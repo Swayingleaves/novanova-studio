@@ -130,7 +130,5 @@ Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不�
 
 ## 📚 相关文档
 
-- [数据库设计](docs/backend-database.md)
-- [用户系统设计](docs/user-system-design.md)
 - [产品定位](PRODUCT.md)
 - [开源许可证](LICENSE)
