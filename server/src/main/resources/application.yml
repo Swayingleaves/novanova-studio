@@ -1,0 +1,270 @@
+# ============================================================
+# Novanova Studio 服务端应用配置文件
+# 包含服务端口、数据库、Redis、邮件、AI 任务消费等全部配置项
+# 敏感信息通过环境变量注入，默认值仅用于本地开发
+# ============================================================
+
+# ============================================================
+# 服务基础配置
+# ============================================================
+server:
+  # 服务监听端口，默认 9080
+  port: ${SERVER_PORT:9080}
+  # 关闭模式：immediate 表示立即关闭，graceful 表示优雅关闭（等待请求处理完毕）
+  shutdown: immediate
+
+# ============================================================
+# Spring 框架配置
+# ============================================================
+spring:
+  application:
+    # 应用名称，用于服务注册、日志标识等
+    name: novanova-studio-server
+  config:
+    import:
+      # 从上级目录加载 .env 环境变量文件（可选）
+      - optional:file:../.env[.properties]
+      # 从当前目录加载 .env 环境变量文件（可选）
+      - optional:file:.env[.properties]
+  devtools:
+    restart:
+      # 是否启用开发工具热重启
+      enabled: true
+      # 热重启时排除的静态资源目录，这些文件变更不触发重启
+      additional-exclude: static/**,public/**,templates/**
+
+  # ----------------------------------------------------------
+  # 数据源配置（JDBC，用于 Flyway 迁移等阻塞式访问场景）
+  # ----------------------------------------------------------
+  datasource:
+    # PostgreSQL JDBC 连接地址
+    url: jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:5432}/${POSTGRES_DATABASE:novanova_studio}
+    # 数据库用户名
+    username: ${POSTGRES_USERNAME:postgres}
+    # 数据库密码
+    password: ${POSTGRES_PASSWORD:123456}
+    hikari:
+      # HikariCP 连接池最大连接数
+      maximum-pool-size: ${POSTGRES_MAX_POOL_SIZE:20}
+      # HikariCP 连接池最小空闲连接数
+      minimum-idle: ${POSTGRES_MIN_IDLE:5}
+
+  # ----------------------------------------------------------
+  # R2DBC 响应式数据库连接配置（WebFlux 异步数据库访问）
+  # ----------------------------------------------------------
+  r2dbc:
+    # PostgreSQL R2DBC 连接地址
+    url: r2dbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:5432}/${POSTGRES_DATABASE:novanova_studio}
+    # 数据库用户名
+    username: ${POSTGRES_USERNAME:postgres}
+    # 数据库密码
+    password: ${POSTGRES_PASSWORD:123456}
+    pool:
+      # 是否启用连接池
+      enabled: true
+      # 连接池初始连接数
+      initial-size: ${POSTGRES_MIN_IDLE:5}
+      # 连接池最大连接数
+      max-size: ${POSTGRES_MAX_POOL_SIZE:20}
+
+  # ----------------------------------------------------------
+  # Redis 数据配置
+  # ----------------------------------------------------------
+  data:
+    redis:
+      # Redis 服务地址
+      host: ${REDIS_HOST:127.0.0.1}
+      # Redis 服务端口
+      port: ${REDIS_PORT:6379}
+      # Redis 密码，为空表示无密码
+      password: ${REDIS_PASSWORD:}
+      # 使用的 Redis 数据库编号（0-15）
+      database: ${REDIS_DATABASE:0}
+
+  # ----------------------------------------------------------
+  # Flyway 数据库迁移配置
+  # ----------------------------------------------------------
+  flyway:
+    # 是否启用 Flyway 迁移
+    enabled: true
+    # 迁移使用的数据库连接地址
+    url: jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:5432}/${POSTGRES_DATABASE:novanova_studio}
+    # 迁移使用的数据库用户名
+    user: ${POSTGRES_USERNAME:postgres}
+    # 迁移使用的数据库密码
+    password: ${POSTGRES_PASSWORD:123456}
+    # SQL 迁移脚本存放路径
+    locations: classpath:db/migration
+
+  # ----------------------------------------------------------
+  # 邮件发送配置（SMTP）
+  # ----------------------------------------------------------
+  mail:
+    # SMTP 邮件服务器地址
+    host: ${EMAIL_SMTP_HOST:}
+    # SMTP 端口，465 为 SSL 端口
+    port: ${EMAIL_SMTP_PORT:465}
+    # SMTP 认证用户名
+    username: ${EMAIL_SMTP_USERNAME:}
+    # SMTP 认证密码
+    password: ${EMAIL_SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          # 是否开启 SMTP 认证
+          auth: true
+          ssl:
+            # 是否启用 SSL 加密连接
+            enable: true
+          starttls:
+            # 是否启用 STARTTLS（与 SSL 二选一）
+            enable: false
+
+  # ----------------------------------------------------------
+  # WebFlux 编解码器配置
+  # ----------------------------------------------------------
+  codec:
+    # 编解码器最大内存缓冲区大小，超出后写入磁盘
+    max-in-memory-size: ${SERVER_MAX_IN_MEMORY_SIZE:60MB}
+  webflux:
+    multipart:
+      # 多部分请求在内存中的最大大小
+      max-in-memory-size: ${SERVER_MAX_FILE_SIZE:50MB}
+      # 每个部分在磁盘上的最大大小
+      max-disk-usage-per-part: ${SERVER_MAX_FILE_SIZE:50MB}
+      # 多部分请求允许的最大部分数量
+      max-parts: ${SERVER_MAX_MULTIPART_PARTS:16}
+
+# ============================================================
+# Actuator 监控端点配置
+# ============================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        # 对外暴露的 Actuator 端点，仅开放健康检查和信息端点
+        include: health,info
+
+# ============================================================
+# 日志配置
+# ============================================================
+logging:
+  file:
+    # 日志文件输出目录
+    path: ${LOG_DIR:./logs}
+  level:
+    # 全局日志级别
+    root: ${LOG_LEVEL:INFO}
+
+# ============================================================
+# SpringDoc OpenAPI / Swagger 文档配置
+# ============================================================
+springdoc:
+  swagger-ui:
+    # Swagger UI 访问路径
+    path: /swagger/index.html
+
+# ============================================================
+# 项目自定义业务配置
+# ============================================================
+novanova:
+  app:
+    # JWT 签名密钥，生产环境必须配置
+    secret-key: ${APP_SECRET_KEY:}
+    # 用户登录 Token 过期时间（小时）
+    token-expire-hours: ${TOKEN_EXPIRE_HOURS:24}
+    # 可信代理地址列表，用于获取真实客户端 IP（逗号分隔）
+    trusted-proxy-addresses: ${TRUSTED_PROXY_ADDRESSES:}
+  cors:
+    # 允许跨域请求的来源地址模式（逗号分隔）
+    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:3000,http://127.0.0.1:3000,https://www.novanovastudio.cn}
+  admin:
+    # 初始管理员邮箱，首次启动时自动创建
+    initial-email: ${ADMIN_INITIAL_EMAIL:admin@admin.com}
+    # 初始管理员密码
+    initial-password: ${ADMIN_INITIAL_PASSWORD:novanovastudio@pwss}
+    # 初始管理员昵称
+    initial-nickname: ${ADMIN_INITIAL_NICKNAME:admin}
+  email:
+    # 发件人显示地址
+    from: ${EMAIL_SMTP_FROM:}
+
+  # ----------------------------------------------------------
+  # OAuth2 第三方登录配置
+  # ----------------------------------------------------------
+  oauth2:
+    linux-do:
+      # 是否启用 Linux.do 登录
+      enabled: ${OAUTH2_LINUX_DO_ENABLED:false}
+      # Linux.do OAuth2 客户端 ID
+      client-id: ${OAUTH2_LINUX_DO_CLIENT_ID:}
+      # Linux.do OAuth2 客户端密钥
+      client-secret: ${OAUTH2_LINUX_DO_CLIENT_SECRET:}
+      # 登录回调地址
+      redirect-uri: ${OAUTH2_LINUX_DO_REDIRECT_URI:}
+    google:
+      # 是否启用 Google 登录
+      enabled: ${OAUTH2_GOOGLE_ENABLED:false}
+      # Google OAuth2 客户端 ID
+      client-id: ${OAUTH2_GOOGLE_CLIENT_ID:}
+      # Google OAuth2 客户端密钥
+      client-secret: ${OAUTH2_GOOGLE_CLIENT_SECRET:}
+      # 登录回调地址
+      redirect-uri: ${OAUTH2_GOOGLE_REDIRECT_URI:}
+
+  # ----------------------------------------------------------
+  # AI 相关配置
+  # ----------------------------------------------------------
+  ai:
+    system-prompt:
+      # 图片优化系统提示词文件路径
+      optimization-image-file: ${AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE:file:./server/config/prompts/optimization-image.md}
+      # 视频优化系统提示词文件路径
+      optimization-video-file: ${AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE:file:./server/config/prompts/optimization-video.md}
+      # 图片生成 Agent 系统提示词文件路径
+      agent-image-file: ${AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE:file:./server/config/prompts/agent-image.md}
+      # 视频生成 Agent 系统提示词文件路径
+      agent-video-file: ${AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE:file:./server/config/prompts/agent-video.md}
+      # 画布 Agent 系统提示词文件路径
+      agent-canvas-file: ${AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE:file:./server/config/prompts/agent-canvas.md}
+    # ----------------------------------------------------------
+    # AI 任务消费配置
+    # 基于 Redis Stream + Consumer Group 实现，不是队列也不是栈。
+    # 消息写入 Stream 后由消费组分发给各实例消费者，
+    # 每个实例以唯一消费者名（hostname-pid-uuid）加入同一消费组，
+    # 单实例内通过 Semaphore 控制并发执行数。
+    # 分布式锁（SET NX PX）保证同一任务不被多实例重复执行。
+    # 消息仅携带 taskId，实际任务数据以 PostgreSQL 快照为准。
+    # ----------------------------------------------------------
+    task:
+      # Redis Stream 键名，所有任务消息写入此 Stream
+      stream-key: ${AI_TASK_STREAM_KEY:novanova:ai-task:stream}
+      # Redis Consumer Group 名称，所有实例的消费者加入同一组
+      consumer-group: ${AI_TASK_CONSUMER_GROUP:novanova-ai-task-consumer}
+      # 单实例内最大并发执行任务数，通过 Semaphore 控制；多实例各自独立计数
+      consumer-concurrency: ${AI_TASK_CONSUMER_CONCURRENCY:4}
+      # XREADGROUP / XPENDING 单次调用最多返回的消息条数
+      read-batch-size: ${AI_TASK_READ_BATCH_SIZE:4}
+      # XREADGROUP 阻塞等待新消息的最大时长（秒），超时后返回空并重新轮询
+      read-block-seconds: ${AI_TASK_READ_BLOCK_SECONDS:5}
+      # 任务分布式锁过期时间（秒），通过 SET NX PX 设置；超时未完成任务锁自动释放
+      lock-ttl-seconds: ${AI_TASK_LOCK_TTL_SECONDS:300}
+      # 任务执行期间锁自动续期间隔（秒），续期前校验锁值防止误续他人锁
+      lock-renew-seconds: ${AI_TASK_LOCK_RENEW_SECONDS:60}
+      # Pending 列表中的消息空闲超过该时间（秒）后，通过 XCLAIM 转移给当前消费者重新执行
+      pending-claim-idle-seconds: ${AI_TASK_PENDING_CLAIM_IDLE_SECONDS:300}
+      # 服务启动时，running 状态超过该时间（秒）的任务视为异常，重置为 pending 并重新入队
+      running-recover-seconds: ${AI_TASK_RUNNING_RECOVER_SECONDS:900}
+
+# ============================================================
+# 注意事项
+# ============================================================
+# AI 任务消费基于 Redis Stream + Consumer Group，不是队列也不是栈。
+# 消息通过 XADD 写入 Stream，由消费组通过 XREADGROUP 分发给组内消费者。
+# 每个应用实例生成唯一消费者名，单实例内 Semaphore 控制并发上限，
+# 多实例部署时 Redis 自动将消息分发给不同实例的消费者。
+# 分布式锁（SET NX PX）防止同一任务被多实例重复执行，
+# 锁续期（Lua 脚本校验锁值后 PEXPIRE）防止长任务锁过期，
+# 空闲 Pending 消息通过 XCLAIM 重新认领，启动时超时 running 任务重新入队。
+# 调整并发数和超时参数时需结合 Redis 实例性能和任务平均耗时综合评估。
+# ============================================================

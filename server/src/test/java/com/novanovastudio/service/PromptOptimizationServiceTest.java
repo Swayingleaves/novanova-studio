@@ -1,0 +1,116 @@
+package com.novanovastudio.service;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.dto.AiTaskDtos;
+import com.novanovastudio.dto.PromptOptimizationDtos;
+import java.nio.file.Path;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import reactor.core.publisher.Mono;
+
+/**
+ * 提示词优化服务测试。
+ *
+ * @author   zhenglin.cn.cq@gmail.com
+ * @date     2026-07-17 00:00
+ */
+@ExtendWith(MockitoExtension.class)
+class PromptOptimizationServiceTest {
+
+    /** AI任务服务 */
+    @Mock
+    private AiTaskService aiTaskService;
+
+    /**
+     * 图片优化应使用默认文本模型并加载图片策略。
+     */
+    @Test
+    void shouldCreateImagePromptOptimizationTask() {
+        when(aiTaskService.createTask(any())).thenReturn(Mono.just(taskResponse()));
+        SystemPromptTemplateService templateService = promptTemplateService();
+        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, templateService);
+
+        service.optimizePrompt(new PromptOptimizationDtos.OptimizePromptRequest(AiTaskTypes.IMAGE, "一只猫")).block();
+
+        AiTaskDtos.CreateAiTaskRequest request = capturedRequest();
+        Assertions.assertEquals(AiTaskTypes.TEXT, request.taskType());
+        Assertions.assertNull(request.model());
+        Assertions.assertEquals("一只猫", request.prompt());
+        Assertions.assertEquals(templateService.get(PromptTemplateType.OPTIMIZATION_IMAGE), request.parameters().get("systemPrompt"));
+    }
+
+    /**
+     * 视频优化应加载独立的视频策略。
+     */
+    @Test
+    void shouldCreateVideoPromptOptimizationTask() {
+        when(aiTaskService.createTask(any())).thenReturn(Mono.just(taskResponse()));
+        SystemPromptTemplateService templateService = promptTemplateService();
+        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, templateService);
+
+        service.optimizePrompt(new PromptOptimizationDtos.OptimizePromptRequest(AiTaskTypes.VIDEO, "海边奔跑")).block();
+
+        AiTaskDtos.CreateAiTaskRequest request = capturedRequest();
+        Assertions.assertEquals(templateService.get(PromptTemplateType.OPTIMIZATION_VIDEO), request.parameters().get("systemPrompt"));
+    }
+
+    /**
+     * 不支持的生成类型应直接拒绝。
+     */
+    @Test
+    void shouldRejectUnsupportedGenerationType() {
+        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, promptTemplateService());
+
+        Assertions.assertThrows(BusinessException.class,
+                () -> service.optimizePrompt(new PromptOptimizationDtos.OptimizePromptRequest(AiTaskTypes.TEXT, "测试")));
+    }
+
+    /**
+     * 捕获提交给AI任务服务的请求。
+     *
+     * @return CreateAiTaskRequest AI任务请求
+     */
+    private AiTaskDtos.CreateAiTaskRequest capturedRequest() {
+        ArgumentCaptor<AiTaskDtos.CreateAiTaskRequest> captor = ArgumentCaptor.forClass(AiTaskDtos.CreateAiTaskRequest.class);
+        verify(aiTaskService).createTask(captor.capture());
+        return captor.getValue();
+    }
+
+    /**
+     * 构建AI任务响应。
+     *
+     * @return AiGenerationTaskResponse 任务响应
+     */
+    private AiTaskDtos.AiGenerationTaskResponse taskResponse() {
+        return new AiTaskDtos.AiGenerationTaskResponse(
+                "task-1", AiTaskTypes.TEXT, "chat-model", "默认渠道", "pending", 0,
+                null, null, "", "", "", "", "");
+    }
+
+    /**
+     * 加载测试使用的外部系统提示词模板。
+     *
+     * @return SystemPromptTemplateService 已加载的模板服务
+     */
+    private SystemPromptTemplateService promptTemplateService() {
+        com.novanovastudio.config.NovanovaProperties properties = new com.novanovastudio.config.NovanovaProperties();
+        Path promptDirectory = Path.of("config", "prompts").toAbsolutePath();
+        properties.getAi().getSystemPrompt().setOptimizationImageFile(promptDirectory.resolve("optimization-image.md").toUri().toString());
+        properties.getAi().getSystemPrompt().setOptimizationVideoFile(promptDirectory.resolve("optimization-video.md").toUri().toString());
+        properties.getAi().getSystemPrompt().setAgentImageFile(promptDirectory.resolve("agent-image.md").toUri().toString());
+        properties.getAi().getSystemPrompt().setAgentVideoFile(promptDirectory.resolve("agent-video.md").toUri().toString());
+        properties.getAi().getSystemPrompt().setAgentCanvasFile(promptDirectory.resolve("agent-canvas.md").toUri().toString());
+        SystemPromptTemplateService service = new SystemPromptTemplateService(properties, new org.springframework.core.io.DefaultResourceLoader());
+        service.loadTemplates();
+        return service;
+    }
+}

@@ -1,0 +1,58 @@
+# 强制文本文件使用 LF 行尾。
+# 背景：本仓库 core.autocrlf=true，且历史上有 shell 脚本/Dockerfile 以 CRLF 提交，
+# 导致 bash 执行时报 `set: pipefail: invalid option`、Dockerfile `\` 续行断裂等问题。
+# 这里显式锁定 LF，避免再次复发。
+
+* text=auto eol=lf
+
+# Windows 脚本
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Linux/macOS 脚本
+*.sh text eol=lf
+
+# Java
+*.java text eol=lf
+
+# Go
+*.go text eol=lf
+*.mod     text eol=lf
+*.sum     text eol=lf
+
+# YAML
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# XML
+*.xml text eol=lf
+
+# Properties
+*.properties text eol=lf
+
+# Markdown
+*.md text eol=lf
+
+# JSON
+*.json text eol=lf
+
+# 显式按类型锁定（防止个别工具误判为二进制跳过转换）
+Dockerfile* text eol=lf
+*.conf    text eol=lf
+
+*.toml    text eol=lf
+*.json    text eol=lf
+
+
+# 二进制资源不做行尾转换
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.tar  binary
+*.so   binary
+*.a    binary

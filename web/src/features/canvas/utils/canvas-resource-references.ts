@@ -1,0 +1,130 @@
+import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
+import { seedanceReferenceLabel } from "@/features/generation/lib/seedance-video";
+import type { CanvasConnection, CanvasNode } from "../types";
+import { isImageNode, isTextNode, isVideoNode } from "../domain/canvas-node";
+
+export type CanvasResourceKind = "image" | "video" | "text";
+
+export type CanvasResourceReference = {
+    id: string;
+    nodeId: string;
+    kind: CanvasResourceKind;
+    label: string;
+    title: string;
+    previewUrl?: string;
+    text?: string;
+    active: boolean;
+};
+
+type GraphIndex = {
+    nodeById: Map<string, CanvasNode>;
+    parentNodesById: Map<string, CanvasNode[]>;
+    childNodesById: Map<string, CanvasNode[]>;
+};
+
+export function buildCanvasResourceReferences(nodes: CanvasNode[], connections: CanvasConnection[], contextNodeId?: string | null): CanvasResourceReference[] {
+    const highlightedIds = new Set(contextNodeId ? getMentionResourceNodes(contextNodeId, nodes, connections).map((node) => node.id) : []);
+    return mapReferences(nodes, (node) => highlightedIds.has(node.id));
+}
+
+export function buildNodeMentionReferences(node: CanvasNode, nodes: CanvasNode[], connections: CanvasConnection[]): CanvasResourceReference[] {
+    return mapReferences(getMentionResourceNodes(node.id, nodes, connections), true);
+}
+
+export function getMentionResourceNodes(nodeId: string, nodes: CanvasNode[], connections: CanvasConnection[]): CanvasNode[] {
+    return resolveContextResourceNodes(nodeId, buildGraphIndex(nodes, connections), true);
+}
+
+export function getGenerationResourceNodes(nodeId: string, nodes: CanvasNode[], connections: CanvasConnection[]): CanvasNode[] {
+    return resolveContextResourceNodes(nodeId, buildGraphIndex(nodes, connections), false);
+}
+
+export function labelForKind(kind: CanvasResourceKind, index: number) {
+    if (kind === "image") return imageReferenceLabel(index);
+    if (kind === "video") return seedanceReferenceLabel("video", index);
+    return `文本${index + 1}`;
+}
+
+function resolveContextResourceNodes(nodeId: string, graph: GraphIndex, includeSelf: boolean): CanvasNode[] {
+    const directResources = readDirectResourceInputs(nodeId, graph);
+    if (directResources.length) return directResources;
+
+    const currentNode = graph.nodeById.get(nodeId);
+    return includeSelf && currentNode && resolveResourceKind(currentNode) ? [currentNode] : [];
+}
+
+function readDirectResourceInputs(nodeId: string, graph: GraphIndex): CanvasNode[] {
+    return uniqueNodes((graph.parentNodesById.get(nodeId) || []).filter((node) => Boolean(resolveResourceKind(node))));
+}
+
+function mapReferences(nodes: CanvasNode[], active: boolean | ((node: CanvasNode) => boolean) = false): CanvasResourceReference[] {
+    const countByKind: Record<CanvasResourceKind, number> = { image: 0, video: 0, text: 0 };
+    const references: CanvasResourceReference[] = [];
+
+    uniqueNodes(nodes).forEach((node) => {
+        const kind = resolveResourceKind(node);
+        if (!kind) return;
+
+        const label = labelForKind(kind, countByKind[kind]);
+        countByKind[kind] += 1;
+        references.push({
+            id: node.id,
+            nodeId: node.id,
+            kind,
+            label,
+            title: node.title || label,
+            previewUrl: readPreviewUrl(node),
+            text: kind === "text" ? readTextContent(node) : undefined,
+            active: typeof active === "function" ? active(node) : active,
+        });
+    });
+
+    return references;
+}
+
+function buildGraphIndex(nodes: CanvasNode[], connections: CanvasConnection[]): GraphIndex {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const parentNodesById = new Map<string, CanvasNode[]>();
+    const childNodesById = new Map<string, CanvasNode[]>();
+
+    for (const connection of connections) {
+        const sourceNode = nodeById.get(connection.source.nodeId);
+        const targetNode = nodeById.get(connection.target.nodeId);
+        if (!sourceNode || !targetNode) continue;
+        appendLinkedNode(parentNodesById, targetNode.id, sourceNode);
+        appendLinkedNode(childNodesById, sourceNode.id, targetNode);
+    }
+
+    return { nodeById, parentNodesById, childNodesById };
+}
+
+function appendLinkedNode(targetMap: Map<string, CanvasNode[]>, key: string, node: CanvasNode): void {
+    const linkedNodes = targetMap.get(key);
+    if (linkedNodes) linkedNodes.push(node);
+    else targetMap.set(key, [node]);
+}
+
+function resolveResourceKind(node: CanvasNode): CanvasResourceKind | null {
+    if (isImageNode(node) && node.content.source) return "image";
+    if (isVideoNode(node) && node.content.source) return "video";
+    if (isTextNode(node) && readTextContent(node)) return "text";
+    return null;
+}
+
+function readPreviewUrl(node: CanvasNode): string | undefined {
+    return isTextNode(node) ? undefined : node.content.source;
+}
+
+function readTextContent(node: CanvasNode): string {
+    if (isTextNode(node)) return node.content.text.trim();
+    return node.generation.prompt.trim();
+}
+
+function uniqueNodes(nodes: CanvasNode[]): CanvasNode[] {
+    const seen = new Set<string>();
+    return nodes.filter((node) => {
+        if (seen.has(node.id)) return false;
+        seen.add(node.id);
+        return true;
+    });
+}

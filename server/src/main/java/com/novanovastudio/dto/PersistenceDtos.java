@@ -1,0 +1,303 @@
+package com.novanovastudio.dto;
+
+import com.alibaba.fastjson2.JSONObject;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * @title        PersistenceDtos.java
+ * @author       zhenglin.cn.cq@gmail.com
+ * @description  业务持久化DTO
+ * @createTime   2026-06-24 11:02:00
+ */
+public final class PersistenceDtos {
+
+    /**
+     * 禁止实例化
+     */
+    private PersistenceDtos() {
+    }
+
+    /** 渠道标识请求。 */
+    public record ChannelIdRequest(@NotBlank(message = "渠道ID不能为空") String channelId) {
+    }
+
+    /** 渠道创建或修改请求。 */
+    public record ChannelMutationRequest(String id, @NotNull(message = "渠道名称不能为null") String name,
+                                         String baseUrl, String apiKey,
+                                         @NotBlank(message = "接口格式不能为空") String apiFormat,
+                                         List<String> models, Integer sortOrder) {
+    }
+
+    /** 用户模型配置。 */
+    public record ModelConfig(String id, String channelId, String modelName, String modelType,
+                              List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost) {
+    }
+
+    /** 模型配置列表响应。 */
+    public record ModelConfigListResponse(List<ModelConfig> modelConfigs) {
+    }
+
+    /** 创建用户模型配置请求。 */
+    public record CreateModelConfigRequest(@NotBlank(message = "渠道ID不能为空") String channelId,
+                                           @NotBlank(message = "模型名称不能为空") String modelName,
+                                           @NotBlank(message = "模型类型不能为空") String modelType,
+                                           List<String> capabilities, Integer sortOrder,
+                                           @Min(value = 0, message = "模型积分不能小于0") Integer creditCost) {
+    }
+
+    /** 修改用户模型配置请求。 */
+    public record UpdateModelConfigRequest(@NotBlank(message = "模型配置ID不能为空") String id,
+                                           @NotBlank(message = "模型类型不能为空") String modelType,
+                                           List<String> capabilities, Integer sortOrder,
+                                           @Min(value = 0, message = "模型积分不能小于0") Integer creditCost) {
+    }
+
+    /** 设置默认模型请求。 */
+    public record SetDefaultModelRequest(@NotBlank(message = "模型配置ID不能为空") String id,
+                                         @NotBlank(message = "模型类型不能为空") String modelType) {
+    }
+
+    /**
+     * 保存画布项目请求
+     *
+     * @param project JSONObject 画布项目JSON
+     */
+    public record SaveProjectRequest(@NotNull(message = "画布项目不能为空") JSONObject project) {
+    }
+
+    /**
+     * 画布项目响应
+     *
+     * @param project JSONObject 画布项目JSON
+     */
+    public record ProjectResponse(JSONObject project) {
+    }
+
+    /**
+     * 画布项目列表响应
+     *
+     * @param projects List<JSONObject> 画布项目列表
+     */
+    public record ProjectListResponse(List<JSONObject> projects) {
+    }
+
+    /**
+     * 单ID请求
+     *
+     * @param id String 记录ID
+     */
+    public record IdRequest(@NotBlank(message = "ID不能为空") String id) {
+    }
+
+    /**
+     * 批量删除ID请求
+     *
+     * @param ids List<String> ID列表
+     */
+    public record DeleteIdsRequest(@NotEmpty(message = "ID不能为空") List<String> ids) {
+    }
+
+    /**
+     * 保存素材请求
+     *
+     * @param asset JSONObject 素材JSON
+     */
+    public record SaveAssetRequest(@NotNull(message = "素材不能为空") JSONObject asset) {
+    }
+
+    /**
+     * 素材列表响应
+     *
+     * @param assets List<JSONObject> 素材列表
+     */
+    public record AssetListResponse(List<JSONObject> assets) {
+    }
+
+    /**
+     * 保存生成记录请求
+     *
+     * @param logType String 记录类型
+     * @param log JSONObject 生成记录JSON
+     */
+    public record SaveGenerationLogRequest(@NotBlank(message = "记录类型不能为空") String logType,
+                                           @NotNull(message = "生成记录不能为空") JSONObject log) {
+    }
+
+    /**
+     * 修改生成记录标题请求
+     *
+     * @param id String 记录ID
+     * @param title String 新标题
+     */
+    public record RenameGenerationLogTitleRequest(@NotBlank(message = "记录ID不能为空") String id,
+                                                  @NotBlank(message = "标题不能为空") String title) {
+    }
+
+    /**
+     * 生成记录列表响应
+     *
+     * @param logs List<JSONObject> 生成记录列表
+     */
+    public record GenerationLogListResponse(List<JSONObject> logs) {
+    }
+
+    /**
+     * 登记远程媒体请求
+     *
+     * @param kind String 媒体类型
+     * @param sourceUrl String 远程URL
+     * @param storageKey String 媒体存储键
+     * @param mimeType String MIME类型
+     * @param bytes Long 文件大小
+     * @param width Integer 宽度
+     * @param height Integer 高度
+     * @param durationMs Integer 时长毫秒
+     * @param metadata JSONObject 扩展元数据
+     */
+    public record RegisterRemoteMediaRequest(@NotBlank(message = "媒体类型不能为空") String kind,
+                                             String sourceUrl,
+                                             String storageKey,
+                                             String mimeType,
+                                             Long bytes,
+                                             Integer width,
+                                             Integer height,
+                                             Integer durationMs,
+                                             JSONObject metadata) {
+    }
+
+    /**
+     * 媒体信息请求
+     *
+     * @param storageKey String 媒体存储键
+     */
+    public record MediaInfoRequest(@NotBlank(message = "媒体存储键不能为空") String storageKey) {
+    }
+
+    /**
+     * 远程媒体转存对象存储请求。
+     *
+     * @param storageKey String 当前用户的媒体存储键
+     */
+    public record TransferRemoteMediaRequest(@NotBlank(message = "媒体存储键不能为空") String storageKey) {
+    }
+
+    /**
+     * 删除媒体请求
+     *
+     * @param storageKeys List<String> 媒体存储键列表
+     */
+    public record DeleteMediaRequest(@NotEmpty(message = "媒体存储键不能为空") List<String> storageKeys) {
+    }
+
+    /**
+     * 对象存储文件信息
+     *
+     * @param provider String 对象存储供应商
+     * @param url String 公开访问URL
+     * @param key String 对象Key
+     * @param bucket String 存储桶
+     * @param region String 地域
+     * @param bytes Long 文件大小
+     * @param mimeType String MIME类型
+     * @param uploadedAt String 上传时间
+     */
+    public record ObjectStorageFile(String provider, String url, String key, String bucket, String region, Long bytes, String mimeType, String uploadedAt) {
+    }
+
+    /**
+     * 上传媒体响应
+     *
+     * @param storageKey String 媒体存储键
+     * @param url String 可访问URL
+     * @param bytes Long 文件大小
+     * @param mimeType String MIME类型
+     * @param width Integer 宽度
+     * @param height Integer 高度
+     * @param durationMs Integer 时长毫秒
+     * @param objectStorage ObjectStorageFile 对象存储信息
+     */
+    public record UploadedMediaResponse(String storageKey, String url, Long bytes, String mimeType, Integer width, Integer height, Integer durationMs, ObjectStorageFile objectStorage) {
+    }
+
+    /**
+     * 下载媒体内容。
+     *
+     * @param data byte[] 媒体二进制内容
+     * @param mimeType String 媒体MIME类型
+     * @param fileName String 下载文件名
+     */
+    public record DownloadedMedia(byte[] data, String mimeType, String fileName) {
+    }
+
+    /**
+     * 对象存储配置
+     *
+     * @param provider String 对象存储供应商
+     * @param accessKey String 访问密钥
+     * @param secretKey String SecretKey
+     * @param bucket String 存储桶
+     * @param region String 地域
+     * @param endpoint String 服务Endpoint
+     * @param directory String 目录
+     * @param publicBaseUrl String 公开访问基础URL
+     * @param id String 对象存储配置ID
+     * @param name String 对象存储名称
+     * @param lastTestedAt String 最后测试时间
+     * @param defaultStorage Boolean 是否默认对象存储
+     */
+    public record ObjectStorageConfig(String provider,
+                                      String accessKey,
+                                      String secretKey,
+                                      String bucket,
+                                      String region,
+                                      String endpoint,
+                                      String directory,
+                                      String publicBaseUrl,
+                                      String id,
+                                      String name,
+                                      String lastTestedAt,
+                                      Boolean defaultStorage) {
+    }
+
+    /** 对象存储标识请求。 */
+    public record ObjectStorageIdRequest(@NotBlank(message = "对象存储ID不能为空") String storageId) {
+    }
+
+    /**
+     * 用户配置中的对象存储配置载体
+     *
+     * @param objectStorage ObjectStorageConfig 对象存储配置
+     */
+    public record ObjectStoragePayload(ObjectStorageConfig objectStorage) {
+    }
+
+    /**
+     * 通用Map响应
+     *
+     * @param data Map<String, Object> 响应数据
+     */
+    public record GenericMapResponse(Map<String, Object> data) {
+    }
+
+    /**
+     * 渠道列表响应
+     *
+     * @param channels List<AiChannelConfig> AI渠道列表
+     */
+    public record ChannelListResponse(List<AiTaskDtos.AiChannelConfig> channels) {
+    }
+
+    /**
+     * 对象存储列表响应
+     *
+     * @param objectStorages List<JSONObject> 对象存储列表
+     */
+    public record ObjectStorageListResponse(List<JSONObject> objectStorages) {
+    }
+
+}
