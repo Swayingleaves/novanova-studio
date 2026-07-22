@@ -11,6 +11,9 @@
 <p align="center">
   <img src="github_images/nova-s1.png" alt="Novanova Studio 首页截图">
 </p>
+<p align="center">
+  <img src="github_images/nova-s2.png" alt="Novanova Studio 画布截图">
+</p>
 
 ## ✨ 项目定位
 
