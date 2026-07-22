@@ -1,6 +1,6 @@
 # macOS / Linux 本地启动
 
-推荐的本地开发方式是：Docker 只运行 PostgreSQL 和 Redis，Java 服务端与 Next.js 前端分别在本机启动。这样既保留热更新，也避免 Nginx 的 Linux 宿主机依赖。
+支持两种本地运行方式：热更新模式仅通过 Docker 运行 PostgreSQL 和 Redis；完整容器模式通过 `docker-compose-local.yml` 启动 Nginx、前端和服务端。
 
 ## 1. 准备环境
 
@@ -40,12 +40,13 @@ openssl rand -base64 48
 | --- | --- | --- |
 | `APP_SECRET_KEY` | 无 | 必填，使用上一步生成的随机值。 |
 | `SERVER_PORT` | `8080` | 服务端端口；前端默认代理到此端口。 |
+| `WEB_PORT` | `5550` | 完整容器模式中 Nginx 的本地访问端口。 |
 | `POSTGRES_HOST` / `POSTGRES_PORT` | `127.0.0.1` / `5432` | PostgreSQL 连接地址。 |
 | `REDIS_HOST` / `REDIS_PORT` | `127.0.0.1` / `6379` | Redis 连接地址。 |
 | `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | `admin@admin.com` / `novanovastudio@pwss` | 仅在同邮箱账号不存在时创建初始管理员；本地可用，部署前必须修改。 |
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | 样例值 | 仅在浏览器绕过 Next.js 代理直接请求后端时，补充实际前端来源。 |
 
-## 3. 启动 PostgreSQL 与 Redis
+## 3. 启动 PostgreSQL 与 Redis（热更新模式）
 
 在项目根目录执行：
 
@@ -60,7 +61,29 @@ docker compose ps postgres redis
 docker compose stop postgres redis
 ```
 
-## 4. 启动服务端
+## 4. 使用本地 Docker Compose 启动完整应用
+
+主 `docker-compose.yml` 用于 Linux 服务器部署；两份 Compose 共用容器名称，不能同时启动。本地完整容器调试必须指定 `docker-compose-local.yml`：
+
+```bash
+docker compose -f docker-compose-local.yml up --build -d
+docker compose -f docker-compose-local.yml ps
+curl http://127.0.0.1:5550/api/v1/health
+```
+
+访问 [http://127.0.0.1:5550](http://127.0.0.1:5550)。项目内 [Nginx 配置](../nginx/default.conf) 会只读挂载到容器，代理页面与 `/api/v1/*` 接口；修改配置后执行：
+
+```bash
+docker compose -f docker-compose-local.yml restart nginx
+```
+
+停止并移除完整容器模式的容器和网络，项目根目录 `volume/` 下的数据不会删除：
+
+```bash
+docker compose -f docker-compose-local.yml down
+```
+
+## 5. 启动服务端（热更新模式）
 
 保持命令在**项目根目录**执行。这样本地默认的 Agent 提示词路径 `server/config/prompts/` 与根目录 `.env` 都能按当前配置被读取。
 
@@ -91,7 +114,7 @@ curl http://127.0.0.1:8080/api/v1/health
 
 默认 API 文档地址为 [http://127.0.0.1:8080/swagger/index.html](http://127.0.0.1:8080/swagger/index.html)。
 
-## 5. 启动前端
+## 6. 启动前端（热更新模式）
 
 打开第二个终端窗口，从项目根目录执行：
 
@@ -110,7 +133,7 @@ pnpm dev
 NEXT_PUBLIC_SERVER_URL="http://127.0.0.1:<服务端端口>" pnpm dev
 ```
 
-## 6. 完成首次配置
+## 7. 完成首次配置
 
 1. 访问 [http://127.0.0.1:5555](http://127.0.0.1:5555)，使用 `.env` 中的初始管理员账号登录。
 2. 打开 **配置与用户偏好**，在"我的渠道"中添加 AI 渠道并填写服务端 API 地址、密钥和可用模型。

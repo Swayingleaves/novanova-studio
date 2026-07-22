@@ -1,0 +1,119 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: novanovastudio-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      POSTGRES_DB: ${POSTGRES_DATABASE:-novanova_studio}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./volume/postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  redis:
+    image: redis:8.6
+    container_name: novanovastudio-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./volume/redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: novanovastudio-nginx
+    ports:
+      - "127.0.0.1:${WEB_PORT:-5550}:80"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - web
+      - server
+    restart: unless-stopped
+
+  web:
+    image: novanovastudio-web:${IMAGE_TAG:-latest}
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_SERVER_URL: ""
+    container_name: novanovastudio-web
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      - server
+    restart: unless-stopped
+
+  server:
+    image: novanovastudio-server:${IMAGE_TAG:-latest}
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: novanovastudio-server
+    environment:
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?请在.env中配置APP_SECRET_KEY}
+      TOKEN_EXPIRE_HOURS: ${TOKEN_EXPIRE_HOURS:-24}
+      TRUSTED_PROXY_ADDRESSES: ${TRUSTED_PROXY_ADDRESSES:-}
+      CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-http://localhost:3000,http://127.0.0.1:3000,https://www.novanovastudio.cn}
+      SERVER_PORT: 8080
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USERNAME: ${POSTGRES_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
+      POSTGRES_DATABASE: ${POSTGRES_DATABASE:-novanova_studio}
+      POSTGRES_ADMINISTRATOR_DATABASE: ${POSTGRES_ADMINISTRATOR_DATABASE:-postgres}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DATABASE: ${REDIS_DATABASE:-0}
+      ADMIN_INITIAL_EMAIL: ${ADMIN_INITIAL_EMAIL:-admin@admin.com}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-novanovastudio@pwss}
+      ADMIN_INITIAL_NICKNAME: ${ADMIN_INITIAL_NICKNAME:-admin}
+      EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-}
+      EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-465}
+      EMAIL_SMTP_USERNAME: ${EMAIL_SMTP_USERNAME:-}
+      EMAIL_SMTP_PASSWORD: ${EMAIL_SMTP_PASSWORD:-}
+      EMAIL_SMTP_FROM: ${EMAIL_SMTP_FROM:-}
+      OAUTH2_LINUX_DO_ENABLED: ${OAUTH2_LINUX_DO_ENABLED:-false}
+      OAUTH2_LINUX_DO_CLIENT_ID: ${OAUTH2_LINUX_DO_CLIENT_ID:-}
+      OAUTH2_LINUX_DO_CLIENT_SECRET: ${OAUTH2_LINUX_DO_CLIENT_SECRET:-}
+      OAUTH2_LINUX_DO_REDIRECT_URI: ${OAUTH2_LINUX_DO_REDIRECT_URI:-}
+      OAUTH2_GOOGLE_ENABLED: ${OAUTH2_GOOGLE_ENABLED:-false}
+      OAUTH2_GOOGLE_CLIENT_ID: ${OAUTH2_GOOGLE_CLIENT_ID:-}
+      OAUTH2_GOOGLE_CLIENT_SECRET: ${OAUTH2_GOOGLE_CLIENT_SECRET:-}
+      OAUTH2_GOOGLE_REDIRECT_URI: ${OAUTH2_GOOGLE_REDIRECT_URI:-}
+      AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE: ${AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE:-file:/app/config/prompts/optimization-image.md}
+      AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE: ${AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE:-file:/app/config/prompts/optimization-video.md}
+      AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE: ${AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE:-file:/app/config/prompts/agent-image.md}
+      AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE: ${AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE:-file:/app/config/prompts/agent-video.md}
+      AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE: ${AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE:-file:/app/config/prompts/agent-canvas.md}
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-8080}:8080"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./server/config/prompts:/app/config/prompts:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
