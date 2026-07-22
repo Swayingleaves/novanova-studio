@@ -168,6 +168,9 @@ springdoc:
 # 项目自定义业务配置
 # ============================================================
 novanova:
+  database:
+    # 自动创建目标数据库前连接的PostgreSQL管理数据库
+    administrator-database: ${POSTGRES_ADMINISTRATOR_DATABASE:postgres}
   app:
     # JWT 签名密钥，生产环境必须配置
     secret-key: ${APP_SECRET_KEY:}

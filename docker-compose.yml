@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:17
-    container_name: navanavastudio-postgres
+    container_name: novanovastudio-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USERNAME:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
@@ -21,7 +21,7 @@ services:
 
   redis:
     image: redis:8.6
-    container_name: navanavastudio-redis
+    container_name: novanovastudio-redis
     command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -38,7 +38,7 @@ services:
 
   nginx:
     image: nginx:1.27-alpine
-    container_name: navanavastudio-nginx
+    container_name: novanovastudio-nginx
     network_mode: host
     volumes:
       - /etc/localtime:/etc/localtime:ro
@@ -52,13 +52,13 @@ services:
     restart: unless-stopped
 
   web:
-    image: navanavastudio-web:${IMAGE_TAG:-latest}
+    image: novanovastudio-web:${IMAGE_TAG:-latest}
     build:
       context: ./web
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_SERVER_URL: ""
-    container_name: navanavastudio-web
+    container_name: novanovastudio-web
     ports:
       - "127.0.0.1:${WEB_PORT:-5550}:5550"
     volumes:
@@ -68,11 +68,11 @@ services:
     restart: unless-stopped
 
   server:
-    image: navanavastudio-server:${IMAGE_TAG:-latest}
+    image: novanovastudio-server:${IMAGE_TAG:-latest}
     build:
       context: ./server
       dockerfile: Dockerfile
-    container_name: navanavastudio-server
+    container_name: novanovastudio-server
     environment:
       APP_SECRET_KEY: ${APP_SECRET_KEY:?请在.env中配置APP_SECRET_KEY}
       TOKEN_EXPIRE_HOURS: ${TOKEN_EXPIRE_HOURS:-24}
@@ -84,6 +84,7 @@ services:
       POSTGRES_USERNAME: ${POSTGRES_USERNAME:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
       POSTGRES_DATABASE: ${POSTGRES_DATABASE:-novanova_studio}
+      POSTGRES_ADMINISTRATOR_DATABASE: ${POSTGRES_ADMINISTRATOR_DATABASE:-postgres}
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
