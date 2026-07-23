@@ -135,3 +135,9 @@ Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不�
 
 - [产品定位](PRODUCT.md)
 - [开源许可证](LICENSE)
+
+
+## 友链
+
+- [开源社区Linux Do](https://linux.do/)
+- [Agentscope-Java](https://java.agentscope.io/v2/en/intro.html)
