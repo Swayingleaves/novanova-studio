@@ -13,6 +13,19 @@ import org.junit.jupiter.api.Test;
 class AgentExecutionRegistryTest {
 
     /**
+     * 验证工具结果回传只能命中会话所属用户。
+     */
+    @Test
+    void shouldVerifySessionOwnership() {
+        AgentExecutionRegistry registry = new AgentExecutionRegistry();
+        registry.open(1000L, "session-1");
+
+        Assertions.assertTrue(registry.isOwnedBy(1000L, "session-1"));
+        Assertions.assertFalse(registry.isOwnedBy(1001L, "session-1"));
+        Assertions.assertFalse(registry.isOwnedBy(1000L, "missing-session"));
+    }
+
+    /**
      * 验证取消只能命中会话所属用户。
      */
     @Test

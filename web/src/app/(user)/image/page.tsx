@@ -6,7 +6,7 @@ import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
 
 import { ImageGeneratingCard, renderPendingImageToolCall } from "./components/pending-image-tool-call";
-import { buildImageGenerationContextualPrompt, regenerateImageRound } from "./image-round-regenerate";
+import { regenerateImageRound } from "./image-round-regenerate";
 import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -145,6 +145,14 @@ export default function ImagePage() {
     const [activeThinking, setActiveThinking] = useState<ThinkingBlockState | null>(null);
     const [toolCalls, setToolCalls] = useState<ToolCallState[]>([]);
     const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null);
+    const model = effectiveConfig.imageModel || effectiveConfig.model;
+    const agentCreationSettings = {
+        model,
+        size: config.size,
+        resolution: config.imageResolution,
+        quality: config.quality,
+        count: Number(config.count),
+    };
 
     // Refs to access latest state in SSE callbacks (updated inline to avoid React batch staleness)
     const streamingTextRef = useRef(streamingText);
@@ -170,7 +178,8 @@ export default function ImagePage() {
     }, []);
 
     const { sessionId, isStreaming, isStopping, sendMessage, cancelMessage, resetSession, restoreSession } = useAgentChatSSE({
-        profile: "generation",
+        entrySource: "imagePage",
+        creationSettings: agentCreationSettings,
         onTextDelta: (msgId, delta) => {
             setStreamingText((prev) => {
                 const next = prev?.messageId === msgId ? { ...prev, text: prev.text + delta } : { messageId: msgId, text: delta };
@@ -260,13 +269,15 @@ export default function ImagePage() {
                     chatMessagesRef.current = next;
                     return next;
                 });
+            } else if (text) {
+                setChatMessages((prev) => (prev.at(-1)?.text === text ? prev : [...prev, { id: nanoid(), role: "assistant", text }]));
             }
             setStreamingText(null);
             streamingTextRef.current = null;
             setCompletedThinkings([]);
             // 刷新侧栏（后端已保存生成记录）。历史会话追加生成完成后，交回历史视图展示，避免同一轮重复渲染。
-            void refreshConversations().then(() => {
-                if (!activeIdRef.current) return;
+            void refreshConversations().then((nextConversations) => {
+                if (!activeIdRef.current || !nextConversations.some((conversation) => conversation.id === activeIdRef.current)) return;
                 setChatMessages([]);
                 chatMessagesRef.current = [];
                 setToolCalls([]);
@@ -308,12 +319,20 @@ export default function ImagePage() {
                 toolCallsRef.current = [];
             });
         },
+        onPlanCreated: (planId, summary, taskCount) => {
+            setChatMessages((prev) => [...prev, { id: `plan-${planId}`, role: "system", title: "创作计划", text: summary, meta: `${taskCount} 个任务` }]);
+        },
+        onPlanTaskStatus: (planId, _taskId, status, statusMessage) => {
+            setChatMessages((prev) => prev.map((item) => (item.id === `plan-${planId}` ? { ...item, meta: status === "failed" ? `失败：${statusMessage}` : statusMessage } : item)));
+        },
+        onPromptPrepared: (planId, _taskId, strategy) => {
+            setChatMessages((prev) => prev.map((item) => (item.id === `plan-${planId}` ? { ...item, meta: strategy === "OPTIMIZE" ? "提示词已优化" : "保留原始提示词" } : item)));
+        },
         onError: (error) => {
             setChatMessages((prev) => [...prev, { id: nanoid(), role: "error", text: error }]);
         },
     });
 
-    const model = effectiveConfig.imageModel || effectiveConfig.model;
     const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "image", count: effectiveConfig.count });
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
     const activeConversationPending = activeConversation ? hasPendingImageConversation(activeConversation) : false;
@@ -399,17 +418,6 @@ export default function ImagePage() {
             return;
         }
 
-        const contextualPrompt = `${buildImageGenerationContextualPrompt(
-            {
-                size: config.size,
-                quality: config.quality,
-                imageResolution: config.imageResolution,
-                model: effectiveConfig.model,
-                imageModel: effectiveConfig.imageModel,
-            },
-            model,
-        )}\n\n${text}`;
-
         // Add user message to chat
         setChatMessages((prev) => {
             const next = [...prev, { id: nanoid(), role: "user" as const, text }];
@@ -418,8 +426,8 @@ export default function ImagePage() {
         });
 
         // Send via Agent SSE — chat model resolved server-side from user config
-        const refs = references.map((r) => ({ url: r.dataUrl, type: r.type, name: r.name }));
-        await sendMessage(contextualPrompt, refs.length ? refs : undefined);
+        const refs = references.map((r) => ({ url: r.dataUrl, type: r.type, name: r.name, storageKey: r.storageKey }));
+        await sendMessage(text, refs.length ? refs : undefined, agentCreationSettings);
 
         setPrompt("");
         setReferences([]);

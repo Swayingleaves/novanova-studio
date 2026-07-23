@@ -143,6 +143,16 @@ export default function VideoPage() {
     const [activeThinking, setActiveThinking] = useState<ThinkingBlockState | null>(null);
     const [toolCalls, setToolCalls] = useState<ToolCallState[]>([]);
     const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null);
+    const model = effectiveConfig.videoModel || effectiveConfig.model;
+    const videoResolution = config.vquality || "720p";
+    const agentCreationSettings = {
+        model,
+        size: config.size || "16:9",
+        resolution: videoResolution,
+        quality: videoResolution.includes("1080") ? "high" : videoResolution.includes("480") ? "low" : "medium",
+        seconds: config.videoSeconds || "5",
+        watermark: String(config.videoWatermark).toLowerCase() === "true",
+    };
 
     // Refs to access latest state in SSE callbacks
     const streamingTextRef = useRef(streamingText);
@@ -169,7 +179,8 @@ export default function VideoPage() {
     }, []);
 
     const { sessionId, isStreaming, isStopping, sendMessage, cancelMessage, resetSession, restoreSession } = useAgentChatSSE({
-        profile: "video",
+        entrySource: "videoPage",
+        creationSettings: agentCreationSettings,
         onTextDelta: (msgId, delta) => {
             setStreamingText((prev) => {
                 const next = prev?.messageId === msgId ? { ...prev, text: prev.text + delta } : { messageId: msgId, text: delta };
@@ -253,12 +264,14 @@ export default function VideoPage() {
                     chatMessagesRef.current = next;
                     return next;
                 });
+            } else if (text) {
+                setChatMessages((prev) => (prev.at(-1)?.text === text ? prev : [...prev, { id: nanoid(), role: "assistant", text }]));
             }
             setStreamingText(null);
             streamingTextRef.current = null;
             setCompletedThinkings([]);
-            void refreshConversations().then(() => {
-                if (!activeIdRef.current) return;
+            void refreshConversations().then((nextConversations) => {
+                if (!activeIdRef.current || !nextConversations.some((conversation) => conversation.id === activeIdRef.current)) return;
                 setChatMessages([]);
                 chatMessagesRef.current = [];
                 setToolCalls([]);
@@ -307,12 +320,20 @@ export default function VideoPage() {
                 return next;
             });
         },
+        onPlanCreated: (planId, summary, taskCount) => {
+            setChatMessages((prev) => [...prev, { id: `plan-${planId}`, role: "system", title: "创作计划", text: summary, meta: `${taskCount} 个任务` }]);
+        },
+        onPlanTaskStatus: (planId, _taskId, status, statusMessage) => {
+            setChatMessages((prev) => prev.map((item) => (item.id === `plan-${planId}` ? { ...item, meta: status === "failed" ? `失败：${statusMessage}` : statusMessage } : item)));
+        },
+        onPromptPrepared: (planId, _taskId, strategy) => {
+            setChatMessages((prev) => prev.map((item) => (item.id === `plan-${planId}` ? { ...item, meta: strategy === "OPTIMIZE" ? "提示词已优化" : "保留原始提示词" } : item)));
+        },
         onError: (error) => {
             setChatMessages((prev) => [...prev, { id: nanoid(), role: "error", text: error }]);
         },
     });
 
-    const model = effectiveConfig.videoModel || effectiveConfig.model;
     const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "video", count: 1 });
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
     const activeConversationPending = activeConversation ? hasPendingVideoConversation(activeConversation) : false;
@@ -455,7 +476,6 @@ export default function VideoPage() {
         const seconds = config.videoSeconds || "5";
         const quality = config.vquality || "720p";
         const watermark = config.videoWatermark ?? true;
-        const contextualPrompt = `[用户设置：尺寸=${size}，时长=${seconds}，分辨率=${quality}，视频模型=${videoModel}，水印=${watermark}]\n\n${text}`;
         pendingVideoSizeRef.current = size;
         const attachments = [
             ...references.map((reference) => ({ id: reference.id, name: reference.name, url: reference.dataUrl, type: reference.type })),
@@ -471,7 +491,14 @@ export default function VideoPage() {
         const imageRefs = references.map((reference) => ({ url: reference.objectStorage?.url || reference.dataUrl, type: reference.type, name: reference.name, storageKey: reference.storageKey }));
         const videoRefs = videoReferences.map((reference) => ({ url: reference.objectStorage?.url || reference.url, type: reference.type, name: reference.name, storageKey: reference.storageKey }));
         const allRefs = [...imageRefs, ...videoRefs];
-        await sendMessage(contextualPrompt, allRefs.length ? allRefs : undefined);
+        await sendMessage(text, allRefs.length ? allRefs : undefined, {
+            model: videoModel,
+            size,
+            resolution: quality,
+            quality: quality.includes("1080") ? "high" : quality.includes("480") ? "low" : "medium",
+            seconds,
+            watermark: String(watermark).toLowerCase() === "true",
+        });
 
         setPrompt("");
         setReferences([]);
@@ -480,15 +507,26 @@ export default function VideoPage() {
 
     const regenerateRound = async (round: Round) => {
         const videoModel = round.config.videoModel || round.config.model || model;
-        const size = round.config.size || "16:9";
-        const contextualPrompt = `[用户设置：尺寸=${size}，时长=${round.config.videoSeconds || "5"}，分辨率=${round.config.vquality || "720p"}，视频模型=${videoModel}]\n\n${round.prompt}`;
-        pendingVideoSizeRef.current = size;
+        const size = round.config.size;
+        const resolution = round.config.vquality;
+        if (size) pendingVideoSizeRef.current = size;
         setChatMessages((prev) => {
             const next = [...prev, { id: nanoid(), role: "user", text: round.prompt }];
             chatMessagesRef.current = next;
             return next;
         });
-        await sendMessage(contextualPrompt);
+        await sendMessage(round.prompt, undefined, {
+            model: videoModel,
+            ...(size ? { size } : {}),
+            ...(resolution ? {
+                resolution,
+                quality: resolution.includes("1080") ? "high" : resolution.includes("480") ? "low" : "medium",
+            } : {}),
+            ...(round.config.videoSeconds ? { seconds: round.config.videoSeconds } : {}),
+            ...(round.config.videoWatermark !== undefined && round.config.videoWatermark !== null
+                ? { watermark: String(round.config.videoWatermark).toLowerCase() === "true" }
+                : {}),
+        });
     };
 
     const newConversation = () => {

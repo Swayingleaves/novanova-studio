@@ -516,11 +516,7 @@ function normalizeApiFormat(value: unknown): ApiCallFormat {
 }
 
 function normalizeApiBaseUrl(baseUrl: string) {
-    const trimmed = baseUrl.trim().replace(/\/+$/, "");
-    if (!trimmed) return "";
-    const lower = trimmed.toLowerCase();
-    if (lower.endsWith("/v1") || lower.endsWith("/v1beta") || lower.endsWith("/api/v3") || lower.endsWith("/api/plan/v3")) return trimmed;
-    return `${trimmed}/v1`;
+    return baseUrl.trim().replace(/\/+$/, "");
 }
 
 function uniqueText(items: string[]) {

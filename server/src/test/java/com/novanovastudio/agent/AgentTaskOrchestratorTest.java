@@ -11,6 +11,7 @@ import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.agent.dto.AgentSession;
 import com.novanovastudio.agent.dto.AgentToolResult.ToolResult;
+import com.novanovastudio.agent.dto.CreationSettings;
 import com.novanovastudio.agent.dto.AiResponse;
 import com.novanovastudio.agent.dto.ToolCall;
 import com.novanovastudio.agent.dto.ToolCallFunction;
@@ -181,7 +182,8 @@ class AgentTaskOrchestratorTest {
                 new AgentExecutionRegistry()
         );
         AgentSession session = new AgentSession("session-1", 1L, "新对话", "canvas", new ArrayList<>(), OffsetDateTime.now(), OffsetDateTime.now());
-        AgentChatRequest request = new AgentChatRequest("session-1", null, "你好", Map.of(), List.of(), List.of(), List.of(), "channel-1::missing-model");
+        AgentChatRequest request = new AgentChatRequest("session-1", "canvas", "你好", Map.of(), List.of(), List.of(), List.of(),
+                new CreationSettings("channel-1::missing-model", null, null, null, null, null, null));
 
         invokeRunAgentLoop(orchestrator, session, request).block();
 
@@ -253,11 +255,11 @@ class AgentTaskOrchestratorTest {
     void shouldPersistInitialVideoRoundBeforeToolExecution() throws Exception {
         StubPersistenceService persistenceService = new StubPersistenceService(List.of());
         AgentTaskOrchestrator orchestrator = newOrchestrator(persistenceService);
-        AgentChatRequest request = new AgentChatRequest("session-1", "video",
+        AgentChatRequest request = new AgentChatRequest("session-1", "videoPage",
                 "[用户设置：尺寸=704x1280]\n\n用户原始输入 A", Map.of(), List.of(), List.of(
                 new AgentChatRequest.Attachment("https://untrusted.example.com/cat-dog.png", "image/png", "猫狗.png", "image:cat-dog"),
                 new AgentChatRequest.Attachment("https://untrusted.example.com/source.mp4", "video/mp4", "素材.mp4", "video:source")),
-                List.of(), "model-1");
+                List.of(), new CreationSettings("model-1", "704x1280", "720p", "medium", null, "5", false));
 
         invokeSaveInitialVideoRound(orchestrator, "session-1", request).block();
 

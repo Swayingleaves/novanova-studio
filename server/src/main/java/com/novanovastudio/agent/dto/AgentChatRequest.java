@@ -13,24 +13,46 @@ import java.util.Map;
  * Agent 对话请求
  *
  * @param sessionId      String 会话ID，为空表示新建
- * @param profile        String 会话类型：canvas | generation，默认 canvas
+ * @param entrySource    String 入口来源：imagePage | videoPage | canvas
  * @param message        String 用户消息
  * @param canvasSnapshot Map 画布快照（canvas profile 使用，generation 可为 null）
  * @param references     List<Reference> 选中节点引用
  * @param attachments    List<Attachment> 附件（图片参考等，generation profile 使用）
  * @param history        List<HistoryMessage> 前端对话历史
- * @param model          String 用户选择的模型编码
+ * @param creationSettings CreationSettings 页面选择的生成设置
  */
 public record AgentChatRequest(
     String sessionId,
-    String profile,
+    String entrySource,
     String message,
     Map<String, Object> canvasSnapshot,
     List<Reference> references,
     List<Attachment> attachments,
     List<HistoryMessage> history,
-    String model
+    CreationSettings creationSettings
 ) {
+
+    /**
+     * 将入口来源转换为旧画布编排器使用的Profile名称。
+     *
+     * @return String 旧Profile名称
+     */
+    public String profile() {
+        return switch (entrySource == null ? "" : entrySource) {
+            case "imagePage" -> "generation";
+            case "videoPage" -> "video";
+            default -> "canvas";
+        };
+    }
+
+    /**
+     * 获取页面选择的模型编码，供旧画布编排器读取。
+     *
+     * @return String 模型编码
+     */
+    public String model() {
+        return creationSettings == null ? null : creationSettings.model();
+    }
 
     /**
      * 选中节点引用

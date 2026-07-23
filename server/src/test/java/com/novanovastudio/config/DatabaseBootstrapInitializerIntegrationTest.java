@@ -40,6 +40,8 @@ class DatabaseBootstrapInitializerIntegrationTest {
     /** 业务表名称集合。 */
     private static final Set<String> BUSINESS_TABLE_NAMES = Set.of(
         "agent_session",
+        "agent_plan",
+        "agent_plan_task",
         "ai_generation_tasks",
         "api_request_logs",
         "assets",
@@ -67,13 +69,13 @@ class DatabaseBootstrapInitializerIntegrationTest {
     );
 
     /**
-     * 测试缺失数据库可被创建、重复创建可安全跳过且单一初始化迁移完整生效。
+     * 测试缺失数据库可被创建、重复创建可安全跳过且全部迁移完整生效。
      *
      * @return void 无返回值
      * @throws SQLException 数据库断言或清理失败时抛出
      */
     @Test
-    void shouldCreateMissingDatabaseAndApplySingleInitialMigration() throws SQLException {
+    void shouldCreateMissingDatabaseAndApplyAllMigrations() throws SQLException {
         String targetDatabaseName = newTargetDatabaseName();
         try {
             initializeDatabase(targetDatabaseName, postgresqlContainer.getUsername(), postgresqlContainer.getPassword());
@@ -86,10 +88,10 @@ class DatabaseBootstrapInitializerIntegrationTest {
                 .load()
                 .migrate();
 
-            Assertions.assertEquals(1, queryCount(targetDatabaseName, "flyway_schema_history"));
-            Assertions.assertEquals("1", queryString(
+            Assertions.assertEquals(2, queryCount(targetDatabaseName, "flyway_schema_history"));
+            Assertions.assertEquals("2", queryString(
                 targetDatabaseName,
-                "SELECT version FROM flyway_schema_history WHERE success = TRUE"
+                "SELECT MAX(CAST(version AS INTEGER)) FROM flyway_schema_history WHERE success = TRUE"
             ));
             Assertions.assertTrue(readBusinessTableNames(targetDatabaseName).containsAll(BUSINESS_TABLE_NAMES));
             Assertions.assertEquals(877, queryCount(targetDatabaseName, "prompt_library"));

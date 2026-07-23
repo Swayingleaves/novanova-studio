@@ -19,6 +19,7 @@ import com.novanovastudio.agent.dto.AgentToolResult.ToolResult;
 import com.novanovastudio.agent.dto.AiMessage;
 import com.novanovastudio.ai.AiJsonUtils;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.AiTaskDtos;
@@ -159,26 +160,32 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                             Mono<List<AiTaskDtos.AiTaskMediaReference>> initialReferences = legacyReferences.isEmpty()
                                     && validatedAttachments.imageReferences().isEmpty()
                                     && "edit_image".equals(toolName)
-                                    ? latestSuccessfulImageReference()
+                                    ? latestSuccessfulImageReference(userId)
                                     : Mono.just(legacyReferences);
                             return initialReferences.flatMap(references -> preserveLegacyVideoReferenceBehavior(
                                     userId, toolName, model, references, validatedAttachments, emitter, sessionId)
                                     .flatMap(effectiveLegacyReferences -> {
                                         List<AiTaskDtos.AiTaskMediaReference> effectiveReferences = mergeReferences(validatedAttachments.imageReferences(), effectiveLegacyReferences);
                                         List<AiTaskDtos.AiTaskMediaReference> effectiveVideoReferences = validatedAttachments.videoReferences();
+                                        String effectiveGenerationSource = String.valueOf(args.getOrDefault("entrySource", generationSource()));
+                                        if (!AiTaskSources.isSupported(effectiveGenerationSource)
+                                                || (AiTaskTypes.IMAGE.equals(taskType()) && AiTaskSources.VIDEO_PAGE.equals(effectiveGenerationSource))
+                                                || (AiTaskTypes.VIDEO.equals(taskType()) && AiTaskSources.IMAGE_PAGE.equals(effectiveGenerationSource))) {
+                                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成任务入口来源与任务类型不匹配"));
+                                        }
                                         AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(
-                                                taskType(), prompt, model.isBlank() ? null : model, params, effectiveReferences, effectiveVideoReferences, generationSource());
+                                                taskType(), prompt, model.isBlank() ? null : model, params, effectiveReferences, effectiveVideoReferences, effectiveGenerationSource);
                                         long createdAt = System.currentTimeMillis();
                                         return Mono.defer(() -> {
                                             executionRegistry.beginTaskCreation(sessionId);
-                                            return aiTaskService.createTask(taskRequest, response -> {
+                                            return aiTaskService.createTaskForUser(userId, taskRequest, response -> {
                                                     JSONObject canceledRound = buildGenerationRound(callId, response.id(), prompt, model, params,
                                                             effectiveReferences, effectiveVideoReferences, 100, createdAt, "canceled");
                                                     String title = prompt.length() > 30 ? prompt.substring(0, 30) : prompt;
                                                     boolean cancellationRequested = executionRegistry.registerTask(sessionId,
                                                             new AgentExecutionRegistry.AgentTaskRegistration(response.id(), logType(), title, canceledRound));
                                                     if (cancellationRequested || executionRegistry.isCancelRequested(sessionId)) {
-                                                        return aiTaskService.cancelTask(response.id())
+                                                        return aiTaskService.cancelTaskForUser(userId, response.id())
                                                                 .then(saveCanceledRound(userId, sessionId, callId, response.id(), prompt, model, params,
                                                                         effectiveReferences, effectiveVideoReferences, createdAt));
                                                     }
@@ -347,8 +354,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      *
      * @return Mono<List<AiTaskMediaReference>> 最近图片引用列表
      */
-    private Mono<List<AiTaskDtos.AiTaskMediaReference>> latestSuccessfulImageReference() {
-        return aiTaskService.listTasks(List.of("success"))
+    private Mono<List<AiTaskDtos.AiTaskMediaReference>> latestSuccessfulImageReference(Long userId) {
+        return aiTaskService.listTasksForUser(userId, List.of("success"))
                 .map(tasks -> tasks.stream()
                         .filter(task -> "image".equals(task.taskType()))
                         .flatMap(task -> extractMediaUrls(task.resultData()).stream())
@@ -362,7 +369,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
     /** 查询用户最近生成任务记录 */
     protected Mono<ToolResult> executeQueryHistory(Long userId, Map<String, Object> args) {
         int count = toInt(args.get("count"), 5);
-        return aiTaskService.listTasks(List.of())
+        return aiTaskService.listTasksForUser(userId, List.of())
             .map(tasks -> {
                 List<Map<String, Object>> recent = tasks.stream()
                     .limit(count)
@@ -410,7 +417,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                     new TaskProgressSnapshot(initialTask.status(), initialProgress));
             return Flux.interval(Duration.ZERO, POLL_INTERVAL)
             .take(TIMEOUT.toSeconds())
-            .concatMap(i -> aiTaskService.getTask(taskId))
+            .concatMap(i -> aiTaskService.getTaskForUser(userId, taskId))
             .concatMap(task -> persistChangedProgress(userId, sessionId, callId, prompt, model,
                     parameters, references, videoReferences, createdAt, previousSnapshot, task))
             .takeUntil(task -> isTerminal(task.status()))
@@ -418,10 +425,95 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                 AgentEvent.progress(sessionId, callId, taskId,
                     task.progress() != null ? task.progress() : 0, task.status())))
             .last()
+            .flatMap(task -> saveTerminalRound(userId, sessionId, callId, prompt, model, parameters,
+                    references, videoReferences, createdAt, task).thenReturn(task))
             .map(task -> buildResult(taskId, task))
             .defaultIfEmpty(new ToolResult(false, "生成超时，请重试", Map.of("taskId", taskId)))
             .contextWrite(ctx);
         });
+    }
+
+    /**
+     * 保存成功、失败或取消的终态生成轮次。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param callId String 计划任务或工具调用ID
+     * @param prompt String 最终提示词
+     * @param model String 生成模型
+     * @param parameters Map<String, Object> 生成参数
+     * @param references List<AiTaskMediaReference> 图片参考素材
+     * @param videoReferences List<AiTaskMediaReference> 视频参考素材
+     * @param createdAt long 轮次创建时间
+     * @param task AiGenerationTaskResponse 终态AI任务
+     * @return Mono<Void> 保存完成信号
+     */
+    private Mono<Void> saveTerminalRound(Long userId, String sessionId, String callId, String prompt,
+                                         String model, Map<String, Object> parameters,
+                                         List<AiTaskDtos.AiTaskMediaReference> references,
+                                         List<AiTaskDtos.AiTaskMediaReference> videoReferences,
+                                         long createdAt, AiTaskDtos.AiGenerationTaskResponse task) {
+        JSONObject round = buildGenerationRound(callId, task.id(), prompt, model, parameters,
+                references, videoReferences, 100, createdAt, task.status());
+        round.put("results", terminalResults(callId, task));
+        String title = prompt.length() > 30 ? prompt.substring(0, 30) : prompt;
+        return persistenceService.saveOrUpdateGenerationRound(userId, sessionId, logType(), title, round);
+    }
+
+    /**
+     * 将AI任务终态结果转换为页面生成轮次结果数组。
+     *
+     * @param callId String 计划任务或工具调用ID
+     * @param task AiGenerationTaskResponse 终态AI任务
+     * @return List<JSONObject> 页面结果数组
+     */
+    private List<JSONObject> terminalResults(String callId, AiTaskDtos.AiGenerationTaskResponse task) {
+        List<JSONObject> mediaItems = new ArrayList<>();
+        if (task.resultData() != null) {
+            var items = task.resultData().getJSONArray("items");
+            if (items != null) {
+                for (int index = 0; index < items.size(); index++) {
+                    JSONObject item = items.getJSONObject(index);
+                    if (item != null && !item.isEmpty()) mediaItems.add(item);
+                }
+            }
+            JSONObject item = task.resultData().getJSONObject("item");
+            if (mediaItems.isEmpty() && item != null && !item.isEmpty()) {
+                mediaItems.add(item);
+            }
+        }
+        if ("success".equals(task.status()) && !mediaItems.isEmpty()) {
+            List<JSONObject> results = new ArrayList<>();
+            for (int index = 0; index < mediaItems.size(); index++) {
+                JSONObject result = terminalResult(callId + (index == 0 ? "" : "-" + index), task.id(), "success", "");
+                result.put(logType(), mediaItems.get(index));
+                results.add(result);
+            }
+            return results;
+        }
+        String status = "canceled".equals(task.status()) ? "canceled" : "failed";
+        String error = "canceled".equals(status) ? "已停止生成"
+                : StringUtils.hasText(task.errorMessage()) ? task.errorMessage() : "生成结果缺少媒体";
+        return List.of(terminalResult(callId, task.id(), status, error));
+    }
+
+    /**
+     * 构造单个页面生成终态结果。
+     *
+     * @param resultId String 页面结果ID
+     * @param taskId String AI任务ID
+     * @param status String 终态状态
+     * @param error String 错误信息
+     * @return JSONObject 页面结果
+     */
+    private JSONObject terminalResult(String resultId, String taskId, String status, String error) {
+        JSONObject result = new JSONObject();
+        result.put("id", resultId);
+        result.put("taskId", taskId);
+        result.put("status", status);
+        result.put("progress", 100);
+        if (StringUtils.hasText(error)) result.put("error", error);
+        return result;
     }
 
     /**
@@ -584,7 +676,11 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                 Map<String, Object> data = new LinkedHashMap<>();
                 data.put("taskId", taskId);
                 data.put("taskType", task.taskType());
-                data.put("urls", extractMediaUrls(task.resultData()));
+                List<String> mediaUrls = extractMediaUrls(task.resultData());
+                if (mediaUrls.isEmpty()) {
+                    yield new ToolResult(false, "生成结果缺少媒体", data);
+                }
+                data.put("urls", mediaUrls);
                 if (task.resultData() != null) {
                     // 兼容 Agnes 返回 "item" 单对象 和 其他 provider 返回 "items" 数组两种格式
                     var items = task.resultData().getJSONArray("items");

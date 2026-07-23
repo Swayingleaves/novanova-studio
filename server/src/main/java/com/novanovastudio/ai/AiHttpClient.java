@@ -518,12 +518,8 @@ public class AiHttpClient {
      * @param path String 接口路径
      * @return String 完整地址
      */
-    private String buildAiUrl(String baseUrl, String path) {
+    static String buildAiUrl(String baseUrl, String path) {
         String normalized = baseUrl == null ? "" : baseUrl.trim().replaceAll("/+$", "");
-        String lower = normalized.toLowerCase();
-        if (!lower.endsWith("/v1") && !lower.endsWith("/api/v3") && !lower.endsWith("/api/plan/v3")) {
-            normalized += "/v1";
-        }
         return normalized + path;
     }
 

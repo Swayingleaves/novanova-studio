@@ -44,8 +44,10 @@ class CanvasAgentToolRoutingTest {
     @Test
     void shouldRegisterPendingResultBeforeEmittingToolEvent() throws Exception {
         ImmediateResultEmitter emitter = new ImmediateResultEmitter();
+        AgentExecutionRegistry executionRegistry = new AgentExecutionRegistry();
+        executionRegistry.open(1L, "session-1");
         AgentTaskOrchestrator orchestrator = new AgentTaskOrchestrator(
-                null, null, null, null, emitter, null, null, List.of(), new AgentExecutionRegistry());
+                null, null, null, null, emitter, null, null, List.of(), executionRegistry);
         emitter.setOrchestrator(orchestrator);
 
         ToolResult result = invokeWaitForFrontendResult(orchestrator).block();

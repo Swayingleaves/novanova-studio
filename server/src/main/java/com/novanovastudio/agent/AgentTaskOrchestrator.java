@@ -298,6 +298,10 @@ public class AgentTaskOrchestrator {
      * @param result AgentToolResult 工具结果
      */
     public void submitToolResult(Long userId, AgentToolResult result) {
+        if (!executionRegistry.isOwnedBy(userId, result.sessionId())) {
+            log.warn("拒绝非会话所属用户回传工具结果: userId={}, sessionId={}", userId, result.sessionId());
+            return;
+        }
         ConcurrentHashMap<String, MonoSink<ToolResult>> sessionResults = pendingResults.get(result.sessionId());
         if (sessionResults == null) {
             log.warn("收到未知 session 的工具结果: sessionId={}", result.sessionId());
@@ -308,7 +312,28 @@ public class AgentTaskOrchestrator {
             log.warn("收到未知 callId 的工具结果: sessionId={}, callId={}", result.sessionId(), result.callId());
             return;
         }
+        if (sessionResults.isEmpty()) {
+            pendingResults.remove(result.sessionId(), sessionResults);
+        }
         sink.success(new ToolResult(result.result().ok(), result.result().message(), result.result().data()));
+    }
+
+    /**
+     * 转发Java已注册的画布前端工具并等待执行结果。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String Agent会话ID
+     * @param callId String 工具调用ID
+     * @param toolName String 画布工具名
+     * @param arguments Map<String, Object> 已校验工具参数
+     * @return Mono<ToolResult> 前端工具执行结果
+     */
+    public Mono<ToolResult> executeFrontendTool(Long userId, String sessionId, String callId,
+                                                String toolName, Map<String, Object> arguments) {
+        if (!toolRegistry.isFrontend(toolName)) {
+            return Mono.just(new ToolResult(false, "不支持的画布前端工具: " + toolName));
+        }
+        return waitForFrontendResult(userId, sessionId, callId, toolName, arguments);
     }
 
     /**
@@ -809,7 +834,12 @@ public class AgentTaskOrchestrator {
             // 超时或取消时清理 pendingResults 映射
             sink.onDispose(() -> {
                 ConcurrentHashMap<String, MonoSink<ToolResult>> sessionResults = pendingResults.get(sessionId);
-                if (sessionResults != null) sessionResults.remove(callId);
+                if (sessionResults != null) {
+                    sessionResults.remove(callId);
+                    if (sessionResults.isEmpty()) {
+                        pendingResults.remove(sessionId, sessionResults);
+                    }
+                }
             });
         }).timeout(Duration.ofSeconds(30))
           .onErrorResume(e -> Mono.just(new ToolResult(false, "前端工具执行超时: " + e.getMessage())));

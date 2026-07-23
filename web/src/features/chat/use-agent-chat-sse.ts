@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentAttachment, AgentEvent } from "@/features/canvas/api/agent";
+import type { AgentAttachment, AgentEvent, CreationSettings } from "@/features/canvas/api/agent";
 import { agentChat, agentSubscribeEvents, cancelAgentChat } from "@/features/canvas/api/agent";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import type { ToolCallState } from "./types";
@@ -9,7 +9,8 @@ import type { ToolCallState } from "./types";
 const CLOSED_CONNECTION_ERROR_PATTERN = /(?:java\.io\.IOException:\s*)?closed\b/i;
 
 type UseAgentChatSSEProps = {
-  profile: "canvas" | "generation" | "video";
+  entrySource: "imagePage" | "videoPage" | "canvas";
+  creationSettings?: CreationSettings;
   onTextDelta?: (messageId: string, delta: string) => void;
   onThoughtDelta?: (thoughtId: string, delta: string) => void;
   onThoughtComplete?: (thoughtId: string, durationMs: number) => void;
@@ -19,6 +20,9 @@ type UseAgentChatSSEProps = {
   onTaskComplete?: (messageId: string, text: string) => void;
   onCanceled?: (message: string) => void;
   onNotice?: (message: string) => void;
+  onPlanCreated?: (planId: string, summary: string, taskCount: number) => void;
+  onPlanTaskStatus?: (planId: string, taskId: string, status: string, message: string) => void;
+  onPromptPrepared?: (planId: string, taskId: string, strategy: "KEEP" | "OPTIMIZE") => void;
   onError?: (error: string) => void;
 };
 
@@ -26,29 +30,18 @@ type AgentChatSSEReturn = {
   sessionId: string | null;
   isStreaming: boolean;
   isStopping: boolean;
-  sendMessage: (message: string, attachments?: AgentAttachment[]) => Promise<void>;
+  sendMessage: (message: string, attachments?: AgentAttachment[], creationSettings?: CreationSettings) => Promise<void>;
   cancelMessage: () => Promise<void>;
   resetSession: () => void;
   restoreSession: (sid: string) => void;
 };
 
 /**
- * 通用 Agent SSE 通信 Hook，支持画布、图片和视频三类 profile。
- * 图片与视频 profile 下后端自行执行工具，前端透传事件给回调。
+ * 通用 Agent SSE 通信 Hook，支持画布、图片和视频三类入口来源。
+ * 图片与视频入口下后端自行执行工具，前端透传事件给回调。
  */
 export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn {
-  const {
-    profile,
-    onTextDelta,
-    onThoughtDelta,
-    onThoughtComplete,
-    onToolCall,
-    onToolProgress,
-    onToolResult,
-    onTaskComplete,
-    onNotice,
-    onError,
-  } = props;
+  const { entrySource, creationSettings } = props;
 
   const sessionIdRef = useRef<string | undefined>();
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -157,6 +150,34 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
       callbacksRef.current.onNotice?.(data.text || "");
     });
 
+    es.addEventListener("plan-created", (e: MessageEvent) => {
+      const data: AgentEvent = JSON.parse(e.data);
+      callbacksRef.current.onPlanCreated?.(
+        String(data.resultData?.planId || ""),
+        String(data.resultData?.summary || data.text || ""),
+        Number(data.resultData?.taskCount || 0),
+      );
+    });
+
+    es.addEventListener("plan-task-status", (e: MessageEvent) => {
+      const data: AgentEvent = JSON.parse(e.data);
+      callbacksRef.current.onPlanTaskStatus?.(
+        String(data.resultData?.planId || ""),
+        String(data.resultData?.taskId || data.callId || ""),
+        data.status || "",
+        String(data.resultData?.message || data.text || ""),
+      );
+    });
+
+    es.addEventListener("prompt-prepared", (e: MessageEvent) => {
+      const data: AgentEvent = JSON.parse(e.data);
+      callbacksRef.current.onPromptPrepared?.(
+        String(data.resultData?.planId || ""),
+        String(data.resultData?.taskId || data.callId || ""),
+        String(data.resultData?.strategy || "KEEP") as "KEEP" | "OPTIMIZE",
+      );
+    });
+
     es.addEventListener("error", (e: MessageEvent) => {
       if (!e.data) return;
       try {
@@ -186,7 +207,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
   }, []);
 
   const sendMessage = useCallback(
-    async (message: string, attachments?: AgentAttachment[]) => {
+    async (message: string, attachments?: AgentAttachment[], settingsOverride?: CreationSettings) => {
       if (sendingRef.current) return;
       sendingRef.current = true;
       canceledHandledRef.current = false;
@@ -194,9 +215,10 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
       try {
         const { sessionId: sid } = await agentChat({
           sessionId: sessionIdRef.current,
-          profile,
+          entrySource,
           message,
           attachments,
+          creationSettings: settingsOverride || creationSettings,
         });
         sessionIdRef.current = sid;
         setSessionId(sid);
@@ -210,7 +232,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
         sendingRef.current = false;
       }
     },
-    [profile]
+    [entrySource, creationSettings]
   );
 
   const resetSession = useCallback(() => {

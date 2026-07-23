@@ -172,4 +172,48 @@ public record AgentEvent(
     public static AgentEvent canceled(String sessionId, String message) {
         return new AgentEvent("canceled", sessionId, null, null, null, null, null, message, null, null, null, null, null, null, null, null, null, null);
     }
+
+    /**
+     * 构造计划已创建事件。
+     *
+     * @param sessionId String 会话ID
+     * @param planId String 计划ID
+     * @param summary String 计划摘要
+     * @param taskCount int 任务数量
+     * @return AgentEvent 计划事件
+     */
+    public static AgentEvent planCreated(String sessionId, String planId, String summary, int taskCount) {
+        return new AgentEvent("plan-created", sessionId, null, null, null, null, null, summary, null, null, null, null,
+                null, null, Map.of("planId", planId, "summary", summary == null ? "" : summary, "taskCount", taskCount), null, null, "created");
+    }
+
+    /**
+     * 构造计划任务状态事件。
+     *
+     * @param sessionId String 会话ID
+     * @param planId String 计划ID
+     * @param taskId String 计划任务ID
+     * @param status String 任务状态
+     * @param message String 状态说明
+     * @return AgentEvent 计划任务状态事件
+     */
+    public static AgentEvent planTaskStatus(String sessionId, String planId, String taskId, String status, String message) {
+        return new AgentEvent("plan-task-status", sessionId, taskId, null, null, null, null, message, null, null, null, null,
+                null, null, Map.of("planId", planId, "taskId", taskId, "message", message == null ? "" : message), null, null, status);
+    }
+
+    /**
+     * 构造提示词准备完成事件。
+     *
+     * @param sessionId String 会话ID
+     * @param planId String 计划ID
+     * @param taskId String 计划任务ID
+     * @param strategy String 提示词策略
+     * @return AgentEvent 提示词准备事件
+     */
+    public static AgentEvent promptPrepared(String sessionId, String planId, String taskId, String strategy) {
+        return new AgentEvent("prompt-prepared", sessionId, taskId, null, null, null, null, "提示词已准备", null, null, null, null,
+                null, null, Map.of("planId", planId, "taskId", taskId, "strategy", strategy), null, null, "prepared");
+    }
+
 }

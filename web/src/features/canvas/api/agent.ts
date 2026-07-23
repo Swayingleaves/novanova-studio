@@ -8,15 +8,25 @@ export type AgentAttachment = {
   storageKey?: string;
 };
 
+export type CreationSettings = {
+  model?: string;
+  size?: string;
+  resolution?: string;
+  quality?: string;
+  count?: number;
+  seconds?: string;
+  watermark?: boolean;
+};
+
 export interface AgentChatParams {
   sessionId?: string;
-  profile?: string;
+  entrySource: "imagePage" | "videoPage" | "canvas";
   message: string;
   canvasSnapshot?: Record<string, unknown>;
   references?: { title: string; text: string }[];
   attachments?: AgentAttachment[];
   history?: AgentChatHistoryMessage[];
-  model?: string;
+  creationSettings?: CreationSettings;
 }
 
 export type AgentChatHistoryMessage = {

@@ -13,6 +13,9 @@ interface UseAgentSSEProps {
   onToolExecute?: () => void;
   onTextDelta: (messageId: string, delta: string) => void;
   onTaskComplete: (messageId: string, text: string) => void;
+  onPlanCreated?: (planId: string, summary: string, taskCount: number) => void;
+  onPlanTaskStatus?: (planId: string, taskId: string, status: string, message: string) => void;
+  onPromptPrepared?: (planId: string, taskId: string, strategy: "KEEP" | "OPTIMIZE") => void;
   onError: (message: string) => void;
 }
 
@@ -20,7 +23,7 @@ interface UseAgentSSEProps {
  * Agent SSE 通信 Hook。建立 SSE 长连接，处理文本增量、工具执行、任务完成和错误事件。
  * 画布写操作工具通过 onApplyOps 应用到画布，并将执行结果回传后端继续 Agent Loop。
  */
-export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, onTaskComplete, onError }: UseAgentSSEProps) {
+export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, onTaskComplete, onPlanCreated, onPlanTaskStatus, onPromptPrepared, onError }: UseAgentSSEProps) {
   const sessionIdRef = useRef<string | undefined>(undefined);
   const eventSourceRef = useRef<EventSource | null>(null);
   const sendingRef = useRef(false);
@@ -29,12 +32,18 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
   const onToolExecuteRef = useRef(onToolExecute);
   const onTextDeltaRef = useRef(onTextDelta);
   const onTaskCompleteRef = useRef(onTaskComplete);
+  const onPlanCreatedRef = useRef(onPlanCreated);
+  const onPlanTaskStatusRef = useRef(onPlanTaskStatus);
+  const onPromptPreparedRef = useRef(onPromptPrepared);
   const onErrorRef = useRef(onError);
   snapshotRef.current = snapshot;
   onApplyOpsRef.current = onApplyOps;
   onToolExecuteRef.current = onToolExecute;
   onTextDeltaRef.current = onTextDelta;
   onTaskCompleteRef.current = onTaskComplete;
+  onPlanCreatedRef.current = onPlanCreated;
+  onPlanTaskStatusRef.current = onPlanTaskStatus;
+  onPromptPreparedRef.current = onPromptPrepared;
   onErrorRef.current = onError;
 
   // connectSSE 不依赖任何回调引用，所有回调通过 ref 访问，保证 SSE 连接只建立一次。
@@ -84,6 +93,35 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
       if (data.messageId && data.text) onTaskCompleteRef.current(data.messageId, data.text);
     });
 
+    // 仅展示主Agent计划摘要和确定性执行阶段，不展示模型思维链。
+    es.addEventListener("plan-created", (e: MessageEvent) => {
+      const data: AgentEvent = JSON.parse(e.data);
+      onPlanCreatedRef.current?.(
+        String(data.resultData?.planId || ""),
+        String(data.resultData?.summary || data.text || ""),
+        Number(data.resultData?.taskCount || 0),
+      );
+    });
+
+    es.addEventListener("plan-task-status", (e: MessageEvent) => {
+      const data: AgentEvent = JSON.parse(e.data);
+      onPlanTaskStatusRef.current?.(
+        String(data.resultData?.planId || ""),
+        String(data.resultData?.taskId || data.callId || ""),
+        data.status || "",
+        String(data.resultData?.message || data.text || ""),
+      );
+    });
+
+    es.addEventListener("prompt-prepared", (e: MessageEvent) => {
+      const data: AgentEvent = JSON.parse(e.data);
+      onPromptPreparedRef.current?.(
+        String(data.resultData?.planId || ""),
+        String(data.resultData?.taskId || data.callId || ""),
+        String(data.resultData?.strategy || "KEEP") as "KEEP" | "OPTIMIZE",
+      );
+    });
+
     // 错误事件
     es.addEventListener("error", (e: MessageEvent) => {
       // 浏览器原生 onerror 也会触发 error 监听，e.data 此时为 undefined，避免误解析
@@ -114,11 +152,12 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
       try {
         const { sessionId } = await agentChat({
           sessionId: sessionIdRef.current,
+          entrySource: "canvas",
           message,
           canvasSnapshot: snapshotRef.current as unknown as Record<string, unknown>,
           references,
           history,
-          model,
+          creationSettings: model ? { model } : undefined,
         });
         sessionIdRef.current = sessionId;
       } finally {
