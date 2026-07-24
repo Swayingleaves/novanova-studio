@@ -806,7 +806,9 @@ public class AgentTaskOrchestrator {
         if (!profile.isFrontendTool(toolName)) {
             String callId = call.id();
             eventEmitter.emit(userId, AgentEvent.toolExecute(sessionId, callId, toolName, args));
-            return profile.executeTool(userId, toolName, args, attachments, eventEmitter, sessionId, callId)
+            String originalPrompt = String.valueOf(args.getOrDefault("prompt", ""));
+            return profile.executeTool(userId, toolName, args, originalPrompt, attachments,
+                    eventEmitter, sessionId, callId)
                 .doOnNext(result -> eventEmitter.emit(userId,
                     AgentEvent.toolResult(sessionId, callId, result.ok(), result.message(), result.data())));
         }

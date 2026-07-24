@@ -58,6 +58,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_SERVER_URL: ""
+        NEXT_PUBLIC_ICP_RECORD_NUMBER: ${NEXT_PUBLIC_ICP_RECORD_NUMBER:-}
     container_name: novanovastudio-web
     ports:
       - "127.0.0.1:${WEB_PORT:-5550}:5550"

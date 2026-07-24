@@ -31,6 +31,7 @@ import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import type { ChatMessageItem, ThinkingBlockState, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
+import { attachAgentActivitiesToThreadSections, collectAgentActivities, createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, groupAgentActivitiesByRoundId, updateAgentActivityMessage, upsertAgentActivityMessage, type AgentActivitiesByRoundId } from "@/features/generation/components/agent-activity";
 import { hasPendingVideoConversation } from "@/features/generation/lib/generation-conversation-recovery";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
@@ -63,6 +64,7 @@ type RoundConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" |
 type Round = {
     id: string;
     prompt: string;
+    generationPrompt?: string;
     references: ReferenceImage[];
     videoReferences: ReferenceVideo[];
     config: RoundConfig;
@@ -143,6 +145,7 @@ export default function VideoPage() {
     const [activeThinking, setActiveThinking] = useState<ThinkingBlockState | null>(null);
     const [toolCalls, setToolCalls] = useState<ToolCallState[]>([]);
     const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null);
+    const [agentActivitiesByRoundId, setAgentActivitiesByRoundId] = useState<AgentActivitiesByRoundId>({});
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const videoResolution = config.vquality || "720p";
     const agentCreationSettings = {
@@ -201,8 +204,15 @@ export default function VideoPage() {
             const isVideoTool = call.name === "generate_video" || call.name === "edit_video";
             const pendingCall = isVideoTool ? bindPendingVideoSize(call, pendingVideoSizeRef.current) : call;
             setToolCalls((prev) => {
-                const next = [...prev, pendingCall];
+                const next = prev.some((item) => item.callId === pendingCall.callId)
+                    ? prev.map((item) => (item.callId === pendingCall.callId ? pendingCall : item))
+                    : [...prev, pendingCall];
                 toolCallsRef.current = next;
+                return next;
+            });
+            setChatMessages((prev) => {
+                const next = upsertAgentActivityMessage(prev, createToolExecutionActivity(pendingCall));
+                chatMessagesRef.current = next;
                 return next;
             });
             if (isVideoTool) {
@@ -210,14 +220,19 @@ export default function VideoPage() {
                 const streamed = streamingTextRef.current;
                 if (streamed && streamed.text) {
                     setChatMessages((prev) => {
-                        const next = [...prev, { id: streamed.messageId, role: "assistant" as const, text: streamed.text }];
+                        const next = prev.some((item) => item.id === streamed.messageId)
+                            ? prev
+                            : [...prev, { id: streamed.messageId, role: "assistant" as const, text: streamed.text }];
                         chatMessagesRef.current = next;
                         return next;
                     });
                 }
                 const toolText = call.name === "generate_video" ? "正在生成视频..." : "正在编辑视频...";
                 setChatMessages((prev) => {
-                    const next = [...prev, { id: pendingCall.callId, role: "tool", text: toolText, detail: pendingCall }];
+                    const toolMessage = { id: pendingCall.callId, role: "tool" as const, text: toolText, detail: pendingCall };
+                    const next = prev.some((item) => item.id === pendingCall.callId)
+                        ? prev.map((item) => (item.id === pendingCall.callId ? toolMessage : item))
+                        : [...prev, toolMessage];
                     chatMessagesRef.current = next;
                     return next;
                 });
@@ -232,7 +247,11 @@ export default function VideoPage() {
                 return next;
             });
             setChatMessages((prev) => {
-                const next = prev.map((m) => (m.role === "tool" && m.detail?.callId === callId ? { ...m, detail: { ...m.detail, progress, taskId } } : m));
+                const messagesWithProgress = prev.map((m) => {
+                    const detail = m.detail as ToolCallState | undefined;
+                    return m.role === "tool" && detail?.callId === callId ? { ...m, detail: { ...detail, progress, taskId } } : m;
+                });
+                const next = updateAgentActivityMessage(messagesWithProgress, `tool-${callId}`, { progress });
                 chatMessagesRef.current = next;
                 return next;
             });
@@ -248,10 +267,11 @@ export default function VideoPage() {
                 return next;
             });
             setChatMessages((prev) => {
-                const next = prev.map((m) => {
+                const messagesWithResult = prev.map((m) => {
                     const detail = m.detail as ToolCallState | undefined;
                     return m.role === "tool" && detail?.callId === callId ? { ...m, detail: { ...detail, status, resultMessage: resultMsg, resultData: data } } : m;
                 });
+                const next = updateAgentActivityMessage(messagesWithResult, `tool-${callId}`, { status, progress: status === "success" ? 100 : undefined });
                 chatMessagesRef.current = next;
                 return next;
             });
@@ -271,7 +291,13 @@ export default function VideoPage() {
             streamingTextRef.current = null;
             setCompletedThinkings([]);
             void refreshConversations().then((nextConversations) => {
-                if (!activeIdRef.current || !nextConversations.some((conversation) => conversation.id === activeIdRef.current)) return;
+                const completedConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
+                if (!completedConversation) return;
+                const completedActivities = collectAgentActivities(chatMessagesRef.current);
+                const completedActivitiesByRoundId = groupAgentActivitiesByRoundId(completedConversation.rounds.map((round) => round.id), completedActivities);
+                if (Object.keys(completedActivitiesByRoundId).length) {
+                    setAgentActivitiesByRoundId((current) => ({ ...current, ...completedActivitiesByRoundId }));
+                }
                 setChatMessages([]);
                 chatMessagesRef.current = [];
                 setToolCalls([]);
@@ -290,12 +316,13 @@ export default function VideoPage() {
             });
             setChatMessages((prev) => {
                 let hasExecutingTool = false;
-                const next = prev.map((item) => {
+                const messagesWithCanceledTool = prev.map((item) => {
                     const detail = item.detail as ToolCallState | undefined;
                     if (item.role !== "tool" || detail?.status !== "executing") return item;
                     hasExecutingTool = true;
                     return { ...item, text: stoppedMessage, detail: { ...detail, status: "canceled" as const, resultMessage: stoppedMessage } };
                 });
+                const next = finishRunningAgentActivities(messagesWithCanceledTool, "canceled", stoppedMessage);
                 if (!hasExecutingTool) {
                     next.push({ id: nanoid(), role: "error", text: stoppedMessage });
                 }
@@ -303,10 +330,15 @@ export default function VideoPage() {
                 return next;
             });
             void refreshConversations().then((nextConversations) => {
-                const hasPersistedCanceledRound = nextConversations
-                    .find((conversation) => conversation.id === activeIdRef.current)
-                    ?.rounds.some((round) => round.result.status === "canceled");
-                if (!hasPersistedCanceledRound) return;
+                const canceledConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
+                if (!canceledConversation) return;
+                const canceledActivities = collectAgentActivities(chatMessagesRef.current);
+                const canceledActivitiesByRoundId = groupAgentActivitiesByRoundId(
+                    canceledConversation.rounds.filter((round) => round.result.status === "canceled").map((round) => round.id),
+                    canceledActivities,
+                );
+                if (!Object.keys(canceledActivitiesByRoundId).length) return;
+                setAgentActivitiesByRoundId((current) => ({ ...current, ...canceledActivitiesByRoundId }));
                 setChatMessages([]);
                 chatMessagesRef.current = [];
                 setToolCalls([]);
@@ -321,16 +353,52 @@ export default function VideoPage() {
             });
         },
         onPlanCreated: (planId, summary, taskCount) => {
-            setChatMessages((prev) => [...prev, { id: `plan-${planId}`, role: "system", title: "创作计划", text: summary, meta: `${taskCount} 个任务` }]);
+            setChatMessages((prev) => {
+                const next = upsertAgentActivityMessage(prev, {
+                    id: `plan-${planId}`,
+                    type: "plan-created",
+                    title: "创建创作计划",
+                    description: `${summary}，共 ${taskCount} 个任务`,
+                    status: "success",
+                });
+                chatMessagesRef.current = next;
+                return next;
+            });
         },
-        onPlanTaskStatus: (planId, _taskId, status, statusMessage) => {
-            setChatMessages((prev) => prev.map((item) => (item.id === `plan-${planId}` ? { ...item, meta: status === "failed" ? `失败：${statusMessage}` : statusMessage } : item)));
+        onPlanTaskStatus: (planId, taskId, status, statusMessage) => {
+            const activityStatus = getPlanTaskActivityStatus(status);
+            if (!activityStatus) return;
+            setChatMessages((prev) => {
+                const next = upsertAgentActivityMessage(prev, {
+                    id: `task-${planId}-${taskId}`,
+                    type: "plan-task-status",
+                    title: "执行创作任务",
+                    description: statusMessage,
+                    status: activityStatus,
+                });
+                chatMessagesRef.current = next;
+                return next;
+            });
         },
-        onPromptPrepared: (planId, _taskId, strategy) => {
-            setChatMessages((prev) => prev.map((item) => (item.id === `plan-${planId}` ? { ...item, meta: strategy === "OPTIMIZE" ? "提示词已优化" : "保留原始提示词" } : item)));
+        onPromptPrepared: (planId, taskId, strategy) => {
+            setChatMessages((prev) => {
+                const next = upsertAgentActivityMessage(prev, {
+                    id: `prompt-${planId}-${taskId}`,
+                    type: "prompt-prepared",
+                    title: strategy === "OPTIMIZE" ? "优化生成提示词" : "准备生成提示词",
+                    description: strategy === "OPTIMIZE" ? "已根据创作目标优化提示词" : "沿用原始提示词",
+                    status: "success",
+                });
+                chatMessagesRef.current = next;
+                return next;
+            });
         },
         onError: (error) => {
-            setChatMessages((prev) => [...prev, { id: nanoid(), role: "error", text: error }]);
+            setChatMessages((prev) => {
+                const next = [...finishRunningAgentActivities(prev, "failed", error), { id: nanoid(), role: "error" as const, text: error }];
+                chatMessagesRef.current = next;
+                return next;
+            });
         },
     });
 
@@ -820,13 +888,16 @@ export default function VideoPage() {
     );
     const livePendingRoundIds = new Set(toolCalls.filter((call) => call.status === "executing").map((call) => call.callId));
     const threadSections = activeConversation
-        ? buildVideoThreadSections(activeConversation, livePendingRoundIds, {
-              uploadingObjectStorageId,
-              onDownload: downloadVideo,
-              onSaveAsset: saveResultToAssets,
-              onUploadObjectStorage: uploadResultToObjectStorage,
-              onRegenerate: regenerateRound,
-          })
+        ? attachAgentActivitiesToThreadSections(
+              buildVideoThreadSections(activeConversation, livePendingRoundIds, {
+                  uploadingObjectStorageId,
+                  onDownload: downloadVideo,
+                  onSaveAsset: saveResultToAssets,
+                  onUploadObjectStorage: uploadResultToObjectStorage,
+                  onRegenerate: regenerateRound,
+              }),
+              agentActivitiesByRoundId,
+          )
         : [];
     // 历史记录与当前生成中消息同时展示，避免续写时把已保存历史临时隐藏。
     const allThreadSections = chatThreadSection ? [...threadSections, chatThreadSection] : threadSections;

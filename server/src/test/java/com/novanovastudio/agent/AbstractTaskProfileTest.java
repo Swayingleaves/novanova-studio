@@ -62,6 +62,9 @@ class AbstractTaskProfileTest {
     /** 已保存的轮次快照 */
     private List<JSONObject> savedRounds;
 
+    /** 已保存的会话标题 */
+    private List<String> savedTitles;
+
     /** 响应式操作实际执行顺序 */
     private List<String> executionOrder;
 
@@ -75,6 +78,7 @@ class AbstractTaskProfileTest {
     void setUp() {
         eventEmitter = mock(AgentEventEmitter.class);
         savedRounds = new ArrayList<>();
+        savedTitles = new ArrayList<>();
         executionOrder = new ArrayList<>();
         profile = new TestTaskProfile(aiTaskService, persistenceService, executionRegistry);
     }
@@ -89,19 +93,20 @@ class AbstractTaskProfileTest {
         when(persistenceService.saveOrUpdateGenerationRound(anyLong(), anyString(), anyString(), anyString(), any(JSONObject.class)))
                 .thenAnswer(invocation -> Mono.defer(() -> {
                     JSONObject round = invocation.getArgument(4);
+                    savedTitles.add(invocation.getArgument(3));
                     savedRounds.add(JSON.parseObject(JSON.toJSONString(round)));
                     JSONObject result = round.getJSONArray("results").getJSONObject(0);
                     executionOrder.add("save:" + result.getString("status") + ":" + result.getIntValue("progress"));
                     return Mono.empty();
                 }));
         AiTaskDtos.AiGenerationTaskResponse created = response("pending", 0, new JSONObject());
-        when(aiTaskService.createTask(any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class)))
+        when(aiTaskService.createTaskForUser(anyLong(), any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class)))
                 .thenAnswer(invocation -> {
-                    taskRequestRef.set(invocation.getArgument(0));
-                    Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue = invocation.getArgument(1);
+                    taskRequestRef.set(invocation.getArgument(1));
+                    Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue = invocation.getArgument(2);
                     return beforeEnqueue.apply(created).thenReturn(created);
                 });
-        when(aiTaskService.getTask("task-1")).thenReturn(
+        when(aiTaskService.getTaskForUser(7L, "task-1")).thenReturn(
                 polledResponse("pending", 0, new JSONObject()),
                 polledResponse("running", 0, new JSONObject()),
                 polledResponse("running", 35, new JSONObject()),
@@ -109,22 +114,30 @@ class AbstractTaskProfileTest {
                 polledResponse("success", 100, successfulResultData()));
 
         Mono<ToolResult> execution = profile.executeTool(7L, "generate_image",
-                Map.of("prompt", "生成一张海报", "size", "1:1", "resolution", "4K", "quality", "high", "model", "model-1"),
-                List.of(), eventEmitter, "session-1", "call-1");
+                Map.of("prompt", "优化后的海报提示词", "size", "1:1", "resolution", "4K", "quality", "high", "model", "model-1"),
+                "生成一张海报", List.of(), eventEmitter, "session-1", "call-1");
 
         ToolResult result = execution.block(Duration.ofSeconds(10));
 
         Assertions.assertNotNull(result);
         Assertions.assertTrue(result.ok());
         Assertions.assertNotNull(taskRequestRef.get());
+        Assertions.assertEquals("优化后的海报提示词", taskRequestRef.get().prompt());
         Assertions.assertEquals("4K", taskRequestRef.get().parameters().get("resolution"));
 
         Assertions.assertEquals("save:pending:0", executionOrder.getFirst());
         Assertions.assertEquals("getTask", executionOrder.get(1));
-        Assertions.assertEquals(3, savedRounds.size());
+        Assertions.assertEquals(4, savedRounds.size());
         assertPendingRound(savedRounds.get(0), 0);
         assertPendingRound(savedRounds.get(1), 0);
         assertPendingRound(savedRounds.get(2), 35);
+        Assertions.assertEquals("success", savedRounds.get(3).getJSONArray("results")
+                .getJSONObject(0).getString("status"));
+        savedRounds.forEach(round -> {
+            Assertions.assertEquals("生成一张海报", round.getString("prompt"));
+            Assertions.assertEquals("优化后的海报提示词", round.getString("generationPrompt"));
+        });
+        Assertions.assertTrue(savedTitles.stream().allMatch("生成一张海报"::equals));
     }
 
     /**
@@ -144,16 +157,18 @@ class AbstractTaskProfileTest {
                 });
         AtomicReference<AiTaskDtos.CreateAiTaskRequest> taskRequestRef = new AtomicReference<>();
         AiTaskDtos.AiGenerationTaskResponse created = response("success", 100, successfulResultData());
-        when(aiTaskService.createTask(any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class)))
+        when(aiTaskService.createTaskForUser(anyLong(), any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class)))
                 .thenAnswer(invocation -> {
-                    taskRequestRef.set(invocation.getArgument(0));
-                    Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue = invocation.getArgument(1);
+                    taskRequestRef.set(invocation.getArgument(1));
+                    Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue = invocation.getArgument(2);
                     return beforeEnqueue.apply(created).thenReturn(created);
                 });
-        when(aiTaskService.getTask("task-1")).thenReturn(Mono.just(response("success", 100, successfulResultData())));
+        when(aiTaskService.getTaskForUser(7L, "task-1"))
+                .thenReturn(Mono.just(response("success", 100, successfulResultData())));
 
         ToolResult result = profile.executeTool(7L, "generate_image",
                         Map.of("prompt", "使用上传图片生成海报", "model", "model-1"),
+                        "使用上传图片生成海报",
                         List.of(new AgentChatRequest.Attachment("https://untrusted.example.com/cat-dog.png", "image/png", "猫狗.png", "image:cat-dog")),
                         eventEmitter, "session-1", "call-1")
                 .block(Duration.ofSeconds(10));
@@ -180,6 +195,7 @@ class AbstractTaskProfileTest {
 
         ToolResult result = videoProfile.executeTool(7L, "generate_video",
                         Map.of("prompt", "让小猫和小狗玩耍", "model", "video-model"),
+                        "让小猫和小狗玩耍",
                         List.of(new AgentChatRequest.Attachment("https://untrusted.example.com/cat-dog.png", "image/png", "猫狗.png", "image:cat-dog")),
                         eventEmitter, "session-1", "call-1")
                 .block(Duration.ofSeconds(10));
@@ -187,7 +203,35 @@ class AbstractTaskProfileTest {
         Assertions.assertNotNull(result);
         Assertions.assertFalse(result.ok());
         Assertions.assertEquals("当前模型未配置图生视频能力，请切换支持图生视频的模型", result.message());
-        verify(aiTaskService, never()).createTask(any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class));
+        verify(aiTaskService, never()).createTaskForUser(anyLong(), any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class));
+    }
+
+    /**
+     * 创建任务前停止时，也应保留用户原始输入和实际生成提示词。
+     */
+    @Test
+    void shouldKeepOriginalAndGenerationPromptsWhenCanceledBeforeTaskCreation() {
+        when(executionRegistry.isCancelRequested("session-1")).thenReturn(true);
+        when(persistenceService.saveOrUpdateGenerationRound(anyLong(), anyString(), anyString(), anyString(), any(JSONObject.class)))
+                .thenAnswer(invocation -> {
+                    savedTitles.add(invocation.getArgument(3));
+                    savedRounds.add(JSON.parseObject(JSON.toJSONString(invocation.getArgument(4))));
+                    return Mono.empty();
+                });
+
+        ToolResult result = profile.executeTool(7L, "generate_image",
+                        Map.of("prompt", "优化后的小狗提示词", "model", "model-1"),
+                        "生成一只小狗", List.of(), eventEmitter, "session-1", "call-1")
+                .block(Duration.ofSeconds(10));
+
+        Assertions.assertNotNull(result);
+        Assertions.assertFalse(result.ok());
+        Assertions.assertEquals("生成一只小狗", savedRounds.getFirst().getString("prompt"));
+        Assertions.assertEquals("优化后的小狗提示词", savedRounds.getFirst().getString("generationPrompt"));
+        Assertions.assertEquals("生成一只小狗", savedTitles.getFirst());
+        Assertions.assertEquals("canceled", savedRounds.getFirst().getJSONArray("results")
+                .getJSONObject(0).getString("status"));
+        verify(aiTaskService, never()).createTaskForUser(anyLong(), any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class));
     }
 
     /**

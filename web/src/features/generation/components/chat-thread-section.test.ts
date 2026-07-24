@@ -3,7 +3,7 @@ import test from "node:test";
 import React from "react";
 import { LoaderCircle } from "lucide-react";
 
-import type { ChatMessageItem, ToolCallState } from "@/features/chat/types";
+import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 
 import { buildChatThreadSection } from "./chat-thread-section.ts";
 
@@ -62,4 +62,23 @@ test("buildChatThreadSection 将用户素材传递到对话轮次", () => {
     const section = buildChatThreadSection(messages, [], null, null, [], () => null);
 
     assert.ok(section?.rounds[0]?.userAttachments);
+});
+
+test("buildChatThreadSection 将 Agent 执行活动归入当前对话轮次", () => {
+    const activity: AgentActivityState = {
+        id: "plan-plan-1",
+        type: "plan-created",
+        title: "创建创作计划",
+        description: "生成一张小狗图片，共 1 个任务",
+        status: "success",
+    };
+    const messages: ChatMessageItem[] = [
+        { id: "user-4", role: "user", text: "生成一张小狗图片" },
+        { id: "agent-activity-plan-plan-1", role: "system", text: activity.title, detail: activity },
+    ];
+
+    const section = buildChatThreadSection(messages, [], null, null, [], () => null);
+
+    assert.equal(section?.rounds[0]?.id, "user-4");
+    assert.deepEqual(section?.rounds[0]?.activities, [activity]);
 });

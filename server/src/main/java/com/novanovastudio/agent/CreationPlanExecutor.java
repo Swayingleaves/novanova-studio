@@ -265,7 +265,8 @@ public class CreationPlanExecutor {
         AgentLoopProfile profile = resolveProfile(task.taskType());
         List<AgentChatRequest.Attachment> attachments = new ArrayList<>(request.attachments() == null ? List.of() : request.attachments());
         attachments.addAll(dependencyAttachments);
-        return profile.executeTool(userId, toolName, arguments, attachments, eventEmitter, sessionId, task.taskId())
+        return profile.executeTool(userId, toolName, arguments, request.message(), attachments,
+                        eventEmitter, sessionId, task.taskId())
                 .flatMap(result -> {
                     emit(userId, AgentEvent.toolResult(sessionId, task.taskId(), result.ok(), result.message(), result.data()));
                     String status = taskStatus(result);

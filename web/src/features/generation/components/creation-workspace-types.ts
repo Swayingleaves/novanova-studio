@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import type { AgentActivityState } from "@/features/chat/types";
+
 export type CreationConversationStatus = "running" | "unreadSuccess" | "unreadFailed" | "none";
 
 export type CreationConversationItem = {
@@ -23,6 +25,7 @@ export type CreationThreadRound = {
     id: string;
     userText: string;
     userAttachments?: ReactNode;
+    activities?: AgentActivityState[];
     statusText: string;
     assistantText?: string;
     resultContent: ReactNode;

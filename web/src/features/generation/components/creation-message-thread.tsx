@@ -5,6 +5,7 @@ import { Copy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
 
+import { AgentActivityTimeline } from "@/features/generation/components/agent-activity-timeline";
 import type { CreationMessageThreadProps } from "@/features/generation/components/creation-workspace-types";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 
@@ -65,22 +66,25 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange }
                             <div className="space-y-8">
                                 {section.rounds.map((round) => (
                                     <article key={round.id} className="space-y-4">
-                                        <div className="flex justify-end">
-                                            <div className="group flex w-fit max-w-[92%] flex-col items-end sm:max-w-[82%]">
-                                                {round.userAttachments ? <div className="mb-3">{round.userAttachments}</div> : null}
-                                                <div className="relative rounded-[28px] bg-[rgba(83,96,116,0.08)] px-5 py-4 pr-14">
+                                        {round.userText || round.userAttachments ? (
+                                            <div className="flex justify-end">
+                                                <div className="group flex w-fit max-w-[92%] flex-col items-end sm:max-w-[82%]">
+                                                    {round.userAttachments ? <div className="mb-3">{round.userAttachments}</div> : null}
                                                     {round.userText ? (
-                                                        <MessageCopyButton
-                                                            side="right"
-                                                            placement="inside"
-                                                            onClick={() => copyText(round.userText, "用户消息已复制")}
-                                                        />
+                                                        <div className="relative rounded-[28px] bg-[rgba(83,96,116,0.08)] px-5 py-4 pr-14">
+                                                            <MessageCopyButton
+                                                                side="right"
+                                                                placement="inside"
+                                                                onClick={() => copyText(round.userText, "用户消息已复制")}
+                                                            />
+                                                            <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--studio-ink)] sm:text-[15px]">{round.userText}</p>
+                                                        </div>
                                                     ) : null}
-                                                    <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--studio-ink)] sm:text-[15px]">{round.userText}</p>
                                                 </div>
                                             </div>
-                                        </div>
+                                        ) : null}
                                         <div className="space-y-3">
+                                            {round.activities?.length ? <AgentActivityTimeline activities={round.activities} /> : null}
                                             {round.statusText ? <div className="text-xs font-medium text-[var(--studio-muted)]">{round.statusText}</div> : null}
                                             {round.assistantText ? (
                                                 <div className="group inline-flex max-w-3xl items-start gap-2">
