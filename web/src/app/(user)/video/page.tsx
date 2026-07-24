@@ -29,9 +29,9 @@ import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
-import type { ChatMessageItem, ThinkingBlockState, ToolCallState } from "@/features/chat/types";
+import type { AgentActivityState, ChatMessageItem, ThinkingBlockState, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
-import { attachAgentActivitiesToThreadSections, collectAgentActivities, createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, groupAgentActivitiesByRoundId, updateAgentActivityMessage, upsertAgentActivityMessage, type AgentActivitiesByRoundId } from "@/features/generation/components/agent-activity";
+import { createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, normalizeAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { hasPendingVideoConversation } from "@/features/generation/lib/generation-conversation-recovery";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
@@ -70,6 +70,7 @@ type Round = {
     config: RoundConfig;
     result: GenerationResult;
     createdAt: number;
+    activities?: AgentActivityState[];
 };
 
 type Conversation = GenerationLogStatusFields & {
@@ -145,7 +146,6 @@ export default function VideoPage() {
     const [activeThinking, setActiveThinking] = useState<ThinkingBlockState | null>(null);
     const [toolCalls, setToolCalls] = useState<ToolCallState[]>([]);
     const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null);
-    const [agentActivitiesByRoundId, setAgentActivitiesByRoundId] = useState<AgentActivitiesByRoundId>({});
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const videoResolution = config.vquality || "720p";
     const agentCreationSettings = {
@@ -293,11 +293,6 @@ export default function VideoPage() {
             void refreshConversations().then((nextConversations) => {
                 const completedConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
                 if (!completedConversation) return;
-                const completedActivities = collectAgentActivities(chatMessagesRef.current);
-                const completedActivitiesByRoundId = groupAgentActivitiesByRoundId(completedConversation.rounds.map((round) => round.id), completedActivities);
-                if (Object.keys(completedActivitiesByRoundId).length) {
-                    setAgentActivitiesByRoundId((current) => ({ ...current, ...completedActivitiesByRoundId }));
-                }
                 setChatMessages([]);
                 chatMessagesRef.current = [];
                 setToolCalls([]);
@@ -314,31 +309,22 @@ export default function VideoPage() {
                 toolCallsRef.current = next;
                 return next;
             });
-            setChatMessages((prev) => {
-                let hasExecutingTool = false;
-                const messagesWithCanceledTool = prev.map((item) => {
-                    const detail = item.detail as ToolCallState | undefined;
-                    if (item.role !== "tool" || detail?.status !== "executing") return item;
-                    hasExecutingTool = true;
-                    return { ...item, text: stoppedMessage, detail: { ...detail, status: "canceled" as const, resultMessage: stoppedMessage } };
-                });
-                const next = finishRunningAgentActivities(messagesWithCanceledTool, "canceled", stoppedMessage);
-                if (!hasExecutingTool) {
-                    next.push({ id: nanoid(), role: "error", text: stoppedMessage });
-                }
-                chatMessagesRef.current = next;
-                return next;
+            let hasExecutingTool = false;
+            const messagesWithCanceledTool = chatMessagesRef.current.map((item) => {
+                const detail = item.detail as ToolCallState | undefined;
+                if (item.role !== "tool" || detail?.status !== "executing") return item;
+                hasExecutingTool = true;
+                return { ...item, text: stoppedMessage, detail: { ...detail, status: "canceled" as const, resultMessage: stoppedMessage } };
             });
+            const canceledMessages = finishRunningAgentActivities(messagesWithCanceledTool, "canceled", stoppedMessage);
+            if (!hasExecutingTool) {
+                canceledMessages.push({ id: nanoid(), role: "error", text: stoppedMessage });
+            }
+            chatMessagesRef.current = canceledMessages;
+            setChatMessages(canceledMessages);
             void refreshConversations().then((nextConversations) => {
                 const canceledConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
                 if (!canceledConversation) return;
-                const canceledActivities = collectAgentActivities(chatMessagesRef.current);
-                const canceledActivitiesByRoundId = groupAgentActivitiesByRoundId(
-                    canceledConversation.rounds.filter((round) => round.result.status === "canceled").map((round) => round.id),
-                    canceledActivities,
-                );
-                if (!Object.keys(canceledActivitiesByRoundId).length) return;
-                setAgentActivitiesByRoundId((current) => ({ ...current, ...canceledActivitiesByRoundId }));
                 setChatMessages([]);
                 chatMessagesRef.current = [];
                 setToolCalls([]);
@@ -888,16 +874,13 @@ export default function VideoPage() {
     );
     const livePendingRoundIds = new Set(toolCalls.filter((call) => call.status === "executing").map((call) => call.callId));
     const threadSections = activeConversation
-        ? attachAgentActivitiesToThreadSections(
-              buildVideoThreadSections(activeConversation, livePendingRoundIds, {
-                  uploadingObjectStorageId,
-                  onDownload: downloadVideo,
-                  onSaveAsset: saveResultToAssets,
-                  onUploadObjectStorage: uploadResultToObjectStorage,
-                  onRegenerate: regenerateRound,
-              }),
-              agentActivitiesByRoundId,
-          )
+        ? buildVideoThreadSections(activeConversation, livePendingRoundIds, {
+              uploadingObjectStorageId,
+              onDownload: downloadVideo,
+              onSaveAsset: saveResultToAssets,
+              onUploadObjectStorage: uploadResultToObjectStorage,
+              onRegenerate: regenerateRound,
+          })
         : [];
     // 历史记录与当前生成中消息同时展示，避免续写时把已保存历史临时隐藏。
     const allThreadSections = chatThreadSection ? [...threadSections, chatThreadSection] : threadSections;
@@ -1096,6 +1079,7 @@ function buildVideoThreadSections(
             userAttachments: renderVideoRoundReferences(round),
             statusText: buildVideoStatusText(round),
             assistantText: buildVideoAssistantText(round),
+            activities: round.activities,
             resultContent: (
                 <div className="grid gap-3 xl:grid-cols-2">
                     {getVideoDisplayResults(round).map((result) =>
@@ -1320,6 +1304,7 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
 
             return {
                 ...round,
+                activities: normalizeAgentActivities(round.activities),
                 references: normalizedReferences,
                 videoReferences: normalizedVideoReferences,
                 result:

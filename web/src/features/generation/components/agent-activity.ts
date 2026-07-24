@@ -1,7 +1,4 @@
 import type { AgentActivityState, AgentActivityStatus, ChatMessageItem, ToolCallState } from "@/features/chat/types";
-import type { CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
-
-export type AgentActivitiesByRoundId = Record<string, AgentActivityState[]>;
 
 const PLAN_TASK_STATUS_MAP: Record<string, AgentActivityStatus> = {
     running: "running",
@@ -10,6 +7,9 @@ const PLAN_TASK_STATUS_MAP: Record<string, AgentActivityStatus> = {
     canceled: "canceled",
     skipped: "skipped",
 };
+
+const AGENT_ACTIVITY_TYPES = new Set(["plan-created", "plan-task-status", "prompt-prepared", "tool-execute"]);
+const AGENT_ACTIVITY_STATUSES = new Set(["pending", "running", "success", "failed", "canceled", "skipped"]);
 
 const QUALITY_LABELS: Record<string, string> = {
     low: "低质量",
@@ -62,41 +62,9 @@ export function finishRunningAgentActivities(
     });
 }
 
-/** 提取聊天消息中的 Agent 执行活动。 */
-export function collectAgentActivities(messages: ChatMessageItem[]): AgentActivityState[] {
-    return messages.flatMap((item) => (isAgentActivityState(item.detail) ? [item.detail] : []));
-}
-
-/** 按工具调用编号与结果轮次编号一致的契约，对完成活动进行分组。 */
-export function groupAgentActivitiesByRoundId(roundIds: string[], activities: AgentActivityState[]): AgentActivitiesByRoundId {
-    const groupedActivities: AgentActivitiesByRoundId = {};
-    const planActivities = activities.filter((activity) => activity.type === "plan-created");
-    for (const roundId of roundIds) {
-        const toolActivityId = `tool-${roundId}`;
-        if (!activities.some((activity) => activity.type === "tool-execute" && activity.id === toolActivityId)) {
-            continue;
-        }
-        const roundActivities = activities.filter((activity) => (
-            activity.type !== "plan-created"
-            && (activity.id === toolActivityId || activity.id.endsWith(`-${roundId}`))
-        ));
-        groupedActivities[roundId] = [...planActivities, ...roundActivities];
-    }
-    return groupedActivities;
-}
-
-/** 将已完成的 Agent 执行活动挂到对应历史结果轮次。 */
-export function attachAgentActivitiesToThreadSections(
-    sections: CreationThreadSection[],
-    activitiesByRoundId: AgentActivitiesByRoundId,
-): CreationThreadSection[] {
-    return sections.map((section) => ({
-        ...section,
-        rounds: section.rounds.map((round) => ({
-            ...round,
-            activities: activitiesByRoundId[round.id] || round.activities,
-        })),
-    }));
+/** 从历史记录中恢复结构合法的Agent执行活动。 */
+export function normalizeAgentActivities(value: unknown): AgentActivityState[] {
+    return Array.isArray(value) ? value.filter(isAgentActivityState) : [];
 }
 
 /** 根据服务端计划任务状态创建可展示的活动状态。 */
@@ -124,8 +92,12 @@ export function isAgentActivityState(value: unknown): value is AgentActivityStat
     const activity = value as Partial<AgentActivityState>;
     return typeof activity.id === "string"
         && typeof activity.type === "string"
+        && AGENT_ACTIVITY_TYPES.has(activity.type)
         && typeof activity.title === "string"
-        && typeof activity.status === "string";
+        && typeof activity.status === "string"
+        && AGENT_ACTIVITY_STATUSES.has(activity.status)
+        && (activity.description === undefined || typeof activity.description === "string")
+        && (activity.progress === undefined || typeof activity.progress === "number");
 }
 
 function activityMessageId(activityId: string): string {

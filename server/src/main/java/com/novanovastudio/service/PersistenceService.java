@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.alibaba.fastjson2.TypeReference;
 import com.novanovastudio.ai.AiHttpClient;
+import com.novanovastudio.agent.AgentActivityService;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
@@ -92,6 +93,9 @@ public class PersistenceService {
 
     /** 业务仓储 */
     private final PersistenceRepository repository;
+
+    /** Agent执行活动服务 */
+    private final AgentActivityService agentActivityService;
 
     /** 外部媒体下载客户端 */
     private final AiHttpClient aiHttpClient;
@@ -590,6 +594,10 @@ public class PersistenceService {
         if (!StringUtils.hasText(roundId)) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "生成轮次ID不能为空"));
         }
+        JSONArray activities = agentActivityService.activitiesForRound(sessionId, round);
+        if (!activities.isEmpty()) {
+            round.put("activities", activities);
+        }
         return repository.findGenerationLogById(userId, sessionId)
                 .defaultIfEmpty(new PersistenceRecords.GenerationLogRecord())
                 .flatMap(existingRecord -> {
@@ -613,6 +621,9 @@ public class PersistenceService {
                             JSONObject existingRound = rounds.getJSONObject(index);
                             if (existingRound.containsKey("createdAt")) {
                                 round.put("createdAt", existingRound.getLongValue("createdAt"));
+                            }
+                            if (!round.containsKey("activities") && existingRound.containsKey("activities")) {
+                                round.put("activities", existingRound.getJSONArray("activities"));
                             }
                             rounds.set(index, round);
                             replaced = true;

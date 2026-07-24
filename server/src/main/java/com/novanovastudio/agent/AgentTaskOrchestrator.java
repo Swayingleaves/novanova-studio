@@ -66,6 +66,9 @@ public class AgentTaskOrchestrator {
     /** 读操作工具集合，后端直接读快照 */
     private static final Set<String> READ_TOOLS = Set.of("canvas_get_state", "canvas_get_selection", "canvas_export_snapshot");
 
+    /** 需要由服务端分配稳定轮次ID的生成类Profile */
+    private static final Set<String> GENERATION_PROFILE_NAMES = Set.of("generation", "video");
+
     private final AiHttpClient aiHttpClient;
     private final AiProviderAdapterRegistry adapterRegistry;
     private final AgentToolRegistry toolRegistry;
@@ -85,8 +88,11 @@ public class AgentTaskOrchestrator {
     /** userId → 当前活跃的 sessionId，防止同一用户并发启动多个 Agent Loop */
     private final ConcurrentHashMap<Long, String> activeLoops = new ConcurrentHashMap<>();
 
-    /** sessionId → 初始视频生成轮次，用于覆盖工具调用ID并更新同一条持久化记录 */
+    /** sessionId → 初始视频生成轮次，用于停止时更新同一条待生成记录 */
     private final ConcurrentHashMap<String, InitialVideoRound> initialVideoRounds = new ConcurrentHashMap<>();
+
+    /** sessionId → 当前请求的服务端生成轮次ID，避免上游工具调用ID跨轮重复覆盖历史 */
+    private final ConcurrentHashMap<String, String> generationRoundIds = new ConcurrentHashMap<>();
 
     /**
      * 构造编排器。aiTaskService 与本类存在构造器循环依赖，使用 @Lazy 延迟初始化打破循环。
@@ -140,8 +146,10 @@ public class AgentTaskOrchestrator {
                     return Mono.just(existing);
                 }
                 executionRegistry.open(userId, session.id());
+                String generationRoundId = GENERATION_PROFILE_NAMES.contains(profile.name())
+                        ? UUID.randomUUID().toString() : "";
                 InitialVideoRound initialVideoRound = "video".equals(profile.name())
-                        ? createInitialVideoRound(request) : null;
+                        ? createInitialVideoRound(request, generationRoundId) : null;
                 Mono<Void> persistInitialRound = initialVideoRound != null
                         ? saveInitialVideoRound(userId, session.id(), initialVideoRound)
                         : Mono.empty();
@@ -149,6 +157,9 @@ public class AgentTaskOrchestrator {
                 Mono<Void> persistUserMessage = sessionService.appendUserMessage(
                         session.id(), UUID.randomUUID().toString(), request.message());
                 return persistInitialRound.then(persistUserMessage).then(Mono.fromSupplier(() -> {
+                    if (StringUtils.hasText(generationRoundId)) {
+                        generationRoundIds.put(session.id(), generationRoundId);
+                    }
                     if (initialVideoRound != null) {
                         initialVideoRounds.put(session.id(), initialVideoRound);
                     }
@@ -159,6 +170,7 @@ public class AgentTaskOrchestrator {
                         .doFinally(signal -> {
                             activeLoops.remove(userId, session.id());
                             initialVideoRounds.remove(session.id());
+                            generationRoundIds.remove(session.id());
                             executionRegistry.complete(session.id());
                         })
                         .subscribe(
@@ -169,6 +181,8 @@ public class AgentTaskOrchestrator {
                     return session.id();
                 })).doOnError(error -> {
                     activeLoops.remove(userId, session.id());
+                    initialVideoRounds.remove(session.id());
+                    generationRoundIds.remove(session.id());
                     executionRegistry.complete(session.id());
                 });
             });
@@ -178,10 +192,10 @@ public class AgentTaskOrchestrator {
      * 构造视频 Agent 在工具创建前的待生成轮次。
      *
      * @param request AgentChatRequest 用户对话请求
+     * @param roundId String 服务端生成轮次ID
      * @return InitialVideoRound 初始视频生成轮次
      */
-    private InitialVideoRound createInitialVideoRound(AgentChatRequest request) {
-        String roundId = UUID.randomUUID().toString();
+    private InitialVideoRound createInitialVideoRound(AgentChatRequest request, String roundId) {
         String prompt = normalizeUserPrompt(request.message());
         JSONObject result = new JSONObject();
         result.put("id", roundId);
@@ -428,7 +442,7 @@ public class AgentTaskOrchestrator {
                                          AiResponse response, int step, String assistantId) {
         AiTaskDtos.AiChannelConfig channel = textModel.channel();
         AiResponse promptAppliedResponse = applyOriginalPromptToTerminalTools(profile, response, messages);
-        AiResponse effectiveResponse = applyInitialVideoRoundIdToTerminalTools(profile, sessionId, promptAppliedResponse);
+        AiResponse effectiveResponse = applyGenerationRoundIdsToTerminalTools(profile, sessionId, promptAppliedResponse);
         return Flux.fromIterable(effectiveResponse.toolCalls())
             .concatMap(toolCall -> executeSingleTool(sessionId, userId, profile, toolCall, attachments))
             .collectList()
@@ -480,33 +494,40 @@ public class AgentTaskOrchestrator {
     }
 
     /**
-     * 将视频终态工具调用绑定到请求开始时已保存的生成轮次。
+     * 将生成类终态工具调用绑定到当前请求的服务端轮次ID。
+     * <p>
+     * 上游模型返回的工具调用ID只用于单次响应关联，不能作为跨轮持久化主键；同批多个工具
+     * 使用服务端轮次ID派生子ID，确保图片和视频多轮对话都不会覆盖历史轮次。
      *
      * @param profile AgentLoopProfile 当前 Profile
      * @param sessionId String Agent会话ID
      * @param response AiResponse 模型响应
-     * @return AiResponse 使用初始视频轮次ID后的响应
+     * @return AiResponse 使用服务端轮次ID后的响应
      */
-    private AiResponse applyInitialVideoRoundIdToTerminalTools(AgentLoopProfile profile, String sessionId, AiResponse response) {
-        if (!"video".equals(profile.name())) {
+    private AiResponse applyGenerationRoundIdsToTerminalTools(AgentLoopProfile profile, String sessionId, AiResponse response) {
+        if (!GENERATION_PROFILE_NAMES.contains(profile.name())) {
             return response;
         }
-        InitialVideoRound initialVideoRound = initialVideoRounds.get(sessionId);
-        String roundId = initialVideoRound != null ? initialVideoRound.id() : "";
-        if (!StringUtils.hasText(roundId) || response.toolCalls().isEmpty()) {
+        if (response.toolCalls().isEmpty()) {
             return response;
+        }
+        String roundId = generationRoundIds.get(sessionId);
+        if (!StringUtils.hasText(roundId)) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "生成轮次ID不存在");
         }
         List<ToolCall> toolCalls = new ArrayList<>();
-        boolean bound = false;
+        int terminalToolIndex = 0;
         for (ToolCall call : response.toolCalls()) {
-            if (!bound && isPromptPassthroughTool(call.function().name()) && profile.isTerminalTool(call.function().name())) {
-                toolCalls.add(new ToolCall(roundId, call.function()));
-                bound = true;
+            if (isPromptPassthroughTool(call.function().name()) && profile.isTerminalTool(call.function().name())) {
+                String toolRoundId = terminalToolIndex == 0
+                        ? roundId : roundId + "-tool-" + (terminalToolIndex + 1);
+                toolCalls.add(new ToolCall(toolRoundId, call.function()));
+                terminalToolIndex++;
             } else {
                 toolCalls.add(call);
             }
         }
-        return bound ? new AiResponse(response.text(), toolCalls) : response;
+        return terminalToolIndex > 0 ? new AiResponse(response.text(), toolCalls) : response;
     }
 
     /**
@@ -809,8 +830,14 @@ public class AgentTaskOrchestrator {
             String originalPrompt = String.valueOf(args.getOrDefault("prompt", ""));
             return profile.executeTool(userId, toolName, args, originalPrompt, attachments,
                     eventEmitter, sessionId, callId)
-                .doOnNext(result -> eventEmitter.emit(userId,
-                    AgentEvent.toolResult(sessionId, callId, result.ok(), result.message(), result.data())));
+                .flatMap(result -> {
+                    eventEmitter.emit(userId, AgentEvent.toolResult(
+                            sessionId, callId, result.ok(), result.message(), result.data()));
+                    if (!profile.isTerminalTool(toolName)) {
+                        return Mono.just(result);
+                    }
+                    return eventEmitter.persistRoundActivities(userId, sessionId, callId).thenReturn(result);
+                });
         }
 
         // 前端画布操作工具：通过 SSE 发送，等待前端回传结果

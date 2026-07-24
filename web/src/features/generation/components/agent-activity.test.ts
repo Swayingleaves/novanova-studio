@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { AgentActivityState, ToolCallState } from "@/features/chat/types";
-import type { CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 
-import { attachAgentActivitiesToThreadSections, collectAgentActivities, createToolExecutionActivity, finishRunningAgentActivities, groupAgentActivitiesByRoundId, updateAgentActivityMessage, upsertAgentActivityMessage } from "./agent-activity.ts";
+import { createToolExecutionActivity, finishRunningAgentActivities, normalizeAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "./agent-activity.ts";
 
 test("upsertAgentActivityMessage 对重复 SSE 活动执行幂等覆盖", () => {
     const firstActivity = {
@@ -61,22 +60,19 @@ test("finishRunningAgentActivities 在 SSE 异常时结束所有运行中活动"
     }
 });
 
-test("attachAgentActivitiesToThreadSections 将完成活动保留到对应结果轮次", () => {
+test("normalizeAgentActivities 忽略历史记录中的非法活动", () => {
     const activity: AgentActivityState = {
-        id: "tool-task-3",
+        id: "tool-task-4",
         type: "tool-execute",
-        title: "调用图片生成工具",
+        title: "调用视频生成工具",
         status: "success",
     };
-    const messages = upsertAgentActivityMessage([], activity);
-    const sections: CreationThreadSection[] = [{
-        id: "section-1",
-        label: "今天",
-        rounds: [{ id: "task-3", userText: "生成图片", statusText: "已完成", resultContent: null }],
-    }];
 
-    const activitiesByRoundId = groupAgentActivitiesByRoundId(["task-3"], collectAgentActivities(messages));
-    const nextSections = attachAgentActivitiesToThreadSections(sections, activitiesByRoundId);
-
-    assert.deepEqual(nextSections[0]?.rounds[0]?.activities, [activity]);
+    assert.deepEqual(normalizeAgentActivities([
+        activity,
+        null,
+        { id: "missing-fields" },
+        { ...activity, type: "unknown" },
+        { ...activity, status: "unknown" },
+    ]), [activity]);
 });

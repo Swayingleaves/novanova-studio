@@ -84,6 +84,13 @@ class CanvasAgentToolRoutingTest {
         private AgentTaskOrchestrator orchestrator;
 
         /**
+         * 创建立即回传结果的测试事件发射器。
+         */
+        private ImmediateResultEmitter() {
+            super(new AgentActivityService(org.mockito.Mockito.mock(com.novanovastudio.repository.PersistenceRepository.class)));
+        }
+
+        /**
          * 绑定Agent任务编排器。
          *
          * @param orchestrator Agent任务编排器

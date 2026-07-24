@@ -809,6 +809,53 @@ public class PersistenceRepository {
     }
 
     /**
+     * 原子保存指定生成轮次的Agent执行活动。
+     *
+     * @param userId Long 当前用户ID
+     * @param id String 生成记录ID
+     * @param roundId String 生成轮次ID
+     * @param activitiesJson String 执行活动JSON数组
+     * @return Mono<Long> 更新行数
+     */
+    public Mono<Long> saveGenerationRoundActivities(Long userId, String id, String roundId, String activitiesJson) {
+        return databaseClient.sql("""
+                UPDATE generation_logs
+                SET log_data = jsonb_set(
+                        log_data,
+                        '{rounds}',
+                        (
+                            SELECT jsonb_agg(
+                                    CASE
+                                        WHEN round_data ->> 'id' = :roundId
+                                            THEN jsonb_set(round_data, '{activities}', CAST(:activities AS jsonb), true)
+                                        ELSE round_data
+                                    END
+                                    ORDER BY item_index
+                            )
+                            FROM jsonb_array_elements(COALESCE(log_data -> 'rounds', '[]'::jsonb))
+                                 WITH ORDINALITY AS round_item(round_data, item_index)
+                        ),
+                        false
+                    ),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = :userId
+                  AND id = :id
+                  AND status = 1
+                  AND EXISTS (
+                      SELECT 1
+                      FROM jsonb_array_elements(COALESCE(log_data -> 'rounds', '[]'::jsonb)) AS round_item(round_data)
+                      WHERE round_data ->> 'id' = :roundId
+                  )
+                """)
+                .bind("userId", userId)
+                .bind("id", id)
+                .bind("roundId", roundId)
+                .bind("activities", activitiesJson)
+                .fetch()
+                .rowsUpdated();
+    }
+
+    /**
      * 标记生成记录已查看。
      *
      * @param userId Long 当前用户ID

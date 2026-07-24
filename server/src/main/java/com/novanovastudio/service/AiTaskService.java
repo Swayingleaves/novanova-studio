@@ -302,8 +302,9 @@ public class AiTaskService {
      * @return Mono<AiModelListResponse> 模型列表
      */
     public Mono<AiTaskDtos.AiModelListResponse> listModels() {
-        // 只发布管理员启用的模型目录，严禁把渠道地址或密钥返回给普通用户。
-        return Mono.zip(persistenceService.getPlatformAiChannels(), persistenceService.getPlatformModelConfigs())
+        // 模型目录仅向已登录用户开放，并且严禁返回渠道地址或密钥。
+        return currentUserProvider.currentUserId().then(Mono.defer(() -> Mono.zip(
+                        persistenceService.getPlatformAiChannels(), persistenceService.getPlatformModelConfigs())))
                 .map(tuple -> {
                     List<AiTaskDtos.AiChannelConfig> channels = tuple.getT1();
                     List<AiTaskDtos.AiModelOption> models = tuple.getT2().stream()
