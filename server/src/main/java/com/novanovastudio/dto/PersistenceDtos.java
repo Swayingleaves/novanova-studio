@@ -5,6 +5,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import java.util.List;
 import java.util.Map;
 
@@ -35,7 +36,8 @@ public final class PersistenceDtos {
 
     /** 用户模型配置。 */
     public record ModelConfig(String id, String channelId, String modelName, String modelType,
-                              List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost) {
+                              List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
+                              Boolean thinkingEnabled, String reasoningEffort) {
     }
 
     /** 模型配置列表响应。 */
@@ -47,14 +49,18 @@ public final class PersistenceDtos {
                                            @NotBlank(message = "模型名称不能为空") String modelName,
                                            @NotBlank(message = "模型类型不能为空") String modelType,
                                            List<String> capabilities, Integer sortOrder,
-                                           @Min(value = 0, message = "模型积分不能小于0") Integer creditCost) {
+                                           @Min(value = 0, message = "模型积分不能小于0") Integer creditCost,
+                                           Boolean thinkingEnabled,
+                                           @Pattern(regexp = "high|max", message = "思考强度只支持high、max") String reasoningEffort) {
     }
 
     /** 修改用户模型配置请求。 */
     public record UpdateModelConfigRequest(@NotBlank(message = "模型配置ID不能为空") String id,
                                            @NotBlank(message = "模型类型不能为空") String modelType,
                                            List<String> capabilities, Integer sortOrder,
-                                           @Min(value = 0, message = "模型积分不能小于0") Integer creditCost) {
+                                           @Min(value = 0, message = "模型积分不能小于0") Integer creditCost,
+                                           Boolean thinkingEnabled,
+                                           @Pattern(regexp = "high|max", message = "思考强度只支持high、max") String reasoningEffort) {
     }
 
     /** 设置默认模型请求。 */

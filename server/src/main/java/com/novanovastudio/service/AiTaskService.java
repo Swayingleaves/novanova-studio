@@ -365,6 +365,8 @@ public class AiTaskService {
                                                                 task,
                                                                 resolvedModel.channel(),
                                                                 resolvedModel.model(),
+                                                                resolvedModel.thinkingEnabled(),
+                                                                resolvedModel.reasoningEffort(),
                                                                 request,
                                                                 () -> eventPublisher.isCancelRequested(taskId),
                                                                 progress -> updateTaskState(taskId, STATUS_RUNNING, progress, "", null),
@@ -542,7 +544,8 @@ public class AiTaskService {
                                 .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员配置默认" + capabilityLabel(capability) + "模型"));
                     }
                     ResolvedModel resolvedModel = resolveModel(capability, selectedConfig.channelId() + "::" + selectedConfig.modelName(), tuple.getT1());
-                    return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.creditCost());
+                    return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.creditCost(),
+                            thinkingEnabled(selectedConfig.thinkingEnabled()), reasoningEffort(selectedConfig.reasoningEffort()));
                 });
     }
 
@@ -603,7 +606,7 @@ public class AiTaskService {
         }
         validateChannelSupport(channel, capability);
         validateUserChannelAccess(channel);
-        return new ResolvedModel(channel, model, 0);
+        return new ResolvedModel(channel, model, 0, true, "high");
     }
 
 
@@ -846,11 +849,32 @@ public class AiTaskService {
     }
 
     /**
+     * 规范化思考模式开关。
+     *
+     * @param enabled Boolean 模型配置中的开关
+     * @return boolean 缺省时开启思考模式
+     */
+    private boolean thinkingEnabled(Boolean enabled) {
+        return enabled == null || Boolean.TRUE.equals(enabled);
+    }
+
+    /**
+     * 规范化思考强度。
+     *
+     * @param effort String 模型配置中的强度
+     * @return String high或max
+     */
+    private String reasoningEffort(String effort) {
+        return "max".equals(effort) ? "max" : "high";
+    }
+
+    /**
      * 解析后的模型和渠道
      *
      * @param channel AiChannelConfig 渠道配置
      * @param model String 模型名称
      */
-    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, Integer creditCost) {
+    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, Integer creditCost,
+                                 boolean thinkingEnabled, String reasoningEffort) {
     }
 }

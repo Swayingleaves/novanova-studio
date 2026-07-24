@@ -126,6 +126,8 @@ export type ServerModelConfig = {
     defaultModel: boolean;
     sortOrder: number;
     creditCost: number;
+    thinkingEnabled: boolean;
+    reasoningEffort: "high" | "max";
 };
 
 export type CreditSettings = {
@@ -578,7 +580,7 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost">) {
+export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "thinkingEnabled" | "reasoningEffort">) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 

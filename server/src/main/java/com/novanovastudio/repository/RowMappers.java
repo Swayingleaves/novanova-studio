@@ -133,6 +133,8 @@ public final class RowMappers {
         record.setDefaultModel(row.get("is_default", Boolean.class));
         record.setSortOrder(row.get("sort_order", Integer.class));
         record.setCreditCost(row.get("credit_cost", Integer.class));
+        record.setThinkingEnabled(row.get("thinking_enabled", Boolean.class));
+        record.setReasoningEffort(row.get("reasoning_effort", String.class));
         record.setCreatedAt(row.get("created_at", OffsetDateTime.class));
         record.setUpdatedAt(row.get("updated_at", OffsetDateTime.class));
         return record;

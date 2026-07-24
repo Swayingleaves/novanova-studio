@@ -15,6 +15,8 @@ import reactor.core.publisher.Mono;
  * @param task AiGenerationTask 当前任务实体
  * @param channel AiChannelConfig 当前渠道配置
  * @param model String 实际请求模型
+ * @param thinkingEnabled boolean 是否开启思考模式
+ * @param reasoningEffort String 思考强度
  * @param request CreateAiTaskRequest 原始任务请求
  * @param cancelChecker Supplier<Mono<Boolean>> 取消状态检查器
  * @param progressReporter IntFunction<Mono<Void>> 进度上报器
@@ -23,6 +25,8 @@ import reactor.core.publisher.Mono;
 public record AiTaskExecutionContext(AiGenerationTask task,
                                      AiTaskDtos.AiChannelConfig channel,
                                      String model,
+                                     boolean thinkingEnabled,
+                                     String reasoningEffort,
                                      AiTaskDtos.CreateAiTaskRequest request,
                                      Supplier<Mono<Boolean>> cancelChecker,
                                      IntFunction<Mono<Void>> progressReporter,

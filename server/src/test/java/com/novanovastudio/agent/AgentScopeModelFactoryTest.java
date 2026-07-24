@@ -7,7 +7,10 @@ import com.novanovastudio.ai.AiProviderAdapterRegistry;
 import com.novanovastudio.dto.AiTaskDtos;
 import io.agentscope.core.model.AnthropicChatModel;
 import io.agentscope.core.model.GeminiChatModel;
+import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
+import io.agentscope.core.model.OpenAIChatModel;
+import java.lang.reflect.Field;
 import java.util.List;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -54,6 +57,41 @@ class AgentScopeModelFactoryTest {
 
         Assertions.assertThrows(IllegalStateException.class,
                 () -> factory.createModel(channel("agnes", "text-model")));
+    }
+
+    /**
+     * OpenAI兼容模型应将思考配置写入AgentScope生成参数。
+     */
+    @Test
+    void shouldConfigureOpenAiThinkingParameters() throws Exception {
+        AiProviderAdapterRegistry adapterRegistry = mock(AiProviderAdapterRegistry.class);
+        when(adapterRegistry.normalizeApiFormat("openai")).thenReturn("openai");
+        AgentScopeModelFactory factory = new AgentScopeModelFactory(null, adapterRegistry);
+
+        GenerateOptions enabled = configuredOptions(factory.createModel(channel("openai", "deepseek-reasoner"), true, "max"));
+        GenerateOptions disabled = configuredOptions(factory.createModel(channel("openai", "deepseek-reasoner"), false, "max"));
+
+        Assertions.assertEquals("enabled", ((java.util.Map<?, ?>) enabled.getAdditionalBodyParams().get("thinking")).get("type"));
+        Assertions.assertEquals("max", enabled.getReasoningEffort());
+        Assertions.assertEquals("/chat/completions", enabled.getEndpointPath());
+        Assertions.assertEquals("disabled", ((java.util.Map<?, ?>) disabled.getAdditionalBodyParams().get("thinking")).get("type"));
+        Assertions.assertNull(disabled.getReasoningEffort());
+    }
+
+    /**
+     * 从结构化输出包装器中读取OpenAI模型生成参数。
+     *
+     * @param model Model AgentScope模型
+     * @return GenerateOptions 已配置生成参数
+     * @throws ReflectiveOperationException 反射读取失败时抛出
+     */
+    private GenerateOptions configuredOptions(Model model) throws ReflectiveOperationException {
+        Field delegateField = model.getClass().getDeclaredField("delegate");
+        delegateField.setAccessible(true);
+        OpenAIChatModel delegate = (OpenAIChatModel) delegateField.get(model);
+        Field optionsField = OpenAIChatModel.class.getDeclaredField("configuredOptions");
+        optionsField.setAccessible(true);
+        return (GenerateOptions) optionsField.get(delegate);
     }
 
     /**

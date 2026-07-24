@@ -1,6 +1,6 @@
 "use client";
 
-import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Tabs } from "antd";
+import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Switch, Tabs } from "antd";
 import { nanoid } from "nanoid";
 import { ChevronDown, ChevronUp, CloudUpload, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,6 +23,7 @@ import {
     type ModelChannel,
 } from "@/features/settings/stores/use-config-store";
 import { isObjectStorageReady, objectStorageReadyMessage, testObjectStorageUpload } from "@/features/storage/services/object-storage";
+import { isOpenAiTextModel, isReasoningEffortDisabled, reasoningEffortOptions } from "@/features/settings/lib/model-thinking-configuration";
 import {
     createChannel,
     createModelConfig,
@@ -329,6 +330,10 @@ export function AppConfigModal() {
         setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType && modelConfigValue(configItem) === model ? { ...configItem, creditCost } : configItem)));
     };
 
+    const updateModelThinkingConfiguration = (model: string, patch: Pick<ServerModelConfig, "thinkingEnabled"> | Pick<ServerModelConfig, "reasoningEffort">) => {
+        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === "text" && modelConfigValue(configItem) === model ? { ...configItem, ...patch } : configItem)));
+    };
+
     const setDefaultDraftModel = (modelType: ModelCapability, model: string) => {
         setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType ? { ...configItem, defaultModel: modelConfigValue(configItem) === model } : configItem)));
     };
@@ -358,6 +363,8 @@ export function AppConfigModal() {
                     capabilities: configItem.capabilities,
                     sortOrder: configItem.sortOrder,
                     creditCost: configItem.creditCost,
+                    thinkingEnabled: configItem.thinkingEnabled,
+                    reasoningEffort: configItem.reasoningEffort,
                 });
                 createdConfigIds.set(configItem.id, saved.id);
             }
@@ -377,6 +384,8 @@ export function AppConfigModal() {
                         capabilities: configItem.capabilities,
                         sortOrder: configItem.sortOrder,
                         creditCost: configItem.creditCost,
+                        thinkingEnabled: configItem.thinkingEnabled,
+                        reasoningEffort: configItem.reasoningEffort,
                     });
                 }
             }
@@ -728,14 +737,19 @@ export function AppConfigModal() {
                                                             {models.map((model) => {
                                                                 const capabilities = draftConfig.modelCapabilities.find((item) => item.model === model)?.capabilities || [];
                                                                 return (
-                                                                    <div key={model} className="flex flex-wrap items-center gap-3 rounded border border-[var(--studio-line)] bg-[var(--studio-panel)] px-3 py-2">
+                                                            <div key={model} className="flex flex-wrap items-center gap-3 rounded border border-[var(--studio-line)] bg-[var(--studio-panel)] px-3 py-2">
+                                                                {(() => {
+                                                                    const modelConfig = draftModelConfigs.find((item) => item.modelType === group.capability && modelConfigValue(item) === model);
+                                                                    const showThinkingConfiguration = modelConfig && isOpenAiTextModel(modelConfig, draftChannels);
+                                                                    return (
+                                                                        <>
                                                                         <span className="min-w-40 text-sm">{modelOptionLabel(draftConfig, model)}</span>
                                                                         <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
                                                                             消耗积分
                                                                             <InputNumber
                                                                                 min={0}
                                                                                 precision={0}
-                                                                                value={draftModelConfigs.find((item) => item.modelType === group.capability && modelConfigValue(item) === model)?.creditCost ?? 0}
+                                                                                value={modelConfig?.creditCost ?? 0}
                                                                                 disabled={isSaving}
                                                                                 className="w-24"
                                                                                 onChange={(value) => updateModelCreditCost(group.capability, model, Number(value) || 0)}
@@ -751,6 +765,33 @@ export function AppConfigModal() {
                                                                                 {option.label}
                                                                             </Checkbox>
                                                                         ))}
+                                                                        {showThinkingConfiguration && modelConfig ? (
+                                                                            <>
+                                                                                <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
+                                                                                    开启思考模式
+                                                                                    <Switch
+                                                                                        size="small"
+                                                                                        checked={modelConfig.thinkingEnabled}
+                                                                                        disabled={isSaving}
+                                                                                        onChange={(thinkingEnabled) => updateModelThinkingConfiguration(model, { thinkingEnabled })}
+                                                                                    />
+                                                                                </span>
+                                                                                <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
+                                                                                    思考强度
+                                                                                    <Select
+                                                                                        size="small"
+                                                                                        value={modelConfig.reasoningEffort}
+                                                                                        disabled={isReasoningEffortDisabled(isSaving, modelConfig.thinkingEnabled)}
+                                                                                        className="w-20"
+                                                                                        options={reasoningEffortOptions}
+                                                                                        onChange={(reasoningEffort: "high" | "max") => updateModelThinkingConfiguration(model, { reasoningEffort })}
+                                                                                    />
+                                                                                </span>
+                                                                            </>
+                                                                        ) : null}
+                                                                        </>
+                                                                    );
+                                                                })()}
                                                                     </div>
                                                                 );
                                                             })}
@@ -927,7 +968,18 @@ function cloneObjectStorages(storages: ObjectStorageConfig[]) {
 }
 
 function createDraftModelConfig(channelId: string, modelName: string, modelType: ModelCapability): ServerModelConfig {
-    return { id: `draft-${nanoid()}`, channelId, modelName, modelType, capabilities: [], defaultModel: false, sortOrder: 0, creditCost: 0 };
+    return {
+        id: `draft-${nanoid()}`,
+        channelId,
+        modelName,
+        modelType,
+        capabilities: [],
+        defaultModel: false,
+        sortOrder: 0,
+        creditCost: 0,
+        thinkingEnabled: true,
+        reasoningEffort: "high",
+    };
 }
 
 function sameValue(first: unknown, second: unknown) {
@@ -935,8 +987,10 @@ function sameValue(first: unknown, second: unknown) {
 }
 
 function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelConfig) {
-    return first.modelType === second.modelType && first.sortOrder === second.sortOrder && first.creditCost === second.creditCost && sameValue(first.capabilities, second.capabilities);
+    return first.modelType === second.modelType && first.sortOrder === second.sortOrder && first.creditCost === second.creditCost
+        && first.thinkingEnabled === second.thinkingEnabled && first.reasoningEffort === second.reasoningEffort && sameValue(first.capabilities, second.capabilities);
 }
+
 
 function modelConfigValue(config: Pick<ServerModelConfig, "channelId" | "modelName">) {
     return `${config.channelId}::${config.modelName}`;
