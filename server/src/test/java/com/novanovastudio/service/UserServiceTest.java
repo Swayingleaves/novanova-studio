@@ -112,6 +112,64 @@ class UserServiceTest {
     }
 
     /**
+     * 验证原密码正确且新密码符合长度要求时更新密码哈希。
+     */
+    @Test
+    @DisplayName("原密码正确时修改当前用户密码")
+    void shouldChangeCurrentUserPassword() {
+        TestContext context = testContext();
+        User user = normalUser(8L);
+        user.setPassword("encoded-current-password");
+        when(context.currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
+        when(context.userRepository.findById(8L)).thenReturn(Mono.just(user));
+        when(context.passwordEncoder.matches("current-password", "encoded-current-password")).thenReturn(true);
+        when(context.passwordEncoder.encode("new-password")).thenReturn("encoded-new-password");
+        when(context.userRepository.updateCurrentUserPassword(8L, "encoded-new-password")).thenReturn(Mono.empty());
+
+        StepVerifier.create(context.service.changeCurrentUserPassword(new UserDtos.ChangeCurrentUserPasswordRequest("current-password", "new-password")))
+                .verifyComplete();
+
+        verify(context.userRepository).updateCurrentUserPassword(8L, "encoded-new-password");
+    }
+
+    /**
+     * 验证原密码错误时不生成或写入新密码。
+     */
+    @Test
+    @DisplayName("原密码错误时拒绝修改密码")
+    void shouldRejectPasswordChangeWhenCurrentPasswordIsWrong() {
+        TestContext context = testContext();
+        User user = normalUser(8L);
+        user.setPassword("encoded-current-password");
+        when(context.currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
+        when(context.userRepository.findById(8L)).thenReturn(Mono.just(user));
+        when(context.passwordEncoder.matches("wrong-password", "encoded-current-password")).thenReturn(false);
+
+        StepVerifier.create(context.service.changeCurrentUserPassword(new UserDtos.ChangeCurrentUserPasswordRequest("wrong-password", "new-password")))
+                .expectErrorMatches(error -> error instanceof BusinessException && "原密码错误".equals(error.getMessage()))
+                .verify();
+
+        verify(context.passwordEncoder, never()).encode(any());
+        verify(context.userRepository, never()).updateCurrentUserPassword(any(), any());
+    }
+
+    /**
+     * 验证新密码不足8位时在访问用户数据前拒绝请求。
+     */
+    @Test
+    @DisplayName("新密码不足8位时拒绝修改密码")
+    void shouldRejectPasswordChangeWhenNewPasswordIsTooShort() {
+        TestContext context = testContext();
+
+        StepVerifier.create(context.service.changeCurrentUserPassword(new UserDtos.ChangeCurrentUserPasswordRequest("current-password", "short")))
+                .expectErrorMatches(error -> error instanceof BusinessException && "密码至少需要8位".equals(error.getMessage()))
+                .verify();
+
+        verify(context.currentUserProvider, never()).currentUserId();
+        verify(context.userRepository, never()).updateCurrentUserPassword(any(), any());
+    }
+
+    /**
      * 验证当前用户阅读欢迎引导后写入已读状态。
      */
     @Test

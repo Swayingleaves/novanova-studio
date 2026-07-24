@@ -327,4 +327,20 @@ public class UserRepository {
                 .rowsUpdated()
                 .map(updatedRows -> updatedRows > 0);
     }
+
+    /**
+     * 更新当前用户的密码哈希。
+     *
+     * @param userId Long 当前用户ID
+     * @param encodedPassword String 新密码哈希
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> updateCurrentUserPassword(Long userId, String encodedPassword) {
+        return databaseClient.sql("UPDATE users SET password = :password, updated_at = CURRENT_TIMESTAMP WHERE id = :userId")
+                .bind("password", encodedPassword)
+                .bind("userId", userId)
+                .fetch()
+                .rowsUpdated()
+                .then();
+    }
 }

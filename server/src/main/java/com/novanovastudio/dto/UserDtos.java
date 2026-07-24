@@ -83,6 +83,16 @@ public final class UserDtos {
     }
 
     /**
+     * 修改当前用户密码请求。
+     *
+     * @param currentPassword String 原密码
+     * @param newPassword String 新密码，至少8位
+     */
+    public record ChangeCurrentUserPasswordRequest(@NotBlank(message = "请输入原密码") String currentPassword,
+                                                   @NotBlank(message = "请输入新密码") @Size(min = 8, message = "新密码至少8位") String newPassword) {
+    }
+
+    /**
      * 登录响应
      *
      * @param token String Bearer Token

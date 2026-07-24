@@ -48,7 +48,7 @@ public class HttpLoggingWebFilter implements WebFilter {
     private static final Set<String> SENSITIVE_QUERY_FIELDS = Set.of("code", "state", "logincode", "token", "access_token", "refresh_token", "id_token", "error_description", "session_state");
 
     /** JSON正文中的敏感字段 */
-    private static final Set<String> SENSITIVE_BODY_FIELDS = Set.of("password", "code", "logincode", "clientsecret", "client_secret", "token", "access_token", "refresh_token");
+    private static final Set<String> SENSITIVE_BODY_FIELDS = Set.of("password", "currentpassword", "newpassword", "code", "logincode", "clientsecret", "client_secret", "token", "access_token", "refresh_token");
 
     /** SSE 订阅接口路径（长连接流式响应，不能缓冲） */
     private static final String SSE_TASK_SUBSCRIBE_PATH = "/api/v1/ai/task/subscribe";

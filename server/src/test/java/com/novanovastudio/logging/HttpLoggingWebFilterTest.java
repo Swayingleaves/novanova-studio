@@ -54,6 +54,24 @@ class HttpLoggingWebFilterTest {
     }
 
     /**
+     * 验证修改密码请求中的原密码和新密码不会写入日志。
+     */
+    @Test
+    @DisplayName("修改密码请求中的敏感字段会被脱敏")
+    void shouldSanitizePasswordChangeBody() {
+        HttpLoggingWebFilter filter = new HttpLoggingWebFilter();
+
+        String sanitizedBody = filter.sanitizeBody(
+                "{\"currentPassword\":\"current-secret\",\"newPassword\":\"new-secret\"}",
+                MediaType.APPLICATION_JSON
+        );
+
+        assertFalse(sanitizedBody.contains("current-secret"));
+        assertFalse(sanitizedBody.contains("new-secret"));
+        assertTrue(sanitizedBody.contains("[已脱敏]"));
+    }
+
+    /**
      * 验证非法JSON不会回退记录原始敏感正文。
      */
     @Test

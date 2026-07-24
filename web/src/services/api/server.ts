@@ -225,6 +225,10 @@ export function updateCurrentUserProfile(input: Pick<ServerUserProfile, "usernam
     return serverPost<ServerUserProfile>("/auth/updateUserProfile", input);
 }
 
+export function changeCurrentUserPassword(input: { currentPassword: string; newPassword: string }) {
+    return serverPost("/auth/changePassword", input);
+}
+
 export function listServerUsers(params: { page: number; pageSize: number; keyword?: string; role?: string; status?: number; createdAfter?: string; createdBefore?: string }) {
     const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
     if (params.keyword) query.set("keyword", params.keyword);
