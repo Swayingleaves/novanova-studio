@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  <a href="https://www.novanovastudio.cn/">>>>>在线体验<<<<<</a>
+</p>
+
+<p align="center">
   <img src="github_images/nova-s1.png" alt="Novanova Studio 首页截图">
 </p>
 <p align="center">
