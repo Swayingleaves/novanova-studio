@@ -5,8 +5,9 @@ import { Image } from "antd";
 import { LoaderCircle } from "lucide-react";
 import { nanoid } from "nanoid";
 
-import type { ChatAttachment, ChatMessageItem, ThinkingBlockState, ToolCallState } from "../../chat/types.ts";
+import type { AgentActivityState, ChatAttachment, ChatMessageItem, ThinkingBlockState, ToolCallState } from "../../chat/types.ts";
 import { formatDuration } from "../lib/image-utils.ts";
+import { isAgentActivityState } from "./agent-activity.ts";
 import type { CreationThreadRound, CreationThreadSection } from "./creation-workspace-types.ts";
 
 /**
@@ -37,22 +38,30 @@ export function buildChatThreadSection(
 
     // 将消息配对为 user → tool/assistant round
     const rounds: CreationThreadRound[] = [];
+    let currentRoundId = "";
     let currentUserText = "";
     let currentUserAttachments: React.ReactNode = null;
     let currentResultContent: React.ReactNode = null;
     let currentAssistantText = "";
     let currentStatusText = "";
+    let currentActivities: AgentActivityState[] = [];
 
     for (const msg of messages) {
         if (msg.role === "user") {
-            if (currentUserText) { rounds.push(makeRound(currentUserText, currentUserAttachments, currentStatusText, currentAssistantText, currentResultContent)); }
+            if (currentUserText || currentActivities.length) {
+                rounds.push(makeRound(currentRoundId, currentUserText, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, currentResultContent));
+            }
+            currentRoundId = msg.id;
             currentUserText = msg.text;
             currentUserAttachments = renderUserAttachments(msg.attachments);
             currentResultContent = null;
             currentAssistantText = "";
             currentStatusText = "";
+            currentActivities = [];
         } else if (msg.role === "assistant") {
             currentAssistantText = msg.text;
+        } else if (msg.role === "system" && isAgentActivityState(msg.detail)) {
+            currentActivities = [...currentActivities.filter((activity) => activity.id !== msg.detail.id), msg.detail];
         } else if (msg.role === "tool") {
             const call = msg.detail as ToolCallState | undefined;
             if (call?.status === "executing") {
@@ -76,8 +85,8 @@ export function buildChatThreadSection(
             currentStatusText = `❌ ${msg.text}`;
         }
     }
-    if (currentUserText) {
-        rounds.push(makeRound(currentUserText, currentUserAttachments, currentStatusText, currentAssistantText, currentResultContent));
+    if (currentUserText || currentActivities.length) {
+        rounds.push(makeRound(currentRoundId, currentUserText, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, currentResultContent));
     }
 
     if (streamingText) {
@@ -88,10 +97,19 @@ export function buildChatThreadSection(
 }
 
 /** 将助手文本以 Markdown 渲染后与结果内容合并为单条 round */
-function makeRound(userText: string, userAttachments: React.ReactNode, statusText: string, assistantText: string, resultContent: React.ReactNode): CreationThreadRound {
+function makeRound(
+    id: string,
+    userText: string,
+    userAttachments: React.ReactNode,
+    activities: AgentActivityState[],
+    statusText: string,
+    assistantText: string,
+    resultContent: React.ReactNode,
+): CreationThreadRound {
     return {
-        id: nanoid(),
+        id: id || nanoid(),
         userText,
+        activities,
         statusText,
         assistantText,
         resultContent,

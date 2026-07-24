@@ -431,9 +431,63 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
 
         BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(
-                new com.novanovastudio.dto.PersistenceDtos.CreateModelConfigRequest("channel-1", "unknown-model", "image", java.util.List.of(), 0, 0)).block());
+                new com.novanovastudio.dto.PersistenceDtos.CreateModelConfigRequest("channel-1", "unknown-model", "image", java.util.List.of(), 0, 0, true, "high")).block());
 
         Assertions.assertTrue(exception.getMessage().contains("不在所属渠道"));
+    }
+
+    /**
+     * 模型思考配置应在新建、更新和查询间完整往返。
+     */
+    @Test
+    void shouldRoundTripModelThinkingConfiguration() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"deepseek-reasoner\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
+
+        PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "deepseek-reasoner", "text", java.util.List.of(), 0, 0, false, "max")).block();
+
+        Assertions.assertNotNull(created);
+        Assertions.assertFalse(created.thinkingEnabled());
+        Assertions.assertEquals("max", created.reasoningEffort());
+        ArgumentCaptor<PersistenceRecords.UserAiModelConfigRecord> createCaptor = ArgumentCaptor.forClass(PersistenceRecords.UserAiModelConfigRecord.class);
+        verify(repository).createPlatformAiModelConfig(createCaptor.capture());
+        PersistenceRecords.UserAiModelConfigRecord record = createCaptor.getValue();
+        Assertions.assertFalse(record.getThinkingEnabled());
+        Assertions.assertEquals("max", record.getReasoningEffort());
+
+        when(repository.getPlatformAiModelConfig(created.id())).thenReturn(Mono.just(record));
+        when(repository.updatePlatformAiModelConfig(record)).thenReturn(Mono.just(1L));
+        PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
+                created.id(), "text", java.util.List.of(), 0, 0, true, "high")).block();
+
+        Assertions.assertNotNull(updated);
+        Assertions.assertTrue(updated.thinkingEnabled());
+        Assertions.assertEquals("high", updated.reasoningEffort());
+        when(repository.listPlatformAiModelConfigs()).thenReturn(Flux.just(record));
+        PersistenceDtos.ModelConfig listed = service.listModelConfigs().block().getFirst();
+        Assertions.assertTrue(listed.thinkingEnabled());
+        Assertions.assertEquals("high", listed.reasoningEffort());
+    }
+
+    /**
+     * 未填写思考配置时应使用历史记录迁移后的默认值。
+     */
+    @Test
+    void shouldDefaultModelThinkingConfiguration() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"deepseek-chat\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
+
+        PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "deepseek-chat", "text", java.util.List.of(), 0, 0, null, null)).block();
+
+        Assertions.assertNotNull(created);
+        Assertions.assertTrue(created.thinkingEnabled());
+        Assertions.assertEquals("high", created.reasoningEffort());
     }
 
     /**

@@ -13,6 +13,17 @@ import org.junit.jupiter.api.Test;
 class AiHttpClientTest {
 
     /**
+     * OpenAI兼容接口必须直接在配置的基础地址后拼接业务路径，不能主动增加版本路径。
+     */
+    @Test
+    void shouldAppendPathToConfiguredAiBaseUrl() {
+        Assertions.assertEquals("https://api.deepseek.com/chat/completions",
+                AiHttpClient.buildAiUrl("https://api.deepseek.com", "/chat/completions"));
+        Assertions.assertEquals("https://api.openai.com/v1/chat/completions",
+                AiHttpClient.buildAiUrl("https://api.openai.com/v1/", "/chat/completions"));
+    }
+
+    /**
      * 应允许HTTP或HTTPS远程媒体地址。
      */
     @Test

@@ -6,7 +6,7 @@ import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
 
 import { ImageGeneratingCard, renderPendingImageToolCall } from "./components/pending-image-tool-call";
-import { buildImageGenerationContextualPrompt, regenerateImageRound } from "./image-round-regenerate";
+import { regenerateImageRound } from "./image-round-regenerate";
 import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -18,6 +18,7 @@ import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import { ChatMessage, ThinkingBlock } from "@/features/chat";
 import type { ChatMessageItem, ThinkingBlockState, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
+import { attachAgentActivitiesToThreadSections, collectAgentActivities, createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, groupAgentActivitiesByRoundId, updateAgentActivityMessage, upsertAgentActivityMessage, type AgentActivitiesByRoundId } from "@/features/generation/components/agent-activity";
 import { findLatestPendingConversation, hasPendingImageConversation } from "@/features/generation/lib/generation-conversation-recovery";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
@@ -61,6 +62,7 @@ type RoundConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "imageRes
 type Round = {
     id: string;
     prompt: string;
+    generationPrompt?: string;
     references: ReferenceImage[];
     config: RoundConfig;
     results: GenerationResult[];
@@ -145,6 +147,15 @@ export default function ImagePage() {
     const [activeThinking, setActiveThinking] = useState<ThinkingBlockState | null>(null);
     const [toolCalls, setToolCalls] = useState<ToolCallState[]>([]);
     const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null);
+    const [agentActivitiesByRoundId, setAgentActivitiesByRoundId] = useState<AgentActivitiesByRoundId>({});
+    const model = effectiveConfig.imageModel || effectiveConfig.model;
+    const agentCreationSettings = {
+        model,
+        size: config.size,
+        resolution: config.imageResolution,
+        quality: config.quality,
+        count: Number(config.count),
+    };
 
     // Refs to access latest state in SSE callbacks (updated inline to avoid React batch staleness)
     const streamingTextRef = useRef(streamingText);
@@ -170,7 +181,8 @@ export default function ImagePage() {
     }, []);
 
     const { sessionId, isStreaming, isStopping, sendMessage, cancelMessage, resetSession, restoreSession } = useAgentChatSSE({
-        profile: "generation",
+        entrySource: "imagePage",
+        creationSettings: agentCreationSettings,
         onTextDelta: (msgId, delta) => {
             setStreamingText((prev) => {
                 const next = prev?.messageId === msgId ? { ...prev, text: prev.text + delta } : { messageId: msgId, text: delta };
@@ -189,8 +201,15 @@ export default function ImagePage() {
         },
         onToolCall: (call) => {
             setToolCalls((prev) => {
-                const next = [...prev, call];
+                const next = prev.some((item) => item.callId === call.callId)
+                    ? prev.map((item) => (item.callId === call.callId ? call : item))
+                    : [...prev, call];
                 toolCallsRef.current = next;
+                return next;
+            });
+            setChatMessages((prev) => {
+                const next = upsertAgentActivityMessage(prev, createToolExecutionActivity(call));
+                chatMessagesRef.current = next;
                 return next;
             });
             // 只对生图/编辑工具在聊天区展示卡片，内部工具（query_history 等）不占聊天位
@@ -200,14 +219,19 @@ export default function ImagePage() {
                 const streamed = streamingTextRef.current;
                 if (streamed && streamed.text) {
                     setChatMessages((prev) => {
-                        const next = [...prev, { id: streamed.messageId, role: "assistant" as const, text: streamed.text }];
+                        const next = prev.some((item) => item.id === streamed.messageId)
+                            ? prev
+                            : [...prev, { id: streamed.messageId, role: "assistant" as const, text: streamed.text }];
                         chatMessagesRef.current = next;
                         return next;
                     });
                 }
                 const toolText = call.name === "generate_image" ? "正在生成图片..." : "正在编辑图片...";
                 setChatMessages((prev) => {
-                    const next = [...prev, { id: call.callId, role: "tool" as const, text: toolText, detail: call }];
+                    const toolMessage = { id: call.callId, role: "tool" as const, text: toolText, detail: call };
+                    const next = prev.some((item) => item.id === call.callId)
+                        ? prev.map((item) => (item.id === call.callId ? toolMessage : item))
+                        : [...prev, toolMessage];
                     chatMessagesRef.current = next;
                     return next;
                 });
@@ -223,10 +247,11 @@ export default function ImagePage() {
                 return next;
             });
             setChatMessages((prev) => {
-                const next = prev.map((m) => {
+                const messagesWithProgress = prev.map((m) => {
                     const detail = m.detail as ToolCallState | undefined;
                     return m.role === "tool" && detail?.callId === callId ? { ...m, detail: { ...detail, progress, taskId } } : m;
                 });
+                const next = updateAgentActivityMessage(messagesWithProgress, `tool-${callId}`, { progress });
                 chatMessagesRef.current = next;
                 return next;
             });
@@ -243,10 +268,11 @@ export default function ImagePage() {
             });
             // 同步更新 chatMessages 中对应消息的 detail，否则 buildChatThreadSection 看到的永远是 executing
             setChatMessages((prev) => {
-                const next = prev.map((m) => {
+                const messagesWithResult = prev.map((m) => {
                     const detail = m.detail as ToolCallState | undefined;
                     return m.role === "tool" && detail?.callId === callId ? { ...m, detail: { ...detail, status, resultMessage: resultMsg, resultData: data } } : m;
                 });
+                const next = updateAgentActivityMessage(messagesWithResult, `tool-${callId}`, { status, progress: status === "success" ? 100 : undefined });
                 chatMessagesRef.current = next;
                 return next;
             });
@@ -260,13 +286,21 @@ export default function ImagePage() {
                     chatMessagesRef.current = next;
                     return next;
                 });
+            } else if (text) {
+                setChatMessages((prev) => (prev.at(-1)?.text === text ? prev : [...prev, { id: nanoid(), role: "assistant", text }]));
             }
             setStreamingText(null);
             streamingTextRef.current = null;
             setCompletedThinkings([]);
             // 刷新侧栏（后端已保存生成记录）。历史会话追加生成完成后，交回历史视图展示，避免同一轮重复渲染。
-            void refreshConversations().then(() => {
-                if (!activeIdRef.current) return;
+            void refreshConversations().then((nextConversations) => {
+                const completedConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
+                if (!completedConversation) return;
+                const completedActivities = collectAgentActivities(chatMessagesRef.current);
+                const completedActivitiesByRoundId = groupAgentActivitiesByRoundId(completedConversation.rounds.map((round) => round.id), completedActivities);
+                if (Object.keys(completedActivitiesByRoundId).length) {
+                    setAgentActivitiesByRoundId((current) => ({ ...current, ...completedActivitiesByRoundId }));
+                }
                 setChatMessages([]);
                 chatMessagesRef.current = [];
                 setToolCalls([]);
@@ -285,12 +319,13 @@ export default function ImagePage() {
             });
             setChatMessages((prev) => {
                 let hasExecutingTool = false;
-                const next = prev.map((item) => {
+                const messagesWithCanceledTool = prev.map((item) => {
                     const detail = item.detail as ToolCallState | undefined;
                     if (item.role !== "tool" || detail?.status !== "executing") return item;
                     hasExecutingTool = true;
                     return { ...item, text: stoppedMessage, detail: { ...detail, status: "canceled" as const, resultMessage: stoppedMessage } };
                 });
+                const next = finishRunningAgentActivities(messagesWithCanceledTool, "canceled", stoppedMessage);
                 if (!hasExecutingTool) {
                     next.push({ id: nanoid(), role: "error", text: stoppedMessage });
                 }
@@ -298,22 +333,71 @@ export default function ImagePage() {
                 return next;
             });
             void refreshConversations().then((nextConversations) => {
-                const hasPersistedCanceledRound = nextConversations
-                    .find((conversation) => conversation.id === activeIdRef.current)
-                    ?.rounds.some((round) => round.results.some((result) => result.status === "canceled"));
-                if (!hasPersistedCanceledRound) return;
+                const canceledConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
+                if (!canceledConversation) return;
+                const canceledActivities = collectAgentActivities(chatMessagesRef.current);
+                const canceledActivitiesByRoundId = groupAgentActivitiesByRoundId(
+                    canceledConversation.rounds.filter((round) => round.results.some((result) => result.status === "canceled")).map((round) => round.id),
+                    canceledActivities,
+                );
+                if (!Object.keys(canceledActivitiesByRoundId).length) return;
+                setAgentActivitiesByRoundId((current) => ({ ...current, ...canceledActivitiesByRoundId }));
                 setChatMessages([]);
                 chatMessagesRef.current = [];
                 setToolCalls([]);
                 toolCallsRef.current = [];
             });
         },
+        onPlanCreated: (planId, summary, taskCount) => {
+            setChatMessages((prev) => {
+                const next = upsertAgentActivityMessage(prev, {
+                    id: `plan-${planId}`,
+                    type: "plan-created",
+                    title: "创建创作计划",
+                    description: `${summary}，共 ${taskCount} 个任务`,
+                    status: "success",
+                });
+                chatMessagesRef.current = next;
+                return next;
+            });
+        },
+        onPlanTaskStatus: (planId, taskId, status, statusMessage) => {
+            const activityStatus = getPlanTaskActivityStatus(status);
+            if (!activityStatus) return;
+            setChatMessages((prev) => {
+                const next = upsertAgentActivityMessage(prev, {
+                    id: `task-${planId}-${taskId}`,
+                    type: "plan-task-status",
+                    title: "执行创作任务",
+                    description: statusMessage,
+                    status: activityStatus,
+                });
+                chatMessagesRef.current = next;
+                return next;
+            });
+        },
+        onPromptPrepared: (planId, taskId, strategy) => {
+            setChatMessages((prev) => {
+                const next = upsertAgentActivityMessage(prev, {
+                    id: `prompt-${planId}-${taskId}`,
+                    type: "prompt-prepared",
+                    title: strategy === "OPTIMIZE" ? "优化生成提示词" : "准备生成提示词",
+                    description: strategy === "OPTIMIZE" ? "已根据创作目标优化提示词" : "沿用原始提示词",
+                    status: "success",
+                });
+                chatMessagesRef.current = next;
+                return next;
+            });
+        },
         onError: (error) => {
-            setChatMessages((prev) => [...prev, { id: nanoid(), role: "error", text: error }]);
+            setChatMessages((prev) => {
+                const next = [...finishRunningAgentActivities(prev, "failed", error), { id: nanoid(), role: "error" as const, text: error }];
+                chatMessagesRef.current = next;
+                return next;
+            });
         },
     });
 
-    const model = effectiveConfig.imageModel || effectiveConfig.model;
     const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "image", count: effectiveConfig.count });
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
     const activeConversationPending = activeConversation ? hasPendingImageConversation(activeConversation) : false;
@@ -399,17 +483,6 @@ export default function ImagePage() {
             return;
         }
 
-        const contextualPrompt = `${buildImageGenerationContextualPrompt(
-            {
-                size: config.size,
-                quality: config.quality,
-                imageResolution: config.imageResolution,
-                model: effectiveConfig.model,
-                imageModel: effectiveConfig.imageModel,
-            },
-            model,
-        )}\n\n${text}`;
-
         // Add user message to chat
         setChatMessages((prev) => {
             const next = [...prev, { id: nanoid(), role: "user" as const, text }];
@@ -418,8 +491,8 @@ export default function ImagePage() {
         });
 
         // Send via Agent SSE — chat model resolved server-side from user config
-        const refs = references.map((r) => ({ url: r.dataUrl, type: r.type, name: r.name }));
-        await sendMessage(contextualPrompt, refs.length ? refs : undefined);
+        const refs = references.map((r) => ({ url: r.dataUrl, type: r.type, name: r.name, storageKey: r.storageKey }));
+        await sendMessage(text, refs.length ? refs : undefined, agentCreationSettings);
 
         setPrompt("");
         setReferences([]);
@@ -698,14 +771,17 @@ export default function ImagePage() {
               }
             : activeConversation;
     const threadSections = displayedConversation
-        ? buildImageThreadSections(displayedConversation, {
-              uploadingObjectStorageId,
-              onEdit: addResultToReferences,
-              onDownload: downloadImage,
-              onSaveAsset: saveResultToAssets,
-              onUploadObjectStorage: uploadResultToObjectStorage,
-              onRegenerate: regenerateRound,
-          })
+        ? attachAgentActivitiesToThreadSections(
+              buildImageThreadSections(displayedConversation, {
+                  uploadingObjectStorageId,
+                  onEdit: addResultToReferences,
+                  onDownload: downloadImage,
+                  onSaveAsset: saveResultToAssets,
+                  onUploadObjectStorage: uploadResultToObjectStorage,
+                  onRegenerate: regenerateRound,
+              }),
+              agentActivitiesByRoundId,
+          )
         : [];
 
     const chatThreadSection = buildChatThreadSection(

@@ -34,3 +34,16 @@ export type ToolCallState = {
   resultMessage?: string;
   resultData?: Record<string, unknown>;
 };
+
+export type AgentActivityType = "plan-created" | "plan-task-status" | "prompt-prepared" | "tool-execute";
+
+export type AgentActivityStatus = "pending" | "running" | "success" | "failed" | "canceled" | "skipped";
+
+export type AgentActivityState = {
+  id: string;
+  type: AgentActivityType;
+  title: string;
+  description?: string;
+  status: AgentActivityStatus;
+  progress?: number;
+};

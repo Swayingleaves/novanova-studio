@@ -110,4 +110,15 @@ public class AuthController {
     public Mono<ApiResponse<UserDtos.UserProfile>> updateUserProfile(@Valid @RequestBody UserDtos.UpdateCurrentUserProfileRequest request) {
         return userService.updateCurrentUserProfile(request).map(ApiResponse::ok);
     }
+
+    /**
+     * 修改当前用户密码。
+     *
+     * @param request ChangeCurrentUserPasswordRequest 修改密码请求
+     * @return Mono<ApiResponse<String>> 操作响应
+     */
+    @PostMapping("/changePassword")
+    public Mono<ApiResponse<String>> changePassword(@Valid @RequestBody UserDtos.ChangeCurrentUserPasswordRequest request) {
+        return userService.changeCurrentUserPassword(request).thenReturn(ApiResponse.ok("ok"));
+    }
 }

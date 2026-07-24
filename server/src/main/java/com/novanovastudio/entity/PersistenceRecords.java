@@ -204,6 +204,12 @@ public final class PersistenceRecords {
         /** 单次生成消耗积分 */
         private Integer creditCost;
 
+        /** 是否开启思考模式 */
+        private Boolean thinkingEnabled;
+
+        /** 思考强度 */
+        private String reasoningEffort;
+
         /** 创建时间 */
         private OffsetDateTime createdAt;
 

@@ -3,6 +3,7 @@ package com.novanovastudio.agent;
 import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentSession;
 import com.novanovastudio.agent.dto.AiMessage;
+import com.novanovastudio.agent.dto.CreationSettings;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.service.PromptTemplateType;
 import com.novanovastudio.service.SystemPromptTemplateService;
@@ -31,7 +32,8 @@ class GenerationProfileSystemPromptTest {
         AgentSession session = new AgentSession(
                 "session-1", 1L, "测试会话", "generation", List.of(), OffsetDateTime.now(), OffsetDateTime.now());
         AgentChatRequest request = new AgentChatRequest(
-                "session-1", "generation", "生成内容", Map.of(), List.of(), List.of(), List.of(), "model-1");
+                "session-1", "imagePage", "生成内容", Map.of(), List.of(), List.of(), List.of(),
+                new CreationSettings("model-1", "1:1", "2K", "high", 1, null, null));
 
         List<AiMessage> imageMessages = new ImageProfile(null, null, templateService, new AgentExecutionRegistry()).buildMessages(1L, session, request).block();
         List<AiMessage> videoMessages = new VideoProfile(null, null, templateService, new AgentExecutionRegistry()).buildMessages(1L, session, request).block();
@@ -42,6 +44,10 @@ class GenerationProfileSystemPromptTest {
         Assertions.assertEquals(templateService.get(PromptTemplateType.AGENT_IMAGE), imageMessages.getFirst().content());
         Assertions.assertEquals("system", videoMessages.getFirst().role());
         Assertions.assertEquals(templateService.get(PromptTemplateType.AGENT_VIDEO), videoMessages.getFirst().content());
+        Assertions.assertTrue(imageMessages.getFirst().content().contains("选择 KEEP"));
+        Assertions.assertTrue(imageMessages.getFirst().content().contains("选择 OPTIMIZE"));
+        Assertions.assertTrue(videoMessages.getFirst().content().contains("选择 KEEP"));
+        Assertions.assertTrue(videoMessages.getFirst().content().contains("选择 OPTIMIZE"));
     }
 
     /**
@@ -54,6 +60,7 @@ class GenerationProfileSystemPromptTest {
         Path promptDirectory = Path.of("config", "prompts").toAbsolutePath();
         properties.getAi().getSystemPrompt().setOptimizationImageFile(promptDirectory.resolve("optimization-image.md").toUri().toString());
         properties.getAi().getSystemPrompt().setOptimizationVideoFile(promptDirectory.resolve("optimization-video.md").toUri().toString());
+        properties.getAi().getSystemPrompt().setAgentMainFile(promptDirectory.resolve("agent-main.md").toUri().toString());
         properties.getAi().getSystemPrompt().setAgentImageFile(promptDirectory.resolve("agent-image.md").toUri().toString());
         properties.getAi().getSystemPrompt().setAgentVideoFile(promptDirectory.resolve("agent-video.md").toUri().toString());
         properties.getAi().getSystemPrompt().setAgentCanvasFile(promptDirectory.resolve("agent-canvas.md").toUri().toString());

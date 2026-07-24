@@ -126,6 +126,8 @@ export type ServerModelConfig = {
     defaultModel: boolean;
     sortOrder: number;
     creditCost: number;
+    thinkingEnabled: boolean;
+    reasoningEffort: "high" | "max";
 };
 
 export type CreditSettings = {
@@ -221,6 +223,10 @@ export function getCurrentUserInfo() {
 
 export function updateCurrentUserProfile(input: Pick<ServerUserProfile, "username" | "nickname" | "avatar">) {
     return serverPost<ServerUserProfile>("/auth/updateUserProfile", input);
+}
+
+export function changeCurrentUserPassword(input: { currentPassword: string; newPassword: string }) {
+    return serverPost("/auth/changePassword", input);
 }
 
 export function listServerUsers(params: { page: number; pageSize: number; keyword?: string; role?: string; status?: number; createdAfter?: string; createdBefore?: string }) {
@@ -578,7 +584,7 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost">) {
+export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "thinkingEnabled" | "reasoningEffort">) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 

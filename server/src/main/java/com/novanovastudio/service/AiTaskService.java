@@ -150,8 +150,24 @@ public class AiTaskService {
     public Mono<AiTaskDtos.AiGenerationTaskResponse> createTask(
             AiTaskDtos.CreateAiTaskRequest request,
             Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
+        return currentUserProvider.currentUserId().flatMap(userId -> createTaskForUser(userId, request, beforeEnqueue));
+    }
+
+    /**
+     * 为已完成鉴权的指定用户创建AI生成任务。
+     * <p>仅供服务端Agent编排链路调用，避免后台订阅丢失WebFlux安全上下文。</p>
+     *
+     * @param userId Long 用户ID
+     * @param request CreateAiTaskRequest 创建任务请求
+     * @param beforeEnqueue Function 入队前响应式处理器
+     * @return Mono<AiGenerationTaskResponse> 任务响应
+     */
+    public Mono<AiTaskDtos.AiGenerationTaskResponse> createTaskForUser(
+            Long userId,
+            AiTaskDtos.CreateAiTaskRequest request,
+            Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
         // 校验任务类型并解析可用模型渠道。
-        return currentUserProvider.currentUserId().flatMap(userId -> {
+        return Mono.defer(() -> {
             validateTaskType(request.taskType());
             validateGenerationSource(request.taskType(), request.generationSource());
             return resolveModel(request.taskType(), request.model()).flatMap(resolvedModel -> {
@@ -197,9 +213,18 @@ public class AiTaskService {
      * @return Mono<List<AiGenerationTaskResponse>> 任务列表
      */
     public Mono<List<AiTaskDtos.AiGenerationTaskResponse>> listTasks(List<String> statuses) {
-        // 查询当前用户任务，并转换为前端契约响应。
-        return currentUserProvider.currentUserId()
-                .flatMapMany(userId -> repository.listTasks(userId, statuses))
+        return currentUserProvider.currentUserId().flatMap(userId -> listTasksForUser(userId, statuses));
+    }
+
+    /**
+     * 查询指定用户任务列表。
+     *
+     * @param userId Long 用户ID
+     * @param statuses List<String> 状态列表
+     * @return Mono<List<AiGenerationTaskResponse>> 任务列表
+     */
+    public Mono<List<AiTaskDtos.AiGenerationTaskResponse>> listTasksForUser(Long userId, List<String> statuses) {
+        return repository.listTasks(userId, statuses)
                 .map(this::taskResponse)
                 .collectList();
     }
@@ -211,9 +236,18 @@ public class AiTaskService {
      * @return Mono<AiGenerationTaskResponse> 任务响应
      */
     public Mono<AiTaskDtos.AiGenerationTaskResponse> getTask(String taskId) {
-        // 查询时限定当前用户，避免跨用户访问任务。
-        return currentUserProvider.currentUserId()
-                .flatMap(userId -> repository.getTask(userId, taskId))
+        return currentUserProvider.currentUserId().flatMap(userId -> getTaskForUser(userId, taskId));
+    }
+
+    /**
+     * 查询指定用户单个任务。
+     *
+     * @param userId Long 用户ID
+     * @param taskId String 任务ID
+     * @return Mono<AiGenerationTaskResponse> 任务响应
+     */
+    public Mono<AiTaskDtos.AiGenerationTaskResponse> getTaskForUser(Long userId, String taskId) {
+        return repository.getTask(userId, taskId)
                 .map(this::taskResponse)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "任务不存在")));
     }
@@ -225,8 +259,18 @@ public class AiTaskService {
      * @return Mono<AiGenerationTaskResponse> 任务响应
      */
     public Mono<AiTaskDtos.AiGenerationTaskResponse> cancelTask(String taskId) {
-        // 读取任务归属并仅允许取消当前用户自己的任务。
-        return currentUserProvider.currentUserId().flatMap(userId -> repository.getTask(userId, taskId)
+        return currentUserProvider.currentUserId().flatMap(userId -> cancelTaskForUser(userId, taskId));
+    }
+
+    /**
+     * 取消指定用户的AI生成任务。
+     *
+     * @param userId Long 用户ID
+     * @param taskId String 任务ID
+     * @return Mono<AiGenerationTaskResponse> 任务响应
+     */
+    public Mono<AiTaskDtos.AiGenerationTaskResponse> cancelTaskForUser(Long userId, String taskId) {
+        return repository.getTask(userId, taskId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "任务不存在")))
                 .flatMap(task -> {
                     Mono<Void> update = isTerminal(task.getStatus()) ? Mono.empty() : eventPublisher.markCancelRequested(taskId)
@@ -234,7 +278,7 @@ public class AiTaskService {
                             .then();
                     return update.then(getTaskResponse(taskId, userId))
                             .flatMap(response -> eventPublisher.publish(userId, new AiTaskDtos.AiTaskEvent(EVENT_TASK, response)).thenReturn(response));
-                }));
+                });
     }
 
     /**
@@ -321,6 +365,8 @@ public class AiTaskService {
                                                                 task,
                                                                 resolvedModel.channel(),
                                                                 resolvedModel.model(),
+                                                                resolvedModel.thinkingEnabled(),
+                                                                resolvedModel.reasoningEffort(),
                                                                 request,
                                                                 () -> eventPublisher.isCancelRequested(taskId),
                                                                 progress -> updateTaskState(taskId, STATUS_RUNNING, progress, "", null),
@@ -498,7 +544,8 @@ public class AiTaskService {
                                 .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员配置默认" + capabilityLabel(capability) + "模型"));
                     }
                     ResolvedModel resolvedModel = resolveModel(capability, selectedConfig.channelId() + "::" + selectedConfig.modelName(), tuple.getT1());
-                    return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.creditCost());
+                    return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.creditCost(),
+                            thinkingEnabled(selectedConfig.thinkingEnabled()), reasoningEffort(selectedConfig.reasoningEffort()));
                 });
     }
 
@@ -559,7 +606,7 @@ public class AiTaskService {
         }
         validateChannelSupport(channel, capability);
         validateUserChannelAccess(channel);
-        return new ResolvedModel(channel, model, 0);
+        return new ResolvedModel(channel, model, 0, true, "high");
     }
 
 
@@ -802,11 +849,32 @@ public class AiTaskService {
     }
 
     /**
+     * 规范化思考模式开关。
+     *
+     * @param enabled Boolean 模型配置中的开关
+     * @return boolean 缺省时开启思考模式
+     */
+    private boolean thinkingEnabled(Boolean enabled) {
+        return enabled == null || Boolean.TRUE.equals(enabled);
+    }
+
+    /**
+     * 规范化思考强度。
+     *
+     * @param effort String 模型配置中的强度
+     * @return String high或max
+     */
+    private String reasoningEffort(String effort) {
+        return "max".equals(effort) ? "max" : "high";
+    }
+
+    /**
      * 解析后的模型和渠道
      *
      * @param channel AiChannelConfig 渠道配置
      * @param model String 模型名称
      */
-    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, Integer creditCost) {
+    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, Integer creditCost,
+                                 boolean thinkingEnabled, String reasoningEffort) {
     }
 }

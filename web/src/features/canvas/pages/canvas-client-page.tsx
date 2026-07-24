@@ -1885,6 +1885,39 @@ function CanvasWorkspacePage() {
             activeAgentAssistantMessageIdRef.current = displayMessageId;
             completeTextMessage(sessionId, displayMessageId, text);
         },
+        onPlanCreated: (planId, summary, taskCount) => {
+            const sessionId = activeAgentSessionIdRef.current;
+            if (!sessionId) return;
+            appendAssistantMessage(sessionId, {
+                id: `plan-${planId}`,
+                role: "system",
+                title: "创作计划",
+                text: summary,
+                meta: `${taskCount} 个任务`,
+            });
+        },
+        onPlanTaskStatus: (planId, _taskId, status, statusMessage) => {
+            const sessionId = activeAgentSessionIdRef.current;
+            if (!sessionId) return;
+            updateAssistantSession(sessionId, (session) => ({
+                ...session,
+                messages: session.messages.map((item) => item.id === `plan-${planId}`
+                    ? { ...item, meta: status === "failed" ? `失败：${statusMessage}` : statusMessage }
+                    : item),
+                updatedAt: new Date().toISOString(),
+            }));
+        },
+        onPromptPrepared: (planId, _taskId, strategy) => {
+            const sessionId = activeAgentSessionIdRef.current;
+            if (!sessionId) return;
+            updateAssistantSession(sessionId, (session) => ({
+                ...session,
+                messages: session.messages.map((item) => item.id === `plan-${planId}`
+                    ? { ...item, meta: strategy === "OPTIMIZE" ? "提示词已优化" : "保留原始提示词" }
+                    : item),
+                updatedAt: new Date().toISOString(),
+            }));
+        },
         onError: (errorMessage) => {
             const sessionId = activeAgentSessionIdRef.current;
             const messageId = activeAgentAssistantMessageIdRef.current;

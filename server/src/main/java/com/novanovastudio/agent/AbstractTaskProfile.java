@@ -19,6 +19,7 @@ import com.novanovastudio.agent.dto.AgentToolResult.ToolResult;
 import com.novanovastudio.agent.dto.AiMessage;
 import com.novanovastudio.ai.AiJsonUtils;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.AiTaskDtos;
@@ -98,10 +99,12 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
 
     @Override
     public Mono<ToolResult> executeTool(Long userId, String toolName, Map<String, Object> args,
-                                         List<AgentChatRequest.Attachment> attachments, AgentEventEmitter emitter, String sessionId, String callId) {
+                                         String originalPrompt, List<AgentChatRequest.Attachment> attachments,
+                                         AgentEventEmitter emitter, String sessionId, String callId) {
         return switch (toolName) {
             case "generate_image", "generate_video",
-                 "edit_image",    "edit_video"    -> executeGenerate(userId, toolName, args, attachments, emitter, sessionId, callId);
+                 "edit_image",    "edit_video"    -> executeGenerate(userId, toolName, args, originalPrompt,
+                    attachments, emitter, sessionId, callId);
             case "query_history"                  -> executeQueryHistory(userId, args);
             default -> Mono.just(new ToolResult(false, "不支持的工具: " + toolName));
         };
@@ -116,6 +119,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @param userId    Long 用户ID
      * @param toolName  String 工具名，用于区分 edit_video 降级
      * @param args      Map 工具入参
+     * @param originalPrompt String 用户原始输入
      * @param attachments List<Attachment> 当前请求上传的媒体附件
      * @param emitter   AgentEventEmitter 事件发射器
      * @param sessionId String 会话ID
@@ -123,9 +127,10 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @return Mono<ToolResult> 工具执行结果
      */
     protected Mono<ToolResult> executeGenerate(Long userId, String toolName, Map<String, Object> args,
+                                                String originalPrompt,
                                                 List<AgentChatRequest.Attachment> attachments,
                                                 AgentEventEmitter emitter, String sessionId, String callId) {
-        String prompt = String.valueOf(args.getOrDefault("prompt", ""));
+        String generationPrompt = String.valueOf(args.getOrDefault("prompt", ""));
         String size = String.valueOf(args.getOrDefault("size", "1:1"));
         String quality = String.valueOf(args.getOrDefault("quality", "high"));
         String model = String.valueOf(args.getOrDefault("model", ""));
@@ -148,7 +153,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         }
 
         if (executionRegistry.isCancelRequested(sessionId)) {
-            return saveCanceledRound(userId, sessionId, callId, "", prompt, model, params, List.of(), List.of(), System.currentTimeMillis())
+            return saveCanceledRound(userId, sessionId, callId, "", originalPrompt, generationPrompt,
+                    model, params, List.of(), List.of(), System.currentTimeMillis())
                     .thenReturn(canceledResult(""));
         }
 
@@ -159,36 +165,48 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                             Mono<List<AiTaskDtos.AiTaskMediaReference>> initialReferences = legacyReferences.isEmpty()
                                     && validatedAttachments.imageReferences().isEmpty()
                                     && "edit_image".equals(toolName)
-                                    ? latestSuccessfulImageReference()
+                                    ? latestSuccessfulImageReference(userId)
                                     : Mono.just(legacyReferences);
                             return initialReferences.flatMap(references -> preserveLegacyVideoReferenceBehavior(
                                     userId, toolName, model, references, validatedAttachments, emitter, sessionId)
                                     .flatMap(effectiveLegacyReferences -> {
                                         List<AiTaskDtos.AiTaskMediaReference> effectiveReferences = mergeReferences(validatedAttachments.imageReferences(), effectiveLegacyReferences);
                                         List<AiTaskDtos.AiTaskMediaReference> effectiveVideoReferences = validatedAttachments.videoReferences();
+                                        String effectiveGenerationSource = String.valueOf(args.getOrDefault("entrySource", generationSource()));
+                                        if (!AiTaskSources.isSupported(effectiveGenerationSource)
+                                                || (AiTaskTypes.IMAGE.equals(taskType()) && AiTaskSources.VIDEO_PAGE.equals(effectiveGenerationSource))
+                                                || (AiTaskTypes.VIDEO.equals(taskType()) && AiTaskSources.IMAGE_PAGE.equals(effectiveGenerationSource))) {
+                                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成任务入口来源与任务类型不匹配"));
+                                        }
                                         AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(
-                                                taskType(), prompt, model.isBlank() ? null : model, params, effectiveReferences, effectiveVideoReferences, generationSource());
+                                                taskType(), generationPrompt, model.isBlank() ? null : model, params,
+                                                effectiveReferences, effectiveVideoReferences, effectiveGenerationSource);
                                         long createdAt = System.currentTimeMillis();
                                         return Mono.defer(() -> {
                                             executionRegistry.beginTaskCreation(sessionId);
-                                            return aiTaskService.createTask(taskRequest, response -> {
-                                                    JSONObject canceledRound = buildGenerationRound(callId, response.id(), prompt, model, params,
-                                                            effectiveReferences, effectiveVideoReferences, 100, createdAt, "canceled");
-                                                    String title = prompt.length() > 30 ? prompt.substring(0, 30) : prompt;
+                                            return aiTaskService.createTaskForUser(userId, taskRequest, response -> {
+                                                    JSONObject canceledRound = buildGenerationRound(callId, response.id(), originalPrompt,
+                                                            generationPrompt, model, params, effectiveReferences,
+                                                            effectiveVideoReferences, 100, createdAt, "canceled");
+                                                    String title = originalPrompt.length() > 30
+                                                            ? originalPrompt.substring(0, 30) : originalPrompt;
                                                     boolean cancellationRequested = executionRegistry.registerTask(sessionId,
                                                             new AgentExecutionRegistry.AgentTaskRegistration(response.id(), logType(), title, canceledRound));
                                                     if (cancellationRequested || executionRegistry.isCancelRequested(sessionId)) {
-                                                        return aiTaskService.cancelTask(response.id())
-                                                                .then(saveCanceledRound(userId, sessionId, callId, response.id(), prompt, model, params,
+                                                        return aiTaskService.cancelTaskForUser(userId, response.id())
+                                                                .then(saveCanceledRound(userId, sessionId, callId, response.id(),
+                                                                        originalPrompt, generationPrompt, model, params,
                                                                         effectiveReferences, effectiveVideoReferences, createdAt));
                                                     }
-                                                    return savePendingRound(userId, sessionId, callId, response.id(), prompt, model, params,
+                                                    return savePendingRound(userId, sessionId, callId, response.id(),
+                                                            originalPrompt, generationPrompt, model, params,
                                                             effectiveReferences, effectiveVideoReferences,
                                                             response.progress() != null ? response.progress() : 0, createdAt);
                                                 })
                                                 .doFinally(signal -> executionRegistry.completeTaskCreation(sessionId))
                                                 .flatMap(response -> pollUntilComplete(userId, response, emitter, sessionId, callId,
-                                                        prompt, model, params, effectiveReferences, effectiveVideoReferences, createdAt)
+                                                        originalPrompt, generationPrompt, model, params,
+                                                        effectiveReferences, effectiveVideoReferences, createdAt)
                                                         .doFinally(signal -> executionRegistry.removeTask(sessionId, response.id())));
                                         });
                                     }));
@@ -347,8 +365,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      *
      * @return Mono<List<AiTaskMediaReference>> 最近图片引用列表
      */
-    private Mono<List<AiTaskDtos.AiTaskMediaReference>> latestSuccessfulImageReference() {
-        return aiTaskService.listTasks(List.of("success"))
+    private Mono<List<AiTaskDtos.AiTaskMediaReference>> latestSuccessfulImageReference(Long userId) {
+        return aiTaskService.listTasksForUser(userId, List.of("success"))
                 .map(tasks -> tasks.stream()
                         .filter(task -> "image".equals(task.taskType()))
                         .flatMap(task -> extractMediaUrls(task.resultData()).stream())
@@ -362,7 +380,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
     /** 查询用户最近生成任务记录 */
     protected Mono<ToolResult> executeQueryHistory(Long userId, Map<String, Object> args) {
         int count = toInt(args.get("count"), 5);
-        return aiTaskService.listTasks(List.of())
+        return aiTaskService.listTasksForUser(userId, List.of())
             .map(tasks -> {
                 List<Map<String, Object>> recent = tasks.stream()
                     .limit(count)
@@ -390,7 +408,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @param emitter AgentEventEmitter 事件发射器
      * @param sessionId String 会话ID
      * @param callId String 工具调用ID
-     * @param prompt String 用户提示词
+     * @param originalPrompt String 用户原始输入
+     * @param generationPrompt String 实际生成提示词
      * @param model String 模型名称
      * @param parameters Map<String, Object> 生成参数
      * @param references List<AiTaskMediaReference> 图片参考素材
@@ -400,7 +419,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      */
     protected Mono<ToolResult> pollUntilComplete(Long userId, AiTaskDtos.AiGenerationTaskResponse initialTask,
                                                   AgentEventEmitter emitter, String sessionId, String callId,
-                                                  String prompt, String model, Map<String, Object> parameters,
+                                                  String originalPrompt, String generationPrompt, String model,
+                                                  Map<String, Object> parameters,
                                                   List<AiTaskDtos.AiTaskMediaReference> references,
                                                   List<AiTaskDtos.AiTaskMediaReference> videoReferences, long createdAt) {
         String taskId = initialTask.id();
@@ -410,18 +430,107 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                     new TaskProgressSnapshot(initialTask.status(), initialProgress));
             return Flux.interval(Duration.ZERO, POLL_INTERVAL)
             .take(TIMEOUT.toSeconds())
-            .concatMap(i -> aiTaskService.getTask(taskId))
-            .concatMap(task -> persistChangedProgress(userId, sessionId, callId, prompt, model,
+            .concatMap(i -> aiTaskService.getTaskForUser(userId, taskId))
+            .concatMap(task -> persistChangedProgress(userId, sessionId, callId, originalPrompt,
+                    generationPrompt, model,
                     parameters, references, videoReferences, createdAt, previousSnapshot, task))
             .takeUntil(task -> isTerminal(task.status()))
             .doOnNext(task -> emitter.emit(userId,
                 AgentEvent.progress(sessionId, callId, taskId,
                     task.progress() != null ? task.progress() : 0, task.status())))
             .last()
+            .flatMap(task -> saveTerminalRound(userId, sessionId, callId, originalPrompt,
+                    generationPrompt, model, parameters, references, videoReferences,
+                    createdAt, task).thenReturn(task))
             .map(task -> buildResult(taskId, task))
             .defaultIfEmpty(new ToolResult(false, "生成超时，请重试", Map.of("taskId", taskId)))
             .contextWrite(ctx);
         });
+    }
+
+    /**
+     * 保存成功、失败或取消的终态生成轮次。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param callId String 计划任务或工具调用ID
+     * @param originalPrompt String 用户原始输入
+     * @param generationPrompt String 实际生成提示词
+     * @param model String 生成模型
+     * @param parameters Map<String, Object> 生成参数
+     * @param references List<AiTaskMediaReference> 图片参考素材
+     * @param videoReferences List<AiTaskMediaReference> 视频参考素材
+     * @param createdAt long 轮次创建时间
+     * @param task AiGenerationTaskResponse 终态AI任务
+     * @return Mono<Void> 保存完成信号
+     */
+    private Mono<Void> saveTerminalRound(Long userId, String sessionId, String callId,
+                                         String originalPrompt, String generationPrompt,
+                                         String model, Map<String, Object> parameters,
+                                         List<AiTaskDtos.AiTaskMediaReference> references,
+                                         List<AiTaskDtos.AiTaskMediaReference> videoReferences,
+                                         long createdAt, AiTaskDtos.AiGenerationTaskResponse task) {
+        JSONObject round = buildGenerationRound(callId, task.id(), originalPrompt, generationPrompt,
+                model, parameters, references, videoReferences, 100, createdAt, task.status());
+        round.put("results", terminalResults(callId, task));
+        String title = originalPrompt.length() > 30 ? originalPrompt.substring(0, 30) : originalPrompt;
+        return persistenceService.saveOrUpdateGenerationRound(userId, sessionId, logType(), title, round);
+    }
+
+    /**
+     * 将AI任务终态结果转换为页面生成轮次结果数组。
+     *
+     * @param callId String 计划任务或工具调用ID
+     * @param task AiGenerationTaskResponse 终态AI任务
+     * @return List<JSONObject> 页面结果数组
+     */
+    private List<JSONObject> terminalResults(String callId, AiTaskDtos.AiGenerationTaskResponse task) {
+        List<JSONObject> mediaItems = new ArrayList<>();
+        if (task.resultData() != null) {
+            var items = task.resultData().getJSONArray("items");
+            if (items != null) {
+                for (int index = 0; index < items.size(); index++) {
+                    JSONObject item = items.getJSONObject(index);
+                    if (item != null && !item.isEmpty()) mediaItems.add(item);
+                }
+            }
+            JSONObject item = task.resultData().getJSONObject("item");
+            if (mediaItems.isEmpty() && item != null && !item.isEmpty()) {
+                mediaItems.add(item);
+            }
+        }
+        if ("success".equals(task.status()) && !mediaItems.isEmpty()) {
+            List<JSONObject> results = new ArrayList<>();
+            for (int index = 0; index < mediaItems.size(); index++) {
+                JSONObject result = terminalResult(callId + (index == 0 ? "" : "-" + index), task.id(), "success", "");
+                result.put(logType(), mediaItems.get(index));
+                results.add(result);
+            }
+            return results;
+        }
+        String status = "canceled".equals(task.status()) ? "canceled" : "failed";
+        String error = "canceled".equals(status) ? "已停止生成"
+                : StringUtils.hasText(task.errorMessage()) ? task.errorMessage() : "生成结果缺少媒体";
+        return List.of(terminalResult(callId, task.id(), status, error));
+    }
+
+    /**
+     * 构造单个页面生成终态结果。
+     *
+     * @param resultId String 页面结果ID
+     * @param taskId String AI任务ID
+     * @param status String 终态状态
+     * @param error String 错误信息
+     * @return JSONObject 页面结果
+     */
+    private JSONObject terminalResult(String resultId, String taskId, String status, String error) {
+        JSONObject result = new JSONObject();
+        result.put("id", resultId);
+        result.put("taskId", taskId);
+        result.put("status", status);
+        result.put("progress", 100);
+        if (StringUtils.hasText(error)) result.put("error", error);
+        return result;
     }
 
     /**
@@ -430,7 +539,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @param userId Long 用户ID
      * @param sessionId String 会话ID
      * @param callId String 工具调用ID
-     * @param prompt String 用户提示词
+     * @param originalPrompt String 用户原始输入
+     * @param generationPrompt String 实际生成提示词
      * @param model String 模型名称
      * @param parameters Map<String, Object> 生成参数
      * @param references List<AiTaskMediaReference> 图片参考素材
@@ -441,7 +551,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @return Mono<AiGenerationTaskResponse> 原任务响应
      */
     private Mono<AiTaskDtos.AiGenerationTaskResponse> persistChangedProgress(
-            Long userId, String sessionId, String callId, String prompt, String model,
+            Long userId, String sessionId, String callId, String originalPrompt,
+            String generationPrompt, String model,
             Map<String, Object> parameters, List<AiTaskDtos.AiTaskMediaReference> references,
             List<AiTaskDtos.AiTaskMediaReference> videoReferences,
             long createdAt, AtomicReference<TaskProgressSnapshot> previousSnapshot,
@@ -453,8 +564,9 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
             return Mono.just(task);
         }
         // 页面只识别 pending，服务端 running 状态通过 progress 表达执行进度。
-        return savePendingRound(userId, sessionId, callId, task.id(), prompt, model,
-                parameters, references, videoReferences, progress, createdAt).thenReturn(task);
+        return savePendingRound(userId, sessionId, callId, task.id(), originalPrompt,
+                generationPrompt, model, parameters, references, videoReferences,
+                progress, createdAt).thenReturn(task);
     }
 
     /**
@@ -464,7 +576,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @param sessionId String 会话ID
      * @param callId String 工具调用ID
      * @param taskId String AI任务ID
-     * @param prompt String 用户提示词
+     * @param originalPrompt String 用户原始输入
+     * @param generationPrompt String 实际生成提示词
      * @param model String 模型名称
      * @param parameters Map<String, Object> 生成参数
      * @param references List<AiTaskMediaReference> 图片参考素材
@@ -474,13 +587,14 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @return Mono<Void> 保存结果
      */
     private Mono<Void> savePendingRound(Long userId, String sessionId, String callId, String taskId,
-                                        String prompt, String model, Map<String, Object> parameters,
+                                        String originalPrompt, String generationPrompt, String model,
+                                        Map<String, Object> parameters,
                                         List<AiTaskDtos.AiTaskMediaReference> references,
                                         List<AiTaskDtos.AiTaskMediaReference> videoReferences, int progress,
                                         long createdAt) {
-        JSONObject round = buildGenerationRound(callId, taskId, prompt, model, parameters, references, videoReferences,
-                progress, createdAt, "pending");
-        String title = prompt.length() > 30 ? prompt.substring(0, 30) : prompt;
+        JSONObject round = buildGenerationRound(callId, taskId, originalPrompt, generationPrompt,
+                model, parameters, references, videoReferences, progress, createdAt, "pending");
+        String title = originalPrompt.length() > 30 ? originalPrompt.substring(0, 30) : originalPrompt;
         return persistenceService.saveOrUpdateGenerationRound(userId, sessionId, logType(), title, round);
     }
 
@@ -491,7 +605,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @param sessionId String Agent会话ID
      * @param callId String 工具调用ID
      * @param taskId String AI任务ID
-     * @param prompt String 用户提示词
+     * @param originalPrompt String 用户原始输入
+     * @param generationPrompt String 实际生成提示词
      * @param model String 模型名称
      * @param parameters Map<String, Object> 生成参数
      * @param references List<AiTaskMediaReference> 图片参考素材
@@ -500,12 +615,13 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @return Mono<Void> 保存结果
      */
     private Mono<Void> saveCanceledRound(Long userId, String sessionId, String callId, String taskId,
-                                         String prompt, String model, Map<String, Object> parameters,
+                                         String originalPrompt, String generationPrompt, String model,
+                                         Map<String, Object> parameters,
                                          List<AiTaskDtos.AiTaskMediaReference> references,
                                          List<AiTaskDtos.AiTaskMediaReference> videoReferences, long createdAt) {
-        JSONObject round = buildGenerationRound(callId, taskId, prompt, model, parameters, references, videoReferences,
-                100, createdAt, "canceled");
-        String title = prompt.length() > 30 ? prompt.substring(0, 30) : prompt;
+        JSONObject round = buildGenerationRound(callId, taskId, originalPrompt, generationPrompt,
+                model, parameters, references, videoReferences, 100, createdAt, "canceled");
+        String title = originalPrompt.length() > 30 ? originalPrompt.substring(0, 30) : originalPrompt;
         return persistenceService.saveOrUpdateGenerationRound(userId, sessionId, logType(), title, round);
     }
 
@@ -514,7 +630,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      *
      * @param callId String 工具调用ID
      * @param taskId String AI任务ID
-     * @param prompt String 用户提示词
+     * @param originalPrompt String 用户原始输入
+     * @param generationPrompt String 实际生成提示词
      * @param model String 模型名称
      * @param parameters Map<String, Object> 生成参数
      * @param references List<AiTaskMediaReference> 图片参考素材
@@ -523,7 +640,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @param status String 生成状态
      * @return JSONObject 生成轮次
      */
-    private JSONObject buildGenerationRound(String callId, String taskId, String prompt, String model,
+    private JSONObject buildGenerationRound(String callId, String taskId, String originalPrompt,
+                                            String generationPrompt, String model,
                                             Map<String, Object> parameters,
                                             List<AiTaskDtos.AiTaskMediaReference> references,
                                             List<AiTaskDtos.AiTaskMediaReference> videoReferences, int progress,
@@ -546,7 +664,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         if (StringUtils.hasText(taskId)) {
             round.put("taskId", taskId);
         }
-        round.put("prompt", prompt);
+        round.put("prompt", originalPrompt);
+        round.put("generationPrompt", generationPrompt);
         round.put("assistantText", "");
         round.put("config", config);
         round.put("results", List.of(result));
@@ -584,7 +703,11 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                 Map<String, Object> data = new LinkedHashMap<>();
                 data.put("taskId", taskId);
                 data.put("taskType", task.taskType());
-                data.put("urls", extractMediaUrls(task.resultData()));
+                List<String> mediaUrls = extractMediaUrls(task.resultData());
+                if (mediaUrls.isEmpty()) {
+                    yield new ToolResult(false, "生成结果缺少媒体", data);
+                }
+                data.put("urls", mediaUrls);
                 if (task.resultData() != null) {
                     // 兼容 Agnes 返回 "item" 单对象 和 其他 provider 返回 "items" 数组两种格式
                     var items = task.resultData().getJSONArray("items");

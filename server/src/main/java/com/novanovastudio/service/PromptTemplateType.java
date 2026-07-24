@@ -12,6 +12,8 @@ public enum PromptTemplateType {
     OPTIMIZATION_IMAGE,
     /** 视频提示词优化模板 */
     OPTIMIZATION_VIDEO,
+    /** 主Agent模板 */
+    AGENT_MAIN,
     /** 图片生成Agent模板 */
     AGENT_IMAGE,
     /** 视频生成Agent模板 */

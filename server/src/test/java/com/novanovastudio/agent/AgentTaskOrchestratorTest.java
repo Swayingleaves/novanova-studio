@@ -11,6 +11,7 @@ import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.agent.dto.AgentSession;
 import com.novanovastudio.agent.dto.AgentToolResult.ToolResult;
+import com.novanovastudio.agent.dto.CreationSettings;
 import com.novanovastudio.agent.dto.AiResponse;
 import com.novanovastudio.agent.dto.ToolCall;
 import com.novanovastudio.agent.dto.ToolCallFunction;
@@ -29,6 +30,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
@@ -67,16 +69,43 @@ class AgentTaskOrchestratorTest {
         Assertions.assertEquals("{\"prompt\":\"猫\"}", response.toolCalls().getFirst().function().arguments());
     }
 
-    /** OpenAI Responses流应逐段输出中文文本。 */
+    /**
+     * 旧Agent循环应通过Chat Completions端点发送模型的思考配置。
+     */
     @Test
-    void shouldAggregateResponsesTextDeltas() throws Exception {
-        AtomicReference<String> emitted = new AtomicReference<>("");
-        Object accumulator = newStreamAccumulator("ResponsesStreamAccumulator", delta -> emitted.set(emitted.get() + delta));
-        acceptStreamData(accumulator, "{\"type\":\"response.output_text.delta\",\"delta\":\"流式\"}");
-        acceptStreamData(accumulator, "{\"type\":\"response.output_text.delta\",\"delta\":\"输出\"}");
+    @SuppressWarnings("unchecked")
+    void shouldSendThinkingConfigurationThroughLegacyAgentLoop() throws Exception {
+        AiHttpClient aiHttpClient = org.mockito.Mockito.mock(AiHttpClient.class);
+        AgentLoopProfile profile = org.mockito.Mockito.mock(AgentLoopProfile.class);
+        when(profile.tools()).thenReturn(List.of());
+        AgentTaskOrchestrator orchestrator = new AgentTaskOrchestrator(aiHttpClient, null, null, null, null, null, null, List.of(), new AgentExecutionRegistry());
+        List<String> paths = new ArrayList<>();
+        List<JSONObject> payloads = new ArrayList<>();
+        when(aiHttpClient.sendStreamingJsonRequest(org.mockito.ArgumentMatchers.any(AiTaskDtos.AiChannelConfig.class),
+                org.mockito.ArgumentMatchers.eq("/chat/completions"), org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    paths.add(invocation.getArgument(1));
+                    payloads.add(JSON.parseObject(JSON.toJSONString(invocation.getArgument(2))));
+                    return Flux.just("[DONE]");
+                });
+        Class<?> thinkingType = Class.forName(AgentTaskOrchestrator.class.getName() + "$ThinkingConfiguration");
+        Method method = AgentTaskOrchestrator.class.getDeclaredMethod("callStreamingChatCompletionsApi", AiTaskDtos.AiChannelConfig.class,
+                AgentLoopProfile.class, List.class, boolean.class, Consumer.class, thinkingType);
+        method.setAccessible(true);
+        AiTaskDtos.AiChannelConfig channel = new AiTaskDtos.AiChannelConfig("channel-1", "DeepSeek", "https://api.deepseek.com", "key", "openai", List.of("deepseek-chat"));
 
-        Assertions.assertEquals("流式输出", emitted.get());
-        Assertions.assertEquals("流式输出", streamResponse(accumulator).text());
+        Mono<AiResponse> enabled = (Mono<AiResponse>) method.invoke(orchestrator, channel, profile, List.of(), false,
+                (Consumer<String>) ignored -> { }, newPrivateRecord(thinkingType.getName(), new Class<?>[]{boolean.class, String.class}, true, "max"));
+        Mono<AiResponse> disabled = (Mono<AiResponse>) method.invoke(orchestrator, channel, profile, List.of(), false,
+                (Consumer<String>) ignored -> { }, newPrivateRecord(thinkingType.getName(), new Class<?>[]{boolean.class, String.class}, false, "max"));
+        enabled.block();
+        disabled.block();
+
+        Assertions.assertEquals(List.of("/chat/completions", "/chat/completions"), paths);
+        Assertions.assertEquals("enabled", payloads.get(0).getJSONObject("thinking").getString("type"));
+        Assertions.assertEquals("max", payloads.get(0).getString("reasoning_effort"));
+        Assertions.assertEquals("disabled", payloads.get(1).getJSONObject("thinking").getString("type"));
+        Assertions.assertFalse(payloads.get(1).containsKey("reasoning_effort"));
     }
 
     /** Anthropic流应聚合文本增量。 */
@@ -181,7 +210,8 @@ class AgentTaskOrchestratorTest {
                 new AgentExecutionRegistry()
         );
         AgentSession session = new AgentSession("session-1", 1L, "新对话", "canvas", new ArrayList<>(), OffsetDateTime.now(), OffsetDateTime.now());
-        AgentChatRequest request = new AgentChatRequest("session-1", null, "你好", Map.of(), List.of(), List.of(), List.of(), "channel-1::missing-model");
+        AgentChatRequest request = new AgentChatRequest("session-1", "canvas", "你好", Map.of(), List.of(), List.of(), List.of(),
+                new CreationSettings("channel-1::missing-model", null, null, null, null, null, null));
 
         invokeRunAgentLoop(orchestrator, session, request).block();
 
@@ -253,11 +283,11 @@ class AgentTaskOrchestratorTest {
     void shouldPersistInitialVideoRoundBeforeToolExecution() throws Exception {
         StubPersistenceService persistenceService = new StubPersistenceService(List.of());
         AgentTaskOrchestrator orchestrator = newOrchestrator(persistenceService);
-        AgentChatRequest request = new AgentChatRequest("session-1", "video",
+        AgentChatRequest request = new AgentChatRequest("session-1", "videoPage",
                 "[用户设置：尺寸=704x1280]\n\n用户原始输入 A", Map.of(), List.of(), List.of(
                 new AgentChatRequest.Attachment("https://untrusted.example.com/cat-dog.png", "image/png", "猫狗.png", "image:cat-dog"),
                 new AgentChatRequest.Attachment("https://untrusted.example.com/source.mp4", "video/mp4", "素材.mp4", "video:source")),
-                List.of(), "model-1");
+                List.of(), new CreationSettings("model-1", "704x1280", "720p", "medium", null, "5", false));
 
         invokeSaveInitialVideoRound(orchestrator, "session-1", request).block();
 
@@ -389,7 +419,16 @@ class AgentTaskOrchestratorTest {
     private Mono<AiTaskDtos.AiChannelConfig> invokeResolveChannelByModel(AgentTaskOrchestrator orchestrator, String modelHint) throws Exception {
         Method method = AgentTaskOrchestrator.class.getDeclaredMethod("resolveChannelByModel", String.class);
         method.setAccessible(true);
-        return (Mono<AiTaskDtos.AiChannelConfig>) method.invoke(orchestrator, modelHint);
+        Mono<?> resolvedModel = (Mono<?>) method.invoke(orchestrator, modelHint);
+        return resolvedModel.map(model -> {
+            try {
+                Method channel = model.getClass().getDeclaredMethod("channel");
+                channel.setAccessible(true);
+                return (AiTaskDtos.AiChannelConfig) channel.invoke(model);
+            } catch (ReflectiveOperationException exception) {
+                throw new IllegalStateException(exception);
+            }
+        });
     }
 
     /**
@@ -647,7 +686,7 @@ class AgentTaskOrchestratorTest {
                     .flatMap(channel -> channel.models().stream()
                             .map(model -> new PersistenceDtos.ModelConfig(
                                     channel.id() + "::" + model, channel.id(), model, AiTaskTypes.TEXT, List.of(),
-                                    model.equals(channel.models().get(0)), 0, 0)))
+                                    model.equals(channel.models().get(0)), 0, 0, true, "high")))
                     .toList());
         }
 

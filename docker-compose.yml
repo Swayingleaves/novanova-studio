@@ -58,6 +58,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_SERVER_URL: ""
+        NEXT_PUBLIC_ICP_RECORD_NUMBER: ${NEXT_PUBLIC_ICP_RECORD_NUMBER:-}
     container_name: novanovastudio-web
     ports:
       - "127.0.0.1:${WEB_PORT:-5550}:5550"
@@ -107,6 +108,7 @@ services:
       OAUTH2_GOOGLE_REDIRECT_URI: ${OAUTH2_GOOGLE_REDIRECT_URI:-}
       AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE: ${AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE:-file:/app/config/prompts/optimization-image.md}
       AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE: ${AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE:-file:/app/config/prompts/optimization-video.md}
+      AI_SYSTEM_PROMPT_AGENT_MAIN_FILE: ${AI_SYSTEM_PROMPT_AGENT_MAIN_FILE:-file:/app/config/prompts/agent-main.md}
       AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE: ${AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE:-file:/app/config/prompts/agent-image.md}
       AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE: ${AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE:-file:/app/config/prompts/agent-video.md}
       AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE: ${AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE:-file:/app/config/prompts/agent-canvas.md}

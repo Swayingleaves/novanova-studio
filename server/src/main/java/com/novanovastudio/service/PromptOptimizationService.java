@@ -7,6 +7,8 @@ import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PromptOptimizationDtos;
 import java.util.List;
 import java.util.Map;
+import java.time.Duration;
+import java.util.function.Function;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -37,6 +39,27 @@ public class PromptOptimizationService {
      * @throws BusinessException 生成类型不支持时抛出
      */
     public Mono<AiTaskDtos.AiGenerationTaskResponse> optimizePrompt(PromptOptimizationDtos.OptimizePromptRequest request) {
+        return aiTaskService.createTask(optimizationTaskRequest(request));
+    }
+
+    /**
+     * 为指定用户创建提示词优化任务。
+     *
+     * @param userId Long 用户ID
+     * @param request OptimizePromptRequest 提示词优化请求
+     * @return Mono<AiGenerationTaskResponse> 已创建的异步文本任务
+     */
+    public Mono<AiTaskDtos.AiGenerationTaskResponse> optimizePromptForUser(Long userId, PromptOptimizationDtos.OptimizePromptRequest request) {
+        return aiTaskService.createTaskForUser(userId, optimizationTaskRequest(request), response -> Mono.empty());
+    }
+
+    /**
+     * 构造提示词优化文本任务。
+     *
+     * @param request OptimizePromptRequest 提示词优化请求
+     * @return CreateAiTaskRequest 文本任务请求
+     */
+    private AiTaskDtos.CreateAiTaskRequest optimizationTaskRequest(PromptOptimizationDtos.OptimizePromptRequest request) {
         String generationType = request.generationType().trim();
         String systemPrompt = systemPrompt(generationType);
         String prompt = request.prompt().trim();
@@ -51,7 +74,50 @@ public class PromptOptimizationService {
                 List.of(),
                 null
         );
-        return aiTaskService.createTask(taskRequest);
+        return taskRequest;
+    }
+
+    /**
+     * 创建优化任务并等待其成功返回最终提示词。
+     *
+     * @param userId Long 用户ID
+     * @param generationType String 图片或视频生成类型
+     * @param prompt String 原始提示词
+     * @return Mono<String> 优化后的提示词
+     */
+    public Mono<String> optimizeAndWait(Long userId, String generationType, String prompt) {
+        return optimizeAndWait(userId, generationType, prompt, response -> Mono.empty());
+    }
+
+    /**
+     * 创建优化任务，在入队前执行计划任务登记，并等待成功返回最终提示词。
+     *
+     * @param userId Long 用户ID
+     * @param generationType String 图片或视频生成类型
+     * @param prompt String 原始提示词
+     * @param beforeEnqueue Function 入队前处理器
+     * @return Mono<String> 优化后的提示词
+     */
+    public Mono<String> optimizeAndWait(Long userId, String generationType, String prompt,
+                                        Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
+        PromptOptimizationDtos.OptimizePromptRequest request = new PromptOptimizationDtos.OptimizePromptRequest(generationType, prompt);
+        return aiTaskService.createTaskForUser(userId, optimizationTaskRequest(request), beforeEnqueue)
+                .flatMap(created -> reactor.core.publisher.Flux.interval(Duration.ZERO, Duration.ofSeconds(1))
+                        .concatMap(ignored -> aiTaskService.getTaskForUser(userId, created.id()))
+                        .filter(task -> List.of("success", "failed", "canceled").contains(task.status()))
+                        .next()
+                        .timeout(Duration.ofMinutes(5)))
+                .flatMap(task -> {
+                    if (!"success".equals(task.status())) {
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
+                                task.errorMessage() == null || task.errorMessage().isBlank() ? "提示词优化失败" : task.errorMessage()));
+                    }
+                    String optimizedPrompt = task.resultData() == null ? "" : task.resultData().getString("content");
+                    if (optimizedPrompt == null || optimizedPrompt.isBlank()) {
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "提示词优化结果为空"));
+                    }
+                    return Mono.just(optimizedPrompt.trim());
+                });
     }
 
     /**

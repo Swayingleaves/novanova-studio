@@ -29,6 +29,18 @@ public class AgentExecutionRegistry {
     }
 
     /**
+     * 判断活跃会话是否属于指定用户。
+     *
+     * @param userId Long 当前用户ID
+     * @param sessionId String Agent会话ID
+     * @return boolean 是否属于该用户
+     */
+    public boolean isOwnedBy(Long userId, String sessionId) {
+        ExecutionState state = executions.get(sessionId);
+        return state != null && state.userId.equals(userId);
+    }
+
+    /**
      * 关联 Agent Loop 的订阅控制器。
      *
      * @param sessionId String Agent 会话ID

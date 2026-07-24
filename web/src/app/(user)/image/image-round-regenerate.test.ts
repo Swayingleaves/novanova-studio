@@ -12,6 +12,7 @@ test("buildImageRoundRegeneratePayload 保留历史配置与参考图", () => {
                 quality: "high",
                 imageResolution: "4K",
                 imageModel: "image-model-pro",
+                count: "2",
             },
             references: [
                 {
@@ -19,6 +20,7 @@ test("buildImageRoundRegeneratePayload 保留历史配置与参考图", () => {
                     name: "cat.png",
                     type: "image/png",
                     dataUrl: "https://example.com/cat.png",
+                    storageKey: "image:cat",
                 },
             ],
         },
@@ -26,19 +28,26 @@ test("buildImageRoundRegeneratePayload 保留历史配置与参考图", () => {
     );
 
     assert.equal(payload.prompt, "生成一只坐在窗边的黑猫");
-    assert.equal(payload.contextualPrompt, "[用户设置：尺寸=16:9，清晰度=4K，质量=high，生图模型=image-model-pro]\n\n生成一只坐在窗边的黑猫");
+    assert.deepEqual(payload.creationSettings, {
+        model: "image-model-pro",
+        size: "16:9",
+        resolution: "4K",
+        quality: "high",
+        count: 2,
+    });
     assert.deepEqual(payload.attachments, [
         {
             url: "https://example.com/cat.png",
             type: "image/png",
             name: "cat.png",
+            storageKey: "image:cat",
         },
     ]);
 });
 
 test("regenerateImageRound 会追加用户消息并发送重新生成请求", async () => {
     const userMessages: string[] = [];
-    const sendCalls: Array<{ message: string; attachments?: { url: string; type: string; name: string }[] }> = [];
+    const sendCalls: Array<{ message: string; attachments?: { url: string; type: string; name: string }[]; creationSettings?: Record<string, unknown> }> = [];
 
     await regenerateImageRound(
         {
@@ -51,8 +60,8 @@ test("regenerateImageRound 会追加用户消息并发送重新生成请求", as
             appendUserMessage: (message) => {
                 userMessages.push(message);
             },
-            sendMessage: async (message, attachments) => {
-                sendCalls.push({ message, attachments });
+            sendMessage: async (message, attachments, creationSettings) => {
+                sendCalls.push({ message, attachments, creationSettings });
             },
         },
     );
@@ -60,8 +69,11 @@ test("regenerateImageRound 会追加用户消息并发送重新生成请求", as
     assert.deepEqual(userMessages, ["生成一张极简海报"]);
     assert.deepEqual(sendCalls, [
         {
-            message: "[用户设置：尺寸=1:1，清晰度=2K，质量=high，生图模型=default-image-model]\n\n生成一张极简海报",
+            message: "生成一张极简海报",
             attachments: undefined,
+            creationSettings: {
+                model: "default-image-model",
+            },
         },
     ]);
 });

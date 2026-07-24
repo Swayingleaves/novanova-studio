@@ -24,6 +24,7 @@ const studioWordmarkFont = { fontFamily: "var(--studio-wordmark-font)" } as cons
 const studioWordmarkText = { ...studioWordmarkFont, fontWeight: 720 } as const;
 const studioLockupFont = { ...studioInterfaceFont, fontWeight: 420 } as const;
 const showcaseCardPositions = ["col-span-2 aspect-[4/3] lg:col-[1/8] lg:row-[1/10] lg:aspect-auto", "aspect-[4/5] lg:col-[8/13] lg:row-[2/7] lg:aspect-auto", "aspect-[4/5] lg:col-[8/13] lg:row-[7/13] lg:aspect-auto"];
+const icpRecordNumber = process.env.NEXT_PUBLIC_ICP_RECORD_NUMBER?.trim();
 
 export default function IndexPage() {
     const [prompt, setPrompt] = useState("");
@@ -182,9 +183,21 @@ export default function IndexPage() {
 
                 <FantasticShow {...showcases} />
 
-                <footer className="mt-9 flex flex-col gap-1 border-t border-[var(--studio-line)] pt-4 text-[10px] uppercase text-[var(--studio-faint)] sm:flex-row sm:items-center sm:justify-between">
-                    <span>Novanova Studio / AI Visual Agent</span>
-                    <span>Black Theme System / 2026</span>
+                <footer className="mt-9 flex flex-col gap-2 border-t border-[var(--studio-line)] pt-4 text-[10px] text-[var(--studio-faint)] sm:flex-row sm:items-center sm:justify-between">
+                    <span className="uppercase">Novanova Studio / AI Visual Agent</span>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        {icpRecordNumber ? (
+                            <a
+                                href="https://beian.miit.gov.cn/"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="transition hover:text-[var(--studio-muted)]"
+                            >
+                                {icpRecordNumber}
+                            </a>
+                        ) : null}
+                        <span>© 2026 All rights reserved</span>
+                    </div>
                 </footer>
             </div>
         </main>

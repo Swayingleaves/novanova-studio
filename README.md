@@ -108,6 +108,7 @@ Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不�
 
 | 文件 | 用途 | 可覆盖环境变量 |
 | --- | --- | --- |
+| `agent-main.md` | 主 Agent 的意图识别、任务依赖图与页面能力边界。 | `AI_SYSTEM_PROMPT_AGENT_MAIN_FILE` |
 | `agent-image.md` | 图片生成与编辑 Agent 的工具与行为约束。 | `AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE` |
 | `agent-video.md` | 视频生成与编辑 Agent 的工具与行为约束。 | `AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE` |
 | `agent-canvas.md` | 画布 Agent 的状态理解与画布操作约束。 | `AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE` |

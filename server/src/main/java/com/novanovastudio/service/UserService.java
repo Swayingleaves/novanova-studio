@@ -292,6 +292,30 @@ public class UserService {
     }
 
     /**
+     * 修改当前用户密码。
+     * <p>
+     * 写入新密码前必须验证原密码，密码编码在弹性线程池中执行。
+     *
+     * @param request ChangeCurrentUserPasswordRequest 修改密码请求
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> changeCurrentUserPassword(UserDtos.ChangeCurrentUserPasswordRequest request) {
+        validatePassword(request.newPassword());
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> userRepository.findById(userId)
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "用户不存在")))
+                        .flatMap(user -> matchesPassword(request.currentPassword(), user.getPassword())
+                                .flatMap(matches -> {
+                                    if (!matches) {
+                                        return Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "原密码错误"));
+                                    }
+                                    return encodePassword(request.newPassword())
+                                            .flatMap(encodedPassword -> userRepository.updateCurrentUserPassword(userId, encodedPassword));
+                                }))
+                        .doOnSuccess(ignored -> log.info("用户密码已修改: userId={}", userId)));
+    }
+
+    /**
      * 标记当前用户已阅读欢迎引导。
      *
      * @return Mono<Void> 操作结果

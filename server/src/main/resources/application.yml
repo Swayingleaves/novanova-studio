@@ -224,6 +224,8 @@ novanova:
       optimization-image-file: ${AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE:file:./server/config/prompts/optimization-image.md}
       # 视频优化系统提示词文件路径
       optimization-video-file: ${AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE:file:./server/config/prompts/optimization-video.md}
+      # 主 Agent 系统提示词文件路径
+      agent-main-file: ${AI_SYSTEM_PROMPT_AGENT_MAIN_FILE:file:./server/config/prompts/agent-main.md}
       # 图片生成 Agent 系统提示词文件路径
       agent-image-file: ${AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE:file:./server/config/prompts/agent-image.md}
       # 视频生成 Agent 系统提示词文件路径

@@ -123,7 +123,8 @@ public class PersistenceRepository {
     public Flux<PersistenceRecords.UserAiModelConfigRecord> listUserAiModelConfigs(Long userId) {
         return databaseClient.sql("""
                 SELECT id, user_id, model_config_id, channel_id, model_name, model_type,
-                       capabilities::text AS capabilities, is_default, sort_order, 0 AS credit_cost, created_at, updated_at
+                       capabilities::text AS capabilities, is_default, sort_order, 0 AS credit_cost,
+                       thinking_enabled, reasoning_effort, created_at, updated_at
                 FROM user_ai_model_configs WHERE user_id=:userId ORDER BY model_type, sort_order, id
                 """).bind("userId", userId).map((row, metadata) -> RowMappers.userAiModelConfig(row)).all();
     }
@@ -132,7 +133,8 @@ public class PersistenceRepository {
     public Mono<PersistenceRecords.UserAiModelConfigRecord> getUserAiModelConfig(Long userId, String modelConfigId) {
         return databaseClient.sql("""
                 SELECT id, user_id, model_config_id, channel_id, model_name, model_type,
-                       capabilities::text AS capabilities, is_default, sort_order, 0 AS credit_cost, created_at, updated_at
+                       capabilities::text AS capabilities, is_default, sort_order, 0 AS credit_cost,
+                       thinking_enabled, reasoning_effort, created_at, updated_at
                 FROM user_ai_model_configs WHERE user_id=:userId AND model_config_id=:modelConfigId
                 """).bind("userId", userId).bind("modelConfigId", modelConfigId)
                 .map((row, metadata) -> RowMappers.userAiModelConfig(row)).one();
@@ -141,12 +143,16 @@ public class PersistenceRepository {
     /** 新增用户模型配置。 */
     public Mono<Void> createUserAiModelConfig(PersistenceRecords.UserAiModelConfigRecord record) {
         return databaseClient.sql("""
-                INSERT INTO user_ai_model_configs(user_id, model_config_id, channel_id, model_name, model_type, capabilities, is_default, sort_order)
-                VALUES (:userId,:modelConfigId,:channelId,:modelName,:modelType,CAST(:capabilities AS jsonb),:isDefault,:sortOrder)
+                INSERT INTO user_ai_model_configs(user_id, model_config_id, channel_id, model_name, model_type, capabilities, is_default, sort_order,
+                                                  thinking_enabled, reasoning_effort)
+                VALUES (:userId,:modelConfigId,:channelId,:modelName,:modelType,CAST(:capabilities AS jsonb),:isDefault,:sortOrder,
+                        :thinkingEnabled,:reasoningEffort)
                 """).bind("userId", record.getUserId()).bind("modelConfigId", record.getModelConfigId())
                 .bind("channelId", record.getChannelId()).bind("modelName", record.getModelName())
                 .bind("modelType", record.getModelType()).bind("capabilities", record.getCapabilities())
                 .bind("isDefault", Boolean.TRUE.equals(record.getDefaultModel())).bind("sortOrder", record.getSortOrder())
+                .bind("thinkingEnabled", record.getThinkingEnabled() == null || Boolean.TRUE.equals(record.getThinkingEnabled()))
+                .bind("reasoningEffort", record.getReasoningEffort() == null ? "high" : record.getReasoningEffort())
                 .fetch().rowsUpdated().then();
     }
 
@@ -154,10 +160,11 @@ public class PersistenceRepository {
     public Mono<Long> updateUserAiModelConfig(PersistenceRecords.UserAiModelConfigRecord record) {
         return databaseClient.sql("""
                 UPDATE user_ai_model_configs SET model_type=:modelType, capabilities=CAST(:capabilities AS jsonb),
-                sort_order=:sortOrder, updated_at=CURRENT_TIMESTAMP
+                sort_order=:sortOrder, thinking_enabled=:thinkingEnabled, reasoning_effort=:reasoningEffort, updated_at=CURRENT_TIMESTAMP
                 WHERE user_id=:userId AND model_config_id=:modelConfigId
                 """).bind("modelType", record.getModelType()).bind("capabilities", record.getCapabilities())
-                .bind("sortOrder", record.getSortOrder()).bind("userId", record.getUserId())
+                .bind("sortOrder", record.getSortOrder()).bind("thinkingEnabled", record.getThinkingEnabled() == null || Boolean.TRUE.equals(record.getThinkingEnabled()))
+                .bind("reasoningEffort", record.getReasoningEffort() == null ? "high" : record.getReasoningEffort()).bind("userId", record.getUserId())
                 .bind("modelConfigId", record.getModelConfigId()).fetch().rowsUpdated();
     }
 
@@ -393,7 +400,8 @@ public class PersistenceRepository {
     public Flux<PersistenceRecords.UserAiModelConfigRecord> listPlatformAiModelConfigs() {
         return databaseClient.sql("""
                 SELECT id, NULL::BIGINT AS user_id, model_config_id, channel_id, model_name, model_type,
-                       capabilities::text AS capabilities, is_default, sort_order, credit_cost, created_at, updated_at
+                       capabilities::text AS capabilities, is_default, sort_order, credit_cost,
+                       thinking_enabled, reasoning_effort, created_at, updated_at
                 FROM platform_ai_model_configs
                 ORDER BY model_type, sort_order, id
                 """).map((row, metadata) -> RowMappers.userAiModelConfig(row)).all();
@@ -408,7 +416,8 @@ public class PersistenceRepository {
     public Mono<PersistenceRecords.UserAiModelConfigRecord> getPlatformAiModelConfig(String modelConfigId) {
         return databaseClient.sql("""
                 SELECT id, NULL::BIGINT AS user_id, model_config_id, channel_id, model_name, model_type,
-                       capabilities::text AS capabilities, is_default, sort_order, credit_cost, created_at, updated_at
+                       capabilities::text AS capabilities, is_default, sort_order, credit_cost,
+                       thinking_enabled, reasoning_effort, created_at, updated_at
                 FROM platform_ai_model_configs
                 WHERE model_config_id = :modelConfigId
                 """).bind("modelConfigId", modelConfigId).map((row, metadata) -> RowMappers.userAiModelConfig(row)).one();
@@ -422,12 +431,17 @@ public class PersistenceRepository {
      */
     public Mono<Void> createPlatformAiModelConfig(PersistenceRecords.UserAiModelConfigRecord record) {
         return databaseClient.sql("""
-                INSERT INTO platform_ai_model_configs(model_config_id, channel_id, model_name, model_type, capabilities, is_default, sort_order, credit_cost)
-                VALUES (:modelConfigId, :channelId, :modelName, :modelType, CAST(:capabilities AS jsonb), :isDefault, :sortOrder, :creditCost)
+                INSERT INTO platform_ai_model_configs(model_config_id, channel_id, model_name, model_type, capabilities, is_default, sort_order,
+                                                      credit_cost, thinking_enabled, reasoning_effort)
+                VALUES (:modelConfigId, :channelId, :modelName, :modelType, CAST(:capabilities AS jsonb), :isDefault, :sortOrder,
+                        :creditCost, :thinkingEnabled, :reasoningEffort)
                 """).bind("modelConfigId", record.getModelConfigId()).bind("channelId", record.getChannelId())
                 .bind("modelName", record.getModelName()).bind("modelType", record.getModelType())
                 .bind("capabilities", record.getCapabilities()).bind("isDefault", Boolean.TRUE.equals(record.getDefaultModel()))
-                .bind("sortOrder", record.getSortOrder()).bind("creditCost", record.getCreditCost()).fetch().rowsUpdated().then();
+                .bind("sortOrder", record.getSortOrder()).bind("creditCost", record.getCreditCost())
+                .bind("thinkingEnabled", record.getThinkingEnabled() == null || Boolean.TRUE.equals(record.getThinkingEnabled()))
+                .bind("reasoningEffort", record.getReasoningEffort() == null ? "high" : record.getReasoningEffort())
+                .fetch().rowsUpdated().then();
     }
 
     /**
@@ -440,10 +454,14 @@ public class PersistenceRepository {
         return databaseClient.sql("""
                 UPDATE platform_ai_model_configs
                 SET model_type = :modelType, capabilities = CAST(:capabilities AS jsonb), sort_order = :sortOrder, credit_cost = :creditCost,
+                    thinking_enabled = :thinkingEnabled, reasoning_effort = :reasoningEffort,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE model_config_id = :modelConfigId
                 """).bind("modelType", record.getModelType()).bind("capabilities", record.getCapabilities())
-                .bind("sortOrder", record.getSortOrder()).bind("creditCost", record.getCreditCost()).bind("modelConfigId", record.getModelConfigId())
+                .bind("sortOrder", record.getSortOrder()).bind("creditCost", record.getCreditCost())
+                .bind("thinkingEnabled", record.getThinkingEnabled() == null || Boolean.TRUE.equals(record.getThinkingEnabled()))
+                .bind("reasoningEffort", record.getReasoningEffort() == null ? "high" : record.getReasoningEffort())
+                .bind("modelConfigId", record.getModelConfigId())
                 .fetch().rowsUpdated();
     }
 

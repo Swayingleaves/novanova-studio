@@ -809,6 +809,9 @@ public class NovanovaProperties {
             /** 视频提示词优化文件路径 */
             private String optimizationVideoFile = "";
 
+            /** 主Agent文件路径 */
+            private String agentMainFile = "";
+
             /** 图片生成Agent文件路径 */
             private String agentImageFile = "";
 
@@ -852,6 +855,24 @@ public class NovanovaProperties {
              */
             public void setOptimizationVideoFile(String optimizationVideoFile) {
                 this.optimizationVideoFile = optimizationVideoFile;
+            }
+
+            /**
+             * 获取主Agent文件路径。
+             *
+             * @return String 主Agent文件路径
+             */
+            public String getAgentMainFile() {
+                return agentMainFile;
+            }
+
+            /**
+             * 设置主Agent文件路径。
+             *
+             * @param agentMainFile String 主Agent文件路径
+             */
+            public void setAgentMainFile(String agentMainFile) {
+                this.agentMainFile = agentMainFile;
             }
 
             /**
@@ -907,6 +928,7 @@ public class NovanovaProperties {
             public void setAgentCanvasFile(String agentCanvasFile) {
                 this.agentCanvasFile = agentCanvasFile;
             }
+
         }
     }
 }

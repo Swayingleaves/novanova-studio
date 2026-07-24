@@ -1,0 +1,82 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import type { AgentActivityState, ToolCallState } from "@/features/chat/types";
+import type { CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
+
+import { attachAgentActivitiesToThreadSections, collectAgentActivities, createToolExecutionActivity, finishRunningAgentActivities, groupAgentActivitiesByRoundId, updateAgentActivityMessage, upsertAgentActivityMessage } from "./agent-activity.ts";
+
+test("upsertAgentActivityMessage 对重复 SSE 活动执行幂等覆盖", () => {
+    const firstActivity = {
+        id: "task-plan-1-task-1",
+        type: "plan-task-status" as const,
+        title: "执行创作任务",
+        description: "子Agent正在准备任务",
+        status: "running" as const,
+    };
+    const firstMessages = upsertAgentActivityMessage([], firstActivity);
+    const nextMessages = upsertAgentActivityMessage(firstMessages, { ...firstActivity, description: "任务执行中" });
+    const activity = nextMessages[0]?.detail as AgentActivityState;
+
+    assert.equal(nextMessages.length, 1);
+    assert.equal(activity.description, "任务执行中");
+});
+
+test("updateAgentActivityMessage 更新工具进度和完成状态", () => {
+    const call: ToolCallState = {
+        callId: "task-1",
+        name: "generate_image",
+        arguments: { size: "3:4", resolution: "1K", quality: "medium", count: 1 },
+        status: "executing",
+        progress: 0,
+    };
+    const messages = upsertAgentActivityMessage([], createToolExecutionActivity(call));
+    const nextMessages = updateAgentActivityMessage(messages, "tool-task-1", { status: "success", progress: 100 });
+    const activity = nextMessages[0]?.detail as AgentActivityState;
+
+    assert.equal(activity.description, "3:4 / 1K / 标准质量 / 1 个结果");
+    assert.equal(activity.status, "success");
+    assert.equal(activity.progress, 100);
+});
+
+test("finishRunningAgentActivities 在 SSE 异常时结束所有运行中活动", () => {
+    const planMessages = upsertAgentActivityMessage([], {
+        id: "task-plan-2-task-2",
+        type: "plan-task-status",
+        title: "执行创作任务",
+        status: "running",
+    });
+    const toolMessages = upsertAgentActivityMessage(planMessages, {
+        id: "tool-task-2",
+        type: "tool-execute",
+        title: "调用视频生成工具",
+        status: "running",
+    });
+    const nextMessages = finishRunningAgentActivities(toolMessages, "failed", "生成连接已关闭");
+
+    for (const message of nextMessages) {
+        const activity = message.detail as AgentActivityState;
+        assert.equal(activity.status, "failed");
+        assert.equal(activity.description, "生成连接已关闭");
+    }
+});
+
+test("attachAgentActivitiesToThreadSections 将完成活动保留到对应结果轮次", () => {
+    const activity: AgentActivityState = {
+        id: "tool-task-3",
+        type: "tool-execute",
+        title: "调用图片生成工具",
+        status: "success",
+    };
+    const messages = upsertAgentActivityMessage([], activity);
+    const sections: CreationThreadSection[] = [{
+        id: "section-1",
+        label: "今天",
+        rounds: [{ id: "task-3", userText: "生成图片", statusText: "已完成", resultContent: null }],
+    }];
+
+    const activitiesByRoundId = groupAgentActivitiesByRoundId(["task-3"], collectAgentActivities(messages));
+    const nextSections = attachAgentActivitiesToThreadSections(sections, activitiesByRoundId);
+
+    assert.deepEqual(nextSections[0]?.rounds[0]?.activities, [activity]);
+});

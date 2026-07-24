@@ -73,6 +73,7 @@ public class CanvasProfile implements AgentLoopProfile {
      * @param userId Long 用户ID
      * @param toolName String 工具名称
      * @param args Map 工具参数
+     * @param originalPrompt String 用户原始输入
      * @param attachments List<Attachment> 当前用户上传的媒体附件
      * @param emitter AgentEventEmitter 事件发射器
      * @param sessionId String 会话ID
@@ -80,7 +81,8 @@ public class CanvasProfile implements AgentLoopProfile {
      * @return Mono<ToolResult> 不支持结果
      */
     @Override
-    public Mono<ToolResult> executeTool(Long userId, String toolName, Map<String, Object> args, List<AgentChatRequest.Attachment> attachments,
+    public Mono<ToolResult> executeTool(Long userId, String toolName, Map<String, Object> args, String originalPrompt,
+                                         List<AgentChatRequest.Attachment> attachments,
                                          AgentEventEmitter emitter, String sessionId, String callId) {
         return Mono.just(new ToolResult(false, "画布工具必须由前端执行: " + toolName));
     }

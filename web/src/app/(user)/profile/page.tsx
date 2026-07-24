@@ -1,14 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, App, Avatar, Button, Descriptions, Form, Input, Skeleton } from "antd";
-import { Camera, LogIn, Save } from "lucide-react";
+import { Alert, App, Avatar, Button, Descriptions, Form, Input, Modal, Skeleton } from "antd";
+import { Camera, LockKeyhole, LogIn, Save } from "lucide-react";
 
-import { getCurrentUserInfo, updateCurrentUserProfile } from "@/services/api/server";
+import { changeCurrentUserPassword, getCurrentUserInfo, updateCurrentUserProfile } from "@/services/api/server";
 import { uploadMediaFile } from "@/features/storage/services/file-storage";
 import { useUserStore, type ServerUserProfile } from "@/features/auth/stores/use-user-store";
 
 type ProfileFormValues = Pick<ServerUserProfile, "username" | "nickname" | "avatar">;
+type PasswordFormValues = { currentPassword: string; newPassword: string; confirmPassword: string };
 
 const MAX_AVATAR_FILE_SIZE = 2 * 1024 * 1024;
 
@@ -98,6 +99,7 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
     const [uploadingAvatar, setUploadingAvatar] = useState(false);
     const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null);
     const [avatarPreview, setAvatarPreview] = useState(profile.avatar);
+    const [passwordModalOpen, setPasswordModalOpen] = useState(false);
 
     const releaseLocalAvatarPreview = useCallback(() => {
         if (!localAvatarPreviewUrlRef.current) return;
@@ -204,7 +206,13 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
             <section className="border-t border-[var(--studio-line)] pt-5 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
                 <h2 className="studio-title text-base font-medium">账号信息</h2>
                 <Descriptions className="mt-4" column={1} size="small" items={accountInformation(profile)} />
+                <div className="mt-5 border-t border-[var(--studio-line)] pt-5">
+                    <Button icon={<LockKeyhole className="size-4" />} onClick={() => setPasswordModalOpen(true)}>
+                        修改密码
+                    </Button>
+                </div>
             </section>
+            <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
             <input
                 ref={avatarInputRef}
                 hidden
@@ -216,6 +224,78 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
                 }}
             />
         </div>
+    );
+}
+
+function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+    const { message } = App.useApp();
+    const [form] = Form.useForm<PasswordFormValues>();
+    const [submitting, setSubmitting] = useState(false);
+
+    const closeModal = () => {
+        if (submitting) return;
+        form.resetFields();
+        onClose();
+    };
+
+    const submitPassword = async (values: PasswordFormValues) => {
+        setSubmitting(true);
+        try {
+            await changeCurrentUserPassword({ currentPassword: values.currentPassword, newPassword: values.newPassword });
+            message.success("密码已修改");
+            form.resetFields();
+            onClose();
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "密码修改失败");
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    return (
+        <Modal
+            title="修改密码"
+            open={open}
+            onCancel={closeModal}
+            onOk={() => form.submit()}
+            okText="确认修改"
+            cancelText="取消"
+            confirmLoading={submitting}
+            cancelButtonProps={{ disabled: submitting }}
+            destroyOnHidden
+            width={480}
+        >
+            <Form form={form} layout="vertical" requiredMark={false} preserve={false} className="mt-5" onFinish={submitPassword}>
+                <Form.Item name="currentPassword" label="原密码" rules={[{ required: true, message: "请输入原密码" }]}>
+                    <Input.Password autoComplete="current-password" placeholder="请输入原密码" />
+                </Form.Item>
+                <Form.Item
+                    name="newPassword"
+                    label="新密码"
+                    rules={[
+                        { required: true, message: "请输入新密码" },
+                        { min: 8, message: "新密码至少需要 8 位" },
+                    ]}
+                >
+                    <Input.Password autoComplete="new-password" placeholder="至少 8 位" />
+                </Form.Item>
+                <Form.Item
+                    name="confirmPassword"
+                    label="确认新密码"
+                    dependencies={["newPassword"]}
+                    rules={[
+                        { required: true, message: "请再次输入新密码" },
+                        ({ getFieldValue }) => ({
+                            validator(_, value) {
+                                return !value || getFieldValue("newPassword") === value ? Promise.resolve() : Promise.reject(new Error("两次输入的新密码不一致"));
+                            },
+                        }),
+                    ]}
+                >
+                    <Input.Password autoComplete="new-password" placeholder="请再次输入新密码" />
+                </Form.Item>
+            </Form>
+        </Modal>
     );
 }
 

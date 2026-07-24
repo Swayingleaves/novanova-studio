@@ -1,13 +1,15 @@
 /**
  * @title        AgentController.java
  * @author       zhenglin.cn.cq@gmail.com
- * @description  画布 Agent 对话接口
+ * @description  统一创作 Agent 对话接口
  * @createTime   2026-06-27 10:00:00
  */
 package com.novanovastudio.controller;
 
 import com.novanovastudio.agent.AgentEventEmitter;
 import com.novanovastudio.agent.AgentTaskOrchestrator;
+import com.novanovastudio.agent.CreationAgentOrchestrator;
+import com.novanovastudio.agent.CreationEntrySource;
 import com.novanovastudio.agent.dto.AgentCancelRequest;
 import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentEvent;
@@ -29,7 +31,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
- * 画布 Agent 对话接口，提供发起对话、订阅 SSE 事件流、回传前端工具结果三个端点。
+ * 统一创作 Agent 对话接口，提供发起对话、订阅SSE事件流和回传画布工具结果三个端点。
  */
 @RestController
 @RequestMapping("/api/v1/ai/agent")
@@ -38,20 +40,27 @@ import reactor.core.publisher.Mono;
 public class AgentController {
 
     private final AgentTaskOrchestrator orchestrator;
+    private final CreationAgentOrchestrator creationAgentOrchestrator;
     private final AgentEventEmitter eventEmitter;
     private final CurrentUserProvider currentUserProvider;
 
     /**
-     * 发起对话。接收用户消息和画布快照，异步启动 Agent Loop，立即返回 sessionId 供前端订阅事件。
+     * 发起对话。接收用户消息、入口来源和生成设置，异步启动主Agent计划，立即返回sessionId。
      *
      * @param request AgentChatRequest 对话请求
      * @return Mono<ApiResponse<Map<String, String>>> sessionId
      */
     @PostMapping("/chat")
     public Mono<ApiResponse<Map<String, String>>> chat(@RequestBody AgentChatRequest request) {
-        log.info("Agent 对话请求: profile={}, sessionId={}, message={}", request.profile(), request.sessionId(), request.message());
+        if (request == null || !CreationEntrySource.supported(request.entrySource())) {
+            return Mono.error(new com.novanovastudio.common.BusinessException(
+                    com.novanovastudio.common.ErrorCode.PARAM_INVALID, "Agent入口来源不合法"));
+        }
+        log.info("Agent 对话请求: entrySource={}, sessionId={}, message={}", request.entrySource(), request.sessionId(), request.message());
         return currentUserProvider.currentUserId()
-            .flatMap(userId -> orchestrator.startChat(userId, request))
+            .flatMap(userId -> creationAgentOrchestrator.supports(request.entrySource())
+                    ? creationAgentOrchestrator.startChat(userId, request)
+                    : orchestrator.startChat(userId, request))
             .map(sessionId -> ApiResponse.ok(Map.of("sessionId", sessionId)));
     }
 
@@ -65,7 +74,9 @@ public class AgentController {
     public Mono<ApiResponse<Void>> cancelChat(@Valid @RequestBody AgentCancelRequest request) {
         log.info("停止 Agent 对话请求: sessionId={}", request.sessionId());
         return currentUserProvider.currentUserId()
-                .flatMap(userId -> orchestrator.cancelChat(userId, request.sessionId()))
+                .flatMap(userId -> creationAgentOrchestrator.isActive(request.sessionId())
+                        ? creationAgentOrchestrator.cancelChat(userId, request.sessionId())
+                        : orchestrator.cancelChat(userId, request.sessionId()))
                 .thenReturn(ApiResponse.ok(null));
     }
 

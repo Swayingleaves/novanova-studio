@@ -24,7 +24,7 @@ class SystemPromptTemplateServiceTest {
     Path temporaryDirectory;
 
     /**
-     * 验证五类模板均按UTF-8内容加载并缓存。
+     * 验证全部模板均按UTF-8内容加载并缓存。
      *
      * @throws IOException 创建模板文件失败时抛出
      */
@@ -104,6 +104,7 @@ class SystemPromptTemplateServiceTest {
         NovanovaProperties.Ai.SystemPrompt systemPrompt = properties.getAi().getSystemPrompt();
         systemPrompt.setOptimizationImageFile(templateFile(PromptTemplateType.OPTIMIZATION_IMAGE).toUri().toString());
         systemPrompt.setOptimizationVideoFile(templateFile(PromptTemplateType.OPTIMIZATION_VIDEO).toUri().toString());
+        systemPrompt.setAgentMainFile(templateFile(PromptTemplateType.AGENT_MAIN).toUri().toString());
         systemPrompt.setAgentImageFile(templateFile(PromptTemplateType.AGENT_IMAGE).toUri().toString());
         systemPrompt.setAgentVideoFile(templateFile(PromptTemplateType.AGENT_VIDEO).toUri().toString());
         systemPrompt.setAgentCanvasFile(templateFile(PromptTemplateType.AGENT_CANVAS).toUri().toString());

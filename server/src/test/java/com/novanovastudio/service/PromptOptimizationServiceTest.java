@@ -1,6 +1,7 @@
 package com.novanovastudio.service;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -16,6 +17,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
 
 /**
  * 提示词优化服务测试。
@@ -75,6 +77,25 @@ class PromptOptimizationServiceTest {
     }
 
     /**
+     * 优化任务失败时必须终止并返回错误，不能回退原提示词。
+     */
+    @Test
+    void shouldFailWhenPromptOptimizationTaskFails() {
+        when(aiTaskService.createTaskForUser(eq(1L), any(), any())).thenReturn(Mono.just(taskResponse()));
+        when(aiTaskService.getTaskForUser(1L, "task-1")).thenReturn(Mono.just(new AiTaskDtos.AiGenerationTaskResponse(
+                "task-1", AiTaskTypes.TEXT, "chat-model", "默认渠道", "failed", 100,
+                null, null, "优化服务失败", "", "", "", "")));
+        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, promptTemplateService());
+
+        StepVerifier.create(service.optimizeAndWait(1L, AiTaskTypes.IMAGE, "一只猫"))
+                .expectErrorSatisfies(error -> {
+                    Assertions.assertInstanceOf(BusinessException.class, error);
+                    Assertions.assertEquals("优化服务失败", error.getMessage());
+                })
+                .verify();
+    }
+
+    /**
      * 捕获提交给AI任务服务的请求。
      *
      * @return CreateAiTaskRequest AI任务请求
@@ -106,6 +127,7 @@ class PromptOptimizationServiceTest {
         Path promptDirectory = Path.of("config", "prompts").toAbsolutePath();
         properties.getAi().getSystemPrompt().setOptimizationImageFile(promptDirectory.resolve("optimization-image.md").toUri().toString());
         properties.getAi().getSystemPrompt().setOptimizationVideoFile(promptDirectory.resolve("optimization-video.md").toUri().toString());
+        properties.getAi().getSystemPrompt().setAgentMainFile(promptDirectory.resolve("agent-main.md").toUri().toString());
         properties.getAi().getSystemPrompt().setAgentImageFile(promptDirectory.resolve("agent-image.md").toUri().toString());
         properties.getAi().getSystemPrompt().setAgentVideoFile(promptDirectory.resolve("agent-video.md").toUri().toString());
         properties.getAi().getSystemPrompt().setAgentCanvasFile(promptDirectory.resolve("agent-canvas.md").toUri().toString());

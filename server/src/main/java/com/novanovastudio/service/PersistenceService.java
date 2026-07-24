@@ -171,6 +171,8 @@ public class PersistenceService {
                     record.setDefaultModel(false);
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
                     record.setCreditCost(request.creditCost() == null ? 0 : request.creditCost());
+                    record.setThinkingEnabled(thinkingEnabled(request.thinkingEnabled()));
+                    record.setReasoningEffort(reasoningEffort(request.reasoningEffort()));
                     return repository.createPlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
                 });
     }
@@ -185,6 +187,8 @@ public class PersistenceService {
                     record.setCapabilities(JSON.toJSONString(request.capabilities() == null ? List.of() : request.capabilities()));
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
                     record.setCreditCost(request.creditCost() == null ? 0 : request.creditCost());
+                    record.setThinkingEnabled(thinkingEnabled(request.thinkingEnabled()));
+                    record.setReasoningEffort(reasoningEffort(request.reasoningEffort()));
                     return repository.updatePlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
                 });
     }
@@ -228,7 +232,32 @@ public class PersistenceService {
     /** 构建模型配置响应。 */
     private PersistenceDtos.ModelConfig modelConfigDto(PersistenceRecords.UserAiModelConfigRecord record) {
         return new PersistenceDtos.ModelConfig(record.getModelConfigId(), record.getChannelId(), record.getModelName(), record.getModelType(),
-                parseStringList(record.getCapabilities()), Boolean.TRUE.equals(record.getDefaultModel()), record.getSortOrder(), record.getCreditCost());
+                parseStringList(record.getCapabilities()), Boolean.TRUE.equals(record.getDefaultModel()), record.getSortOrder(), record.getCreditCost(),
+                thinkingEnabled(record.getThinkingEnabled()), reasoningEffort(record.getReasoningEffort()));
+    }
+
+    /**
+     * 规范化思考模式开关。
+     *
+     * @param enabled Boolean 请求中的思考模式开关
+     * @return boolean 缺省时开启思考模式
+     */
+    private boolean thinkingEnabled(Boolean enabled) {
+        return enabled == null || Boolean.TRUE.equals(enabled);
+    }
+
+    /**
+     * 规范化思考强度。
+     *
+     * @param effort String 请求中的思考强度
+     * @return String high或max
+     */
+    private String reasoningEffort(String effort) {
+        String value = StringUtils.hasText(effort) ? effort : "high";
+        if (!Set.of("high", "max").contains(value)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "思考强度只支持high、max");
+        }
+        return value;
     }
 
     /** 校验模型类型。 */

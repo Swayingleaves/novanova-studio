@@ -298,6 +298,10 @@ public class AgentTaskOrchestrator {
      * @param result AgentToolResult 工具结果
      */
     public void submitToolResult(Long userId, AgentToolResult result) {
+        if (!executionRegistry.isOwnedBy(userId, result.sessionId())) {
+            log.warn("拒绝非会话所属用户回传工具结果: userId={}, sessionId={}", userId, result.sessionId());
+            return;
+        }
         ConcurrentHashMap<String, MonoSink<ToolResult>> sessionResults = pendingResults.get(result.sessionId());
         if (sessionResults == null) {
             log.warn("收到未知 session 的工具结果: sessionId={}", result.sessionId());
@@ -308,7 +312,28 @@ public class AgentTaskOrchestrator {
             log.warn("收到未知 callId 的工具结果: sessionId={}, callId={}", result.sessionId(), result.callId());
             return;
         }
+        if (sessionResults.isEmpty()) {
+            pendingResults.remove(result.sessionId(), sessionResults);
+        }
         sink.success(new ToolResult(result.result().ok(), result.result().message(), result.result().data()));
+    }
+
+    /**
+     * 转发Java已注册的画布前端工具并等待执行结果。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String Agent会话ID
+     * @param callId String 工具调用ID
+     * @param toolName String 画布工具名
+     * @param arguments Map<String, Object> 已校验工具参数
+     * @return Mono<ToolResult> 前端工具执行结果
+     */
+    public Mono<ToolResult> executeFrontendTool(Long userId, String sessionId, String callId,
+                                                String toolName, Map<String, Object> arguments) {
+        if (!toolRegistry.isFrontend(toolName)) {
+            return Mono.just(new ToolResult(false, "不支持的画布前端工具: " + toolName));
+        }
+        return waitForFrontendResult(userId, sessionId, callId, toolName, arguments);
     }
 
     /**
@@ -329,11 +354,11 @@ public class AgentTaskOrchestrator {
      */
     private Mono<Void> runAgentLoop(Long userId, AgentSession session, AgentLoopProfile profile, AgentChatRequest request) {
         log.info("Agent Loop 模型选择: profile={}, requestModel={}, sessionId={}", profile.name(), request.model(), session.id());
-        Mono<AiTaskDtos.AiChannelConfig> channelMono = StringUtils.hasText(request.model())
+        Mono<ResolvedTextModel> textModelMono = StringUtils.hasText(request.model())
             ? resolveChannelByModel(request.model())
             : resolveChannel(AiTaskTypes.TEXT);
-        return channelMono.flatMap(channel -> profile.buildMessages(userId, session, request)
-            .flatMap(messages -> executeStep(session.id(), userId, profile, channel, messages, request.attachments(), 1)
+        return textModelMono.flatMap(textModel -> profile.buildMessages(userId, session, request)
+            .flatMap(messages -> executeStep(session.id(), userId, profile, textModel, messages, request.attachments(), 1)
                 .doFinally(signal -> sessionService.persist(session).subscribe()))
         ).onErrorResume(e -> {
             if (executionRegistry.isCancelRequested(session.id())) {
@@ -351,13 +376,13 @@ public class AgentTaskOrchestrator {
      *
      * @param sessionId String 会话ID
      * @param userId   Long 用户ID
-     * @param channel  AiChannelConfig 文本对话渠道
+     * @param textModel ResolvedTextModel 已解析文本模型
      * @param messages List<AiMessage> 当前消息列表
      * @param attachments List<Attachment> 当前请求上传的媒体附件
      * @param step     int 当前步数
      * @return Mono<Void>
      */
-    private Mono<Void> executeStep(String sessionId, Long userId, AgentLoopProfile profile, AiTaskDtos.AiChannelConfig channel,
+    private Mono<Void> executeStep(String sessionId, Long userId, AgentLoopProfile profile, ResolvedTextModel textModel,
                                    List<AiMessage> messages, List<AgentChatRequest.Attachment> attachments, int step) {
         if (step > profile.maxSteps()) {
             log.info("Agent Loop 达到步数上限: sessionId={}", sessionId);
@@ -371,14 +396,14 @@ public class AgentTaskOrchestrator {
                 eventEmitter.emit(userId, AgentEvent.textDelta(sessionId, assistantId, delta));
             }
         };
-        return callAiApi(channel, profile, messages, step == 1, textDeltaConsumer)
+        return callAiApi(textModel, profile, messages, step == 1, textDeltaConsumer)
             .flatMap(response -> {
                 if (response.toolCalls().isEmpty()) {
                     eventEmitter.emit(userId, AgentEvent.taskComplete(sessionId, assistantId, response.text()));
                     return sessionService.appendAssistantMessage(sessionId, assistantId, response.text());
                 }
 
-                return executeToolCalls(sessionId, userId, profile, channel, messages, attachments, response, step, assistantId);
+                return executeToolCalls(sessionId, userId, profile, textModel, messages, attachments, response, step, assistantId);
             })
             .onErrorResume(e -> {
                 if (executionRegistry.isCancelRequested(sessionId)) {
@@ -398,9 +423,10 @@ public class AgentTaskOrchestrator {
      * 避免多余的 LLM 回调。
      */
     private Mono<Void> executeToolCalls(String sessionId, Long userId, AgentLoopProfile profile,
-                                         AiTaskDtos.AiChannelConfig channel, List<AiMessage> messages,
+                                         ResolvedTextModel textModel, List<AiMessage> messages,
                                          List<AgentChatRequest.Attachment> attachments,
                                          AiResponse response, int step, String assistantId) {
+        AiTaskDtos.AiChannelConfig channel = textModel.channel();
         AiResponse promptAppliedResponse = applyOriginalPromptToTerminalTools(profile, response, messages);
         AiResponse effectiveResponse = applyInitialVideoRoundIdToTerminalTools(profile, sessionId, promptAppliedResponse);
         return Flux.fromIterable(effectiveResponse.toolCalls())
@@ -425,7 +451,7 @@ public class AgentTaskOrchestrator {
                 }
                 // 存在非终态工具（如 query_history）：将结果喂回 LLM 继续对话
                 List<AiMessage> nextMessages = appendToolResults(messages, effectiveResponse, results, channel.apiFormat());
-                return executeStep(sessionId, userId, profile, channel, nextMessages, attachments, step + 1);
+                return executeStep(sessionId, userId, profile, textModel, nextMessages, attachments, step + 1);
             });
     }
 
@@ -780,7 +806,9 @@ public class AgentTaskOrchestrator {
         if (!profile.isFrontendTool(toolName)) {
             String callId = call.id();
             eventEmitter.emit(userId, AgentEvent.toolExecute(sessionId, callId, toolName, args));
-            return profile.executeTool(userId, toolName, args, attachments, eventEmitter, sessionId, callId)
+            String originalPrompt = String.valueOf(args.getOrDefault("prompt", ""));
+            return profile.executeTool(userId, toolName, args, originalPrompt, attachments,
+                    eventEmitter, sessionId, callId)
                 .doOnNext(result -> eventEmitter.emit(userId,
                     AgentEvent.toolResult(sessionId, callId, result.ok(), result.message(), result.data())));
         }
@@ -809,7 +837,12 @@ public class AgentTaskOrchestrator {
             // 超时或取消时清理 pendingResults 映射
             sink.onDispose(() -> {
                 ConcurrentHashMap<String, MonoSink<ToolResult>> sessionResults = pendingResults.get(sessionId);
-                if (sessionResults != null) sessionResults.remove(callId);
+                if (sessionResults != null) {
+                    sessionResults.remove(callId);
+                    if (sessionResults.isEmpty()) {
+                        pendingResults.remove(sessionId, sessionResults);
+                    }
+                }
             });
         }).timeout(Duration.ofSeconds(30))
           .onErrorResume(e -> Mono.just(new ToolResult(false, "前端工具执行超时: " + e.getMessage())));
@@ -833,42 +866,47 @@ public class AgentTaskOrchestrator {
     // ===== 渠道解析 =====
 
     /**
-     * 调用 AI 接口，根据渠道 apiFormat 自动选择端点：
-     * openai 渠道使用 Responses API (/responses)，其他渠道使用 Chat Completions API (/chat/completions)。
+     * 调用 AI 接口，根据渠道 apiFormat 自动选择端点。
+     * OpenAI兼容渠道统一使用 Chat Completions API (/chat/completions)。
      *
-     * @param channel     AiChannelConfig 文本对话渠道
+     * @param textModel   ResolvedTextModel 已解析文本模型
+     * @param profile     AgentLoopProfile 当前Agent配置
      * @param messages    List<AiMessage> 消息列表
      * @param requireTool boolean 是否强制工具调用
+     * @param textDeltaConsumer Consumer<String> 文本增量消费者
      * @return Mono<AiResponse> AI 响应
      */
-    private Mono<AiResponse> callAiApi(AiTaskDtos.AiChannelConfig channel, AgentLoopProfile profile, List<AiMessage> messages,
+    private Mono<AiResponse> callAiApi(ResolvedTextModel textModel, AgentLoopProfile profile, List<AiMessage> messages,
                                        boolean requireTool, Consumer<String> textDeltaConsumer) {
+        AiTaskDtos.AiChannelConfig channel = textModel.channel();
         if ("openai".equalsIgnoreCase(channel.apiFormat())) {
-            return callStreamingResponsesApi(channel, profile, messages, requireTool, textDeltaConsumer);
+            return callStreamingChatCompletionsApi(channel, profile, messages, requireTool, textDeltaConsumer,
+                    new ThinkingConfiguration(textModel.thinkingEnabled(), textModel.reasoningEffort()));
         }
         if ("anthropic".equalsIgnoreCase(channel.apiFormat())) {
             return callStreamingAnthropicMessagesApi(channel, profile, messages, requireTool, textDeltaConsumer);
         }
-        return callStreamingChatCompletionsApi(channel, profile, messages, requireTool, textDeltaConsumer);
+        return callStreamingChatCompletionsApi(channel, profile, messages, requireTool, textDeltaConsumer, null);
     }
 
-    private Mono<AiResponse> callResponsesApi(AiTaskDtos.AiChannelConfig channel, AgentLoopProfile profile, List<AiMessage> messages, boolean requireTool) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", firstModel(channel));
-        body.put("input", messages.stream().map(this::toApiMessage).toList());
-        body.put("tools", toApiTools(profile.tools()));
-        body.put("tool_choice", requireTool ? "required" : "auto");
-        body.put("parallel_tool_calls", false);
-        return aiHttpClient.sendJsonRequest(channel, "POST", "/responses", body)
-            .map(this::parseAiResponse);
-    }
-
-    private Mono<AiResponse> callChatCompletionsApi(AiTaskDtos.AiChannelConfig channel, AgentLoopProfile profile, List<AiMessage> messages, boolean requireTool) {
+    /**
+     * 非流式调用Chat Completions接口。
+     *
+     * @param channel AiChannelConfig 文本模型渠道
+     * @param profile AgentLoopProfile 当前Agent配置
+     * @param messages List<AiMessage> 当前消息列表
+     * @param requireTool boolean 是否强制工具调用
+     * @param thinkingConfiguration ThinkingConfiguration OpenAI兼容渠道思考配置
+     * @return Mono<AiResponse> AI响应
+     */
+    private Mono<AiResponse> callChatCompletionsApi(AiTaskDtos.AiChannelConfig channel, AgentLoopProfile profile, List<AiMessage> messages,
+                                                     boolean requireTool, ThinkingConfiguration thinkingConfiguration) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", firstModel(channel));
         body.put("messages", messages.stream().map(this::toChatMessage).toList());
         body.put("tools", toApiTools(profile.tools()));
         body.put("tool_choice", requireTool ? "required" : "auto");
+        applyThinkingConfiguration(body, thinkingConfiguration);
         return aiHttpClient.sendJsonRequest(channel, "POST", "/chat/completions", body)
             .map(this::parseChatCompletionsResponse);
     }
@@ -893,34 +931,26 @@ public class AgentTaskOrchestrator {
             .map(this::parseAnthropicResponse);
     }
 
-    /** 流式调用OpenAI Responses API并聚合最终响应。 */
-    private Mono<AiResponse> callStreamingResponsesApi(AiTaskDtos.AiChannelConfig channel, AgentLoopProfile profile,
-                                                        List<AiMessage> messages, boolean requireTool, Consumer<String> textDeltaConsumer) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("model", firstModel(channel));
-        body.put("input", messages.stream().map(this::toApiMessage).toList());
-        body.put("tools", toApiTools(profile.tools()));
-        body.put("tool_choice", requireTool ? "required" : "auto");
-        body.put("parallel_tool_calls", false);
-        body.put("stream", true);
-        ResponsesStreamAccumulator accumulator = new ResponsesStreamAccumulator(textDeltaConsumer);
-        return aiHttpClient.sendStreamingJsonRequest(channel, "/responses", body)
-                .takeUntil("[DONE]"::equals)
-                .filter(data -> !"[DONE]".equals(data))
-                .doOnNext(accumulator::accept)
-                .then(Mono.fromSupplier(accumulator::response))
-                .onErrorResume(error -> fallbackWhenStreamingUnsupported(error,
-                        callResponsesApi(channel, profile, messages, requireTool), textDeltaConsumer, channel));
-    }
-
-    /** 流式调用Chat Completions API并聚合最终响应。 */
+    /**
+     * 流式调用Chat Completions接口并聚合最终响应。
+     *
+     * @param channel AiChannelConfig 文本模型渠道
+     * @param profile AgentLoopProfile 当前Agent配置
+     * @param messages List<AiMessage> 当前消息列表
+     * @param requireTool boolean 是否强制工具调用
+     * @param textDeltaConsumer Consumer<String> 文本增量消费者
+     * @param thinkingConfiguration ThinkingConfiguration OpenAI兼容渠道思考配置
+     * @return Mono<AiResponse> AI响应
+     */
     private Mono<AiResponse> callStreamingChatCompletionsApi(AiTaskDtos.AiChannelConfig channel, AgentLoopProfile profile,
-                                                              List<AiMessage> messages, boolean requireTool, Consumer<String> textDeltaConsumer) {
+                                                              List<AiMessage> messages, boolean requireTool, Consumer<String> textDeltaConsumer,
+                                                              ThinkingConfiguration thinkingConfiguration) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", firstModel(channel));
         body.put("messages", messages.stream().map(this::toChatMessage).toList());
         body.put("tools", toApiTools(profile.tools()));
         body.put("tool_choice", requireTool ? "required" : "auto");
+        applyThinkingConfiguration(body, thinkingConfiguration);
         body.put("stream", true);
         ChatStreamAccumulator accumulator = new ChatStreamAccumulator(textDeltaConsumer);
         return aiHttpClient.sendStreamingJsonRequest(channel, "/chat/completions", body)
@@ -929,7 +959,24 @@ public class AgentTaskOrchestrator {
                 .doOnNext(accumulator::accept)
                 .then(Mono.fromSupplier(accumulator::response))
                 .onErrorResume(error -> fallbackWhenStreamingUnsupported(error,
-                        callChatCompletionsApi(channel, profile, messages, requireTool), textDeltaConsumer, channel));
+                        callChatCompletionsApi(channel, profile, messages, requireTool, thinkingConfiguration), textDeltaConsumer, channel));
+    }
+
+    /**
+     * 写入OpenAI兼容文本调用的思考参数。
+     *
+     * @param body Map<String, Object> 请求体
+     * @param configuration ThinkingConfiguration 思考配置，非OpenAI调用时为null
+     * @return void 无返回值
+     */
+    private void applyThinkingConfiguration(Map<String, Object> body, ThinkingConfiguration configuration) {
+        if (configuration == null) {
+            return;
+        }
+        body.put("thinking", Map.of("type", configuration.enabled() ? "enabled" : "disabled"));
+        if (configuration.enabled()) {
+            body.put("reasoning_effort", configuration.reasoningEffort());
+        }
     }
 
     /** 流式调用Anthropic Messages API并聚合最终响应。 */
@@ -975,40 +1022,6 @@ public class AgentTaskOrchestrator {
         private ToolCall toToolCall() {
             return new ToolCall(id, new ToolCallFunction(name, arguments.isEmpty() ? "{}" : arguments.toString()));
         }
-    }
-
-    /** OpenAI Responses流聚合器。 */
-    private static final class ResponsesStreamAccumulator {
-        private final Consumer<String> textDeltaConsumer;
-        private final StringBuilder text = new StringBuilder();
-        private final Map<String, MutableToolCall> toolCalls = new LinkedHashMap<>();
-
-        private ResponsesStreamAccumulator(Consumer<String> textDeltaConsumer) { this.textDeltaConsumer = textDeltaConsumer; }
-
-        private void accept(String data) {
-            JSONObject event = JSON.parseObject(data);
-            String type = event.getString("type");
-            if ("error".equals(type) || "response.failed".equals(type)) {
-                JSONObject error = event.getJSONObject("error");
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
-                        error == null ? "AI流式响应失败" : error.getString("message"));
-            }
-            if ("response.output_text.delta".equals(type)) appendText(event.getString("delta"));
-            if ("response.output_item.added".equals(type) || "response.output_item.done".equals(type)) {
-                JSONObject item = event.getJSONObject("item");
-                if (item != null && "function_call".equals(item.getString("type"))) {
-                    MutableToolCall call = toolCalls.computeIfAbsent(item.getString("id"), ignored -> new MutableToolCall());
-                    call.id = item.getString("id"); call.name = item.getString("name");
-                    if (StringUtils.hasText(item.getString("arguments")) && call.arguments.isEmpty()) call.arguments.append(item.getString("arguments"));
-                }
-            }
-            if ("response.function_call_arguments.delta".equals(type)) {
-                toolCalls.computeIfAbsent(event.getString("item_id"), ignored -> new MutableToolCall()).arguments.append(event.getString("delta"));
-            }
-        }
-
-        private void appendText(String delta) { if (delta != null) { text.append(delta); textDeltaConsumer.accept(delta); } }
-        private AiResponse response() { return new AiResponse(text.toString(), toolCalls.values().stream().map(MutableToolCall::toToolCall).toList()); }
     }
 
     /** Chat Completions流聚合器。 */
@@ -1110,19 +1123,6 @@ public class AgentTaskOrchestrator {
             result.add(t);
         }
         return result;
-    }
-
-    /**
-     * 将 AiMessage 转换为 OpenAI Responses API 消息体
-     *
-     * @param msg AiMessage 消息
-     * @return Map<String, Object> API 消息
-     */
-    private Map<String, Object> toApiMessage(AiMessage msg) {
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("role", msg.role());
-        m.put("content", msg.content());
-        return m;
     }
 
     /**
@@ -1281,41 +1281,6 @@ public class AgentTaskOrchestrator {
     }
 
     /**
-     * 解析 OpenAI Responses API 返回 JSON 为 AiResponse
-     *
-     * @param payload JSONObject AI 返回 JSON
-     * @return AiResponse 解析结果
-     */
-    private AiResponse parseAiResponse(JSONObject payload) {
-        JSONArray output = payload.getJSONArray("output");
-        StringBuilder text = new StringBuilder();
-        List<ToolCall> toolCalls = new ArrayList<>();
-        if (output != null) {
-            for (int i = 0; i < output.size(); i++) {
-                JSONObject item = output.getJSONObject(i);
-                String type = item.getString("type");
-                if ("message".equals(type)) {
-                    // 提取 message 中的 output_text 文本
-                    JSONArray content = item.getJSONArray("content");
-                    if (content != null) {
-                        for (int j = 0; j < content.size(); j++) {
-                            JSONObject contentItem = content.getJSONObject(j);
-                            if ("output_text".equals(contentItem.getString("type"))) {
-                                text.append(contentItem.getString("text"));
-                            }
-                        }
-                    }
-                } else if ("function_call".equals(type)) {
-                    // 提取 function_call 工具调用
-                    toolCalls.add(new ToolCall(item.getString("id"),
-                        new ToolCallFunction(item.getString("name"), item.getString("arguments"))));
-                }
-            }
-        }
-        return new AiResponse(text.toString(), toolCalls);
-    }
-
-    /**
      * 解析 Chat Completions API 返回 JSON 为 AiResponse
      *
      * @param payload JSONObject AI 返回 JSON
@@ -1464,9 +1429,9 @@ public class AgentTaskOrchestrator {
      * 解析支持指定能力且配置完整的全站AI渠道。
      *
      * @param capability String 能力：text/image/video
-     * @return Mono<AiChannelConfig> 渠道配置
+     * @return Mono<ResolvedTextModel> 文本模型配置
      */
-    private Mono<AiTaskDtos.AiChannelConfig> resolveChannel(String capability) {
+    private Mono<ResolvedTextModel> resolveChannel(String capability) {
         return persistenceService.getPlatformModelConfigs()
                 .flatMap(configs -> configs.stream()
                         .filter(config -> capability.equals(config.modelType()) && Boolean.TRUE.equals(config.defaultModel()))
@@ -1480,9 +1445,9 @@ public class AgentTaskOrchestrator {
      * 显式选择不可用时返回业务错误，避免使用未经用户确认的其他渠道。
      *
      * @param modelHint String channelId::model 编码
-     * @return Mono<AiChannelConfig> 渠道配置（models 仅含指定模型）
+     * @return Mono<ResolvedTextModel> 文本模型配置
      */
-    private Mono<AiTaskDtos.AiChannelConfig> resolveChannelByModel(String modelHint) {
+    private Mono<ResolvedTextModel> resolveChannelByModel(String modelHint) {
         // 先校验模型在全站文本模型目录中启用，再读取对应的完整渠道连接信息。
         return Mono.zip(persistenceService.getPlatformModelConfigs(), persistenceService.getPlatformAiChannels())
                 .flatMap(tuple -> {
@@ -1509,8 +1474,9 @@ public class AgentTaskOrchestrator {
                                             && channel.models().contains(config.modelName())
                                             && adapterRegistry.supports(channel, AiTaskTypes.TEXT))
                                     .findFirst()
-                                    .map(channel -> Mono.just(new AiTaskDtos.AiChannelConfig(
-                                            channel.id(), channel.name(), channel.baseUrl(), channel.apiKey(), channel.apiFormat(), List.of(config.modelName()))))
+                                    .map(channel -> Mono.just(new ResolvedTextModel(
+                                            new AiTaskDtos.AiChannelConfig(channel.id(), channel.name(), channel.baseUrl(), channel.apiKey(), channel.apiFormat(), List.of(config.modelName())),
+                                            thinkingEnabled(config.thinkingEnabled()), reasoningEffort(config.reasoningEffort()))))
                                     .orElseGet(() -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员完整配置文本模型渠道"))))
                             .orElseGet(() -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "所选文本模型未在管理员启用的模型中配置")));
                 });
@@ -1524,6 +1490,45 @@ public class AgentTaskOrchestrator {
      */
     private String channelModelValue(AiTaskDtos.AiChannelConfig channel) {
         return channel.id() + "::" + firstModel(channel);
+    }
+
+    /**
+     * 规范化思考模式开关。
+     *
+     * @param enabled Boolean 模型配置中的开关
+     * @return boolean 缺省时开启思考模式
+     */
+    private boolean thinkingEnabled(Boolean enabled) {
+        return enabled == null || Boolean.TRUE.equals(enabled);
+    }
+
+    /**
+     * 规范化思考强度。
+     *
+     * @param effort String 模型配置中的强度
+     * @return String high或max
+     */
+    private String reasoningEffort(String effort) {
+        return "max".equals(effort) ? "max" : "high";
+    }
+
+    /**
+     * 已解析的文本模型及其思考配置。
+     *
+     * @param channel AiChannelConfig 文本模型渠道
+     * @param thinkingEnabled boolean 是否开启思考模式
+     * @param reasoningEffort String 思考强度
+     */
+    private record ResolvedTextModel(AiTaskDtos.AiChannelConfig channel, boolean thinkingEnabled, String reasoningEffort) {
+    }
+
+    /**
+     * OpenAI兼容文本请求的思考参数。
+     *
+     * @param enabled boolean 是否开启思考模式
+     * @param reasoningEffort String 思考强度
+     */
+    private record ThinkingConfiguration(boolean enabled, String reasoningEffort) {
     }
 
     /**

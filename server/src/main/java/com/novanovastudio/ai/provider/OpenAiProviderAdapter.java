@@ -80,14 +80,17 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
     private Mono<JSONObject> executeTextTask(AiTaskExecutionContext context) {
         Map<String, Object> payload = new java.util.LinkedHashMap<>();
         payload.put("model", context.model());
-        payload.put("input", context.request().prompt());
         String systemPrompt = AiTaskParameterReader.stringParameter(context.request().parameters(), "systemPrompt", "");
+        List<Map<String, String>> messages = new ArrayList<>();
         if (StringUtils.hasText(systemPrompt)) {
-            payload.put("instructions", systemPrompt);
+            messages.add(Map.of("role", "system", "content", systemPrompt));
         }
-        return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/responses", payload)
+        messages.add(Map.of("role", "user", "content", context.request().prompt()));
+        payload.put("messages", messages);
+        applyThinkingConfiguration(payload, context);
+        return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/chat/completions", payload)
                 .map(AiJsonUtils::responsePayload)
-                .map(response -> AiJsonUtils.jsonObject(Map.of("content", readOpenAiText(response))));
+                .map(response -> AiJsonUtils.jsonObject(Map.of("content", readChatCompletionsText(response))));
     }
 
     /**
@@ -266,33 +269,32 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
     }
 
     /**
-     * 读取OpenAI Responses接口文本内容
+     * 写入文本模型思考配置。
+     *
+     * @param payload Map<String, Object> OpenAI兼容请求体
+     * @param context AiTaskExecutionContext 任务执行上下文
+     * @return void 无返回值
+     */
+    private void applyThinkingConfiguration(Map<String, Object> payload, AiTaskExecutionContext context) {
+        payload.put("thinking", Map.of("type", context.thinkingEnabled() ? "enabled" : "disabled"));
+        if (context.thinkingEnabled()) {
+            payload.put("reasoning_effort", context.reasoningEffort());
+        }
+    }
+
+    /**
+     * 读取OpenAI Chat Completions接口文本内容。
      *
      * @param response JSONObject 接口响应载荷
      * @return String 文本内容
      */
-    private String readOpenAiText(JSONObject response) {
-        String outputText = AiTaskParameterReader.firstNonEmpty(response.getString("output_text"), response.getString("text"));
-        if (StringUtils.hasText(outputText)) {
-            return outputText;
-        }
-        JSONArray output = response.getJSONArray("output");
-        if (output == null) {
+    private String readChatCompletionsText(JSONObject response) {
+        JSONArray choices = response.getJSONArray("choices");
+        if (choices == null || choices.isEmpty()) {
             return "";
         }
-        StringBuilder builder = new StringBuilder();
-        for (Object outputItem : output) {
-            JSONObject item = JSON.parseObject(JSON.toJSONString(outputItem));
-            JSONArray content = item.getJSONArray("content");
-            if (content == null) {
-                continue;
-            }
-            for (Object contentItem : content) {
-                JSONObject contentObject = JSON.parseObject(JSON.toJSONString(contentItem));
-                builder.append(AiTaskParameterReader.firstNonEmpty(contentObject.getString("text")));
-            }
-        }
-        return builder.toString();
+        JSONObject message = choices.getJSONObject(0).getJSONObject("message");
+        return message == null ? "" : AiTaskParameterReader.firstNonEmpty(message.getString("content"));
     }
 
     /**
