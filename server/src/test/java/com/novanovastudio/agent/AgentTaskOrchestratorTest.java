@@ -313,13 +313,42 @@ class AgentTaskOrchestratorTest {
         AgentLoopProfile profile = org.mockito.Mockito.mock(AgentLoopProfile.class);
         when(profile.name()).thenReturn("video");
         when(profile.isTerminalTool("generate_video")).thenReturn(true);
-        putInitialVideoRoundId(orchestrator, "session-1", "round-1");
+        putGenerationRoundId(orchestrator, "session-1", "round-1");
         AiResponse response = new AiResponse("", List.of(new ToolCall("provider-call-1",
                 new ToolCallFunction("generate_video", "{\"prompt\":\"用户原始输入 A\"}"))));
 
-        AiResponse normalizedResponse = invokeApplyInitialVideoRoundIdToTerminalTools(orchestrator, profile, "session-1", response);
+        AiResponse normalizedResponse = invokeApplyGenerationRoundIdsToTerminalTools(
+                orchestrator, profile, "session-1", response);
 
         Assertions.assertEquals("round-1", normalizedResponse.toolCalls().getFirst().id());
+    }
+
+    /**
+     * 图片多轮生成即使上游重复返回相同工具调用ID，也应使用不同的服务端轮次ID。
+     *
+     * @throws Exception 反射调用失败时抛出
+     */
+    @Test
+    void shouldUseDifferentServerRoundIdsWhenProviderCallIdsRepeatAcrossTurns() throws Exception {
+        AgentTaskOrchestrator orchestrator = newOrchestrator(List.of());
+        AgentLoopProfile profile = org.mockito.Mockito.mock(AgentLoopProfile.class);
+        when(profile.name()).thenReturn("generation");
+        when(profile.isTerminalTool("generate_image")).thenReturn(true);
+        AiResponse providerResponse = new AiResponse("", List.of(
+                new ToolCall("provider-call", new ToolCallFunction("generate_image", "{\"prompt\":\"第一张\"}")),
+                new ToolCall("provider-call", new ToolCallFunction("generate_image", "{\"prompt\":\"第二张\"}"))));
+
+        putGenerationRoundId(orchestrator, "session-1", "server-round-1");
+        AiResponse firstTurn = invokeApplyGenerationRoundIdsToTerminalTools(
+                orchestrator, profile, "session-1", providerResponse);
+        putGenerationRoundId(orchestrator, "session-1", "server-round-2");
+        AiResponse secondTurn = invokeApplyGenerationRoundIdsToTerminalTools(
+                orchestrator, profile, "session-1", providerResponse);
+
+        Assertions.assertEquals("server-round-1", firstTurn.toolCalls().get(0).id());
+        Assertions.assertEquals("server-round-1-tool-2", firstTurn.toolCalls().get(1).id());
+        Assertions.assertEquals("server-round-2", secondTurn.toolCalls().get(0).id());
+        Assertions.assertEquals("server-round-2-tool-2", secondTurn.toolCalls().get(1).id());
     }
 
     /**
@@ -473,7 +502,6 @@ class AgentTaskOrchestratorTest {
      *
      * @param orchestrator AgentTaskOrchestrator 编排器
      * @param sessionId String Agent会话ID
-     * @param roundId String 生成轮次ID
      * @param request AgentChatRequest 用户对话请求
      * @return Mono<Void> 保存结果
      * @throws Exception 反射调用失败时抛出
@@ -481,9 +509,10 @@ class AgentTaskOrchestratorTest {
     @SuppressWarnings("unchecked")
     private Mono<Void> invokeSaveInitialVideoRound(AgentTaskOrchestrator orchestrator, String sessionId,
                                                    AgentChatRequest request) throws Exception {
-        Method createMethod = AgentTaskOrchestrator.class.getDeclaredMethod("createInitialVideoRound", AgentChatRequest.class);
+        Method createMethod = AgentTaskOrchestrator.class.getDeclaredMethod(
+                "createInitialVideoRound", AgentChatRequest.class, String.class);
         createMethod.setAccessible(true);
-        Object initialVideoRound = createMethod.invoke(orchestrator, request);
+        Object initialVideoRound = createMethod.invoke(orchestrator, request, "round-video-1");
         Method saveMethod = AgentTaskOrchestrator.class.getDeclaredMethod("saveInitialVideoRound",
                 Long.class, String.class, initialVideoRound.getClass());
         saveMethod.setAccessible(true);
@@ -491,26 +520,26 @@ class AgentTaskOrchestratorTest {
     }
 
     /**
-     * 调用初始视频轮次ID绑定方法。
+     * 调用服务端生成轮次ID绑定方法。
      *
      * @param orchestrator AgentTaskOrchestrator 编排器
      * @param profile AgentLoopProfile 当前 Profile
      * @param sessionId String Agent会话ID
      * @param response AiResponse AI工具调用响应
-     * @return AiResponse 绑定初始轮次ID后的工具调用响应
+     * @return AiResponse 绑定服务端轮次ID后的工具调用响应
      * @throws Exception 反射调用失败时抛出
      */
-    private AiResponse invokeApplyInitialVideoRoundIdToTerminalTools(AgentTaskOrchestrator orchestrator,
-                                                                       AgentLoopProfile profile, String sessionId,
-                                                                       AiResponse response) throws Exception {
-        Method method = AgentTaskOrchestrator.class.getDeclaredMethod("applyInitialVideoRoundIdToTerminalTools",
+    private AiResponse invokeApplyGenerationRoundIdsToTerminalTools(AgentTaskOrchestrator orchestrator,
+                                                                     AgentLoopProfile profile, String sessionId,
+                                                                     AiResponse response) throws Exception {
+        Method method = AgentTaskOrchestrator.class.getDeclaredMethod("applyGenerationRoundIdsToTerminalTools",
                 AgentLoopProfile.class, String.class, AiResponse.class);
         method.setAccessible(true);
         return (AiResponse) method.invoke(orchestrator, profile, sessionId, response);
     }
 
     /**
-     * 写入测试用初始视频轮次。
+     * 写入测试用服务端生成轮次ID。
      *
      * @param orchestrator AgentTaskOrchestrator 编排器
      * @param sessionId String Agent会话ID
@@ -518,13 +547,10 @@ class AgentTaskOrchestratorTest {
      * @throws Exception 反射写入失败时抛出
      */
     @SuppressWarnings("unchecked")
-    private void putInitialVideoRoundId(AgentTaskOrchestrator orchestrator, String sessionId, String roundId) throws Exception {
-        Constructor<?> constructor = Class.forName("com.novanovastudio.agent.AgentTaskOrchestrator$InitialVideoRound")
-                .getDeclaredConstructor(String.class, String.class, JSONObject.class);
-        constructor.setAccessible(true);
-        Field field = AgentTaskOrchestrator.class.getDeclaredField("initialVideoRounds");
+    private void putGenerationRoundId(AgentTaskOrchestrator orchestrator, String sessionId, String roundId) throws Exception {
+        Field field = AgentTaskOrchestrator.class.getDeclaredField("generationRoundIds");
         field.setAccessible(true);
-        ((Map<String, Object>) field.get(orchestrator)).put(sessionId, constructor.newInstance(roundId, "", new JSONObject()));
+        ((Map<String, String>) field.get(orchestrator)).put(sessionId, roundId);
     }
 
     /**
@@ -661,7 +687,7 @@ class AgentTaskOrchestratorTest {
          * @param channels List<AiChannelConfig> 全站渠道列表
          */
         private StubPersistenceService(List<AiTaskDtos.AiChannelConfig> channels) {
-            super(null, null, null, null, null);
+            super(null, null, null, null, null, null);
             this.channels = channels;
         }
 
@@ -744,6 +770,13 @@ class AgentTaskOrchestratorTest {
 
         /** 最近一次推送事件 */
         private AgentEvent lastEvent;
+
+        /**
+         * 创建测试用事件捕获器。
+         */
+        private CapturingEventEmitter() {
+            super(new AgentActivityService(org.mockito.Mockito.mock(com.novanovastudio.repository.PersistenceRepository.class)));
+        }
 
         /**
          * 捕获推送事件。

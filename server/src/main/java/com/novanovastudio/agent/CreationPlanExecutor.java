@@ -273,6 +273,7 @@ public class CreationPlanExecutor {
                     emit(userId, AgentEvent.planTaskStatus(sessionId, plan.planId(), task.taskId(), status, result.message()));
                     return planRepository.updateTask(plan.planId(), task.taskId(), status, decision.promptStrategy(), finalPrompt,
                                     result.data(), "success".equals(status) ? "" : result.message())
+                            .then(eventEmitter.persistRoundActivities(userId, sessionId, task.taskId()))
                             .thenReturn(new TaskExecutionResult(task.taskId(), status, result.message(), result.data() == null ? Map.of() : result.data()));
                 });
     }

@@ -8,6 +8,7 @@ import static org.mockito.Mockito.when;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import com.novanovastudio.agent.AgentActivityService;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.config.NovanovaProperties;
@@ -41,6 +42,10 @@ class PersistenceServiceTest {
     @Mock
     private PersistenceRepository repository;
 
+    /** Agent执行活动服务 */
+    @Mock
+    private AgentActivityService agentActivityService;
+
     /** 外部媒体下载客户端 */
     @Mock
     private AiHttpClient aiHttpClient;
@@ -65,7 +70,10 @@ class PersistenceServiceTest {
      */
     @BeforeEach
     void setUp() {
-        service = new PersistenceService(repository, aiHttpClient, currentUserProvider, properties, objectStorageService);
+        org.mockito.Mockito.lenient().when(agentActivityService.activitiesForRound(
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(JSONObject.class)))
+                .thenReturn(new JSONArray());
+        service = new PersistenceService(repository, agentActivityService, aiHttpClient, currentUserProvider, properties, objectStorageService);
     }
 
     /**
@@ -180,6 +188,58 @@ class PersistenceServiceTest {
         Assertions.assertEquals(2, rounds.size());
         Assertions.assertEquals("round-1", rounds.getJSONObject(0).getString("id"));
         Assertions.assertEquals("round-2", rounds.getJSONObject(1).getString("id"));
+    }
+
+    /**
+     * saveOrUpdateGenerationRound 应在同一会话连续完成两轮后保留全部历史轮次。
+     */
+    @Test
+    void shouldKeepPreviousRoundsWhenCompletingAnotherTurn() {
+        AtomicReference<JSONObject> persistedLog = new AtomicReference<>(
+                generationLog(roundWithResults("server-round-1", "success")));
+        when(repository.findGenerationLogById(9L, "conversation-1"))
+                .thenAnswer(invocation -> Mono.just(generationLogRecord(persistedLog.get())));
+        when(repository.saveGenerationLog(org.mockito.ArgumentMatchers.any())).thenAnswer(invocation -> {
+            PersistenceRecords.GenerationLogRecord record = invocation.getArgument(0);
+            persistedLog.set(JSON.parseObject(record.getData()));
+            return Mono.empty();
+        });
+
+        service.saveOrUpdateGenerationRound(9L, "conversation-1", "image", "生成图片",
+                roundWithResults("server-round-2", "pending")).block();
+        service.saveOrUpdateGenerationRound(9L, "conversation-1", "image", "生成图片",
+                roundWithResults("server-round-2", "success")).block();
+
+        JSONArray rounds = persistedLog.get().getJSONArray("rounds");
+        Assertions.assertEquals(2, rounds.size());
+        Assertions.assertEquals("server-round-1", rounds.getJSONObject(0).getString("id"));
+        Assertions.assertEquals("success", rounds.getJSONObject(0).getJSONArray("results")
+                .getJSONObject(0).getString("status"));
+        Assertions.assertEquals("server-round-2", rounds.getJSONObject(1).getString("id"));
+        Assertions.assertEquals("success", rounds.getJSONObject(1).getJSONArray("results")
+                .getJSONObject(0).getString("status"));
+    }
+
+    /**
+     * saveOrUpdateGenerationRound 应将后端执行活动写入生成轮次。
+     */
+    @Test
+    void shouldSaveBackendActivitiesWithGenerationRound() {
+        JSONObject activity = new JSONObject();
+        activity.put("id", "tool-round-1");
+        activity.put("type", "tool-execute");
+        activity.put("title", "调用图片生成工具");
+        activity.put("status", "running");
+        when(agentActivityService.activitiesForRound(
+                org.mockito.ArgumentMatchers.eq("conversation-1"), org.mockito.ArgumentMatchers.any(JSONObject.class)))
+                .thenReturn(JSONArray.of(activity));
+        when(repository.findGenerationLogById(9L, "conversation-1")).thenReturn(Mono.empty());
+        when(repository.saveGenerationLog(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+
+        service.saveOrUpdateGenerationRound(9L, "conversation-1", "image", "生成图片", round("round-1", "pending")).block();
+
+        JSONObject savedRound = capturedGenerationLog().getJSONArray("rounds").getJSONObject(0);
+        Assertions.assertEquals("tool-round-1", savedRound.getJSONArray("activities").getJSONObject(0).getString("id"));
     }
 
     /**

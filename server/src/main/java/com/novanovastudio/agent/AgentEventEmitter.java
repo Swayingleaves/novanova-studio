@@ -8,17 +8,23 @@ package com.novanovastudio.agent;
 
 import com.novanovastudio.agent.dto.AgentEvent;
 import java.util.concurrent.ConcurrentHashMap;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
 /**
  * SSE 事件发射器，每个用户维护一个 Sinks.Many 事件流，支持一对多事件推送。
  */
 @Component
+@RequiredArgsConstructor
 @Slf4j
 public class AgentEventEmitter {
+
+    /** Agent执行活动服务 */
+    private final AgentActivityService activityService;
 
     /** userId → Sink，每个用户一个事件流 */
     private final ConcurrentHashMap<Long, Sinks.Many<AgentEvent>> userSinks = new ConcurrentHashMap<>();
@@ -43,10 +49,26 @@ public class AgentEventEmitter {
      * @param event  AgentEvent 事件
      */
     public void emit(Long userId, AgentEvent event) {
+        activityService.record(event);
         Sinks.Many<AgentEvent> sink = userSinks.get(userId);
         if (sink != null) {
             sink.tryEmitNext(event);
         }
+        if ("task-complete".equals(event.type()) || "canceled".equals(event.type()) || "error".equals(event.type())) {
+            activityService.clear(event.sessionId());
+        }
+    }
+
+    /**
+     * 保存指定生成轮次的最新执行活动。
+     *
+     * @param userId Long 当前用户ID
+     * @param sessionId String Agent会话ID
+     * @param roundId String 生成轮次ID
+     * @return Mono<Void> 保存结果
+     */
+    public Mono<Void> persistRoundActivities(Long userId, String sessionId, String roundId) {
+        return activityService.persistRoundActivities(userId, sessionId, roundId);
     }
 
     /**

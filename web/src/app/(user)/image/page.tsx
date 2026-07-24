@@ -16,9 +16,9 @@ import { requestCreditCost } from "@/features/generation/constants/credits";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import { ChatMessage, ThinkingBlock } from "@/features/chat";
-import type { ChatMessageItem, ThinkingBlockState, ToolCallState } from "@/features/chat/types";
+import type { AgentActivityState, ChatMessageItem, ThinkingBlockState, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
-import { attachAgentActivitiesToThreadSections, collectAgentActivities, createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, groupAgentActivitiesByRoundId, updateAgentActivityMessage, upsertAgentActivityMessage, type AgentActivitiesByRoundId } from "@/features/generation/components/agent-activity";
+import { createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, normalizeAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { findLatestPendingConversation, hasPendingImageConversation } from "@/features/generation/lib/generation-conversation-recovery";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
@@ -68,6 +68,7 @@ type Round = {
     results: GenerationResult[];
     createdAt: number;
     assistantText?: string;
+    activities?: AgentActivityState[];
 };
 
 const IMAGE_PREVIEW_BASE_HEIGHT = 240;
@@ -147,7 +148,6 @@ export default function ImagePage() {
     const [activeThinking, setActiveThinking] = useState<ThinkingBlockState | null>(null);
     const [toolCalls, setToolCalls] = useState<ToolCallState[]>([]);
     const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null);
-    const [agentActivitiesByRoundId, setAgentActivitiesByRoundId] = useState<AgentActivitiesByRoundId>({});
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const agentCreationSettings = {
         model,
@@ -296,11 +296,6 @@ export default function ImagePage() {
             void refreshConversations().then((nextConversations) => {
                 const completedConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
                 if (!completedConversation) return;
-                const completedActivities = collectAgentActivities(chatMessagesRef.current);
-                const completedActivitiesByRoundId = groupAgentActivitiesByRoundId(completedConversation.rounds.map((round) => round.id), completedActivities);
-                if (Object.keys(completedActivitiesByRoundId).length) {
-                    setAgentActivitiesByRoundId((current) => ({ ...current, ...completedActivitiesByRoundId }));
-                }
                 setChatMessages([]);
                 chatMessagesRef.current = [];
                 setToolCalls([]);
@@ -317,31 +312,22 @@ export default function ImagePage() {
                 toolCallsRef.current = next;
                 return next;
             });
-            setChatMessages((prev) => {
-                let hasExecutingTool = false;
-                const messagesWithCanceledTool = prev.map((item) => {
-                    const detail = item.detail as ToolCallState | undefined;
-                    if (item.role !== "tool" || detail?.status !== "executing") return item;
-                    hasExecutingTool = true;
-                    return { ...item, text: stoppedMessage, detail: { ...detail, status: "canceled" as const, resultMessage: stoppedMessage } };
-                });
-                const next = finishRunningAgentActivities(messagesWithCanceledTool, "canceled", stoppedMessage);
-                if (!hasExecutingTool) {
-                    next.push({ id: nanoid(), role: "error", text: stoppedMessage });
-                }
-                chatMessagesRef.current = next;
-                return next;
+            let hasExecutingTool = false;
+            const messagesWithCanceledTool = chatMessagesRef.current.map((item) => {
+                const detail = item.detail as ToolCallState | undefined;
+                if (item.role !== "tool" || detail?.status !== "executing") return item;
+                hasExecutingTool = true;
+                return { ...item, text: stoppedMessage, detail: { ...detail, status: "canceled" as const, resultMessage: stoppedMessage } };
             });
+            const canceledMessages = finishRunningAgentActivities(messagesWithCanceledTool, "canceled", stoppedMessage);
+            if (!hasExecutingTool) {
+                canceledMessages.push({ id: nanoid(), role: "error", text: stoppedMessage });
+            }
+            chatMessagesRef.current = canceledMessages;
+            setChatMessages(canceledMessages);
             void refreshConversations().then((nextConversations) => {
                 const canceledConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
                 if (!canceledConversation) return;
-                const canceledActivities = collectAgentActivities(chatMessagesRef.current);
-                const canceledActivitiesByRoundId = groupAgentActivitiesByRoundId(
-                    canceledConversation.rounds.filter((round) => round.results.some((result) => result.status === "canceled")).map((round) => round.id),
-                    canceledActivities,
-                );
-                if (!Object.keys(canceledActivitiesByRoundId).length) return;
-                setAgentActivitiesByRoundId((current) => ({ ...current, ...canceledActivitiesByRoundId }));
                 setChatMessages([]);
                 chatMessagesRef.current = [];
                 setToolCalls([]);
@@ -771,17 +757,14 @@ export default function ImagePage() {
               }
             : activeConversation;
     const threadSections = displayedConversation
-        ? attachAgentActivitiesToThreadSections(
-              buildImageThreadSections(displayedConversation, {
-                  uploadingObjectStorageId,
-                  onEdit: addResultToReferences,
-                  onDownload: downloadImage,
-                  onSaveAsset: saveResultToAssets,
-                  onUploadObjectStorage: uploadResultToObjectStorage,
-                  onRegenerate: regenerateRound,
-              }),
-              agentActivitiesByRoundId,
-          )
+        ? buildImageThreadSections(displayedConversation, {
+              uploadingObjectStorageId,
+              onEdit: addResultToReferences,
+              onDownload: downloadImage,
+              onSaveAsset: saveResultToAssets,
+              onUploadObjectStorage: uploadResultToObjectStorage,
+              onRegenerate: regenerateRound,
+          })
         : [];
 
     const chatThreadSection = buildChatThreadSection(
@@ -1040,6 +1023,7 @@ function buildImageThreadSections(
             userAttachments: round.references.length ? renderImageRoundReferences(round) : undefined,
             statusText: buildImageStatusText(round),
             assistantText: buildImageAssistantText(round),
+            activities: round.activities,
             resultContent: (
                 <div className="flex flex-wrap items-start gap-3">
                     {round.results.map((result, index) =>
@@ -1310,6 +1294,7 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
     const rounds = await Promise.all(
         (raw.rounds || []).map(async (round) => ({
             ...round,
+            activities: normalizeAgentActivities(round.activities),
             references: await Promise.all((round.references || []).map(async (reference) => ({ ...reference, dataUrl: await resolveImageUrl(reference.storageKey, reference.dataUrl) }))),
             results: await Promise.all(
                 (round.results || []).map(async (result) => {

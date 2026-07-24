@@ -431,13 +431,15 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
             return Flux.interval(Duration.ZERO, POLL_INTERVAL)
             .take(TIMEOUT.toSeconds())
             .concatMap(i -> aiTaskService.getTaskForUser(userId, taskId))
-            .concatMap(task -> persistChangedProgress(userId, sessionId, callId, originalPrompt,
-                    generationPrompt, model,
-                    parameters, references, videoReferences, createdAt, previousSnapshot, task))
+            .concatMap(task -> {
+                // 先更新后端活动快照，再保存轮次，确保数据库中的执行过程与当前进度一致。
+                emitter.emit(userId, AgentEvent.progress(sessionId, callId, taskId,
+                        task.progress() != null ? task.progress() : 0, task.status()));
+                return persistChangedProgress(userId, sessionId, callId, originalPrompt,
+                        generationPrompt, model,
+                        parameters, references, videoReferences, createdAt, previousSnapshot, task);
+            })
             .takeUntil(task -> isTerminal(task.status()))
-            .doOnNext(task -> emitter.emit(userId,
-                AgentEvent.progress(sessionId, callId, taskId,
-                    task.progress() != null ? task.progress() : 0, task.status())))
             .last()
             .flatMap(task -> saveTerminalRound(userId, sessionId, callId, originalPrompt,
                     generationPrompt, model, parameters, references, videoReferences,
