@@ -1,5 +1,7 @@
 package com.novanovastudio.ai;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -14,6 +16,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -37,6 +42,9 @@ public class AiHttpClient {
 
     /** 远程媒体单次下载最大字节数 */
     private static final long MAXIMUM_REMOTE_MEDIA_BYTES = 100L * 1024 * 1024;
+
+    /** 模型列表响应日志最大字符数 */
+    private static final int MODEL_RESPONSE_LOG_MAXIMUM_CHARACTERS = 4000;
 
     /** 远程媒体下载客户端 */
     private final HttpClient remoteMediaHttpClient = HttpClient.newBuilder()
@@ -361,6 +369,69 @@ public class AiHttpClient {
     }
 
     /**
+     * 从第三方渠道拉取可用模型列表。
+     *
+     * @param baseUrl String 渠道基础地址
+     * @param apiKey String 渠道API Key
+     * @param apiFormat String 渠道调用格式
+     * @return Mono<List<String>> 去重并排序后的模型名称
+     */
+    public Mono<List<String>> fetchChannelModels(String baseUrl, String apiKey, String apiFormat) {
+        return callBlocking(() -> {
+            String normalizedFormat = normalizeModelApiFormat(apiFormat);
+            URI uri = buildModelListUri(baseUrl, normalizedFormat);
+            if (!StringUtils.hasText(apiKey)) {
+                throw new BusinessException(ErrorCode.PARAM_MISSING, "API Key不能为空");
+            }
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(uri)
+                    .timeout(Duration.ofSeconds(30))
+                    .header("Accept", "application/json")
+                    .GET();
+            String safeHeaders;
+            if ("gemini".equals(normalizedFormat)) {
+                requestBuilder.header("x-goog-api-key", apiKey.trim());
+                safeHeaders = "Accept=application/json, x-goog-api-key=***";
+            } else if ("anthropic".equals(normalizedFormat)) {
+                requestBuilder.header("x-api-key", apiKey.trim())
+                        .header("anthropic-version", "2023-06-01");
+                safeHeaders = "Accept=application/json, x-api-key=***, anthropic-version=2023-06-01";
+            } else {
+                requestBuilder.header("Authorization", "Bearer " + apiKey.trim());
+                safeHeaders = "Accept=application/json, Authorization=Bearer ***";
+            }
+            try {
+                log.info("渠道模型拉取请求: apiFormat={}, url={}, headers={}", normalizedFormat, uri, safeHeaders);
+                HttpResponse<String> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+                String responseBody = response.body() == null ? "" : response.body();
+                String safeResponseBody = sanitizeModelResponse(responseBody, apiKey);
+                log.info("渠道模型拉取响应: apiFormat={}, url={}, status={}, body={}", normalizedFormat, uri,
+                        response.statusCode(), abbreviateModelResponse(safeResponseBody));
+                if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
+                            "拉取模型失败: HTTP " + response.statusCode() + "，" + readModelErrorMessage(safeResponseBody));
+                }
+                List<String> models;
+                try {
+                    models = parseChannelModels(responseBody, normalizedFormat);
+                } catch (BusinessException exception) {
+                    throw new BusinessException(exception.getCode(), sanitizeModelResponse(exception.getMessage(), apiKey));
+                }
+                if (models.isEmpty()) {
+                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "渠道没有返回可用模型");
+                }
+                return models;
+            } catch (BusinessException exception) {
+                throw exception;
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "拉取模型失败: 请求已中断");
+            } catch (Exception exception) {
+                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "拉取模型失败: " + exception.getMessage());
+            }
+        });
+    }
+
+    /**
      * 下载远程媒体二进制内容
      *
      * @param url String 远程媒体地址
@@ -437,6 +508,152 @@ public class AiHttpClient {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "远程媒体仅支持HTTP或HTTPS地址");
         }
         return uri;
+    }
+
+    /**
+     * 规范化并校验模型接口调用格式。
+     *
+     * @param apiFormat String 原始调用格式
+     * @return String 规范化后的调用格式
+     * @throws BusinessException 调用格式为空或不受支持时抛出
+     */
+    private String normalizeModelApiFormat(String apiFormat) {
+        if (!StringUtils.hasText(apiFormat)) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "接口格式不能为空");
+        }
+        String normalizedFormat = apiFormat.trim().toLowerCase(Locale.ROOT);
+        Set<String> supportedFormats = Set.of("openai", "gemini", "anthropic", "agnes");
+        if (!supportedFormats.contains(normalizedFormat)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "不支持的接口格式: " + normalizedFormat);
+        }
+        return normalizedFormat;
+    }
+
+    /**
+     * 构建并校验模型列表接口地址。
+     *
+     * @param baseUrl String 渠道基础地址
+     * @param apiFormat String 规范化后的调用格式
+     * @return URI 模型列表接口地址
+     * @throws BusinessException 地址为空或格式不合法时抛出
+     */
+    private URI buildModelListUri(String baseUrl, String apiFormat) {
+        if (!StringUtils.hasText(baseUrl)) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "Base URL不能为空");
+        }
+        String url = switch (apiFormat) {
+            case "gemini" -> buildGeminiUrl(baseUrl, "/models");
+            case "anthropic" -> buildAnthropicUrl(baseUrl, "/v1/models");
+            default -> buildAiUrl(baseUrl, "/models");
+        };
+        try {
+            URI uri = URI.create(url);
+            if ((!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme()))
+                    || !StringUtils.hasText(uri.getHost())) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "Base URL仅支持HTTP或HTTPS地址");
+            }
+            return uri;
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (IllegalArgumentException exception) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "Base URL格式不合法");
+        }
+    }
+
+    /**
+     * 解析不同渠道格式的模型列表响应。
+     *
+     * @param responseBody String 第三方响应内容
+     * @param apiFormat String 规范化后的调用格式
+     * @return List<String> 去重并排序后的模型名称
+     * @throws BusinessException 响应不是合法JSON或模型字段格式错误时抛出
+     */
+    private List<String> parseChannelModels(String responseBody, String apiFormat) {
+        try {
+            JSONObject response = JSON.parseObject(responseBody);
+            if (response == null) {
+                throw new IllegalArgumentException("响应为空");
+            }
+            JSONObject error = response.getJSONObject("error");
+            if (error != null && StringUtils.hasText(error.getString("message"))) {
+                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, error.getString("message"));
+            }
+            JSONArray values = response.getJSONArray("gemini".equals(apiFormat) ? "models" : "data");
+            if (values == null) {
+                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "渠道模型列表响应格式不正确");
+            }
+            TreeSet<String> models = new TreeSet<>();
+            String modelField = "gemini".equals(apiFormat) ? "name" : "id";
+            for (Object value : values) {
+                if (!(value instanceof JSONObject model)) {
+                    continue;
+                }
+                String modelName = model.getString(modelField);
+                if (StringUtils.hasText(modelName)) {
+                    String normalizedName = "gemini".equals(apiFormat)
+                            ? modelName.trim().replaceFirst("^models/", "")
+                            : modelName.trim();
+                    if (StringUtils.hasText(normalizedName)) {
+                        models.add(normalizedName);
+                    }
+                }
+            }
+            return new ArrayList<>(models);
+        } catch (BusinessException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "渠道模型列表响应不是合法JSON");
+        }
+    }
+
+    /**
+     * 从第三方错误响应中读取可展示消息。
+     *
+     * @param responseBody String 第三方响应内容
+     * @return String 错误消息
+     */
+    private String readModelErrorMessage(String responseBody) {
+        try {
+            JSONObject response = JSON.parseObject(responseBody);
+            JSONObject error = response == null ? null : response.getJSONObject("error");
+            if (error != null && StringUtils.hasText(error.getString("message"))) {
+                return error.getString("message");
+            }
+            if (response != null && StringUtils.hasText(response.getString("msg"))) {
+                return response.getString("msg");
+            }
+        } catch (Exception ignored) {
+            // 非JSON错误响应直接使用受限长度的原始内容。
+        }
+        String abbreviated = abbreviateModelResponse(responseBody);
+        return StringUtils.hasText(abbreviated) ? abbreviated : "第三方渠道未返回错误信息";
+    }
+
+    /**
+     * 限制模型列表响应日志长度。
+     *
+     * @param responseBody String 原始响应内容
+     * @return String 可安全记录的响应内容
+     */
+    private String abbreviateModelResponse(String responseBody) {
+        if (responseBody == null || responseBody.length() <= MODEL_RESPONSE_LOG_MAXIMUM_CHARACTERS) {
+            return responseBody == null ? "" : responseBody;
+        }
+        return responseBody.substring(0, MODEL_RESPONSE_LOG_MAXIMUM_CHARACTERS) + "...";
+    }
+
+    /**
+     * 从第三方响应中移除可能回显的完整API Key。
+     *
+     * @param responseBody String 原始响应内容
+     * @param apiKey String 当前渠道API Key
+     * @return String 已脱敏的响应内容
+     */
+    private String sanitizeModelResponse(String responseBody, String apiKey) {
+        if (!StringUtils.hasText(responseBody) || !StringUtils.hasText(apiKey)) {
+            return responseBody == null ? "" : responseBody;
+        }
+        return responseBody.replace(apiKey.trim(), "***");
     }
 
     /**

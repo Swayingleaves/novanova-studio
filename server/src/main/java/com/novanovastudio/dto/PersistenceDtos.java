@@ -34,6 +34,16 @@ public final class PersistenceDtos {
                                          List<String> models, Integer sortOrder) {
     }
 
+    /** 渠道模型拉取请求。 */
+    public record ChannelModelRefreshRequest(@NotBlank(message = "Base URL不能为空") String baseUrl,
+                                             @NotBlank(message = "API Key不能为空") String apiKey,
+                                             @NotBlank(message = "接口格式不能为空") String apiFormat) {
+    }
+
+    /** 渠道模型拉取响应。 */
+    public record ChannelModelRefreshResponse(List<String> models) {
+    }
+
     /** 用户模型配置。 */
     public record ModelConfig(String id, String channelId, String modelName, String modelType,
                               List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,

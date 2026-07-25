@@ -139,6 +139,19 @@ public class PersistenceService {
                         }));
     }
 
+    /**
+     * 使用当前请求中的临时渠道配置拉取模型列表。
+     * <p>
+     * 该操作仅访问第三方渠道，不创建或修改数据库中的渠道。
+     *
+     * @param request ChannelModelRefreshRequest 渠道连接配置
+     * @return Mono<List<String>> 去重并排序后的模型列表
+     */
+    public Mono<List<String>> refreshChannelModels(PersistenceDtos.ChannelModelRefreshRequest request) {
+        return aiHttpClient.fetchChannelModels(request.baseUrl(), request.apiKey(), request.apiFormat())
+                .doOnSuccess(models -> log.info("拉取渠道模型列表成功: apiFormat={}, models={}", request.apiFormat(), models.size()));
+    }
+
     /** 删除全站渠道。 */
     public Mono<Void> deleteChannel(String channelId) {
         return repository.existsPlatformModelConfigByChannel(channelId)

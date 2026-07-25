@@ -117,6 +117,10 @@ export type ServerChannelList = {
     channels: ServerChannel[];
 };
 
+export type ServerChannelModelList = {
+    models: string[];
+};
+
 export type ServerModelConfig = {
     id: string;
     channelId: string;
@@ -568,8 +572,12 @@ export function updateChannel(channel: ServerChannel) {
     return serverPost<ServerChannel>("/config/channel/updateChannel", channel);
 }
 
-export function refreshChannelModels(channel: ServerChannel) {
-    return serverPost<ServerChannel>("/config/channel/refreshChannelModels", channel);
+export function refreshChannelModels(channel: Pick<ServerChannel, "baseUrl" | "apiKey" | "apiFormat">) {
+    return serverPost<ServerChannelModelList>("/config/channel/refreshChannelModels", {
+        baseUrl: channel.baseUrl,
+        apiKey: channel.apiKey,
+        apiFormat: channel.apiFormat,
+    });
 }
 
 export function deleteChannel(channelId: string) {

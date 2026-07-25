@@ -6,7 +6,6 @@ import { ChevronDown, ChevronUp, CloudUpload, Plus, RefreshCw, Trash2, Wifi } fr
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useUserStore } from "@/features/auth/stores/use-user-store";
-import { fetchChannelModels } from "@/features/generation/api/image";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import {
     configFromModelConfigs,
@@ -32,6 +31,7 @@ import {
     deleteModelConfig,
     deleteObjectStorage as deleteServerObjectStorage,
     getCreditSettings,
+    refreshChannelModels as refreshServerChannelModels,
     setDefaultModel,
     setDefaultObjectStorage as setServerDefaultObjectStorage,
     updateChannel as updateServerChannel,
@@ -251,14 +251,14 @@ export function AppConfigModal() {
     };
 
     const refreshChannelModels = async (channel: ModelChannel) => {
-        if (channel.apiFormat !== "agnes" && (!channel.baseUrl.trim() || !channel.apiKey.trim())) {
+        if (!channel.baseUrl.trim() || !channel.apiKey.trim()) {
             message.error("请先填写该渠道的 Base URL 和 API Key");
             return;
         }
         setLoadingChannelId(channel.id);
         try {
-            const models = await fetchChannelModels(channel);
-            updateDraftChannel(channel.id, { models });
+            const result = await refreshServerChannelModels(channel);
+            updateDraftChannel(channel.id, { models: result.models });
             message.success(`${channel.name} 模型列表已更新，请点击保存`);
         } catch (error) {
             message.error(error instanceof Error ? error.message : "读取模型失败");
