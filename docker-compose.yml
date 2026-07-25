@@ -8,9 +8,31 @@ services:
       POSTGRES_DB: ${POSTGRES_DATABASE:-novanova_studio}
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        chown -R postgres:postgres /var/log/postgresql
+        exec docker-entrypoint.sh "$@"
+      - --
+    command:
+      - postgres
+      - -c
+      - logging_collector=on
+      - -c
+      - log_directory=/var/log/postgresql
+      - -c
+      - log_filename=postgresql-%Y-%m-%d_%H%M%S.log
+      - -c
+      - log_rotation_age=1d
+      - -c
+      - log_rotation_size=50MB
+      - -c
+      - log_truncate_on_rotation=on
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./volume/postgres_data:/var/lib/postgresql/data
+      - ./logs/postgres:/var/log/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -22,12 +44,20 @@ services:
   redis:
     image: redis:8.6
     container_name: novanovastudio-redis
-    command: ["redis-server", "--appendonly", "yes"]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        chown -R redis:redis /var/log/redis
+        exec docker-entrypoint.sh "$@"
+      - --
+    command: ["redis-server", "--appendonly", "yes", "--logfile", "/var/log/redis/redis.log"]
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./volume/redis_data:/data
+      - ./logs/redis:/var/log/redis
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -44,7 +74,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ${NGINX_CONFIG_DIRECTORY:-/etc/nginx/conf.d}:/etc/nginx/conf.d:ro
       - ${NGINX_STATIC_DIRECTORY:-/usr/share/nginx/html}:/usr/share/nginx/html:ro
-      - ${NGINX_LOG_DIRECTORY:-/var/log/nginx}:/var/log/nginx
+      - ${NGINX_LOG_DIRECTORY:-./logs/nginx}:/var/log/nginx
       - ${NGINX_SSL_DIRECTORY:-/etc/nginx/ssl}:/etc/nginx/ssl:ro
     depends_on:
       - web
@@ -60,10 +90,12 @@ services:
         NEXT_PUBLIC_SERVER_URL: ""
         NEXT_PUBLIC_ICP_RECORD_NUMBER: ${NEXT_PUBLIC_ICP_RECORD_NUMBER:-}
     container_name: novanovastudio-web
+    command: ["sh", "-c", "exec node server.js >> /app/logs/web.log 2>&1"]
     ports:
       - "127.0.0.1:${WEB_PORT:-5550}:5550"
     volumes:
       - /etc/localtime:/etc/localtime:ro
+      - ./logs/web:/app/logs
     depends_on:
       - server
     restart: unless-stopped
@@ -80,6 +112,7 @@ services:
       TRUSTED_PROXY_ADDRESSES: ${TRUSTED_PROXY_ADDRESSES:-}
       CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-http://localhost:3000,http://127.0.0.1:3000,https://www.novanovastudio.cn}
       SERVER_PORT: 8080
+      LOG_DIR: /app/logs
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USERNAME: ${POSTGRES_USERNAME:-postgres}
@@ -117,6 +150,7 @@ services:
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./server/config/prompts:/app/config/prompts:ro
+      - ./logs/server:/app/logs
     depends_on:
       postgres:
         condition: service_healthy

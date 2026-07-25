@@ -146,3 +146,11 @@ Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不�
 
 - [开源社区Linux Do](https://linux.do/)
 - [Agentscope-Java](https://java.agentscope.io/v2/en/intro.html)
+
+# 联系我
+
+<p align="center">
+  <img src="github_images/wechat_me.jpg" width="200">
+  &nbsp;&nbsp;&nbsp;
+  <img src="github_images/wechat_group.jpg" width="200">
+</p>
