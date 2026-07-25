@@ -100,10 +100,17 @@ public class PersistenceController {
         return persistenceService.updateChannel(request).map(ApiResponse::ok);
     }
 
-    /** 保存渠道最新发现的模型列表。 */
+    /**
+     * 从第三方渠道拉取模型列表。
+     *
+     * @param request ChannelModelRefreshRequest 渠道连接配置
+     * @return Mono<ApiResponse<ChannelModelRefreshResponse>> 模型列表响应
+     */
     @PostMapping("/config/channel/refreshChannelModels") @RequireRole("admin")
-    public Mono<ApiResponse<AiTaskDtos.AiChannelConfig>> refreshChannelModels(@Valid @RequestBody PersistenceDtos.ChannelMutationRequest request) {
-        return persistenceService.updateChannel(request).map(ApiResponse::ok);
+    public Mono<ApiResponse<PersistenceDtos.ChannelModelRefreshResponse>> refreshChannelModels(
+            @Valid @RequestBody PersistenceDtos.ChannelModelRefreshRequest request) {
+        return persistenceService.refreshChannelModels(request)
+                .map(models -> ApiResponse.ok(new PersistenceDtos.ChannelModelRefreshResponse(models)));
     }
 
     /** 删除当前用户渠道。 */

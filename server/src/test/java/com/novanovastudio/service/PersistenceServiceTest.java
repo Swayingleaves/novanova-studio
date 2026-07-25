@@ -17,8 +17,9 @@ import com.novanovastudio.entity.PersistenceRecords;
 import com.novanovastudio.repository.PersistenceRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.storage.ObjectStorageService;
-import java.util.concurrent.atomic.AtomicReference;
 import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -74,6 +75,23 @@ class PersistenceServiceTest {
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(JSONObject.class)))
                 .thenReturn(new JSONArray());
         service = new PersistenceService(repository, agentActivityService, aiHttpClient, currentUserProvider, properties, objectStorageService);
+    }
+
+    /**
+     * 拉取渠道模型应只调用第三方客户端，不读写渠道仓储。
+     */
+    @Test
+    void shouldRefreshChannelModelsWithoutPersistingChannel() {
+        PersistenceDtos.ChannelModelRefreshRequest request = new PersistenceDtos.ChannelModelRefreshRequest(
+                "https://api.example.com/v1", "secret-key", "openai");
+        when(aiHttpClient.fetchChannelModels(request.baseUrl(), request.apiKey(), request.apiFormat()))
+                .thenReturn(Mono.just(List.of("model-a", "model-b")));
+
+        List<String> models = service.refreshChannelModels(request).block();
+
+        Assertions.assertEquals(List.of("model-a", "model-b"), models);
+        verify(aiHttpClient).fetchChannelModels(request.baseUrl(), request.apiKey(), request.apiFormat());
+        verifyNoInteractions(repository);
     }
 
     /**

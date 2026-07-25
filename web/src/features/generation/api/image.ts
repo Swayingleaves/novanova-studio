@@ -1,9 +1,8 @@
 import type { ReferenceImage } from "@/features/generation/types/image";
-import type { AiConfig, ModelChannel } from "@/features/settings/stores/use-config-store";
+import type { AiConfig } from "@/features/settings/stores/use-config-store";
 import { createAiTask, subscribeAiTaskDeltas, waitAiTask, type ServerGenerationSource } from "@/services/api/server";
 
 import type { AiTextMessage, ImageRequestOptions, ResponseFunctionTool, ResponseInputMessage, ToolChoice, ToolResponseResult } from "./image-contracts";
-import { fetchConfiguredImageModels, fetchModelsForChannel } from "./image-model-catalog";
 import { requestServerGeneratedImages } from "./image-task-provider";
 
 export type { AiTextMessage, ResponseFunctionTool, ResponseInputMessage, ResponseToolCall, ToolResponseResult } from "./image-contracts";
@@ -38,14 +37,6 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
     } finally {
         unsubscribe();
     }
-}
-
-export function fetchImageModels(config: Pick<AiConfig, "baseUrl" | "apiKey" | "apiFormat">) {
-    return fetchConfiguredImageModels(config);
-}
-
-export function fetchChannelModels(channel: ModelChannel) {
-    return fetchModelsForChannel(channel);
 }
 
 function textTaskPrompt(messages: AiTextMessage[]) {
