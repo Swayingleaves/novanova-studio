@@ -232,6 +232,9 @@ novanova:
       agent-video-file: ${AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE:file:./server/config/prompts/agent-video.md}
       # 画布 Agent 系统提示词文件路径
       agent-canvas-file: ${AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE:file:./server/config/prompts/agent-canvas.md}
+    image:
+      # 是否将第三方HTTP图片结果下载并转存到默认对象存储
+      upload-http-result-to-object-storage: ${AI_IMAGE_HTTP_RESULT_UPLOAD_TO_OBJECT_STORAGE:false}
     # ----------------------------------------------------------
     # AI 任务消费配置
     # 基于 Redis Stream + Consumer Group 实现，不是队列也不是栈。

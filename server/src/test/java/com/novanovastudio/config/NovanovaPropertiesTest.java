@@ -32,4 +32,16 @@ class NovanovaPropertiesTest {
         Assertions.assertEquals(300, task.getPendingClaimIdleSeconds());
         Assertions.assertEquals(900, task.getRunningRecoverSeconds());
     }
+
+    /**
+     * 测试HTTP图片结果默认不转存对象存储。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldDisableHttpImageResultObjectStorageUploadByDefault() {
+        NovanovaProperties properties = new NovanovaProperties();
+
+        Assertions.assertFalse(properties.getAi().getImage().isUploadHttpResultToObjectStorage());
+    }
 }

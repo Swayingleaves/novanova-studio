@@ -6,6 +6,7 @@ import { Menu } from "lucide-react";
 
 import { AppSidebar } from "@/features/app-shell/components/app-sidebar";
 import { AppConfigModal } from "@/features/app-shell/components/app-config-modal";
+import { GitHubLink } from "@/features/app-shell/components/github-link";
 import { WelcomeModal } from "@/features/app-shell/components/welcome-modal";
 import { AuthModal } from "@/features/auth/components/auth-modal";
 import { MobileNavDrawer } from "@/features/app-shell/components/mobile-nav-drawer";
@@ -39,6 +40,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <MobileNavDrawer open={mobileNavOpen} activeToolSlug={activeToolSlug} onClose={() => setMobileNavOpen(false)} />
                 </>
             )}
+
+            {!hideSidebar ? (
+                <GitHubLink className="studio-glass fixed right-3 top-3 z-40 rounded-lg text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]" />
+            ) : null}
 
             {/* Main content */}
             <div className="relative z-10 flex min-w-0 flex-1 flex-col">
