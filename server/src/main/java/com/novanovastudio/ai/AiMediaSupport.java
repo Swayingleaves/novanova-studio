@@ -3,11 +3,13 @@ package com.novanovastudio.ai;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.service.PersistenceService;
 import java.util.Base64;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Mono;
@@ -20,6 +22,7 @@ import reactor.core.publisher.Mono;
  */
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class AiMediaSupport {
 
     /** AI HTTP客户端 */
@@ -27,6 +30,9 @@ public class AiMediaSupport {
 
     /** 业务持久化服务 */
     private final PersistenceService persistenceService;
+
+    /** 服务配置 */
+    private final NovanovaProperties properties;
 
     /**
      * 从图片接口结果中读取二进制内容
@@ -57,9 +63,14 @@ public class AiMediaSupport {
      * @return Mono<UploadedMediaResponse> 媒体响应
      */
     public Mono<PersistenceDtos.UploadedMediaResponse> storeGeneratedImageItem(Long userId, JSONObject item, Integer width, Integer height, Integer durationMs) {
-        // 第三方直接返回图片URL时只登记源链接，不下载后自动上传OSS。
         String url = AiTaskParameterReader.firstNonEmpty(item.getString("url"));
         if (isHttpUrl(url)) {
+            if (isInsecureHttpUrl(url) && properties.getAi().getImage().isUploadHttpResultToObjectStorage()) {
+                // HTTPS页面不能直接加载HTTP图片，开启配置后必须转存成功才返回生成结果。
+                log.info("检测到HTTP图片结果，开始转存默认对象存储: userId={}", userId);
+                return imageBinary(item).flatMap(binary -> storeGeneratedMedia(userId, AiTaskTypes.IMAGE, "generated.png", binary, width, height, durationMs));
+            }
+            // 保持默认行为：仅登记第三方URL，不下载后上传对象存储。
             return registerGeneratedMediaUrl(userId, AiTaskTypes.IMAGE, url, AiTaskParameterReader.firstNonEmpty(item.getString("mime_type"), item.getString("mimeType"), "image/png"), width, height, durationMs);
         }
         return imageBinary(item).flatMap(binary -> storeGeneratedMedia(userId, AiTaskTypes.IMAGE, "generated.png", binary, width, height, durationMs));
@@ -182,5 +193,15 @@ public class AiMediaSupport {
      */
     public boolean isHttpUrl(String url) {
         return StringUtils.hasText(url) && (url.startsWith("http://") || url.startsWith("https://"));
+    }
+
+    /**
+     * 判断是否为不安全的HTTP媒体地址。
+     *
+     * @param url String 媒体地址
+     * @return boolean true表示HTTP地址，false表示其他协议或HTTPS地址
+     */
+    private boolean isInsecureHttpUrl(String url) {
+        return StringUtils.hasText(url) && url.startsWith("http://");
     }
 }
