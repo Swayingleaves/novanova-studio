@@ -89,6 +89,7 @@ services:
       args:
         NEXT_PUBLIC_SERVER_URL: ""
         NEXT_PUBLIC_ICP_RECORD_NUMBER: ${NEXT_PUBLIC_ICP_RECORD_NUMBER:-}
+        NEXT_PUBLIC_GITHUB_URL: ${NEXT_PUBLIC_GITHUB_URL:-}
     container_name: novanovastudio-web
     command: ["sh", "-c", "exec node server.js >> /app/logs/web.log 2>&1"]
     ports:
