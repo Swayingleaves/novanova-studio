@@ -147,7 +147,7 @@ Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不�
 - [开源社区Linux Do](https://linux.do/)
 - [Agentscope-Java](https://java.agentscope.io/v2/en/intro.html)
 
-# 联系我
+## 联系我(个人免费使用)
 - 商业授权
 - 技术支持
 

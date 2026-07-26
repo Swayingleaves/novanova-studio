@@ -463,7 +463,7 @@ function FantasticShow({ items, loading, error, reload }: ReturnType<typeof useH
                                 type="button"
                                 role="tab"
                                 aria-selected={selected}
-                                className={`h-9 rounded-[6px] border px-3 text-sm transition ${selected ? "border-[var(--studio-action)] bg-[var(--studio-action)] text-[var(--studio-action-foreground)]" : "border-[var(--studio-line)] bg-transparent text-[var(--studio-muted)] hover:border-[var(--studio-line-strong)] hover:bg-[var(--studio-surface)] hover:text-[var(--studio-ink)]"}`}
+                                className={`h-9 rounded-[6px] border px-3 text-sm transition ${selected ? "border-[var(--studio-action)] bg-[var(--studio-surface-raised)] text-[var(--studio-action)]" : "border-[var(--studio-line)] bg-transparent text-[var(--studio-muted)] hover:border-[var(--studio-line-strong)] hover:bg-[var(--studio-surface)] hover:text-[var(--studio-ink)]"}`}
                                 onClick={() => setCategory(item)}
                             >
                                 {item}

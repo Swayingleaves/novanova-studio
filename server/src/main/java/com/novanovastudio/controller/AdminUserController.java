@@ -40,6 +40,7 @@ public class AdminUserController {
      * @param page int 页码
      * @param pageSize int 每页数量
      * @param keyword String 搜索关键字（模糊匹配昵称、用户名和邮箱）
+     * @param userId Long 用户ID（精确匹配）
      * @param role String 角色筛选
      * @param status Integer 状态筛选
      * @param createdAfter String 创建时间起始
@@ -50,12 +51,13 @@ public class AdminUserController {
     public Mono<ApiResponse<UserDtos.UserListResponse>> listUsers(@RequestParam(defaultValue = "1") int page,
                                                                    @RequestParam(defaultValue = "20") int pageSize,
                                                                    @RequestParam(required = false) String keyword,
+                                                                   @RequestParam(required = false) Long userId,
                                                                    @RequestParam(required = false) String role,
                                                                    @RequestParam(required = false) Integer status,
                                                                    @RequestParam(required = false) String createdAfter,
                                                                    @RequestParam(required = false) String createdBefore) {
         return adminGuard.requireAdmin()
-                .then(userService.listUsers(page, pageSize, keyword, role, status, createdAfter, createdBefore))
+                .then(userService.listUsers(page, pageSize, keyword, userId, role, status, createdAfter, createdBefore))
                 .map(ApiResponse::ok);
     }
 

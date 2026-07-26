@@ -225,10 +225,21 @@ public class UserRepository {
 
     /**
      * 分页查询用户列表（支持搜索和筛选）
+     *
+     * @param page int 页码
+     * @param pageSize int 每页数量
+     * @param keyword String 搜索关键字
+     * @param userId Long 用户ID（精确匹配）
+     * @param role String 角色筛选
+     * @param status Integer 状态筛选
+     * @param createdAfter String 创建时间起始
+     * @param createdBefore String 创建时间截止
+     * @return Flux<User> 用户列表
      */
-    public Flux<User> listUsers(int page, int pageSize, String keyword, String role, Integer status, String createdAfter, String createdBefore) {
+    public Flux<User> listUsers(int page, int pageSize, String keyword, Long userId, String role, Integer status, String createdAfter, String createdBefore) {
         StringBuilder sql = new StringBuilder("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id WHERE 1=1");
         if (StringUtils.hasText(keyword)) sql.append(" AND (users.username ILIKE :keyword OR users.nickname ILIKE :keyword OR users.email ILIKE :keyword)");
+        if (userId != null) sql.append(" AND users.id = :userId");
         if (StringUtils.hasText(role)) sql.append(" AND users.role = :role");
         if (status != null) sql.append(" AND users.status = :status");
         if (StringUtils.hasText(createdAfter)) sql.append(" AND users.created_at >= :createdAfter");
@@ -238,6 +249,7 @@ public class UserRepository {
                 .bind("offset", (page - 1) * pageSize)
                 .bind("limit", pageSize);
         if (StringUtils.hasText(keyword)) spec = spec.bind("keyword", "%" + keyword.trim() + "%");
+        if (userId != null) spec = spec.bind("userId", userId);
         if (StringUtils.hasText(role)) spec = spec.bind("role", role.trim());
         if (status != null) spec = spec.bind("status", status);
         if (StringUtils.hasText(createdAfter)) spec = spec.bind("createdAfter", java.time.LocalDateTime.parse(createdAfter.trim()));
@@ -247,16 +259,26 @@ public class UserRepository {
 
     /**
      * 查询用户总数（支持搜索和筛选）
+     *
+     * @param keyword String 搜索关键字
+     * @param userId Long 用户ID（精确匹配）
+     * @param role String 角色筛选
+     * @param status Integer 状态筛选
+     * @param createdAfter String 创建时间起始
+     * @param createdBefore String 创建时间截止
+     * @return Mono<Long> 用户总数
      */
-    public Mono<Long> countUsers(String keyword, String role, Integer status, String createdAfter, String createdBefore) {
+    public Mono<Long> countUsers(String keyword, Long userId, String role, Integer status, String createdAfter, String createdBefore) {
         StringBuilder sql = new StringBuilder("SELECT COUNT(*) AS total FROM users WHERE 1=1");
         if (StringUtils.hasText(keyword)) sql.append(" AND (username ILIKE :keyword OR nickname ILIKE :keyword OR email ILIKE :keyword)");
+        if (userId != null) sql.append(" AND id = :userId");
         if (StringUtils.hasText(role)) sql.append(" AND role = :role");
         if (status != null) sql.append(" AND status = :status");
         if (StringUtils.hasText(createdAfter)) sql.append(" AND created_at >= :createdAfter");
         if (StringUtils.hasText(createdBefore)) sql.append(" AND created_at <= :createdBefore");
         var spec = databaseClient.sql(sql.toString());
         if (StringUtils.hasText(keyword)) spec = spec.bind("keyword", "%" + keyword.trim() + "%");
+        if (userId != null) spec = spec.bind("userId", userId);
         if (StringUtils.hasText(role)) spec = spec.bind("role", role.trim());
         if (status != null) spec = spec.bind("status", status);
         if (StringUtils.hasText(createdAfter)) spec = spec.bind("createdAfter", java.time.LocalDateTime.parse(createdAfter.trim()));

@@ -336,6 +336,7 @@ function UserManagement() {
     const [page, setPage] = useState(1);
     const [loading, setLoading] = useState(false);
     const [searchKeyword, setSearchKeyword] = useState("");
+    const [userIdKeyword, setUserIdKeyword] = useState("");
     const [filterRole, setFilterRole] = useState<string | undefined>();
     const [filterStatus, setFilterStatus] = useState<number | undefined>();
     const [filterCreatedAfter, setFilterCreatedAfter] = useState<string | undefined>();
@@ -352,12 +353,18 @@ function UserManagement() {
 
     const loadUsers = useCallback(
         async (nextPage = page) => {
+            const normalizedUserId = userIdKeyword.trim();
+            if (normalizedUserId && !/^[1-9]\d*$/.test(normalizedUserId)) {
+                message.warning("请输入正整数用户ID");
+                return;
+            }
             setLoading(true);
             try {
                 const result = await listServerUsers({
                     page: nextPage,
                     pageSize: PAGE_SIZE,
                     keyword: searchKeyword || undefined,
+                    userId: normalizedUserId || undefined,
                     role: filterRole,
                     status: filterStatus,
                     createdAfter: filterCreatedAfter,
@@ -371,7 +378,7 @@ function UserManagement() {
                 setLoading(false);
             }
         },
-        [message, page, searchKeyword, filterRole, filterStatus, filterCreatedAfter, filterCreatedBefore],
+        [message, page, searchKeyword, userIdKeyword, filterRole, filterStatus, filterCreatedAfter, filterCreatedBefore],
     );
 
     useEffect(() => {
@@ -467,6 +474,12 @@ function UserManagement() {
 
     const columns: ColumnsType<ServerUserProfile> = [
         {
+            title: "用户ID",
+            dataIndex: "id",
+            width: 120,
+            render: (value: number) => <span className="tabular-nums">{value}</span>,
+        },
+        {
             title: "用户",
             dataIndex: "email",
             render: (_, user) => (
@@ -551,6 +564,16 @@ function UserManagement() {
                         onChange={(e) => setSearchKeyword(e.target.value)}
                         onSearch={handleSearch}
                         className="max-w-64"
+                        prefix={<Search className="size-3.5 text-[var(--studio-faint)]" />}
+                        allowClear
+                    />
+                    <Input.Search
+                        placeholder="用户ID"
+                        value={userIdKeyword}
+                        onChange={(e) => setUserIdKeyword(e.target.value)}
+                        onSearch={handleSearch}
+                        className="w-32"
+                        inputMode="numeric"
                         prefix={<Search className="size-3.5 text-[var(--studio-faint)]" />}
                         allowClear
                     />

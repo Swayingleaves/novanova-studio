@@ -233,9 +233,10 @@ export function changeCurrentUserPassword(input: { currentPassword: string; newP
     return serverPost("/auth/changePassword", input);
 }
 
-export function listServerUsers(params: { page: number; pageSize: number; keyword?: string; role?: string; status?: number; createdAfter?: string; createdBefore?: string }) {
+export function listServerUsers(params: { page: number; pageSize: number; keyword?: string; userId?: string; role?: string; status?: number; createdAfter?: string; createdBefore?: string }) {
     const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
     if (params.keyword) query.set("keyword", params.keyword);
+    if (params.userId) query.set("userId", params.userId);
     if (params.role) query.set("role", params.role);
     if (params.status !== undefined) query.set("status", String(params.status));
     if (params.createdAfter) query.set("createdAfter", params.createdAfter);

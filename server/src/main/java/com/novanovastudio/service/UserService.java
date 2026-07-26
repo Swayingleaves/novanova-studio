@@ -332,22 +332,23 @@ public class UserService {
      * @param page int 页码
      * @param pageSize int 每页数量
      * @param keyword String 搜索关键字
+     * @param userId Long 用户ID（精确匹配）
      * @param role String 角色筛选
      * @param status Integer 状态筛选
      * @param createdAfter String 创建时间起始
      * @param createdBefore String 创建时间截止
      * @return Mono<UserListResponse> 用户列表
      */
-    public Mono<UserDtos.UserListResponse> listUsers(int page, int pageSize, String keyword, String role, Integer status, String createdAfter, String createdBefore) {
+    public Mono<UserDtos.UserListResponse> listUsers(int page, int pageSize, String keyword, Long userId, String role, Integer status, String createdAfter, String createdBefore) {
         int normalizedPage = Math.max(1, page);
         int normalizedPageSize = Math.min(100, Math.max(1, pageSize <= 0 ? 20 : pageSize));
-        return userRepository.listUsers(normalizedPage, normalizedPageSize, keyword, role, status, createdAfter, createdBefore)
+        return userRepository.listUsers(normalizedPage, normalizedPageSize, keyword, userId, role, status, createdAfter, createdBefore)
                 .collectList()
                 .flatMap(users -> passwordLoginLockService.lockedUntilByUserIds(users.stream().map(User::getId).toList())
                         .map(passwordLockedUntilByUserId -> users.stream()
                                 .map(user -> userProfile(user, passwordLockedUntilByUserId.get(user.getId())))
                                 .toList()))
-                .zipWith(userRepository.countUsers(keyword, role, status, createdAfter, createdBefore))
+                .zipWith(userRepository.countUsers(keyword, userId, role, status, createdAfter, createdBefore))
                 .map(tuple -> new UserDtos.UserListResponse(tuple.getT1(), tuple.getT2()));
     }
 

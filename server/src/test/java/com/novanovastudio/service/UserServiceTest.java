@@ -316,13 +316,16 @@ class UserServiceTest {
         TestContext context = testContext();
         User user = normalUser(8L);
         OffsetDateTime lockedUntil = OffsetDateTime.now().plusMinutes(5);
-        when(context.userRepository.listUsers(1, 20, null, null, null, null, null)).thenReturn(Flux.just(user));
-        when(context.userRepository.countUsers(null, null, null, null, null)).thenReturn(Mono.just(1L));
+        when(context.userRepository.listUsers(1, 20, null, 8L, null, null, null, null)).thenReturn(Flux.just(user));
+        when(context.userRepository.countUsers(null, 8L, null, null, null, null)).thenReturn(Mono.just(1L));
         when(context.passwordLoginLockService.lockedUntilByUserIds(java.util.List.of(8L))).thenReturn(Mono.just(Map.of(8L, lockedUntil)));
 
-        StepVerifier.create(context.service.listUsers(1, 20, null, null, null, null, null))
+        StepVerifier.create(context.service.listUsers(1, 20, null, 8L, null, null, null, null))
                 .assertNext(response -> assertTrue(lockedUntil.toString().equals(response.users().getFirst().passwordLockedUntil())))
                 .verifyComplete();
+
+        verify(context.userRepository).listUsers(1, 20, null, 8L, null, null, null, null);
+        verify(context.userRepository).countUsers(null, 8L, null, null, null, null);
     }
 
     /**
