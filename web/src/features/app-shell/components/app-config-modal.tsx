@@ -67,6 +67,7 @@ const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
     { label: "Gemini", value: "gemini" },
     { label: "Agnes", value: "agnes" },
     { label: "Anthropic", value: "anthropic" },
+    { label: "Seedance", value: "seedance" },
 ];
 
 const objectStorageProviderOptions: Array<{ label: string; value: ObjectStorageProvider }> = [
@@ -1004,6 +1005,7 @@ function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "agnes") return "Agnes";
     if (apiFormat === "gemini") return "Gemini";
     if (apiFormat === "anthropic") return "Anthropic";
+    if (apiFormat === "seedance") return "Seedance";
     return "OpenAI";
 }
 

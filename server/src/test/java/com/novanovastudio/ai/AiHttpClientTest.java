@@ -66,6 +66,37 @@ class AiHttpClientTest {
     }
 
     /**
+     * Seedance格式应使用方舟模型列表接口，并过滤已下线模型但保留即将退役模型。
+     *
+     * @throws IOException 本地测试服务创建失败时抛出
+     */
+    @Test
+    void shouldFetchSeedanceModelsAndExcludeShutdownModels() throws IOException {
+        AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicReference<String> path = new AtomicReference<>();
+        HttpServer server = startJsonServer(200,
+                "{\"data\":["
+                        + "{\"id\":\"doubao-seedance-2-0-260128\"},"
+                        + "{\"id\":\"doubao-seedance-2-0-fast-260128\",\"status\":\"Retiring\"},"
+                        + "{\"id\":\"old-seedance-model\",\"status\":\"Shutdown\"},"
+                        + "{\"id\":\"doubao-seedance-2-0-260128\"}]}",
+                exchange -> {
+                    authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+                    path.set(exchange.getRequestURI().getPath());
+                });
+        try {
+            List<String> models = new AiHttpClient().fetchChannelModels(
+                    baseUrl(server) + "/api/v3", "seedance-key", "seedance").block();
+
+            Assertions.assertEquals(List.of("doubao-seedance-2-0-260128", "doubao-seedance-2-0-fast-260128"), models);
+            Assertions.assertEquals("Bearer seedance-key", authorization.get());
+            Assertions.assertEquals("/api/v3/models", path.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /**
      * Gemini格式应使用Google鉴权头，并移除模型名称中的models前缀。
      *
      * @throws IOException 本地测试服务创建失败时抛出

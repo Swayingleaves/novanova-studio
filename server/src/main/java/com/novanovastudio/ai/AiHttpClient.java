@@ -522,7 +522,7 @@ public class AiHttpClient {
             throw new BusinessException(ErrorCode.PARAM_MISSING, "接口格式不能为空");
         }
         String normalizedFormat = apiFormat.trim().toLowerCase(Locale.ROOT);
-        Set<String> supportedFormats = Set.of("openai", "gemini", "anthropic", "agnes");
+        Set<String> supportedFormats = Set.of("openai", "gemini", "anthropic", "agnes", "seedance");
         if (!supportedFormats.contains(normalizedFormat)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "不支持的接口格式: " + normalizedFormat);
         }
@@ -586,6 +586,10 @@ public class AiHttpClient {
             String modelField = "gemini".equals(apiFormat) ? "name" : "id";
             for (Object value : values) {
                 if (!(value instanceof JSONObject model)) {
+                    continue;
+                }
+                String status = model.getString("status");
+                if (status != null && "shutdown".equalsIgnoreCase(status.trim())) {
                     continue;
                 }
                 String modelName = model.getString(modelField);
