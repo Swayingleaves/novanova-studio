@@ -16,7 +16,9 @@ import com.novanovastudio.task.AiTaskEventPublisher;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
 import java.security.SecureRandom;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -69,6 +71,9 @@ public class UserService {
 
     /** 邮箱验证码过期分钟数 */
     private static final int EMAIL_CODE_EXPIRE_MINUTES = 10;
+
+    /** 用户统计业务时区 */
+    private static final ZoneId USER_STATISTICS_TIME_ZONE = ZoneId.of("Asia/Shanghai");
 
     /** 安全随机数 */
     private static final SecureRandom secureRandom = new SecureRandom();
@@ -350,6 +355,23 @@ public class UserService {
                                 .toList()))
                 .zipWith(userRepository.countUsers(keyword, userId, role, status, createdAfter, createdBefore))
                 .map(tuple -> new UserDtos.UserListResponse(tuple.getT1(), tuple.getT2()));
+    }
+
+    /**
+     * 查询用户总量与新增统计。
+     *
+     * @return Mono<UserStatisticsResponse> 用户统计
+     */
+    public Mono<UserDtos.UserStatisticsResponse> getUserStatistics() {
+        LocalDate today = LocalDate.now(USER_STATISTICS_TIME_ZONE);
+        OffsetDateTime dayStart = today.atStartOfDay(USER_STATISTICS_TIME_ZONE).toOffsetDateTime();
+        OffsetDateTime monthStart = today.withDayOfMonth(1).atStartOfDay(USER_STATISTICS_TIME_ZONE).toOffsetDateTime();
+        return userRepository.getUserStatistics(monthStart, dayStart)
+                .map(statistics -> new UserDtos.UserStatisticsResponse(
+                        statistics.totalUsers(), statistics.monthlyNewUsers(), statistics.dailyNewUsers()))
+                .doOnSuccess(statistics -> log.info(
+                        "查询用户统计成功: totalUsers={}, monthlyNewUsers={}, dailyNewUsers={}",
+                        statistics.totalUsers(), statistics.monthlyNewUsers(), statistics.dailyNewUsers()));
     }
 
     /**

@@ -113,6 +113,16 @@ public final class UserDtos {
     }
 
     /**
+     * 用户统计响应
+     *
+     * @param totalUsers long 总用户数
+     * @param monthlyNewUsers long 本月新增用户数
+     * @param dailyNewUsers long 今日新增用户数
+     */
+    public record UserStatisticsResponse(long totalUsers, long monthlyNewUsers, long dailyNewUsers) {
+    }
+
+    /**
      * 更新用户状态请求
      *
      * @param userId Long 用户ID

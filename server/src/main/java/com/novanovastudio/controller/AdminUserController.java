@@ -62,6 +62,18 @@ public class AdminUserController {
     }
 
     /**
+     * 查询用户总量与新增统计。
+     *
+     * @return Mono<ApiResponse<UserStatisticsResponse>> 用户统计
+     */
+    @GetMapping("/getUserStatistics")
+    public Mono<ApiResponse<UserDtos.UserStatisticsResponse>> getUserStatistics() {
+        return adminGuard.requireAdmin()
+                .then(userService.getUserStatistics())
+                .map(ApiResponse::ok);
+    }
+
+    /**
      * 新增用户
      *
      * @param request AdminCreateUserRequest 请求
