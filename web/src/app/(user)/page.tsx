@@ -8,7 +8,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { getHomepageTargetPath, homepageFallbackEditorialShowcaseId, homepageFallbackEditorialVideoUrls } from "@/features/homepage/api/homepage-showcases";
 import { useHomepageShowcases } from "@/features/homepage/hooks/use-homepage-showcases";
-import { FANTASTIC_SHOW_CATEGORIES, creatorMonogram, filterFantasticShowcases, getFantasticShowcases, type FantasticShowCategory } from "@/features/homepage/lib/fantastic-show";
+import { FANTASTIC_SHOWCASE_LIMIT, FANTASTIC_SHOW_CATEGORIES, creatorMonogram, filterFantasticShowcases, getFantasticShowcases, type FantasticShowCategory } from "@/features/homepage/lib/fantastic-show";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import type { HomepageShowcase } from "@/services/api/server";
 
@@ -475,7 +475,7 @@ function FantasticShow({ items, loading, error, reload }: ReturnType<typeof useH
 
             {loading ? (
                 <div className="mt-6 grid gap-x-4 gap-y-7 md:grid-cols-2 xl:grid-cols-4" aria-label="正在加载精彩创作">
-                    {Array.from({ length: 8 }, (_, index) => (
+                    {Array.from({ length: FANTASTIC_SHOWCASE_LIMIT }, (_, index) => (
                         <div key={index} className="space-y-3">
                             <div className="studio-skeleton aspect-[4/3]" />
                             <div className="studio-skeleton h-4 w-2/5" />

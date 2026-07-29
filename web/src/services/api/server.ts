@@ -102,6 +102,12 @@ export type UserListResponse = {
     total: number;
 };
 
+export type UserStatisticsResponse = {
+    totalUsers: number;
+    monthlyNewUsers: number;
+    dailyNewUsers: number;
+};
+
 /** 后端渠道配置，对齐 AiChannelConfig record */
 export type ServerChannel = {
     id: string;
@@ -242,6 +248,10 @@ export function listServerUsers(params: { page: number; pageSize: number; keywor
     if (params.createdAfter) query.set("createdAfter", params.createdAfter);
     if (params.createdBefore) query.set("createdBefore", params.createdBefore);
     return serverGet<UserListResponse>(`/admin/user/listUsers?${query}`);
+}
+
+export function getServerUserStatistics() {
+    return serverGet<UserStatisticsResponse>("/admin/user/getUserStatistics");
 }
 
 export function updateServerUserStatus(userId: number, status: number) {

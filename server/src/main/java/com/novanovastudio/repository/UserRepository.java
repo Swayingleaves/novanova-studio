@@ -2,6 +2,7 @@ package com.novanovastudio.repository;
 
 import com.novanovastudio.entity.EmailVerificationCode;
 import com.novanovastudio.entity.User;
+import java.time.OffsetDateTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Repository;
@@ -287,6 +288,31 @@ public class UserRepository {
     }
 
     /**
+     * 查询用户总量与新增统计。
+     * <p>
+     * 使用条件聚合在一次表扫描中完成三个计数，避免分别查询造成重复开销。
+     *
+     * @param monthStart OffsetDateTime 本月开始时间
+     * @param dayStart OffsetDateTime 今日开始时间
+     * @return Mono<UserStatistics> 用户统计
+     */
+    public Mono<UserStatistics> getUserStatistics(OffsetDateTime monthStart, OffsetDateTime dayStart) {
+        return databaseClient.sql("""
+                SELECT COUNT(*) AS total_users,
+                       COUNT(*) FILTER (WHERE created_at >= :monthStart) AS monthly_new_users,
+                       COUNT(*) FILTER (WHERE created_at >= :dayStart) AS daily_new_users
+                FROM users
+                """)
+                .bind("monthStart", monthStart)
+                .bind("dayStart", dayStart)
+                .map((row, metadata) -> new UserStatistics(
+                        row.get("total_users", Long.class),
+                        row.get("monthly_new_users", Long.class),
+                        row.get("daily_new_users", Long.class)))
+                .one();
+    }
+
+    /**
      * 更新用户状态
      *
      * @param userId Long 用户ID
@@ -301,6 +327,16 @@ public class UserRepository {
                 .fetch()
                 .rowsUpdated()
                 .then();
+    }
+
+    /**
+     * 用户统计查询结果。
+     *
+     * @param totalUsers long 总用户数
+     * @param monthlyNewUsers long 本月新增用户数
+     * @param dailyNewUsers long 今日新增用户数
+     */
+    public record UserStatistics(long totalUsers, long monthlyNewUsers, long dailyNewUsers) {
     }
 
     /**

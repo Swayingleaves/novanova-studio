@@ -10,6 +10,7 @@ import { Edit, Image as ImageIcon, Plus, Power, Search, Send, Trash2, Upload, Vi
 
 import {
     adjustServerUserCredits,
+    getServerUserStatistics,
     unlockServerUserPassword,
     listServerUsers,
     updateServerUserRole,
@@ -350,6 +351,10 @@ function UserManagement() {
     const [creditChangeAmount, setCreditChangeAmount] = useState<number | null>(null);
     const [creditReason, setCreditReason] = useState("");
     const [creditSaving, setCreditSaving] = useState(false);
+    const statisticsQuery = useQuery({
+        queryKey: ["admin-user-statistics"],
+        queryFn: getServerUserStatistics,
+    });
 
     const loadUsers = useCallback(
         async (nextPage = page) => {
@@ -404,7 +409,7 @@ function UserManagement() {
             setNewUserNickname("");
             setNewUserRole("user");
             setPage(1);
-            await loadUsers(1);
+            await Promise.all([loadUsers(1), statisticsQuery.refetch()]);
         } catch (error) {
             message.error(error instanceof Error ? error.message : "创建用户失败");
         }
@@ -474,7 +479,7 @@ function UserManagement() {
 
     const columns: ColumnsType<ServerUserProfile> = [
         {
-            title: "用户ID",
+            title: "ID",
             dataIndex: "id",
             width: 120,
             render: (value: number) => <span className="tabular-nums">{value}</span>,
@@ -556,6 +561,31 @@ function UserManagement() {
 
     return (
         <div>
+            <section className="mb-5 grid grid-cols-1 border border-[var(--studio-line)] bg-[var(--studio-surface)] sm:grid-cols-3" aria-label="用户统计">
+                {[
+                    { label: "总用户数", value: statisticsQuery.data?.totalUsers },
+                    { label: "本月用户增量", value: statisticsQuery.data?.monthlyNewUsers },
+                    { label: "今日用户增量", value: statisticsQuery.data?.dailyNewUsers },
+                ].map((item, index) => (
+                    <div key={item.label} className={`min-w-0 px-5 py-4 ${index > 0 ? "border-t border-[var(--studio-line)] sm:border-l sm:border-t-0" : ""}`}>
+                        <div className="text-sm text-[var(--studio-muted)]">{item.label}</div>
+                        {statisticsQuery.isLoading ? (
+                            <Skeleton.Input active size="small" className="mt-2 !h-8 !w-24" />
+                        ) : (
+                            <div className="mt-2 text-2xl font-semibold tabular-nums text-[var(--studio-ink)]">{item.value?.toLocaleString() ?? "--"}</div>
+                        )}
+                    </div>
+                ))}
+            </section>
+            {statisticsQuery.isError ? (
+                <Alert
+                    className="mb-4"
+                    type="error"
+                    showIcon
+                    message="用户统计加载失败"
+                    action={<Button size="small" onClick={() => void statisticsQuery.refetch()}>重新加载</Button>}
+                />
+            ) : null}
             <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                     <Input.Search

@@ -360,12 +360,6 @@ export function resolveModelRequestConfig(config: AiConfig, model: string): AiCo
     };
 }
 
-export async function saveCurrentObjectStorages() {
-    const state = useConfigStore.getState();
-    const { updateObjectStorage } = await import("@/services/api/server");
-    await updateObjectStorage(state.objectStorage);
-}
-
 function normalizeConfig(config: Partial<AiConfig> = {}): AiConfig {
     const channels = normalizeChannels(config.channels || defaultChannels);
     const models = modelOptionsFromChannels(channels);

@@ -1,6 +1,7 @@
 import type { HomepageShowcase } from "@/services/api/server";
 
 export const FANTASTIC_SHOW_CATEGORIES = ["全部", "视觉海报", "概念短片", "商业广告", "游戏美术", "时尚影像", "产品视觉", "生活方式"] as const;
+export const FANTASTIC_SHOWCASE_LIMIT = 8;
 
 export type FantasticShowCategory = (typeof FANTASTIC_SHOW_CATEGORIES)[number];
 
@@ -8,10 +9,10 @@ export type FantasticShowCategory = (typeof FANTASTIC_SHOW_CATEGORIES)[number];
  * 返回首页顶部精选之外的精彩创作内容。
  *
  * @param items HomepageShowcase[] 已排序的首页展示内容
- * @return HomepageShowcase[] 用于精彩创作网格的内容
+ * @return HomepageShowcase[] 用于精彩创作网格的最多8条内容
  */
 export function getFantasticShowcases(items: HomepageShowcase[]) {
-    return items.slice(3);
+    return items.slice(3, 3 + FANTASTIC_SHOWCASE_LIMIT);
 }
 
 /**
