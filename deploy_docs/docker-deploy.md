@@ -2,7 +2,7 @@
 
 本文档介绍如何使用 Docker Compose 一键部署 Novanova Studio 的全部服务（PostgreSQL、Redis、后端、前端、Nginx）。
 
-> **注意**：此方式适用于 Linux 服务器环境。Nginx 使用 `network_mode: host` 并挂载宿主机 `/etc`、日志和证书目录，因此不适用于 Windows / macOS 本地开发。本地开发请参考 [Windows 本地启动](local-setup-windows.md) 或 [macOS / Linux 本地启动](local-setup-macos-linux.md)。
+> **注意**：此方式适用于 Linux 服务器环境。Nginx 使用 `network_mode: host` 并挂载宿主机 `/etc`、日志和证书目录，因此不适用于 Windows / macOS 本地开发。本地开发请参考[本地源码启动与调试指南](local-source-development.md)。
 
 ## 1. 准备环境
 
