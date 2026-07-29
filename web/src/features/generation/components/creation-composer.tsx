@@ -6,6 +6,7 @@ import { useEffect, useRef } from "react";
 import { ArrowUp, Bot, Square, X } from "lucide-react";
 
 import type { CreationComposerProps } from "@/features/generation/components/creation-workspace-types";
+import { CreditCostDisplay } from "@/features/generation/constants/credits";
 
 export function CreationComposer({ agentLabel = "Novanova Agent", value, placeholder, references, actions, running, canSubmit, creditCost, compact, focusWhenValueSet, stopping, onChange, onPasteImages, onSubmit, onStop }: CreationComposerProps) {
     const inputRef = useRef<TextAreaRef>(null);
@@ -113,12 +114,19 @@ export function CreationComposer({ agentLabel = "Novanova Agent", value, placeho
                             ) : (
                                 <button
                                     type="button"
-                                    className="creation-composer-submit-trigger"
+                                    className="creation-composer-submit-trigger creation-composer-submit-trigger-cost"
                                     disabled={!canSubmit || running}
                                     onClick={onSubmit}
                                     aria-label={running ? "生成中" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
                                 >
-                                    {running ? "生成中" : <ArrowUp className="size-[18px] shrink-0" strokeWidth={2.1} />}
+                                    {running ? (
+                                        "生成中"
+                                    ) : (
+                                        <>
+                                            <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />
+                                            <ArrowUp className="size-[18px] shrink-0" strokeWidth={2.1} />
+                                        </>
+                                    )}
                                 </button>
                             )}
                         </div>
