@@ -4,7 +4,6 @@ import { nanoid } from "nanoid";
 
 import { readImageMeta } from "@/features/generation/lib/image-utils";
 import { deleteServerMedia, downloadServerMedia, getServerMediaInfo, registerRemoteMedia, uploadServerMedia } from "@/services/api/server";
-import { saveCurrentObjectStorages } from "@/features/settings/stores/use-config-store";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { mergeMediaStorageInfo } from "./media-storage-info";
 
@@ -42,7 +41,6 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
     const meta = await readImageMeta(localUrl);
     URL.revokeObjectURL(localUrl);
     const storageKey = `image:${nanoid()}`;
-    await saveCurrentObjectStorages();
     const media = await uploadServerMedia(
         blob,
         {
@@ -110,7 +108,6 @@ export async function setImageBlob(storageKey: string, blob: Blob) {
     const localUrl = URL.createObjectURL(blob);
     const meta = await readImageMeta(localUrl);
     URL.revokeObjectURL(localUrl);
-    await saveCurrentObjectStorages();
     const media = await uploadServerMedia(blob, { kind: "image", storageKey, mimeType: blob.type || meta.mimeType, width: meta.width, height: meta.height }, "image.png");
     resolvedUrls.set(storageKey, media.url);
     return media.url;

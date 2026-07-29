@@ -3,7 +3,6 @@
 import { nanoid } from "nanoid";
 
 import { deleteServerMedia, downloadServerMedia, getServerMediaInfo, registerRemoteMedia, uploadServerMedia } from "@/services/api/server";
-import { saveCurrentObjectStorages } from "@/features/settings/stores/use-config-store";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { mergeMediaStorageInfo } from "./media-storage-info";
 
@@ -21,7 +20,6 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file", opt
     const meta: Partial<{ width: number; height: number; durationMs: number }> = blob.type.startsWith("video/") ? await readVideoMeta(localUrl) : {};
     URL.revokeObjectURL(localUrl);
     const storageKey = `${prefix}:${nanoid()}`;
-    await saveCurrentObjectStorages();
     const media = await uploadServerMedia(
         blob,
         {
@@ -70,7 +68,6 @@ export async function setMediaBlob(storageKey: string, blob: Blob) {
     const localUrl = URL.createObjectURL(blob);
     const meta = blob.type.startsWith("video/") ? await readVideoMeta(localUrl) : {};
     URL.revokeObjectURL(localUrl);
-    await saveCurrentObjectStorages();
     const media = await uploadServerMedia(blob, { kind: storageKey.split(":", 1)[0] || "file", storageKey, mimeType: blob.type || "application/octet-stream", ...meta }, "media.bin");
     resolvedUrls.set(storageKey, media.url);
     return media.url;
