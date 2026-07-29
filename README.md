@@ -98,13 +98,13 @@ flowchart LR
 
 ## 🚀 本地启动或部署
 
-按场景选择对应文档：
+### 本地开发
 
-- 本地开发（保留热更新）：
-  - [Windows 本地启动指南](deploy_docs/local-setup-windows.md)
-  - [macOS / Linux 本地启动指南](deploy_docs/local-setup-macos-linux.md)
-- 服务器部署：
-  - [Docker 完整部署指南](deploy_docs/docker-deploy.md)
+- [本地源码启动与调试指南](deploy_docs/local-source-development.md)
+
+### 服务器部署
+
+- [Docker 完整部署指南](deploy_docs/docker-deploy.md)
 
 ## 📝 Agent 提示词配置
 
