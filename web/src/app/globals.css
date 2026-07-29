@@ -1324,6 +1324,13 @@ html[data-theme="dark"] {
     padding: 0 !important;
 }
 
+.creation-composer-submit-trigger-cost {
+    width: auto;
+    min-width: 72px;
+    gap: 6px;
+    padding-inline: 10px !important;
+}
+
 .creation-composer-submit.ant-btn:not(:disabled),
 .creation-composer-submit-trigger:not(:disabled) {
     background: var(--studio-action) !important;
