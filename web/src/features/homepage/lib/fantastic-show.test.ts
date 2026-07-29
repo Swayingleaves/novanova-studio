@@ -27,6 +27,11 @@ test("精彩创作跳过首页顶部的前三条内容", () => {
     );
 });
 
+test("精彩创作最多展示8条内容", () => {
+    const items = Array.from({ length: 12 }, (_, index) => showcase(index + 1, "视觉海报", "林夏"));
+    assert.deepEqual(getFantasticShowcases(items).map((item) => item.id), [4, 5, 6, 7, 8, 9, 10, 11]);
+});
+
 test("精彩创作支持分类和标题、描述、创作者关键词搜索", () => {
     const items = [showcase(1, "视觉海报", "林夏", "雾城回声"), showcase(2, "产品视觉", "Miro", "玻璃脉冲")];
     assert.deepEqual(
