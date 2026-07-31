@@ -6,6 +6,8 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { Copy, PanelRightClose, Plus } from "lucide-react";
+import { ThinkingBlock } from "@/features/chat";
+import type { ThinkingBlockState } from "@/features/chat/types";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
@@ -26,6 +28,8 @@ type CanvasChatPanelProps = {
     nodes: CanvasNode[];
     onNodeDropRef?: React.MutableRefObject<((nodeId: string) => void) | null>;
     messages: CanvasAssistantMessage[];
+    completedThinkings?: ThinkingBlockState[];
+    activeThinking?: ThinkingBlockState | null;
     onSend: (text: string, references?: CanvasAssistantReference[]) => void;
     onNewSession: () => void;
     isStreaming?: boolean;
@@ -40,7 +44,7 @@ type CanvasChatPanelProps = {
  * 基于 assistant-ui 的画布 AI 对话面板
  * 承载画布内的对话、节点引用和模型选择交互
  */
-export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, onSend, onNewSession, isStreaming = false, config, model, onModelChange, onMissingConfig, initialPrompt = "" }: CanvasChatPanelProps) {
+export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, completedThinkings = [], activeThinking = null, onSend, onNewSession, isStreaming = false, config, model, onModelChange, onMissingConfig, initialPrompt = "" }: CanvasChatPanelProps) {
     const theme = useCanvasTheme();
     const copyText = useCopyText();
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -90,7 +94,7 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, on
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
-    }, [messages, isStreaming]);
+    }, [activeThinking, completedThinkings, messages, isStreaming]);
 
     useEffect(() => {
         const handleWindowResize = () => setPanelWidth((current) => clampPanelWidth(current));
@@ -198,6 +202,21 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, on
                             </div>
                         ))
                     )}
+                    {[...completedThinkings, ...(activeThinking ? [activeThinking] : [])]
+                        .filter((thinking) => thinking.text)
+                        .map((thinking) => (
+                            <ThinkingBlock
+                                key={thinking.id}
+                                block={thinking}
+                                streaming={activeThinking?.id === thinking.id}
+                                appearance={{
+                                    text: theme.node.text,
+                                    muted: theme.node.muted,
+                                    background: theme.toolbar.itemHover,
+                                    border: theme.toolbar.border,
+                                }}
+                            />
+                        ))}
                     {isStreaming ? (
                         <div className="text-xs" style={{ color: theme.node.muted }}>
                             <span className="inline-block animate-pulse">● 生成中...</span>

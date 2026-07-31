@@ -3,7 +3,7 @@ import test from "node:test";
 
 const { buildImageRoundRegeneratePayload, regenerateImageRound } = await import(new URL("./image-round-regenerate.ts", import.meta.url).href);
 
-test("buildImageRoundRegeneratePayload 保留历史配置与参考图", () => {
+test("buildImageRoundRegeneratePayload 保留历史配置与参考图并固定单图数量", () => {
     const payload = buildImageRoundRegeneratePayload(
         {
             prompt: "生成一只坐在窗边的黑猫",
@@ -33,7 +33,7 @@ test("buildImageRoundRegeneratePayload 保留历史配置与参考图", () => {
         size: "16:9",
         resolution: "4K",
         quality: "high",
-        count: 2,
+        count: 1,
     });
     assert.deepEqual(payload.attachments, [
         {
@@ -73,6 +73,7 @@ test("regenerateImageRound 会追加用户消息并发送重新生成请求", as
             attachments: undefined,
             creationSettings: {
                 model: "default-image-model",
+                count: 1,
             },
         },
     ]);

@@ -1,3 +1,5 @@
+import type { AgentAction } from "@/features/canvas/api/agent";
+
 export type ChatRole = "user" | "assistant" | "system" | "tool" | "error";
 
 export type ChatMessageItem = {
@@ -8,6 +10,7 @@ export type ChatMessageItem = {
   meta?: string;
   detail?: unknown;
   attachments?: ChatAttachment[];
+  action?: AgentAction;
 };
 
 export type ChatAttachment = {

@@ -124,7 +124,7 @@ class CreationAgentOrchestratorTest {
      * @return CreationPlan 候选计划
      */
     private CreationPlan plan(String prompt) {
-        return new CreationPlan("model-plan", "生成图片", CreationEntrySource.IMAGE_PAGE, "生成一张图片", "",
+        return new CreationPlan("model-plan", "生成图片", CreationEntrySource.IMAGE_PAGE, "生成一张图片", "", false,
                 new CreationSettings("image-model", "1:1", "2K", "high", 1, null, null),
                 List.of(new CreationTask("task-1", "image", "generate", prompt, List.of(), null, Map.of())));
     }

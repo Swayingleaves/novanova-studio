@@ -1,13 +1,16 @@
 "use client";
 
 import { Button, Tooltip } from "antd";
-import { Copy } from "lucide-react";
+import { ArrowRight, Copy } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
+import { useRouter } from "next/navigation";
 
 import { AgentActivityTimeline } from "@/features/generation/components/agent-activity-timeline";
 import type { CreationMessageThreadProps } from "@/features/generation/components/creation-workspace-types";
+import { ThinkingBlock } from "@/features/chat";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
+import { storeInitialPromptForNavigation } from "@/shared/lib/initial-prompt";
 
 const AT_BOTTOM_THRESHOLD = 48;
 
@@ -16,6 +19,7 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange }
     const keepPinnedToBottomRef = useRef(true);
     const latestFreshUserRoundIdRef = useRef<string | null>(null);
     const copyText = useCopyText();
+    const router = useRouter();
 
     const isAtBottom = () => {
         const el = scrollRef.current;
@@ -84,6 +88,9 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange }
                                             </div>
                                         ) : null}
                                         <div className="space-y-3">
+                                            {round.thinkings?.map((thinking) => (
+                                                <ThinkingBlock key={thinking.id} block={thinking} streaming={round.activeThinkingId === thinking.id} />
+                                            ))}
                                             {round.activities?.length ? <AgentActivityTimeline activities={round.activities} /> : null}
                                             {round.statusText ? <div className="text-xs font-medium text-[var(--studio-muted)]">{round.statusText}</div> : null}
                                             {round.assistantText ? (
@@ -101,6 +108,23 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange }
                                                 </div>
                                             ) : null}
                                             {round.resultContent}
+                                            {round.action?.type === "navigate" ? (
+                                                <div className="pt-1">
+                                                    <Button
+                                                        type="primary"
+                                                        size="small"
+                                                        icon={<ArrowRight className="size-3.5" />}
+                                                        onClick={() => {
+                                                            const action = round.action;
+                                                            if (!action || action.type !== "navigate") return;
+                                                            if (action.initialPrompt) storeInitialPromptForNavigation(action.initialPrompt);
+                                                            router.push(action.href);
+                                                        }}
+                                                    >
+                                                        {round.action.label}
+                                                    </Button>
+                                                </div>
+                                            ) : null}
                                             {round.actionBar ? <div className="pt-1">{round.actionBar}</div> : null}
                                         </div>
                                     </article>

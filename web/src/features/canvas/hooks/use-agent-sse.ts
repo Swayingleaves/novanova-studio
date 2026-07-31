@@ -12,7 +12,10 @@ interface UseAgentSSEProps {
   onApplyOps: (ops?: CanvasAgentOp[]) => CanvasAgentSnapshot;
   onToolExecute?: () => void;
   onTextDelta: (messageId: string, delta: string) => void;
+  onThoughtDelta?: (thoughtId: string, delta: string) => void;
+  onThoughtComplete?: (thoughtId: string, durationMs: number) => void;
   onTaskComplete: (messageId: string, text: string) => void;
+  onCanceled?: (message: string) => void;
   onPlanCreated?: (planId: string, summary: string, taskCount: number) => void;
   onPlanTaskStatus?: (planId: string, taskId: string, status: string, message: string) => void;
   onPromptPrepared?: (planId: string, taskId: string, strategy: "KEEP" | "OPTIMIZE") => void;
@@ -23,7 +26,7 @@ interface UseAgentSSEProps {
  * Agent SSE 通信 Hook。建立 SSE 长连接，处理文本增量、工具执行、任务完成和错误事件。
  * 画布写操作工具通过 onApplyOps 应用到画布，并将执行结果回传后端继续 Agent Loop。
  */
-export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, onTaskComplete, onPlanCreated, onPlanTaskStatus, onPromptPrepared, onError }: UseAgentSSEProps) {
+export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, onThoughtDelta, onThoughtComplete, onTaskComplete, onCanceled, onPlanCreated, onPlanTaskStatus, onPromptPrepared, onError }: UseAgentSSEProps) {
   const sessionIdRef = useRef<string | undefined>(undefined);
   const eventSourceRef = useRef<EventSource | null>(null);
   const sendingRef = useRef(false);
@@ -31,7 +34,10 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
   const onApplyOpsRef = useRef(onApplyOps);
   const onToolExecuteRef = useRef(onToolExecute);
   const onTextDeltaRef = useRef(onTextDelta);
+  const onThoughtDeltaRef = useRef(onThoughtDelta);
+  const onThoughtCompleteRef = useRef(onThoughtComplete);
   const onTaskCompleteRef = useRef(onTaskComplete);
+  const onCanceledRef = useRef(onCanceled);
   const onPlanCreatedRef = useRef(onPlanCreated);
   const onPlanTaskStatusRef = useRef(onPlanTaskStatus);
   const onPromptPreparedRef = useRef(onPromptPrepared);
@@ -40,7 +46,10 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
   onApplyOpsRef.current = onApplyOps;
   onToolExecuteRef.current = onToolExecute;
   onTextDeltaRef.current = onTextDelta;
+  onThoughtDeltaRef.current = onThoughtDelta;
+  onThoughtCompleteRef.current = onThoughtComplete;
   onTaskCompleteRef.current = onTaskComplete;
+  onCanceledRef.current = onCanceled;
   onPlanCreatedRef.current = onPlanCreated;
   onPlanTaskStatusRef.current = onPlanTaskStatus;
   onPromptPreparedRef.current = onPromptPrepared;
@@ -58,6 +67,17 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
     es.addEventListener("text-delta", (e: MessageEvent) => {
       const data: AgentEvent = JSON.parse(e.data);
       if (data.messageId && data.delta) onTextDeltaRef.current(data.messageId, data.delta);
+    });
+
+    // 主Agent思考事件仅更新当前页面的瞬时展示状态。
+    es.addEventListener("thought-delta", (e: MessageEvent) => {
+      const data: AgentEvent = JSON.parse(e.data);
+      if (data.thoughtId && data.thoughtDelta) onThoughtDeltaRef.current?.(data.thoughtId, data.thoughtDelta);
+    });
+
+    es.addEventListener("thought-complete", (e: MessageEvent) => {
+      const data: AgentEvent = JSON.parse(e.data);
+      if (data.thoughtId) onThoughtCompleteRef.current?.(data.thoughtId, data.thoughtDurationMs ?? 0);
     });
 
     // 工具执行事件：将工具参数转为画布操作并应用，再回传结果给后端
@@ -90,10 +110,15 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
     // 任务完成事件
     es.addEventListener("task-complete", (e: MessageEvent) => {
       const data: AgentEvent = JSON.parse(e.data);
-      if (data.messageId && data.text) onTaskCompleteRef.current(data.messageId, data.text);
+      onTaskCompleteRef.current(data.messageId || "", data.text || "");
     });
 
-    // 仅展示主Agent计划摘要和确定性执行阶段，不展示模型思维链。
+    es.addEventListener("canceled", (e: MessageEvent) => {
+      const data: AgentEvent = JSON.parse(e.data);
+      onCanceledRef.current?.(data.text || "已停止生成");
+    });
+
+    // 展示主Agent计划摘要和确定性执行阶段。
     es.addEventListener("plan-created", (e: MessageEvent) => {
       const data: AgentEvent = JSON.parse(e.data);
       onPlanCreatedRef.current?.(

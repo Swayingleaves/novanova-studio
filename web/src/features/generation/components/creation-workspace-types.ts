@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
-import type { AgentActivityState } from "@/features/chat/types";
+import type { AgentAction } from "@/features/canvas/api/agent";
+import type { AgentActivityState, ThinkingBlockState } from "@/features/chat/types";
 
 export type CreationConversationStatus = "running" | "unreadSuccess" | "unreadFailed" | "none";
 
@@ -25,10 +26,13 @@ export type CreationThreadRound = {
     id: string;
     userText: string;
     userAttachments?: ReactNode;
+    thinkings?: ThinkingBlockState[];
+    activeThinkingId?: string;
     activities?: AgentActivityState[];
     statusText: string;
     assistantText?: string;
     resultContent: ReactNode;
+    action?: AgentAction;
     actionBar?: ReactNode;
 };
 
