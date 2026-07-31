@@ -29,7 +29,8 @@ import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
-import type { AgentActivityState, ChatMessageItem, ThinkingBlockState, ToolCallState } from "@/features/chat/types";
+import { useAgentThinking } from "@/features/chat/use-agent-thinking";
+import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
 import { createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, normalizeAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { hasPendingVideoConversation } from "@/features/generation/lib/generation-conversation-recovery";
@@ -142,8 +143,7 @@ export default function VideoPage() {
 
     // Agent chat state
     const [chatMessages, setChatMessages] = useState<ChatMessageItem[]>([]);
-    const [completedThinkings, setCompletedThinkings] = useState<ThinkingBlockState[]>([]);
-    const [activeThinking, setActiveThinking] = useState<ThinkingBlockState | null>(null);
+    const { completedThinkings, activeThinking, onThoughtDelta, onThoughtComplete, resetThinkings } = useAgentThinking();
     const [toolCalls, setToolCalls] = useState<ToolCallState[]>([]);
     const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null);
     const model = effectiveConfig.videoModel || effectiveConfig.model;
@@ -191,15 +191,8 @@ export default function VideoPage() {
                 return next;
             });
         },
-        onThoughtDelta: (thoughtId, delta) => {
-            setActiveThinking((prev) => (prev?.id === thoughtId ? { ...prev, text: prev.text + delta } : { id: thoughtId, text: delta, durationMs: 0, collapsed: false }));
-        },
-        onThoughtComplete: (_thoughtId, durationMs) => {
-            setActiveThinking((prev) => {
-                if (prev) setCompletedThinkings((list) => [...list, { ...prev, durationMs, collapsed: true }]);
-                return null;
-            });
-        },
+        onThoughtDelta,
+        onThoughtComplete,
         onToolCall: (call) => {
             const isVideoTool = call.name === "generate_video" || call.name === "edit_video";
             const pendingCall = isVideoTool ? bindPendingVideoSize(call, pendingVideoSizeRef.current) : call;
@@ -276,23 +269,30 @@ export default function VideoPage() {
                 return next;
             });
         },
-        onTaskComplete: (_msgId, text) => {
+        onTaskComplete: (messageId, text, action) => {
             const streamed = streamingTextRef.current;
-            if (streamed && streamed.text) {
-                setChatMessages((prev) => {
-                    const next = [...prev, { id: streamed.messageId, role: "assistant" as const, text: streamed.text }];
-                    chatMessagesRef.current = next;
-                    return next;
-                });
-            } else if (text) {
-                setChatMessages((prev) => (prev.at(-1)?.text === text ? prev : [...prev, { id: nanoid(), role: "assistant", text }]));
-            }
+            setChatMessages((prev) => {
+                let next = prev;
+                if (streamed && streamed.text) {
+                    const assistantMessage = { id: streamed.messageId, role: "assistant" as const, text: streamed.text, ...(action ? { action } : {}) };
+                    next = prev.some((item) => item.id === streamed.messageId)
+                        ? prev.map((item) => item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)
+                        : [...prev, assistantMessage];
+                } else if (text || action) {
+                    const lastMessage = prev.at(-1);
+                    next = lastMessage?.role === "assistant" && lastMessage.text === text
+                        ? action ? prev.map((item, index) => index === prev.length - 1 ? { ...item, action } : item) : prev
+                        : [...prev, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
+                }
+                chatMessagesRef.current = next;
+                return next;
+            });
             setStreamingText(null);
             streamingTextRef.current = null;
-            setCompletedThinkings([]);
+            resetThinkings();
             void refreshConversations().then((nextConversations) => {
                 const completedConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
-                if (!completedConversation) return;
+                if (!completedConversation || action) return;
                 setChatMessages([]);
                 chatMessagesRef.current = [];
                 setToolCalls([]);
@@ -300,8 +300,7 @@ export default function VideoPage() {
             });
         },
         onCanceled: (stoppedMessage) => {
-            setActiveThinking(null);
-            setCompletedThinkings([]);
+            resetThinkings();
             setStreamingText(null);
             streamingTextRef.current = null;
             setToolCalls((prev) => {
@@ -380,6 +379,7 @@ export default function VideoPage() {
             });
         },
         onError: (error) => {
+            resetThinkings();
             setChatMessages((prev) => {
                 const next = [...finishRunningAgentActivities(prev, "failed", error), { id: nanoid(), role: "error" as const, text: error }];
                 chatMessagesRef.current = next;
@@ -525,6 +525,8 @@ export default function VideoPage() {
             return;
         }
 
+        resetThinkings();
+
         const videoModel = effectiveConfig.videoModel || effectiveConfig.model || model;
         const size = config.size || "16:9";
         const seconds = config.videoSeconds || "5";
@@ -594,8 +596,7 @@ export default function VideoPage() {
         setMobileSidebarOpen(false);
         setChatMessages([]);
         chatMessagesRef.current = [];
-        setCompletedThinkings([]);
-        setActiveThinking(null);
+        resetThinkings();
         setToolCalls([]);
         toolCallsRef.current = [];
         setStreamingText(null);
@@ -614,8 +615,7 @@ export default function VideoPage() {
         chatMessagesRef.current = [];
         setToolCalls([]);
         toolCallsRef.current = [];
-        setCompletedThinkings([]);
-        setActiveThinking(null);
+        resetThinkings();
         setStreamingText(null);
         streamingTextRef.current = null;
         setPrompt("");

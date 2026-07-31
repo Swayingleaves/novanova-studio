@@ -47,11 +47,27 @@ public class CreationPlanValidator {
         if (!CreationEntrySource.supported(entrySource) || !entrySource.equals(plan.entrySource())) {
             throw invalid("Agent计划入口来源与当前页面不一致");
         }
-        if (StringUtils.hasText(plan.clarificationQuestion())) {
-            return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), plan.clarificationQuestion(), settings, List.of());
-        }
         List<CreationTask> tasks = plan.tasks() == null ? List.of() : plan.tasks();
-        if (tasks.isEmpty() || tasks.size() > 8) {
+        if (isGenerationPage(entrySource) && tasks.size() > 1) {
+            return canvasGuidancePlan(plan, entrySource, settings);
+        }
+        if (CreationEntrySource.IMAGE_PAGE.equals(entrySource) && settings != null
+                && settings.count() != null && settings.count() > 1) {
+            return canvasGuidancePlan(plan, entrySource, settings);
+        }
+        if (Boolean.TRUE.equals(plan.canvasGuidance())) {
+            if (!isGenerationPage(entrySource)) {
+                throw invalid("只有图片或视频页面允许引导用户前往画布");
+            }
+            return canvasGuidancePlan(plan, entrySource, settings);
+        }
+        if (StringUtils.hasText(plan.clarificationQuestion())) {
+            return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), plan.clarificationQuestion(), false, settings, List.of());
+        }
+        if (tasks.isEmpty()) {
+            throw invalid("Agent计划任务数量不合法");
+        }
+        if (tasks.size() > 8) {
             throw invalid("Agent计划任务数量不合法");
         }
         Set<String> taskIds = new HashSet<>();
@@ -74,11 +90,11 @@ public class CreationPlanValidator {
         }
         if (!missingCanvasArguments.isEmpty()) {
             String question = "请补充画布操作所需参数：" + String.join("、", missingCanvasArguments) + "。";
-            return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), question, settings, List.of());
+            return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), question, false, settings, List.of());
         }
         String missingQuestion = missingSettingsQuestion(entrySource, tasks, settings);
         if (StringUtils.hasText(missingQuestion)) {
-            return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), missingQuestion, settings, List.of());
+            return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), missingQuestion, false, settings, List.of());
         }
         for (CreationTask task : tasks) {
             List<String> dependencies = task.dependsOn() == null ? List.of() : task.dependsOn();
@@ -87,7 +103,32 @@ public class CreationPlanValidator {
             }
         }
         detectCycle(tasks);
-        return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), "", settings, tasks);
+        return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), "", false, settings, tasks);
+    }
+
+    /**
+     * 创建批量生成引导计划，确保该分支不会进入计划持久化和任务执行流程。
+     *
+     * @param plan CreationPlan 主Agent候选计划
+     * @param entrySource String 当前入口来源
+     * @param settings CreationSettings 页面生成设置
+     * @return CreationPlan 空任务的画布引导计划
+     */
+    private CreationPlan canvasGuidancePlan(CreationPlan plan, String entrySource, CreationSettings settings) {
+        String message = CreationEntrySource.IMAGE_PAGE.equals(entrySource)
+                ? "图片生成页面每次只能生成 1 张图片。需要批量生成多个画面时，请前往画布操作。"
+                : "视频生成页面每次只能生成 1 个视频。需要批量生成多个视频时，请前往画布操作。";
+        return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), message, true, settings, List.of());
+    }
+
+    /**
+     * 判断入口是否为独立图片或视频生成页面。
+     *
+     * @param entrySource String 当前入口来源
+     * @return boolean 是否为生成页面
+     */
+    private boolean isGenerationPage(String entrySource) {
+        return CreationEntrySource.IMAGE_PAGE.equals(entrySource) || CreationEntrySource.VIDEO_PAGE.equals(entrySource);
     }
 
     /**
@@ -108,8 +149,8 @@ public class CreationPlanValidator {
             return "";
         }
         if (hasImageTask) {
-            if (settings.count() != null && (settings.count() < 1 || settings.count() > 10)) {
-                throw invalid("图片生成数量必须在1到10之间");
+            if (settings.count() != null && settings.count() < 1) {
+                throw invalid("图片生成数量必须为1");
             }
             if (!StringUtils.hasText(settings.size()) || !StringUtils.hasText(settings.resolution())
                     || !StringUtils.hasText(settings.quality()) || settings.count() == null || settings.count() < 1) {

@@ -20,6 +20,8 @@ public class AgentScopeAgentFactory {
 
     /** Prompt模板服务 */
     private final SystemPromptTemplateService promptService;
+    /** 主Agent思考事件中间件 */
+    private final AgentThinkingEventMiddleware thinkingEventMiddleware;
 
     /**
      * 创建主Agent。
@@ -29,7 +31,7 @@ public class AgentScopeAgentFactory {
      */
     public ReActAgent mainAgent(Model model) {
         return build("main-agent", promptService.get(PromptTemplateType.AGENT_MAIN), model,
-                "只能返回 CreationPlan 结构化结果，不得调用工具。");
+                "只能返回 CreationPlan 结构化结果，不得调用工具。", true);
     }
 
     /**
@@ -40,7 +42,7 @@ public class AgentScopeAgentFactory {
      */
     public ReActAgent imageAgent(Model model) {
         return build("image-specialist-agent", promptService.get(PromptTemplateType.AGENT_IMAGE), model,
-                "只返回 SpecialistAgentResult；只能选择 KEEP 或 OPTIMIZE，不得调用生成工具。");
+                "只返回 SpecialistAgentResult；只能选择 KEEP 或 OPTIMIZE，不得调用生成工具。", false);
     }
 
     /**
@@ -51,7 +53,7 @@ public class AgentScopeAgentFactory {
      */
     public ReActAgent videoAgent(Model model) {
         return build("video-specialist-agent", promptService.get(PromptTemplateType.AGENT_VIDEO), model,
-                "只返回 SpecialistAgentResult；只能选择 KEEP 或 OPTIMIZE，不得调用生成工具。");
+                "只返回 SpecialistAgentResult；只能选择 KEEP 或 OPTIMIZE，不得调用生成工具。", false);
     }
 
     /**
@@ -61,15 +63,19 @@ public class AgentScopeAgentFactory {
      * @param prompt String 外部系统提示词
      * @param model Model AgentScope模型
      * @param contract String Java固定的结构化契约补充
+     * @param thinkingEnabled boolean 是否转发思考事件
      * @return ReActAgent Agent实例
      */
-    private ReActAgent build(String name, String prompt, Model model, String contract) {
-        return ReActAgent.builder()
+    private ReActAgent build(String name, String prompt, Model model, String contract, boolean thinkingEnabled) {
+        ReActAgent.Builder builder = ReActAgent.builder()
                 .name(name)
                 .sysPrompt(prompt + "\n\n" + contract)
                 .model(model)
                 .toolkit(new io.agentscope.core.tool.Toolkit())
-                .maxIters(4)
-                .build();
+                .maxIters(4);
+        if (thinkingEnabled) {
+            builder.middleware(thinkingEventMiddleware);
+        }
+        return builder.build();
     }
 }

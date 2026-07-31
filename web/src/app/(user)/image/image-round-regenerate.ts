@@ -41,7 +41,6 @@ export function buildImageRoundRegeneratePayload(round: ImageRoundRegenerateInpu
         name: reference.name,
         storageKey: reference.storageKey,
     }));
-    const count = Number(round.config.count);
     return {
         prompt: round.prompt,
         attachments: attachments.length ? attachments : undefined,
@@ -50,7 +49,7 @@ export function buildImageRoundRegeneratePayload(round: ImageRoundRegenerateInpu
             ...(round.config.size ? { size: round.config.size } : {}),
             ...(round.config.imageResolution ? { resolution: round.config.imageResolution } : {}),
             ...(round.config.quality ? { quality: round.config.quality } : {}),
-            ...(Number.isFinite(count) && count > 0 ? { count } : {}),
+            count: 1,
         },
     };
 }

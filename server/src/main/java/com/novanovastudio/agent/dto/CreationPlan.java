@@ -10,6 +10,7 @@ import java.util.List;
  * @param entrySource String 入口来源
  * @param summary String 可向用户展示的计划摘要
  * @param clarificationQuestion String 缺少参数时向用户提出的问题
+ * @param canvasGuidance Boolean 是否应引导用户前往画布处理批量任务
  * @param creationSettings CreationSettings 页面生成硬约束
  * @param tasks List<CreationTask> 计划任务列表
  * @author   zhenglin.cn.cq@gmail.com
@@ -21,6 +22,7 @@ public record CreationPlan(
         String entrySource,
         String summary,
         String clarificationQuestion,
+        Boolean canvasGuidance,
         CreationSettings creationSettings,
         List<CreationTask> tasks
 ) {

@@ -3,7 +3,7 @@ import test from "node:test";
 import React from "react";
 import { LoaderCircle } from "lucide-react";
 
-import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/features/chat/types";
+import type { AgentActivityState, ChatMessageItem, ThinkingBlockState, ToolCallState } from "@/features/chat/types";
 
 import { buildChatThreadSection } from "./chat-thread-section.ts";
 
@@ -81,4 +81,40 @@ test("buildChatThreadSection 将 Agent 执行活动归入当前对话轮次", ()
 
     assert.equal(section?.rounds[0]?.id, "user-4");
     assert.deepEqual(section?.rounds[0]?.activities, [activity]);
+});
+
+test("buildChatThreadSection 将思考块挂到最新轮次且不影响计划活动", () => {
+    const activity: AgentActivityState = {
+        id: "plan-plan-2",
+        type: "plan-created",
+        title: "创建创作计划",
+        status: "success",
+    };
+    const completedThinking: ThinkingBlockState = { id: "reply-1:block-1", text: "第一段推理", durationMs: 18, collapsed: true };
+    const activeThinking: ThinkingBlockState = { id: "reply-2:block-1", text: "第二段推理", durationMs: 0, collapsed: false };
+    const messages: ChatMessageItem[] = [
+        { id: "user-5", role: "user", text: "第一轮" },
+        { id: "assistant-5", role: "assistant", text: "第一轮完成" },
+        { id: "user-6", role: "user", text: "第二轮" },
+        { id: "agent-activity-plan-plan-2", role: "system", text: activity.title, detail: activity },
+    ];
+
+    const section = buildChatThreadSection(messages, [completedThinking], activeThinking, null, [], () => null);
+
+    assert.equal(section?.rounds[0]?.thinkings, undefined);
+    assert.deepEqual(section?.rounds[1]?.thinkings, [completedThinking, activeThinking]);
+    assert.equal(section?.rounds[1]?.activeThinkingId, activeThinking.id);
+    assert.deepEqual(section?.rounds[1]?.activities, [activity]);
+});
+
+test("buildChatThreadSection 将画布引导动作绑定到助手所在轮次", () => {
+    const action = { type: "navigate" as const, label: "去画布操作", href: "/canvas", initialPrompt: "生成三个分镜" };
+    const messages: ChatMessageItem[] = [
+        { id: "user-6", role: "user", text: action.initialPrompt },
+        { id: "assistant-6", role: "assistant", text: "请前往画布操作。", action },
+    ];
+
+    const section = buildChatThreadSection(messages, [], null, null, [], () => null);
+
+    assert.deepEqual(section?.rounds[0]?.action, action);
 });

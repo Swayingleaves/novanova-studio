@@ -18,6 +18,13 @@ export type CreationSettings = {
   watermark?: boolean;
 };
 
+export type AgentAction = {
+  type: "navigate";
+  label: string;
+  href: string;
+  initialPrompt?: string;
+};
+
 export interface AgentChatParams {
   sessionId?: string;
   entrySource: "imagePage" | "videoPage" | "canvas";
@@ -59,6 +66,7 @@ export interface AgentEvent {
   progress?: number;
   taskId?: string;
   status?: string;
+  action?: AgentAction;
 }
 
 type ApiResponse<T> = { code: number; data: T; msg: string };

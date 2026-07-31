@@ -1,6 +1,7 @@
 package com.novanovastudio.agent;
 
 import com.alibaba.fastjson2.JSON;
+import com.novanovastudio.agent.dto.AgentAction;
 import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.agent.dto.CreationPlan;
@@ -180,7 +181,10 @@ public class CreationAgentOrchestrator {
                         .map(candidate -> planValidator.validate(candidate, request.entrySource(), request.creationSettings()))
                         .flatMap(validated -> {
                             if (StringUtils.hasText(validated.clarificationQuestion())) {
-                                return completeWithMessage(userId, session.id(), validated.clarificationQuestion());
+                                AgentAction action = Boolean.TRUE.equals(validated.canvasGuidance())
+                                        ? AgentAction.navigateToCanvas(request.message())
+                                        : null;
+                                return completeWithMessage(userId, session.id(), validated.clarificationQuestion(), action);
                             }
                             CreationPlan plan = withServerPlanId(validated, session, request.message());
                             planId.set(plan.planId());
@@ -215,7 +219,11 @@ public class CreationAgentOrchestrator {
                 ? toolRegistry.allTools().stream().filter(com.novanovastudio.agent.dto.AgentTool::frontend).toList()
                 : List.of());
         return agent.call(JSON.toJSONString(input), CreationPlan.class, RuntimeContext.builder()
-                        .sessionId(session.id() + ":main").userId(String.valueOf(userId)).build())
+                        .sessionId(session.id() + ":main")
+                        .userId(String.valueOf(userId))
+                        .put(AgentThinkingEventMiddleware.ThinkingEventContext.class,
+                                new AgentThinkingEventMiddleware.ThinkingEventContext(userId, session.id()))
+                        .build())
                 .timeout(Duration.ofSeconds(60))
                 .map(message -> message.getStructuredData(CreationPlan.class))
                 .doFinally(signal -> agent.close());
@@ -244,9 +252,22 @@ public class CreationAgentOrchestrator {
      * @return Mono<Void> 完成信号
      */
     private Mono<Void> completeWithMessage(Long userId, String sessionId, String text) {
+        return completeWithMessage(userId, sessionId, text, null);
+    }
+
+    /**
+     * 保存助手终态消息并推送task-complete事件，可选携带结构化交互动作。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param text String 用户可见消息
+     * @param action AgentAction 前端交互动作，可为空
+     * @return Mono<Void> 完成信号
+     */
+    private Mono<Void> completeWithMessage(Long userId, String sessionId, String text, AgentAction action) {
         String messageId = UUID.randomUUID().toString();
         return sessionService.appendAssistantMessage(sessionId, messageId, text)
-                .doOnSuccess(ignored -> eventEmitter.emit(userId, AgentEvent.taskComplete(sessionId, messageId, text)));
+                .doOnSuccess(ignored -> eventEmitter.emit(userId, AgentEvent.taskComplete(sessionId, messageId, text, action)));
     }
 
     /**
@@ -276,7 +297,7 @@ public class CreationAgentOrchestrator {
                 })
                 .toList();
         return new CreationPlan(UUID.randomUUID().toString(), plan.intent(), plan.entrySource(), plan.summary(), "",
-                plan.creationSettings(), tasks);
+                false, plan.creationSettings(), tasks);
     }
 
     /**

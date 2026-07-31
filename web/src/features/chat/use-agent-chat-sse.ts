@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AgentAttachment, AgentEvent, CreationSettings } from "@/features/canvas/api/agent";
+import type { AgentAction, AgentAttachment, AgentEvent, CreationSettings } from "@/features/canvas/api/agent";
 import { agentChat, agentSubscribeEvents, cancelAgentChat } from "@/features/canvas/api/agent";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import type { ToolCallState } from "./types";
@@ -17,7 +17,7 @@ type UseAgentChatSSEProps = {
   onToolCall?: (call: ToolCallState) => void;
   onToolProgress?: (callId: string, taskId: string, progress: number, status: string) => void;
   onToolResult?: (callId: string, ok: boolean, message: string, data?: Record<string, unknown>) => void;
-  onTaskComplete?: (messageId: string, text: string) => void;
+  onTaskComplete?: (messageId: string, text: string, action?: AgentAction) => void;
   onCanceled?: (message: string) => void;
   onNotice?: (message: string) => void;
   onPlanCreated?: (planId: string, summary: string, taskCount: number) => void;
@@ -130,7 +130,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
     es.addEventListener("task-complete", (e: MessageEvent) => {
       const data: AgentEvent = JSON.parse(e.data);
       setIsStreaming(false);
-      callbacksRef.current.onTaskComplete?.(data.messageId || "", data.text || "");
+      callbacksRef.current.onTaskComplete?.(data.messageId || "", data.text || "", data.action);
     });
 
     es.addEventListener("canceled", (e: MessageEvent) => {

@@ -7,25 +7,34 @@ import type { ThinkingBlockState } from "./types";
 type Props = {
   block: ThinkingBlockState;
   streaming?: boolean;
+  appearance?: ThinkingBlockAppearance;
+};
+
+export type ThinkingBlockAppearance = {
+  text: string;
+  muted: string;
+  background: string;
+  border: string;
 };
 
 /**
  * 思考过程折叠组件。
  * streaming 时显示"思考中..."动画；完成后折叠并显示耗时。
  */
-export function ThinkingBlock({ block, streaming }: Props) {
-  const [collapsed, setCollapsed] = useState(true);
+export function ThinkingBlock({ block, streaming = false, appearance }: Props) {
+  const [collapsed, setCollapsed] = useState(streaming ? false : block.collapsed);
 
   useEffect(() => {
-    if (!streaming) setCollapsed(true);
-  }, [streaming]);
+    setCollapsed(streaming ? false : block.collapsed);
+  }, [block.collapsed, block.id, streaming]);
 
   return (
     <div className="mb-2">
       <button
         type="button"
         onClick={() => setCollapsed((v) => !v)}
-        className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-500 transition-colors"
+        className="flex items-center gap-1.5 text-xs text-[var(--studio-muted)] transition-colors hover:text-[var(--studio-ink)]"
+        style={appearance ? { color: appearance.muted } : undefined}
       >
         <Brain className="size-3.5" />
         {streaming ? (
@@ -36,7 +45,10 @@ export function ThinkingBlock({ block, streaming }: Props) {
         {collapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
       </button>
       {!collapsed && (
-        <div className="mt-1.5 rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs leading-relaxed text-gray-500 whitespace-pre-wrap font-mono dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+        <div
+          className="mt-1.5 whitespace-pre-wrap rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3 font-mono text-xs leading-relaxed text-[var(--studio-text)]"
+          style={appearance ? { color: appearance.text, background: appearance.background, borderColor: appearance.border } : undefined}
+        >
           {block.text}
         </div>
       )}

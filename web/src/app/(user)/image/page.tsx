@@ -15,8 +15,8 @@ import { ImageSettingsPanel } from "@/features/generation/components/image-setti
 import { requestCreditCost } from "@/features/generation/constants/credits";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
-import { ChatMessage, ThinkingBlock } from "@/features/chat";
-import type { AgentActivityState, ChatMessageItem, ThinkingBlockState, ToolCallState } from "@/features/chat/types";
+import { useAgentThinking } from "@/features/chat/use-agent-thinking";
+import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
 import { createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, normalizeAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { findLatestPendingConversation, hasPendingImageConversation } from "@/features/generation/lib/generation-conversation-recovery";
@@ -144,8 +144,7 @@ export default function ImagePage() {
 
     // Agent chat state
     const [chatMessages, setChatMessages] = useState<ChatMessageItem[]>([]);
-    const [completedThinkings, setCompletedThinkings] = useState<ThinkingBlockState[]>([]);
-    const [activeThinking, setActiveThinking] = useState<ThinkingBlockState | null>(null);
+    const { completedThinkings, activeThinking, onThoughtDelta, onThoughtComplete, resetThinkings } = useAgentThinking();
     const [toolCalls, setToolCalls] = useState<ToolCallState[]>([]);
     const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null);
     const model = effectiveConfig.imageModel || effectiveConfig.model;
@@ -154,7 +153,7 @@ export default function ImagePage() {
         size: config.size,
         resolution: config.imageResolution,
         quality: config.quality,
-        count: Number(config.count),
+        count: 1,
     };
 
     // Refs to access latest state in SSE callbacks (updated inline to avoid React batch staleness)
@@ -190,15 +189,8 @@ export default function ImagePage() {
                 return next;
             });
         },
-        onThoughtDelta: (thoughtId, delta) => {
-            setActiveThinking((prev) => (prev?.id === thoughtId ? { ...prev, text: prev.text + delta } : { id: thoughtId, text: delta, durationMs: 0, collapsed: false }));
-        },
-        onThoughtComplete: (thoughtId, durationMs) => {
-            setActiveThinking((prev) => {
-                if (prev) setCompletedThinkings((list) => [...list, { ...prev, durationMs, collapsed: true }]);
-                return null;
-            });
-        },
+        onThoughtDelta,
+        onThoughtComplete,
         onToolCall: (call) => {
             setToolCalls((prev) => {
                 const next = prev.some((item) => item.callId === call.callId)
@@ -277,25 +269,32 @@ export default function ImagePage() {
                 return next;
             });
         },
-        onTaskComplete: (_msgId, text) => {
+        onTaskComplete: (messageId, text, action) => {
             // 将流式文本保存为持久消息
             const streamed = streamingTextRef.current;
-            if (streamed && streamed.text) {
-                setChatMessages((prev) => {
-                    const next = [...prev, { id: streamed.messageId, role: "assistant" as const, text: streamed.text }];
-                    chatMessagesRef.current = next;
-                    return next;
-                });
-            } else if (text) {
-                setChatMessages((prev) => (prev.at(-1)?.text === text ? prev : [...prev, { id: nanoid(), role: "assistant", text }]));
-            }
+            setChatMessages((prev) => {
+                let next = prev;
+                if (streamed && streamed.text) {
+                    const assistantMessage = { id: streamed.messageId, role: "assistant" as const, text: streamed.text, ...(action ? { action } : {}) };
+                    next = prev.some((item) => item.id === streamed.messageId)
+                        ? prev.map((item) => item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)
+                        : [...prev, assistantMessage];
+                } else if (text || action) {
+                    const lastMessage = prev.at(-1);
+                    next = lastMessage?.role === "assistant" && lastMessage.text === text
+                        ? action ? prev.map((item, index) => index === prev.length - 1 ? { ...item, action } : item) : prev
+                        : [...prev, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
+                }
+                chatMessagesRef.current = next;
+                return next;
+            });
             setStreamingText(null);
             streamingTextRef.current = null;
-            setCompletedThinkings([]);
+            resetThinkings();
             // 刷新侧栏（后端已保存生成记录）。历史会话追加生成完成后，交回历史视图展示，避免同一轮重复渲染。
             void refreshConversations().then((nextConversations) => {
                 const completedConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
-                if (!completedConversation) return;
+                if (!completedConversation || action) return;
                 setChatMessages([]);
                 chatMessagesRef.current = [];
                 setToolCalls([]);
@@ -303,8 +302,7 @@ export default function ImagePage() {
             });
         },
         onCanceled: (stoppedMessage) => {
-            setActiveThinking(null);
-            setCompletedThinkings([]);
+            resetThinkings();
             setStreamingText(null);
             streamingTextRef.current = null;
             setToolCalls((prev) => {
@@ -376,6 +374,7 @@ export default function ImagePage() {
             });
         },
         onError: (error) => {
+            resetThinkings();
             setChatMessages((prev) => {
                 const next = [...finishRunningAgentActivities(prev, "failed", error), { id: nanoid(), role: "error" as const, text: error }];
                 chatMessagesRef.current = next;
@@ -384,7 +383,7 @@ export default function ImagePage() {
         },
     });
 
-    const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "image", count: effectiveConfig.count });
+    const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "image", count: 1 });
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
     const activeConversationPending = activeConversation ? hasPendingImageConversation(activeConversation) : false;
     const canGenerate = Boolean(prompt.trim()) && !isStreaming && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
@@ -469,6 +468,8 @@ export default function ImagePage() {
             return;
         }
 
+        resetThinkings();
+
         // Add user message to chat
         setChatMessages((prev) => {
             const next = [...prev, { id: nanoid(), role: "user" as const, text }];
@@ -508,8 +509,7 @@ export default function ImagePage() {
         setMobileSidebarOpen(false);
         setChatMessages([]);
         chatMessagesRef.current = [];
-        setCompletedThinkings([]);
-        setActiveThinking(null);
+        resetThinkings();
         setToolCalls([]);
         toolCallsRef.current = [];
         setStreamingText(null);
@@ -529,8 +529,7 @@ export default function ImagePage() {
         chatMessagesRef.current = [];
         setToolCalls([]);
         toolCallsRef.current = [];
-        setCompletedThinkings([]);
-        setActiveThinking(null);
+        resetThinkings();
         setStreamingText(null);
         streamingTextRef.current = null;
         setPrompt("");

@@ -5,8 +5,8 @@ import { Image } from "antd";
 import { LoaderCircle } from "lucide-react";
 import { nanoid } from "nanoid";
 
+import type { AgentAction } from "@/features/canvas/api/agent";
 import type { AgentActivityState, ChatAttachment, ChatMessageItem, ThinkingBlockState, ToolCallState } from "../../chat/types.ts";
-import { formatDuration } from "../lib/image-utils.ts";
 import { isAgentActivityState } from "./agent-activity.ts";
 import type { CreationThreadRound, CreationThreadSection } from "./creation-workspace-types.ts";
 
@@ -30,11 +30,8 @@ export function buildChatThreadSection(
     renderResults: (data: Record<string, unknown>) => React.ReactNode,
     renderPendingToolCall?: (call: ToolCallState) => React.ReactNode,
 ): CreationThreadSection | null {
-    if (!messages.length && !activeThinking && !streamingText) return null;
-    const allThinkings = activeThinking ? [...thinkings, activeThinking] : thinkings;
-    const thinkingLabel = allThinkings.length
-        ? allThinkings.map((t) => `思考 ${formatDuration(t.durationMs)}`).join(" + ")
-        : "当前对话";
+    if (!messages.length && !thinkings.length && !activeThinking && !streamingText) return null;
+    const allThinkings = (activeThinking ? [...thinkings, activeThinking] : thinkings).filter((thinking) => thinking.text);
 
     // 将消息配对为 user → tool/assistant round
     const rounds: CreationThreadRound[] = [];
@@ -45,11 +42,12 @@ export function buildChatThreadSection(
     let currentAssistantText = "";
     let currentStatusText = "";
     let currentActivities: AgentActivityState[] = [];
+    let currentAction: AgentAction | undefined;
 
     for (const msg of messages) {
         if (msg.role === "user") {
             if (currentUserText || currentActivities.length) {
-                rounds.push(makeRound(currentRoundId, currentUserText, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, currentResultContent));
+                rounds.push(makeRound(currentRoundId, currentUserText, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, currentResultContent, currentAction));
             }
             currentRoundId = msg.id;
             currentUserText = msg.text;
@@ -58,8 +56,10 @@ export function buildChatThreadSection(
             currentAssistantText = "";
             currentStatusText = "";
             currentActivities = [];
+            currentAction = undefined;
         } else if (msg.role === "assistant") {
             currentAssistantText = msg.text;
+            currentAction = msg.action;
         } else if (msg.role === "system" && isAgentActivityState(msg.detail)) {
             currentActivities = [...currentActivities.filter((activity) => activity.id !== msg.detail.id), msg.detail];
         } else if (msg.role === "tool") {
@@ -86,14 +86,20 @@ export function buildChatThreadSection(
         }
     }
     if (currentUserText || currentActivities.length) {
-        rounds.push(makeRound(currentRoundId, currentUserText, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, currentResultContent));
+        rounds.push(makeRound(currentRoundId, currentUserText, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, currentResultContent, currentAction));
     }
 
     if (streamingText) {
         rounds.push({ id: "loading", userText: "", statusText: "AI 正在输入...", assistantText: streamingText.text, resultContent: null } as CreationThreadRound);
     }
 
-    return { id: "chat", label: thinkingLabel, rounds };
+    const latestConversationRound = rounds.findLast((round) => Boolean(round.userText || round.userAttachments));
+    if (latestConversationRound && allThinkings.length) {
+        latestConversationRound.thinkings = allThinkings;
+        latestConversationRound.activeThinkingId = activeThinking?.id;
+    }
+
+    return { id: "chat", label: "当前对话", rounds };
 }
 
 /** 将助手文本以 Markdown 渲染后与结果内容合并为单条 round */
@@ -105,6 +111,7 @@ function makeRound(
     statusText: string,
     assistantText: string,
     resultContent: React.ReactNode,
+    action?: AgentAction,
 ): CreationThreadRound {
     return {
         id: id || nanoid(),
@@ -114,7 +121,7 @@ function makeRound(
         assistantText,
         resultContent,
         userAttachments,
-        actionBar: null,
+        action,
     } as CreationThreadRound;
 }
 

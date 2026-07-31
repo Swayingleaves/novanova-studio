@@ -124,12 +124,14 @@ class CreationPlanValidatorTest {
      */
     @Test
     void shouldRejectCyclicDependencies() {
-        CreationPlan plan = plan(CreationEntrySource.IMAGE_PAGE, List.of(
-                task("task-a", "image", List.of("task-b")),
-                task("task-b", "image", List.of("task-a"))));
+        CreationPlan plan = plan(CreationEntrySource.CANVAS, List.of(
+                new CreationTask("task-a", "canvas", "tool", "创建节点A", List.of("task-b"),
+                        "canvas_create_text_node", Map.of("text", "A")),
+                new CreationTask("task-b", "canvas", "tool", "创建节点B", List.of("task-a"),
+                        "canvas_create_text_node", Map.of("text", "B"))));
 
         Assertions.assertThrows(BusinessException.class,
-                () -> validator.validate(plan, CreationEntrySource.IMAGE_PAGE, imageSettings()));
+                () -> validator.validate(plan, CreationEntrySource.CANVAS, null));
     }
 
     /**
@@ -148,6 +150,68 @@ class CreationPlanValidatorTest {
     }
 
     /**
+     * 图片页多任务必须转换为画布引导，不能进入执行器。
+     */
+    @Test
+    void shouldGuideImageBatchToCanvas() {
+        CreationPlan plan = plan(CreationEntrySource.IMAGE_PAGE, List.of(
+                task("image-task-a", "image", List.of()),
+                task("image-task-b", "image", List.of())));
+
+        CreationPlan result = validator.validate(plan, CreationEntrySource.IMAGE_PAGE, imageSettings());
+
+        Assertions.assertTrue(result.tasks().isEmpty());
+        Assertions.assertTrue(result.canvasGuidance());
+        Assertions.assertEquals("图片生成页面每次只能生成 1 张图片。需要批量生成多个画面时，请前往画布操作。", result.clarificationQuestion());
+    }
+
+    /**
+     * 视频页多任务必须转换为画布引导，不能进入执行器。
+     */
+    @Test
+    void shouldGuideVideoBatchToCanvas() {
+        CreationPlan plan = plan(CreationEntrySource.VIDEO_PAGE, List.of(
+                task("video-task-a", "video", List.of()),
+                task("video-task-b", "video", List.of())));
+
+        CreationPlan result = validator.validate(plan, CreationEntrySource.VIDEO_PAGE, videoSettings());
+
+        Assertions.assertTrue(result.tasks().isEmpty());
+        Assertions.assertTrue(result.canvasGuidance());
+        Assertions.assertEquals("视频生成页面每次只能生成 1 个视频。需要批量生成多个视频时，请前往画布操作。", result.clarificationQuestion());
+    }
+
+    /**
+     * 图片数量大于一时必须转换为画布引导。
+     */
+    @Test
+    void shouldGuideImageCountToCanvas() {
+        CreationPlan plan = plan(CreationEntrySource.IMAGE_PAGE,
+                List.of(task("image-task", "image", List.of())));
+        CreationSettings settings = new CreationSettings("image-model", "1:1", "2K", "high", 2, null, null);
+
+        CreationPlan result = validator.validate(plan, CreationEntrySource.IMAGE_PAGE, settings);
+
+        Assertions.assertTrue(result.tasks().isEmpty());
+        Assertions.assertTrue(result.canvasGuidance());
+        Assertions.assertTrue(result.clarificationQuestion().contains("1 张图片"));
+    }
+
+    /**
+     * 图片数量超过一且模型没有返回任务时仍必须直接引导到画布。
+     */
+    @Test
+    void shouldGuideImageCountToCanvasBeforeTaskValidation() {
+        CreationPlan plan = plan(CreationEntrySource.IMAGE_PAGE, List.of());
+        CreationSettings settings = new CreationSettings("image-model", "1:1", "2K", "high", 2, null, null);
+
+        CreationPlan result = validator.validate(plan, CreationEntrySource.IMAGE_PAGE, settings);
+
+        Assertions.assertTrue(result.tasks().isEmpty());
+        Assertions.assertTrue(result.canvasGuidance());
+    }
+
+    /**
      * 构造测试计划。
      *
      * @param entrySource String 入口来源
@@ -155,7 +219,7 @@ class CreationPlanValidatorTest {
      * @return CreationPlan 计划
      */
     private CreationPlan plan(String entrySource, List<CreationTask> tasks) {
-        return new CreationPlan("model-plan", "生成内容", entrySource, "执行生成", "", null, tasks);
+        return new CreationPlan("model-plan", "生成内容", entrySource, "执行生成", "", false, null, tasks);
     }
 
     /**

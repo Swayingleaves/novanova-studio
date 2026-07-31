@@ -14,7 +14,7 @@ import { exportCanvasDocuments } from "@/features/canvas/utils/canvas-export";
 import { setMediaBlob } from "@/features/storage/services/file-storage";
 import { setImageBlob } from "@/features/storage/services/image-storage";
 import { readZip } from "@/shared/lib/zip";
-import { readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
+import { readInitialPromptFromLocation, storeInitialPromptForNavigation } from "@/shared/lib/initial-prompt";
 
 const NEW_PROJECT_TITLE_PREFIX = "无限画布";
 const IMPORT_ERROR_MESSAGE = "导入失败，请选择有效的画布压缩包";
@@ -39,7 +39,8 @@ export default function CanvasPage() {
         if (!initialPrompt) return;
         initialPromptHandledRef.current = true;
         const documentId = createDocument(`${NEW_PROJECT_TITLE_PREFIX} ${documents.length + 1}`);
-        router.replace(`/canvas/${documentId}?initialPrompt=${encodeURIComponent(initialPrompt)}`);
+        storeInitialPromptForNavigation(initialPrompt);
+        router.replace(`/canvas/${documentId}`);
     }, [createDocument, documents.length, hydrated, router]);
 
     const openProject = (projectId: string) => {
@@ -49,7 +50,8 @@ export default function CanvasPage() {
     const createAndOpenProject = () => {
         const documentId = createDocument(`${NEW_PROJECT_TITLE_PREFIX} ${documents.length + 1}`);
         const initialPrompt = readInitialPromptFromLocation();
-        router.push(initialPrompt ? `/canvas/${documentId}?initialPrompt=${encodeURIComponent(initialPrompt)}` : `/canvas/${documentId}`);
+        if (initialPrompt) storeInitialPromptForNavigation(initialPrompt);
+        router.push(`/canvas/${documentId}`);
     };
 
     const importCanvasArchive = async (file?: File) => {

@@ -60,6 +60,7 @@ import { CanvasTopBar } from "../components/canvas-top-bar";
 import { CanvasWorkspaceOverlays } from "../components/canvas-workspace-overlays";
 import type { InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
 import { useAgentSSE } from "../hooks/use-agent-sse";
+import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import { useAssistantMessageStream } from "../hooks/use-assistant-message-stream";
 import { useCanvasKeyboardShortcuts } from "../hooks/canvas-keyboard-shortcuts";
 import { useCanvasViewportGeometry } from "../hooks/canvas-viewport-geometry";
@@ -300,6 +301,7 @@ function CanvasWorkspacePage() {
     const initialPromptHandledRef = useRef(false);
     const [agentUndoSnapshot, setAgentUndoSnapshot] = useState<CanvasAgentSnapshot | null>(null);
     const [agentRunning, setAgentRunning] = useState(false);
+    const { completedThinkings, activeThinking, onThoughtDelta, onThoughtComplete, resetThinkings } = useAgentThinking();
     const [titleEditing, setTitleEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState("");
     const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
@@ -308,6 +310,10 @@ function CanvasWorkspacePage() {
     const batchTransitionIdsRef = useRef<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
     const [taskPanelOpen, setTaskPanelOpen] = useState(false);
+
+    useEffect(() => {
+        resetThinkings();
+    }, [activeChatId, resetThinkings]);
 
     useEffect(() => {
         setInitialPrompt(readInitialPromptFromLocation());
@@ -1878,12 +1884,21 @@ function CanvasWorkspacePage() {
             activeAgentAssistantMessageIdRef.current = displayMessageId;
             appendTextDelta(sessionId, displayMessageId, delta);
         },
+        onThoughtDelta,
+        onThoughtComplete,
         onTaskComplete: (_messageId, text) => {
+            resetThinkings();
             const sessionId = activeAgentSessionIdRef.current;
             if (!sessionId) return;
             const displayMessageId = activeAgentAssistantMessageIdRef.current || nanoid();
             activeAgentAssistantMessageIdRef.current = displayMessageId;
             completeTextMessage(sessionId, displayMessageId, text);
+        },
+        onCanceled: () => {
+            resetThinkings();
+            resetTextStream(false);
+            activeAgentAssistantMessageIdRef.current = null;
+            setAgentRunning(false);
         },
         onPlanCreated: (planId, summary, taskCount) => {
             const sessionId = activeAgentSessionIdRef.current;
@@ -1919,6 +1934,7 @@ function CanvasWorkspacePage() {
             }));
         },
         onError: (errorMessage) => {
+            resetThinkings();
             const sessionId = activeAgentSessionIdRef.current;
             const messageId = activeAgentAssistantMessageIdRef.current;
             resetTextStream(false);
@@ -1933,6 +1949,7 @@ function CanvasWorkspacePage() {
 
     const handleCreateAgentSession = useCallback(() => {
         if (agentRunning) return;
+        resetThinkings();
         const activeSession = chatSessions.find((session) => session.id === activeChatId);
         if (activeSession && activeSession.messages.length === 0) {
             resetAgentSession();
@@ -1953,7 +1970,7 @@ function CanvasWorkspacePage() {
         activeAgentAssistantMessageIdRef.current = null;
         resetAgentSession();
         handleAssistantSessionsChange([...chatSessions, newSession], sessionId);
-    }, [activeChatId, agentRunning, chatSessions, handleAssistantSessionsChange, resetAgentSession]);
+    }, [activeChatId, agentRunning, chatSessions, handleAssistantSessionsChange, resetAgentSession, resetThinkings]);
 
     const startTitleEditing = useCallback(() => {
         setTitleDraft(currentDocument?.identity.title || "未命名画布");
@@ -2970,6 +2987,8 @@ function CanvasWorkspacePage() {
                     nodes={nodes}
                     onNodeDropRef={onNodeDropRef}
                     messages={activeSessionMessages}
+                    completedThinkings={completedThinkings}
+                    activeThinking={activeThinking}
                     onNewSession={handleCreateAgentSession}
                     initialPrompt={initialPrompt}
                     onSend={async (text, references = []) => {
@@ -2981,6 +3000,7 @@ function CanvasWorkspacePage() {
                         activeAgentSessionIdRef.current = sessionId;
                         activeAgentAssistantMessageIdRef.current = null;
                         resetTextStream(false);
+                        resetThinkings();
                         setAgentRunning(true);
 
                         if (!activeChatId) {
@@ -3004,6 +3024,7 @@ function CanvasWorkspacePage() {
                                 history,
                             );
                         } catch (error) {
+                            resetThinkings();
                             appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
                             setAgentRunning(false);
                         }
