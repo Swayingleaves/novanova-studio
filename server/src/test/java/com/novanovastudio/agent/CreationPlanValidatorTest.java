@@ -90,6 +90,20 @@ class CreationPlanValidatorTest {
     }
 
     /**
+     * 批量画布工具不得夹带生成操作，生成必须使用专用工具。
+     */
+    @Test
+    void shouldRejectGenerationInsideCanvasApplyOperations() {
+        CreationTask task = new CreationTask("canvas-task", "canvas", "tool", "批量操作并生成", List.of(),
+                "canvas_apply_ops", Map.of("ops", List.of(Map.of(
+                        "type", "run_generation", "nodeId", "image-1"))));
+
+        Assertions.assertThrows(BusinessException.class,
+                () -> validator.validate(plan(CreationEntrySource.CANVAS, List.of(task)),
+                        CreationEntrySource.CANVAS, null));
+    }
+
+    /**
      * 画布工具缺少Schema必填参数时必须转为补参问题。
      */
     @Test

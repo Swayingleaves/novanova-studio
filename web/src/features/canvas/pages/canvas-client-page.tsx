@@ -8,7 +8,7 @@ import { saveAs } from "file-saver";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/features/generation/api/image";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/features/generation/api/video";
-import { cancelAiTask, createAiTask, subscribeAiTaskDeltas, waitAiTask } from "@/services/api/server";
+import { cancelAiTask, createAiTask, readAiTaskError, subscribeAiTaskDeltas, waitAiTask, type AiTaskErrorDetails } from "@/services/api/server";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { normalizeImageGenerationCount } from "@/features/generation/components/image-settings-panel";
 import { normalizeVideoGenerationCount } from "@/features/generation/components/video-settings-panel";
@@ -85,7 +85,7 @@ import { readCanvasSystemClipboard } from "../services/canvas-system-clipboard";
 import { saveCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
-import { positionCanvasAgentAddNodeOps } from "../utils/canvas-agent-tools";
+import { positionCanvasAgentAddNodeOps, type CanvasAgentToolResult } from "../utils/canvas-agent-tools";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
 import {
     type CanvasAssistantImage,
@@ -108,6 +108,17 @@ import type { ReferenceImage } from "@/features/generation/types/image";
 const VIDEO_NODE_MAX_WIDTH = 420;
 const VIDEO_NODE_MAX_HEIGHT = 420;
 const CONNECTION_HANDLE_HIT_RADIUS = 40;
+
+type CanvasNodeGenerationFailure = {
+    nodeId: string;
+    error: AiTaskErrorDetails;
+};
+
+type CanvasNodeGenerationOutcome = {
+    nodeId: string;
+    error?: AiTaskErrorDetails;
+    canceled?: boolean;
+};
 const CONNECTION_NODE_HIT_PADDING = 32;
 const PROMPT_PANEL_WIDTH = 580;
 const PROMPT_PANEL_HEIGHT = 196;
@@ -324,7 +335,8 @@ function CanvasWorkspacePage() {
     const connectionsRef = useRef(connections);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
     const viewportRef = useRef(viewport);
-    const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => Promise<void>) | null>(null);
+    const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, recovery: boolean, signal?: AbortSignal) => Promise<CanvasAgentToolResult>) | null>(null);
+    const retryNodeRef = useRef<((node: CanvasDomainNode, signal?: AbortSignal) => Promise<CanvasAgentToolResult>) | null>(null);
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
     const selectionBoxRef = useRef(selectionBox);
@@ -810,7 +822,7 @@ function CanvasWorkspacePage() {
     }, []);
 
     const applyAgentOps = useCallback(
-        (ops?: CanvasAgentOp[]) => {
+        async (ops: CanvasAgentOp[] | undefined, signal: AbortSignal) => {
             const safeOps = positionCanvasAgentAddNodeOps(Array.isArray(ops) ? ops.filter((op) => op?.type) : [], getCanvasCenter());
             const before = { projectId, title: currentDocument?.identity.title || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current };
             const generationOps: CanvasAgentOp[] = [];
@@ -829,15 +841,31 @@ function CanvasWorkspacePage() {
                 showMissingAiConfig(mode);
                 throw new Error(`${mode === "image" ? "图片" : mode === "video" ? "视频" : "文本"}生成节点已创建，但模型配置不完整，生成尚未开始`);
             }
-            queueMicrotask(() =>
-                generationOps.forEach((operation) => {
-                    if (!operation.nodeId) return;
-                    const target = nodesRef.current.find((node) => node.id === operation.nodeId);
-                    const prompt = operation.prompt?.trim() || (target ? readCanvasNodePrompt(target) : "");
-                    void generateNodeRef.current?.(operation.nodeId, operation.mode || target?.kind || "image", prompt);
-                }),
-            );
-            return { ...next, projectId, title: currentDocument?.identity.title || "未命名画布" };
+            if (!generationOps.length) {
+                return { snapshot: { ...next, projectId, title: currentDocument?.identity.title || "未命名画布" } };
+            }
+            const outcomes = await Promise.all(generationOps.map(async (operation) => {
+                if (!operation.nodeId) throw new Error("生成节点ID不能为空");
+                const target = nodesRef.current.find((node) => node.id === operation.nodeId);
+                if (!target) throw new Error(`生成节点不存在: ${operation.nodeId}`);
+                const prompt = operation.prompt?.trim() || readCanvasNodePrompt(target);
+                const execute = generateNodeRef.current;
+                if (!execute) throw new Error("画布生成执行器尚未就绪");
+                return execute(operation.nodeId, operation.mode || target.kind, prompt, operation.recovery === true, signal);
+            }));
+            const result = withCanvasArgumentSources(mergeCanvasGenerationResults(outcomes), generationOps, stateOps);
+            return {
+                snapshot: {
+                    ...next,
+                    nodes: nodesRef.current,
+                    connections: connectionsRef.current,
+                    selectedNodeIds: Array.from(selectedNodeIdsRef.current),
+                    viewport: viewportRef.current,
+                    projectId,
+                    title: currentDocument?.identity.title || "未命名画布",
+                },
+                result,
+            };
         },
         [commitAgentSnapshot, currentDocument?.identity.title, effectiveConfig, getCanvasCenter, isAiConfigReady, projectId, showMissingAiConfig],
     );
@@ -1867,9 +1895,9 @@ function CanvasWorkspacePage() {
         },
     });
 
-    const { sendMessage: sendAgentMessage, resetSession: resetAgentSession } = useAgentSSE({
+    const { sendMessage: sendAgentMessage, cancelMessage: cancelAgentMessage, resetSession: resetAgentSession } = useAgentSSE({
         snapshot: agentSnapshot,
-        onApplyOps: (ops) => applyAgentOps(ops),
+        onApplyOps: applyAgentOps,
         onToolExecute: () => {
             const sessionId = activeAgentSessionIdRef.current;
             const messageId = activeAgentAssistantMessageIdRef.current;
@@ -1990,28 +2018,47 @@ function CanvasWorkspacePage() {
     }, []);
 
     const handleGenerateNode = useCallback(
-        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => {
-            if (isGenerationRunning(nodeId)) return;
+        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, recovery = false, externalSignal?: AbortSignal): Promise<CanvasAgentToolResult> => {
+            if (recovery) {
+                const retryNode = nodesRef.current.find((node) => node.id === nodeId);
+                if (!retryNode) return failedCanvasGenerationResult(nodeId, canvasError("invalid_parameter", `生成节点不存在: ${nodeId}`, "nodeId"));
+                const retry = retryNodeRef.current;
+                if (!retry) return failedCanvasGenerationResult(nodeId, canvasError("configuration", "画布重试执行器尚未就绪"));
+                return retry(retryNode, externalSignal);
+            }
+            if (isGenerationRunning(nodeId)) {
+                return failedCanvasGenerationResult(nodeId, canvasError("configuration", "当前节点正在生成，请等待任务完成"));
+            }
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 showMissingAiConfig(mode);
-                return;
+                return failedCanvasGenerationResult(nodeId, canvasError("configuration", "模型配置不完整"));
             }
 
-            setRunningNodeId(nodeId);
-            const runController = startGenerationRequest(nodeId, nodeId, nodeId);
             const sourceTextContent = sourceNode && isTextNode(sourceNode) ? sourceNode.content.text.trim() : "";
             const editingTextNode = mode === "text" && Boolean(sourceTextContent);
-            const generationContext = await hydrateNodeGenerationContext(
-                buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? `请根据要求修改以下文本。\n\n原文：\n${sourceTextContent}\n\n修改要求：\n${prompt}` : prompt),
-                mode,
-            );
+            let generationContext: Awaited<ReturnType<typeof hydrateNodeGenerationContext>>;
+            try {
+                generationContext = await hydrateNodeGenerationContext(
+                    buildNodeGenerationContext(nodeId, nodesRef.current, connectionsRef.current, editingTextNode ? `请根据要求修改以下文本。\n\n原文：\n${sourceTextContent}\n\n修改要求：\n${prompt}` : prompt),
+                    mode,
+                );
+            } catch (error) {
+                if (isGenerationCanceled(error) || externalSignal?.aborted) return canceledCanvasGenerationResult();
+                return failedCanvasGenerationResult(nodeId, readAiTaskError(error));
+            }
+            if (externalSignal?.aborted) return canceledCanvasGenerationResult();
+            setRunningNodeId(nodeId);
+            const runController = startGenerationRequest(nodeId, nodeId, nodeId);
+            const detachExternalAbort = bindAbortSignal(externalSignal, runController);
             const effectivePrompt = generationContext.prompt.trim();
+            const actualToolArguments = canvasActualGenerationArguments(mode, effectivePrompt || prompt, generationConfig);
             if (runController.signal.aborted) {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
-                return;
+                detachExternalAbort();
+                return canceledCanvasGenerationResult();
             }
             const markSourceStatus = !sourceNode || (!isImageNode(sourceNode) && !editingTextNode);
             if (markSourceStatus) {
@@ -2020,7 +2067,8 @@ function CanvasWorkspacePage() {
             if (!effectivePrompt && mode === "text") {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
-                return;
+                detachExternalAbort();
+                return failedCanvasGenerationResult(nodeId, canvasError("invalid_parameter", "生成提示词不能为空", "prompt"));
             }
             let pendingChildIds: string[] = [];
 
@@ -2127,42 +2175,48 @@ function CanvasWorkspacePage() {
                     const controller = runController;
                     targetIds.forEach((targetId) => startGenerationRequest(targetId, nodeId, nodeId, controller));
                     if (count > 1) startGenerationRequest(rootId, nodeId, nodeId, controller);
-                    let hasSuccess = false;
-                    let hasFailure = false;
-                    await Promise.all(
-                        targetIds.map(async (targetId) => {
+                    const outcomes = await Promise.all(
+                        targetIds.map(async (targetId): Promise<CanvasNodeGenerationOutcome> => {
                             try {
                                 const generationRequest = referenceImages.length
                                     ? requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, "canvas", { signal: controller.signal })
                                     : requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, "canvas", { signal: controller.signal });
                                 const [image] = await generationRequest;
+                                if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                                 const uploaded = await reuseOrUploadImage(image);
+                                if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
                                 setNodes((currentNodes) => applyGeneratedImageToBatchNodes(currentNodes, { rootId, targetId, attributes: imageAttributes(uploaded), ...imageSize }));
-                                hasSuccess = true;
-                                return true;
+                                return { nodeId: targetId };
                             } catch (error) {
-                                if (isGenerationCanceled(error)) return false;
-                                const errorDetails = error instanceof Error ? error.message : "生成失败";
-                                hasFailure = true;
+                                if (isGenerationCanceled(error)) {
+                                    setNodes((prev) => synchronizeImageBatchRootExecution(
+                                        prev.map((node) => (node.id === targetId ? updateCanvasNodeExecution(node, { phase: "idle", errorMessage: "" }) : node)),
+                                        rootId,
+                                    ));
+                                    return { nodeId: targetId, canceled: true };
+                                }
+                                const structuredError = readAiTaskError(error);
                                 setNodes((prev) =>
                                     synchronizeImageBatchRootExecution(
-                                        prev.map((node) => (node.id === targetId ? updateCanvasNodeExecution(node, { phase: "failed", errorMessage: errorDetails }) : node)),
+                                        prev.map((node) => (node.id === targetId ? updateCanvasNodeExecution(node, { phase: "failed", errorMessage: structuredError.message }) : node)),
                                         rootId,
                                     ),
                                 );
+                                return { nodeId: targetId, error: structuredError };
                             } finally {
                                 finishGenerationRequest(targetId, controller);
                             }
-                            return false;
                         }),
                     );
                     if (count > 1) finishGenerationRequest(rootId, controller);
                     if (controller.signal.aborted) {
-                        return;
+                        return canceledCanvasGenerationResult();
                     }
-                    if (hasFailure) message.error(hasSuccess ? "部分图片生成失败" : "全部图片生成失败");
-                    return;
+                    const successfulNodeIds = outcomes.filter((outcome) => !outcome.error && !outcome.canceled).map((outcome) => outcome.nodeId);
+                    const failures = outcomes.filter((outcome): outcome is CanvasNodeGenerationFailure => Boolean(outcome.error));
+                    if (failures.length) message.error(successfulNodeIds.length ? "部分图片生成失败" : "全部图片生成失败");
+                    return canvasGenerationResult(successfulNodeIds, failures, actualToolArguments);
                 }
 
                 if (mode === "video") {
@@ -2170,8 +2224,9 @@ function CanvasWorkspacePage() {
                     const referenceImages = await ensureVideoReferenceImagesObjectStorage(generationContext.referenceImages);
                     if (!referenceImages) {
                         if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? updateCanvasNodeExecution(node, { phase: "idle", errorMessage: "" }) : node)));
-                        return;
+                        return canceledCanvasGenerationResult();
                     }
+                    if (runController.signal.aborted) return canceledCanvasGenerationResult();
                     const videoGenerationContext = { ...generationContext, referenceImages };
                     const spec = nodeSizeFromRatio(generationConfig.size, getCanvasNodeTemplate("video").width, getCanvasNodeTemplate("video").height) || getCanvasNodeTemplate("video");
                     const isEmptyVideoNode = Boolean(sourceNode && isVideoNode(sourceNode) && !sourceNode.content.source);
@@ -2220,18 +2275,21 @@ function CanvasWorkspacePage() {
                     if (connectionTargets.length) setConnections((prev) => [...prev, ...connectionTargets.map((videoId) => createCanvasConnection(nanoid(), nodeId, videoId))]);
                     videoIds.filter((videoId) => videoId !== nodeId).forEach((videoId) => startGenerationRequest(videoId, nodeId, nodeId, runController));
 
-                    let hasSuccess = false;
-                    let hasFailure = false;
-                    await Promise.all(
-                        videoIds.map(async (videoId) => {
+                    const outcomes = await Promise.all(
+                        videoIds.map(async (videoId): Promise<CanvasNodeGenerationOutcome> => {
                             try {
-                                const video = await storeGeneratedVideo(
-                                    await requestVideoGeneration({ ...generationConfig, count: "1" }, effectivePrompt, videoGenerationContext.referenceImages, videoGenerationContext.referenceVideos, "canvas", {
-                                        signal: runController.signal,
-                                        onProgress: (progress) => setNodes((prev) => prev.map((node) => (node.id === videoId ? updateCanvasNodeExecution(node, { progress }) : node))),
-                                        onTaskCreated: (taskId) => setNodes((prev) => prev.map((node) => (node.id === videoId ? updateCanvasNodeExecution(node, { taskId }) : node))),
-                                    }),
-                                );
+                                const generatedVideo = await requestVideoGeneration({ ...generationConfig, count: "1" }, effectivePrompt, videoGenerationContext.referenceImages, videoGenerationContext.referenceVideos, "canvas", {
+                                    signal: runController.signal,
+                                    onProgress: (progress) => {
+                                        if (!runController.signal.aborted) setNodes((prev) => prev.map((node) => (node.id === videoId ? updateCanvasNodeExecution(node, { progress }) : node)));
+                                    },
+                                    onTaskCreated: (taskId) => {
+                                        if (!runController.signal.aborted) setNodes((prev) => prev.map((node) => (node.id === videoId ? updateCanvasNodeExecution(node, { taskId }) : node)));
+                                    },
+                                });
+                                if (runController.signal.aborted) throw new DOMException("Aborted", "AbortError");
+                                const video = await storeGeneratedVideo(generatedVideo);
+                                if (runController.signal.aborted) throw new DOMException("Aborted", "AbortError");
                                 const completedSize = fitNodeSize(video.width || spec.width, video.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                                 setNodes((prev) =>
                                     prev.map((node) => {
@@ -2251,19 +2309,25 @@ function CanvasWorkspacePage() {
                                         return updateCanvasNodeFrame(completed, { position: { x: center.x - completedSize.width / 2, y: center.y - completedSize.height / 2 }, ...completedSize });
                                     }),
                                 );
-                                hasSuccess = true;
+                                return { nodeId: videoId };
                             } catch (error) {
-                                if (isGenerationCanceled(error)) return;
-                                hasFailure = true;
-                                const errorDetails = error instanceof Error ? error.message : "视频生成失败";
-                                setNodes((prev) => prev.map((node) => (node.id === videoId ? updateCanvasNodeExecution(node, { phase: "failed", errorMessage: errorDetails }) : node)));
+                                if (isGenerationCanceled(error)) {
+                                    setNodes((prev) => prev.map((node) => (node.id === videoId ? updateCanvasNodeExecution(node, { phase: "idle", errorMessage: "" }) : node)));
+                                    return { nodeId: videoId, canceled: true };
+                                }
+                                const structuredError = readAiTaskError(error);
+                                setNodes((prev) => prev.map((node) => (node.id === videoId ? updateCanvasNodeExecution(node, { phase: "failed", errorMessage: structuredError.message }) : node)));
+                                return { nodeId: videoId, error: structuredError };
                             } finally {
                                 if (videoId !== nodeId) finishGenerationRequest(videoId, runController);
                             }
                         }),
                     );
-                    if (hasFailure) message.error(hasSuccess ? "部分视频生成失败" : "全部视频生成失败");
-                    return;
+                    if (runController.signal.aborted) return canceledCanvasGenerationResult();
+                    const successfulNodeIds = outcomes.filter((outcome) => !outcome.error && !outcome.canceled).map((outcome) => outcome.nodeId);
+                    const failures = outcomes.filter((outcome): outcome is CanvasNodeGenerationFailure => Boolean(outcome.error));
+                    if (failures.length) message.error(successfulNodeIds.length ? "部分视频生成失败" : "全部视频生成失败");
+                    return canvasGenerationResult(successfulNodeIds, failures, actualToolArguments);
                 }
 
                 let streamed = "";
@@ -2301,13 +2365,16 @@ function CanvasWorkspacePage() {
                 }));
                 const answers = await Promise.all(
                     textTargetIds.map((targetNodeId) => {
+                        if (controller.signal.aborted) {
+                            return Promise.reject(new DOMException("Aborted", "AbortError"));
+                        }
                         // 后端任务体系下，每个目标节点创建一个文本任务，订阅text-delta增量回写节点内容。
                         return createAiTask({ taskType: "text", prompt: effectivePrompt, model: textModel, references: textReferences })
                             .then((task) => ({ targetNodeId, taskId: task.id }))
                             .then(async ({ targetNodeId, taskId }) => {
                                 let localStreamed = "";
                                 const unsubscribe = subscribeAiTaskDeltas((deltaTaskId, delta) => {
-                                    if (deltaTaskId !== taskId) return;
+                                    if (deltaTaskId !== taskId || controller.signal.aborted) return;
                                     localStreamed += delta;
                                     streamed = localStreamed;
                                     setNodes((prev) => prev.map((node) => (node.id === targetNodeId ? replaceCanvasNodeWithText(node, localStreamed, node.title, "running") : node)));
@@ -2324,7 +2391,7 @@ function CanvasWorkspacePage() {
                             });
                     }),
                 );
-                if (controller.signal.aborted) return;
+                if (controller.signal.aborted) return canceledCanvasGenerationResult();
                 const answerByNodeId = new Map(answers.map((item) => [item.nodeId, item.content]));
                 setNodes((prev) =>
                     prev.map((node) =>
@@ -2335,12 +2402,21 @@ function CanvasWorkspacePage() {
                               : node,
                     ),
                 );
+                return canvasGenerationResult(textTargetIds, [], actualToolArguments);
             } catch (error) {
-                if (isGenerationCanceled(error)) return;
-                const errorDetails = error instanceof Error ? error.message : "生成失败";
-                message.error(errorDetails);
-                setNodes((prev) => prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : updateCanvasNodeExecution(node, { phase: "failed", errorMessage: errorDetails })) : node)));
+                if (isGenerationCanceled(error)) {
+                    setNodes((prev) => prev.map((node) =>
+                        node.id === nodeId || pendingChildIds.includes(node.id)
+                            ? updateCanvasNodeExecution(node, { phase: "idle", errorMessage: "" }) : node));
+                    return canceledCanvasGenerationResult();
+                }
+                const structuredError = readAiTaskError(error);
+                message.error(structuredError.message);
+                setNodes((prev) => prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : updateCanvasNodeExecution(node, { phase: "failed", errorMessage: structuredError.message })) : node)));
+                const failedNodeIds = pendingChildIds.length ? pendingChildIds : [nodeId];
+                return canvasGenerationResult([], failedNodeIds.map((failedNodeId) => ({ nodeId: failedNodeId, error: structuredError })), actualToolArguments);
             } finally {
+                detachExternalAbort();
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
             }
@@ -2361,11 +2437,13 @@ function CanvasWorkspacePage() {
     }, [handleGenerateNode]);
 
     const handleRetryNode = useCallback(
-        async (node: CanvasDomainNode) => {
-            if (isGenerationRunning(node.id)) return;
+        async (node: CanvasDomainNode, externalSignal?: AbortSignal): Promise<CanvasAgentToolResult> => {
+            if (isGenerationRunning(node.id)) {
+                return failedCanvasGenerationResult(node.id, canvasError("configuration", "当前节点正在生成，请等待任务完成"));
+            }
             const sourceNode = node;
             const batchRoot = isImageNode(node) && node.grouping.rootId ? nodesRef.current.find((item) => item.id === node.grouping.rootId) : null;
-            const savedImageNode = isImageNode(batchRoot || node) ? batchRoot || node : null;
+            const savedImageNode = isImageNode(node) ? node : batchRoot && isImageNode(batchRoot) ? batchRoot : null;
             const savedImageGeneration = savedImageNode && isImageNode(savedImageNode) ? savedImageNode.generation : null;
             const hasSavedImageGeneration = Boolean(savedImageGeneration && (savedImageGeneration.prompt || savedImageGeneration.model || savedImageGeneration.references.length));
             const retryMode: CanvasNodeGenerationMode = node.kind;
@@ -2376,19 +2454,20 @@ function CanvasWorkspacePage() {
                           model: savedImageGeneration.model || effectiveConfig.imageModel || effectiveConfig.model,
                           quality: savedImageGeneration.quality || effectiveConfig.quality,
                           size: savedImageGeneration.size || effectiveConfig.size,
+                          imageResolution: savedImageGeneration.resolution || effectiveConfig.imageResolution,
                           count: "1",
                       }
                     : { ...buildGenerationConfig(effectiveConfig, sourceNode, retryMode), count: "1" };
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 showMissingAiConfig(retryMode);
-                return;
+                return failedCanvasGenerationResult(node.id, canvasError("configuration", "模型配置不完整"));
             }
 
             const context = hasSavedImageGeneration ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, readCanvasNodePrompt(sourceNode)), retryMode);
             const prompt = (savedImageGeneration?.prompt || context?.prompt || "").trim();
             if (!prompt) {
                 message.warning("找不到提示词，无法重试");
-                return;
+                return failedCanvasGenerationResult(node.id, canvasError("invalid_parameter", "找不到提示词，无法重试", "prompt"));
             }
             const generationType = savedImageGeneration?.operation;
             const useReferenceImages = generationType ? generationType === "edit" : Boolean(context?.referenceImages.length);
@@ -2403,43 +2482,53 @@ function CanvasWorkspacePage() {
             if (useReferenceImages && !retryReferenceImages) {
                 message.error("参考图片已丢失，无法继续重试");
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage: "参考图片已丢失，无法继续重试" }) : item)));
-                return;
+                return failedCanvasGenerationResult(node.id, canvasError("configuration", "参考图片已丢失，无法继续重试"));
             }
             const retryImages = retryReferenceImages || [];
+            const actualToolArguments = canvasActualGenerationArguments(retryMode, prompt, generationConfig, 1);
+            if (externalSignal?.aborted) return canceledCanvasGenerationResult();
 
             setRunningNodeId(node.id);
             setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "running", errorMessage: "" }) : item)));
             const controller = startGenerationRequest(node.id, sourceNode.id, node.id);
+            const detachExternalAbort = bindAbortSignal(externalSignal, controller);
 
             try {
                 if (isTextNode(node)) {
-                    if (!context) return;
+                    if (!context) return failedCanvasGenerationResult(node.id, canvasError("unknown", "文本节点缺少生成上下文"));
                     let streamed = "";
                     const answer = await requestImageQuestion(
                         generationConfig,
                         buildNodeResponseMessages({ ...context, prompt }),
                         (text) => {
+                            if (controller.signal.aborted) return;
                             streamed = text;
                             setNodes((prev) => prev.map((item) => (item.id === node.id ? replaceCanvasNodeWithText(item, text, item.title, "running") : item)));
                         },
                         { signal: controller.signal },
                     );
+                    if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                     setNodes((prev) => prev.map((item) => (item.id === node.id ? replaceCanvasNodeWithText(item, answer || streamed, item.title, "succeeded") : item)));
-                    return;
+                    return canvasGenerationResult([node.id], [], actualToolArguments);
                 }
                 if (isVideoNode(node)) {
                     const videoReferenceImages = await ensureVideoReferenceImagesObjectStorage(retryImages);
                     if (!videoReferenceImages) {
                         setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "idle", errorMessage: "" }) : item)));
-                        return;
+                        return canceledCanvasGenerationResult();
                     }
-                    const video = await storeGeneratedVideo(
-                        await requestVideoGeneration(generationConfig, prompt, videoReferenceImages, context?.referenceVideos || [], "canvas", {
-                            signal: controller.signal,
-                            onProgress: (progress) => setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { progress }) : item))),
-                            onTaskCreated: (taskId) => setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { taskId }) : item))),
-                        }),
-                    );
+                    const generatedVideo = await requestVideoGeneration(generationConfig, prompt, videoReferenceImages, context?.referenceVideos || [], "canvas", {
+                        signal: controller.signal,
+                        onProgress: (progress) => {
+                            if (!controller.signal.aborted) setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { progress }) : item)));
+                        },
+                        onTaskCreated: (taskId) => {
+                            if (!controller.signal.aborted) setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { taskId }) : item)));
+                        },
+                    });
+                    if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
+                    const video = await storeGeneratedVideo(generatedVideo);
+                    if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                     const videoSize = fitNodeSize(video.width || node.frame.width, video.height || node.frame.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                     setNodes((prev) =>
                         prev.map((item) => {
@@ -2460,13 +2549,15 @@ function CanvasWorkspacePage() {
                             );
                         }),
                     );
-                    return;
+                    return canvasGenerationResult([node.id], [], actualToolArguments);
                 }
 
                 const image = useReferenceImages
                     ? await requestEdit(generationConfig, prompt, retryImages, undefined, "canvas", { signal: controller.signal }).then((items) => items[0])
                     : await requestGeneration(generationConfig, prompt, "canvas", { signal: controller.signal }).then((items) => items[0]);
+                if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                 const uploadedImage = await reuseOrUploadImage(image);
+                if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                 const imageConfig = getCanvasNodeTemplate("image");
                 const imageSize = fitNodeSize(uploadedImage.width, uploadedImage.height, imageConfig.width, imageConfig.height);
                 const generationAttributes = savedImageGeneration
@@ -2492,18 +2583,32 @@ function CanvasWorkspacePage() {
                         });
                     }),
                 );
+                return canvasGenerationResult([node.id], [], actualToolArguments);
             } catch (error) {
-                if (isGenerationCanceled(error)) return;
-                const errorDetails = error instanceof Error ? error.message : "生成失败";
-                message.error(errorDetails);
-                setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage: errorDetails }) : item)));
+                if (isGenerationCanceled(error)) {
+                    setNodes((prev) => prev.map((item) => (item.id === node.id
+                        ? updateCanvasNodeExecution(item, { phase: "idle", errorMessage: "" }) : item)));
+                    return canceledCanvasGenerationResult();
+                }
+                const structuredError = readAiTaskError(error);
+                message.error(structuredError.message);
+                setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage: structuredError.message }) : item)));
+                return failedCanvasGenerationResult(node.id, structuredError, actualToolArguments);
             } finally {
+                detachExternalAbort();
                 finishGenerationRequest(node.id, controller);
                 setRunningNodeId(null);
             }
         },
         [effectiveConfig, ensureVideoReferenceImagesObjectStorage, finishGenerationRequest, isAiConfigReady, isGenerationRunning, message, showMissingAiConfig, startGenerationRequest],
     );
+
+    useEffect(() => {
+        retryNodeRef.current = handleRetryNode;
+        return () => {
+            retryNodeRef.current = null;
+        };
+    }, [handleRetryNode]);
 
     const insertAssistantImage = useCallback(
         async (image: CanvasAssistantImage) => {
@@ -2990,6 +3095,7 @@ function CanvasWorkspacePage() {
                     completedThinkings={completedThinkings}
                     activeThinking={activeThinking}
                     onNewSession={handleCreateAgentSession}
+                    onStop={() => void cancelAgentMessage().catch((error) => message.error(error instanceof Error ? error.message : "停止失败"))}
                     initialPrompt={initialPrompt}
                     onSend={async (text, references = []) => {
                         if (agentRunning) return;
@@ -3232,8 +3338,108 @@ function updateNodeWithTaskResult(nodes: CanvasDomainNode[], nodeId: string, com
     });
 }
 
+function canvasError(category: string, errorMessage: string, parameter?: string): AiTaskErrorDetails {
+    return {
+        source: "canvas",
+        category,
+        stage: "frontend_tool",
+        parameter,
+        message: errorMessage,
+        requestAccepted: false,
+        safeToRetry: false,
+    };
+}
+
+function canvasGenerationResult(successfulNodeIds: string[], failures: CanvasNodeGenerationFailure[], actualToolArguments?: Record<string, unknown>): CanvasAgentToolResult {
+    const successful = Array.from(new Set(successfulNodeIds));
+    return {
+        ok: failures.length === 0,
+        message: failures.length
+            ? successful.length ? "部分画布节点生成失败" : "画布节点生成失败"
+            : `画布节点生成完成，共 ${successful.length} 个`,
+        data: { successfulNodeIds: successful, failures, ...(actualToolArguments ? { actualToolArguments } : {}) },
+    };
+}
+
+function failedCanvasGenerationResult(nodeId: string, error: AiTaskErrorDetails, actualToolArguments?: Record<string, unknown>): CanvasAgentToolResult {
+    return canvasGenerationResult([], [{ nodeId, error }], actualToolArguments);
+}
+
+function canceledCanvasGenerationResult(): CanvasAgentToolResult {
+    return { ok: false, message: "已停止生成", data: { canceled: true, successfulNodeIds: [], failures: [] } };
+}
+
+function mergeCanvasGenerationResults(results: CanvasAgentToolResult[]): CanvasAgentToolResult {
+    if (results.some((result) => result.data?.canceled === true)) return canceledCanvasGenerationResult();
+    const successfulNodeIds = results.flatMap((result) =>
+        Array.isArray(result.data?.successfulNodeIds)
+            ? result.data.successfulNodeIds.filter((value): value is string => typeof value === "string")
+            : [],
+    );
+    const failures = results.flatMap((result) =>
+        Array.isArray(result.data?.failures)
+            ? result.data.failures.filter((value): value is CanvasNodeGenerationFailure => Boolean(
+                value && typeof value === "object" && typeof (value as CanvasNodeGenerationFailure).nodeId === "string"
+                && (value as CanvasNodeGenerationFailure).error,
+            ))
+            : [],
+    );
+    const actualToolArguments = results.reduce<Record<string, unknown>>((combined, result) => {
+        const value = result.data?.actualToolArguments;
+        if (value && typeof value === "object" && !Array.isArray(value)) Object.assign(combined, value);
+        return combined;
+    }, {});
+    return canvasGenerationResult(successfulNodeIds, failures,
+        Object.keys(actualToolArguments).length ? actualToolArguments : undefined);
+}
+
+function withCanvasArgumentSources(result: CanvasAgentToolResult, generationOps: CanvasAgentOp[], stateOps: CanvasAgentOp[]): CanvasAgentToolResult {
+    const actualToolArguments = result.data?.actualToolArguments;
+    if (!actualToolArguments || typeof actualToolArguments !== "object") return result;
+    const generatedNodeIds = new Set(stateOps.filter((operation) => operation.type === "add_node" && operation.id)
+        .map((operation) => operation.id as string));
+    const targetNodeId = generationOps.find((operation) => operation.nodeId)?.nodeId;
+    const createdNode = Boolean(targetNodeId && generatedNodeIds.has(targetNodeId));
+    const addOperation = stateOps.find((operation) => operation.type === "add_node" && operation.id === targetNodeId);
+    const agentFields = new Set(Object.keys(addOperation?.attributes || {}));
+    if (agentFields.has("content")) agentFields.add("prompt");
+    const argumentSources = Object.fromEntries(Object.keys(actualToolArguments).map((name) => [
+        name,
+        createdNode ? agentFields.has(name) ? "Agent生成" : "系统默认" : "用户硬约束",
+    ]));
+    return { ...result, data: { ...result.data, argumentSources } };
+}
+
+function canvasActualGenerationArguments(mode: CanvasNodeGenerationMode, prompt: string, config: AiConfig, forcedCount?: number): Record<string, unknown> {
+    const values: Record<string, unknown> = {
+        prompt,
+        model: config.model,
+        count: forcedCount ?? Number(config.count || 1),
+    };
+    if (mode === "image") {
+        values.size = config.size;
+        values.quality = config.quality;
+        values.imageResolution = config.imageResolution;
+    } else if (mode === "video") {
+        values.size = config.size;
+        values.seconds = config.videoSeconds;
+        values.vquality = config.vquality;
+        values.watermark = config.videoWatermark;
+    }
+    return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined && value !== null && value !== ""));
+}
+
+function bindAbortSignal(signal: AbortSignal | undefined, controller: AbortController) {
+    if (!signal) return () => undefined;
+    const abort = () => controller.abort();
+    if (signal.aborted) abort();
+    else signal.addEventListener("abort", abort, { once: true });
+    return () => signal.removeEventListener("abort", abort);
+}
+
 function isGenerationCanceled(error: unknown) {
-    return error instanceof Error && (error.message === "请求已取消" || error.name === "AbortError");
+    return error instanceof Error && (error.message === "请求已取消" || error.name === "AbortError")
+        || readAiTaskError(error).category === "canceled";
 }
 
 function sourceNodeReferenceImages(node: CanvasDomainNode | null) {

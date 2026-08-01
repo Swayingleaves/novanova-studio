@@ -2,6 +2,7 @@ package com.novanovastudio.ai.provider;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiHttpClient;
+import com.novanovastudio.ai.AiErrorSupport;
 import com.novanovastudio.ai.AiJsonUtils;
 import com.novanovastudio.ai.AiMediaSupport;
 import com.novanovastudio.ai.AiProviderAdapter;
@@ -176,8 +177,8 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
                                 ? cancelSeedanceVideoTask(context, providerTaskId)
                                 : querySeedanceVideoTask(context, providerTaskId, taskPath, attempt)))
                 .next()
-                .switchIfEmpty(Mono.error(new BusinessException(
-                        ErrorCode.THIRD_PARTY_CALL_ERROR, "Seedance 视频生成超时，请稍后重试")));
+                .switchIfEmpty(Mono.error(AiErrorSupport.providerPollingTimeout(
+                        "Seedance 视频生成超时，请稍后重试")));
     }
 
     /**
@@ -206,8 +207,8 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
                             return Mono.empty();
                         }
                         if (FAILURE_STATUSES.contains(status)) {
-                            return Mono.error(new BusinessException(
-                                    ErrorCode.THIRD_PARTY_CALL_ERROR, seedanceFailureMessage(response, status)));
+                            return Mono.error(AiErrorSupport.providerTaskFailure(
+                                    response, seedanceFailureMessage(response, status)));
                         }
                         return Mono.error(new BusinessException(
                                 ErrorCode.THIRD_PARTY_CALL_ERROR, "Seedance 返回了未知任务状态: " + status));

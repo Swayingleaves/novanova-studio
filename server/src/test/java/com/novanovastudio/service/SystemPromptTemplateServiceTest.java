@@ -105,6 +105,7 @@ class SystemPromptTemplateServiceTest {
         systemPrompt.setOptimizationImageFile(templateFile(PromptTemplateType.OPTIMIZATION_IMAGE).toUri().toString());
         systemPrompt.setOptimizationVideoFile(templateFile(PromptTemplateType.OPTIMIZATION_VIDEO).toUri().toString());
         systemPrompt.setAgentMainFile(templateFile(PromptTemplateType.AGENT_MAIN).toUri().toString());
+        systemPrompt.setAgentRecoveryFile(templateFile(PromptTemplateType.AGENT_RECOVERY).toUri().toString());
         systemPrompt.setAgentImageFile(templateFile(PromptTemplateType.AGENT_IMAGE).toUri().toString());
         systemPrompt.setAgentVideoFile(templateFile(PromptTemplateType.AGENT_VIDEO).toUri().toString());
         systemPrompt.setAgentCanvasFile(templateFile(PromptTemplateType.AGENT_CANVAS).toUri().toString());

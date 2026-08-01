@@ -1,6 +1,7 @@
 package com.novanovastudio.agent;
 
 import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.dto.CreationPlan;
 import com.novanovastudio.agent.dto.CreationSettings;
@@ -46,6 +47,16 @@ public class CreationPlanValidator {
         }
         if (!CreationEntrySource.supported(entrySource) || !entrySource.equals(plan.entrySource())) {
             throw invalid("Agent计划入口来源与当前页面不一致");
+        }
+        if (settings != null
+                && settings.generationStyleIds() != null && !settings.generationStyleIds().isEmpty()
+                && settings.generationStyleSnapshots() != null && !settings.generationStyleSnapshots().isEmpty()) {
+            throw invalid("生成风格ID和历史风格快照不能同时提交");
+        }
+        if (CreationEntrySource.CANVAS.equals(entrySource) && settings != null
+                && ((settings.generationStyleIds() != null && !settings.generationStyleIds().isEmpty())
+                || (settings.generationStyleSnapshots() != null && !settings.generationStyleSnapshots().isEmpty()))) {
+            throw invalid("生成风格只支持图片或视频页面");
         }
         List<CreationTask> tasks = plan.tasks() == null ? List.of() : plan.tasks();
         if (isGenerationPage(entrySource) && tasks.size() > 1) {
@@ -217,6 +228,9 @@ public class CreationPlanValidator {
             throw invalid("主Agent不能重复调用画布只读工具");
         }
         Map<String, Object> arguments = task.toolArguments() == null ? Map.of() : task.toolArguments();
+        if ("canvas_apply_ops".equals(task.toolName()) && containsGenerationOperation(arguments.get("ops"))) {
+            throw invalid("canvas_apply_ops不能执行生成，请使用专用生成工具");
+        }
         List<String> missing = new ArrayList<>(missingRequiredArguments(tool.parameters(), arguments));
         if ("canvas_create_generation_flow".equals(task.toolName())
                 && "image".equals(arguments.get("mode"))
@@ -237,6 +251,21 @@ public class CreationPlanValidator {
             throw invalid("普通画布工具必须使用canvas任务类型和tool动作");
         }
         return List.of();
+    }
+
+    /**
+     * 判断批量画布操作中是否夹带生成操作。
+     *
+     * @param operations Object 画布操作列表
+     * @return boolean 是否包含run_generation
+     */
+    private boolean containsGenerationOperation(Object operations) {
+        if (!(operations instanceof List<?> values)) return false;
+        return values.stream().anyMatch(value -> {
+            if (value instanceof Map<?, ?> operation) return "run_generation".equals(operation.get("type"));
+            JSONObject operation = value == null ? null : JSON.parseObject(JSON.toJSONString(value));
+            return operation != null && "run_generation".equals(operation.getString("type"));
+        });
     }
 
     /**

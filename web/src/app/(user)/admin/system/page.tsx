@@ -25,6 +25,11 @@ import {
     updateAdminPrompt,
     updateAdminPromptStatus,
     deleteAdminPrompts,
+    listAdminGenerationStyles,
+    createAdminGenerationStyle,
+    updateAdminGenerationStyle,
+    updateAdminGenerationStyleStatus,
+    deleteAdminGenerationStyles,
     listAdminHomepageShowcases,
     createAdminHomepageShowcase,
     updateAdminHomepageShowcase,
@@ -35,6 +40,7 @@ import {
     type HomepageShowcase,
     type ServerAdminCreditTransaction,
     type ServerPrompt,
+    type ServerGenerationStyle,
     type SystemNotification,
 } from "@/services/api/server";
 import { useUserStore, type ServerUserProfile, type ServerUserRole } from "@/features/auth/stores/use-user-store";
@@ -90,6 +96,7 @@ export default function AdminSystemPage() {
                         { key: "credits", label: "积分消耗", children: <CreditConsumptionManagement /> },
                         { key: "notifications", label: "消息管理", children: <NotificationManagement /> },
                         { key: "prompts", label: "提示词库", children: <PromptManagement /> },
+                        { key: "styles", label: "风格管理", children: <GenerationStyleManagement /> },
                         { key: "homepage", label: "首页展示", children: <HomepageShowcaseManagement /> },
                     ]}
                 />
@@ -1179,6 +1186,225 @@ function PromptManagement() {
                                     { label: "停用", value: 0 },
                                 ]}
                             />
+                        </Form.Item>
+                    </div>
+                </Form>
+            </Modal>
+        </div>
+    );
+}
+
+type GenerationStyleFormValues = {
+    generationType: "image" | "video";
+    name: string;
+    stylePrompt: string;
+    sortOrder?: number;
+    status?: number;
+};
+
+/**
+ * 管理员维护图片和视频生成风格。
+ *
+ * @return 风格管理内容
+ */
+function GenerationStyleManagement() {
+    const { message, modal } = App.useApp();
+    const [form] = Form.useForm<GenerationStyleFormValues>();
+    const [styles, setStyles] = useState<ServerGenerationStyle[]>([]);
+    const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(1);
+    const [keyword, setKeyword] = useState("");
+    const [generationType, setGenerationType] = useState<"all" | "image" | "video">("all");
+    const [status, setStatus] = useState<number | undefined>();
+    const [loading, setLoading] = useState(false);
+    const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
+    const [editOpen, setEditOpen] = useState(false);
+    const [editingStyle, setEditingStyle] = useState<ServerGenerationStyle | null>(null);
+
+    const loadStyles = useCallback(async (nextPage = page) => {
+        setLoading(true);
+        try {
+            const result = await listAdminGenerationStyles({
+                page: nextPage,
+                pageSize: PAGE_SIZE,
+                keyword: keyword || undefined,
+                generationType,
+                status,
+            });
+            setStyles(result.styles);
+            setTotal(result.total);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "查询风格失败");
+        } finally {
+            setLoading(false);
+        }
+    }, [generationType, keyword, message, page, status]);
+
+    useEffect(() => {
+        void loadStyles(page);
+    }, [loadStyles, page]);
+
+    const openCreate = () => {
+        setEditingStyle(null);
+        form.setFieldsValue({ generationType: "image", name: "", stylePrompt: "", sortOrder: 1000, status: 1 });
+        setEditOpen(true);
+    };
+
+    const openEdit = (style: ServerGenerationStyle) => {
+        setEditingStyle(style);
+        form.setFieldsValue({
+            generationType: style.generationType,
+            name: style.name,
+            stylePrompt: style.stylePrompt,
+            sortOrder: style.sortOrder ?? 1000,
+            status: style.status ?? 1,
+        });
+        setEditOpen(true);
+    };
+
+    const saveStyle = async () => {
+        try {
+            const values = await form.validateFields();
+            const input = {
+                generationType: values.generationType,
+                name: values.name.trim(),
+                stylePrompt: values.stylePrompt.trim(),
+                sortOrder: values.sortOrder ?? 1000,
+                status: values.status ?? 1,
+            };
+            if (editingStyle) {
+                await updateAdminGenerationStyle({ id: editingStyle.id, ...input });
+                message.success("风格已更新");
+            } else {
+                await createAdminGenerationStyle(input);
+                message.success("风格已创建");
+            }
+            setEditOpen(false);
+            await loadStyles(editingStyle ? page : 1);
+            if (!editingStyle) setPage(1);
+        } catch (error) {
+            if (error instanceof Error) message.error(error.message);
+        }
+    };
+
+    const changeStatus = (style: ServerGenerationStyle) => {
+        const nextStatus = style.status === 1 ? 0 : 1;
+        modal.confirm({
+            title: nextStatus === 1 ? "启用风格" : "停用风格",
+            content: nextStatus === 1 ? "启用后用户可以在图片或视频对话框中选择该风格。" : "停用后新生成不能选择该风格，历史快照不受影响。",
+            okText: nextStatus === 1 ? "启用" : "停用",
+            cancelText: "取消",
+            onOk: async () => {
+                try {
+                    await updateAdminGenerationStyleStatus(style.id, nextStatus);
+                    message.success("风格状态已更新");
+                    await loadStyles(page);
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : "更新风格状态失败");
+                }
+            },
+        });
+    };
+
+    const deleteStyles = (ids: number[]) => {
+        modal.confirm({
+            title: "删除风格",
+            content: "删除后新生成不会再展示这些风格，历史快照不受影响，确定删除？",
+            okText: "删除",
+            okButtonProps: { danger: true },
+            cancelText: "取消",
+            onOk: async () => {
+                try {
+                    await deleteAdminGenerationStyles(ids);
+                    message.success("风格已删除");
+                    setSelectedRowKeys([]);
+                    const nextPage = styles.length <= ids.length && page > 1 ? page - 1 : page;
+                    setPage(nextPage);
+                    await loadStyles(nextPage);
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : "删除风格失败");
+                }
+            },
+        });
+    };
+
+    const columns: ColumnsType<ServerGenerationStyle> = [
+        { title: "名称", dataIndex: "name", ellipsis: true, width: 180 },
+        {
+            title: "类型",
+            dataIndex: "generationType",
+            width: 100,
+            render: (value: string) => <Tag color={value === "video" ? "purple" : "blue"}>{value === "video" ? "视频" : "图片"}</Tag>,
+        },
+        { title: "风格提示词", dataIndex: "stylePrompt", ellipsis: true },
+        { title: "排序", dataIndex: "sortOrder", width: 80, align: "right" },
+        {
+            title: "状态",
+            dataIndex: "status",
+            width: 90,
+            render: (value: number) => (value === 1 ? <Tag color="green">启用</Tag> : <Tag>停用</Tag>),
+        },
+        {
+            title: "操作",
+            width: 150,
+            render: (_, style) => (
+                <Space size="small">
+                    <Button size="small" icon={<Edit className="size-3.5" />} onClick={() => openEdit(style)}>编辑</Button>
+                    <Button size="small" icon={<Power className="size-3.5" />} onClick={() => changeStatus(style)}>{style.status === 1 ? "停用" : "启用"}</Button>
+                </Space>
+            ),
+        },
+    ];
+
+    return (
+        <div>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <Space wrap>
+                    <Input.Search value={keyword} allowClear placeholder="搜索名称或提示词" onChange={(event) => setKeyword(event.target.value)} onSearch={() => { setPage(1); void loadStyles(1); }} />
+                    <Select
+                        value={generationType}
+                        options={[{ label: "全部类型", value: "all" }, { label: "图片", value: "image" }, { label: "视频", value: "video" }]}
+                        onChange={(value) => { setGenerationType(value); setPage(1); }}
+                    />
+                    <Select
+                        allowClear
+                        placeholder="全部状态"
+                        value={status}
+                        options={[{ label: "启用", value: 1 }, { label: "停用", value: 0 }]}
+                        onChange={(value) => { setStatus(value); setPage(1); }}
+                    />
+                </Space>
+                <Space>
+                    {selectedRowKeys.length ? <Button danger icon={<Trash2 className="size-3.5" />} onClick={() => deleteStyles(selectedRowKeys.map(Number))}>批量删除</Button> : null}
+                    <Button type="primary" icon={<Plus className="size-4" />} onClick={openCreate}>新增风格</Button>
+                </Space>
+            </div>
+            <Table
+                rowKey="id"
+                columns={columns}
+                dataSource={styles}
+                loading={loading}
+                rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
+                pagination={{ current: page, pageSize: PAGE_SIZE, total, showSizeChanger: false, onChange: setPage }}
+                scroll={{ x: 820 }}
+            />
+            <Modal title={editingStyle ? "编辑风格" : "新增风格"} open={editOpen} onOk={saveStyle} onCancel={() => setEditOpen(false)} okText="保存" cancelText="取消">
+                <Form form={form} layout="vertical">
+                    <Form.Item name="name" label="风格名称" rules={[{ required: true, message: "请输入风格名称" }]}>
+                        <Input placeholder="例如：电影感" />
+                    </Form.Item>
+                    <Form.Item name="stylePrompt" label="风格提示词" rules={[{ required: true, message: "请输入风格提示词" }]}>
+                        <Input.TextArea rows={6} placeholder="描述需要注入生成提示词的风格特征" />
+                    </Form.Item>
+                    <div className="grid grid-cols-3 gap-3">
+                        <Form.Item name="generationType" label="类型" rules={[{ required: true, message: "请选择类型" }]}>
+                            <Select options={[{ label: "图片", value: "image" }, { label: "视频", value: "video" }]} />
+                        </Form.Item>
+                        <Form.Item name="sortOrder" label="排序">
+                            <InputNumber className="w-full" min={0} />
+                        </Form.Item>
+                        <Form.Item name="status" label="状态">
+                            <Select options={[{ label: "启用", value: 1 }, { label: "停用", value: 0 }]} />
                         </Form.Item>
                     </div>
                 </Form>

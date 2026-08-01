@@ -92,6 +92,7 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 }
 
 async function requestServerVideoTask(config: AiConfig, prompt: string, references: ReferenceImage[] = [], videoReferences: ReferenceVideo[] = [], generationSource: ServerGenerationSource, options?: RequestOptions & { onProgress?: (progress: number) => void; onTaskCreated?: (taskId: string) => void }): Promise<VideoGenerationResult> {
+    if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     const selectedModel = (config.model || config.videoModel).trim();
     const requestConfig = resolveModelRequestConfig(config, selectedModel);
     const task = await createAiTask({

@@ -30,6 +30,7 @@ class AgentScopeAgentFactoryTest {
     void shouldIsolatePromptsAndKeepBusinessToolkitEmpty() throws ReflectiveOperationException {
         SystemPromptTemplateService promptService = mock(SystemPromptTemplateService.class);
         when(promptService.get(PromptTemplateType.AGENT_MAIN)).thenReturn("主Agent模板");
+        when(promptService.get(PromptTemplateType.AGENT_RECOVERY)).thenReturn("恢复Agent模板");
         when(promptService.get(PromptTemplateType.AGENT_IMAGE)).thenReturn("图片Agent模板");
         when(promptService.get(PromptTemplateType.AGENT_VIDEO)).thenReturn("视频Agent模板");
         AgentThinkingEventMiddleware thinkingEventMiddleware = mock(AgentThinkingEventMiddleware.class);
@@ -38,15 +39,19 @@ class AgentScopeAgentFactoryTest {
         when(model.getModelName()).thenReturn("test-model");
 
         try (ReActAgent mainAgent = factory.mainAgent(model);
+             ReActAgent recoveryAgent = factory.recoveryAgent(model);
              ReActAgent imageAgent = factory.imageAgent(model);
              ReActAgent videoAgent = factory.videoAgent(model)) {
             Assertions.assertTrue(mainAgent.getSysPrompt().contains("主Agent模板"));
+            Assertions.assertTrue(recoveryAgent.getSysPrompt().contains("恢复Agent模板"));
             Assertions.assertTrue(imageAgent.getSysPrompt().contains("图片Agent模板"));
             Assertions.assertTrue(videoAgent.getSysPrompt().contains("视频Agent模板"));
             Assertions.assertTrue(mainAgent.getToolkit().getToolNames().isEmpty());
+            Assertions.assertTrue(recoveryAgent.getToolkit().getToolNames().isEmpty());
             Assertions.assertTrue(imageAgent.getToolkit().getToolNames().isEmpty());
             Assertions.assertTrue(videoAgent.getToolkit().getToolNames().isEmpty());
             Assertions.assertTrue(middlewares(mainAgent).contains(thinkingEventMiddleware));
+            Assertions.assertTrue(middlewares(recoveryAgent).contains(thinkingEventMiddleware));
             Assertions.assertFalse(middlewares(imageAgent).contains(thinkingEventMiddleware));
             Assertions.assertFalse(middlewares(videoAgent).contains(thinkingEventMiddleware));
         }

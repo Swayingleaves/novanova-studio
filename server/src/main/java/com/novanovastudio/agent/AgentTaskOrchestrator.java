@@ -16,6 +16,7 @@ import com.novanovastudio.agent.dto.AgentSession;
 import com.novanovastudio.agent.dto.AgentTool;
 import com.novanovastudio.agent.dto.AgentToolResult;
 import com.novanovastudio.ai.AiHttpClient;
+import com.novanovastudio.ai.AiErrorDetails;
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.common.BusinessException;
@@ -68,6 +69,10 @@ public class AgentTaskOrchestrator {
 
     /** 需要由服务端分配稳定轮次ID的生成类Profile */
     private static final Set<String> GENERATION_PROFILE_NAMES = Set.of("generation", "video");
+
+    /** 需要等待画布真实生成终态的前端工具 */
+    private static final Set<String> CANVAS_GENERATION_TOOLS = Set.of(
+            "canvas_generate_text", "canvas_generate_image", "canvas_generate_video", "canvas_run_generation");
 
     private final AiHttpClient aiHttpClient;
     private final AiProviderAdapterRegistry adapterRegistry;
@@ -329,7 +334,8 @@ public class AgentTaskOrchestrator {
         if (sessionResults.isEmpty()) {
             pendingResults.remove(result.sessionId(), sessionResults);
         }
-        sink.success(new ToolResult(result.result().ok(), result.result().message(), result.result().data()));
+        sink.success(new ToolResult(result.result().ok(), result.result().message(),
+                result.result().data(), result.result().error()));
     }
 
     /**
@@ -871,8 +877,28 @@ public class AgentTaskOrchestrator {
                     }
                 }
             });
-        }).timeout(Duration.ofSeconds(30))
-          .onErrorResume(e -> Mono.just(new ToolResult(false, "前端工具执行超时: " + e.getMessage())));
+        }).timeout(frontendToolTimeout(toolName, args))
+          .onErrorResume(e -> {
+              String message = "前端工具执行超时";
+              eventEmitter.emit(userId, AgentEvent.toolCancel(sessionId, callId, message));
+              AiErrorDetails error = new AiErrorDetails("canvas", "timeout", "frontend_tool", null,
+                      null, null, null, message, true, false);
+              return Mono.just(new ToolResult(false, message, Map.of("error", error.toMap())));
+          });
+    }
+
+    /**
+     * 按工具类型选择前端执行等待时间。
+     *
+     * @param toolName String 工具名称
+     * @param args Map<String, Object> 工具参数
+     * @return Duration 生成工具十二分钟，普通工具三十秒
+     */
+    private Duration frontendToolTimeout(String toolName, Map<String, Object> args) {
+        boolean autoGenerationFlow = "canvas_create_generation_flow".equals(toolName)
+                && Boolean.TRUE.equals(args.get("autoRun"));
+        return CANVAS_GENERATION_TOOLS.contains(toolName) || autoGenerationFlow
+                ? Duration.ofMinutes(12) : Duration.ofSeconds(30);
     }
 
     /**

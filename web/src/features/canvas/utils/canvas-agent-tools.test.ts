@@ -113,3 +113,39 @@ test("缺少坐标的生成节点放在当前画布视口中心", () => {
     assert.equal(positioned[0]?.y, 680);
     assert.equal(positioned[1]?.type, "run_generation");
 });
+
+test("恢复生成复用失败节点并标记为恢复执行", () => {
+    const execution = resolveCanvasAgentTool("canvas_generate_image", {
+        prompt: "调整后的提示词",
+        size: "1:1",
+        quality: "medium",
+        recoveryNodeIds: ["image-failed"],
+    });
+
+    assert.ok(execution);
+    assert.deepEqual(execution.ops, [
+        {
+            type: "update_node",
+            id: "image-failed",
+            attributes: { prompt: "调整后的提示词", size: "1:1", quality: "medium" },
+        },
+        {
+            type: "run_generation",
+            nodeId: "image-failed",
+            prompt: "调整后的提示词",
+            recovery: true,
+        },
+    ]);
+    assert.equal(execution.ops.some((operation) => operation.type === "add_node"), false);
+});
+
+test("批量画布操作禁止夹带生成", () => {
+    const execution = resolveCanvasAgentTool("canvas_apply_ops", {
+        ops: [{ type: "run_generation", nodeId: "image-existing" }],
+    });
+
+    assert.ok(execution);
+    assert.equal(execution.result.ok, false);
+    assert.deepEqual(execution.ops, []);
+    assert.match(execution.result.message, /不能执行生成/);
+});

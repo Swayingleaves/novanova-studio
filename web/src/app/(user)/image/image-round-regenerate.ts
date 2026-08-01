@@ -1,9 +1,11 @@
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
+import type { GenerationStyleSnapshot } from "@/services/api/server";
 
 type ImageRoundRegenerateInput = {
     prompt: string;
     references: ReferenceImage[];
+    generationStyleSnapshots?: GenerationStyleSnapshot[];
     config: ImageGenerationSettings;
 };
 
@@ -25,6 +27,7 @@ type ImageRoundRegeneratePayload = {
         resolution?: string;
         quality?: string;
         count?: number;
+        generationStyleSnapshots?: GenerationStyleSnapshot[];
     };
 };
 
@@ -50,6 +53,7 @@ export function buildImageRoundRegeneratePayload(round: ImageRoundRegenerateInpu
             ...(round.config.imageResolution ? { resolution: round.config.imageResolution } : {}),
             ...(round.config.quality ? { quality: round.config.quality } : {}),
             count: 1,
+            ...(round.generationStyleSnapshots?.length ? { generationStyleSnapshots: round.generationStyleSnapshots } : {}),
         },
     };
 }

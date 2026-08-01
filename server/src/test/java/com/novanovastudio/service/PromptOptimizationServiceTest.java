@@ -8,8 +8,10 @@ import static org.mockito.Mockito.when;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.dto.AiTaskDtos;
+import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.dto.PromptOptimizationDtos;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,6 +33,10 @@ class PromptOptimizationServiceTest {
     /** AI任务服务 */
     @Mock
     private AiTaskService aiTaskService;
+
+    /** 生成风格服务 */
+    @Mock
+    private GenerationStyleService generationStyleService;
 
     /**
      * 图片优化应使用默认文本模型并加载图片策略。
@@ -63,6 +69,24 @@ class PromptOptimizationServiceTest {
 
         AiTaskDtos.CreateAiTaskRequest request = capturedRequest();
         Assertions.assertEquals(templateService.get(PromptTemplateType.OPTIMIZATION_VIDEO), request.parameters().get("systemPrompt"));
+    }
+
+    /** 手动提示词优化应按选择顺序注入风格提示词块。 */
+    @Test
+    void shouldComposeSelectedStylesForManualOptimization() {
+        when(aiTaskService.createTask(any())).thenReturn(Mono.just(taskResponse()));
+        when(generationStyleService.resolveStyles(eq(AiTaskTypes.IMAGE), eq(List.of(2L, 1L)), any()))
+                .thenReturn(Mono.just(List.of(
+                        new GenerationStyleDtos.GenerationStyleSnapshot(2L, "水彩", "image", "watercolor"),
+                        new GenerationStyleDtos.GenerationStyleSnapshot(1L, "电影感", "image", "cinematic"))));
+        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, promptTemplateService(), generationStyleService);
+
+        service.optimizePrompt(new PromptOptimizationDtos.OptimizePromptRequest(AiTaskTypes.IMAGE, "一只猫", List.of(2L, 1L))).block();
+
+        AiTaskDtos.CreateAiTaskRequest request = capturedRequest();
+        Assertions.assertTrue(request.prompt().indexOf("水彩") < request.prompt().indexOf("电影感"));
+        Assertions.assertTrue(request.prompt().contains("watercolor"));
+        Assertions.assertTrue(request.prompt().contains("cinematic"));
     }
 
     /**
@@ -128,6 +152,7 @@ class PromptOptimizationServiceTest {
         properties.getAi().getSystemPrompt().setOptimizationImageFile(promptDirectory.resolve("optimization-image.md").toUri().toString());
         properties.getAi().getSystemPrompt().setOptimizationVideoFile(promptDirectory.resolve("optimization-video.md").toUri().toString());
         properties.getAi().getSystemPrompt().setAgentMainFile(promptDirectory.resolve("agent-main.md").toUri().toString());
+        properties.getAi().getSystemPrompt().setAgentRecoveryFile(promptDirectory.resolve("agent-recovery.md").toUri().toString());
         properties.getAi().getSystemPrompt().setAgentImageFile(promptDirectory.resolve("agent-image.md").toUri().toString());
         properties.getAi().getSystemPrompt().setAgentVideoFile(promptDirectory.resolve("agent-video.md").toUri().toString());
         properties.getAi().getSystemPrompt().setAgentCanvasFile(promptDirectory.resolve("agent-canvas.md").toUri().toString());

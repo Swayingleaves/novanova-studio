@@ -16,6 +16,15 @@ export type CreationSettings = {
   count?: number;
   seconds?: string;
   watermark?: boolean;
+  generationStyleIds?: number[];
+  generationStyleSnapshots?: GenerationStyleSnapshot[];
+};
+
+export type GenerationStyleSnapshot = {
+  id: number;
+  name: string;
+  generationType: "image" | "video";
+  stylePrompt: string;
 };
 
 export type AgentAction = {

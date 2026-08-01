@@ -324,14 +324,16 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                                             }
                                             if ("failed".equals(status)) {
                                                 String message = agnesErrorMessage(response);
-                                                return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, AiTaskParameterReader.firstNonEmpty(message, "Agnes 视频生成失败")));
+                                                return Mono.error(AiErrorSupport.providerTaskFailure(response,
+                                                        AiTaskParameterReader.firstNonEmpty(message, "Agnes 视频生成失败")));
                                             }
                                             return Mono.empty();
                                         }));
                                     });
                         }))
                 .next()
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "Agnes 视频生成超时，请稍后重试")));
+                .switchIfEmpty(Mono.error(AiErrorSupport.providerPollingTimeout(
+                        "Agnes 视频生成超时，请稍后重试")));
     }
 
     /**

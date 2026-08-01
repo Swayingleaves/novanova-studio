@@ -860,6 +860,9 @@ public class NovanovaProperties {
             /** 主Agent文件路径 */
             private String agentMainFile = "";
 
+            /** 主Agent失败恢复文件路径 */
+            private String agentRecoveryFile = "";
+
             /** 图片生成Agent文件路径 */
             private String agentImageFile = "";
 
@@ -921,6 +924,24 @@ public class NovanovaProperties {
              */
             public void setAgentMainFile(String agentMainFile) {
                 this.agentMainFile = agentMainFile;
+            }
+
+            /**
+             * 获取主Agent失败恢复文件路径。
+             *
+             * @return String 主Agent失败恢复文件路径
+             */
+            public String getAgentRecoveryFile() {
+                return agentRecoveryFile;
+            }
+
+            /**
+             * 设置主Agent失败恢复文件路径。
+             *
+             * @param agentRecoveryFile String 主Agent失败恢复文件路径
+             */
+            public void setAgentRecoveryFile(String agentRecoveryFile) {
+                this.agentRecoveryFile = agentRecoveryFile;
             }
 
             /**

@@ -17,6 +17,14 @@ export type CanvasAgentToolExecution = {
 
 type CreateId = () => string;
 
+const RECOVERABLE_GENERATION_TOOLS = new Set([
+    "canvas_generate_text",
+    "canvas_generate_image",
+    "canvas_generate_video",
+    "canvas_create_generation_flow",
+    "canvas_run_generation",
+]);
+
 /** 将 Agent 工具参数解析为画布操作和真实的执行结果语义。 */
 export function resolveCanvasAgentTool(
     name: string,
@@ -24,6 +32,10 @@ export function resolveCanvasAgentTool(
     createId: CreateId = nanoid,
 ): CanvasAgentToolExecution | null {
     if (!args) return null;
+    const recoveryNodeIds = readStringArray(args.recoveryNodeIds);
+    if (recoveryNodeIds.length && RECOVERABLE_GENERATION_TOOLS.has(name)) {
+        return createRecoveryGenerationExecution(name, args, recoveryNodeIds);
+    }
 
     switch (name) {
         case "canvas_generate_text":
@@ -163,13 +175,26 @@ function createRunGenerationExecution(args: Record<string, unknown>): CanvasAgen
 function createApplyOpsExecution(ops: CanvasAgentOp[]): CanvasAgentToolExecution {
     const runningNodeIds = ops.filter((op) => op.type === "run_generation" && op.nodeId).map((op) => op.nodeId as string);
     if (!runningNodeIds.length) return successExecution("canvas_apply_ops", ops);
+    return failureExecution("canvas_apply_ops不能执行生成，请使用专用生成工具");
+}
+
+function createRecoveryGenerationExecution(name: string, args: Record<string, unknown>, nodeIds: string[]): CanvasAgentToolExecution {
+    const prompt = readString(args.prompt);
+    const textGeneration = name === "canvas_generate_text" || args.mode === "text";
+    const attributes: CanvasAgentOp["attributes"] = {
+        ...(prompt ? textGeneration ? { content: prompt } : { prompt } : {}),
+        ...(readString(args.size) ? { size: readString(args.size) } : {}),
+        ...(readString(args.quality) ? { quality: readString(args.quality) } : {}),
+        ...(readString(args.imageResolution) ? { imageResolution: readString(args.imageResolution) } : {}),
+        ...(readString(args.seconds) ? { seconds: readString(args.seconds) } : {}),
+        ...(readString(args.vquality) ? { vquality: readString(args.vquality) } : {}),
+    };
     return {
-        ops,
-        result: {
-            ok: true,
-            message: "画布操作已应用，生成任务已开始",
-            data: { nodeIds: runningNodeIds, status: "running" },
-        },
+        ops: nodeIds.flatMap((nodeId) => [
+            { type: "update_node", id: nodeId, attributes } satisfies CanvasAgentOp,
+            { type: "run_generation", nodeId, prompt, recovery: true } satisfies CanvasAgentOp,
+        ]),
+        result: { ok: true, message: "失败节点正在重新生成", data: { nodeIds, status: "running" } },
     };
 }
 
@@ -178,7 +203,23 @@ function successExecution(name: string, ops: CanvasAgentOp[]): CanvasAgentToolEx
 }
 
 function failureExecution(message: string): CanvasAgentToolExecution {
-    return { ops: [], result: { ok: false, message } };
+    return {
+        ops: [],
+        result: {
+            ok: false,
+            message,
+            data: {
+                error: {
+                    source: "canvas",
+                    category: "invalid_parameter",
+                    stage: "frontend_tool",
+                    message,
+                    requestAccepted: false,
+                    safeToRetry: false,
+                },
+            },
+        },
+    };
 }
 
 function generationAttributes(mode: "text" | "image" | "video", args: Record<string, unknown>, prompt: string): CanvasAgentOp["attributes"] {
@@ -187,16 +228,19 @@ function generationAttributes(mode: "text" | "image" | "video", args: Record<str
         return {
             prompt,
             status: "idle",
-            seconds: readString(args.seconds) || undefined,
-            vquality: readString(args.vquality) || undefined,
+            ...(readString(args.size) ? { size: readString(args.size) } : {}),
+            ...(readString(args.seconds) ? { seconds: readString(args.seconds) } : {}),
+            ...(readString(args.vquality) ? { vquality: readString(args.vquality) } : {}),
         };
     }
+    const count = readPositiveInteger(args.count);
     return {
         prompt,
         status: "idle",
-        size: readString(args.size) || undefined,
-        quality: readString(args.quality) || undefined,
-        count: readPositiveInteger(args.count),
+        ...(readString(args.size) ? { size: readString(args.size) } : {}),
+        ...(readString(args.quality) ? { quality: readString(args.quality) } : {}),
+        ...(readString(args.imageResolution) ? { imageResolution: readString(args.imageResolution) } : {}),
+        ...(count === undefined ? {} : { count }),
     };
 }
 
@@ -285,4 +329,10 @@ function readNumber(value: unknown) {
 function readPositiveInteger(value: unknown) {
     const number = readNumber(value);
     return number === undefined ? undefined : Math.max(1, Math.floor(number));
+}
+
+function readStringArray(value: unknown): string[] {
+    return Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
+        : [];
 }

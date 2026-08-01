@@ -1,6 +1,7 @@
 package com.novanovastudio.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import java.util.List;
 
 /**
  * AI 提示词优化接口数据结构。
@@ -21,9 +22,21 @@ public final class PromptOptimizationDtos {
      *
      * @param generationType 生成类型，支持 image、video
      * @param prompt 用户原始提示词
+     * @param generationStyleIds 用户选择的风格ID
      */
     public record OptimizePromptRequest(
             @NotBlank(message = "生成类型不能为空") String generationType,
-            @NotBlank(message = "提示词不能为空") String prompt) {
+            @NotBlank(message = "提示词不能为空") String prompt,
+            List<Long> generationStyleIds) {
+
+        /**
+         * 保留无风格的旧版构造方式。
+         *
+         * @param generationType 生成类型
+         * @param prompt 用户原始提示词
+         */
+        public OptimizePromptRequest(String generationType, String prompt) {
+            this(generationType, prompt, null);
+        }
     }
 }

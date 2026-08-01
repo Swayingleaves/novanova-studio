@@ -139,6 +139,7 @@ services:
       OAUTH2_GOOGLE_REDIRECT_URI: ${OAUTH2_GOOGLE_REDIRECT_URI:-}
       AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE: ${AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE:-file:/app/config/prompts/optimization-image.md}
       AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE: ${AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE:-file:/app/config/prompts/optimization-video.md}
+      AI_SYSTEM_PROMPT_AGENT_RECOVERY_FILE: ${AI_SYSTEM_PROMPT_AGENT_RECOVERY_FILE:-file:/app/config/prompts/agent-recovery.md}
       AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE: ${AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE:-file:/app/config/prompts/agent-image.md}
       AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE: ${AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE:-file:/app/config/prompts/agent-video.md}
       AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE: ${AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE:-file:/app/config/prompts/agent-canvas.md}

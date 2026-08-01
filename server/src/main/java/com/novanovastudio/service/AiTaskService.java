@@ -5,6 +5,8 @@ import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentTaskOrchestrator;
 import com.novanovastudio.ai.AiProviderAdapter;
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
+import com.novanovastudio.ai.AiErrorDetails;
+import com.novanovastudio.ai.AiErrorSupport;
 import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.ai.AiTaskTypes;
@@ -386,7 +388,9 @@ public class AiTaskService {
                         return updateTaskState(taskId, STATUS_CANCELED, 100, "任务已取消", null);
                     }
                     log.error("AI生成任务执行失败: taskId={}", taskId, exception);
-                    return updateTaskState(taskId, STATUS_FAILED, 100, exception.getMessage(), null);
+                    AiErrorDetails error = AiErrorSupport.fromThrowable(exception, "task", "execution");
+                    return updateTaskState(taskId, STATUS_FAILED, 100, error.message(),
+                            toJson(AiErrorSupport.errorData(error)));
                 }));
     }
 

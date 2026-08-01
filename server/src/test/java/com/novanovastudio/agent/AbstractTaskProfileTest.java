@@ -141,6 +141,55 @@ class AbstractTaskProfileTest {
     }
 
     /**
+     * 风格快照应写入生成轮次，但不能进入渠道供应商参数。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldPersistStyleSnapshotsWithoutForwardingThemToProvider() {
+        when(persistenceService.saveOrUpdateGenerationRound(anyLong(), anyString(), anyString(), anyString(), any(JSONObject.class)))
+                .thenAnswer(invocation -> {
+                    savedRounds.add(JSON.parseObject(JSON.toJSONString(invocation.getArgument(4))));
+                    return Mono.empty();
+                });
+
+        AtomicReference<AiTaskDtos.CreateAiTaskRequest> taskRequestRef = new AtomicReference<>();
+        AiTaskDtos.AiGenerationTaskResponse created = response("success", 100, successfulResultData());
+        when(aiTaskService.createTaskForUser(anyLong(), any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class)))
+                .thenAnswer(invocation -> {
+                    taskRequestRef.set(invocation.getArgument(1));
+                    Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue = invocation.getArgument(2);
+                    return beforeEnqueue.apply(created).thenReturn(created);
+                });
+        when(aiTaskService.getTaskForUser(7L, "task-1"))
+                .thenReturn(Mono.just(response("success", 100, successfulResultData())));
+
+        ToolResult result = profile.executeTool(7L, "generate_image",
+                        Map.of(
+                                "prompt", "电影感海报",
+                                "model", "model-1",
+                                "generationStyleSnapshots", List.of(Map.of(
+                                        "id", 7L,
+                                        "name", "电影感",
+                                        "generationType", "image",
+                                        "stylePrompt", "cinematic lighting"))),
+                        "生成一张海报", List.of(), eventEmitter, "session-1", "call-1")
+                .block(Duration.ofSeconds(10));
+
+        Assertions.assertNotNull(result);
+        Assertions.assertTrue(result.ok());
+        Assertions.assertNotNull(taskRequestRef.get());
+        Assertions.assertFalse(taskRequestRef.get().parameters().containsKey("generationStyleSnapshots"));
+        Assertions.assertFalse(savedRounds.isEmpty());
+        savedRounds.forEach(round -> {
+            JSONObject snapshots = round.getJSONArray("generationStyleSnapshots").getJSONObject(0);
+            Assertions.assertEquals(7L, snapshots.getLongValue("id"));
+            Assertions.assertEquals("电影感", snapshots.getString("name"));
+            Assertions.assertEquals("cinematic lighting", snapshots.getString("stylePrompt"));
+            Assertions.assertFalse(round.getJSONObject("config").containsKey("generationStyleSnapshots"));
+        });
+    }
+
+    /**
      * 上传图片附件应按存储键写入任务引用和待处理生成记录。
      */
     @Test
@@ -203,6 +252,9 @@ class AbstractTaskProfileTest {
         Assertions.assertNotNull(result);
         Assertions.assertFalse(result.ok());
         Assertions.assertEquals("当前模型未配置图生视频能力，请切换支持图生视频的模型", result.message());
+        Assertions.assertNotNull(result.error());
+        Assertions.assertEquals("invalid_parameter", result.error().category());
+        Assertions.assertFalse(result.error().safeToRetry());
         verify(aiTaskService, never()).createTaskForUser(anyLong(), any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class));
     }
 
@@ -242,9 +294,13 @@ class AbstractTaskProfileTest {
         ToolResult result = profile.buildResult("task-1", response("running", 80, new JSONObject()));
 
         Assertions.assertFalse(result.ok());
-        Assertions.assertEquals("生成超时，请重试", result.message());
+        Assertions.assertEquals("生成任务等待超时", result.message());
         Assertions.assertNotNull(result.data());
         Assertions.assertEquals("task-1", result.data().get("taskId"));
+        Assertions.assertNotNull(result.error());
+        Assertions.assertEquals("timeout", result.error().category());
+        Assertions.assertTrue(result.error().requestAccepted());
+        Assertions.assertFalse(result.error().safeToRetry());
     }
 
     /**

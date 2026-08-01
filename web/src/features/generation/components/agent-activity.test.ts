@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { AgentActivityState, ToolCallState } from "@/features/chat/types";
 
-import { createToolExecutionActivity, finishRunningAgentActivities, normalizeAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "./agent-activity.ts";
+import { createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, normalizeAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "./agent-activity.ts";
 
 test("upsertAgentActivityMessage 对重复 SSE 活动执行幂等覆盖", () => {
     const firstActivity = {
@@ -58,6 +58,12 @@ test("finishRunningAgentActivities 在 SSE 异常时结束所有运行中活动"
         assert.equal(activity.status, "failed");
         assert.equal(activity.description, "生成连接已关闭");
     }
+});
+
+test("恢复诊断状态继续显示为运行中活动", () => {
+    assert.equal(getPlanTaskActivityStatus("diagnosing"), "running");
+    assert.equal(getPlanTaskActivityStatus("adjusting"), "running");
+    assert.equal(getPlanTaskActivityStatus("retrying"), "running");
 });
 
 test("normalizeAgentActivities 忽略历史记录中的非法活动", () => {
