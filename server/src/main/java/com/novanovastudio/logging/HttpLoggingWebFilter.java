@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -37,6 +39,12 @@ import reactor.core.publisher.Mono;
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class HttpLoggingWebFilter implements WebFilter {
+
+    /** 请求标识请求头 */
+    static final String REQUEST_ID_HEADER = "X-Request-Id";
+
+    /** 请求标识允许的字符，避免外部请求头向日志注入控制字符 */
+    private static final Pattern REQUEST_ID_PATTERN = Pattern.compile("[A-Za-z0-9._:-]{1,128}");
 
     /** 最大日志正文长度 */
     private static final int MAX_BODY_LENGTH = 20_000;
@@ -67,17 +75,33 @@ public class HttpLoggingWebFilter implements WebFilter {
         if (!path.startsWith("/api/")) {
             return chain.filter(exchange);
         }
+        String requestId = requestId(exchange);
+        exchange.getResponse().getHeaders().set(REQUEST_ID_HEADER, requestId);
+        Mono<Void> loggingChain;
         // SSE 长连接不缓冲响应，直接透传并记录摘要
         if (SSE_TASK_SUBSCRIBE_PATH.equals(path) || SSE_AGENT_EVENTS_PATH.equals(path)) {
-            return logStreamingRequest(exchange, chain);
+            loggingChain = logStreamingRequest(exchange, chain);
+        } else if (isMultipart(exchange.getRequest().getHeaders().getContentType())) {
+            loggingChain = logMultipartRequest(exchange, chain);
+        } else if (isMethodWithoutBody(exchange.getRequest().getMethod())) {
+            loggingChain = logRequestWithoutBody(exchange, chain);
+        } else {
+            loggingChain = logRequestWithBody(exchange, chain);
         }
-        if (isMultipart(exchange.getRequest().getHeaders().getContentType())) {
-            return logMultipartRequest(exchange, chain);
-        }
-        if (isMethodWithoutBody(exchange.getRequest().getMethod())) {
-            return logRequestWithoutBody(exchange, chain);
-        }
-        return logRequestWithBody(exchange, chain);
+        return loggingChain.contextWrite(context -> MappedDiagnosticContext.put(
+                context, MappedDiagnosticContext.REQUEST_ID, requestId));
+    }
+
+    /**
+     * 获取安全的请求标识；请求头未提供合法值时生成新标识。
+     *
+     * @param exchange ServerWebExchange 当前请求交换对象
+     * @return String 请求标识
+     */
+    private String requestId(ServerWebExchange exchange) {
+        String requestId = exchange.getRequest().getHeaders().getFirst(REQUEST_ID_HEADER);
+        return requestId != null && REQUEST_ID_PATTERN.matcher(requestId).matches()
+                ? requestId : UUID.randomUUID().toString();
     }
 
     /**

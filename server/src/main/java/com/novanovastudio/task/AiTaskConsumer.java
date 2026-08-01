@@ -1,11 +1,13 @@
 package com.novanovastudio.task;
 
 import com.novanovastudio.config.NovanovaProperties;
+import com.novanovastudio.logging.MappedDiagnosticContext;
 import com.novanovastudio.service.AiTaskService;
 import jakarta.annotation.PreDestroy;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.time.Duration;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -133,10 +135,14 @@ public class AiTaskConsumer {
     private void submitMessage(String consumerName, Semaphore semaphore, AiTaskQueueMessage message) {
         executorService.submit(() -> {
             boolean acquired = false;
-            try {
+            try (MappedDiagnosticContext.Scope ignored = MappedDiagnosticContext.open(
+                    Map.of(MappedDiagnosticContext.TASK_ID, message.taskId()))) {
                 semaphore.acquire();
                 acquired = true;
-                handleMessage(consumerName, message).block();
+                handleMessage(consumerName, message)
+                        .contextWrite(context -> MappedDiagnosticContext.put(
+                                context, MappedDiagnosticContext.TASK_ID, message.taskId()))
+                        .block();
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 log.error("AI任务消费者线程被中断: taskId={}", message.taskId(), exception);
@@ -167,6 +173,8 @@ public class AiTaskConsumer {
                     }
                     Disposable renewDisposable = Flux.interval(Duration.ofSeconds(properties.getAi().getTask().getLockRenewSeconds()))
                             .flatMap(ignored -> taskLock.renew(message.taskId(), lockValue))
+                            .contextWrite(context -> MappedDiagnosticContext.put(
+                                    context, MappedDiagnosticContext.TASK_ID, message.taskId()))
                             .subscribe(renewed -> {
                                 if (!Boolean.TRUE.equals(renewed)) {
                                     log.info("AI任务锁续期未生效: taskId={}", message.taskId());
@@ -177,6 +185,8 @@ public class AiTaskConsumer {
                             .doFinally(signal -> {
                                 renewDisposable.dispose();
                                 taskLock.release(message.taskId(), lockValue)
+                                        .contextWrite(context -> MappedDiagnosticContext.put(
+                                                context, MappedDiagnosticContext.TASK_ID, message.taskId()))
                                         .subscribe(
                                                 ignored -> {
                                                 },

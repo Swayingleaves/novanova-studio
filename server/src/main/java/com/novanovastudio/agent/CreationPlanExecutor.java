@@ -16,6 +16,7 @@ import com.novanovastudio.agent.dto.RecoveryTaskContext;
 import com.novanovastudio.agent.dto.RecoveryTaskDecision;
 import com.novanovastudio.agent.dto.SpecialistAgentResult;
 import com.novanovastudio.dto.GenerationStyleDtos;
+import com.novanovastudio.logging.MappedDiagnosticContext;
 import com.novanovastudio.service.PromptOptimizationService;
 import com.novanovastudio.service.AiTaskService;
 import com.novanovastudio.repository.AgentPlanRepository;
@@ -119,9 +120,11 @@ public class CreationPlanExecutor {
             return Mono.error(new IllegalStateException("创作计划依赖图无法继续执行"));
         }
         return Flux.fromIterable(ready)
-                .flatMap(task -> dependenciesSucceeded(task, completed)
+                .flatMap(task -> (dependenciesSucceeded(task, completed)
                         ? executeTask(userId, sessionId, plan, request, model, task, dependencyAttachments(task, completed))
-                        : skipTask(userId, sessionId, plan.planId(), task), ready.size())
+                        : skipTask(userId, sessionId, plan.planId(), task))
+                        .contextWrite(context -> MappedDiagnosticContext.put(
+                                context, MappedDiagnosticContext.PLAN_TASK_ID, task.taskId())), ready.size())
                 .collectList()
                 .flatMap(layerResults -> recoverLayer(userId, sessionId, plan, request, model,
                         ready, completed, layerResults))

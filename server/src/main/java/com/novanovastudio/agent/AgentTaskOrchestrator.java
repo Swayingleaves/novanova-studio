@@ -21,6 +21,7 @@ import com.novanovastudio.ai.AiProviderAdapterRegistry;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.logging.MappedDiagnosticContext;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.security.CurrentUser;
@@ -162,6 +163,7 @@ public class AgentTaskOrchestrator {
                 Mono<Void> persistUserMessage = sessionService.appendUserMessage(
                         session.id(), UUID.randomUUID().toString(), request.message());
                 return persistInitialRound.then(persistUserMessage).then(Mono.fromSupplier(() -> {
+                    Map<String, String> inheritedDiagnosticContext = MappedDiagnosticContext.currentValues();
                     if (StringUtils.hasText(generationRoundId)) {
                         generationRoundIds.put(session.id(), generationRoundId);
                     }
@@ -169,8 +171,14 @@ public class AgentTaskOrchestrator {
                         initialVideoRounds.put(session.id(), initialVideoRound);
                     }
                     var subscription = runAgentLoop(userId, session, profile, request)
-                        .contextWrite(context -> context.put(CurrentUserProvider.CURRENT_USER_CONTEXT_KEY,
-                            new CurrentUser(userId, null, null, 1)))
+                        .contextWrite(context -> MappedDiagnosticContext.put(
+                            MappedDiagnosticContext.put(
+                                MappedDiagnosticContext.putAll(
+                                    context.put(CurrentUserProvider.CURRENT_USER_CONTEXT_KEY,
+                                        new CurrentUser(userId, null, null, 1)),
+                                    inheritedDiagnosticContext),
+                                MappedDiagnosticContext.USER_ID, userId),
+                            MappedDiagnosticContext.SESSION_ID, session.id()))
                         .subscribeOn(Schedulers.boundedElastic())
                         .doFinally(signal -> {
                             activeLoops.remove(userId, session.id());
@@ -379,7 +387,11 @@ public class AgentTaskOrchestrator {
             : resolveChannel(AiTaskTypes.TEXT);
         return textModelMono.flatMap(textModel -> profile.buildMessages(userId, session, request)
             .flatMap(messages -> executeStep(session.id(), userId, profile, textModel, messages, request.attachments(), 1)
-                .doFinally(signal -> sessionService.persist(session).subscribe()))
+                .doFinally(signal -> sessionService.persist(session)
+                    .contextWrite(context -> MappedDiagnosticContext.put(
+                        MappedDiagnosticContext.put(context, MappedDiagnosticContext.USER_ID, userId),
+                        MappedDiagnosticContext.SESSION_ID, session.id()))
+                    .subscribe()))
         ).onErrorResume(e -> {
             if (executionRegistry.isCancelRequested(session.id())) {
                 log.info("Agent Loop 已停止，忽略连接关闭异常: sessionId={}", session.id());

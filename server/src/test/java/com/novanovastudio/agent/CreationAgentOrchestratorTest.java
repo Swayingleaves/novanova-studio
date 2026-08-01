@@ -83,6 +83,40 @@ class CreationAgentOrchestratorTest {
     }
 
     /**
+     * 用户发送重试时，主Agent误将重试指令作为提示词也必须恢复为最近一次创作目标。
+     */
+    @Test
+    void shouldRestoreLatestPromptWhenRetryMessageIsSelectedAsTaskPrompt() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+        AgentSession session = session(List.of(
+                new AgentMessage("user-1", "user", "生成一只小猫和小狗在沙滩上玩耍", null),
+                new AgentMessage("assistant-1", "assistant", "生成失败", null)));
+
+        CreationPlan result = orchestrator.withServerPlanId(plan("重试"), session, "重试");
+
+        Assertions.assertEquals("生成一只小猫和小狗在沙滩上玩耍", result.tasks().getFirst().prompt());
+    }
+
+    /**
+     * 用户切换模型后发送重试时，恢复历史风格但保留本次模型和页面设置。
+     */
+    @Test
+    void shouldRestoreHistoricalStylesWithoutOverwritingCurrentSettings() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+        CreationSettings current = new CreationSettings("new-image-model", "9:16", "2K", "medium", 1, null, null);
+        CreationSettings historical = new CreationSettings("old-image-model", "1:1", "1K", "high", 1, null, null,
+                List.of(7L), null);
+
+        CreationSettings result = orchestrator.mergeRetrySettings(current, historical);
+
+        Assertions.assertEquals("new-image-model", result.model());
+        Assertions.assertEquals("9:16", result.size());
+        Assertions.assertEquals(List.of(7L), result.generationStyleIds());
+    }
+
+    /**
      * 构造主Agent编排器。
      *
      * @param sessionService AgentSessionService 会话服务
