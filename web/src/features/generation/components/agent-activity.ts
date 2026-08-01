@@ -2,6 +2,9 @@ import type { AgentActivityState, AgentActivityStatus, ChatMessageItem, ToolCall
 
 const PLAN_TASK_STATUS_MAP: Record<string, AgentActivityStatus> = {
     running: "running",
+    diagnosing: "running",
+    adjusting: "running",
+    retrying: "running",
     success: "success",
     failed: "failed",
     canceled: "canceled",

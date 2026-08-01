@@ -57,10 +57,14 @@ test("regenerateImageRound 会追加用户消息并发送重新生成请求", as
         },
         {
             fallbackModel: "default-image-model",
-            appendUserMessage: (message) => {
+            appendUserMessage: (message: string) => {
                 userMessages.push(message);
             },
-            sendMessage: async (message, attachments, creationSettings) => {
+            sendMessage: async (
+                message: string,
+                attachments?: { url: string; type: string; name: string; storageKey?: string }[],
+                creationSettings?: Record<string, unknown>,
+            ) => {
                 sendCalls.push({ message, attachments, creationSettings });
             },
         },
@@ -77,4 +81,24 @@ test("regenerateImageRound 会追加用户消息并发送重新生成请求", as
             },
         },
     ]);
+});
+
+test("buildImageRoundRegeneratePayload 只携带历史风格快照，不重新提交风格ID", () => {
+    const snapshots = [{ id: 7, name: "电影感", generationType: "image" as const, stylePrompt: "cinematic" }];
+    const payload = buildImageRoundRegeneratePayload(
+        {
+            prompt: "生成一张海报",
+            config: {},
+            references: [],
+            generationStyleSnapshots: snapshots,
+        },
+        "fallback-model",
+    );
+
+    assert.deepEqual(payload.creationSettings, {
+        model: "fallback-model",
+        count: 1,
+        generationStyleSnapshots: snapshots,
+    });
+    assert.equal("generationStyleIds" in payload.creationSettings, false);
 });

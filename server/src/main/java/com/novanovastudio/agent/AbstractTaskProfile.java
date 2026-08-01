@@ -20,9 +20,12 @@ import com.novanovastudio.agent.dto.AiMessage;
 import com.novanovastudio.ai.AiJsonUtils;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.AiTaskSources;
+import com.novanovastudio.ai.AiErrorDetails;
+import com.novanovastudio.ai.AiErrorSupport;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.AiTaskDtos;
+import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.service.AiTaskService;
 import com.novanovastudio.service.PersistenceService;
 import java.time.Duration;
@@ -42,6 +45,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
 
     private static final Duration POLL_INTERVAL = Duration.ofSeconds(1);
     private static final Duration TIMEOUT = Duration.ofSeconds(300);
+    /** 仅供生成轮次快照使用的内部参数键，不能进入渠道请求。 */
+    private static final String INTERNAL_STYLE_SNAPSHOTS = "generationStyleSnapshots";
 
     protected final AiTaskService aiTaskService;
 
@@ -151,6 +156,10 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
             if (args.containsKey("seconds")) params.put("seconds", args.get("seconds"));
             if (args.containsKey("watermark")) params.put("watermark", args.get("watermark"));
         }
+        List<GenerationStyleDtos.GenerationStyleSnapshot> styleSnapshots = readStyleSnapshots(args.get(INTERNAL_STYLE_SNAPSHOTS));
+        if (!styleSnapshots.isEmpty()) {
+            params.put(INTERNAL_STYLE_SNAPSHOTS, JSON.toJSON(styleSnapshots));
+        }
 
         if (executionRegistry.isCancelRequested(sessionId)) {
             return saveCanceledRound(userId, sessionId, callId, "", originalPrompt, generationPrompt,
@@ -178,8 +187,10 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                                 || (AiTaskTypes.VIDEO.equals(taskType()) && AiTaskSources.IMAGE_PAGE.equals(effectiveGenerationSource))) {
                                             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成任务入口来源与任务类型不匹配"));
                                         }
+                                        Map<String, Object> providerParameters = new LinkedHashMap<>(params);
+                                        providerParameters.remove(INTERNAL_STYLE_SNAPSHOTS);
                                         AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(
-                                                taskType(), generationPrompt, model.isBlank() ? null : model, params,
+                                                taskType(), generationPrompt, model.isBlank() ? null : model, providerParameters,
                                                 effectiveReferences, effectiveVideoReferences, effectiveGenerationSource);
                                         long createdAt = System.currentTimeMillis();
                                         return Mono.defer(() -> {
@@ -211,8 +222,11 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                         });
                                     }));
                         }))
-                // 预校验失败必须作为终态工具结果返回，确保视频页面不会残留 pending 记录。
-                .onErrorResume(BusinessException.class, exception -> Mono.just(new ToolResult(false, exception.getMessage())));
+                // 预校验失败必须作为结构化终态返回，确保主Agent能够基于明确类别决定询问或停止。
+                .onErrorResume(BusinessException.class, exception -> {
+                    AiErrorDetails error = AiErrorSupport.fromThrowable(exception, "task", "execution");
+                    return Mono.just(new ToolResult(false, error.message(), AiErrorSupport.errorData(error), error));
+                });
     }
 
     /**
@@ -445,7 +459,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                     generationPrompt, model, parameters, references, videoReferences,
                     createdAt, task).thenReturn(task))
             .map(task -> buildResult(taskId, task))
-            .defaultIfEmpty(new ToolResult(false, "生成超时，请重试", Map.of("taskId", taskId)))
+            .defaultIfEmpty(timeoutResult(taskId))
             .contextWrite(ctx);
         });
     }
@@ -659,7 +673,10 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
             result.put("error", "已停止生成");
         }
 
-        JSONObject config = new JSONObject(parameters);
+        Map<String, Object> persistedParameters = new LinkedHashMap<>(parameters == null ? Map.of() : parameters);
+        Object rawStyleSnapshots = persistedParameters.remove(INTERNAL_STYLE_SNAPSHOTS);
+        List<GenerationStyleDtos.GenerationStyleSnapshot> styleSnapshots = readStyleSnapshots(rawStyleSnapshots);
+        JSONObject config = new JSONObject(persistedParameters);
         config.put("model", model);
         JSONObject round = new JSONObject();
         round.put("id", callId);
@@ -673,8 +690,30 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         round.put("results", List.of(result));
         round.put("references", JSON.toJSON(references));
         round.put("videoReferences", JSON.toJSON(videoReferences));
+        if (!styleSnapshots.isEmpty()) {
+            round.put(INTERNAL_STYLE_SNAPSHOTS, JSON.toJSON(styleSnapshots));
+        }
         round.put("createdAt", createdAt);
         return round;
+    }
+
+    /**
+     * 解析内部风格快照参数。
+     *
+     * @param raw 原始参数值
+     * @return 风格快照列表
+     */
+    private List<GenerationStyleDtos.GenerationStyleSnapshot> readStyleSnapshots(Object raw) {
+        if (raw == null) {
+            return List.of();
+        }
+        try {
+            List<GenerationStyleDtos.GenerationStyleSnapshot> snapshots = JSON.parseArray(
+                    JSON.toJSONString(raw), GenerationStyleDtos.GenerationStyleSnapshot.class);
+            return snapshots == null ? List.of() : List.copyOf(snapshots);
+        } catch (RuntimeException exception) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "风格快照格式不合法");
+        }
     }
 
     /**
@@ -727,11 +766,31 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                     taskId, task.taskType(), AiJsonUtils.formatResponseForLog(task.resultData()));
                 yield new ToolResult(true, "生成完成", data);
             }
-            case "failed" -> new ToolResult(false,
-                task.errorMessage() != null ? task.errorMessage() : "生成失败", Map.of("taskId", taskId));
+            case "failed" -> {
+                Map<String, Object> data = new LinkedHashMap<>();
+                data.put("taskId", taskId);
+                if (task.resultData() != null && task.resultData().get("error") != null) {
+                    data.put("error", task.resultData().get("error"));
+                }
+                yield new ToolResult(false,
+                        task.errorMessage() != null ? task.errorMessage() : "生成失败", data);
+            }
             case "canceled" -> canceledResult(taskId);
-            default -> new ToolResult(false, "生成超时，请重试", Map.of("taskId", taskId));
+            default -> timeoutResult(taskId);
         };
+    }
+
+    /**
+     * 构造不可自动重试的轮询超时结果。
+     *
+     * @param taskId String AI任务ID
+     * @return ToolResult 结构化超时结果
+     */
+    private ToolResult timeoutResult(String taskId) {
+        return new ToolResult(false, "生成任务等待超时", Map.of(
+                "taskId", taskId,
+                "error", new AiErrorDetails("task", "timeout", "polling", null,
+                        null, null, null, "生成任务等待超时", true, false).toMap()));
     }
 
     // ===== 消息构建 =====

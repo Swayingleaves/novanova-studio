@@ -105,6 +105,8 @@ services:
       dockerfile: Dockerfile
     container_name: novanovastudio-server
     environment:
+      # 显式设置容器和 Java 的默认时区，避免日志按 UTC 输出。
+      TZ: ${TZ:-Asia/Shanghai}
       APP_SECRET_KEY: ${APP_SECRET_KEY:?请在.env中配置APP_SECRET_KEY}
       TOKEN_EXPIRE_HOURS: ${TOKEN_EXPIRE_HOURS:-24}
       TRUSTED_PROXY_ADDRESSES: ${TRUSTED_PROXY_ADDRESSES:-}
@@ -139,6 +141,7 @@ services:
       OAUTH2_GOOGLE_REDIRECT_URI: ${OAUTH2_GOOGLE_REDIRECT_URI:-}
       AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE: ${AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE:-file:/app/config/prompts/optimization-image.md}
       AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE: ${AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE:-file:/app/config/prompts/optimization-video.md}
+      AI_SYSTEM_PROMPT_AGENT_RECOVERY_FILE: ${AI_SYSTEM_PROMPT_AGENT_RECOVERY_FILE:-file:/app/config/prompts/agent-recovery.md}
       AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE: ${AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE:-file:/app/config/prompts/agent-image.md}
       AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE: ${AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE:-file:/app/config/prompts/agent-video.md}
       AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE: ${AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE:-file:/app/config/prompts/agent-canvas.md}

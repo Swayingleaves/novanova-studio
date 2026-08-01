@@ -132,7 +132,7 @@ public class AgentToolRegistry {
             true));
         register(new AgentTool("canvas_create_generation_flow",
             "创建文本、图片或视频生成配置节点；autoRun为true时立即开始生成。",
-            JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\"},\"mode\":{\"type\":\"string\",\"enum\":[\"text\",\"image\",\"video\"]},\"title\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"size\":{\"type\":\"string\"},\"quality\":{\"type\":\"string\"},\"count\":{\"type\":\"number\"},\"seconds\":{\"type\":\"string\"},\"vquality\":{\"type\":\"string\"},\"autoRun\":{\"type\":\"boolean\"}},\"required\":[\"prompt\",\"mode\"],\"additionalProperties\":false}"),
+            JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\"},\"mode\":{\"type\":\"string\",\"enum\":[\"text\",\"image\",\"video\"]},\"title\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"size\":{\"type\":\"string\"},\"quality\":{\"type\":\"string\"},\"imageResolution\":{\"type\":\"string\"},\"count\":{\"type\":\"number\"},\"seconds\":{\"type\":\"string\"},\"vquality\":{\"type\":\"string\"},\"autoRun\":{\"type\":\"boolean\"}},\"required\":[\"prompt\",\"mode\"],\"additionalProperties\":false}"),
             true));
         register(new AgentTool("canvas_update_node",
             "更新节点基础字段或 metadata。",
@@ -167,7 +167,7 @@ public class AgentToolRegistry {
             JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"viewport\":{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"k\":{\"type\":\"number\"}},\"required\":[\"x\",\"y\",\"k\"],\"additionalProperties\":false}},\"additionalProperties\":false}"),
             true));
         register(new AgentTool("canvas_apply_ops",
-            "批量操作画布。ops 支持 add_node、update_node、delete_node、delete_connections、connect_nodes、set_viewport、select_nodes、run_generation。",
+            "批量操作画布。ops 只支持 add_node、update_node、delete_node、delete_connections、connect_nodes、set_viewport、select_nodes；生成必须调用专用生成工具。",
             JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"ops\":{\"type\":\"array\",\"items\":{\"type\":\"object\",\"additionalProperties\":true}}},\"additionalProperties\":false}"),
             true));
     }
@@ -179,19 +179,19 @@ public class AgentToolRegistry {
      */
     private void registerGenerationTools() {
         register(new AgentTool("canvas_generate_text",
-            "在画布创建文本生成配置节点并立即开始异步生成；工具成功仅表示生成已开始。",
+            "在画布创建文本生成配置节点并立即生成；工具在真实生成终态后返回结果。",
             JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\"},\"title\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"}},\"required\":[\"prompt\"],\"additionalProperties\":false}"),
             true));
         register(new AgentTool("canvas_generate_image",
-            "在画布创建图片生成配置节点并立即开始异步生成；工具成功仅表示生成已开始。size为必填图片尺寸，支持1:1、16:9、9:16、4:3、3:4或1024x1024这类像素尺寸；用户未提供时必须先询问用户，不要猜测默认值。",
-            JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\"},\"title\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"size\":{\"type\":\"string\",\"description\":\"图片尺寸，支持1:1、16:9、9:16、4:3、3:4或1024x1024这类像素尺寸\"},\"quality\":{\"type\":\"string\"},\"count\":{\"type\":\"number\"}},\"required\":[\"prompt\",\"size\"],\"additionalProperties\":false}"),
+            "在画布创建图片生成配置节点并立即生成；工具在真实生成终态后返回结果。size为必填图片尺寸，支持1:1、16:9、9:16、4:3、3:4或1024x1024这类像素尺寸；用户未提供时必须先询问用户，不要猜测默认值。",
+            JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\"},\"title\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"size\":{\"type\":\"string\",\"description\":\"图片尺寸，支持1:1、16:9、9:16、4:3、3:4或1024x1024这类像素尺寸\"},\"quality\":{\"type\":\"string\"},\"imageResolution\":{\"type\":\"string\"},\"count\":{\"type\":\"number\"}},\"required\":[\"prompt\",\"size\"],\"additionalProperties\":false}"),
             true));
         register(new AgentTool("canvas_generate_video",
-            "在画布创建视频生成配置节点并立即开始异步生成；工具成功仅表示生成已开始。",
-            JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\"},\"title\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"seconds\":{\"type\":\"string\"},\"vquality\":{\"type\":\"string\"}},\"required\":[\"prompt\"],\"additionalProperties\":false}"),
+            "在画布创建视频生成配置节点并立即生成；工具在真实生成终态后返回结果。",
+            JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\"},\"title\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"size\":{\"type\":\"string\"},\"seconds\":{\"type\":\"string\"},\"vquality\":{\"type\":\"string\"}},\"required\":[\"prompt\"],\"additionalProperties\":false}"),
             true));
         register(new AgentTool("canvas_run_generation",
-            "触发指定画布配置节点异步生成；工具成功仅表示生成已开始。",
+            "触发指定画布配置节点生成；工具在真实生成终态后返回结果。",
             JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"nodeId\":{\"type\":\"string\"},\"mode\":{\"type\":\"string\",\"enum\":[\"text\",\"image\",\"video\"]},\"prompt\":{\"type\":\"string\"}},\"required\":[\"nodeId\"],\"additionalProperties\":false}"),
             true));
     }

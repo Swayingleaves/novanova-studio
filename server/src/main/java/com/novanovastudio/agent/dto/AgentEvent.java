@@ -167,6 +167,19 @@ public record AgentEvent(
     }
 
     /**
+     * 构造前端工具取消事件，用于服务端等待超时后中止对应浏览器任务。
+     *
+     * @param sessionId String 会话ID
+     * @param callId String 工具调用ID
+     * @param message String 取消原因
+     * @return AgentEvent 工具取消事件
+     */
+    public static AgentEvent toolCancel(String sessionId, String callId, String message) {
+        return new AgentEvent("tool-cancel", sessionId, callId, null, null, null, null, message, null,
+                null, null, null, null, null, null, null, null, "canceled", null);
+    }
+
+    /**
      * 构造提示事件，用于向用户推送过程性提示（如模型不支持视频编辑时降级说明）。
      *
      * @param sessionId String 会话ID

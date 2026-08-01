@@ -2,6 +2,7 @@ package com.novanovastudio.repository;
 
 import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.agent.dto.CreationPlan;
+import com.novanovastudio.agent.dto.CreationSettings;
 import com.novanovastudio.agent.dto.CreationTask;
 import java.time.OffsetDateTime;
 import lombok.RequiredArgsConstructor;
@@ -52,6 +53,31 @@ public class AgentPlanRepository {
                 .concatMap(task -> insertTask(plan.planId(), task)))
                 .then()
                 .as(transactionalOperator::transactional);
+    }
+
+    /**
+     * 查询当前会话最近一次创作计划的生成设置，供用户发送重试指令时恢复历史风格。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String Agent会话ID
+     * @return Mono<CreationSettings> 最近创作计划的生成设置；不存在时为空
+     */
+    public Mono<CreationSettings> findLatestCreationSettings(Long userId, String sessionId) {
+        return databaseClient.sql("""
+                SELECT creation_settings::text AS creation_settings
+                FROM agent_plan
+                WHERE user_id = :userId
+                  AND session_id = :sessionId
+                ORDER BY created_at DESC
+                LIMIT 1
+                """)
+                .bind("userId", userId)
+                .bind("sessionId", sessionId)
+                .map((row, metadata) -> row.get("creation_settings", String.class))
+                .one()
+                .flatMap(json -> json == null || json.isBlank()
+                        ? Mono.empty()
+                        : Mono.just(JSON.parseObject(json, CreationSettings.class)));
     }
 
     /**

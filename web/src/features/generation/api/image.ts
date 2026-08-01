@@ -16,6 +16,7 @@ export function requestEdit(config: AiConfig, prompt: string, references: Refere
 }
 
 export async function requestImageQuestion(config: AiConfig, messages: AiTextMessage[], onDelta: (text: string) => void, options?: ImageRequestOptions): Promise<string> {
+    if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     let taskId = "";
     let streamed = "";
     const unsubscribe = subscribeAiTaskDeltas((eventTaskId, delta) => {

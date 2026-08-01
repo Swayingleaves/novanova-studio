@@ -5,9 +5,11 @@ import com.novanovastudio.agent.dto.AgentAction;
 import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.agent.dto.CreationPlan;
+import com.novanovastudio.agent.dto.CreationSettings;
 import com.novanovastudio.agent.dto.AgentSession;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.logging.MappedDiagnosticContext;
 import com.novanovastudio.service.AiTaskService;
 import com.novanovastudio.repository.AgentPlanRepository;
 import io.agentscope.core.ReActAgent;
@@ -86,9 +88,13 @@ public class CreationAgentOrchestrator {
     public Mono<String> startChat(Long userId, AgentChatRequest request) {
         validateRequest(request);
         String existingSessionId = activeUserSessions.get(userId);
-        if (existingSessionId != null) {
+        if (existingSessionId != null && activeSessions.contains(existingSessionId)) {
             log.warn("用户已有活跃的主Agent计划，忽略重复请求: userId={}, activeSession={}", userId, existingSessionId);
             return Mono.just(existingSessionId);
+        }
+        // 先清理执行已结束但映射尚未完成同步的旧会话，避免吞掉用户的重试请求。
+        if (existingSessionId != null) {
+            activeUserSessions.remove(userId, existingSessionId);
         }
         return sessionService.getOrCreateSession(userId, request.sessionId(), request.entrySource())
                 .flatMap(session -> {
@@ -102,9 +108,16 @@ public class CreationAgentOrchestrator {
                     executionRegistry.open(userId, session.id());
                     activeSessions.add(session.id());
                     AtomicReference<String> planId = new AtomicReference<>();
-                    Mono<Void> execution = executeConversation(userId, session, request, planId)
+                    Map<String, String> inheritedDiagnosticContext = MappedDiagnosticContext.currentValues();
+                    Mono<Void> execution = resolveRetryRequest(userId, session, request)
+                            .flatMap(effectiveRequest -> executeConversation(userId, session, effectiveRequest, planId))
                             .onErrorResume(exception -> handleExecutionError(userId, session.id(), planId.get(), exception))
-                            .doFinally(signal -> finishExecution(planId.get(), signal, userId, session.id()));
+                            .doFinally(signal -> finishExecution(planId.get(), signal, userId, session.id()))
+                            .contextWrite(context -> MappedDiagnosticContext.put(
+                                    MappedDiagnosticContext.put(
+                                            MappedDiagnosticContext.putAll(context, inheritedDiagnosticContext),
+                                            MappedDiagnosticContext.USER_ID, userId),
+                                    MappedDiagnosticContext.SESSION_ID, session.id()));
                     Disposable subscription = execution.subscribe();
                     executionRegistry.attachSubscription(session.id(), subscription);
                     return Mono.just(session.id());
@@ -192,9 +205,60 @@ public class CreationAgentOrchestrator {
                             return planRepository.create(userId, session.id(), plan)
                                     .then(Mono.fromRunnable(() -> eventEmitter.emit(userId,
                                             AgentEvent.planCreated(session.id(), plan.planId(), plan.summary(), plan.tasks().size()))))
-                                    .then(planExecutor.execute(userId, session.id(), plan, request, model))
+                                    .then(planExecutor.execute(userId, session.id(), plan, request, model)
+                                            .contextWrite(context -> MappedDiagnosticContext.put(
+                                                    context, MappedDiagnosticContext.PLAN_ID, plan.planId())))
                                     .flatMap(summary -> completeWithMessage(userId, session.id(), summary.message()));
                         }));
+    }
+
+    /**
+     * 为聊天重试请求恢复最近创作计划中的历史风格，同时保留本次请求的页面设置。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 当前Agent会话
+     * @param request AgentChatRequest 当前对话请求
+     * @return Mono<AgentChatRequest> 合并历史风格后的请求
+     */
+    private Mono<AgentChatRequest> resolveRetryRequest(Long userId, AgentSession session, AgentChatRequest request) {
+        if (!isRetryMessage(request.message()) || hasGenerationStyles(request.creationSettings())) {
+            return Mono.just(request);
+        }
+        return planRepository.findLatestCreationSettings(userId, session.id())
+                .map(historicalSettings -> new AgentChatRequest(
+                        request.sessionId(), request.entrySource(), request.message(), request.canvasSnapshot(),
+                        request.references(), request.attachments(), request.history(),
+                        mergeRetrySettings(request.creationSettings(), historicalSettings)))
+                .defaultIfEmpty(request);
+    }
+
+    /**
+     * 合并重试所需的历史风格字段，当前请求的其他页面设置保持不变。
+     *
+     * @param current CreationSettings 当前请求生成设置
+     * @param historical CreationSettings 最近失败计划生成设置
+     * @return CreationSettings 合并后的生成设置
+     */
+    CreationSettings mergeRetrySettings(CreationSettings current, CreationSettings historical) {
+        if (current == null || historical == null || !hasGenerationStyles(historical)) {
+            return current;
+        }
+        List<Long> styleIds = historical.generationStyleSnapshots() != null
+                && !historical.generationStyleSnapshots().isEmpty() ? null : historical.generationStyleIds();
+        return new CreationSettings(current.model(), current.size(), current.resolution(), current.quality(),
+                current.count(), current.seconds(), current.watermark(), styleIds, historical.generationStyleSnapshots());
+    }
+
+    /**
+     * 判断生成设置是否携带风格ID或风格快照。
+     *
+     * @param settings CreationSettings 生成设置
+     * @return boolean 是否携带风格
+     */
+    private boolean hasGenerationStyles(CreationSettings settings) {
+        return settings != null
+                && ((settings.generationStyleIds() != null && !settings.generationStyleIds().isEmpty())
+                || (settings.generationStyleSnapshots() != null && !settings.generationStyleSnapshots().isEmpty()));
     }
 
     /**
@@ -213,6 +277,10 @@ public class CreationAgentOrchestrator {
         input.put("message", request.message());
         input.put("history", recentHistory(session));
         input.put("creationSettings", request.creationSettings());
+        input.put("retryRequested", isRetryMessage(request.message()));
+        if (isRetryMessage(request.message())) {
+            input.put("retryPrompt", latestRetryPrompt(session));
+        }
         input.put("attachmentCount", request.attachments() == null ? 0 : request.attachments().size());
         input.put("canvasSnapshot", CreationEntrySource.CANVAS.equals(request.entrySource()) ? request.canvasSnapshot() : Map.of());
         input.put("canvasTools", CreationEntrySource.CANVAS.equals(request.entrySource())
@@ -288,16 +356,48 @@ public class CreationAgentOrchestrator {
                 .forEach(userPrompts::add);
         java.util.List<com.novanovastudio.agent.dto.CreationTask> tasks = plan.tasks().stream()
                 .map(task -> {
-                    if (!userPrompts.contains(task.prompt())) {
+                    String taskPrompt = isRetryMessage(currentMessage) && isRetryMessage(task.prompt())
+                            ? latestRetryPrompt(session) : task.prompt();
+                    if (!StringUtils.hasText(taskPrompt) || !userPrompts.contains(taskPrompt)) {
                         throw new BusinessException(ErrorCode.PARAM_INVALID, "主Agent任务提示词必须逐字来自用户消息");
                     }
                     return new com.novanovastudio.agent.dto.CreationTask(
-                            task.taskId(), task.taskType(), task.action(), task.prompt(), task.dependsOn(),
+                            task.taskId(), task.taskType(), task.action(), taskPrompt, task.dependsOn(),
                             task.toolName(), task.toolArguments());
                 })
                 .toList();
         return new CreationPlan(UUID.randomUUID().toString(), plan.intent(), plan.entrySource(), plan.summary(), "",
                 false, plan.creationSettings(), tasks);
+    }
+
+    /**
+     * 判断用户消息是否为明确的重新生成指令。
+     *
+     * @param message String 用户消息
+     * @return boolean 是否为重试指令
+     */
+    private boolean isRetryMessage(String message) {
+        if (!StringUtils.hasText(message)) {
+            return false;
+        }
+        String normalized = message.trim().replaceAll("[。！!？?，,、\\s]+$", "");
+        return Set.of("重试", "再试一次", "重新生成", "再生成一次").contains(normalized);
+    }
+
+    /**
+     * 获取重试时最近一条非重试用户创作消息。
+     *
+     * @param session AgentSession 当前会话
+     * @return String 最近一次创作提示词；不存在时返回空字符串
+     */
+    private String latestRetryPrompt(AgentSession session) {
+        for (int index = session.messages().size() - 1; index >= 0; index--) {
+            com.novanovastudio.agent.dto.AgentMessage message = session.messages().get(index);
+            if ("user".equals(message.role()) && StringUtils.hasText(message.text()) && !isRetryMessage(message.text())) {
+                return message.text();
+            }
+        }
+        return "";
     }
 
     /**

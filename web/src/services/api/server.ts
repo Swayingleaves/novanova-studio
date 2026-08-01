@@ -61,6 +61,29 @@ export type ServerAiTask = {
     updatedAt: string;
 };
 
+export type AiTaskErrorDetails = {
+    source: string;
+    category: string;
+    stage: string;
+    httpStatus?: number;
+    code?: string;
+    type?: string;
+    parameter?: string;
+    message: string;
+    requestAccepted: boolean | null;
+    safeToRetry: boolean;
+};
+
+export class AiTaskFailureError extends Error {
+    readonly details: AiTaskErrorDetails;
+
+    constructor(message: string, details: AiTaskErrorDetails) {
+        super(message);
+        this.name = "AiTaskFailureError";
+        this.details = details;
+    }
+}
+
 export type ServerAiTaskCreateInput = {
     taskType: ServerAiTaskType;
     prompt: string;
@@ -72,6 +95,37 @@ export type ServerAiTaskCreateInput = {
 };
 
 export type PromptOptimizationType = "image" | "video";
+
+export type GenerationStyleType = "image" | "video";
+
+export type GenerationStyleSnapshot = {
+    id: number;
+    name: string;
+    generationType: GenerationStyleType;
+    stylePrompt: string;
+};
+
+export type GenerationStyleOption = {
+    id: number;
+    name: string;
+    generationType: GenerationStyleType;
+};
+
+export type ServerGenerationStyle = GenerationStyleSnapshot & {
+    status: number;
+    sortOrder: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type GenerationStyleListResponse = {
+    styles: ServerGenerationStyle[];
+    total: number;
+};
+
+export type GenerationStyleOptionListResponse = {
+    styles: GenerationStyleOption[];
+};
 
 export type ServerAiModelList = {
     models: Array<{ value: string; label: string; capability: string; provider: string; apiFormat: ApiCallFormat; defaultModel: boolean; creditCost: number }>;
@@ -416,6 +470,57 @@ export function deleteAdminPrompts(ids: number[]) {
     return serverPost("/admin/prompt/deletePrompts", { ids });
 }
 
+// ---- 图片和视频生成风格 ----
+
+export function listGenerationStyles(generationType: GenerationStyleType) {
+    return serverGet<GenerationStyleOptionListResponse>(`/style/listStyles?generationType=${encodeURIComponent(generationType)}`);
+}
+
+export type ServerGenerationStyleListParams = {
+    keyword?: string;
+    generationType?: "all" | GenerationStyleType;
+    status?: number;
+    page?: number;
+    pageSize?: number;
+};
+
+function generationStyleQuery(params: ServerGenerationStyleListParams = {}) {
+    const query = new URLSearchParams({ page: String(params.page || 1), pageSize: String(params.pageSize || 20) });
+    if (params.keyword) query.set("keyword", params.keyword);
+    if (params.generationType) query.set("generationType", params.generationType);
+    if (params.status !== undefined) query.set("status", String(params.status));
+    return `?${query.toString()}`;
+}
+
+export function listAdminGenerationStyles(params: ServerGenerationStyleListParams = {}) {
+    return serverGet<GenerationStyleListResponse>(`/admin/style/listStyles${generationStyleQuery(params)}`);
+}
+
+export type ServerGenerationStyleInput = {
+    id?: number;
+    generationType: GenerationStyleType;
+    name: string;
+    stylePrompt: string;
+    status?: number;
+    sortOrder?: number;
+};
+
+export function createAdminGenerationStyle(input: Omit<ServerGenerationStyleInput, "id">) {
+    return serverPost("/admin/style/createStyle", input);
+}
+
+export function updateAdminGenerationStyle(input: ServerGenerationStyleInput & { id: number }) {
+    return serverPost("/admin/style/updateStyle", input);
+}
+
+export function updateAdminGenerationStyleStatus(id: number, status: number) {
+    return serverPost("/admin/style/updateStyleStatus", { id, status });
+}
+
+export function deleteAdminGenerationStyles(ids: number[]) {
+    return serverPost("/admin/style/deleteStyles", { ids });
+}
+
 export function listAdminNotifications() {
     return serverGet<{ notifications: SystemNotification[] }>("/admin/notification/list");
 }
@@ -545,7 +650,7 @@ export function createAiTask(input: ServerAiTaskCreateInput) {
     return serverPost<ServerAiTask>("/ai/task/createTask", input);
 }
 
-export function createPromptOptimizationTask(input: { generationType: PromptOptimizationType; prompt: string }) {
+export function createPromptOptimizationTask(input: { generationType: PromptOptimizationType; prompt: string; generationStyleIds?: number[] }) {
     return serverPost<ServerAiTask>("/ai/prompt/optimizePrompt", input);
 }
 
@@ -680,8 +785,16 @@ export function setDefaultObjectStorage(storageId: string) {
 }
 
 export async function waitAiTask(taskId: string, options: { signal?: AbortSignal; onProgress?: (task: ServerAiTask) => void } = {}) {
+    if (options.signal?.aborted) {
+        void cancelAiTask(taskId).catch(() => {});
+        throw new DOMException("Aborted", "AbortError");
+    }
     const initial = await getAiTaskInfo(taskId);
-    if (isFinalAiTaskStatus(initial.status)) return initial;
+    if (options.signal?.aborted) {
+        void cancelAiTask(taskId).catch(() => {});
+        throw new DOMException("Aborted", "AbortError");
+    }
+    if (isFinalAiTaskStatus(initial.status)) return completedAiTask(initial);
     return new Promise<ServerAiTask>((resolve, reject) => {
         let settled = false;
         const cleanupFns: Array<() => void> = [];
@@ -697,7 +810,13 @@ export async function waitAiTask(taskId: string, options: { signal?: AbortSignal
                 options.onProgress?.(task);
                 return;
             }
-            finish(() => (task.status === "success" ? resolve(task) : reject(new Error(task.errorMessage || "生成失败"))));
+            finish(() => {
+                try {
+                    resolve(completedAiTask(task));
+                } catch (error) {
+                    reject(error);
+                }
+            });
         };
         cleanupFns.push(subscribeAiTaskEvents(onTask));
         const pollTimer = window.setInterval(() => {
@@ -711,10 +830,52 @@ export async function waitAiTask(taskId: string, options: { signal?: AbortSignal
                 void cancelAiTask(taskId).catch(() => {});
                 finish(() => reject(new DOMException("Aborted", "AbortError")));
             };
-            options.signal.addEventListener("abort", onAbort, { once: true });
-            cleanupFns.push(() => options.signal?.removeEventListener("abort", onAbort));
+            if (options.signal.aborted) {
+                onAbort();
+            } else {
+                options.signal.addEventListener("abort", onAbort, { once: true });
+                cleanupFns.push(() => options.signal?.removeEventListener("abort", onAbort));
+            }
         }
     });
+}
+
+export function readAiTaskError(error: unknown): AiTaskErrorDetails {
+    if (error instanceof AiTaskFailureError) return error.details;
+    if (error instanceof DOMException && error.name === "AbortError") {
+        return { source: "canvas", category: "canceled", stage: "frontend_tool", message: "已停止生成", requestAccepted: true, safeToRetry: false };
+    }
+    return {
+        source: "canvas",
+        category: "unknown",
+        stage: "frontend_tool",
+        message: error instanceof Error ? error.message : "生成失败",
+        requestAccepted: true,
+        safeToRetry: false,
+    };
+}
+
+function completedAiTask(task: ServerAiTask): ServerAiTask {
+    if (task.status === "success") return task;
+    const rawResult = task.resultData && typeof task.resultData === "object" ? task.resultData as Record<string, unknown> : undefined;
+    const rawError = rawResult?.error && typeof rawResult.error === "object" ? rawResult.error as Record<string, unknown> : undefined;
+    const message = readOptionalText(rawError?.message) || task.errorMessage || (task.status === "canceled" ? "任务已取消" : "生成失败");
+    throw new AiTaskFailureError(message, {
+        source: readOptionalText(rawError?.source) || "task",
+        category: readOptionalText(rawError?.category) || (task.status === "canceled" ? "canceled" : "unknown"),
+        stage: readOptionalText(rawError?.stage) || "execution",
+        httpStatus: typeof rawError?.httpStatus === "number" ? rawError.httpStatus : undefined,
+        code: readOptionalText(rawError?.code),
+        type: readOptionalText(rawError?.type),
+        parameter: readOptionalText(rawError?.parameter),
+        message,
+        requestAccepted: rawError?.requestAccepted === true ? true : rawError?.requestAccepted === false ? false : null,
+        safeToRetry: rawError?.safeToRetry === true,
+    });
+}
+
+function readOptionalText(value: unknown): string | undefined {
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 async function serverGet<T>(path: string, options?: { auth?: boolean }) {

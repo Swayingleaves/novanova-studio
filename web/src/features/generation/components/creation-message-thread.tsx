@@ -79,7 +79,7 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange }
                                                             <MessageCopyButton
                                                                 side="right"
                                                                 placement="inside"
-                                                                onClick={() => copyText(round.userText, "用户消息已复制")}
+                                                                onClick={() => copyText(round.userCopyText || round.userText, "用户消息已复制")}
                                                             />
                                                             <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--studio-ink)] sm:text-[15px]">{round.userText}</p>
                                                         </div>

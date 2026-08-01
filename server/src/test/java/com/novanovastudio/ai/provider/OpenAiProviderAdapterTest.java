@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
 
 /**
- * OpenAI兼容文本请求测试。
+ * OpenAI兼容适配器请求测试。
  *
  * @author zhenglin.cn.cq@gmail.com
  * @date 2026-07-24 00:00
@@ -54,6 +54,27 @@ class OpenAiProviderAdapterTest {
     }
 
     /**
+     * 图片比例必须结合清晰度转换为像素尺寸，已有像素尺寸保持不变。
+     */
+    @Test
+    void shouldNormalizeImageRatioToPixelSize() {
+        AiHttpClient aiHttpClient = mock(AiHttpClient.class);
+        OpenAiProviderAdapter adapter = new OpenAiProviderAdapter(aiHttpClient, mock(AiMediaSupport.class));
+        List<JSONObject> payloads = new ArrayList<>();
+        when(aiHttpClient.sendJsonRequest(any(AiTaskDtos.AiChannelConfig.class), eq("POST"), eq("/images/generations"), any()))
+                .thenAnswer(invocation -> {
+                    payloads.add(JSON.parseObject(JSON.toJSONString(invocation.getArgument(3))));
+                    return Mono.just(JSON.parseObject("{\"data\":[]}"));
+                });
+
+        adapter.execute(imageContext("9:16", "2K")).block();
+        adapter.execute(imageContext("1024x1024", "4K")).block();
+
+        Assertions.assertEquals("1152x2048", payloads.get(0).getString("size"));
+        Assertions.assertEquals("1024x1024", payloads.get(1).getString("size"));
+    }
+
+    /**
      * 构建文本任务上下文。
      *
      * @param thinkingEnabled boolean 是否开启思考模式
@@ -68,6 +89,26 @@ class OpenAiProviderAdapterTest {
                 new AiTaskDtos.AiChannelConfig("channel-1", "DeepSeek", "https://api.deepseek.com", "test-key", "openai", List.of("deepseek-chat")),
                 "deepseek-chat", thinkingEnabled, reasoningEffort,
                 new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.TEXT, "请优化提示词", "deepseek-chat", Map.of("systemPrompt", "你是提示词专家"), List.of(), List.of(), "prompt-optimization"),
+                () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty());
+    }
+
+    /**
+     * 构建图片任务上下文。
+     *
+     * @param size String 图片比例或像素尺寸
+     * @param resolution String 图片清晰度
+     * @return AiTaskExecutionContext 图片任务上下文
+     */
+    private AiTaskExecutionContext imageContext(String size, String resolution) {
+        AiGenerationTask task = new AiGenerationTask();
+        task.setTaskType(AiTaskTypes.IMAGE);
+        task.setUserId(1L);
+        return new AiTaskExecutionContext(task,
+                new AiTaskDtos.AiChannelConfig("channel-1", "OpenAI", "https://api.example.com", "test-key", "openai", List.of("gpt-image-2")),
+                "gpt-image-2", false, "",
+                new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.IMAGE, "生成一只小猫", "gpt-image-2",
+                        Map.of("count", 1, "quality", "medium", "size", size, "resolution", resolution),
+                        List.of(), List.of(), "imagePage"),
                 () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty());
     }
 }

@@ -103,6 +103,7 @@ export function createVideoNode(input: CreateCanvasNodeInput): CanvasVideoNode {
         generation: {
             prompt: "",
             model: "",
+            size: "",
             seconds: "",
             quality: "",
             watermark: "",

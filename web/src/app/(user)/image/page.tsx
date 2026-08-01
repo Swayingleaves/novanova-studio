@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, CloudUpload, Download, FolderPlus, ImagePlus, PenLine, Cog, LoaderCircle, RefreshCw, Sparkles, Upload } from "lucide-react";
+import { BookOpen, CloudUpload, Download, FolderPlus, ImagePlus, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, Upload } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -13,7 +13,7 @@ import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
 import { ImageSettingsPanel } from "@/features/generation/components/image-settings-panel";
 import { requestCreditCost } from "@/features/generation/constants/credits";
-import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
+import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/features/chat/types";
@@ -24,6 +24,7 @@ import { getGenerationConversationStatus, hasRunningGeneration, type GenerationL
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
 import { loadImageLastUsedSettings, saveImageLastUsedSettings, type ImageLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
+import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { formatBytes } from "@/features/generation/lib/image-utils";
 import type { ReferenceImage } from "@/features/generation/types/image";
 import { PromptSelectDialog } from "@/features/prompts/components/prompt-select-dialog";
@@ -36,7 +37,7 @@ import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
-import { deleteGenerationLogs, listGenerationLogs, markGenerationLogViewed, renameGenerationLogTitle } from "@/services/api/server";
+import { deleteGenerationLogs, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
 
 type GeneratedImage = {
     id: string;
@@ -63,6 +64,7 @@ type Round = {
     id: string;
     prompt: string;
     generationPrompt?: string;
+    generationStyleSnapshots?: GenerationStyleSnapshot[];
     references: ReferenceImage[];
     config: RoundConfig;
     results: GenerationResult[];
@@ -102,6 +104,9 @@ export default function ImagePage() {
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [activeId, setActiveId] = useState<string | null>(null);
     const [prompt, setPrompt] = useState("");
+    const [styleOptions, setStyleOptions] = useState<CreationStyleOption[]>([]);
+    const [selectedStyles, setSelectedStyles] = useState<CreationStyleOption[]>([]);
+    const [styleLoading, setStyleLoading] = useState(false);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -124,6 +129,24 @@ export default function ImagePage() {
         setFocusInitialPrompt(true);
         clearInitialPromptFromLocation();
     }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+        setStyleLoading(true);
+        void listGenerationStyles("image")
+            .then((result) => {
+                if (!cancelled) setStyleOptions(result.styles);
+            })
+            .catch((error) => {
+                if (!cancelled) message.error(error instanceof Error ? error.message : "图片风格加载失败");
+            })
+            .finally(() => {
+                if (!cancelled) setStyleLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [message]);
 
     useEffect(() => {
         if (!configHydrated) return;
@@ -154,6 +177,7 @@ export default function ImagePage() {
         resolution: config.imageResolution,
         quality: config.quality,
         count: 1,
+        ...(selectedStyles.length ? { generationStyleIds: selectedStyles.map((style) => style.id) } : {}),
     };
 
     // Refs to access latest state in SSE callbacks (updated inline to avoid React batch staleness)
@@ -472,7 +496,7 @@ export default function ImagePage() {
 
         // Add user message to chat
         setChatMessages((prev) => {
-            const next = [...prev, { id: nanoid(), role: "user" as const, text }];
+            const next = [...prev, { id: nanoid(), role: "user" as const, text, generationStyles: selectedStyles }];
             chatMessagesRef.current = next;
             return next;
         });
@@ -483,20 +507,22 @@ export default function ImagePage() {
 
         setPrompt("");
         setReferences([]);
+        setSelectedStyles([]);
     };
 
     const regenerateRound = async (round: Round) => {
         await regenerateImageRound(round, {
             fallbackModel: model,
-            appendUserMessage: (text) => {
+            appendUserMessage: (text, generationStyles) => {
                 setChatMessages((prev) => {
-                    const next = [...prev, { id: nanoid(), role: "user" as const, text }];
+                    const next = [...prev, { id: nanoid(), role: "user" as const, text, generationStyles }];
                     chatMessagesRef.current = next;
                     return next;
                 });
             },
             sendMessage,
         });
+        setSelectedStyles([]);
     };
 
     const newConversation = () => {
@@ -504,6 +530,7 @@ export default function ImagePage() {
         activeIdRef.current = null;
         setPrompt("");
         setReferences([]);
+        setSelectedStyles([]);
         setSelectedIds([]);
         setManagementMode(false);
         setMobileSidebarOpen(false);
@@ -534,6 +561,7 @@ export default function ImagePage() {
         streamingTextRef.current = null;
         setPrompt("");
         setReferences([]);
+        setSelectedStyles([]);
         setMobileSidebarOpen(false);
         restoreSession(conversation.id);
     };
@@ -551,6 +579,7 @@ export default function ImagePage() {
             setActiveId(null);
             setPrompt("");
             setReferences([]);
+            setSelectedStyles([]);
         }
         setSelectedIds([]);
         setManagementMode(false);
@@ -732,7 +761,7 @@ export default function ImagePage() {
             iconOnly: true,
             disabled: !prompt.trim() || isStreaming || activeConversationPending || isPromptOptimizing,
             loading: isPromptOptimizing,
-            onClick: () => void optimizePrompt({ operationId: "image-page", generationType: "image", prompt, onSuccess: setPrompt }),
+            onClick: () => void optimizePrompt({ operationId: "image-page", generationType: "image", prompt, generationStyleIds: selectedStyles.map((style) => style.id), onSuccess: setPrompt }),
         },
         {
             key: "assets",
@@ -848,6 +877,9 @@ export default function ImagePage() {
                     value: prompt,
                     placeholder: "描述画面主体、风格、构图、光线和用途...",
                     references: referenceChips,
+                    styleOptions,
+                    selectedStyles,
+                    styleLoading,
                     actions: composerActions,
                     running: isStreaming || activeConversationPending,
                     canSubmit: canGenerate,
@@ -855,6 +887,20 @@ export default function ImagePage() {
                     focusWhenValueSet: focusInitialPrompt,
                     creditCost,
                     onChange: setPrompt,
+                    onStyleSelect: (style) => {
+                        setSelectedStyles((current) => {
+                            if (current.some((selected) => selected.id === style.id)) {
+                                message.info("该风格已选择");
+                                return current;
+                            }
+                            if (current.length >= 3) {
+                                message.warning("最多选择3个风格");
+                                return current;
+                            }
+                            return [...current, style];
+                        });
+                    },
+                    onStyleRemove: (styleId) => setSelectedStyles((current) => current.filter((style) => style.id !== styleId)),
                     onPasteImages: (files) => void addReferences(files),
                     onSubmit: () => void generate(),
                     onStop: isStreaming ? () => void cancelMessage() : undefined,
@@ -1019,7 +1065,15 @@ function buildImageThreadSections(
         rounds.push({
             id: round.id,
             userText: round.prompt,
-            userAttachments: round.references.length ? renderImageRoundReferences(round) : undefined,
+            userCopyText: formatGenerationStyleMessage(round.prompt, round.generationStyleSnapshots),
+            userAttachments: round.references.length || round.generationStyleSnapshots?.length
+                ? (
+                    <div className="space-y-2">
+                        {renderGenerationStyleSnapshots(round.generationStyleSnapshots)}
+                        {round.references.length ? renderImageRoundReferences(round) : null}
+                    </div>
+                )
+                : undefined,
             statusText: buildImageStatusText(round),
             assistantText: buildImageAssistantText(round),
             activities: round.activities,
@@ -1063,6 +1117,24 @@ function renderImageRoundReferences(round: Round) {
         <div className="flex flex-wrap gap-2">
             {visibleReferences.map((reference, index) => (
                 <img key={reference.id} src={reference.dataUrl} alt={reference.name} className="size-14 rounded-xl object-cover ring-1 ring-[var(--studio-line)]" title={imageReferenceLabel(index)} />
+            ))}
+        </div>
+    );
+}
+
+function renderGenerationStyleSnapshots(snapshots?: GenerationStyleSnapshot[]) {
+    if (!snapshots?.length) return null;
+    return (
+        <div className="flex flex-wrap gap-2">
+            {snapshots.map((snapshot) => (
+                <span
+                    key={`generation-style-${snapshot.id}`}
+                    title={snapshot.stylePrompt}
+                    className="inline-flex max-w-52 items-center gap-1.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]"
+                >
+                    <Palette className="size-3.5 shrink-0 text-[var(--studio-action)]" />
+                    <span className="truncate">{snapshot.name}</span>
+                </span>
             ))}
         </div>
     );

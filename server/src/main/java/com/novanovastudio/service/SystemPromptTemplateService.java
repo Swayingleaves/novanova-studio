@@ -113,6 +113,7 @@ public class SystemPromptTemplateService {
             case OPTIMIZATION_IMAGE -> systemPrompt.getOptimizationImageFile();
             case OPTIMIZATION_VIDEO -> systemPrompt.getOptimizationVideoFile();
             case AGENT_MAIN -> systemPrompt.getAgentMainFile();
+            case AGENT_RECOVERY -> systemPrompt.getAgentRecoveryFile();
             case AGENT_IMAGE -> systemPrompt.getAgentImageFile();
             case AGENT_VIDEO -> systemPrompt.getAgentVideoFile();
             case AGENT_CANVAS -> systemPrompt.getAgentCanvasFile();

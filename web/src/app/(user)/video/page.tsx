@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, CloudUpload, Download, FolderPlus, Cog, LoaderCircle, RefreshCw, Sparkles, Upload, VideoIcon } from "lucide-react";
+import { BookOpen, CloudUpload, Download, FolderPlus, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, Upload, VideoIcon } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -12,7 +12,7 @@ import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
 import { VideoSettingsPanel } from "@/features/generation/components/video-settings-panel";
 import { requestCreditCost } from "@/features/generation/constants/credits";
-import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
+import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { seedanceReferenceLabel, SEEDANCE_REFERENCE_LIMITS } from "@/features/generation/lib/seedance-video";
 import { formatBytes, formatDuration } from "@/features/generation/lib/image-utils";
 import type { ReferenceImage } from "@/features/generation/types/image";
@@ -37,7 +37,8 @@ import { hasPendingVideoConversation } from "@/features/generation/lib/generatio
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
-import { deleteGenerationLogs, listGenerationLogs, markGenerationLogViewed, renameGenerationLogTitle } from "@/services/api/server";
+import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
+import { deleteGenerationLogs, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
 import { findLatestPlayableVideo, hasPlayableVideoUrl } from "./video-display";
 
 type GeneratedVideo = {
@@ -66,6 +67,7 @@ type Round = {
     id: string;
     prompt: string;
     generationPrompt?: string;
+    generationStyleSnapshots?: GenerationStyleSnapshot[];
     references: ReferenceImage[];
     videoReferences: ReferenceVideo[];
     config: RoundConfig;
@@ -100,6 +102,9 @@ export default function VideoPage() {
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [activeId, setActiveId] = useState<string | null>(null);
     const [prompt, setPrompt] = useState("");
+    const [styleOptions, setStyleOptions] = useState<CreationStyleOption[]>([]);
+    const [selectedStyles, setSelectedStyles] = useState<CreationStyleOption[]>([]);
+    const [styleLoading, setStyleLoading] = useState(false);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
@@ -123,6 +128,24 @@ export default function VideoPage() {
         setFocusInitialPrompt(true);
         clearInitialPromptFromLocation();
     }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+        setStyleLoading(true);
+        void listGenerationStyles("video")
+            .then((result) => {
+                if (!cancelled) setStyleOptions(result.styles);
+            })
+            .catch((error) => {
+                if (!cancelled) message.error(error instanceof Error ? error.message : "视频风格加载失败");
+            })
+            .finally(() => {
+                if (!cancelled) setStyleLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [message]);
 
     useEffect(() => {
         if (!configHydrated) return;
@@ -155,6 +178,7 @@ export default function VideoPage() {
         quality: videoResolution.includes("1080") ? "high" : videoResolution.includes("480") ? "low" : "medium",
         seconds: config.videoSeconds || "5",
         watermark: String(config.videoWatermark).toLowerCase() === "true",
+        ...(selectedStyles.length ? { generationStyleIds: selectedStyles.map((style) => style.id) } : {}),
     };
 
     // Refs to access latest state in SSE callbacks
@@ -539,7 +563,7 @@ export default function VideoPage() {
         ];
 
         setChatMessages((prev) => {
-            const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments }];
+            const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments, generationStyles: selectedStyles }];
             chatMessagesRef.current = next;
             return next;
         });
@@ -554,11 +578,13 @@ export default function VideoPage() {
             quality: quality.includes("1080") ? "high" : quality.includes("480") ? "low" : "medium",
             seconds,
             watermark: String(watermark).toLowerCase() === "true",
+            ...(selectedStyles.length ? { generationStyleIds: selectedStyles.map((style) => style.id) } : {}),
         });
 
         setPrompt("");
         setReferences([]);
         setVideoReferences([]);
+        setSelectedStyles([]);
     };
 
     const regenerateRound = async (round: Round) => {
@@ -567,7 +593,7 @@ export default function VideoPage() {
         const resolution = round.config.vquality;
         if (size) pendingVideoSizeRef.current = size;
         setChatMessages((prev) => {
-            const next = [...prev, { id: nanoid(), role: "user", text: round.prompt }];
+            const next = [...prev, { id: nanoid(), role: "user" as const, text: round.prompt, generationStyles: round.generationStyleSnapshots }];
             chatMessagesRef.current = next;
             return next;
         });
@@ -582,7 +608,9 @@ export default function VideoPage() {
             ...(round.config.videoWatermark !== undefined && round.config.videoWatermark !== null
                 ? { watermark: String(round.config.videoWatermark).toLowerCase() === "true" }
                 : {}),
+            ...(round.generationStyleSnapshots?.length ? { generationStyleSnapshots: round.generationStyleSnapshots } : {}),
         });
+        setSelectedStyles([]);
     };
 
     const newConversation = () => {
@@ -591,6 +619,7 @@ export default function VideoPage() {
         setPrompt("");
         setReferences([]);
         setVideoReferences([]);
+        setSelectedStyles([]);
         setSelectedIds([]);
         setManagementMode(false);
         setMobileSidebarOpen(false);
@@ -621,6 +650,7 @@ export default function VideoPage() {
         setPrompt("");
         setReferences([]);
         setVideoReferences([]);
+        setSelectedStyles([]);
         setMobileSidebarOpen(false);
         restoreSession(conversation.id);
     };
@@ -637,6 +667,7 @@ export default function VideoPage() {
             setPrompt("");
             setReferences([]);
             setVideoReferences([]);
+            setSelectedStyles([]);
         }
         setSelectedIds([]);
         setManagementMode(false);
@@ -848,7 +879,7 @@ export default function VideoPage() {
             iconOnly: true,
             disabled: !prompt.trim() || isStreaming || activeConversationPending || isPromptOptimizing,
             loading: isPromptOptimizing,
-            onClick: () => void optimizePrompt({ operationId: "video-page", generationType: "video", prompt, onSuccess: setPrompt }),
+            onClick: () => void optimizePrompt({ operationId: "video-page", generationType: "video", prompt, generationStyleIds: selectedStyles.map((style) => style.id), onSuccess: setPrompt }),
         },
         {
             key: "assets",
@@ -948,6 +979,9 @@ export default function VideoPage() {
                     value: prompt,
                     placeholder: "描述镜头运动、主体动作、场景氛围和画面风格...",
                     references: referenceChips,
+                    styleOptions,
+                    selectedStyles,
+                    styleLoading,
                     actions: composerActions,
                     running: isStreaming || activeConversationPending,
                     canSubmit: canGenerate,
@@ -955,6 +989,20 @@ export default function VideoPage() {
                     focusWhenValueSet: focusInitialPrompt,
                     creditCost,
                     onChange: setPrompt,
+                    onStyleSelect: (style) => {
+                        setSelectedStyles((current) => {
+                            if (current.some((selected) => selected.id === style.id)) {
+                                message.info("该风格已选择");
+                                return current;
+                            }
+                            if (current.length >= 3) {
+                                message.warning("最多选择3个风格");
+                                return current;
+                            }
+                            return [...current, style];
+                        });
+                    },
+                    onStyleRemove: (styleId) => setSelectedStyles((current) => current.filter((style) => style.id !== styleId)),
                     onPasteImages: (files) => void addReferences(files),
                     onSubmit: () => void generate(),
                     onStop: isStreaming ? () => void cancelMessage() : undefined,
@@ -1076,7 +1124,15 @@ function buildVideoThreadSections(
         rounds.push({
             id: round.id,
             userText: round.prompt,
-            userAttachments: renderVideoRoundReferences(round),
+            userCopyText: formatGenerationStyleMessage(round.prompt, round.generationStyleSnapshots),
+            userAttachments: round.references.length || round.videoReferences.length || round.generationStyleSnapshots?.length
+                ? (
+                    <div className="space-y-2">
+                        {renderGenerationStyleSnapshots(round.generationStyleSnapshots)}
+                        {renderVideoRoundReferences(round)}
+                    </div>
+                )
+                : undefined,
             statusText: buildVideoStatusText(round),
             assistantText: buildVideoAssistantText(round),
             activities: round.activities,
@@ -1122,6 +1178,24 @@ function renderVideoRoundReferences(round: Round) {
             ))}
             {visibleVideoReferences.map((reference, index) => (
                 <video key={reference.id} src={reference.url} className="size-16 rounded-xl object-cover ring-1 ring-[var(--studio-line)]" muted title={seedanceReferenceLabel("video", index)} />
+            ))}
+        </div>
+    );
+}
+
+function renderGenerationStyleSnapshots(snapshots?: GenerationStyleSnapshot[]) {
+    if (!snapshots?.length) return null;
+    return (
+        <div className="flex flex-wrap gap-2">
+            {snapshots.map((snapshot) => (
+                <span
+                    key={`generation-style-${snapshot.id}`}
+                    title={snapshot.stylePrompt}
+                    className="inline-flex max-w-52 items-center gap-1.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]"
+                >
+                    <Palette className="size-3.5 shrink-0 text-[var(--studio-action)]" />
+                    <span className="truncate">{snapshot.name}</span>
+                </span>
             ))}
         </div>
     );

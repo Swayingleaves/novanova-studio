@@ -72,22 +72,19 @@ public class AiHttpClient {
      */
     public Mono<JSONObject> sendJsonRequest(AiTaskDtos.AiChannelConfig channel, String method, String path, Object payload) {
         return callBlocking(() -> {
+            String normalizedMethod = normalizeRequestMethod(method);
             String url = buildAiUrl(channel.baseUrl(), path);
-            String jsonBody = "POST".equalsIgnoreCase(method) ? AiJsonUtils.toJson(payload) : "";
-            log.info("AI请求: {} {} body={}", method, url, jsonBody.length() > 2000 ? jsonBody.substring(0, 2000) + "..." : jsonBody);
+            String jsonBody = "POST".equals(normalizedMethod) ? AiJsonUtils.toJson(payload) : "";
+            log.info("AI请求: {} {} body={}", normalizedMethod, url, jsonBody.length() > 2000 ? jsonBody.substring(0, 2000) + "..." : jsonBody);
             HttpRequest.Builder builder = baseBearerRequest(channel, path).header("Content-Type", "application/json");
-            if ("POST".equalsIgnoreCase(method)) {
-                builder.POST(HttpRequest.BodyPublishers.ofString(jsonBody));
-            } else {
-                builder.GET();
-            }
+            applyRequestMethod(builder, normalizedMethod, jsonBody);
             HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "AI接口调用失败: code" + response.statusCode() + ", " + response.body());
+                throw AiErrorSupport.providerException(response.statusCode(), response.body(), requestStage(normalizedMethod));
             }
             JSONObject json = AiJsonUtils.parseJson(response.body());
             log.info("AI响应: {}", AiJsonUtils.formatResponseForLog(json));
-            AiJsonUtils.validateEnvelope(json);
+            AiJsonUtils.validateEnvelope(json, requestStage(normalizedMethod));
             return json;
         });
     }
@@ -118,8 +115,8 @@ public class AiHttpClient {
                         try (var lines = response.body()) {
                             errorBody = lines.collect(Collectors.joining("\n"));
                         }
-                        return Flux.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
-                                "AI流式接口调用失败: code=" + response.statusCode() + ", " + errorBody));
+                        return Flux.error(AiErrorSupport.providerException(
+                                response.statusCode(), errorBody, "submission"));
                     }
                     String contentType = response.headers().firstValue("Content-Type").orElse("");
                     if (!contentType.toLowerCase().contains("text/event-stream")) {
@@ -169,8 +166,8 @@ public class AiHttpClient {
                         try (var lines = response.body()) {
                             errorBody = lines.collect(Collectors.joining("\n"));
                         }
-                        return Flux.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
-                                "Anthropic流式接口调用失败: code=" + response.statusCode() + ", " + errorBody));
+                        return Flux.error(AiErrorSupport.providerException(
+                                response.statusCode(), errorBody, "submission"));
                     }
                     String contentType = response.headers().firstValue("Content-Type").orElse("");
                     if (!contentType.toLowerCase().contains("text/event-stream")) {
@@ -224,7 +221,7 @@ public class AiHttpClient {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             String body = response.body();
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "Anthropic接口调用失败: code=" + response.statusCode() + ", " + body);
+                throw AiErrorSupport.providerException(response.statusCode(), body, "submission");
             }
             log.info("Anthropic响应: {}", body);
             return AiJsonUtils.parseJson(body);
@@ -247,10 +244,10 @@ public class AiHttpClient {
                     .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "AI接口调用失败: " + response.body());
+                throw AiErrorSupport.providerException(response.statusCode(), response.body(), "submission");
             }
             JSONObject json = AiJsonUtils.parseJson(response.body());
-            AiJsonUtils.validateEnvelope(json);
+            AiJsonUtils.validateEnvelope(json, "submission");
             return json;
         });
     }
@@ -267,7 +264,8 @@ public class AiHttpClient {
             HttpRequest request = baseBearerRequest(channel, path).GET().build();
             HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "下载AI结果失败: " + new String(response.body(), StandardCharsets.UTF_8));
+                throw AiErrorSupport.providerException(response.statusCode(),
+                        new String(response.body(), StandardCharsets.UTF_8), "download");
             }
             String mimeType = response.headers().firstValue("Content-Type").orElse("application/octet-stream");
             return new GeneratedBinary(response.body(), mimeType);
@@ -292,7 +290,8 @@ public class AiHttpClient {
                     .build();
             HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, errorPrefix + ": " + new String(response.body(), StandardCharsets.UTF_8));
+                throw AiErrorSupport.providerException(response.statusCode(),
+                        new String(response.body(), StandardCharsets.UTF_8), "submission");
             }
             String mimeType = response.headers().firstValue("Content-Type").orElse(defaultMimeType);
             return new GeneratedBinary(response.body(), mimeType);
@@ -313,23 +312,51 @@ public class AiHttpClient {
             if (!StringUtils.hasText(channel.apiKey())) {
                 throw new BusinessException(ErrorCode.BUSINESS_ERROR, "服务端AI渠道未配置API Key");
             }
+            String normalizedMethod = normalizeRequestMethod(method);
+            String jsonBody = "POST".equals(normalizedMethod) ? AiJsonUtils.toJson(payload) : "";
             HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
                     .timeout(Duration.ofMinutes(10))
                     .header("Authorization", "Bearer " + channel.apiKey().trim())
                     .header("Content-Type", "application/json");
-            if ("POST".equalsIgnoreCase(method)) {
-                builder.POST(HttpRequest.BodyPublishers.ofString(AiJsonUtils.toJson(payload)));
-            } else {
-                builder.GET();
-            }
+            applyRequestMethod(builder, normalizedMethod, jsonBody);
             HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "AI接口调用失败: " + response.body());
+                throw AiErrorSupport.providerException(response.statusCode(), response.body(), requestStage(normalizedMethod));
             }
             JSONObject json = AiJsonUtils.parseJson(response.body());
-            AiJsonUtils.validateEnvelope(json);
+            AiJsonUtils.validateEnvelope(json, requestStage(normalizedMethod));
             return json;
         });
+    }
+
+    /**
+     * 将已校验的HTTP方法应用到JSON请求构建器。
+     *
+     * @param builder HttpRequest.Builder 请求构建器
+     * @param method String 规范化HTTP方法
+     * @param jsonBody String POST请求体
+     */
+    private static void applyRequestMethod(HttpRequest.Builder builder, String method, String jsonBody) {
+        switch (method) {
+            case "POST" -> builder.POST(HttpRequest.BodyPublishers.ofString(jsonBody));
+            case "GET" -> builder.GET();
+            case "DELETE" -> builder.DELETE();
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "AI接口不支持HTTP方法: " + method);
+        }
+    }
+
+    /**
+     * 规范化并校验AI接口HTTP方法。
+     *
+     * @param method String 原始HTTP方法
+     * @return String GET、POST或DELETE
+     */
+    private static String normalizeRequestMethod(String method) {
+        String normalizedMethod = StringUtils.hasText(method) ? method.trim().toUpperCase(Locale.ROOT) : "";
+        if (!Set.of("GET", "POST", "DELETE").contains(normalizedMethod)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "AI接口不支持HTTP方法: " + normalizedMethod);
+        }
+        return normalizedMethod;
     }
 
     /**
@@ -353,19 +380,29 @@ public class AiHttpClient {
                     .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "Gemini接口调用失败: " + response.body());
+                throw AiErrorSupport.providerException(response.statusCode(), response.body(), "submission");
             }
             JSONObject json = AiJsonUtils.parseJson(response.body());
             JSONObject error = json.getJSONObject("error");
             if (error != null && StringUtils.hasText(error.getString("message"))) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, error.getString("message"));
+                throw AiErrorSupport.providerException(400, json.toJSONString(), "submission");
             }
             JSONObject promptFeedback = json.getJSONObject("promptFeedback");
             if (promptFeedback != null && StringUtils.hasText(promptFeedback.getString("blockReason"))) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "Gemini 拒绝了本次请求：" + promptFeedback.getString("blockReason"));
+                throw AiErrorSupport.providerException(400, json.toJSONString(), "submission");
             }
             return json;
         });
+    }
+
+    /**
+     * 根据HTTP方法判断供应商调用阶段。
+     *
+     * @param method String HTTP方法
+     * @return String submission或polling
+     */
+    private static String requestStage(String method) {
+        return "POST".equals(method) ? "submission" : "polling";
     }
 
     /**
@@ -445,7 +482,7 @@ public class AiHttpClient {
             HttpResponse<InputStream> response = remoteMediaHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
             try (InputStream inputStream = response.body()) {
                 if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "下载参考媒体失败: " + response.statusCode());
+                    throw AiErrorSupport.providerException(response.statusCode(), "", "download");
                 }
                 long contentLength = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
                 if (contentLength > MAXIMUM_REMOTE_MEDIA_BYTES) {

@@ -4,13 +4,15 @@ import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.AiTaskDtos;
+import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.dto.PromptOptimizationDtos;
-import java.util.List;
-import java.util.Map;
 import java.time.Duration;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.function.Function;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -22,7 +24,6 @@ import reactor.core.publisher.Mono;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class PromptOptimizationService {
 
     /** AI 任务服务 */
@@ -30,6 +31,34 @@ public class PromptOptimizationService {
 
     /** 系统提示词模板服务 */
     private final SystemPromptTemplateService systemPromptTemplateService;
+
+    /** 生成风格服务 */
+    private final GenerationStyleService generationStyleService;
+
+    /**
+     * 创建提示词优化服务。
+     *
+     * @param aiTaskService AI任务服务
+     * @param systemPromptTemplateService 系统提示词模板服务
+     * @param generationStyleService 生成风格服务
+     */
+    @Autowired
+    public PromptOptimizationService(AiTaskService aiTaskService, SystemPromptTemplateService systemPromptTemplateService,
+                                     GenerationStyleService generationStyleService) {
+        this.aiTaskService = aiTaskService;
+        this.systemPromptTemplateService = systemPromptTemplateService;
+        this.generationStyleService = generationStyleService;
+    }
+
+    /**
+     * 保留无风格测试和旧调用方使用的构造方式。
+     *
+     * @param aiTaskService AI任务服务
+     * @param systemPromptTemplateService 系统提示词模板服务
+     */
+    public PromptOptimizationService(AiTaskService aiTaskService, SystemPromptTemplateService systemPromptTemplateService) {
+        this(aiTaskService, systemPromptTemplateService, null);
+    }
 
     /**
      * 创建提示词优化任务，模型留空以使用平台配置的默认文本模型。
@@ -39,7 +68,8 @@ public class PromptOptimizationService {
      * @throws BusinessException 生成类型不支持时抛出
      */
     public Mono<AiTaskDtos.AiGenerationTaskResponse> optimizePrompt(PromptOptimizationDtos.OptimizePromptRequest request) {
-        return aiTaskService.createTask(optimizationTaskRequest(request));
+        systemPrompt(request.generationType());
+        return resolveRequestStyles(request).flatMap(styles -> aiTaskService.createTask(optimizationTaskRequest(request, styles)));
     }
 
     /**
@@ -50,7 +80,8 @@ public class PromptOptimizationService {
      * @return Mono<AiGenerationTaskResponse> 已创建的异步文本任务
      */
     public Mono<AiTaskDtos.AiGenerationTaskResponse> optimizePromptForUser(Long userId, PromptOptimizationDtos.OptimizePromptRequest request) {
-        return aiTaskService.createTaskForUser(userId, optimizationTaskRequest(request), response -> Mono.empty());
+        systemPrompt(request.generationType());
+        return resolveRequestStyles(request).flatMap(styles -> aiTaskService.createTaskForUser(userId, optimizationTaskRequest(request, styles), response -> Mono.empty()));
     }
 
     /**
@@ -59,10 +90,11 @@ public class PromptOptimizationService {
      * @param request OptimizePromptRequest 提示词优化请求
      * @return CreateAiTaskRequest 文本任务请求
      */
-    private AiTaskDtos.CreateAiTaskRequest optimizationTaskRequest(PromptOptimizationDtos.OptimizePromptRequest request) {
-        String generationType = request.generationType().trim();
+    private AiTaskDtos.CreateAiTaskRequest optimizationTaskRequest(PromptOptimizationDtos.OptimizePromptRequest request,
+                                                                   List<GenerationStyleDtos.GenerationStyleSnapshot> styles) {
+        String generationType = request.generationType().trim().toLowerCase(Locale.ROOT);
         String systemPrompt = systemPrompt(generationType);
-        String prompt = request.prompt().trim();
+        String prompt = composePrompt(request.prompt(), styles);
         log.info("创建AI提示词优化任务: generationType={}", generationType);
 
         AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(
@@ -100,8 +132,25 @@ public class PromptOptimizationService {
      */
     public Mono<String> optimizeAndWait(Long userId, String generationType, String prompt,
                                         Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
+        return optimizeAndWait(userId, generationType, prompt, List.of(), beforeEnqueue);
+    }
+
+    /**
+     * 创建带风格上下文的优化任务并等待成功结果。
+     *
+     * @param userId Long 用户ID
+     * @param generationType String 图片或视频生成类型
+     * @param prompt String 原始提示词
+     * @param styles List<GenerationStyleSnapshot> 已解析风格快照
+     * @param beforeEnqueue Function 入队前处理器
+     * @return Mono<String> 优化后的提示词
+     */
+    public Mono<String> optimizeAndWait(Long userId, String generationType, String prompt,
+                                        List<GenerationStyleDtos.GenerationStyleSnapshot> styles,
+                                        Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
         PromptOptimizationDtos.OptimizePromptRequest request = new PromptOptimizationDtos.OptimizePromptRequest(generationType, prompt);
-        return aiTaskService.createTaskForUser(userId, optimizationTaskRequest(request), beforeEnqueue)
+        systemPrompt(generationType);
+        return aiTaskService.createTaskForUser(userId, optimizationTaskRequest(request, styles), beforeEnqueue)
                 .flatMap(created -> reactor.core.publisher.Flux.interval(Duration.ZERO, Duration.ofSeconds(1))
                         .concatMap(ignored -> aiTaskService.getTaskForUser(userId, created.id()))
                         .filter(task -> List.of("success", "failed", "canceled").contains(task.status()))
@@ -121,6 +170,48 @@ public class PromptOptimizationService {
     }
 
     /**
+     * 解析生成风格，供新版计划执行器复用同一套校验。
+     *
+     * @param generationType String 图片或视频生成类型
+     * @param styleIds List<Long> 风格ID
+     * @param snapshots List<GenerationStyleSnapshot> 历史快照
+     * @return Mono<List<GenerationStyleSnapshot>> 解析后的快照
+     */
+    public Mono<List<GenerationStyleDtos.GenerationStyleSnapshot>> resolveStyles(
+            String generationType, List<Long> styleIds, List<GenerationStyleDtos.GenerationStyleSnapshot> snapshots) {
+        if (generationStyleService == null) {
+            if ((styleIds != null && !styleIds.isEmpty()) || (snapshots != null && !snapshots.isEmpty())) {
+                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "当前提示词优化服务未配置风格解析器"));
+            }
+            return Mono.just(List.of());
+        }
+        return generationStyleService.resolveStyles(generationType, styleIds, snapshots);
+    }
+
+    /** 解析手动优化请求携带的风格ID。 */
+    private Mono<List<GenerationStyleDtos.GenerationStyleSnapshot>> resolveRequestStyles(PromptOptimizationDtos.OptimizePromptRequest request) {
+        return resolveStyles(request.generationType(), request.generationStyleIds(), List.of());
+    }
+
+    /**
+     * 将用户提示词和按选择顺序排列的风格提示词合并为优化器输入。
+     *
+     * @param prompt 用户提示词
+     * @param styles 风格快照
+     * @return 优化器输入文本
+     */
+    private String composePrompt(String prompt, List<GenerationStyleDtos.GenerationStyleSnapshot> styles) {
+        String normalizedPrompt = prompt == null ? "" : prompt.trim();
+        if (styles == null || styles.isEmpty()) {
+            return normalizedPrompt;
+        }
+        String styleBlocks = java.util.stream.IntStream.range(0, styles.size())
+                .mapToObj(index -> "风格" + (index + 1) + "（" + styles.get(index).name() + "）：" + styles.get(index).stylePrompt())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        return normalizedPrompt + "\n\n【用户选择的风格提示词（按顺序融合）】\n" + styleBlocks;
+    }
+
+    /**
      * 按生成类型读取对应的系统提示词。
      *
      * @param generationType String 生成类型
@@ -128,7 +219,8 @@ public class PromptOptimizationService {
      * @throws BusinessException 生成类型不支持时抛出
      */
     private String systemPrompt(String generationType) {
-        return switch (generationType) {
+        String normalizedType = generationType == null ? "" : generationType.trim().toLowerCase(Locale.ROOT);
+        return switch (normalizedType) {
             case AiTaskTypes.IMAGE -> systemPromptTemplateService.get(PromptTemplateType.OPTIMIZATION_IMAGE);
             case AiTaskTypes.VIDEO -> systemPromptTemplateService.get(PromptTemplateType.OPTIMIZATION_VIDEO);
             default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "仅支持优化图片或视频生成提示词");

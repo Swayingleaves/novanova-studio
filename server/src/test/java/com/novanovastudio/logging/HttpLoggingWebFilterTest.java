@@ -1,8 +1,10 @@
 package com.novanovastudio.logging;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -16,6 +18,49 @@ import org.springframework.mock.web.server.MockServerWebExchange;
  * @date     2026-07-15 00:00
  */
 class HttpLoggingWebFilterTest {
+
+    /**
+     * 验证请求标识会写入响应头和Reactor上下文。
+     */
+    @Test
+    @DisplayName("请求标识会贯穿HTTP响应式链路")
+    void shouldPropagateRequestId() {
+        HttpLoggingWebFilter filter = new HttpLoggingWebFilter();
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/health")
+                        .header(HttpLoggingWebFilter.REQUEST_ID_HEADER, "request-123")
+                        .build()
+        );
+        AtomicReference<String> contextRequestId = new AtomicReference<>();
+
+        filter.filter(exchange, ignored -> reactor.core.publisher.Mono.deferContextual(context -> {
+            contextRequestId.set(MappedDiagnosticContext.values(context).get(MappedDiagnosticContext.REQUEST_ID));
+            return reactor.core.publisher.Mono.empty();
+        })).block();
+
+        assertEquals("request-123", exchange.getResponse().getHeaders().getFirst(HttpLoggingWebFilter.REQUEST_ID_HEADER));
+        assertEquals("request-123", contextRequestId.get());
+    }
+
+    /**
+     * 验证非法请求标识不会原样进入日志上下文。
+     */
+    @Test
+    @DisplayName("非法请求标识会被替换")
+    void shouldReplaceInvalidRequestId() {
+        HttpLoggingWebFilter filter = new HttpLoggingWebFilter();
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/health")
+                        .header(HttpLoggingWebFilter.REQUEST_ID_HEADER, "invalid/request")
+                        .build()
+        );
+
+        filter.filter(exchange, ignored -> reactor.core.publisher.Mono.empty()).block();
+
+        String responseRequestId = exchange.getResponse().getHeaders().getFirst(HttpLoggingWebFilter.REQUEST_ID_HEADER);
+        assertFalse("invalid/request".equals(responseRequestId));
+        assertTrue(responseRequestId != null && !responseRequestId.isBlank());
+    }
 
     /**
      * 验证OAuth2查询参数不会写入日志。

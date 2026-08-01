@@ -5,7 +5,7 @@ import { Tooltip } from "antd";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
-import { Copy, PanelRightClose, Plus } from "lucide-react";
+import { Copy, PanelRightClose, Plus, Square } from "lucide-react";
 import { ThinkingBlock } from "@/features/chat";
 import type { ThinkingBlockState } from "@/features/chat/types";
 import { ModelPicker } from "@/features/settings/components/model-picker";
@@ -32,6 +32,7 @@ type CanvasChatPanelProps = {
     activeThinking?: ThinkingBlockState | null;
     onSend: (text: string, references?: CanvasAssistantReference[]) => void;
     onNewSession: () => void;
+    onStop: () => void;
     isStreaming?: boolean;
     config: AiConfig;
     model: string;
@@ -44,7 +45,7 @@ type CanvasChatPanelProps = {
  * 基于 assistant-ui 的画布 AI 对话面板
  * 承载画布内的对话、节点引用和模型选择交互
  */
-export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, completedThinkings = [], activeThinking = null, onSend, onNewSession, isStreaming = false, config, model, onModelChange, onMissingConfig, initialPrompt = "" }: CanvasChatPanelProps) {
+export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, completedThinkings = [], activeThinking = null, onSend, onNewSession, onStop, isStreaming = false, config, model, onModelChange, onMissingConfig, initialPrompt = "" }: CanvasChatPanelProps) {
     const theme = useCanvasTheme();
     const copyText = useCopyText();
     const scrollRef = useRef<HTMLDivElement>(null);
@@ -171,6 +172,17 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, co
             <div className="flex items-center justify-between px-4 py-3 text-sm font-medium shrink-0" style={{ borderBottom: `1px solid ${theme.toolbar.border}` }}>
                 <span>画布Agent</span>
                 <div className="flex items-center gap-1">
+                    {isStreaming ? (
+                        <button
+                            type="button"
+                            className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100"
+                            onClick={onStop}
+                            title="停止生成"
+                            aria-label="停止生成"
+                        >
+                            <Square className="size-3.5" />
+                        </button>
+                    ) : null}
                     <button
                         type="button"
                         className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-25"

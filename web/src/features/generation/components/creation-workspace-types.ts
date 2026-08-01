@@ -22,9 +22,17 @@ export type CreationReferenceChip = {
     onRemove: () => void;
 };
 
+export type CreationStyleOption = {
+    id: number;
+    name: string;
+    generationType: "image" | "video";
+    stylePrompt?: string;
+};
+
 export type CreationThreadRound = {
     id: string;
     userText: string;
+    userCopyText?: string;
     userAttachments?: ReactNode;
     thinkings?: ThinkingBlockState[];
     activeThinkingId?: string;
@@ -79,6 +87,9 @@ export type CreationComposerProps = {
     value: string;
     placeholder: string;
     references: CreationReferenceChip[];
+    styleOptions?: CreationStyleOption[];
+    selectedStyles?: CreationStyleOption[];
+    styleLoading?: boolean;
     actions: CreationComposerAction[];
     running: boolean;
     canSubmit: boolean;
@@ -87,6 +98,8 @@ export type CreationComposerProps = {
     focusWhenValueSet?: boolean;
     stopping?: boolean;
     onChange: (value: string) => void;
+    onStyleSelect?: (style: CreationStyleOption) => void;
+    onStyleRemove?: (styleId: number) => void;
     onPasteImages?: (files: File[]) => void;
     onSubmit: () => void;
     onStop?: () => void;

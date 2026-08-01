@@ -35,6 +35,17 @@ public class AgentScopeAgentFactory {
     }
 
     /**
+     * 创建主Agent失败恢复模式实例。
+     *
+     * @param model AgentScope文本模型
+     * @return ReActAgent 主Agent恢复模式实例
+     */
+    public ReActAgent recoveryAgent(Model model) {
+        return build("main-agent-recovery", promptService.get(PromptTemplateType.AGENT_RECOVERY), model,
+                "只能返回 CreationRecoveryPlan 结构化结果，不得调用工具或重新规划任务。", true);
+    }
+
+    /**
      * 创建固定图片子Agent。
      *
      * @param model AgentScope文本模型

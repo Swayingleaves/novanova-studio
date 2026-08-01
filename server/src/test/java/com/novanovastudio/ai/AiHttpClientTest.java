@@ -1,6 +1,7 @@
 package com.novanovastudio.ai;
 
 import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.dto.AiTaskDtos;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -240,6 +241,41 @@ class AiHttpClientTest {
                 () -> client.validateRemoteMediaUrl("file:///tmp/media.png").block());
 
         Assertions.assertTrue(exception.getMessage().contains("HTTP或HTTPS"));
+    }
+
+    /**
+     * JSON请求必须保留显式DELETE方法，确保排队中的供应商任务能够取消。
+     *
+     * @throws IOException 本地测试服务创建失败时抛出
+     */
+    @Test
+    void shouldSendExplicitDeleteRequest() throws IOException {
+        AtomicReference<String> method = new AtomicReference<>();
+        HttpServer server = startJsonServer(200, "{}", exchange -> method.set(exchange.getRequestMethod()));
+        try {
+            AiTaskDtos.AiChannelConfig channel = new AiTaskDtos.AiChannelConfig(
+                    "channel-1", "测试渠道", baseUrl(server), "secret-key", "openai", List.of("model-1"));
+
+            new AiHttpClient().sendJsonRequest(channel, "DELETE", "/tasks/task-1", null).block();
+
+            Assertions.assertEquals("DELETE", method.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /**
+     * JSON请求必须拒绝未支持的HTTP方法，不能静默降级为GET。
+     */
+    @Test
+    void shouldRejectUnsupportedJsonRequestMethod() {
+        AiTaskDtos.AiChannelConfig channel = new AiTaskDtos.AiChannelConfig(
+                "channel-1", "测试渠道", "https://example.com", "secret-key", "openai", List.of("model-1"));
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class,
+                () -> new AiHttpClient().sendJsonRequest(channel, "PATCH", "/tasks/task-1", null).block());
+
+        Assertions.assertTrue(exception.getMessage().contains("不支持HTTP方法"));
     }
 
     /**

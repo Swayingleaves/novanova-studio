@@ -8,13 +8,15 @@ import { cancelAiTask, createPromptOptimizationTask, waitAiTask, type PromptOpti
  * @param signal 请求取消信号
  * @returns 优化后的提示词
  */
-export async function optimizeGenerationPrompt(generationType: PromptOptimizationType, prompt: string, signal?: AbortSignal) {
-    const task = await createPromptOptimizationTask({ generationType, prompt });
-    if (signal?.aborted) {
+export async function optimizeGenerationPrompt(generationType: PromptOptimizationType, prompt: string, generationStyleIdsOrSignal?: number[] | AbortSignal, signal?: AbortSignal) {
+    const generationStyleIds = Array.isArray(generationStyleIdsOrSignal) ? generationStyleIdsOrSignal : undefined;
+    const requestSignal = generationStyleIdsOrSignal instanceof AbortSignal ? generationStyleIdsOrSignal : signal;
+    const task = await createPromptOptimizationTask({ generationType, prompt, ...(generationStyleIds?.length ? { generationStyleIds } : {}) });
+    if (requestSignal?.aborted) {
         void cancelAiTask(task.id).catch(() => {});
         throw new DOMException("Aborted", "AbortError");
     }
-    const completed = await waitAiTask(task.id, { signal });
+    const completed = await waitAiTask(task.id, { signal: requestSignal });
     const content = readOptimizedPrompt(completed.resultData);
     if (!content) throw new Error("AI 没有返回有效的优化提示词");
     return content;

@@ -37,6 +37,7 @@ type CanvasAgentCommonFields = {
     viewport?: CanvasViewTransform;
     mode?: CanvasNodeKind;
     prompt?: string;
+    recovery?: boolean;
 };
 
 export type CanvasAgentOp = CanvasAgentCommonFields &

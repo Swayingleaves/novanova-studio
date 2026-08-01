@@ -64,6 +64,20 @@ test("buildChatThreadSection 将用户素材传递到对话轮次", () => {
     assert.ok(section?.rounds[0]?.userAttachments);
 });
 
+test("buildChatThreadSection 即时展示风格并生成可粘贴的复制文本", () => {
+    const messages: ChatMessageItem[] = [{
+        id: "user-style-1",
+        role: "user",
+        text: "生成一张电影海报",
+        generationStyles: [{ id: 7, name: "电影感", generationType: "image" }],
+    }];
+
+    const section = buildChatThreadSection(messages, [], null, null, [], () => null);
+
+    assert.ok(section?.rounds[0]?.userAttachments);
+    assert.equal(section?.rounds[0]?.userCopyText, "风格：电影感\n生成一张电影海报");
+});
+
 test("buildChatThreadSection 将 Agent 执行活动归入当前对话轮次", () => {
     const activity: AgentActivityState = {
         id: "plan-plan-1",

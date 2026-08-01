@@ -5,11 +5,14 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.novanovastudio.agent.AgentTaskOrchestrator;
 import com.novanovastudio.ai.AiProviderAdapter;
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
+import com.novanovastudio.ai.AiErrorDetails;
+import com.novanovastudio.ai.AiProviderException;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.config.NovanovaProperties;
@@ -72,6 +75,9 @@ class AiTaskServiceTest {
     @Mock
     private AiProviderAdapterRegistry adapterRegistry;
 
+    /** 图片供应商适配器 */
+    private AiProviderAdapter providerAdapter;
+
     /** 积分服务 */
     @Mock
     private CreditService creditService;
@@ -102,8 +108,9 @@ class AiTaskServiceTest {
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(
                 new PersistenceDtos.ModelConfig("model-config-1", "channel-1", "model-1", AiTaskTypes.IMAGE, List.of(), true, 0, 0, true, "high")
         )));
+        providerAdapter = mock(AiProviderAdapter.class);
         when(adapterRegistry.resolve(any(AiTaskDtos.AiChannelConfig.class), eq(AiTaskTypes.IMAGE)))
-                .thenReturn(mock(AiProviderAdapter.class));
+                .thenReturn(providerAdapter);
         when(repository.createTask(any(AiGenerationTask.class))).thenReturn(Mono.defer(() -> {
             executionOrder.add("create");
             return Mono.empty();
@@ -154,6 +161,24 @@ class AiTaskServiceTest {
 
         Assertions.assertEquals("pending保存失败", exception.getMessage());
         Assertions.assertEquals(List.of("create", "read", "beforeEnqueue"), executionOrder);
+    }
+
+    /**
+     * 供应商结构化失败进入任务终态时必须退回该任务积分。
+     */
+    @Test
+    void shouldRefundCreditsWhenProviderTaskFails() {
+        when(repository.getTaskById("task-1")).thenReturn(Mono.just(task("task-1")));
+        when(repository.markTaskRunningIfExecutable("task-1")).thenReturn(Mono.just(true));
+        when(eventPublisher.isCancelRequested("task-1")).thenReturn(Mono.just(false));
+        when(providerAdapter.execute(any())).thenReturn(Mono.error(new AiProviderException(
+                new AiErrorDetails("provider", "prompt_policy_violation", "submission", 400,
+                        "content_policy_violation", "invalid_request_error", "prompt", "提示词不符合内容策略",
+                        false, true))));
+
+        service.executeQueuedTask("task-1").block();
+
+        verify(creditService).refundTask(7L, "task-1", AiTaskTypes.IMAGE);
     }
 
     /**

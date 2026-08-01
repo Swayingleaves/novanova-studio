@@ -5,6 +5,7 @@ import com.novanovastudio.common.ApiResponse;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.entity.User;
+import com.novanovastudio.logging.MappedDiagnosticContext;
 import com.novanovastudio.repository.UserRepository;
 import java.nio.charset.StandardCharsets;
 import lombok.RequiredArgsConstructor;
@@ -83,7 +84,9 @@ public class TokenAuthenticationWebFilter implements WebFilter {
             return Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, "账号已被禁用"));
         }
         CurrentUser currentUser = new CurrentUser(user.getId(), user.getEmail(), user.getRole(), user.getStatus());
-        return chain.filter(exchange).contextWrite(context -> context.put(CurrentUserProvider.CURRENT_USER_CONTEXT_KEY, currentUser));
+        return chain.filter(exchange).contextWrite(context -> MappedDiagnosticContext.put(
+                context.put(CurrentUserProvider.CURRENT_USER_CONTEXT_KEY, currentUser),
+                MappedDiagnosticContext.USER_ID, user.getId()));
     }
 
     /**

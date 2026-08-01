@@ -10,6 +10,7 @@ type OptimizePromptOptions = {
     operationId: string;
     generationType: PromptOptimizationType;
     prompt: string;
+    generationStyleIds?: number[];
     onSuccess: (prompt: string) => void;
 };
 
@@ -27,7 +28,7 @@ export function usePromptOptimization() {
     useEffect(() => () => controllerRef.current?.abort(), []);
 
     const optimizePrompt = useCallback(
-        async ({ operationId, generationType, prompt, onSuccess }: OptimizePromptOptions) => {
+        async ({ operationId, generationType, prompt, generationStyleIds, onSuccess }: OptimizePromptOptions) => {
             const normalizedPrompt = prompt.trim();
             if (!normalizedPrompt || optimizingOperationIdRef.current) return;
 
@@ -37,7 +38,7 @@ export function usePromptOptimization() {
             setOptimizingOperationId(operationId);
 
             try {
-                const optimizedPrompt = await optimizeGenerationPrompt(generationType, normalizedPrompt, controller.signal);
+                const optimizedPrompt = await optimizeGenerationPrompt(generationType, normalizedPrompt, generationStyleIds, controller.signal);
                 onSuccess(optimizedPrompt);
                 message.success("提示词已优化");
             } catch (error) {

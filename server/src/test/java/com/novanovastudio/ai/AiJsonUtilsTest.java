@@ -65,4 +65,21 @@ class AiJsonUtilsTest {
         Assertions.assertEquals("Base64内容已省略，字符数=3", logResponse.getJSONArray("data").getJSONObject(0).getString("b64_json"));
         Assertions.assertEquals("abc", response.getJSONArray("data").getJSONObject(0).getString("b64_json"));
     }
+
+    /**
+     * 测试业务响应包装错误保留真实调用阶段和标准状态码。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldPreserveEnvelopeErrorStage() {
+        JSONObject response = JSONObject.of("code", 503, "msg", "服务暂不可用");
+
+        AiProviderException exception = Assertions.assertThrows(AiProviderException.class,
+                () -> AiJsonUtils.validateEnvelope(response, "polling"));
+
+        Assertions.assertEquals("polling", exception.getDetails().stage());
+        Assertions.assertEquals(503, exception.getDetails().httpStatus());
+        Assertions.assertFalse(exception.getDetails().safeToRetry());
+    }
 }

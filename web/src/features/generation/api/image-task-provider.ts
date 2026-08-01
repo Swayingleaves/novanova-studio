@@ -9,6 +9,7 @@ import type { ImageRequestOptions } from "./image-contracts";
 import { normalizeImageTaskResult } from "./image-task-result";
 
 export async function requestServerGeneratedImages(config: AiConfig, prompt: string, references: ReferenceImage[], mask: ReferenceImage | undefined, generationSource: ServerGenerationSource, options?: ImageRequestOptions) {
+    if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
     if (mask) throw new Error("服务端任务系统暂不支持蒙版编辑");
     const model = config.model || config.imageModel;
     const count = normalizeImageCount(config.count);

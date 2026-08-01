@@ -2,14 +2,20 @@
 
 import { useCallback, useEffect, useRef } from "react";
 
-import { agentChat, agentSubscribeEvents, agentSubmitToolResult, type AgentChatHistoryMessage, type AgentEvent } from "@/features/canvas/api/agent";
+import { agentChat, agentSubscribeEvents, agentSubmitToolResult, cancelAgentChat, type AgentChatHistoryMessage, type AgentEvent } from "@/features/canvas/api/agent";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
+import { readAiTaskError } from "@/services/api/server";
 import type { CanvasAgentOp, CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
-import { resolveCanvasAgentTool } from "../utils/canvas-agent-tools";
+import { resolveCanvasAgentTool, type CanvasAgentToolResult } from "../utils/canvas-agent-tools";
+
+type CanvasAgentApplyResult = {
+  snapshot: CanvasAgentSnapshot;
+  result?: CanvasAgentToolResult;
+};
 
 interface UseAgentSSEProps {
   snapshot: CanvasAgentSnapshot;
-  onApplyOps: (ops?: CanvasAgentOp[]) => CanvasAgentSnapshot;
+  onApplyOps: (ops: CanvasAgentOp[] | undefined, signal: AbortSignal) => Promise<CanvasAgentApplyResult>;
   onToolExecute?: () => void;
   onTextDelta: (messageId: string, delta: string) => void;
   onThoughtDelta?: (thoughtId: string, delta: string) => void;
@@ -30,6 +36,8 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
   const sessionIdRef = useRef<string | undefined>(undefined);
   const eventSourceRef = useRef<EventSource | null>(null);
   const sendingRef = useRef(false);
+  const cancelRequestedRef = useRef(false);
+  const activeToolControllersRef = useRef(new Map<string, AbortController>());
   const snapshotRef = useRef(snapshot);
   const onApplyOpsRef = useRef(onApplyOps);
   const onToolExecuteRef = useRef(onToolExecute);
@@ -86,25 +94,37 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
       if (!data.name || !data.callId) return;
       const sessionId = data.sessionId || sessionIdRef.current;
       if (!sessionId) return;
-      try {
-        onToolExecuteRef.current?.();
-        const execution = resolveCanvasAgentTool(data.name, data.arguments);
-        if (!execution) throw new Error(`不支持的画布工具: ${data.name}`);
-        if (execution.ops.length > 0) {
-          snapshotRef.current = onApplyOpsRef.current(execution.ops);
+      void (async () => {
+        const controller = new AbortController();
+        activeToolControllersRef.current.set(data.callId!, controller);
+        try {
+          onToolExecuteRef.current?.();
+          const execution = resolveCanvasAgentTool(data.name!, data.arguments);
+          if (!execution) throw new Error(`不支持的画布工具: ${data.name}`);
+          let result = execution.result;
+          if (execution.ops.length > 0 && result.ok) {
+            const application = await onApplyOpsRef.current(execution.ops, controller.signal);
+            snapshotRef.current = application.snapshot;
+            result = application.result || result;
+          }
+          if (controller.signal.aborted) return;
+          await agentSubmitToolResult({ sessionId, callId: data.callId!, result });
+        } catch (err) {
+          const canceled = controller.signal.aborted;
+          if (canceled) return;
+          await agentSubmitToolResult({
+            sessionId,
+            callId: data.callId!,
+            result: {
+              ok: false,
+              message: err instanceof Error ? err.message : "工具执行失败",
+              data: { error: readAiTaskError(err) },
+            },
+          }).catch(() => undefined);
+        } finally {
+          activeToolControllersRef.current.delete(data.callId!);
         }
-        void agentSubmitToolResult({
-          sessionId,
-          callId: data.callId,
-          result: execution.result,
-        });
-      } catch (err) {
-        void agentSubmitToolResult({
-          sessionId,
-          callId: data.callId,
-          result: { ok: false, message: err instanceof Error ? err.message : "工具执行失败" },
-        });
-      }
+      })();
     });
 
     // 任务完成事件
@@ -115,7 +135,17 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
 
     es.addEventListener("canceled", (e: MessageEvent) => {
       const data: AgentEvent = JSON.parse(e.data);
+      cancelRequestedRef.current = false;
+      activeToolControllersRef.current.forEach((controller) => controller.abort());
+      activeToolControllersRef.current.clear();
       onCanceledRef.current?.(data.text || "已停止生成");
+    });
+
+    es.addEventListener("tool-cancel", (e: MessageEvent) => {
+      const data: AgentEvent = JSON.parse(e.data);
+      if (!data.callId) return;
+      activeToolControllersRef.current.get(data.callId)?.abort();
+      activeToolControllersRef.current.delete(data.callId);
     });
 
     // 展示主Agent计划摘要和确定性执行阶段。
@@ -174,6 +204,7 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
     async (message: string, references?: { title: string; text: string }[], model?: string, history?: AgentChatHistoryMessage[]) => {
       if (sendingRef.current) return;
       sendingRef.current = true;
+      cancelRequestedRef.current = false;
       try {
         const { sessionId } = await agentChat({
           sessionId: sessionIdRef.current,
@@ -185,6 +216,13 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
           creationSettings: model ? { model } : undefined,
         });
         sessionIdRef.current = sessionId;
+        if (cancelRequestedRef.current) {
+          try {
+            await cancelAgentChat(sessionId);
+          } finally {
+            cancelRequestedRef.current = false;
+          }
+        }
       } finally {
         sendingRef.current = false;
       }
@@ -196,7 +234,24 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
    * 重置后端 Agent 会话游标，用于前端新建独立对话。
    */
   const resetSession = useCallback(() => {
+    activeToolControllersRef.current.forEach((controller) => controller.abort());
+    activeToolControllersRef.current.clear();
+    cancelRequestedRef.current = false;
     sessionIdRef.current = undefined;
+  }, []);
+
+  const cancelMessage = useCallback(async () => {
+    activeToolControllersRef.current.forEach((controller) => controller.abort());
+    activeToolControllersRef.current.clear();
+    cancelRequestedRef.current = true;
+    if (!sessionIdRef.current) return;
+    try {
+      await cancelAgentChat(sessionIdRef.current);
+      cancelRequestedRef.current = false;
+    } catch (error) {
+      if (!sendingRef.current) cancelRequestedRef.current = false;
+      throw error;
+    }
   }, []);
 
   const token = useUserStore((s) => s.token);
@@ -211,8 +266,10 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
     connectSSE();
     return () => {
       eventSourceRef.current?.close();
+      activeToolControllersRef.current.forEach((controller) => controller.abort());
+      activeToolControllersRef.current.clear();
     };
   }, [token, connectSSE]);
 
-  return { sendMessage, resetSession };
+  return { sendMessage, cancelMessage, resetSession };
 }

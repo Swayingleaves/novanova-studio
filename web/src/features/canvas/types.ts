@@ -171,6 +171,7 @@ export interface CanvasVideoContent {
 export interface CanvasVideoGenerationSettings {
     prompt: string;
     model: string;
+    size: string;
     seconds: string;
     quality: string;
     watermark: string;

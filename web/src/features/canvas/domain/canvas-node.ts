@@ -201,6 +201,7 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
     return updateVideoNodeGeneration(withContent, {
         prompt: attributes.prompt,
         model: attributes.model,
+        size: attributes.size,
         seconds: attributes.seconds,
         quality: attributes.vquality,
         watermark: attributes.watermark,

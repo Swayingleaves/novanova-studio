@@ -116,10 +116,13 @@ public final class AiJsonUtils {
      * 校验第三方统一响应包装中的错误码
      *
      * @param response JSONObject 响应JSON
+     * @param stage String 调用阶段
      */
-    public static void validateEnvelope(JSONObject response) {
+    public static void validateEnvelope(JSONObject response, String stage) {
         if (response != null && response.containsKey("code") && response.getIntValue("code") != 0) {
-            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, AiTaskParameterReader.firstNonEmpty(response.getString("msg"), "AI接口调用失败"));
+            int providerCode = response.getIntValue("code");
+            int status = providerCode >= 400 && providerCode <= 599 ? providerCode : 400;
+            throw AiErrorSupport.providerException(status, response.toJSONString(), stage);
         }
     }
 
