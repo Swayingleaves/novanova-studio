@@ -108,6 +108,8 @@ services:
       dockerfile: Dockerfile
     container_name: novanovastudio-server
     environment:
+      # 显式设置容器和 Java 的默认时区，避免日志按 UTC 输出。
+      TZ: ${TZ:-Asia/Shanghai}
       APP_SECRET_KEY: ${APP_SECRET_KEY:?请在.env中配置APP_SECRET_KEY}
       TOKEN_EXPIRE_HOURS: ${TOKEN_EXPIRE_HOURS:-24}
       TRUSTED_PROXY_ADDRESSES: ${TRUSTED_PROXY_ADDRESSES:-}

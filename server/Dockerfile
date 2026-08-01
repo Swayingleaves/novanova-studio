@@ -9,6 +9,9 @@ RUN --mount=type=cache,target=/root/.m2 mvn -q -s /opt/maven/settings.xml -Dskip
 
 FROM eclipse-temurin:21-jre
 
+# 默认使用中国标准时间，Compose 可通过 TZ 环境变量覆盖。
+ENV TZ=Asia/Shanghai
+
 WORKDIR /app
 COPY --from=builder /app/target/server-0.0.1-SNAPSHOT.jar /app/server.jar
 

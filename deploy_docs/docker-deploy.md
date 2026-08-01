@@ -43,6 +43,7 @@ openssl rand -base64 48
 | `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | PostgreSQL 凭据，部署到公网前必须修改默认密码。 |
 | `REDIS_PASSWORD` | Redis 密码，公网环境建议设置。 |
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | 改为实际的域名，例如 `https://www.yourdomain.com`。 |
+| `TZ` | 容器和 Java 日志时区，默认是 `Asia/Shanghai`。 |
 
 ### Nginx 路径配置
 
