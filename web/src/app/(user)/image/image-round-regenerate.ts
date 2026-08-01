@@ -33,7 +33,7 @@ type ImageRoundRegeneratePayload = {
 
 type RegenerateImageRoundOptions = {
     fallbackModel: string;
-    appendUserMessage: (message: string) => void;
+    appendUserMessage: (message: string, generationStyles?: GenerationStyleSnapshot[]) => void;
     sendMessage: (message: string, attachments?: ImageRoundAttachment[], creationSettings?: ImageRoundRegeneratePayload["creationSettings"]) => Promise<void>;
 };
 
@@ -60,6 +60,6 @@ export function buildImageRoundRegeneratePayload(round: ImageRoundRegenerateInpu
 
 export async function regenerateImageRound(round: ImageRoundRegenerateInput, options: RegenerateImageRoundOptions) {
     const payload = buildImageRoundRegeneratePayload(round, options.fallbackModel);
-    options.appendUserMessage(payload.prompt);
+    options.appendUserMessage(payload.prompt, payload.creationSettings.generationStyleSnapshots);
     await options.sendMessage(payload.prompt, payload.attachments, payload.creationSettings);
 }

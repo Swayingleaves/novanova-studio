@@ -37,6 +37,7 @@ import { hasPendingVideoConversation } from "@/features/generation/lib/generatio
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
+import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { deleteGenerationLogs, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
 import { findLatestPlayableVideo, hasPlayableVideoUrl } from "./video-display";
 
@@ -562,7 +563,7 @@ export default function VideoPage() {
         ];
 
         setChatMessages((prev) => {
-            const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments }];
+            const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments, generationStyles: selectedStyles }];
             chatMessagesRef.current = next;
             return next;
         });
@@ -592,7 +593,7 @@ export default function VideoPage() {
         const resolution = round.config.vquality;
         if (size) pendingVideoSizeRef.current = size;
         setChatMessages((prev) => {
-            const next = [...prev, { id: nanoid(), role: "user", text: round.prompt }];
+            const next = [...prev, { id: nanoid(), role: "user" as const, text: round.prompt, generationStyles: round.generationStyleSnapshots }];
             chatMessagesRef.current = next;
             return next;
         });
@@ -1123,6 +1124,7 @@ function buildVideoThreadSections(
         rounds.push({
             id: round.id,
             userText: round.prompt,
+            userCopyText: formatGenerationStyleMessage(round.prompt, round.generationStyleSnapshots),
             userAttachments: round.references.length || round.videoReferences.length || round.generationStyleSnapshots?.length
                 ? (
                     <div className="space-y-2">

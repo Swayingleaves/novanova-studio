@@ -2,13 +2,14 @@
 
 import React from "react";
 import { Image } from "antd";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Palette } from "lucide-react";
 import { nanoid } from "nanoid";
 
 import type { AgentAction } from "@/features/canvas/api/agent";
-import type { AgentActivityState, ChatAttachment, ChatMessageItem, ThinkingBlockState, ToolCallState } from "../../chat/types.ts";
+import type { AgentActivityState, ChatAttachment, ChatGenerationStyle, ChatMessageItem, ThinkingBlockState, ToolCallState } from "../../chat/types.ts";
 import { isAgentActivityState } from "./agent-activity.ts";
 import type { CreationThreadRound, CreationThreadSection } from "./creation-workspace-types.ts";
+import { formatGenerationStyleMessage } from "../lib/style-command.ts";
 
 /**
  * 从 Agent 聊天消息构建对话区 section，图片/视频页面共用。
@@ -37,6 +38,7 @@ export function buildChatThreadSection(
     const rounds: CreationThreadRound[] = [];
     let currentRoundId = "";
     let currentUserText = "";
+    let currentUserStyles: ChatGenerationStyle[] | undefined;
     let currentUserAttachments: React.ReactNode = null;
     let currentResultContent: React.ReactNode = null;
     let currentAssistantText = "";
@@ -47,11 +49,12 @@ export function buildChatThreadSection(
     for (const msg of messages) {
         if (msg.role === "user") {
             if (currentUserText || currentActivities.length) {
-                rounds.push(makeRound(currentRoundId, currentUserText, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, currentResultContent, currentAction));
+                rounds.push(makeRound(currentRoundId, currentUserText, currentUserStyles, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, currentResultContent, currentAction));
             }
             currentRoundId = msg.id;
             currentUserText = msg.text;
-            currentUserAttachments = renderUserAttachments(msg.attachments);
+            currentUserStyles = msg.generationStyles;
+            currentUserAttachments = renderUserAttachments(msg.attachments, currentUserStyles);
             currentResultContent = null;
             currentAssistantText = "";
             currentStatusText = "";
@@ -86,7 +89,7 @@ export function buildChatThreadSection(
         }
     }
     if (currentUserText || currentActivities.length) {
-        rounds.push(makeRound(currentRoundId, currentUserText, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, currentResultContent, currentAction));
+        rounds.push(makeRound(currentRoundId, currentUserText, currentUserStyles, currentUserAttachments, currentActivities, currentStatusText, currentAssistantText, currentResultContent, currentAction));
     }
 
     if (streamingText) {
@@ -106,6 +109,7 @@ export function buildChatThreadSection(
 function makeRound(
     id: string,
     userText: string,
+    userStyles: ChatGenerationStyle[] | undefined,
     userAttachments: React.ReactNode,
     activities: AgentActivityState[],
     statusText: string,
@@ -116,6 +120,7 @@ function makeRound(
     return {
         id: id || nanoid(),
         userText,
+        userCopyText: formatGenerationStyleMessage(userText, userStyles),
         activities,
         statusText,
         assistantText,
@@ -125,9 +130,9 @@ function makeRound(
     } as CreationThreadRound;
 }
 
-function renderUserAttachments(attachments?: ChatAttachment[]): React.ReactNode {
+function renderUserAttachments(attachments?: ChatAttachment[], styles?: ChatGenerationStyle[]): React.ReactNode {
     const visibleAttachments = attachments?.filter((attachment) => Boolean(attachment.url.trim())) || [];
-    if (!visibleAttachments.length) {
+    if (!visibleAttachments.length && !styles?.length) {
         return null;
     }
     const imageAttachments = visibleAttachments.filter((attachment) => !attachment.type || attachment.type.startsWith("image/"));
@@ -136,6 +141,16 @@ function renderUserAttachments(attachments?: ChatAttachment[]): React.ReactNode 
     return React.createElement(
         "div",
         { className: "flex flex-wrap gap-2" },
+        styles?.map((style) => React.createElement(
+            "span",
+            {
+                key: `generation-style-${style.id}`,
+                className: "inline-flex max-w-52 items-center gap-1.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]",
+                title: style.stylePrompt,
+            },
+            React.createElement(Palette, { className: "size-3.5 shrink-0 text-[var(--studio-action)]" }),
+            React.createElement("span", { className: "truncate" }, style.name),
+        )),
         React.createElement(
             Image.PreviewGroup,
             null,

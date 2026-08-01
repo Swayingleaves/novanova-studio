@@ -10,7 +10,15 @@ export type ChatMessageItem = {
   meta?: string;
   detail?: unknown;
   attachments?: ChatAttachment[];
+  generationStyles?: ChatGenerationStyle[];
   action?: AgentAction;
+};
+
+export type ChatGenerationStyle = {
+  id: number;
+  name: string;
+  generationType: "image" | "video";
+  stylePrompt?: string;
 };
 
 export type ChatAttachment = {

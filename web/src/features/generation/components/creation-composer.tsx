@@ -7,7 +7,7 @@ import { ArrowUp, Bot, ChevronDown, LoaderCircle, Palette, Square, X } from "luc
 
 import type { CreationComposerProps } from "@/features/generation/components/creation-workspace-types";
 import { CreditCostDisplay } from "@/features/generation/constants/credits";
-import { getStyleCommandRange, removeStyleCommand } from "@/features/generation/lib/style-command";
+import { getStyleCommandRange, parseGenerationStyleMessage, removeStyleCommand } from "@/features/generation/lib/style-command";
 
 export function CreationComposer({ agentLabel = "Novanova Agent", value, placeholder, references, styleOptions, selectedStyles, styleLoading, actions, running, canSubmit, creditCost, compact, focusWhenValueSet, stopping, onChange, onStyleSelect, onStyleRemove, onPasteImages, onSubmit, onStop }: CreationComposerProps) {
     const inputRef = useRef<TextAreaRef>(null);
@@ -77,6 +77,28 @@ export function CreationComposer({ agentLabel = "Novanova Agent", value, placeho
         });
     };
 
+    const pasteStyleMessage = (pastedText: string) => {
+        if (!onStyleSelect) return false;
+        const parsed = parseGenerationStyleMessage(pastedText, availableStyles);
+        if (!parsed) return false;
+        const textarea = inputRef.current?.resizableTextArea?.textArea;
+        const start = textarea?.selectionStart ?? value.length;
+        const end = textarea?.selectionEnd ?? start;
+        const nextValue = `${value.slice(0, start)}${parsed.prompt}${value.slice(end)}`;
+        parsed.styles.forEach((style) => onStyleSelect(style));
+        onChange(nextValue);
+        setStyleCommand(null);
+        setStyleQuery("");
+        setStyleMenuOpen(false);
+        requestAnimationFrame(() => {
+            const nextTextarea = inputRef.current?.resizableTextArea?.textArea;
+            const cursor = start + parsed.prompt.length;
+            nextTextarea?.focus();
+            nextTextarea?.setSelectionRange(cursor, cursor);
+        });
+        return true;
+    };
+
     const renderAction = (action: CreationComposerProps["actions"][number]) => (
         <Tooltip key={action.key} title={action.label}>
             <Button
@@ -140,6 +162,11 @@ export function CreationComposer({ agentLabel = "Novanova Agent", value, placeho
                             className="creation-composer-textarea"
                             onChange={(event) => updatePrompt(event.target.value, event.target.selectionStart ?? event.target.value.length)}
                             onPaste={(event) => {
+                                const pastedText = event.clipboardData.getData("text/plain");
+                                if (pasteStyleMessage(pastedText)) {
+                                    event.preventDefault();
+                                    return;
+                                }
                                 const images = Array.from(event.clipboardData.items)
                                     .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
                                     .map((item) => item.getAsFile())

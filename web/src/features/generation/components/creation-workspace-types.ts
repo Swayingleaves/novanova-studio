@@ -32,6 +32,7 @@ export type CreationStyleOption = {
 export type CreationThreadRound = {
     id: string;
     userText: string;
+    userCopyText?: string;
     userAttachments?: ReactNode;
     thinkings?: ThinkingBlockState[];
     activeThinkingId?: string;

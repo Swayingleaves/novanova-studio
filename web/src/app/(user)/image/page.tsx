@@ -24,6 +24,7 @@ import { getGenerationConversationStatus, hasRunningGeneration, type GenerationL
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
 import { loadImageLastUsedSettings, saveImageLastUsedSettings, type ImageLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
+import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { formatBytes } from "@/features/generation/lib/image-utils";
 import type { ReferenceImage } from "@/features/generation/types/image";
 import { PromptSelectDialog } from "@/features/prompts/components/prompt-select-dialog";
@@ -495,7 +496,7 @@ export default function ImagePage() {
 
         // Add user message to chat
         setChatMessages((prev) => {
-            const next = [...prev, { id: nanoid(), role: "user" as const, text }];
+            const next = [...prev, { id: nanoid(), role: "user" as const, text, generationStyles: selectedStyles }];
             chatMessagesRef.current = next;
             return next;
         });
@@ -512,9 +513,9 @@ export default function ImagePage() {
     const regenerateRound = async (round: Round) => {
         await regenerateImageRound(round, {
             fallbackModel: model,
-            appendUserMessage: (text) => {
+            appendUserMessage: (text, generationStyles) => {
                 setChatMessages((prev) => {
-                    const next = [...prev, { id: nanoid(), role: "user" as const, text }];
+                    const next = [...prev, { id: nanoid(), role: "user" as const, text, generationStyles }];
                     chatMessagesRef.current = next;
                     return next;
                 });
@@ -1064,6 +1065,7 @@ function buildImageThreadSections(
         rounds.push({
             id: round.id,
             userText: round.prompt,
+            userCopyText: formatGenerationStyleMessage(round.prompt, round.generationStyleSnapshots),
             userAttachments: round.references.length || round.generationStyleSnapshots?.length
                 ? (
                     <div className="space-y-2">
