@@ -213,7 +213,7 @@ public class CreationAgentOrchestrator {
     }
 
     /**
-     * 为聊天重试请求恢复最近失败计划中的历史风格，同时保留本次请求的页面设置。
+     * 为聊天重试请求恢复最近创作计划中的历史风格，同时保留本次请求的页面设置。
      *
      * @param userId Long 用户ID
      * @param session AgentSession 当前Agent会话
@@ -224,7 +224,7 @@ public class CreationAgentOrchestrator {
         if (!isRetryMessage(request.message()) || hasGenerationStyles(request.creationSettings())) {
             return Mono.just(request);
         }
-        return planRepository.findLatestFailedCreationSettings(userId, session.id())
+        return planRepository.findLatestCreationSettings(userId, session.id())
                 .map(historicalSettings -> new AgentChatRequest(
                         request.sessionId(), request.entrySource(), request.message(), request.canvasSnapshot(),
                         request.references(), request.attachments(), request.history(),

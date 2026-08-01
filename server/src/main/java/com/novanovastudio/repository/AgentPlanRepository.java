@@ -56,19 +56,18 @@ public class AgentPlanRepository {
     }
 
     /**
-     * 查询当前会话最近一次失败计划的生成设置，供用户发送重试指令时恢复历史风格。
+     * 查询当前会话最近一次创作计划的生成设置，供用户发送重试指令时恢复历史风格。
      *
      * @param userId Long 用户ID
      * @param sessionId String Agent会话ID
-     * @return Mono<CreationSettings> 最近失败计划的生成设置；不存在时为空
+     * @return Mono<CreationSettings> 最近创作计划的生成设置；不存在时为空
      */
-    public Mono<CreationSettings> findLatestFailedCreationSettings(Long userId, String sessionId) {
+    public Mono<CreationSettings> findLatestCreationSettings(Long userId, String sessionId) {
         return databaseClient.sql("""
                 SELECT creation_settings::text AS creation_settings
                 FROM agent_plan
                 WHERE user_id = :userId
                   AND session_id = :sessionId
-                  AND status IN ('failed', 'partial_failed')
                 ORDER BY created_at DESC
                 LIMIT 1
                 """)
