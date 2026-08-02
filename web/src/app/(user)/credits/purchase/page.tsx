@@ -4,7 +4,7 @@ import { Button } from "antd";
 import { ArrowLeft, ExternalLink, ShoppingCart } from "lucide-react";
 import Link from "next/link";
 
-const CREDIT_STORE_URL = "https://pay.ldxp.cn/shop/novanovastudio";
+const creditStoreUrl = process.env.NEXT_PUBLIC_CREDIT_STORE_URL?.trim();
 
 /**
  * 渲染积分购买页。
@@ -25,12 +25,18 @@ export default function CreditPurchasePage() {
                             <p className="mt-1 text-sm text-[var(--studio-muted)]">Novanova Studio 积分店铺</p>
                         </div>
                     </div>
-                    <a href={CREDIT_STORE_URL} target="_blank" rel="noreferrer">
-                        <Button icon={<ExternalLink className="size-4" />}>新窗口购买</Button>
-                    </a>
+                    {creditStoreUrl ? (
+                        <a href={creditStoreUrl} target="_blank" rel="noreferrer">
+                            <Button icon={<ExternalLink className="size-4" />}>新窗口购买</Button>
+                        </a>
+                    ) : null}
                 </header>
                 <section className="mt-5 min-h-[min(720px,calc(100dvh-170px))] flex-1 overflow-hidden border border-[var(--studio-line)] bg-[var(--studio-surface)]" aria-label="积分购买店铺">
-                    <iframe title="Novanova Studio 积分购买店铺" src={CREDIT_STORE_URL} className="h-full min-h-[min(720px,calc(100dvh-170px))] w-full border-0" referrerPolicy="strict-origin-when-cross-origin" />
+                    {creditStoreUrl ? (
+                        <iframe title="Novanova Studio 积分购买店铺" src={creditStoreUrl} className="h-full min-h-[min(720px,calc(100dvh-170px))] w-full border-0" referrerPolicy="strict-origin-when-cross-origin" />
+                    ) : (
+                        <div className="grid min-h-[min(720px,calc(100dvh-170px))] place-items-center px-6 text-center text-sm text-[var(--studio-muted)]">没有配置发卡网站</div>
+                    )}
                 </section>
             </div>
         </main>

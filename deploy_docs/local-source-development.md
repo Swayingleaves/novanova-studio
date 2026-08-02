@@ -69,6 +69,7 @@ if (!(Test-Path -LiteralPath web/.env.local)) {
 | 配置项 | 说明 |
 | --- | --- |
 | `NEXT_PUBLIC_SERVER_URL` | 必填，设置为服务端地址，默认为 `http://127.0.0.1:8080`。 |
+| `NEXT_PUBLIC_CREDIT_STORE_URL` | 可选，发卡网站地址；未配置时购买积分页面显示“没有配置发卡网站”。 |
 | `NEXT_PUBLIC_ICP_RECORD_NUMBER` | 可选，前端页脚展示的 ICP 备案号。 |
 | `NEXT_PUBLIC_GITHUB_URL` | 可选，前端展示的项目 GitHub 仓库地址。 |
 

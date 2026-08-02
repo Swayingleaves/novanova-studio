@@ -44,6 +44,7 @@ openssl rand -base64 48
 | `REDIS_PASSWORD` | Redis 密码，公网环境建议设置。 |
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | 改为实际的域名，例如 `https://www.yourdomain.com`。 |
 | `TZ` | 容器和 Java 日志时区，默认是 `Asia/Shanghai`。 |
+| `NEXT_PUBLIC_CREDIT_STORE_URL` | 可选，发卡网站地址；未配置时购买积分页面显示“没有配置发卡网站”。 |
 
 ### Nginx 路径配置
 

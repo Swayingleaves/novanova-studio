@@ -88,6 +88,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_SERVER_URL: ""
+        NEXT_PUBLIC_CREDIT_STORE_URL: ${NEXT_PUBLIC_CREDIT_STORE_URL:-}
         NEXT_PUBLIC_ICP_RECORD_NUMBER: ${NEXT_PUBLIC_ICP_RECORD_NUMBER:-}
         NEXT_PUBLIC_GITHUB_URL: ${NEXT_PUBLIC_GITHUB_URL:-}
     container_name: novanovastudio-web
