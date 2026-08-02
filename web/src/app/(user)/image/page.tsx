@@ -11,7 +11,7 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/com
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
-import { ImageSettingsPanel } from "@/features/generation/components/image-settings-panel";
+import { ImageSettingsPanel, imageQualityLabel, imageResolutionLabel, imageSizeLabel } from "@/features/generation/components/image-settings-panel";
 import { requestCreditCost } from "@/features/generation/constants/credits";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
@@ -23,6 +23,7 @@ import { findLatestPendingConversation, hasPendingImageConversation } from "@/fe
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
+import { formatImageGenerationSettingsSummary } from "@/features/generation/lib/generation-settings-summary";
 import { loadImageLastUsedSettings, saveImageLastUsedSettings, type ImageLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { formatBytes } from "@/features/generation/lib/image-utils";
@@ -58,7 +59,9 @@ type GenerationResult = {
     error?: string;
 };
 
-type RoundConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "imageResolution" | "size" | "count">;
+type RoundConfig = Pick<AiConfig, "model" | "imageModel" | "quality" | "imageResolution" | "size" | "count"> & {
+    resolution?: string;
+};
 
 type Round = {
     id: string;
@@ -111,6 +114,7 @@ export default function ImagePage() {
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [imageDraftSettingsModified, setImageDraftSettingsModified] = useState(false);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -163,6 +167,13 @@ export default function ImagePage() {
     const updateImageSettings = (key: keyof ImageLastUsedSettings, value: string) => {
         updateConfig(key, value);
         void saveImageLastUsedSettings({ [key]: value }).catch((error) => console.error("保存上次图片生成设置失败", error));
+    };
+
+    const handleImageSettingsChange = (key: keyof ImageLastUsedSettings, value: string) => {
+        if (String(config[key]) !== value) {
+            setImageDraftSettingsModified(true);
+        }
+        updateImageSettings(key, value);
     };
 
     // Agent chat state
@@ -409,6 +420,10 @@ export default function ImagePage() {
 
     const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "image", count: 1 });
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
+    const latestRound = activeConversation?.rounds.at(-1);
+    const draftSettingsSummary = imageDraftSettingsModified ? buildImageSettingsSummary(config, effectiveConfig, model) : "";
+    const historySettingsSummary = !imageDraftSettingsModified && activeId && latestRound?.config ? buildImageSettingsSummary(latestRound.config, effectiveConfig, latestRound.config.imageModel || latestRound.config.model || "") : "";
+    const settingsSummary = draftSettingsSummary || historySettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingImageConversation(activeConversation) : false;
     const canGenerate = Boolean(prompt.trim()) && !isStreaming && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
@@ -528,6 +543,7 @@ export default function ImagePage() {
     const newConversation = () => {
         setActiveId(null);
         activeIdRef.current = null;
+        setImageDraftSettingsModified(false);
         setPrompt("");
         setReferences([]);
         setSelectedStyles([]);
@@ -551,6 +567,7 @@ export default function ImagePage() {
         }
         setActiveId(conversation.id);
         activeIdRef.current = conversation.id;
+        setImageDraftSettingsModified(false);
         // 清空 chat 状态，切换为历史记录视图
         setChatMessages([]);
         chatMessagesRef.current = [];
@@ -577,6 +594,8 @@ export default function ImagePage() {
         void Promise.all([deleteStoredImages(imageKeys), deleteGenerationLogs(selectedIds)]).then(refreshConversations);
         if (activeId && selectedIds.includes(activeId)) {
             setActiveId(null);
+            activeIdRef.current = null;
+            setImageDraftSettingsModified(false);
             setPrompt("");
             setReferences([]);
             setSelectedStyles([]);
@@ -771,7 +790,8 @@ export default function ImagePage() {
         },
         {
             key: "settings",
-            label: "更多设置",
+            label: settingsSummary || "更多设置",
+            className: settingsSummary ? "creation-composer-action-settings" : undefined,
             icon: <Cog className="size-3.5" />,
             onClick: () => setSettingsOpen(true),
         },
@@ -911,13 +931,18 @@ export default function ImagePage() {
                     onClose: () => setSettingsOpen(false),
                     content: (
                         <div className="space-y-4">
-                            <ImageSettingsPanel config={config} onConfigChange={updateImageSettings} theme={theme} showTitle={false} showCount={false} className="space-y-4 px-0 py-0" />
+                            <ImageSettingsPanel config={config} onConfigChange={handleImageSettingsChange} theme={theme} showTitle={false} showCount={false} className="space-y-4 px-0 py-0" />
                             <div>
                                 <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">模型</label>
                                 <ModelPicker
                                     config={effectiveConfig}
                                     value={model}
-                                    onChange={(value) => updateConfig("imageModel", value)}
+                                    onChange={(value) => {
+                                        if (value !== model) {
+                                            setImageDraftSettingsModified(true);
+                                        }
+                                        updateConfig("imageModel", value);
+                                    }}
                                     capability="image"
                                     fullWidth
                                     onMissingConfig={() => (userRole === "admin" ? openConfigDialog(false) : message.error("请联系管理员配置默认生图模型"))}
@@ -1018,6 +1043,16 @@ function readObjectStorage(value: unknown): ObjectStorageFile | undefined {
         return undefined;
     }
     return value as ObjectStorageFile;
+}
+
+/** 根据图片设置生成 composer 按钮摘要，历史配置缺字段时沿用面板默认值。 */
+function buildImageSettingsSummary(settings: Partial<Pick<AiConfig, "quality" | "imageResolution" | "size">> & { resolution?: string }, modelConfig: AiConfig, model: string): string {
+    return formatImageGenerationSettingsSummary({
+        quality: imageQualityLabel(settings.quality || "medium"),
+        resolution: imageResolutionLabel(settings.imageResolution || settings.resolution || "2K"),
+        ratio: imageSizeLabel(settings.size || "1:1"),
+        model: modelOptionLabel(modelConfig, model),
+    });
 }
 
 function buildImageConversationItems(conversations: Conversation[], activeId: string | null, selectedIds: string[]): CreationConversationItem[] {

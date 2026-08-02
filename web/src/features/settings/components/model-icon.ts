@@ -12,3 +12,10 @@ export function resolveModelIcon(model: string, apiFormat?: ApiCallFormat): stri
     if (name.includes("glm")) return "/icons/glm.svg";
     return "";
 }
+
+export function isMonochromeModelIcon(model: string, apiFormat?: ApiCallFormat): boolean {
+    if (apiFormat === "agnes") return true;
+
+    const name = model.toLowerCase();
+    return name.includes("gpt") || name.includes("openai") || name.includes("grok");
+}

@@ -10,16 +10,17 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/com
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
-import { VideoSettingsPanel } from "@/features/generation/components/video-settings-panel";
+import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/features/generation/components/video-settings-panel";
 import { requestCreditCost } from "@/features/generation/constants/credits";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { seedanceReferenceLabel, SEEDANCE_REFERENCE_LIMITS } from "@/features/generation/lib/seedance-video";
 import { formatBytes, formatDuration } from "@/features/generation/lib/image-utils";
+import { formatVideoGenerationSettingsSummary } from "@/features/generation/lib/generation-settings-summary";
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceVideo } from "@/features/generation/types/media";
 import { PromptSelectDialog } from "@/features/prompts/components/prompt-select-dialog";
 import { ModelPicker } from "@/features/settings/components/model-picker";
-import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
+import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 import { deleteStoredMedia, resolveMediaStorageInfo, resolveMediaUrl, uploadMediaFile } from "@/features/storage/services/file-storage";
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { resolveImageUrl, uploadImage } from "@/features/storage/services/image-storage";
@@ -61,7 +62,10 @@ type GenerationResult = {
     error?: string;
 };
 
-type RoundConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoWatermark">;
+type RoundConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoWatermark"> & {
+    resolution?: string;
+    seconds?: string;
+};
 
 type Round = {
     id: string;
@@ -110,6 +114,7 @@ export default function VideoPage() {
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
+    const [videoDraftSettingsModified, setVideoDraftSettingsModified] = useState(false);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -162,6 +167,13 @@ export default function VideoPage() {
     const updateVideoSettings = (key: keyof VideoLastUsedSettings, value: string) => {
         updateConfig(key, value);
         void saveVideoLastUsedSettings({ [key]: value }).catch((error) => console.error("保存上次视频生成设置失败", error));
+    };
+
+    const handleVideoSettingsChange = (key: keyof VideoLastUsedSettings, value: string) => {
+        if (String(config[key]) !== value) {
+            setVideoDraftSettingsModified(true);
+        }
+        updateVideoSettings(key, value);
     };
 
     // Agent chat state
@@ -414,6 +426,10 @@ export default function VideoPage() {
 
     const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "video", count: 1 });
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
+    const latestRound = activeConversation?.rounds.at(-1);
+    const draftSettingsSummary = videoDraftSettingsModified ? buildVideoSettingsSummary(config, effectiveConfig, model) : "";
+    const historySettingsSummary = !videoDraftSettingsModified && activeId && latestRound?.config ? buildVideoSettingsSummary(latestRound.config, effectiveConfig, latestRound.config.videoModel || latestRound.config.model || "") : "";
+    const settingsSummary = draftSettingsSummary || historySettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingVideoConversation(activeConversation) : false;
     const canGenerate = Boolean(prompt.trim()) && !isStreaming && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
@@ -616,6 +632,7 @@ export default function VideoPage() {
     const newConversation = () => {
         setActiveId(null);
         activeIdRef.current = null;
+        setVideoDraftSettingsModified(false);
         setPrompt("");
         setReferences([]);
         setVideoReferences([]);
@@ -640,6 +657,7 @@ export default function VideoPage() {
         }
         setActiveId(conversation.id);
         activeIdRef.current = conversation.id;
+        setVideoDraftSettingsModified(false);
         setChatMessages([]);
         chatMessagesRef.current = [];
         setToolCalls([]);
@@ -664,6 +682,8 @@ export default function VideoPage() {
         void Promise.all([deleteStoredMedia(mediaKeys), deleteGenerationLogs(selectedIds)]).then(refreshConversations);
         if (activeId && selectedIds.includes(activeId)) {
             setActiveId(null);
+            activeIdRef.current = null;
+            setVideoDraftSettingsModified(false);
             setPrompt("");
             setReferences([]);
             setVideoReferences([]);
@@ -889,7 +909,8 @@ export default function VideoPage() {
         },
         {
             key: "settings",
-            label: "更多设置",
+            label: settingsSummary || "更多设置",
+            className: settingsSummary ? "creation-composer-action-settings" : undefined,
             icon: <Cog className="size-3.5" />,
             onClick: () => setSettingsOpen(true),
         },
@@ -1013,13 +1034,18 @@ export default function VideoPage() {
                     onClose: () => setSettingsOpen(false),
                     content: (
                         <div className="space-y-4">
-                            <VideoSettingsPanel config={config} onConfigChange={updateVideoSettings} theme={theme} showTitle={false} className="space-y-4 px-0 py-0" />
+                            <VideoSettingsPanel config={config} onConfigChange={handleVideoSettingsChange} theme={theme} showTitle={false} className="space-y-4 px-0 py-0" />
                             <div>
                                 <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">模型</label>
                                 <ModelPicker
                                     config={effectiveConfig}
                                     value={model}
-                                    onChange={(value) => updateConfig("videoModel", value)}
+                                    onChange={(value) => {
+                                        if (value !== model) {
+                                            setVideoDraftSettingsModified(true);
+                                        }
+                                        updateConfig("videoModel", value);
+                                    }}
                                     capability="video"
                                     fullWidth
                                     onMissingConfig={() => (userRole === "admin" ? openConfigDialog(false) : message.error("请联系管理员配置默认生视频模型"))}
@@ -1078,6 +1104,24 @@ function renderResultVideos(
             })
             .filter(Boolean),
     );
+}
+
+/** 根据视频设置生成 composer 按钮摘要，历史配置缺字段时沿用面板默认值。 */
+function buildVideoSettingsSummary(settings: Partial<Pick<AiConfig, "vquality" | "size" | "videoSeconds" | "model" | "videoModel">> & { resolution?: string; seconds?: string }, modelConfig: AiConfig, model: string): string {
+    const summaryConfig: AiConfig = {
+        ...modelConfig,
+        model,
+        videoModel: model,
+        vquality: settings.vquality || settings.resolution || "720p",
+        size: settings.size || "16:9",
+        videoSeconds: settings.videoSeconds || settings.seconds || "5",
+    };
+    return formatVideoGenerationSettingsSummary({
+        resolution: videoResolutionLabel(summaryConfig.vquality),
+        ratio: videoSizeLabel(summaryConfig.size),
+        duration: videoSecondsLabel(summaryConfig.videoSeconds, summaryConfig),
+        model: modelOptionLabel(modelConfig, model),
+    });
 }
 
 function buildVideoConversationItems(conversations: Conversation[], activeId: string | null, selectedIds: string[]): CreationConversationItem[] {

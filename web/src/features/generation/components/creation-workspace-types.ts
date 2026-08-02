@@ -69,6 +69,7 @@ export type CreationComposerAction = {
     key: string;
     label: string;
     icon: ReactNode;
+    className?: string;
     placement?: "toolbar" | "submit";
     iconOnly?: boolean;
     disabled?: boolean;

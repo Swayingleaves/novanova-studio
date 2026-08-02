@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger } from "@/shared/compo
 import { cn } from "@/shared/lib/utils";
 import { modelOptionLabel, modelOptionName, resolveModelRequestConfig, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/features/settings/stores/use-config-store";
 
-import { resolveModelIcon } from "./model-icon";
+import { isMonochromeModelIcon, resolveModelIcon } from "./model-icon";
 
 const MODEL_PICKER_OPEN_EVENT = "model-picker-open";
 
@@ -126,6 +126,14 @@ function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
 }
 
 function ModelIcon({ config, model }: { config: AiConfig; model: string }) {
-    const icon = model ? resolveModelIcon(modelOptionName(model), resolveModelRequestConfig(config, model).apiFormat) : "";
-    return icon ? <img src={icon} alt="" className="size-4 shrink-0" /> : <Cpu className="size-4 shrink-0 opacity-70" />;
+    const modelName = model ? modelOptionName(model) : "";
+    const apiFormat = model ? resolveModelRequestConfig(config, model).apiFormat : undefined;
+    const icon = model ? resolveModelIcon(modelName, apiFormat) : "";
+    const monochrome = model ? isMonochromeModelIcon(modelName, apiFormat) : false;
+
+    return (
+        <span className={cn("model-picker-icon flex size-5 shrink-0 items-center justify-center rounded-md", monochrome && "model-picker-icon-monochrome")}>
+            {icon ? <img src={icon} alt="" className="size-4" /> : <Cpu className="size-4 opacity-70" />}
+        </span>
+    );
 }
