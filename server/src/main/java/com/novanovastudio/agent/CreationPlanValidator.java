@@ -9,11 +9,13 @@ import com.novanovastudio.agent.dto.CreationTask;
 import com.novanovastudio.agent.dto.AgentTool;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.dto.GenerationStyleDtos;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -48,15 +50,21 @@ public class CreationPlanValidator {
         if (!CreationEntrySource.supported(entrySource) || !entrySource.equals(plan.entrySource())) {
             throw invalid("Agent计划入口来源与当前页面不一致");
         }
-        if (settings != null
-                && settings.generationStyleIds() != null && !settings.generationStyleIds().isEmpty()
-                && settings.generationStyleSnapshots() != null && !settings.generationStyleSnapshots().isEmpty()) {
-            throw invalid("生成风格ID和历史风格快照不能同时提交");
-        }
-        if (CreationEntrySource.CANVAS.equals(entrySource) && settings != null
-                && ((settings.generationStyleIds() != null && !settings.generationStyleIds().isEmpty())
-                || (settings.generationStyleSnapshots() != null && !settings.generationStyleSnapshots().isEmpty()))) {
-            throw invalid("生成风格只支持图片或视频页面");
+        if (settings != null) {
+            boolean hasStyleIds = settings.generationStyleIds() != null && !settings.generationStyleIds().isEmpty();
+            boolean hasStyleIdsByType = settings.generationStyleIdsByType() != null
+                    && settings.generationStyleIdsByType().values().stream()
+                    .anyMatch(ids -> ids != null && !ids.isEmpty());
+            boolean hasStyleIdsByTypeField = settings.generationStyleIdsByType() != null;
+            boolean hasStyleSnapshots = settings.generationStyleSnapshots() != null
+                    && !settings.generationStyleSnapshots().isEmpty();
+            if (hasStyleIds && hasStyleIdsByTypeField) {
+                throw invalid("普通生成风格ID和按类型风格ID不能同时提交");
+            }
+            if ((hasStyleIds || hasStyleIdsByType) && hasStyleSnapshots) {
+                throw invalid("生成风格ID和历史风格快照不能同时提交");
+            }
+            validateGenerationStyles(settings, hasStyleSnapshots);
         }
         List<CreationTask> tasks = plan.tasks() == null ? List.of() : plan.tasks();
         if (isGenerationPage(entrySource) && tasks.size() > 1) {
@@ -115,6 +123,58 @@ public class CreationPlanValidator {
         }
         detectCycle(tasks);
         return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), "", false, settings, tasks);
+    }
+
+    /**
+     * 校验计划设置中的风格数量、重复值和快照结构，防止画布分组绕过统一上限。
+     *
+     * @param settings CreationSettings 页面生成设置
+     * @param hasStyleSnapshots boolean 是否包含历史风格快照
+     * @throws BusinessException 风格参数越权或格式错误时抛出
+     */
+    private void validateGenerationStyles(CreationSettings settings, boolean hasStyleSnapshots) {
+        if (settings.generationStyleIdsByType() != null) {
+            Map<String, List<Long>> idsByType = settings.generationStyleIdsByType();
+            if (idsByType.keySet().stream().anyMatch(type -> type == null || !Set.of("image", "video").contains(type))) {
+                throw invalid("按类型风格只支持image或video");
+            }
+            List<Long> ids = idsByType.values().stream()
+                    .filter(Objects::nonNull)
+                    .flatMap(List::stream)
+                    .toList();
+            if (!ids.isEmpty()) validateStyleIds(ids);
+        } else if (settings.generationStyleIds() != null && !settings.generationStyleIds().isEmpty()) {
+            validateStyleIds(settings.generationStyleIds());
+        }
+        if (hasStyleSnapshots) {
+            List<GenerationStyleDtos.GenerationStyleSnapshot> snapshots = settings.generationStyleSnapshots();
+            if (snapshots.size() > 3) {
+                throw invalid("最多保留3个风格快照");
+            }
+            Set<Long> ids = new HashSet<>();
+            for (var snapshot : snapshots) {
+                if (snapshot == null || snapshot.id() == null || snapshot.id() <= 0
+                        || !ids.add(snapshot.id())
+                        || !StringUtils.hasText(snapshot.name())
+                        || !StringUtils.hasText(snapshot.stylePrompt())
+                        || snapshot.generationType() == null || !Set.of("image", "video").contains(snapshot.generationType())) {
+                    throw invalid("风格快照格式不合法");
+                }
+            }
+        }
+    }
+
+    /** 校验一组风格ID的数量、非空和重复约束。 */
+    private void validateStyleIds(List<Long> ids) {
+        if (ids.size() > 3) {
+            throw invalid("最多选择3个风格");
+        }
+        if (ids.stream().anyMatch(Objects::isNull) || ids.stream().anyMatch(id -> id <= 0)) {
+            throw invalid("风格ID不合法");
+        }
+        if (ids.stream().distinct().count() != ids.size()) {
+            throw invalid("风格不能重复选择");
+        }
     }
 
     /**

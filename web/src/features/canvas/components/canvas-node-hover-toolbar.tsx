@@ -10,6 +10,7 @@ import type { CanvasNode, CanvasNodeKind, CanvasViewTransform } from "../types";
 import { isImageNode, isTextNode, isVideoNode } from "../domain/canvas-node";
 import { buildImageToolbarTools } from "./canvas-image-toolbar-tools";
 import { useCanvasTheme } from "./canvas-theme-provider";
+import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
 
 type ToolbarAction = {
     id: string;
@@ -77,7 +78,8 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
             message.warning("暂无可复制的提示词");
             return;
         }
-        copyText(prompt, "提示词已复制");
+        const styles = !isTextNode(targetNode) ? targetNode.generation.generationStyleSnapshots : [];
+        copyText(formatGenerationStyleMessage(prompt, styles), "提示词已复制");
     };
 
     const imageToolbarTools = buildImageToolbarTools(node, {

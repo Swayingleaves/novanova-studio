@@ -871,7 +871,12 @@ public class CreationPlanExecutor {
             arguments.put("prompt", finalPrompt);
         }
         String toolCallId = recoveryAttempt == 0 ? task.taskId() : task.taskId() + ":recovery:" + recoveryAttempt;
-        return frontendToolExecutor.executeFrontendTool(userId, sessionId, toolCallId, task.toolName(), arguments)
+        return resolveCanvasStyleSnapshots(plan.creationSettings(), task)
+                .map(styles -> {
+                    if (!styles.isEmpty()) arguments.put("generationStyleSnapshots", styles);
+                    return arguments;
+                })
+                .flatMap(preparedArguments -> frontendToolExecutor.executeFrontendTool(userId, sessionId, toolCallId, task.toolName(), preparedArguments))
                 .flatMap(result -> {
                     if (executionRegistry.isCancelRequested(sessionId)) {
                         return canceledTask(userId, sessionId, plan.planId(), task);
@@ -891,6 +896,59 @@ public class CreationPlanExecutor {
                             .thenReturn(new TaskExecutionResult(task.taskId(), status, result.message(), data,
                                     promptStrategy, submittedPrompt, actualArguments, error, recoveryAttempt));
                 });
+    }
+
+    /**
+     * 按画布工具实际生成类型解析风格，避免画布任务类型canvas丢失图片/视频分组。
+     *
+     * @param settings CreationSettings 页面风格设置
+     * @param task CreationTask 画布任务
+     * @return Mono<List<GenerationStyleSnapshot>> 当前任务对应的风格快照
+     */
+    private Mono<List<GenerationStyleDtos.GenerationStyleSnapshot>> resolveCanvasStyleSnapshots(CreationSettings settings, CreationTask task) {
+        String generationType = canvasGenerationType(task);
+        if (settings == null) return Mono.just(List.of());
+        if (generationType != null) return resolveCanvasStyleGroup(settings, generationType);
+        if (!"canvas_run_generation".equals(task == null ? null : task.toolName())
+                || settings.generationStyleIdsByType() == null) return Mono.just(List.of());
+        return Mono.zip(resolveCanvasStyleGroup(settings, "image"), resolveCanvasStyleGroup(settings, "video"))
+                .map(tuple -> {
+                    List<GenerationStyleDtos.GenerationStyleSnapshot> styles = new ArrayList<>();
+                    styles.addAll(tuple.getT1());
+                    styles.addAll(tuple.getT2());
+                    return List.copyOf(styles);
+                });
+    }
+
+    /**
+     * 解析某一生成类型的风格ID或历史快照。
+     *
+     * @param settings CreationSettings 页面风格设置
+     * @param generationType String 图片或视频
+     * @return Mono<List<GenerationStyleSnapshot>> 风格快照
+     */
+    private Mono<List<GenerationStyleDtos.GenerationStyleSnapshot>> resolveCanvasStyleGroup(CreationSettings settings, String generationType) {
+        List<Long> ids = settings.generationStyleIdsByType() == null
+                ? settings.generationStyleIds() : settings.generationStyleIdsByType().getOrDefault(generationType, List.of());
+        List<GenerationStyleDtos.GenerationStyleSnapshot> snapshots = settings.generationStyleSnapshots() == null
+                ? List.of() : settings.generationStyleSnapshots().stream()
+                .filter(snapshot -> snapshot != null && generationType.equals(snapshot.generationType()))
+                .toList();
+        return promptOptimizationService.resolveStyles(generationType, ids, snapshots);
+    }
+
+    /**
+     * 读取画布生成工具对应的图片或视频类型。
+     *
+     * @param task CreationTask 画布任务
+     * @return String 图片、视频或null
+     */
+    private String canvasGenerationType(CreationTask task) {
+        if (task == null) return null;
+        if ("image".equals(task.taskType()) || "video".equals(task.taskType())) return task.taskType();
+        if (task.toolArguments() == null) return null;
+        Object mode = task.toolArguments().get("mode");
+        return "image".equals(mode) || "video".equals(mode) ? String.valueOf(mode) : null;
     }
 
     /**

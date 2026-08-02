@@ -8,7 +8,7 @@ import { saveAs } from "file-saver";
 
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/features/generation/api/image";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/features/generation/api/video";
-import { cancelAiTask, createAiTask, readAiTaskError, subscribeAiTaskDeltas, waitAiTask, type AiTaskErrorDetails } from "@/services/api/server";
+import { cancelAiTask, createAiTask, readAiTaskError, subscribeAiTaskDeltas, waitAiTask, type AiTaskErrorDetails, type GenerationStyleSnapshot } from "@/services/api/server";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { normalizeImageGenerationCount } from "@/features/generation/components/image-settings-panel";
 import { normalizeVideoGenerationCount } from "@/features/generation/components/video-settings-panel";
@@ -335,7 +335,7 @@ function CanvasWorkspacePage() {
     const connectionsRef = useRef(connections);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
     const viewportRef = useRef(viewport);
-    const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, recovery: boolean, signal?: AbortSignal) => Promise<CanvasAgentToolResult>) | null>(null);
+    const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, recovery: boolean, signal?: AbortSignal, styleContext?: { ids?: number[]; snapshots?: GenerationStyleSnapshot[] }) => Promise<CanvasAgentToolResult>) | null>(null);
     const retryNodeRef = useRef<((node: CanvasDomainNode, signal?: AbortSignal) => Promise<CanvasAgentToolResult>) | null>(null);
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
@@ -851,7 +851,12 @@ function CanvasWorkspacePage() {
                 const prompt = operation.prompt?.trim() || readCanvasNodePrompt(target);
                 const execute = generateNodeRef.current;
                 if (!execute) throw new Error("画布生成执行器尚未就绪");
-                return execute(operation.nodeId, operation.mode || target.kind, prompt, operation.recovery === true, signal);
+                const mode = operation.mode || target.kind;
+                const generationType = mode === "image" || mode === "video" ? mode : null;
+                const snapshots = generationType
+                    ? operation.generationStyleSnapshots?.filter((snapshot) => snapshot.generationType === generationType)
+                    : [];
+                return execute(operation.nodeId, mode, prompt, operation.recovery === true, signal, { snapshots });
             }));
             const result = withCanvasArgumentSources(mergeCanvasGenerationResults(outcomes), generationOps, stateOps);
             return {
@@ -2018,7 +2023,7 @@ function CanvasWorkspacePage() {
     }, []);
 
     const handleGenerateNode = useCallback(
-        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, recovery = false, externalSignal?: AbortSignal): Promise<CanvasAgentToolResult> => {
+        async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, recovery = false, externalSignal?: AbortSignal, styleContext?: { ids?: number[]; snapshots?: GenerationStyleSnapshot[] }): Promise<CanvasAgentToolResult> => {
             if (recovery) {
                 const retryNode = nodesRef.current.find((node) => node.id === nodeId);
                 if (!retryNode) return failedCanvasGenerationResult(nodeId, canvasError("invalid_parameter", `生成节点不存在: ${nodeId}`, "nodeId"));
@@ -2054,6 +2059,8 @@ function CanvasWorkspacePage() {
             const detachExternalAbort = bindAbortSignal(externalSignal, runController);
             const effectivePrompt = generationContext.prompt.trim();
             const actualToolArguments = canvasActualGenerationArguments(mode, effectivePrompt || prompt, generationConfig);
+            const styleIds = styleContext?.ids || [];
+            const styleSnapshots = styleContext?.snapshots || [];
             if (runController.signal.aborted) {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
@@ -2092,7 +2099,7 @@ function CanvasWorkspacePage() {
                             : [];
                     const referenceImages = sourceReference.length ? sourceReference : generationContext.referenceImages;
                     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
-                    const generationAttributes = buildImageGenerationAttributes(generationType, generationConfig, count, referenceImages);
+                    const generationAttributes = buildImageGenerationAttributes(generationType, generationConfig, count, referenceImages, styleIds, styleSnapshots);
                     const parentConfig = getCanvasNodeTemplate(sourceIsImage ? "image" : "text");
                     const imageConfig = getCanvasNodeTemplate("image");
                     const parentPosition = sourceNode?.frame.position || { x: 0, y: 0 };
@@ -2179,14 +2186,24 @@ function CanvasWorkspacePage() {
                         targetIds.map(async (targetId): Promise<CanvasNodeGenerationOutcome> => {
                             try {
                                 const generationRequest = referenceImages.length
-                                    ? requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, "canvas", { signal: controller.signal })
-                                    : requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, "canvas", { signal: controller.signal });
+                                    ? requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, "canvas", { signal: controller.signal, generationStyleIds: styleSnapshots.length ? undefined : styleIds, generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined })
+                                    : requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, "canvas", { signal: controller.signal, generationStyleIds: styleSnapshots.length ? undefined : styleIds, generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined });
                                 const [image] = await generationRequest;
                                 if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
+                                const completedStyleSnapshots = image.generationStyleSnapshots?.length ? image.generationStyleSnapshots : styleSnapshots;
                                 const uploaded = await reuseOrUploadImage(image);
                                 if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                                setNodes((currentNodes) => applyGeneratedImageToBatchNodes(currentNodes, { rootId, targetId, attributes: imageAttributes(uploaded), ...imageSize }));
+                                setNodes((currentNodes) => applyGeneratedImageToBatchNodes(currentNodes, {
+                                    rootId,
+                                    targetId,
+                                    attributes: {
+                                        ...imageAttributes(uploaded),
+                                        generationStyleIds: styleIds,
+                                        generationStyleSnapshots: completedStyleSnapshots,
+                                    },
+                                    ...imageSize,
+                                }));
                                 return { nodeId: targetId };
                             } catch (error) {
                                 if (isGenerationCanceled(error)) {
@@ -2260,6 +2277,8 @@ function CanvasWorkspacePage() {
                                         watermark: generationConfig.videoWatermark,
                                         count,
                                         references: generationReferenceUrls(videoGenerationContext),
+                                        generationStyleIds: styleIds,
+                                        generationStyleSnapshots: styleSnapshots,
                                     },
                                 ),
                                 id: videoId,
@@ -2280,6 +2299,8 @@ function CanvasWorkspacePage() {
                             try {
                                 const generatedVideo = await requestVideoGeneration({ ...generationConfig, count: "1" }, effectivePrompt, videoGenerationContext.referenceImages, videoGenerationContext.referenceVideos, "canvas", {
                                     signal: runController.signal,
+                                    generationStyleIds: styleSnapshots.length ? undefined : styleIds,
+                                    generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined,
                                     onProgress: (progress) => {
                                         if (!runController.signal.aborted) setNodes((prev) => prev.map((node) => (node.id === videoId ? updateCanvasNodeExecution(node, { progress }) : node)));
                                     },
@@ -2305,6 +2326,8 @@ function CanvasWorkspacePage() {
                                             watermark: generationConfig.videoWatermark,
                                             count,
                                             references: generationReferenceUrls(videoGenerationContext),
+                                            generationStyleIds: styleIds,
+                                            generationStyleSnapshots: generatedVideo.generationStyleSnapshots?.length ? generatedVideo.generationStyleSnapshots : styleSnapshots,
                                         });
                                         return updateCanvasNodeFrame(completed, { position: { x: center.x - completedSize.width / 2, y: center.y - completedSize.height / 2 }, ...completedSize });
                                     }),
@@ -2425,9 +2448,9 @@ function CanvasWorkspacePage() {
     );
 
     const handleGenerateNodePrompt = useCallback(
-        (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult: (prompt: string) => void) => {
+        (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult: (prompt: string) => void, styleIds: number[] = []) => {
             if (mode === "text") return;
-            void optimizePrompt({ operationId: nodeId, generationType: mode, prompt, onSuccess: onResult });
+            void optimizePrompt({ operationId: nodeId, generationType: mode, prompt, generationStyleIds: styleIds, onSuccess: onResult });
         },
         [optimizePrompt],
     );
@@ -2445,6 +2468,12 @@ function CanvasWorkspacePage() {
             const batchRoot = isImageNode(node) && node.grouping.rootId ? nodesRef.current.find((item) => item.id === node.grouping.rootId) : null;
             const savedImageNode = isImageNode(node) ? node : batchRoot && isImageNode(batchRoot) ? batchRoot : null;
             const savedImageGeneration = savedImageNode && isImageNode(savedImageNode) ? savedImageNode.generation : null;
+            const savedStyleSnapshots = savedImageNode?.generation.generationStyleSnapshots?.length
+                ? savedImageNode.generation.generationStyleSnapshots
+                : !isTextNode(node) && node.generation.generationStyleSnapshots?.length ? node.generation.generationStyleSnapshots : [];
+            const savedStyleIds = savedImageNode?.generation.generationStyleIds?.length
+                ? savedImageNode.generation.generationStyleIds
+                : !isTextNode(node) && node.generation.generationStyleIds?.length ? node.generation.generationStyleIds : [];
             const hasSavedImageGeneration = Boolean(savedImageGeneration && (savedImageGeneration.prompt || savedImageGeneration.model || savedImageGeneration.references.length));
             const retryMode: CanvasNodeGenerationMode = node.kind;
             const generationConfig =
@@ -2519,6 +2548,8 @@ function CanvasWorkspacePage() {
                     }
                     const generatedVideo = await requestVideoGeneration(generationConfig, prompt, videoReferenceImages, context?.referenceVideos || [], "canvas", {
                         signal: controller.signal,
+                        generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds,
+                        generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined,
                         onProgress: (progress) => {
                             if (!controller.signal.aborted) setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { progress }) : item)));
                         },
@@ -2527,6 +2558,7 @@ function CanvasWorkspacePage() {
                         },
                     });
                     if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
+                    const completedStyleSnapshots = generatedVideo.generationStyleSnapshots?.length ? generatedVideo.generationStyleSnapshots : savedStyleSnapshots;
                     const video = await storeGeneratedVideo(generatedVideo);
                     if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                     const videoSize = fitNodeSize(video.width || node.frame.width, video.height || node.frame.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
@@ -2544,6 +2576,8 @@ function CanvasWorkspacePage() {
                                     vquality: generationConfig.vquality,
                                     watermark: generationConfig.videoWatermark,
                                     references: generationReferenceUrls({ referenceImages: videoReferenceImages, referenceVideos: context?.referenceVideos || [] }),
+                                    generationStyleIds: savedStyleIds,
+                                    generationStyleSnapshots: completedStyleSnapshots,
                                 }),
                                 { position: { x: center.x - videoSize.width / 2, y: center.y - videoSize.height / 2 }, ...videoSize },
                             );
@@ -2553,9 +2587,10 @@ function CanvasWorkspacePage() {
                 }
 
                 const image = useReferenceImages
-                    ? await requestEdit(generationConfig, prompt, retryImages, undefined, "canvas", { signal: controller.signal }).then((items) => items[0])
-                    : await requestGeneration(generationConfig, prompt, "canvas", { signal: controller.signal }).then((items) => items[0]);
+                    ? await requestEdit(generationConfig, prompt, retryImages, undefined, "canvas", { signal: controller.signal, generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds, generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined }).then((items) => items[0])
+                    : await requestGeneration(generationConfig, prompt, "canvas", { signal: controller.signal, generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds, generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined }).then((items) => items[0]);
                 if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
+                const completedStyleSnapshots = image.generationStyleSnapshots?.length ? image.generationStyleSnapshots : savedStyleSnapshots;
                 const uploadedImage = await reuseOrUploadImage(image);
                 if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                 const imageConfig = getCanvasNodeTemplate("image");
@@ -2570,8 +2605,10 @@ function CanvasWorkspacePage() {
                           count: normalizeImageGenerationCount(savedImageGeneration.count),
                           references: savedImageGeneration.references,
                           referenceObjectStorages: savedImageGeneration.referenceObjectStorages,
+                          generationStyleIds: savedStyleIds,
+                          generationStyleSnapshots: completedStyleSnapshots,
                       }
-                    : buildImageGenerationAttributes(useReferenceImages ? "edit" : "generation", generationConfig, 1, retryImages);
+                    : buildImageGenerationAttributes(useReferenceImages ? "edit" : "generation", generationConfig, 1, retryImages, savedStyleIds, completedStyleSnapshots);
                 setNodes((prev) =>
                     prev.map((item) => {
                         if (item.id !== node.id) return item;
@@ -2998,7 +3035,7 @@ function CanvasWorkspacePage() {
                             mentionReferences={mentionReferencesByNodeId.get(promptPanelNode.id) || []}
                             onPromptChange={handleNodePromptChange}
                             onConfigChange={handleConfigNodeChange}
-                            onGenerate={handleGenerateNode}
+                            onGenerate={(nodeId, mode, prompt, styleIds, styleSnapshots) => { void handleGenerateNode(nodeId, mode, prompt, false, undefined, { ids: styleIds, snapshots: styleSnapshots }); }}
                             onGeneratePrompt={handleGenerateNodePrompt}
                             onStop={confirmStopGeneration}
                             onMissingConfig={showMissingAiConfig}
@@ -3097,11 +3134,12 @@ function CanvasWorkspacePage() {
                     onNewSession={handleCreateAgentSession}
                     onStop={() => void cancelAgentMessage().catch((error) => message.error(error instanceof Error ? error.message : "停止失败"))}
                     initialPrompt={initialPrompt}
-                    onSend={async (text, references = []) => {
+                    sessionId={activeChatId}
+                    onSend={async (text, references = [], generationStyleIds = [], generationStyles = []) => {
                         if (agentRunning) return;
                         const now = new Date().toISOString();
                         const sessionId = activeChatId || nanoid();
-                        const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references };
+                        const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references, generationStyles };
                         const history = buildAgentChatHistory(activeSessionMessages);
                         activeAgentSessionIdRef.current = sessionId;
                         activeAgentAssistantMessageIdRef.current = null;
@@ -3128,6 +3166,10 @@ function CanvasWorkspacePage() {
                                 references.map((reference) => ({ title: reference.title, text: reference.text || "" })),
                                 config.agentModel || undefined,
                                 history,
+                                {
+                                    image: generationStyles.filter((style) => style.generationType === "image").map((style) => style.id),
+                                    video: generationStyles.filter((style) => style.generationType === "video").map((style) => style.id),
+                                },
                             );
                         } catch (error) {
                             resetThinkings();
@@ -3168,7 +3210,7 @@ function videoAttributes(video: UploadedFile): CanvasNodeAttributes {
     };
 }
 
-function buildImageGenerationAttributes(type: CanvasImageGenerationType, config: AiConfig, count: number, references: ReferenceImage[]): CanvasNodeAttributes {
+function buildImageGenerationAttributes(type: CanvasImageGenerationType, config: AiConfig, count: number, references: ReferenceImage[], generationStyleIds: number[] = [], generationStyleSnapshots: GenerationStyleSnapshot[] = []): CanvasNodeAttributes {
     return {
         generationType: type,
         model: config.model,
@@ -3178,6 +3220,8 @@ function buildImageGenerationAttributes(type: CanvasImageGenerationType, config:
         count,
         references: references.map(referenceUrl).filter((url): url is string => Boolean(url)),
         referenceObjectStorages: references.map((reference) => reference.objectStorage).filter((file): file is NonNullable<typeof file> => Boolean(file?.url)),
+        generationStyleIds,
+        generationStyleSnapshots,
     };
 }
 

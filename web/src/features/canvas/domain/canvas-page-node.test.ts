@@ -119,6 +119,27 @@ test("批量图片生成结果只写入目标子节点并同步根节点进度",
     assert.equal(updatedChild.kind === "image" ? updatedChild.content.source : "", "image:generated");
 });
 
+test("批量图片生成结果把服务端风格快照同步到根节点和子节点", () => {
+    const root = createImageNode({ id: "root", position: { x: 0, y: 0 } });
+    root.grouping = { ...root.grouping, isRoot: true, childIds: ["child-1"] };
+    root.execution = { phase: "running" };
+    const child = createImageNode({ id: "child-1", position: { x: 400, y: 0 } });
+    child.grouping = { ...child.grouping, rootId: "root" };
+    child.execution = { phase: "running" };
+
+    const snapshot = { id: 7, name: "电影感", generationType: "image" as const, stylePrompt: "cinematic" };
+    const updated = applyGeneratedImageToBatchNodes([root, child], {
+        rootId: "root",
+        targetId: "child-1",
+        attributes: { content: "image:generated", status: "success", generationStyleIds: [7], generationStyleSnapshots: [snapshot] },
+        width: 200,
+        height: 100,
+    });
+
+    assert.deepEqual(updated[0].kind === "image" ? updated[0].generation.generationStyleSnapshots : [], [snapshot]);
+    assert.deepEqual(updated[1].kind === "image" ? updated[1].generation.generationStyleSnapshots : [], [snapshot]);
+});
+
 test("批量图片全部结束后根节点汇总部分失败状态", () => {
     const root = createImageNode({ id: "root", position: { x: 0, y: 0 } });
     root.grouping = { ...root.grouping, isRoot: true, childIds: ["child-1", "child-2"] };

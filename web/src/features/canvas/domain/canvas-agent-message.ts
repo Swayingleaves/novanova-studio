@@ -12,6 +12,7 @@ export type CanvasAgentChatMessage = {
     meta?: string;
     detail?: unknown;
     attachments?: CanvasAgentChatAttachment[];
+    generationStyles?: Array<{ id: number; name: string; generationType: "image" | "video" }>;
 };
 
 export type CanvasAgentMessageGroup = {

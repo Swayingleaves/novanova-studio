@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Tooltip } from "antd";
+import { App, Tooltip } from "antd";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
@@ -13,6 +13,9 @@ import type { AiConfig } from "@/features/settings/stores/use-config-store";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import type { CanvasAssistantMessage, CanvasAssistantReference, CanvasNode } from "../types";
+import type { GenerationStyleOption } from "@/services/api/server";
+import { formatGroupedGenerationStyleMessage } from "@/features/generation/lib/style-command";
+import { GenerationStyleChips, useGenerationStyles } from "@/features/generation/components/generation-style-picker";
 import { isImageNode, isTextNode, isVideoNode } from "../domain/canvas-node";
 import { AgentChatComposer } from "./canvas-agent-chat-ui";
 import { useCanvasTheme } from "./canvas-theme-provider";
@@ -30,7 +33,7 @@ type CanvasChatPanelProps = {
     messages: CanvasAssistantMessage[];
     completedThinkings?: ThinkingBlockState[];
     activeThinking?: ThinkingBlockState | null;
-    onSend: (text: string, references?: CanvasAssistantReference[]) => void;
+    onSend: (text: string, references?: CanvasAssistantReference[], generationStyleIds?: number[], generationStyles?: GenerationStyleOption[]) => void;
     onNewSession: () => void;
     onStop: () => void;
     isStreaming?: boolean;
@@ -39,20 +42,25 @@ type CanvasChatPanelProps = {
     onModelChange: (model: string) => void;
     onMissingConfig?: () => void;
     initialPrompt?: string;
+    sessionId?: string | null;
 };
 
 /**
  * 基于 assistant-ui 的画布 AI 对话面板
  * 承载画布内的对话、节点引用和模型选择交互
  */
-export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, completedThinkings = [], activeThinking = null, onSend, onNewSession, onStop, isStreaming = false, config, model, onModelChange, onMissingConfig, initialPrompt = "" }: CanvasChatPanelProps) {
+export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, completedThinkings = [], activeThinking = null, onSend, onNewSession, onStop, isStreaming = false, config, model, onModelChange, onMissingConfig, initialPrompt = "", sessionId = null }: CanvasChatPanelProps) {
     const theme = useCanvasTheme();
+    const { message } = App.useApp();
     const copyText = useCopyText();
     const scrollRef = useRef<HTMLDivElement>(null);
     const stopResizeRef = useRef<() => void>(() => undefined);
     const [prompt, setPrompt] = useState("");
     const initialPromptAppliedRef = useRef(false);
     const [droppedNodeIds, setDroppedNodeIds] = useState<Set<string>>(new Set());
+    const [selectedStyles, setSelectedStyles] = useState<GenerationStyleOption[]>([]);
+    const previousSessionIdRef = useRef(sessionId);
+    const styleCatalog = useGenerationStyles();
     const [panelWidth, setPanelWidth] = useState(DEFAULT_PANEL_WIDTH);
     const [isResizing, setIsResizing] = useState(false);
     const droppedNodes = nodes.filter((node) => droppedNodeIds.has(node.id));
@@ -63,21 +71,31 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, co
         setPrompt(initialPrompt);
     }, [initialPrompt]);
 
+    useEffect(() => {
+        if (previousSessionIdRef.current === sessionId) return;
+        previousSessionIdRef.current = sessionId;
+        setPrompt("");
+        setDroppedNodeIds(new Set());
+        setSelectedStyles([]);
+    }, [sessionId]);
+
     const handleSend = useCallback(
         (text: string) => {
             if (!text.trim()) return;
             const references = droppedNodes.map(nodeToReference).filter((item): item is CanvasAssistantReference => Boolean(item));
-            onSend(text.trim(), references);
+            onSend(text.trim(), references, selectedStyles.map((style) => style.id), selectedStyles);
             setPrompt("");
             setDroppedNodeIds(new Set());
+            setSelectedStyles([]);
         },
-        [droppedNodes, onSend],
+        [droppedNodes, onSend, selectedStyles],
     );
 
     const handleNewSession = useCallback(() => {
         onNewSession();
         setPrompt("");
         setDroppedNodeIds(new Set());
+        setSelectedStyles([]);
     }, [onNewSession]);
 
     useEffect(() => {
@@ -209,7 +227,8 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, co
                     ) : (
                         messages.map((msg) => (
                             <div key={msg.id} className="space-y-1.5">
-                                <ChatBubble role={msg.role as "user" | "assistant"} text={msg.text} theme={theme} onCopy={() => copyText(msg.text, "消息已复制")} />
+                                <ChatBubble role={msg.role as "user" | "assistant"} text={msg.text} theme={theme} onCopy={() => copyText(formatGroupedGenerationStyleMessage(msg.text, msg.generationStyles), "消息已复制")} />
+                                {msg.generationStyles?.length ? <GenerationStyleChips styles={msg.generationStyles} /> : null}
                                 {msg.references?.length ? <MessageReferences references={msg.references} theme={theme} /> : null}
                             </div>
                         ))
@@ -246,6 +265,13 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, co
                     theme={theme}
                     onPromptChange={setPrompt}
                     onSubmit={() => handleSend(prompt)}
+                    styleOptions={styleCatalog.styles}
+                    selectedStyles={selectedStyles}
+                    styleLoading={styleCatalog.loading}
+                    styleError={styleCatalog.error}
+                    onStyleSelect={(style) => setSelectedStyles((current) => current.some((item) => item.id === style.id) || current.length >= 3 ? current : [...current, style])}
+                    onStyleRemove={(id) => setSelectedStyles((current) => current.filter((style) => style.id !== id))}
+                    onStyleLimit={() => message.warning("最多选择3个风格")}
                     droppedNodes={droppedNodes}
                     onDroppedNodeRemove={(nodeId) => {
                         setDroppedNodeIds((prev) => {

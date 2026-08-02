@@ -131,6 +131,7 @@ function createGenerationExecution(
     createId: CreateId,
 ): CanvasAgentToolExecution {
     const prompt = readString(args.prompt);
+    const generationStyleSnapshots = readStyleSnapshots(args.generationStyleSnapshots);
     if (!prompt) return failureExecution("生成提示词不能为空");
     if (autoRun && mode === "image" && !readString(args.size)) {
         return failureExecution("图片尺寸不能为空，请先向用户确认尺寸");
@@ -146,7 +147,13 @@ function createGenerationExecution(
         attributes: generationAttributes(mode, args, prompt),
     };
     const ops = autoRun
-        ? [addNode, { type: "run_generation", nodeId, mode, prompt } satisfies CanvasAgentOp]
+        ? [addNode, {
+            type: "run_generation",
+            nodeId,
+            mode,
+            prompt,
+            ...(generationStyleSnapshots.length ? { generationStyleSnapshots } : {}),
+        } satisfies CanvasAgentOp]
         : [addNode];
     return {
         ops,
@@ -163,7 +170,7 @@ function createRunGenerationExecution(args: Record<string, unknown>): CanvasAgen
     if (!nodeId) return failureExecution("生成节点ID不能为空");
     const mode = readOptionalGenerationMode(args.mode);
     return {
-        ops: [{ type: "run_generation", nodeId, mode, prompt: readString(args.prompt) }],
+        ops: [{ type: "run_generation", nodeId, mode, prompt: readString(args.prompt), generationStyleSnapshots: readStyleSnapshots(args.generationStyleSnapshots) }],
         result: {
             ok: true,
             message: "画布节点生成任务已开始",
@@ -188,6 +195,7 @@ function createRecoveryGenerationExecution(name: string, args: Record<string, un
         ...(readString(args.imageResolution) ? { imageResolution: readString(args.imageResolution) } : {}),
         ...(readString(args.seconds) ? { seconds: readString(args.seconds) } : {}),
         ...(readString(args.vquality) ? { vquality: readString(args.vquality) } : {}),
+        ...(readStyleSnapshots(args.generationStyleSnapshots).length ? { generationStyleSnapshots: readStyleSnapshots(args.generationStyleSnapshots) } : {}),
     };
     return {
         ops: nodeIds.flatMap((nodeId) => [
@@ -231,6 +239,7 @@ function generationAttributes(mode: "text" | "image" | "video", args: Record<str
             ...(readString(args.size) ? { size: readString(args.size) } : {}),
             ...(readString(args.seconds) ? { seconds: readString(args.seconds) } : {}),
             ...(readString(args.vquality) ? { vquality: readString(args.vquality) } : {}),
+            ...(readStyleSnapshots(args.generationStyleSnapshots).length ? { generationStyleSnapshots: readStyleSnapshots(args.generationStyleSnapshots) } : {}),
         };
     }
     const count = readPositiveInteger(args.count);
@@ -241,7 +250,13 @@ function generationAttributes(mode: "text" | "image" | "video", args: Record<str
         ...(readString(args.quality) ? { quality: readString(args.quality) } : {}),
         ...(readString(args.imageResolution) ? { imageResolution: readString(args.imageResolution) } : {}),
         ...(count === undefined ? {} : { count }),
+        ...(readStyleSnapshots(args.generationStyleSnapshots).length ? { generationStyleSnapshots: readStyleSnapshots(args.generationStyleSnapshots) } : {}),
     };
+}
+
+function readStyleSnapshots(value: unknown): import("@/services/api/server").GenerationStyleSnapshot[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is import("@/services/api/server").GenerationStyleSnapshot => Boolean(item) && typeof item === "object" && typeof (item as { id?: unknown }).id === "number" && typeof (item as { name?: unknown }).name === "string" && typeof (item as { generationType?: unknown }).generationType === "string" && typeof (item as { stylePrompt?: unknown }).stylePrompt === "string");
 }
 
 function createTextNodeOps(args: Record<string, unknown>): CanvasAgentOp[] {

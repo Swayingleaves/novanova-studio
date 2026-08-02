@@ -1,4 +1,5 @@
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
+import type { GenerationStyleSnapshot } from "@/services/api/server";
 
 export type GeneratedImageResult = {
     id: string;
@@ -9,6 +10,7 @@ export type GeneratedImageResult = {
     bytes?: number;
     mimeType?: string;
     objectStorage?: ObjectStorageFile;
+    generationStyleSnapshots?: GenerationStyleSnapshot[];
 };
 
 export function normalizeImageTaskResult(resultData: unknown, createId: () => string): GeneratedImageResult[] {

@@ -48,7 +48,14 @@ public final class AiTaskDtos {
                                       Map<String, Object> parameters,
                                       List<AiTaskMediaReference> references,
                                       List<AiTaskMediaReference> videoReferences,
-                                      String generationSource) {
+                                      String generationSource,
+                                      List<Long> generationStyleIds,
+                                      List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots) {
+        public CreateAiTaskRequest(String taskType, String prompt, String model, Map<String, Object> parameters,
+                                   List<AiTaskMediaReference> references, List<AiTaskMediaReference> videoReferences,
+                                   String generationSource) {
+            this(taskType, prompt, model, parameters, references, videoReferences, generationSource, null, null);
+        }
     }
 
     /**

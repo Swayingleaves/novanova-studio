@@ -38,6 +38,7 @@ type CanvasAgentCommonFields = {
     mode?: CanvasNodeKind;
     prompt?: string;
     recovery?: boolean;
+    generationStyleSnapshots?: import("@/services/api/server").GenerationStyleSnapshot[];
 };
 
 export type CanvasAgentOp = CanvasAgentCommonFields &

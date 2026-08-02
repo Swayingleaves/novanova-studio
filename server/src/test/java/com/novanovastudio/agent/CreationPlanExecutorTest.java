@@ -15,6 +15,7 @@ import com.novanovastudio.agent.dto.CreationPlan;
 import com.novanovastudio.agent.dto.CreationTask;
 import com.novanovastudio.agent.dto.RecoveryTaskDecision;
 import com.novanovastudio.ai.AiErrorDetails;
+import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.repository.AgentPlanRepository;
 import com.novanovastudio.service.AiTaskService;
 import com.novanovastudio.service.PromptOptimizationService;
@@ -50,6 +51,8 @@ class CreationPlanExecutorTest {
     private AgentTaskOrchestrator frontendToolExecutor;
     /** 被测执行器 */
     private CreationPlanExecutor executor;
+    /** 风格解析服务 */
+    private PromptOptimizationService promptOptimizationService;
 
     /**
      * 初始化计划执行测试依赖。
@@ -60,13 +63,14 @@ class CreationPlanExecutorTest {
         agentFactory = mock(AgentScopeAgentFactory.class);
         executionRegistry = mock(AgentExecutionRegistry.class);
         frontendToolExecutor = mock(AgentTaskOrchestrator.class);
+        promptOptimizationService = mock(PromptOptimizationService.class);
         when(planRepository.updatePlanStatus(anyString(), anyString(), anyString())).thenReturn(Mono.empty());
         when(planRepository.updateTask(anyString(), anyString(), anyString(), anyString(), anyString(), any(), anyString()))
                 .thenReturn(Mono.empty());
         when(executionRegistry.isCancelRequested(anyString())).thenReturn(false);
         executor = new CreationPlanExecutor(
                 agentFactory,
-                mock(PromptOptimizationService.class),
+                promptOptimizationService,
                 planRepository,
                 mock(AgentEventEmitter.class),
                 executionRegistry,
@@ -74,6 +78,42 @@ class CreationPlanExecutorTest {
                 frontendToolExecutor,
                 List.of(),
                 new CreationRecoveryPlanValidator(new CreationPlanValidator(new AgentToolRegistry())));
+    }
+
+    /**
+     * 画布生成工具按实际图片或视频类型解析对应风格，未指定类型的重生成工具合并两组风格。
+     *
+     * @throws Exception 反射调用失败时抛出
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldResolveCanvasStyleGroupsForGenerationTools() throws Exception {
+        GenerationStyleDtos.GenerationStyleSnapshot imageStyle =
+                new GenerationStyleDtos.GenerationStyleSnapshot(1L, "电影感", "image", "电影感提示词");
+        GenerationStyleDtos.GenerationStyleSnapshot videoStyle =
+                new GenerationStyleDtos.GenerationStyleSnapshot(2L, "胶片", "video", "胶片提示词");
+        when(promptOptimizationService.resolveStyles("image", List.of(1L), List.of()))
+                .thenReturn(Mono.just(List.of(imageStyle)));
+        when(promptOptimizationService.resolveStyles("video", List.of(2L), List.of()))
+                .thenReturn(Mono.just(List.of(videoStyle)));
+        Method method = CreationPlanExecutor.class.getDeclaredMethod("resolveCanvasStyleSnapshots",
+                com.novanovastudio.agent.dto.CreationSettings.class, CreationTask.class);
+        method.setAccessible(true);
+        com.novanovastudio.agent.dto.CreationSettings settings = new com.novanovastudio.agent.dto.CreationSettings(
+                "model", null, null, null, null, null, null, null, null,
+                Map.of("image", List.of(1L), "video", List.of(2L)));
+
+        CreationTask imageTask = new CreationTask("image-task", "image", "generate", "生成图片", List.of(),
+                "canvas_generate_image", Map.of("prompt", "城市夜景", "size", "16:9"));
+        List<GenerationStyleDtos.GenerationStyleSnapshot> imageResult =
+                ((Mono<List<GenerationStyleDtos.GenerationStyleSnapshot>>) method.invoke(executor, settings, imageTask)).block();
+        Assertions.assertEquals(List.of(imageStyle), imageResult);
+
+        CreationTask runTask = new CreationTask("run-task", "canvas", "tool", "重生成", List.of(),
+                "canvas_run_generation", Map.of("nodeId", "image-1"));
+        List<GenerationStyleDtos.GenerationStyleSnapshot> mixedResult =
+                ((Mono<List<GenerationStyleDtos.GenerationStyleSnapshot>>) method.invoke(executor, settings, runTask)).block();
+        Assertions.assertEquals(List.of(imageStyle, videoStyle), mixedResult);
     }
 
     /**

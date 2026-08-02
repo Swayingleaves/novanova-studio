@@ -8,6 +8,7 @@ import { useCanvasTheme } from "../components/canvas-theme-provider";
 import type { CanvasTaskPanelTask } from "../components/canvas-task-panel";
 import type { CanvasGenerationRequest } from "../services/canvas-generation-request-registry";
 import { readCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
+import { formatGroupedGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { createImageNode, createTextNode, createVideoNode, getCanvasNodeTemplate } from "../constants";
 import { applyCanvasNodeAttributes, isImageNode, isTextNode, isVideoNode, type CanvasNodeAttributes } from "../domain/canvas-node";
 import {
@@ -75,11 +76,13 @@ export function buildAgentChatHistory(messages: CanvasAssistantMessage[]) {
             if (item.role !== "user" && item.role !== "assistant") return [];
             const text = item.text.trim();
             if (!text) return [];
+            const styleText = item.generationStyles?.length ? formatGroupedGenerationStyleMessage("", item.generationStyles).trim() : "";
+            const withStyles = styleText ? `${styleText}\n${text}` : text;
             if (item.role === "assistant" || !item.references?.length) {
-                return [{ role: item.role, text }];
+                return [{ role: item.role, text: withStyles }];
             }
             const references = item.references.map((reference) => `- ${reference.title}：${reference.text || ""}`).join("\n");
-            return [{ role: item.role, text: `${text}\n\n选中节点：\n${references}` }];
+            return [{ role: item.role, text: `${withStyles}\n\n选中节点：\n${references}` }];
         })
         .slice(-AGENT_HISTORY_MESSAGE_LIMIT);
 }

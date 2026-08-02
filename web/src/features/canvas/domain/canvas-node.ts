@@ -12,6 +12,7 @@ import type {
     CanvasVideoNode,
 } from "../types.ts";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
+import type { GenerationStyleSnapshot } from "@/services/api/server";
 
 export type CanvasNodeAttributeStatus = "idle" | "loading" | "success" | "error";
 
@@ -50,6 +51,8 @@ export type CanvasNodeAttributes = {
     bytes?: number;
     durationMs?: number;
     objectStorage?: ObjectStorageFile;
+    generationStyleIds?: number[];
+    generationStyleSnapshots?: GenerationStyleSnapshot[];
 };
 
 export function isImageNode(node: CanvasNode): node is CanvasImageNode {
@@ -180,6 +183,8 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
             count: attributes.count,
             references: attributes.references,
             referenceObjectStorages: attributes.referenceObjectStorages,
+            generationStyleIds: attributes.generationStyleIds,
+            generationStyleSnapshots: attributes.generationStyleSnapshots,
         });
         return updateImageNodeGrouping(withGeneration, {
             isRoot: attributes.isBatchRoot,
@@ -208,6 +213,8 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
         count: attributes.count,
         references: attributes.references,
         referenceObjectStorages: attributes.referenceObjectStorages,
+        generationStyleIds: attributes.generationStyleIds,
+        generationStyleSnapshots: attributes.generationStyleSnapshots,
     });
 }
 

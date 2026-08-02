@@ -245,8 +245,10 @@ public class CreationAgentOrchestrator {
         }
         List<Long> styleIds = historical.generationStyleSnapshots() != null
                 && !historical.generationStyleSnapshots().isEmpty() ? null : historical.generationStyleIds();
+        java.util.Map<String, List<Long>> styleIdsByType = historical.generationStyleSnapshots() != null
+                && !historical.generationStyleSnapshots().isEmpty() ? null : historical.generationStyleIdsByType();
         return new CreationSettings(current.model(), current.size(), current.resolution(), current.quality(),
-                current.count(), current.seconds(), current.watermark(), styleIds, historical.generationStyleSnapshots());
+                current.count(), current.seconds(), current.watermark(), styleIds, historical.generationStyleSnapshots(), styleIdsByType);
     }
 
     /**
@@ -258,7 +260,9 @@ public class CreationAgentOrchestrator {
     private boolean hasGenerationStyles(CreationSettings settings) {
         return settings != null
                 && ((settings.generationStyleIds() != null && !settings.generationStyleIds().isEmpty())
-                || (settings.generationStyleSnapshots() != null && !settings.generationStyleSnapshots().isEmpty()));
+                || (settings.generationStyleSnapshots() != null && !settings.generationStyleSnapshots().isEmpty())
+                || (settings.generationStyleIdsByType() != null && settings.generationStyleIdsByType().values().stream()
+                .anyMatch(ids -> ids != null && !ids.isEmpty())));
     }
 
     /**
@@ -275,7 +279,7 @@ public class CreationAgentOrchestrator {
         Map<String, Object> input = new java.util.LinkedHashMap<>();
         input.put("entrySource", request.entrySource());
         input.put("message", request.message());
-        input.put("history", recentHistory(session));
+        input.put("history", historyForAgent(request, session));
         input.put("creationSettings", request.creationSettings());
         input.put("retryRequested", isRetryMessage(request.message()));
         if (isRetryMessage(request.message())) {
@@ -309,6 +313,29 @@ public class CreationAgentOrchestrator {
                 .map(message -> Map.of("role", message.role(), "text", message.text() == null ? "" : message.text()))
                 .toList();
         return history.subList(Math.max(0, history.size() - 20), history.size());
+    }
+
+    /**
+     * 选择主Agent使用的对话历史。
+     * <p>
+     * 画布前端会将风格分组格式化到请求历史中，优先使用该历史可以保留已选择的图片和视频风格；
+     * 其他入口或旧客户端未提交历史时继续使用服务端会话记录。
+     *
+     * @param request AgentChatRequest 当前对话请求
+     * @param session AgentSession 服务端会话
+     * @return List<Map<String, String>> 最近对话历史
+     */
+    private List<Map<String, String>> historyForAgent(AgentChatRequest request, AgentSession session) {
+        if (request != null && CreationEntrySource.CANVAS.equals(request.entrySource())
+                && request.history() != null && !request.history().isEmpty()) {
+            List<Map<String, String>> history = request.history().stream()
+                    .filter(message -> message != null
+                            && ("user".equals(message.role()) || "assistant".equals(message.role())))
+                    .map(message -> Map.of("role", message.role(), "text", message.text() == null ? "" : message.text()))
+                    .toList();
+            return history.subList(Math.max(0, history.size() - 20), history.size());
+        }
+        return recentHistory(session);
     }
 
     /**

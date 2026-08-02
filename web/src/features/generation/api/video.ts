@@ -8,6 +8,7 @@ import { logApiRequestParameters, logApiResponseParameters } from "@/services/ap
 import { AGNES_VIDEO_MODEL, buildApiUrl, modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceVideo } from "@/features/generation/types/media";
+import type { GenerationStyleSnapshot } from "@/services/api/server";
 
 type VideoResponse = { id: string; status?: string; error?: { message?: string } };
 type ApiVideoResponse = VideoResponse | { code?: number; data?: VideoResponse | null; msg?: string };
@@ -30,9 +31,9 @@ type AgnesTask = {
     error?: { message?: string } | string | null;
 };
 type ApiEnvelope<T> = T | { code?: number; data?: T | null; msg?: string };
-type RequestOptions = { signal?: AbortSignal };
+type RequestOptions = { signal?: AbortSignal; generationStyleIds?: number[]; generationStyleSnapshots?: GenerationStyleSnapshot[] };
 
-export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string; uploadedFile?: UploadedFile };
+export type VideoGenerationResult = { blob?: Blob; url?: string; mimeType?: string; uploadedFile?: UploadedFile; generationStyleSnapshots?: GenerationStyleSnapshot[] };
 export type VideoGenerationTask = { id: string; provider: "openai" | "seedance" | "server"; model: string } | { id: string; provider: "agnes"; model: string; taskId?: string };
 export type VideoGenerationTaskState = { status: "pending" } | { status: "completed"; result: VideoGenerationResult } | { status: "failed"; error: string };
 
@@ -108,6 +109,8 @@ async function requestServerVideoTask(config: AiConfig, prompt: string, referenc
         references: references.map(toServerImageReference),
         videoReferences: videoReferences.map(toServerMediaReference),
         generationSource,
+        generationStyleIds: options?.generationStyleIds,
+        generationStyleSnapshots: options?.generationStyleSnapshots,
     });
     options?.onTaskCreated?.(task.id);
     const completed = await waitAiTask(task.id, { signal: options?.signal, onProgress: options?.onProgress ? (t) => options.onProgress!(t.progress) : undefined });
@@ -116,6 +119,7 @@ async function requestServerVideoTask(config: AiConfig, prompt: string, referenc
     return {
         url: item.url,
         mimeType: item.mimeType || "video/mp4",
+        generationStyleSnapshots: readGenerationStyleSnapshots(completed.requestData),
         uploadedFile: {
             url: item.url,
             storageKey: item.storageKey || "",
@@ -127,6 +131,12 @@ async function requestServerVideoTask(config: AiConfig, prompt: string, referenc
             objectStorage: item.objectStorage,
         },
     };
+}
+
+function readGenerationStyleSnapshots(value: unknown): GenerationStyleSnapshot[] {
+    if (!value || typeof value !== "object") return [];
+    const snapshots = (value as { generationStyleSnapshots?: unknown }).generationStyleSnapshots;
+    return Array.isArray(snapshots) ? snapshots as GenerationStyleSnapshot[] : [];
 }
 
 function toServerImageReference(image: ReferenceImage): ServerAiTaskMediaReference {

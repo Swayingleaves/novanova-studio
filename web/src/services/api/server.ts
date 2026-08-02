@@ -92,6 +92,8 @@ export type ServerAiTaskCreateInput = {
     references?: ServerAiTaskMediaReference[];
     videoReferences?: ServerAiTaskMediaReference[];
     generationSource?: ServerGenerationSource;
+    generationStyleIds?: number[];
+    generationStyleSnapshots?: GenerationStyleSnapshot[];
 };
 
 export type PromptOptimizationType = "image" | "video";
