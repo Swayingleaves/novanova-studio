@@ -3,6 +3,7 @@ package com.novanovastudio.agent;
 import static org.mockito.Mockito.mock;
 
 import com.novanovastudio.agent.dto.AgentMessage;
+import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentSession;
 import com.novanovastudio.agent.dto.CreationPlan;
 import com.novanovastudio.agent.dto.CreationSettings;
@@ -83,6 +84,97 @@ class CreationAgentOrchestratorTest {
     }
 
     /**
+     * 画布多轮补充尺寸时，主Agent省略生成命令前缀也必须恢复完整用户消息。
+     */
+    @Test
+    void shouldRestoreCanvasPromptWhenGenerationCommandPrefixIsDropped() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+        AgentSession session = canvasSession(List.of(new AgentMessage("user-1", "user", "生成图片：小马在奔跑", null)));
+
+        CreationPlan result = orchestrator.withServerPlanId(canvasPlan("小马在奔跑"), session, "9:16");
+
+        Assertions.assertEquals("生成图片：小马在奔跑", result.tasks().getFirst().prompt());
+    }
+
+    /**
+     * 画布视频多轮补充尺寸时，同样必须恢复完整用户消息。
+     */
+    @Test
+    void shouldRestoreCanvasVideoPromptWhenGenerationCommandPrefixIsDropped() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+        AgentSession session = canvasSession(List.of(new AgentMessage("user-1", "user", "生成视频：小马在奔跑", null)));
+
+        CreationPlan result = orchestrator.withServerPlanId(canvasVideoPlan("小马在奔跑"), session, "9:16");
+
+        Assertions.assertEquals("生成视频：小马在奔跑", result.tasks().getFirst().prompt());
+    }
+
+    /**
+     * 画布已经选择风格且输入修改风格时，应标记为风格重生成请求。
+     */
+    @Test
+    void shouldRecognizeCanvasStyleFollowUpRequest() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+        AgentChatRequest request = new AgentChatRequest(null, CreationEntrySource.CANVAS, "修改风格", Map.of(),
+                List.of(), List.of(), List.of(), new CreationSettings("image-model", "16:9", "2K", "high", 1,
+                null, null, null, null, Map.of("image", List.of(7L))));
+
+        Assertions.assertTrue(orchestrator.isStyleFollowUpRequest(request));
+    }
+
+    /**
+     * 通用风格命令应直接重生成当前选中的图片节点，并沿用历史原始提示词。
+     */
+    @Test
+    void shouldBuildCanvasStyleFollowUpGenerationPlan() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+        AgentSession session = canvasSession(List.of(new AgentMessage("user-1", "user", "生成图片：小马在奔跑", null)));
+        AgentChatRequest request = new AgentChatRequest(null, CreationEntrySource.CANVAS, "修改风格",
+                Map.of("selectedNodeIds", List.of("image-1"), "nodes", List.of(Map.of(
+                        "id", "image-1", "kind", "image", "generation", Map.of("prompt", "生成图片：小马在奔跑")))),
+                List.of(), List.of(), List.of(), new CreationSettings("image-model", "16:9", "2K", "high", 1,
+                null, null, null, null, Map.of("image", List.of(7L))));
+
+        CreationPlan plan = orchestrator.buildStyleFollowUpPlan(session, request);
+
+        Assertions.assertNotNull(plan);
+        Assertions.assertEquals("canvas_run_generation", plan.tasks().getFirst().toolName());
+        Assertions.assertEquals("生成图片：小马在奔跑", plan.tasks().getFirst().prompt());
+        Assertions.assertEquals("image-1", plan.tasks().getFirst().toolArguments().get("nodeId"));
+    }
+
+    /**
+     * 没有风格选择或普通创作消息不能被误判为风格重生成请求。
+     */
+    @Test
+    void shouldNotRecognizeCanvasNormalGenerationAsStyleFollowUp() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+        AgentChatRequest request = new AgentChatRequest(null, CreationEntrySource.CANVAS, "生成图片：小马在奔跑", Map.of(),
+                List.of(), List.of(), List.of(), new CreationSettings("image-model", "16:9", "2K", "high", 1,
+                null, null));
+
+        Assertions.assertFalse(orchestrator.isStyleFollowUpRequest(request));
+    }
+
+    /**
+     * 画布提示词只允许恢复完整命令正文，近似改写仍必须被拒绝。
+     */
+    @Test
+    void shouldRejectCanvasPromptThatIsNotTheCompleteCommandBody() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+        AgentSession session = canvasSession(List.of(new AgentMessage("user-1", "user", "生成图片：小马在奔跑", null)));
+
+        Assertions.assertThrows(BusinessException.class,
+                () -> orchestrator.withServerPlanId(canvasPlan("小马奔跑"), session, "9:16"));
+    }
+
+    /**
      * 用户发送重试时，主Agent误将重试指令作为提示词也必须恢复为最近一次创作目标。
      */
     @Test
@@ -152,6 +244,17 @@ class CreationAgentOrchestratorTest {
     }
 
     /**
+     * 构造画布创作会话。
+     *
+     * @param messages List<AgentMessage> 会话消息
+     * @return AgentSession 画布会话
+     */
+    private AgentSession canvasSession(List<AgentMessage> messages) {
+        return new AgentSession("session", 1L, "新对话", CreationEntrySource.CANVAS,
+                messages, OffsetDateTime.now(), OffsetDateTime.now());
+    }
+
+    /**
      * 构造主Agent候选计划。
      *
      * @param prompt String 主Agent选择的任务提示词
@@ -161,5 +264,31 @@ class CreationAgentOrchestratorTest {
         return new CreationPlan("model-plan", "生成图片", CreationEntrySource.IMAGE_PAGE, "生成一张图片", "", false,
                 new CreationSettings("image-model", "1:1", "2K", "high", 1, null, null),
                 List.of(new CreationTask("task-1", "image", "generate", prompt, List.of(), null, Map.of())));
+    }
+
+    /**
+     * 构造画布图片候选计划。
+     *
+     * @param prompt String 主Agent选择的任务提示词
+     * @return CreationPlan 画布图片计划
+     */
+    private CreationPlan canvasPlan(String prompt) {
+        return new CreationPlan("model-plan", "生成图片", CreationEntrySource.CANVAS, "生成一张图片", "", false,
+                new CreationSettings("image-model", "1:1", "2K", "high", 1, null, null),
+                List.of(new CreationTask("task-1", "image", "generate", prompt, List.of(), "canvas_generate_image",
+                        Map.of("prompt", prompt, "size", "9:16"))));
+    }
+
+    /**
+     * 构造画布视频候选计划。
+     *
+     * @param prompt String 主Agent选择的任务提示词
+     * @return CreationPlan 画布视频计划
+     */
+    private CreationPlan canvasVideoPlan(String prompt) {
+        return new CreationPlan("model-plan", "生成视频", CreationEntrySource.CANVAS, "生成一个视频", "", false,
+                new CreationSettings("video-model", "16:9", "1080P", "high", 1, "5", false),
+                List.of(new CreationTask("task-1", "video", "generate", prompt, List.of(), "canvas_generate_video",
+                        Map.of("prompt", prompt, "size", "16:9"))));
     }
 }

@@ -6,6 +6,7 @@ import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.agent.dto.CreationPlan;
 import com.novanovastudio.agent.dto.CreationSettings;
+import com.novanovastudio.agent.dto.CreationTask;
 import com.novanovastudio.agent.dto.AgentSession;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -16,12 +17,17 @@ import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.model.Model;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -67,6 +73,14 @@ public class CreationAgentOrchestrator {
     private final Map<Long, String> activeUserSessions = new ConcurrentHashMap<>();
     /** 活跃会话对应的服务端计划ID */
     private final Map<String, String> activePlanIds = new ConcurrentHashMap<>();
+    /** 画布图片命令的原始用户提示词格式 */
+    private static final Pattern CANVAS_IMAGE_COMMAND_PATTERN = Pattern.compile(
+            "^(?:生成|创建|绘制|制作)\\s*(?:一张|一幅|一个)?\\s*(?:图片|图像)\\s*[：:]\\s*(.+)$",
+            Pattern.DOTALL);
+    /** 画布视频命令的原始用户提示词格式 */
+    private static final Pattern CANVAS_VIDEO_COMMAND_PATTERN = Pattern.compile(
+            "^(?:生成|创建|绘制|制作)\\s*(?:一个|一段)?\\s*视频\\s*[：:]\\s*(.+)$",
+            Pattern.DOTALL);
 
     /**
      * 判断请求是否应进入统一主Agent。
@@ -190,7 +204,8 @@ public class CreationAgentOrchestrator {
     private Mono<Void> createAndExecutePlan(Long userId, AgentSession session, AgentChatRequest request,
                                             AtomicReference<String> planId) {
         return modelFactory.defaultTextModel()
-                .flatMap(model -> callMainAgent(userId, session, request, model)
+                .flatMap(model -> Mono.justOrEmpty(buildStyleFollowUpPlan(session, request))
+                        .switchIfEmpty(Mono.defer(() -> callMainAgent(userId, session, request, model)))
                         .map(candidate -> planValidator.validate(candidate, request.entrySource(), request.creationSettings()))
                         .flatMap(validated -> {
                             if (StringUtils.hasText(validated.clarificationQuestion())) {
@@ -204,12 +219,132 @@ public class CreationAgentOrchestrator {
                             activePlanIds.put(session.id(), plan.planId());
                             return planRepository.create(userId, session.id(), plan)
                                     .then(Mono.fromRunnable(() -> eventEmitter.emit(userId,
-                                            AgentEvent.planCreated(session.id(), plan.planId(), plan.summary(), plan.tasks().size()))))
+                                                    AgentEvent.planCreated(session.id(), plan.planId(), plan.summary(), plan.tasks().size()))))
                                     .then(planExecutor.execute(userId, session.id(), plan, request, model)
                                             .contextWrite(context -> MappedDiagnosticContext.put(
                                                     context, MappedDiagnosticContext.PLAN_ID, plan.planId())))
                                     .flatMap(summary -> completeWithMessage(userId, session.id(), summary.message()));
                         }));
+    }
+
+    /**
+     * 构造通用风格重生成计划。
+     * <p>
+     * 仅处理明确的“修改风格”类命令，并且要求画布中存在对应的图片或视频生成节点；
+     * 其他带有具体创作意图的消息继续交给主Agent规划。
+     *
+     * @param session AgentSession 当前会话
+     * @param request AgentChatRequest 当前对话请求
+     * @return CreationPlan 可直接执行的风格重生成计划；无法确定目标时返回null
+     */
+    CreationPlan buildStyleFollowUpPlan(AgentSession session, AgentChatRequest request) {
+        if (!isGenericStyleFollowUpRequest(request)) return null;
+        Map<String, Object> snapshot = request.canvasSnapshot() == null ? Map.of() : request.canvasSnapshot();
+        List<Map<String, Object>> nodes = snapshotNodes(snapshot.get("nodes"));
+        Set<String> selectedNodeIds = new LinkedHashSet<>(stringList(snapshot.get("selectedNodeIds")));
+        List<CreationTask> tasks = new ArrayList<>();
+        for (String generationType : selectedGenerationTypes(request)) {
+            String prompt = latestCanvasPrompt(session, generationType);
+            if (!StringUtils.hasText(prompt)) continue;
+            List<Map<String, Object>> targets = styleFollowUpTargets(nodes, selectedNodeIds, generationType);
+            for (Map<String, Object> target : targets) {
+                String nodeId = stringValue(target.get("id"));
+                if (!StringUtils.hasText(nodeId) || tasks.size() >= 8) break;
+                tasks.add(new CreationTask("style-follow-up-" + generationType + "-" + tasks.size(), "canvas", "tool",
+                        prompt, List.of(), "canvas_run_generation", Map.of("nodeId", nodeId)));
+            }
+        }
+        if (tasks.isEmpty()) return null;
+        return new CreationPlan("", "按已选风格重新生成", CreationEntrySource.CANVAS,
+                "按已选风格重新生成画布内容", "", false, request.creationSettings(), tasks);
+    }
+
+    /** 判断是否为不含额外创作要求的通用风格命令。 */
+    private boolean isGenericStyleFollowUpRequest(AgentChatRequest request) {
+        if (!isStyleFollowUpRequest(request)) return false;
+        String normalized = request.message().replaceAll("[\\s，。！？!?,、:：]+", "");
+        return Set.of("修改风格", "换风格", "应用风格", "使用风格", "使用当前风格", "使用这个风格",
+                "按当前风格生成", "按当前风格重生成", "按已选风格生成", "按已选风格重生成",
+                "重新生成风格").contains(normalized);
+    }
+
+    /** 读取当前风格选择对应的图片或视频类型，保持图片和视频组的选择顺序。 */
+    private List<String> selectedGenerationTypes(AgentChatRequest request) {
+        CreationSettings settings = request.creationSettings();
+        if (settings == null) return List.of();
+        Map<String, List<Long>> idsByType = settings.generationStyleIdsByType();
+        if (idsByType != null) {
+            return List.of("image", "video").stream()
+                    .filter(type -> idsByType.get(type) != null && !idsByType.get(type).isEmpty())
+                    .toList();
+        }
+        if (settings.generationStyleIds() == null || settings.generationStyleIds().isEmpty()) return List.of();
+        if (CreationEntrySource.IMAGE_PAGE.equals(request.entrySource())) return List.of("image");
+        if (CreationEntrySource.VIDEO_PAGE.equals(request.entrySource())) return List.of("video");
+        return List.of();
+    }
+
+    /** 读取画布快照中的节点对象。 */
+    private List<Map<String, Object>> snapshotNodes(Object value) {
+        if (!(value instanceof List<?> values)) return List.of();
+        return values.stream().map(this::objectMap).filter(node -> !node.isEmpty()).toList();
+    }
+
+    /** 选择当前选中节点，否则选择对应类型最近的一个生成节点。 */
+    private List<Map<String, Object>> styleFollowUpTargets(List<Map<String, Object>> nodes,
+                                                            Set<String> selectedNodeIds,
+                                                            String generationType) {
+        List<Map<String, Object>> selected = nodes.stream()
+                .filter(node -> generationType.equals(stringValue(node.get("kind")))
+                        && selectedNodeIds.contains(stringValue(node.get("id")))
+                        && hasGenerationPrompt(node))
+                .toList();
+        if (!selected.isEmpty()) return selected;
+        for (int index = nodes.size() - 1; index >= 0; index--) {
+            Map<String, Object> node = nodes.get(index);
+            if (generationType.equals(stringValue(node.get("kind"))) && hasGenerationPrompt(node)) {
+                return List.of(node);
+            }
+        }
+        return List.of();
+    }
+
+    /** 判断节点是否存在可重用的生成提示词。 */
+    private boolean hasGenerationPrompt(Map<String, Object> node) {
+        return objectMap(node.get("generation")).entrySet().stream()
+                .anyMatch(entry -> "prompt".equals(entry.getKey()) && StringUtils.hasText(stringValue(entry.getValue())));
+    }
+
+    /** 获取历史中最近一条对应类型的原始图片或视频命令。 */
+    private String latestCanvasPrompt(AgentSession session, String generationType) {
+        Pattern commandPattern = "image".equals(generationType) ? CANVAS_IMAGE_COMMAND_PATTERN : CANVAS_VIDEO_COMMAND_PATTERN;
+        for (int index = session.messages().size() - 1; index >= 0; index--) {
+            var message = session.messages().get(index);
+            if (!"user".equals(message.role()) || !StringUtils.hasText(message.text())) continue;
+            if (commandPattern.matcher(message.text().trim()).matches()) return message.text();
+        }
+        return "";
+    }
+
+    /** 将快照中的任意对象转换为字符串键Map。 */
+    private Map<String, Object> objectMap(Object value) {
+        if (!(value instanceof Map<?, ?> source)) return Map.of();
+        Map<String, Object> result = new LinkedHashMap<>();
+        source.forEach((key, item) -> {
+            if (key != null) result.put(String.valueOf(key), item);
+        });
+        return result;
+    }
+
+    /** 将快照中的字符串数组转换为去重后的有序列表。 */
+    private List<String> stringList(Object value) {
+        if (!(value instanceof List<?> values)) return List.of();
+        return values.stream().map(this::stringValue).filter(StringUtils::hasText).distinct().toList();
+    }
+
+    /** 将任意快照值转换为字符串。 */
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     /**
@@ -281,6 +416,8 @@ public class CreationAgentOrchestrator {
         input.put("message", request.message());
         input.put("history", historyForAgent(request, session));
         input.put("creationSettings", request.creationSettings());
+        input.put("generationStyleSelection", generationStyleSelection(request));
+        input.put("styleFollowUp", isStyleFollowUpRequest(request));
         input.put("retryRequested", isRetryMessage(request.message()));
         if (isRetryMessage(request.message())) {
             input.put("retryPrompt", latestRetryPrompt(session));
@@ -299,6 +436,51 @@ public class CreationAgentOrchestrator {
                 .timeout(Duration.ofSeconds(60))
                 .map(message -> message.getStructuredData(CreationPlan.class))
                 .doFinally(signal -> agent.close());
+    }
+
+    /**
+     * 判断当前画布请求是否是在已选风格基础上的风格重生成操作。
+     * <p>
+     * 风格ID由服务端校验和解析，主Agent只需要知道用户已经选择了风格以及请求属于风格操作，
+     * 不应再次要求用户输入风格名称或自行拼接风格提示词。
+     *
+     * @param request AgentChatRequest 当前对话请求
+     * @return boolean 是否为已选风格的画布重生成请求
+     */
+    boolean isStyleFollowUpRequest(AgentChatRequest request) {
+        if (request == null || !CreationEntrySource.CANVAS.equals(request.entrySource())
+                || !hasGenerationStyles(request.creationSettings()) || !StringUtils.hasText(request.message())) {
+            return false;
+        }
+        String normalized = request.message().replaceAll("[\\s，。！？!?,、:：]+", "");
+        if (!normalized.contains("风格")) return false;
+        return List.of("修改", "改成", "改为", "换", "应用", "使用", "重生成", "重新生成")
+                .stream().anyMatch(normalized::contains);
+    }
+
+    /**
+     * 构造供主Agent理解的风格选择摘要，不包含风格提示词和未校验的名称。
+     *
+     * @param request AgentChatRequest 当前对话请求
+     * @return Map<String, Object> 已选择风格的类型和数量
+     */
+    private Map<String, Object> generationStyleSelection(AgentChatRequest request) {
+        Map<String, Object> selection = new LinkedHashMap<>();
+        if (request == null || request.creationSettings() == null) return selection;
+        CreationSettings settings = request.creationSettings();
+        Map<String, List<Long>> idsByType = settings.generationStyleIdsByType();
+        if (idsByType != null) {
+            idsByType.forEach((type, ids) -> {
+                if (ids != null && !ids.isEmpty()) selection.put(type, Map.of("selected", true, "count", ids.size()));
+            });
+            return selection;
+        }
+        if (settings.generationStyleIds() != null && !settings.generationStyleIds().isEmpty()) {
+            String generationType = CreationEntrySource.IMAGE_PAGE.equals(request.entrySource()) ? "image"
+                    : CreationEntrySource.VIDEO_PAGE.equals(request.entrySource()) ? "video" : "unknown";
+            selection.put(generationType, Map.of("selected", true, "count", settings.generationStyleIds().size()));
+        }
+        return selection;
     }
 
     /**
@@ -385,6 +567,9 @@ public class CreationAgentOrchestrator {
                 .map(task -> {
                     String taskPrompt = isRetryMessage(currentMessage) && isRetryMessage(task.prompt())
                             ? latestRetryPrompt(session) : task.prompt();
+                    if (!userPrompts.contains(taskPrompt)) {
+                        taskPrompt = resolveCanvasHistoricalPrompt(plan, task, taskPrompt, userPrompts);
+                    }
                     if (!StringUtils.hasText(taskPrompt) || !userPrompts.contains(taskPrompt)) {
                         throw new BusinessException(ErrorCode.PARAM_INVALID, "主Agent任务提示词必须逐字来自用户消息");
                     }
@@ -395,6 +580,41 @@ public class CreationAgentOrchestrator {
                 .toList();
         return new CreationPlan(UUID.randomUUID().toString(), plan.intent(), plan.entrySource(), plan.summary(), "",
                 false, plan.creationSettings(), tasks);
+    }
+
+    /**
+     * 恢复画布多轮补参时被主Agent去掉命令前缀的原始提示词。
+     * <p>
+     * 只接受历史用户消息中明确的图片或视频命令，并且要求主Agent返回值等于命令分隔符后的完整正文，
+     * 不接受任意子串、相似文本或模型自行改写的内容。
+     *
+     * @param plan CreationPlan 已校验计划
+     * @param task CreationTask 当前任务
+     * @param taskPrompt String 主Agent返回的任务提示词
+     * @param userPrompts Set<String> 当前会话中的用户原始消息
+     * @return String 恢复后的用户原始消息；无法恢复时返回主Agent原值
+     */
+    private String resolveCanvasHistoricalPrompt(CreationPlan plan,
+                                                  com.novanovastudio.agent.dto.CreationTask task,
+                                                  String taskPrompt,
+                                                  Set<String> userPrompts) {
+        if (!CreationEntrySource.CANVAS.equals(plan.entrySource()) || !StringUtils.hasText(taskPrompt)) {
+            return taskPrompt;
+        }
+        Pattern commandPattern = switch (task.taskType()) {
+            case "image" -> CANVAS_IMAGE_COMMAND_PATTERN;
+            case "video" -> CANVAS_VIDEO_COMMAND_PATTERN;
+            default -> null;
+        };
+        if (commandPattern == null) return taskPrompt;
+        for (String userPrompt : userPrompts) {
+            if (!StringUtils.hasText(userPrompt)) continue;
+            Matcher matcher = commandPattern.matcher(userPrompt.trim());
+            if (matcher.matches() && taskPrompt.equals(matcher.group(1).trim())) {
+                return userPrompt;
+            }
+        }
+        return taskPrompt;
     }
 
     /**
