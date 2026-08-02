@@ -131,6 +131,31 @@ public class CreditRepository {
     }
 
     /**
+     * 写入卡密兑换积分流水。
+     *
+     * @param userId Long 兑换用户ID
+     * @param cardId Long 兑换卡密ID
+     * @param changeAmount int 积分变动值
+     * @param balanceAfter int 变动后余额
+     * @param reason String 变动原因
+     * @return Mono<Long> 新建流水ID
+     */
+    public Mono<Long> createCardRedeemTransaction(Long userId, Long cardId, int changeAmount, int balanceAfter, String reason) {
+        return databaseClient.sql("""
+                        INSERT INTO user_credit_transactions(user_id, transaction_type, credit_card_id, change_amount, balance_after, reason)
+                        VALUES (:userId, 'card_redeem', :cardId, :changeAmount, :balanceAfter, :reason)
+                        RETURNING id
+                        """)
+                .bind("userId", userId)
+                .bind("cardId", cardId)
+                .bind("changeAmount", changeAmount)
+                .bind("balanceAfter", balanceAfter)
+                .bind("reason", reason)
+                .map((row, metadata) -> row.get("id", Long.class))
+                .one();
+    }
+
+    /**
      * 创建任务关联积分流水并抢占幂等键。
      *
      * @param userId Long 用户ID

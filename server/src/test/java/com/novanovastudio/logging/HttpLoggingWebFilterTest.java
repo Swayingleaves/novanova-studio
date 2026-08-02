@@ -81,6 +81,24 @@ class HttpLoggingWebFilterTest {
     }
 
     /**
+     * 验证卡密查询参数不会写入明文日志。
+     */
+    @Test
+    @DisplayName("卡密查询参数会被脱敏")
+    void shouldSanitizeCardCodeQueryParameter() {
+        HttpLoggingWebFilter filter = new HttpLoggingWebFilter();
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/credit/listRedemptionRecords?cardCode=ABCDEFGHJKLMNPQRSTUV&page=1").build()
+        );
+
+        String sanitizedUrl = filter.sanitizedUrl(exchange);
+
+        assertFalse(sanitizedUrl.contains("ABCDEFGHJKLMNPQRSTUV"));
+        assertTrue(sanitizedUrl.contains("cardCode=[已脱敏]"));
+        assertTrue(sanitizedUrl.contains("page=1"));
+    }
+
+    /**
      * 验证登录请求中的密码和验证码不会写入日志。
      */
     @Test
@@ -113,6 +131,23 @@ class HttpLoggingWebFilterTest {
 
         assertFalse(sanitizedBody.contains("current-secret"));
         assertFalse(sanitizedBody.contains("new-secret"));
+        assertTrue(sanitizedBody.contains("[已脱敏]"));
+    }
+
+    /**
+     * 卡密兑换请求中的明文卡密不会写入请求日志。
+     */
+    @Test
+    @DisplayName("卡密兑换请求中的明文卡密会被脱敏")
+    void shouldSanitizeCardCodeBody() {
+        HttpLoggingWebFilter filter = new HttpLoggingWebFilter();
+
+        String sanitizedBody = filter.sanitizeBody(
+                "{\"cardCode\":\"ABCDEFGHJKLMNPQRSTUV\"}",
+                MediaType.APPLICATION_JSON
+        );
+
+        assertFalse(sanitizedBody.contains("ABCDEFGHJKLMNPQRSTUV"));
         assertTrue(sanitizedBody.contains("[已脱敏]"));
     }
 

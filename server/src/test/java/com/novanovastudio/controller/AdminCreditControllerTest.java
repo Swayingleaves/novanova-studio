@@ -7,6 +7,8 @@ import static org.mockito.Mockito.when;
 
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.dto.CreditCardDtos;
+import com.novanovastudio.service.CreditCardService;
 import com.novanovastudio.security.AdminGuard;
 import com.novanovastudio.service.CreditService;
 import java.time.LocalDate;
@@ -26,6 +28,9 @@ class AdminCreditControllerTest {
     /** 积分服务 */
     private CreditService creditService;
 
+    /** 卡密管理服务 */
+    private CreditCardService creditCardService;
+
     /** 管理员校验 */
     private AdminGuard adminGuard;
 
@@ -38,8 +43,9 @@ class AdminCreditControllerTest {
     @BeforeEach
     void setUp() {
         creditService = mock(CreditService.class);
+        creditCardService = mock(CreditCardService.class);
         adminGuard = mock(AdminGuard.class);
-        adminCreditController = new AdminCreditController(creditService, adminGuard);
+        adminCreditController = new AdminCreditController(creditService, creditCardService, adminGuard);
     }
 
     /**
@@ -54,5 +60,19 @@ class AdminCreditControllerTest {
                 .verify();
 
         verify(creditService, never()).getAdminCreditOverview(null, LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 1), null, "day");
+    }
+
+    /**
+     * 非管理员不能触发卡密生成服务。
+     */
+    @Test
+    void shouldRejectCardGenerationBeforeCallingCardServiceWhenPermissionDenied() {
+        when(adminGuard.requireAdmin()).thenReturn(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, "权限不足")));
+
+        StepVerifier.create(adminCreditController.generateCreditCards(new CreditCardDtos.GenerateCreditCardsRequest(100, 10)))
+                .expectError(BusinessException.class)
+                .verify();
+
+        verify(creditCardService, never()).generateCreditCards(org.mockito.ArgumentMatchers.any());
     }
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { MenuProps } from "antd";
-import { Bell, LogOut, Cog, UserCircle, Users, Zap } from "lucide-react";
+import { Bell, LogOut, Cog, ShoppingCart, Ticket, UserCircle, Users, Zap } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { App, Dropdown, Popover, Tooltip } from "antd";
@@ -38,6 +38,18 @@ export function AppSidebar() {
     const visibleTools = navigationTools.filter((tool) => !tool.adminOnly || user?.role === "admin");
     const activeSlug = navigationTools.some((tool) => tool.slug === slug) ? (slug as NavigationToolSlug) : undefined;
     const creditBalance = user && Number.isInteger(user.creditBalance) ? user.creditBalance : null;
+    const creditMenuContent = (
+        <div className="flex min-w-28 flex-col gap-1 p-0.5">
+            <Link href="/credits/purchase" className={cn("flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]", pathname === "/credits/purchase" && "bg-[var(--studio-primary-soft)] text-[var(--studio-ink)]")}>
+                <ShoppingCart className="size-4" />
+                <span>购买</span>
+            </Link>
+            <Link href="/credits/redeem" className={cn("flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]", pathname === "/credits/redeem" && "bg-[var(--studio-primary-soft)] text-[var(--studio-ink)]")}>
+                <Ticket className="size-4" />
+                <span>兑换</span>
+            </Link>
+        </div>
+    );
 
     const handleLogoutCurrentUser = async () => {
         try {
@@ -141,12 +153,12 @@ export function AppSidebar() {
 
                 <div className="flex flex-col items-center gap-2 border-t border-[var(--studio-line)] px-2 py-2">
                     {creditBalance !== null ? (
-                        <Tooltip title={`可用积分：${creditNumberFormatter.format(creditBalance)}`} placement="right">
-                            <Link href="/credits" className={cn("sidebar-credit-balance", pathname === "/credits" && "sidebar-rail-item-active")} aria-current={pathname === "/credits" ? "page" : undefined} aria-label={`查看积分，当前可用 ${creditNumberFormatter.format(creditBalance)}`}>
+                        <Popover placement="right" trigger="hover" arrow={false} content={creditMenuContent}>
+                            <Link href="/credits" className={cn("sidebar-credit-balance", pathname.startsWith("/credits") && "sidebar-rail-item-active")} aria-current={pathname.startsWith("/credits") ? "page" : undefined} aria-label={`查看积分，当前可用 ${creditNumberFormatter.format(creditBalance)}`}>
                                 <Zap className="size-3.5 fill-current" strokeWidth={2.4} />
                                 <span className="max-w-[52px] truncate">{creditNumberFormatter.format(creditBalance)}</span>
                             </Link>
-                        </Tooltip>
+                        </Popover>
                     ) : null}
                     {user ? (
                         <Dropdown placement="topLeft" trigger={["hover"]} menu={{ items: userMenuItems }}>

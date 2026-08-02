@@ -8,6 +8,7 @@ import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.agent.AgentActivityService;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.common.SensitiveDataCrypto;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
@@ -16,23 +17,17 @@ import com.novanovastudio.repository.PersistenceRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.storage.ObjectStorageService;
 import java.net.URLConnection;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import javax.crypto.Cipher;
-import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.buffer.DataBufferUtils;
@@ -72,15 +67,6 @@ public class PersistenceService {
 
     /** 生成记录失败状态 */
     private static final String GENERATION_STATUS_FAILED = "failed";
-
-    /** 加密配置前缀 */
-    private static final String ENCRYPTED_CONFIG_PREFIX = "v1:";
-
-    /** AES-GCM标签位数 */
-    private static final int GCM_TAG_BITS = 128;
-
-    /** AES-GCM随机数长度 */
-    private static final int GCM_NONCE_BYTES = 12;
 
     /** 服务端虚拟渠道ID */
     private static final String SERVER_CHANNEL_ID = "server";
@@ -1201,17 +1187,11 @@ public class PersistenceService {
      */
     private Mono<String> encryptSecret(String data) {
         // AES-GCM加密属于CPU操作，放入boundedElastic执行。
-        return Mono.fromCallable(() -> {
-            byte[] nonce = new byte[GCM_NONCE_BYTES];
-            secureRandom.nextBytes(nonce);
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(secretKeyBytes(), "AES"), new GCMParameterSpec(GCM_TAG_BITS, nonce));
-            byte[] ciphertext = cipher.doFinal(data.getBytes(StandardCharsets.UTF_8));
-            ByteBuffer buffer = ByteBuffer.allocate(nonce.length + ciphertext.length);
-            buffer.put(nonce);
-            buffer.put(ciphertext);
-            return ENCRYPTED_CONFIG_PREFIX + Base64.getEncoder().encodeToString(buffer.array());
-        }).subscribeOn(Schedulers.boundedElastic()).onErrorMap(exception -> {
+        return Mono.fromCallable(() -> SensitiveDataCrypto.encrypt(data, properties.getApp().getSecretKey()))
+                .subscribeOn(Schedulers.boundedElastic()).onErrorMap(exception -> {
+            if (exception instanceof BusinessException) {
+                return exception;
+            }
             log.error("加密敏感配置失败", exception);
             return new BusinessException(ErrorCode.SYSTEM_ERROR, "加密敏感配置失败: " + exception.getMessage());
         });
@@ -1228,18 +1208,11 @@ public class PersistenceService {
         if (!StringUtils.hasText(value)) {
             return Mono.just("");
         }
-        if (!value.startsWith(ENCRYPTED_CONFIG_PREFIX)) {
-            log.error("敏感配置不是加密格式");
-            return Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR, "敏感配置不是加密格式"));
-        }
-        return Mono.fromCallable(() -> {
-            byte[] payload = Base64.getDecoder().decode(value.substring(ENCRYPTED_CONFIG_PREFIX.length()));
-            byte[] nonce = java.util.Arrays.copyOfRange(payload, 0, GCM_NONCE_BYTES);
-            byte[] ciphertext = java.util.Arrays.copyOfRange(payload, GCM_NONCE_BYTES, payload.length);
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(secretKeyBytes(), "AES"), new GCMParameterSpec(GCM_TAG_BITS, nonce));
-            return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
-        }).subscribeOn(Schedulers.boundedElastic()).onErrorMap(exception -> {
+        return Mono.fromCallable(() -> SensitiveDataCrypto.decrypt(value, properties.getApp().getSecretKey()))
+                .subscribeOn(Schedulers.boundedElastic()).onErrorMap(exception -> {
+            if (exception instanceof BusinessException) {
+                return exception;
+            }
             log.error("解密敏感配置失败", exception);
             return new BusinessException(ErrorCode.SYSTEM_ERROR, "解密敏感配置失败: " + exception.getMessage());
         });
@@ -1458,20 +1431,6 @@ public class PersistenceService {
         } catch (Exception exception) {
             log.error("解析模型列表失败", exception);
             return new ArrayList<>();
-        }
-    }
-
-    /**
-     * 根据APP_SECRET_KEY生成AES密钥
-     *
-     * @return byte[] AES密钥
-     */
-    private byte[] secretKeyBytes() {
-        try {
-            // 使用SHA-256将应用密钥派生为固定长度AES密钥。
-            return MessageDigest.getInstance("SHA-256").digest(properties.getApp().getSecretKey().getBytes(StandardCharsets.UTF_8));
-        } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "生成加密密钥失败: " + exception.getMessage());
         }
     }
 
