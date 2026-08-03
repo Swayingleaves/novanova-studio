@@ -47,7 +47,14 @@ public final class PersistenceDtos {
     /** 用户模型配置。 */
     public record ModelConfig(String id, String channelId, String modelName, String modelType,
                               List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
-                              Boolean thinkingEnabled, String reasoningEffort) {
+                              Boolean thinkingEnabled, String reasoningEffort, String creditUnit) {
+        /** 保持旧调用方按次计费。 */
+        public ModelConfig(String id, String channelId, String modelName, String modelType,
+                           List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
+                           Boolean thinkingEnabled, String reasoningEffort) {
+            this(id, channelId, modelName, modelType, capabilities, defaultModel, sortOrder, creditCost,
+                    thinkingEnabled, reasoningEffort, "generation");
+        }
     }
 
     /** 模型配置列表响应。 */
@@ -61,7 +68,13 @@ public final class PersistenceDtos {
                                            List<String> capabilities, Integer sortOrder,
                                            @Min(value = 0, message = "模型积分不能小于0") Integer creditCost,
                                            Boolean thinkingEnabled,
-                                           @Pattern(regexp = "high|max", message = "思考强度只支持high、max") String reasoningEffort) {
+                                           @Pattern(regexp = "high|max", message = "思考强度只支持high、max") String reasoningEffort,
+                                           @Pattern(regexp = "generation|second", message = "积分计费单位只支持generation、second") String creditUnit) {
+        /** 保持旧调用方按次计费。 */
+        public CreateModelConfigRequest(String channelId, String modelName, String modelType, List<String> capabilities,
+                                        Integer sortOrder, Integer creditCost, Boolean thinkingEnabled, String reasoningEffort) {
+            this(channelId, modelName, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort, "generation");
+        }
     }
 
     /** 修改用户模型配置请求。 */
@@ -70,7 +83,13 @@ public final class PersistenceDtos {
                                            List<String> capabilities, Integer sortOrder,
                                            @Min(value = 0, message = "模型积分不能小于0") Integer creditCost,
                                            Boolean thinkingEnabled,
-                                           @Pattern(regexp = "high|max", message = "思考强度只支持high、max") String reasoningEffort) {
+                                           @Pattern(regexp = "high|max", message = "思考强度只支持high、max") String reasoningEffort,
+                                           @Pattern(regexp = "generation|second", message = "积分计费单位只支持generation、second") String creditUnit) {
+        /** 保持旧调用方按次计费。 */
+        public UpdateModelConfigRequest(String id, String modelType, List<String> capabilities, Integer sortOrder,
+                                        Integer creditCost, Boolean thinkingEnabled, String reasoningEffort) {
+            this(id, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort, "generation");
+        }
     }
 
     /** 设置默认模型请求。 */

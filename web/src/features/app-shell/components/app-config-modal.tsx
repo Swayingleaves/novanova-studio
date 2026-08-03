@@ -332,6 +332,12 @@ export function AppConfigModal() {
         setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType && modelConfigValue(configItem) === model ? { ...configItem, creditCost } : configItem)));
     };
 
+    const updateModelCreditUnit = (modelType: ModelCapability, model: string, creditUnit: ServerModelConfig["creditUnit"]) => {
+        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType && modelConfigValue(configItem) === model
+            ? { ...configItem, creditUnit: modelType === "video" && creditUnit === "second" ? "second" : "generation" }
+            : configItem)));
+    };
+
     const updateModelThinkingConfiguration = (model: string, patch: Pick<ServerModelConfig, "thinkingEnabled"> | Pick<ServerModelConfig, "reasoningEffort">) => {
         setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === "text" && modelConfigValue(configItem) === model ? { ...configItem, ...patch } : configItem)));
     };
@@ -365,6 +371,7 @@ export function AppConfigModal() {
                     capabilities: configItem.capabilities,
                     sortOrder: configItem.sortOrder,
                     creditCost: configItem.creditCost,
+                    creditUnit: configItem.creditUnit,
                     thinkingEnabled: configItem.thinkingEnabled,
                     reasoningEffort: configItem.reasoningEffort,
                 });
@@ -386,6 +393,7 @@ export function AppConfigModal() {
                         capabilities: configItem.capabilities,
                         sortOrder: configItem.sortOrder,
                         creditCost: configItem.creditCost,
+                        creditUnit: configItem.creditUnit,
                         thinkingEnabled: configItem.thinkingEnabled,
                         reasoningEffort: configItem.reasoningEffort,
                     });
@@ -753,7 +761,7 @@ export function AppConfigModal() {
                                                                         <>
                                                                         <span className="min-w-40 text-sm">{modelOptionLabel(draftConfig, model)}</span>
                                                                         <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
-                                                                            消耗积分
+                                                                            {group.capability === "video" && modelConfig?.creditUnit === "second" ? "每秒积分" : "每次积分"}
                                                                             <InputNumber
                                                                                 min={0}
                                                                                 precision={0}
@@ -763,6 +771,16 @@ export function AppConfigModal() {
                                                                                 onChange={(value) => updateModelCreditCost(group.capability, model, Number(value) || 0)}
                                                                             />
                                                                         </span>
+                                                                        {group.capability === "video" && modelConfig ? (
+                                                                            <Select
+                                                                                size="small"
+                                                                                value={modelConfig.creditUnit === "second" ? "second" : "generation"}
+                                                                                disabled={isSaving}
+                                                                                className="w-24"
+                                                                                options={[{ value: "generation", label: "按次" }, { value: "second", label: "按秒" }]}
+                                                                                onChange={(creditUnit: ServerModelConfig["creditUnit"]) => updateModelCreditUnit(group.capability, model, creditUnit)}
+                                                                            />
+                                                                        ) : null}
                                                                         {MODEL_CAPABILITY_OPTIONS[group.capability].map((option) => (
                                                                             <Checkbox
                                                                                 key={option.value}
@@ -985,6 +1003,7 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         defaultModel: false,
         sortOrder: 0,
         creditCost: 0,
+        creditUnit: "generation",
         thinkingEnabled: true,
         reasoningEffort: "high",
     };
@@ -995,7 +1014,7 @@ function sameValue(first: unknown, second: unknown) {
 }
 
 function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelConfig) {
-    return first.modelType === second.modelType && first.sortOrder === second.sortOrder && first.creditCost === second.creditCost
+    return first.modelType === second.modelType && first.sortOrder === second.sortOrder && first.creditCost === second.creditCost && first.creditUnit === second.creditUnit
         && first.thinkingEnabled === second.thinkingEnabled && first.reasoningEffort === second.reasoningEffort && sameValue(first.capabilities, second.capabilities);
 }
 

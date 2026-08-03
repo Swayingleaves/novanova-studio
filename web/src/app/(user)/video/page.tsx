@@ -11,7 +11,7 @@ import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/features/generation/components/video-settings-panel";
-import { requestCreditCost } from "@/features/generation/constants/credits";
+import { getModelCreditUnit, isPositiveVideoSeconds, requestCreditCost } from "@/features/generation/constants/credits";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { seedanceReferenceLabel, SEEDANCE_REFERENCE_LIMITS } from "@/features/generation/lib/seedance-video";
 import { formatBytes, formatDuration } from "@/features/generation/lib/image-utils";
@@ -424,7 +424,7 @@ export default function VideoPage() {
         },
     });
 
-    const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "video", count: 1 });
+    const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "video", count: 1, seconds: config.videoSeconds });
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
     const latestRound = activeConversation?.rounds.at(-1);
     const draftSettingsSummary = videoDraftSettingsModified ? buildVideoSettingsSummary(config, effectiveConfig, model) : "";
@@ -570,6 +570,10 @@ export default function VideoPage() {
         const videoModel = effectiveConfig.videoModel || effectiveConfig.model || model;
         const size = config.size || "16:9";
         const seconds = config.videoSeconds || "5";
+        if (getModelCreditUnit(effectiveConfig.modelCosts, videoModel, "video") === "second" && !isPositiveVideoSeconds(seconds)) {
+            message.error("按秒计费的视频模型必须选择具体时长，不能使用智能时长");
+            return;
+        }
         const quality = config.vquality || "720p";
         const watermark = config.videoWatermark ?? true;
         pendingVideoSizeRef.current = size;

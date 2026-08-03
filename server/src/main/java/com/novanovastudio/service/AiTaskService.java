@@ -62,6 +62,12 @@ public class AiTaskService {
     /** 文本任务类型 */
     private static final String TYPE_TEXT = AiTaskTypes.TEXT;
 
+    /** 按次计费单位。 */
+    private static final String CREDIT_UNIT_GENERATION = "generation";
+
+    /** 按秒计费单位。 */
+    private static final String CREDIT_UNIT_SECOND = "second";
+
     /** 等待状态 */
     private static final String STATUS_PENDING = "pending";
 
@@ -352,7 +358,7 @@ public class AiTaskService {
                                     .findFirst()
                                     .map(channel -> new AiTaskDtos.AiModelOption(
                                             config.channelId() + CHANNEL_MODEL_SEPARATOR + config.modelName(),
-                                            config.modelName(), config.modelType(), channel.name(), channel.apiFormat(), config.defaultModel(), config.creditCost()))
+                                            config.modelName(), config.modelType(), channel.name(), channel.apiFormat(), config.defaultModel(), config.creditCost(), config.creditUnit()))
                                     .orElse(null))
                             .filter(java.util.Objects::nonNull)
                             .toList();
@@ -582,7 +588,7 @@ public class AiTaskService {
                                 .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员配置默认" + capabilityLabel(capability) + "模型"));
                     }
                     ResolvedModel resolvedModel = resolveModel(capability, selectedConfig.channelId() + "::" + selectedConfig.modelName(), tuple.getT1());
-                    return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.creditCost(),
+                    return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.creditCost(), selectedConfig.creditUnit(),
                             thinkingEnabled(selectedConfig.thinkingEnabled()), reasoningEffort(selectedConfig.reasoningEffort()));
                 });
     }
@@ -644,7 +650,7 @@ public class AiTaskService {
         }
         validateChannelSupport(channel, capability);
         validateUserChannelAccess(channel);
-        return new ResolvedModel(channel, model, 0, true, "high");
+        return new ResolvedModel(channel, model, 0, CREDIT_UNIT_GENERATION, true, "high");
     }
 
 
@@ -764,11 +770,54 @@ public class AiTaskService {
         if (unitCost == null || unitCost < 0) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "模型积分配置不合法");
         }
+        String creditUnit = resolvedModel.creditUnit();
+        if (!CREDIT_UNIT_GENERATION.equals(creditUnit) && !CREDIT_UNIT_SECOND.equals(creditUnit)) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "模型积分计费单位不合法");
+        }
+        if (CREDIT_UNIT_SECOND.equals(creditUnit) && !TYPE_VIDEO.equals(request.taskType())) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "只有视频模型可以按秒计费");
+        }
         int count = TYPE_IMAGE.equals(request.taskType()) ? imageCount(request.parameters()) : 1;
         try {
-            return Math.multiplyExact(unitCost, count);
+            int total = Math.multiplyExact(unitCost, count);
+            return CREDIT_UNIT_SECOND.equals(creditUnit)
+                    ? Math.multiplyExact(total, videoSeconds(request.parameters()))
+                    : total;
         } catch (ArithmeticException exception) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "本次生成积分计算超出范围");
+        }
+    }
+
+    /**
+     * 解析按秒计费视频的时长。
+     *
+     * @param parameters Map<String, Object> 任务参数
+     * @return int 视频时长（秒）
+     * @throws BusinessException 时长为空、为智能时长或不是正整数时抛出
+     */
+    private int videoSeconds(Map<String, Object> parameters) {
+        Object rawSeconds = parameters == null ? null : parameters.get("seconds");
+        if (rawSeconds == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "按秒计费视频必须指定正整数时长");
+        }
+        try {
+            int seconds;
+            if (rawSeconds instanceof Number number) {
+                double numericSeconds = number.doubleValue();
+                if (!Double.isFinite(numericSeconds) || numericSeconds != Math.rint(numericSeconds)
+                        || numericSeconds > Integer.MAX_VALUE || numericSeconds < Integer.MIN_VALUE) {
+                    throw new NumberFormatException("视频时长必须是整数");
+                }
+                seconds = (int) numericSeconds;
+            } else {
+                seconds = Integer.parseInt(rawSeconds.toString().trim());
+            }
+            if (seconds < 1) {
+                throw new NumberFormatException("视频时长必须大于0");
+            }
+            return seconds;
+        } catch (NumberFormatException exception) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "按秒计费视频必须指定正整数时长");
         }
     }
 
@@ -912,7 +961,7 @@ public class AiTaskService {
      * @param channel AiChannelConfig 渠道配置
      * @param model String 模型名称
      */
-    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, Integer creditCost,
+    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, Integer creditCost, String creditUnit,
                                  boolean thinkingEnabled, String reasoningEffort) {
     }
 }

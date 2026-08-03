@@ -147,9 +147,16 @@ public final class AiTaskDtos {
      * @param provider String 渠道
      * @param apiFormat String 渠道调用格式
      * @param defaultModel Boolean 是否为默认模型
-     * @param creditCost Integer 单次生成消耗积分
+     * @param creditCost Integer 当前计费单位对应的积分单价
+     * @param creditUnit String 积分计费单位
      */
-    public record AiModelOption(String value, String label, String capability, String provider, String apiFormat, Boolean defaultModel, Integer creditCost) {
+    public record AiModelOption(String value, String label, String capability, String provider, String apiFormat,
+                                Boolean defaultModel, Integer creditCost, String creditUnit) {
+        /** 保持旧调用方按次计费。 */
+        public AiModelOption(String value, String label, String capability, String provider, String apiFormat,
+                             Boolean defaultModel, Integer creditCost) {
+            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, "generation");
+        }
     }
 
     /**

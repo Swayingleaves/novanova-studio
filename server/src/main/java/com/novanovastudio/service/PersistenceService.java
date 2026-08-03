@@ -50,6 +50,12 @@ import reactor.core.scheduler.Schedulers;
 @Slf4j
 public class PersistenceService {
 
+    /** 按次计费单位。 */
+    private static final String CREDIT_UNIT_GENERATION = "generation";
+
+    /** 按秒计费单位。 */
+    private static final String CREDIT_UNIT_SECOND = "second";
+
     /** 生成记录标题最大长度 */
     private static final int GENERATION_LOG_TITLE_MAX_LENGTH = 100;
 
@@ -174,6 +180,7 @@ public class PersistenceService {
                     record.setDefaultModel(false);
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
                     record.setCreditCost(request.creditCost() == null ? 0 : request.creditCost());
+                    record.setCreditUnit(normalizeCreditUnit(request.modelType(), request.creditUnit()));
                     record.setThinkingEnabled(thinkingEnabled(request.thinkingEnabled()));
                     record.setReasoningEffort(reasoningEffort(request.reasoningEffort()));
                     return repository.createPlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
@@ -190,6 +197,7 @@ public class PersistenceService {
                     record.setCapabilities(JSON.toJSONString(request.capabilities() == null ? List.of() : request.capabilities()));
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
                     record.setCreditCost(request.creditCost() == null ? 0 : request.creditCost());
+                    record.setCreditUnit(normalizeCreditUnit(request.modelType(), request.creditUnit()));
                     record.setThinkingEnabled(thinkingEnabled(request.thinkingEnabled()));
                     record.setReasoningEffort(reasoningEffort(request.reasoningEffort()));
                     return repository.updatePlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
@@ -236,7 +244,27 @@ public class PersistenceService {
     private PersistenceDtos.ModelConfig modelConfigDto(PersistenceRecords.UserAiModelConfigRecord record) {
         return new PersistenceDtos.ModelConfig(record.getModelConfigId(), record.getChannelId(), record.getModelName(), record.getModelType(),
                 parseStringList(record.getCapabilities()), Boolean.TRUE.equals(record.getDefaultModel()), record.getSortOrder(), record.getCreditCost(),
-                thinkingEnabled(record.getThinkingEnabled()), reasoningEffort(record.getReasoningEffort()));
+                thinkingEnabled(record.getThinkingEnabled()), reasoningEffort(record.getReasoningEffort()),
+                normalizeCreditUnit(record.getModelType(), record.getCreditUnit()));
+    }
+
+    /**
+     * 规范化模型计费单位。
+     *
+     * @param modelType String 模型类型
+     * @param creditUnit String 请求中的计费单位
+     * @return String 规范化后的计费单位
+     * @throws BusinessException 计费单位不支持或非视频模型尝试按秒计费时抛出
+     */
+    private String normalizeCreditUnit(String modelType, String creditUnit) {
+        String value = StringUtils.hasText(creditUnit) ? creditUnit : CREDIT_UNIT_GENERATION;
+        if (!Set.of(CREDIT_UNIT_GENERATION, CREDIT_UNIT_SECOND).contains(value)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "积分计费单位只支持generation、second");
+        }
+        if (!"video".equals(modelType) && CREDIT_UNIT_SECOND.equals(value)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "只有视频模型可以按秒计费");
+        }
+        return value;
     }
 
     /**

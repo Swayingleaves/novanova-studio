@@ -2,7 +2,7 @@
 
 import type { ObjectStorageConfig, ObjectStorageFile } from "@/shared/types/object-storage";
 import { getAuthToken, useUserStore, type ServerUserProfile } from "@/features/auth/stores/use-user-store";
-import type { ApiCallFormat } from "@/features/settings/stores/use-config-store";
+import type { ApiCallFormat, ModelCreditUnit } from "@/features/settings/stores/use-config-store";
 
 type ApiResponse<T> = {
     code: number;
@@ -130,7 +130,7 @@ export type GenerationStyleOptionListResponse = {
 };
 
 export type ServerAiModelList = {
-    models: Array<{ value: string; label: string; capability: string; provider: string; apiFormat: ApiCallFormat; defaultModel: boolean; creditCost: number }>;
+    models: Array<{ value: string; label: string; capability: string; provider: string; apiFormat: ApiCallFormat; defaultModel: boolean; creditCost: number; creditUnit: ModelCreditUnit }>;
     imageModels: string[];
     videoModels: string[];
     textModels: string[];
@@ -192,6 +192,7 @@ export type ServerModelConfig = {
     defaultModel: boolean;
     sortOrder: number;
     creditCost: number;
+    creditUnit: ModelCreditUnit;
     thinkingEnabled: boolean;
     reasoningEffort: "high" | "max";
 };
@@ -774,7 +775,7 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "thinkingEnabled" | "reasoningEffort">) {
+export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort">) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 

@@ -201,8 +201,11 @@ public final class PersistenceRecords {
         /** 排序值 */
         private Integer sortOrder;
 
-        /** 单次生成消耗积分 */
+        /** 当前计费单位对应的积分单价 */
         private Integer creditCost;
+
+        /** 积分计费单位：generation按次，second按视频秒数 */
+        private String creditUnit;
 
         /** 是否开启思考模式 */
         private Boolean thinkingEnabled;

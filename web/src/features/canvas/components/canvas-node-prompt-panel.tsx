@@ -8,7 +8,7 @@ import { ModelPicker } from "@/features/settings/components/model-picker";
 import { defaultConfig, normalizeModelOptionValue, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 import { normalizeImageGenerationCount } from "@/features/generation/components/image-settings-panel";
 import { normalizeVideoGenerationCount } from "@/features/generation/components/video-settings-panel";
-import { CreditCostDisplay, requestCreditCost } from "@/features/generation/constants/credits";
+import { getModelCreditUnit, isPositiveVideoSeconds, CreditCostDisplay, requestCreditCost } from "@/features/generation/constants/credits";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptPicker } from "./canvas-prompt-picker";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
@@ -74,7 +74,15 @@ export function CanvasNodePromptPanel({
         if (isEditingExistingContent) return "";
         return buildInitialPrompt(mentionReferences);
     });
-    const creditCost = requestCreditCost({ modelCosts: config.modelCosts, model: config.model, taskType: mode, count: mode === "image" || mode === "video" ? config.count : 1 });
+    const creditCost = requestCreditCost({
+        modelCosts: config.modelCosts,
+        model: config.model,
+        taskType: mode,
+        count: mode === "image" || mode === "video" ? config.count : 1,
+        seconds: mode === "video" ? config.videoSeconds : undefined,
+    });
+    const requiresExplicitVideoSeconds = mode === "video"
+        && getModelCreditUnit(config.modelCosts, config.model, "video") === "second";
 
     useEffect(() => {
         setSelectedStyles((persistedSnapshots || []).map((style) => ({ id: style.id, name: style.name, generationType: style.generationType })));
@@ -165,6 +173,10 @@ export function CanvasNodePromptPanel({
     const submit = () => {
         const text = prompt.trim();
         if (!text || isRunning || isPromptGenerating) return;
+        if (requiresExplicitVideoSeconds && !isPositiveVideoSeconds(config.videoSeconds)) {
+            message.error("按秒计费的视频模型必须选择具体时长，不能使用智能时长");
+            return;
+        }
         const styleIds = selectedStyles.map((style) => style.id);
         const styleSnapshots = persistedSnapshots?.filter((snapshot) => styleIds.includes(snapshot.id)) || [];
         onGenerate(node.id, mode, formatPromptReferenceLabels(text, requiredLabels), styleIds, styleSnapshots.length === styleIds.length ? styleSnapshots : undefined);
