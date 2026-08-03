@@ -1,15 +1,28 @@
+<p align="right"><b>简体中文</b> · <a href="README.en.md">English</a></p>
+
 <p align="center">
   <img src="logo/novanovastudio.png" width="128" alt="Novanova Studio logo">
 </p>
 
 <h1 align="center">Novanova Studio</h1>
 
+## 联系我
+- 商业授权
+- 技术支持
+
+<p align="center">
+  <img src="github_images/wechat_me.png" width="200">
+  &nbsp;&nbsp;&nbsp;
+  <img src="github_images/wechat_group.png" width="200">
+</p>
+
+
 <p align="center">
   AI Agent 驱动的视觉创作工作台：在一个持续保留上下文的空间里完成构思、生成、编辑、编排与沉淀。
 </p>
 
 <p align="center">
-  <a href="https://www.novanovastudio.cn/">>>>>在线体验<<<<<</a>
+  <a href="https://www.novanovastudio.cn/">>>>>如果觉得部署麻烦、找便宜渠道麻烦->点我在线体验<<<<<</a>
 </p>
 
 <p align="center">
@@ -187,12 +200,3 @@ Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不�
 - [开源社区Linux Do](https://linux.do/)
 - [Agentscope-Java](https://java.agentscope.io/v2/en/intro.html)
 
-## 联系我
-- 商业授权
-- 技术支持
-
-<p align="center">
-  <img src="github_images/wechat_me.jpg" width="200">
-  &nbsp;&nbsp;&nbsp;
-  <img src="github_images/wechat_group.jpg" width="200">
-</p>
