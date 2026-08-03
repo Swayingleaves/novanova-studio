@@ -5,6 +5,7 @@ import { Slider } from "antd";
 
 import { ImageSettingsTheme } from "@/features/generation/components/image-settings-panel";
 import { agnesVideoMaxSeconds, agnesVideoRatioOptions, isAgnesVideoConfig, normalizeAgnesVideoRatio, normalizeAgnesVideoResolution, normalizeAgnesVideoSeconds } from "@/features/generation/lib/agnes-video";
+import { isMiniMaxH3VideoConfig, miniMaxH3ResolutionOptions, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio, normalizeMiniMaxH3Resolution, normalizeMiniMaxH3VideoSettings } from "@/features/generation/lib/minimax-h3-video";
 import { isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution } from "@/features/generation/lib/seedance-video";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
@@ -39,7 +40,7 @@ const RATIO_PRESETS: RatioPreset[] = [
     { value: "21:9", label: "21:9", width: 21, height: 9 },
 ];
 
-const RESOLUTION_PRESETS = ["480P", "720P", "1080P", "4K"] as const;
+const GENERIC_RESOLUTION_PRESETS = ["480P", "720P", "1080P", "4K"] as const;
 const VIDEO_COUNT_PRESETS = [1, 2, 4] as const;
 const AGNES_RATIOS = new Set<string>(agnesVideoRatioOptions.map((item) => item.value));
 const GENERIC_SIZE_BY_RATIO: Record<RatioPreset["value"], string> = {
@@ -65,15 +66,25 @@ export function VideoSettingsPanel({
     const resolved = resolveModelRequestConfig(config, config.videoModel || config.model);
     const seedance = isSeedanceVideoConfig(resolved);
     const agnes = isAgnesVideoConfig(resolved);
+    const miniMaxH3 = isMiniMaxH3VideoConfig(resolved);
     const model = modelOptionName(resolved.model || resolved.videoModel);
-    const ratio = resolveRatio(resolved.size, seedance, agnes);
-    const resolution = resolveResolution(resolved.vquality, model, seedance, agnes);
-    const durationRange = resolveDurationRange(resolved, seedance, agnes);
-    const seconds = resolveSeconds(resolved, seedance, agnes, durationRange);
+    const ratio = resolveRatio(resolved.size, seedance, agnes, miniMaxH3);
+    const resolution = resolveResolution(resolved.vquality, model, seedance, agnes, miniMaxH3);
+    const resolutionPresets = miniMaxH3 ? miniMaxH3ResolutionOptions : GENERIC_RESOLUTION_PRESETS;
+    const durationRange = resolveDurationRange(resolved, seedance, agnes, miniMaxH3);
+    const seconds = resolveSeconds(resolved, seedance, agnes, miniMaxH3, durationRange);
     const [durationDraft, setDurationDraft] = useState(seconds);
     const count = normalizeVideoGenerationCount(config.canvasVideoCount);
 
     useEffect(() => setDurationDraft(seconds), [seconds]);
+
+    useEffect(() => {
+        if (!miniMaxH3) return;
+        const normalized = normalizeMiniMaxH3VideoSettings(config.vquality, config.size, config.videoSeconds);
+        if (normalized.vquality !== config.vquality) onConfigChange("vquality", normalized.vquality);
+        if (normalized.size !== config.size) onConfigChange("size", normalized.size);
+        if (normalized.videoSeconds !== config.videoSeconds) onConfigChange("videoSeconds", normalized.videoSeconds);
+    }, [config.size, config.videoSeconds, config.vquality, miniMaxH3, onConfigChange]);
 
     const commitDuration = (value: number) => {
         const normalized = String(normalizeDurationDraft(String(value), durationRange));
@@ -82,7 +93,7 @@ export function VideoSettingsPanel({
     };
 
     const updateRatio = (value: RatioPreset["value"]) => {
-        onConfigChange("size", seedance || agnes ? value : GENERIC_SIZE_BY_RATIO[value]);
+        onConfigChange("size", seedance || agnes || miniMaxH3 ? value : GENERIC_SIZE_BY_RATIO[value]);
     };
 
     return (
@@ -93,7 +104,7 @@ export function VideoSettingsPanel({
                 <Field label="比例" theme={theme}>
                     <div className="grid grid-cols-5 gap-2">
                         {RATIO_PRESETS.map((preset) => {
-                            const disabled = !supportsRatio(preset.value, seedance, agnes);
+                            const disabled = !supportsRatio(preset.value, seedance, agnes, miniMaxH3);
                             return (
                                 <RatioButton
                                     key={preset.value}
@@ -109,19 +120,21 @@ export function VideoSettingsPanel({
                 </Field>
 
                 <Field label="清晰度" theme={theme}>
-                    <div className="grid grid-cols-4 gap-2">
-                        {RESOLUTION_PRESETS.map((item) => {
-                            const disabled = item === "4K" || (item === "1080P" && seedance && isSeedanceFastModel(model));
+                    <div className={`grid gap-2 ${miniMaxH3 ? "grid-cols-2" : "grid-cols-4"}`}>
+                        {resolutionPresets.map((item) => {
+                            const displayItem = miniMaxH3 ? item.toUpperCase() : item;
+                            const disabled = !miniMaxH3 && (item === "4K" || (item === "1080P" && seedance && isSeedanceFastModel(model)));
+                            const disabledReason = item === "4K" ? "当前视频模型不支持 4K" : "当前 fast 模型不支持 1080P";
                             return (
                                 <OptionButton
                                     key={item}
-                                    active={resolution === item}
+                                    active={resolution === displayItem}
                                     disabled={disabled}
-                                    disabledReason={item === "4K" ? "当前视频模型不支持 4K" : "当前 fast 模型不支持 1080P"}
+                                    disabledReason={disabledReason}
                                     theme={theme}
                                     onClick={() => onConfigChange("vquality", item.toLowerCase())}
                                 >
-                                    {item}
+                                    {displayItem}
                                 </OptionButton>
                             );
                         })}
@@ -230,9 +243,10 @@ function RatioGlyph({ width, height, color }: { width: number; height: number; c
     );
 }
 
-function resolveRatio(size: string, seedance: boolean, agnes: boolean): RatioPreset["value"] {
+function resolveRatio(size: string, seedance: boolean, agnes: boolean, miniMaxH3: boolean): RatioPreset["value"] {
     if (seedance) return normalizeSeedanceRatio(size) as RatioPreset["value"];
     if (agnes) return normalizeAgnesVideoRatio(size);
+    if (miniMaxH3) return normalizeMiniMaxH3Ratio(size);
     if (size === "auto") return "adaptive";
     const matched = Object.entries(GENERIC_SIZE_BY_RATIO).find(([, value]) => value === size)?.[0];
     if (matched) return matched as RatioPreset["value"];
@@ -241,25 +255,25 @@ function resolveRatio(size: string, seedance: boolean, agnes: boolean): RatioPre
     return nearestRatio(Number(dimensions[1]) / Number(dimensions[2]));
 }
 
-function resolveResolution(value: string, model: string, seedance: boolean, agnes: boolean): (typeof RESOLUTION_PRESETS)[number] {
-    const normalized = seedance ? normalizeSeedanceResolution(value, model) : agnes ? normalizeAgnesVideoResolution(value) : `${normalizeVideoResolutionValue(value)}p`;
+function resolveResolution(value: string, model: string, seedance: boolean, agnes: boolean, miniMaxH3: boolean): string {
+    const normalized = miniMaxH3 ? normalizeMiniMaxH3Resolution(value) : seedance ? normalizeSeedanceResolution(value, model) : agnes ? normalizeAgnesVideoResolution(value) : `${normalizeVideoResolutionValue(value)}p`;
     const upper = normalized.toUpperCase();
-    return RESOLUTION_PRESETS.includes(upper as (typeof RESOLUTION_PRESETS)[number]) ? upper as (typeof RESOLUTION_PRESETS)[number] : "720P";
+    return miniMaxH3 || GENERIC_RESOLUTION_PRESETS.includes(upper as (typeof GENERIC_RESOLUTION_PRESETS)[number]) ? upper : "720P";
 }
 
-function resolveDurationRange(config: AiConfig, seedance: boolean, agnes: boolean) {
-    if (seedance) return { min: 4, max: 15 };
+function resolveDurationRange(config: AiConfig, seedance: boolean, agnes: boolean, miniMaxH3: boolean) {
+    if (seedance || miniMaxH3) return { min: 4, max: 15 };
     if (agnes) return { min: 1, max: Math.min(15, Math.floor(agnesVideoMaxSeconds(config.vquality))) };
     return { min: 1, max: 15 };
 }
 
-function resolveSeconds(config: AiConfig, seedance: boolean, agnes: boolean, range: { min: number; max: number }) {
-    const raw = seedance ? normalizeSeedanceDuration(config.videoSeconds) : agnes ? Number(normalizeAgnesVideoSeconds(config.videoSeconds, config.vquality)) : Number(config.videoSeconds || 6);
+function resolveSeconds(config: AiConfig, seedance: boolean, agnes: boolean, miniMaxH3: boolean, range: { min: number; max: number }) {
+    const raw = miniMaxH3 ? normalizeMiniMaxH3Duration(config.videoSeconds) : seedance ? normalizeSeedanceDuration(config.videoSeconds) : agnes ? Number(normalizeAgnesVideoSeconds(config.videoSeconds, config.vquality)) : Number(config.videoSeconds || 6);
     return Math.max(range.min, Math.min(range.max, raw));
 }
 
-function supportsRatio(ratio: RatioPreset["value"], seedance: boolean, agnes: boolean) {
-    if (seedance) return true;
+function supportsRatio(ratio: RatioPreset["value"], seedance: boolean, agnes: boolean, miniMaxH3: boolean) {
+    if (seedance || miniMaxH3) return true;
     if (agnes) return AGNES_RATIOS.has(ratio);
     return true;
 }
@@ -283,6 +297,9 @@ export function normalizeVideoGenerationCount(value: string | number): 1 | 2 | 4
 }
 
 export function videoResolutionLabel(value: string): string {
+    const normalizedValue = value.trim().toLowerCase();
+    if (normalizedValue === "2k") return "2K";
+    if (normalizedValue === "768p" || normalizedValue === "768") return "768P";
     const normalized = normalizeVideoResolutionValue(value);
     return normalized.toUpperCase() === "4K" ? "4K" : `${normalized}p`;
 }
@@ -297,6 +314,7 @@ export function videoSizeLabel(value: string): string {
 
 export function videoSecondsLabel(value: string, config?: AiConfig): string {
     if (String(value).trim() === "-1") return "智能";
+    if (config && isMiniMaxH3VideoConfig(config)) return `${normalizeMiniMaxH3Duration(value)}s`;
     if (config && isAgnesVideoConfig(config)) return `${normalizeAgnesVideoSeconds(value, config.vquality)}s`;
     return `${Math.max(1, Math.min(15, Math.floor(Number(value) || 6)))}s`;
 }

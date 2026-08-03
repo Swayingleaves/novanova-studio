@@ -11,7 +11,7 @@ import type { ObjectStorageConfig } from "@/shared/types/object-storage";
 import { normalizeChannelName } from "../lib/channel-name";
 import { refreshModelConfigurationSnapshot } from "../lib/model-configuration-refresh";
 
-export type ApiCallFormat = "openai" | "gemini" | "agnes" | "anthropic" | "seedance";
+export type ApiCallFormat = "openai" | "gemini" | "agnes" | "anthropic" | "seedance" | "minimax";
 export type ModelCapability = "image" | "video" | "text";
 export type ModelCapabilityConfig = { model: string; capabilities: string[] };
 
@@ -298,6 +298,7 @@ export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
     if (apiFormat === "gemini") return "https://generativelanguage.googleapis.com/v1beta";
     if (apiFormat === "anthropic") return "https://api.anthropic.com/v1";
     if (apiFormat === "seedance") return "https://ark.cn-beijing.volces.com/api/v3";
+    if (apiFormat === "minimax") return "https://api.minimaxi.com";
     if (apiFormat === "agnes") return "";
     return "https://api.openai.com/v1";
 }
@@ -506,7 +507,7 @@ function parseModelOption(value: string) {
 }
 
 function normalizeApiFormat(value: unknown): ApiCallFormat {
-    if (value === "gemini" || value === "agnes" || value === "anthropic" || value === "seedance") return value;
+    if (value === "gemini" || value === "agnes" || value === "anthropic" || value === "seedance" || value === "minimax") return value;
     return "openai";
 }
 

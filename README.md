@@ -6,17 +6,6 @@
 
 <h1 align="center">Novanova Studio</h1>
 
-## 联系我
-- 商业授权
-- 技术支持
-
-<p align="center">
-  <img src="github_images/wechat_me.png" width="200">
-  &nbsp;&nbsp;&nbsp;
-  <img src="github_images/wechat_group.png" width="200">
-</p>
-
-
 <p align="center">
   AI Agent 驱动的视觉创作工作台：在一个持续保留上下文的空间里完成构思、生成、编辑、编排与沉淀。
 </p>
@@ -31,6 +20,29 @@
 <p align="center">
   <img src="github_images/nova-s2.png" alt="Novanova Studio 画布截图">
 </p>
+
+## 联系我
+- 商业授权
+- 技术支持
+
+<table align="center">
+  <thead>
+    <tr>
+      <th align="center">联系作者</th>
+      <th align="center">加入交流群</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center" width="33%">
+        <img src="github_images/wechat_me.png" alt="作者微信二维码" width="220" />
+      </td>
+      <td align="center" width="33%">
+        <img src="github_images/wechat_group.png" alt="交流群二维码" width="220" />
+      </td>
+    </tr>
+  </tbody>
+</table>
 
 ## ✨ 项目定位
 

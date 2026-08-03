@@ -68,6 +68,7 @@ const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
     { label: "Agnes", value: "agnes" },
     { label: "Anthropic", value: "anthropic" },
     { label: "Seedance", value: "seedance" },
+    { label: "MiniMax", value: "minimax" },
 ];
 
 const objectStorageProviderOptions: Array<{ label: string; value: ObjectStorageProvider }> = [
@@ -643,7 +644,13 @@ export function AppConfigModal() {
                                                             <Button size="small" icon={collapsed ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />} onClick={() => toggleChannelCollapsed(channel.id)}>
                                                                 {collapsed ? "展开" : "收起"}
                                                             </Button>
-                                                            <Button size="small" disabled={isSaving} loading={loadingChannelId === channel.id} onClick={() => void refreshChannelModels(channel)}>
+                                                            <Button
+                                                                size="small"
+                                                                disabled={isSaving || channel.apiFormat === "minimax"}
+                                                                loading={loadingChannelId === channel.id}
+                                                                title={channel.apiFormat === "minimax" ? "MiniMax 请手动配置 MiniMax-H3" : undefined}
+                                                                onClick={() => void refreshChannelModels(channel)}
+                                                            >
                                                                 拉取模型
                                                             </Button>
                                                             <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={isSaving} onClick={() => removeChannel(channel.id)} />
@@ -669,7 +676,7 @@ export function AppConfigModal() {
                                                                     showSearch
                                                                     allowClear
                                                                     maxTagCount="responsive"
-                                                                    placeholder="输入模型名，或点击拉取模型"
+                                                                    placeholder={channel.apiFormat === "minimax" ? "请输入 MiniMax-H3" : "输入模型名，或点击拉取模型"}
                                                                     value={channel.models}
                                                                     disabled={isSaving}
                                                                     onChange={(models) => updateDraftChannel(channel.id, { models })}
@@ -1006,6 +1013,7 @@ function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "gemini") return "Gemini";
     if (apiFormat === "anthropic") return "Anthropic";
     if (apiFormat === "seedance") return "Seedance";
+    if (apiFormat === "minimax") return "MiniMax";
     return "OpenAI";
 }
 
