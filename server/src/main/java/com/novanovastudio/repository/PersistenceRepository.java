@@ -403,7 +403,7 @@ public class PersistenceRepository {
                        capabilities::text AS capabilities, is_default, sort_order, credit_cost, credit_unit,
                        thinking_enabled, reasoning_effort, created_at, updated_at
                 FROM platform_ai_model_configs
-                ORDER BY model_type, sort_order, id
+                ORDER BY created_at DESC, id DESC
                 """).map((row, metadata) -> RowMappers.userAiModelConfig(row)).all();
     }
 
@@ -502,7 +502,7 @@ public class PersistenceRepository {
                        bucket, region, endpoint, directory, public_base_url, is_default, last_tested_at, status, created_at, updated_at
                 FROM platform_object_storage_configs
                 WHERE status = 1
-                ORDER BY is_default DESC, updated_at DESC, id ASC
+                ORDER BY created_at DESC, id DESC
                 """).map((row, metadata) -> RowMappers.userObjectStorage(row)).all();
     }
 
