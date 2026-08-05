@@ -47,6 +47,9 @@ public class AiMediaSupport {
         }
         String url = AiTaskParameterReader.firstNonEmpty(item.getString("url"));
         if (StringUtils.hasText(url)) {
+            if (isDataUrl(url)) {
+                return Mono.fromSupplier(() -> dataUrlBinary(url, "image/png"));
+            }
             return aiHttpClient.downloadRemoteBinary(url, "image/png");
         }
         return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "图片接口未返回b64_json或url"));
@@ -104,7 +107,7 @@ public class AiMediaSupport {
     public Mono<GeneratedBinary> resolveReferenceBinary(Long userId, AiTaskDtos.AiTaskMediaReference reference, String defaultMimeType) {
         String mimeType = AiTaskParameterReader.firstNonEmpty(reference.mimeType(), defaultMimeType);
         return resolveReferenceUrl(userId, reference).flatMap(url -> {
-            if (url.startsWith("data:")) {
+            if (isDataUrl(url)) {
                 return Mono.fromSupplier(() -> dataUrlBinary(url, mimeType));
             }
             if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -164,7 +167,7 @@ public class AiMediaSupport {
     public GeneratedBinary dataUrlBinary(String url, String defaultMimeType) {
         int commaIndex = url.indexOf(',');
         if (commaIndex < 0 || !url.substring(0, commaIndex).contains(";base64")) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "参考媒体data URL必须是base64格式");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "data URL必须是base64格式");
         }
         String header = url.substring(5, commaIndex);
         String mimeType = AiTaskParameterReader.firstNonEmpty(header.split(";")[0], defaultMimeType);
@@ -193,6 +196,16 @@ public class AiMediaSupport {
      */
     public boolean isHttpUrl(String url) {
         return StringUtils.hasText(url) && (url.startsWith("http://") || url.startsWith("https://"));
+    }
+
+    /**
+     * 判断是否为data URL。
+     *
+     * @param url String 媒体地址
+     * @return boolean 是否为data URL
+     */
+    private boolean isDataUrl(String url) {
+        return StringUtils.hasText(url) && url.regionMatches(true, 0, "data:", 0, 5);
     }
 
     /**
