@@ -227,6 +227,19 @@ class CreationPlanValidatorTest {
     }
 
     /**
+     * 主Agent通过用户原文引用提交任务时，服务端回填前允许提示词为空。
+     */
+    @Test
+    void shouldAllowSourcePromptIdBeforeServerResolvesPrompt() {
+        CreationTask task = new CreationTask("image-task", "image", "generate", "", "current", List.of(), null, Map.of());
+
+        CreationPlan result = validator.validate(plan(CreationEntrySource.IMAGE_PAGE, List.of(task)),
+                CreationEntrySource.IMAGE_PAGE, imageSettings());
+
+        Assertions.assertEquals("current", result.tasks().getFirst().sourcePromptId());
+    }
+
+    /**
      * 图片页多任务必须转换为画布引导，不能进入执行器。
      */
     @Test

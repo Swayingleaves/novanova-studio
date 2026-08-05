@@ -98,7 +98,7 @@ public class CreationPlanValidator {
             if (!allowedTaskType(entrySource, task.taskType())) {
                 throw invalid("当前页面不允许执行该类型的生成任务");
             }
-            if (!StringUtils.hasText(task.prompt())) {
+            if (!StringUtils.hasText(task.prompt()) && !StringUtils.hasText(task.sourcePromptId())) {
                 throw invalid("Agent计划任务缺少提示词");
             }
             if (CreationEntrySource.CANVAS.equals(entrySource)) {
