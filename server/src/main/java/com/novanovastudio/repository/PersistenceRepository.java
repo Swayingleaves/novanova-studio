@@ -317,7 +317,7 @@ public class PersistenceRepository {
                        models::text AS models, sort_order, status, created_at, updated_at
                 FROM platform_ai_channels
                 WHERE status = 1
-                ORDER BY sort_order ASC, id ASC
+                ORDER BY created_at DESC, id DESC
                 """).map((row, metadata) -> RowMappers.userAiChannel(row)).all();
     }
 
