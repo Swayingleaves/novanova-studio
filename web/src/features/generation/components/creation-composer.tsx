@@ -103,14 +103,14 @@ export function CreationComposer({ agentLabel = "Novanova Agent", value, placeho
         <Tooltip key={action.key} title={action.label}>
             <Button
                 size="small"
-                className={`creation-composer-action${action.iconOnly ? " creation-composer-action-icon" : ""}`}
+                className={["creation-composer-action", action.iconOnly ? "creation-composer-action-icon" : "", action.className].filter(Boolean).join(" ")}
                 icon={action.icon}
                 disabled={action.disabled}
                 loading={action.loading}
                 onClick={action.onClick}
                 aria-label={action.iconOnly ? action.label : undefined}
             >
-                {action.iconOnly ? null : action.label}
+                {action.iconOnly ? null : <span className="creation-composer-action-label">{action.label}</span>}
             </Button>
         </Tooltip>
     );

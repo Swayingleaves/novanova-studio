@@ -201,7 +201,7 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
    * 使用 sendingRef 同步锁防止同一事件循环内重复提交（React setState 异步导致 isRunning 守卫失效）。
    */
   const sendMessage = useCallback(
-    async (message: string, references?: { title: string; text: string }[], model?: string, history?: AgentChatHistoryMessage[]) => {
+    async (message: string, references?: { title: string; text: string }[], model?: string, history?: AgentChatHistoryMessage[], generationStyleIdsByType?: { image?: number[]; video?: number[] }) => {
       if (sendingRef.current) return;
       sendingRef.current = true;
       cancelRequestedRef.current = false;
@@ -213,7 +213,7 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
           canvasSnapshot: snapshotRef.current as unknown as Record<string, unknown>,
           references,
           history,
-          creationSettings: model ? { model } : undefined,
+          creationSettings: model || generationStyleIdsByType ? { model, generationStyleIdsByType } : undefined,
         });
         sessionIdRef.current = sessionId;
         if (cancelRequestedRef.current) {

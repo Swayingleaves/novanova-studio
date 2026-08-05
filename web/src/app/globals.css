@@ -256,6 +256,15 @@ html[data-theme="dark"] {
         color: var(--studio-text);
     }
 
+    html[data-theme="dark"] .model-picker-icon-monochrome {
+        background: color-mix(in srgb, var(--background) 78%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent);
+    }
+
+    html[data-theme="dark"] .model-picker-icon-monochrome img {
+        filter: invert(1);
+    }
+
     .studio-glass {
         background: var(--studio-glass);
         border: 1px solid var(--studio-line);
@@ -1306,6 +1315,23 @@ html[data-theme="dark"] {
 .creation-composer-action-icon.ant-btn {
     width: 36px;
     padding-inline: 0 !important;
+}
+
+.creation-composer-action-settings.ant-btn {
+    max-width: min(240px, 36vw);
+    min-width: 0;
+    overflow: hidden;
+}
+
+.creation-composer-action-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.creation-composer-action-settings .creation-composer-action-label {
+    flex: 1 1 auto;
 }
 
 .creation-composer-submit.ant-btn,

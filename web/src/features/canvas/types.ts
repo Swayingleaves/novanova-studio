@@ -1,5 +1,6 @@
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import type { CanvasBackgroundMode } from "@/shared/lib/canvas-theme";
+import type { GenerationStyleSnapshot } from "@/services/api/server";
 
 export interface CanvasViewTransform {
     x: number;
@@ -43,6 +44,7 @@ export interface CanvasAssistantMessage {
     meta?: string;
     detail?: unknown;
     references?: CanvasAssistantReference[];
+    generationStyles?: Array<{ id: number; name: string; generationType: "image" | "video" }>;
 }
 
 export interface CanvasAssistantSession {
@@ -148,6 +150,8 @@ export interface CanvasImageGenerationSettings {
     count: number;
     references: string[];
     referenceObjectStorages: ObjectStorageFile[];
+    generationStyleIds: number[];
+    generationStyleSnapshots: GenerationStyleSnapshot[];
 }
 
 export interface CanvasImageGrouping {
@@ -178,6 +182,8 @@ export interface CanvasVideoGenerationSettings {
     count: number;
     references: string[];
     referenceObjectStorages: ObjectStorageFile[];
+    generationStyleIds: number[];
+    generationStyleSnapshots: GenerationStyleSnapshot[];
 }
 
 interface CanvasNodeBase<Kind extends CanvasNodeKind> {

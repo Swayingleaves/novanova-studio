@@ -62,6 +62,24 @@ test("通用生成流程仅在autoRun为true时触发生成", () => {
     assert.deepEqual(runningExecution.result.data, { nodeId: "image-running-id", status: "running" });
 });
 
+test("自动生成操作携带服务端注入的风格快照", () => {
+    const snapshot = { id: 7, name: "电影感", generationType: "image", stylePrompt: "电影感提示词" } as const;
+    const execution = resolveCanvasAgentTool("canvas_generate_image", {
+        prompt: "城市夜景",
+        size: "16:9",
+        generationStyleSnapshots: [snapshot],
+    }, () => "styled-id");
+
+    assert.ok(execution);
+    assert.deepEqual(execution.ops[1], {
+        type: "run_generation",
+        nodeId: "image-styled-id",
+        mode: "image",
+        prompt: "城市夜景",
+        generationStyleSnapshots: [snapshot],
+    });
+});
+
 test("通用生成流程缺少明确模式时拒绝执行", () => {
     const execution = resolveCanvasAgentTool("canvas_create_generation_flow", {
         prompt: "没有模式",

@@ -414,57 +414,63 @@ public class AiHttpClient {
      * @return Mono<List<String>> 去重并排序后的模型名称
      */
     public Mono<List<String>> fetchChannelModels(String baseUrl, String apiKey, String apiFormat) {
-        return callBlocking(() -> {
+        return Mono.defer(() -> {
             String normalizedFormat = normalizeModelApiFormat(apiFormat);
-            URI uri = buildModelListUri(baseUrl, normalizedFormat);
-            if (!StringUtils.hasText(apiKey)) {
-                throw new BusinessException(ErrorCode.PARAM_MISSING, "API Key不能为空");
+            if ("minimax".equals(normalizedFormat)) {
+                return Mono.<List<String>>error(new BusinessException(ErrorCode.PARAM_INVALID,
+                        "MiniMax 渠道不支持自动拉取模型，请手动配置 MiniMax-H3"));
             }
-            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(uri)
-                    .timeout(Duration.ofSeconds(30))
-                    .header("Accept", "application/json")
-                    .GET();
-            String safeHeaders;
-            if ("gemini".equals(normalizedFormat)) {
-                requestBuilder.header("x-goog-api-key", apiKey.trim());
-                safeHeaders = "Accept=application/json, x-goog-api-key=***";
-            } else if ("anthropic".equals(normalizedFormat)) {
-                requestBuilder.header("x-api-key", apiKey.trim())
-                        .header("anthropic-version", "2023-06-01");
-                safeHeaders = "Accept=application/json, x-api-key=***, anthropic-version=2023-06-01";
-            } else {
-                requestBuilder.header("Authorization", "Bearer " + apiKey.trim());
-                safeHeaders = "Accept=application/json, Authorization=Bearer ***";
-            }
-            try {
-                log.info("渠道模型拉取请求: apiFormat={}, url={}, headers={}", normalizedFormat, uri, safeHeaders);
-                HttpResponse<String> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
-                String responseBody = response.body() == null ? "" : response.body();
-                String safeResponseBody = sanitizeModelResponse(responseBody, apiKey);
-                log.info("渠道模型拉取响应: apiFormat={}, url={}, status={}, body={}", normalizedFormat, uri,
-                        response.statusCode(), abbreviateModelResponse(safeResponseBody));
-                if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
-                            "拉取模型失败: HTTP " + response.statusCode() + "，" + readModelErrorMessage(safeResponseBody));
+            return callBlocking(() -> {
+                URI uri = buildModelListUri(baseUrl, normalizedFormat);
+                if (!StringUtils.hasText(apiKey)) {
+                    throw new BusinessException(ErrorCode.PARAM_MISSING, "API Key不能为空");
                 }
-                List<String> models;
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(uri)
+                        .timeout(Duration.ofSeconds(30))
+                        .header("Accept", "application/json")
+                        .GET();
+                String safeHeaders;
+                if ("gemini".equals(normalizedFormat)) {
+                    requestBuilder.header("x-goog-api-key", apiKey.trim());
+                    safeHeaders = "Accept=application/json, x-goog-api-key=***";
+                } else if ("anthropic".equals(normalizedFormat)) {
+                    requestBuilder.header("x-api-key", apiKey.trim())
+                            .header("anthropic-version", "2023-06-01");
+                    safeHeaders = "Accept=application/json, x-api-key=***, anthropic-version=2023-06-01";
+                } else {
+                    requestBuilder.header("Authorization", "Bearer " + apiKey.trim());
+                    safeHeaders = "Accept=application/json, Authorization=Bearer ***";
+                }
                 try {
-                    models = parseChannelModels(responseBody, normalizedFormat);
+                    log.info("渠道模型拉取请求: apiFormat={}, url={}, headers={}", normalizedFormat, uri, safeHeaders);
+                    HttpResponse<String> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
+                    String responseBody = response.body() == null ? "" : response.body();
+                    String safeResponseBody = sanitizeModelResponse(responseBody, apiKey);
+                    log.info("渠道模型拉取响应: apiFormat={}, url={}, status={}, body={}", normalizedFormat, uri,
+                            response.statusCode(), abbreviateModelResponse(safeResponseBody));
+                    if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                        throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
+                                "拉取模型失败: HTTP " + response.statusCode() + "，" + readModelErrorMessage(safeResponseBody));
+                    }
+                    List<String> models;
+                    try {
+                        models = parseChannelModels(responseBody, normalizedFormat);
+                    } catch (BusinessException exception) {
+                        throw new BusinessException(exception.getCode(), sanitizeModelResponse(exception.getMessage(), apiKey));
+                    }
+                    if (models.isEmpty()) {
+                        throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "渠道没有返回可用模型");
+                    }
+                    return models;
                 } catch (BusinessException exception) {
-                    throw new BusinessException(exception.getCode(), sanitizeModelResponse(exception.getMessage(), apiKey));
+                    throw exception;
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "拉取模型失败: 请求已中断");
+                } catch (Exception exception) {
+                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "拉取模型失败: " + exception.getMessage());
                 }
-                if (models.isEmpty()) {
-                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "渠道没有返回可用模型");
-                }
-                return models;
-            } catch (BusinessException exception) {
-                throw exception;
-            } catch (InterruptedException exception) {
-                Thread.currentThread().interrupt();
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "拉取模型失败: 请求已中断");
-            } catch (Exception exception) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "拉取模型失败: " + exception.getMessage());
-            }
+            });
         });
     }
 
@@ -559,7 +565,7 @@ public class AiHttpClient {
             throw new BusinessException(ErrorCode.PARAM_MISSING, "接口格式不能为空");
         }
         String normalizedFormat = apiFormat.trim().toLowerCase(Locale.ROOT);
-        Set<String> supportedFormats = Set.of("openai", "gemini", "anthropic", "agnes", "seedance");
+        Set<String> supportedFormats = Set.of("openai", "gemini", "anthropic", "agnes", "seedance", "minimax");
         if (!supportedFormats.contains(normalizedFormat)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "不支持的接口格式: " + normalizedFormat);
         }

@@ -46,6 +46,7 @@ import {
 import { useUserStore, type ServerUserProfile, type ServerUserRole } from "@/features/auth/stores/use-user-store";
 import { getHomepageTargetPath } from "@/features/homepage/api/homepage-showcases";
 import { adminCreditFilterKey, adminCreditUserLabel } from "./admin-credit-utils";
+import { CreditCardManagement } from "./components/credit-card-management";
 import {
     CREDIT_TRANSACTION_PAGE_SIZE,
     formatCredits,
@@ -94,6 +95,7 @@ export default function AdminSystemPage() {
                     items={[
                         { key: "users", label: "用户管理", children: <UserManagement /> },
                         { key: "credits", label: "积分消耗", children: <CreditConsumptionManagement /> },
+                        { key: "creditCards", label: "卡密管理", children: <CreditCardManagement /> },
                         { key: "notifications", label: "消息管理", children: <NotificationManagement /> },
                         { key: "prompts", label: "提示词库", children: <PromptManagement /> },
                         { key: "styles", label: "风格管理", children: <GenerationStyleManagement /> },

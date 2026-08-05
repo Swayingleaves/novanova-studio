@@ -4,6 +4,7 @@ import com.novanovastudio.agent.dto.CreationPlan;
 import com.novanovastudio.agent.dto.CreationSettings;
 import com.novanovastudio.agent.dto.CreationTask;
 import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.dto.GenerationStyleDtos;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Assertions;
@@ -60,6 +61,68 @@ class CreationPlanValidatorTest {
 
         Assertions.assertEquals(2, result.tasks().size());
         Assertions.assertSame(settings, result.creationSettings());
+    }
+
+    /**
+     * 画布按类型风格ID与历史快照不能同时提交。
+     */
+    @Test
+    void shouldRejectCanvasStyleIdsByTypeWithSnapshots() {
+        CreationPlan plan = plan(CreationEntrySource.CANVAS, List.of(
+                canvasGenerationTask("image-task", "image", "canvas_generate_image",
+                        Map.of("prompt", "一只小猫", "size", "16:9"))));
+        CreationSettings settings = new CreationSettings("image-model", "16:9", "2K", "high", 1, null, null,
+                null,
+                List.of(new GenerationStyleDtos.GenerationStyleSnapshot(7L, "电影感", "image", "电影感提示词")),
+                Map.of("image", List.of(7L)));
+
+        Assertions.assertThrows(BusinessException.class,
+                () -> validator.validate(plan, CreationEntrySource.CANVAS, settings));
+    }
+
+    /**
+     * 普通风格ID与画布按类型风格ID不能同时提交，避免其中一组被忽略。
+     */
+    @Test
+    void shouldRejectStyleIdsAndStyleIdsByTypeTogether() {
+        CreationPlan plan = plan(CreationEntrySource.CANVAS, List.of(
+                canvasGenerationTask("image-task", "image", "canvas_generate_image",
+                        Map.of("prompt", "一只小猫", "size", "16:9"))));
+        CreationSettings settings = new CreationSettings("image-model", "16:9", "2K", "high", 1, null, null,
+                List.of(7L), null, Map.of("image", List.of(8L)));
+
+        Assertions.assertThrows(BusinessException.class,
+                () -> validator.validate(plan, CreationEntrySource.CANVAS, settings));
+    }
+
+    /**
+     * 即使按类型风格字段为空，也不能与普通风格ID并存后被静默忽略。
+     */
+    @Test
+    void shouldRejectStyleIdsWithEmptyStyleIdsByTypeField() {
+        CreationPlan plan = plan(CreationEntrySource.CANVAS, List.of(
+                canvasGenerationTask("image-task", "image", "canvas_generate_image",
+                        Map.of("prompt", "一只小猫", "size", "16:9"))));
+        CreationSettings settings = new CreationSettings("image-model", "16:9", "2K", "high", 1, null, null,
+                List.of(7L), null, Map.of());
+
+        Assertions.assertThrows(BusinessException.class,
+                () -> validator.validate(plan, CreationEntrySource.CANVAS, settings));
+    }
+
+    /**
+     * 画布图片和视频风格总数超过三项时必须拒绝。
+     */
+    @Test
+    void shouldRejectMoreThanThreeCanvasStylesAcrossTypes() {
+        CreationPlan plan = plan(CreationEntrySource.CANVAS, List.of(
+                canvasGenerationTask("image-task", "image", "canvas_generate_image",
+                        Map.of("prompt", "一只小猫", "size", "16:9"))));
+        CreationSettings settings = new CreationSettings("image-model", "16:9", "2K", "high", 1, null, null,
+                null, null, Map.of("image", List.of(1L, 2L), "video", List.of(3L, 4L)));
+
+        Assertions.assertThrows(BusinessException.class,
+                () -> validator.validate(plan, CreationEntrySource.CANVAS, settings));
     }
 
     /**

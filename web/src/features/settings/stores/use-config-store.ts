@@ -11,8 +11,9 @@ import type { ObjectStorageConfig } from "@/shared/types/object-storage";
 import { normalizeChannelName } from "../lib/channel-name";
 import { refreshModelConfigurationSnapshot } from "../lib/model-configuration-refresh";
 
-export type ApiCallFormat = "openai" | "gemini" | "agnes" | "anthropic" | "seedance";
+export type ApiCallFormat = "openai" | "gemini" | "agnes" | "anthropic" | "seedance" | "minimax";
 export type ModelCapability = "image" | "video" | "text";
+export type ModelCreditUnit = "generation" | "second";
 export type ModelCapabilityConfig = { model: string; capabilities: string[] };
 
 export const MODEL_CAPABILITY_OPTIONS: Record<ModelCapability, Array<{ value: string; label: string }>> = {
@@ -58,7 +59,7 @@ export type AiConfig = {
     videoWatermark: string;
     systemPrompt: string;
     models: string[];
-    modelCosts: Array<{ model: string; taskType: ModelCapability; credits: number }>;
+    modelCosts: Array<{ model: string; taskType: ModelCapability; credits: number; unit: ModelCreditUnit }>;
     imageModels: string[];
     videoModels: string[];
     textModels: string[];
@@ -173,7 +174,7 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
         }
         const [channelResult, modelResult, storageResult] = await Promise.all([listChannels().catch(() => null), listModelConfigs().catch(() => null), listObjectStorages().catch(() => null)]);
         const channels = normalizeChannels(channelResult?.channels || defaultChannels);
-        const modelConfigs = modelResult?.modelConfigs || [];
+        const modelConfigs = (modelResult?.modelConfigs || []).map(normalizeServerModelConfig);
         const objectStorages = normalizeObjectStorages(storageResult?.objectStorages || [defaultObjectStorage]);
         const activeObjectStorageId = resolveActiveObjectStorageId(objectStorages);
         set({
@@ -264,7 +265,7 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
             set((state) => {
                 const normalizedChannels = normalizeChannels(channels);
                 return {
-                    modelConfigs: modelConfigurations,
+                    modelConfigs: modelConfigurations.map(normalizeServerModelConfig),
                     config: configFromModelConfigs(normalizedChannels, modelConfigurations, state.config),
                 };
             });
@@ -298,6 +299,7 @@ export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
     if (apiFormat === "gemini") return "https://generativelanguage.googleapis.com/v1beta";
     if (apiFormat === "anthropic") return "https://api.anthropic.com/v1";
     if (apiFormat === "seedance") return "https://ark.cn-beijing.volces.com/api/v3";
+    if (apiFormat === "minimax") return "https://api.minimaxi.com";
     if (apiFormat === "agnes") return "";
     return "https://api.openai.com/v1";
 }
@@ -407,6 +409,7 @@ export function configFromModelConfigs(channels: ModelChannel[], modelConfigs: S
             model: `${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`,
             taskType: item.modelType,
             credits: item.creditCost,
+            unit: normalizeModelCreditUnit(item.creditUnit, item.modelType),
         })),
     });
 }
@@ -439,7 +442,12 @@ function configFromServerModels(modelList: ServerAiModelList | null) {
         imageModel: defaultByType("image"),
         videoModel: defaultByType("video"),
         textModel: defaultByType("text"),
-        modelCosts: models.map((model) => ({ model: model.value, taskType: model.capability as ModelCapability, credits: model.creditCost })),
+        modelCosts: models.map((model) => ({
+            model: model.value,
+            taskType: model.capability as ModelCapability,
+            credits: model.creditCost,
+            unit: normalizeModelCreditUnit(model.creditUnit, model.capability as ModelCapability),
+        })),
     });
 }
 
@@ -506,8 +514,18 @@ function parseModelOption(value: string) {
 }
 
 function normalizeApiFormat(value: unknown): ApiCallFormat {
-    if (value === "gemini" || value === "agnes" || value === "anthropic" || value === "seedance") return value;
+    if (value === "gemini" || value === "agnes" || value === "anthropic" || value === "seedance" || value === "minimax") return value;
     return "openai";
+}
+
+/** 归一化模型计费单位，历史配置和非视频模型统一按次计费。 */
+export function normalizeModelCreditUnit(value: unknown, modelType: ModelCapability): ModelCreditUnit {
+    return modelType === "video" && value === "second" ? "second" : "generation";
+}
+
+/** 归一化服务端模型配置，兼容未返回计费单位的历史接口。 */
+export function normalizeServerModelConfig(config: ServerModelConfig): ServerModelConfig {
+    return { ...config, creditUnit: normalizeModelCreditUnit(config.creditUnit, config.modelType) };
 }
 
 function normalizeApiBaseUrl(baseUrl: string) {

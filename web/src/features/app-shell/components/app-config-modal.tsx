@@ -68,6 +68,7 @@ const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
     { label: "Agnes", value: "agnes" },
     { label: "Anthropic", value: "anthropic" },
     { label: "Seedance", value: "seedance" },
+    { label: "MiniMax", value: "minimax" },
 ];
 
 const objectStorageProviderOptions: Array<{ label: string; value: ObjectStorageProvider }> = [
@@ -134,6 +135,7 @@ export function AppConfigModal() {
     const [testedObjectStorageId, setTestedObjectStorageId] = useState("");
     const [objectStorageTestUrl, setObjectStorageTestUrl] = useState("");
     const [collapsedChannelIds, setCollapsedChannelIds] = useState<string[]>([]);
+    const [collapsedModelCapabilityTypes, setCollapsedModelCapabilityTypes] = useState<ModelCapability[]>([]);
     const [collapsedObjectStorageIds, setCollapsedObjectStorageIds] = useState<string[]>([]);
     const [channelBaseline, setChannelBaseline] = useState<ModelChannel[]>([]);
     const [draftChannels, setDraftChannels] = useState<ModelChannel[]>([]);
@@ -156,19 +158,20 @@ export function AppConfigModal() {
         const configs = cloneModelConfigs(useConfigStore.getState().modelConfigs);
         setModelConfigBaseline(configs);
         setDraftModelConfigs(cloneModelConfigs(configs));
+        setCollapsedModelCapabilityTypes(capabilityGroups.map((group) => group.capability));
     }, []);
 
-    const resetObjectStorageDraft = useCallback((resetCollapsed = false) => {
+    const resetObjectStorageDraft = useCallback(() => {
         const storages = cloneObjectStorages(useConfigStore.getState().objectStorages);
         setObjectStorageBaseline(storages);
         setDraftObjectStorages(cloneObjectStorages(storages));
-        if (resetCollapsed) setCollapsedObjectStorageIds(storages.slice(1).map((storage) => storage.id));
+        setCollapsedObjectStorageIds(storages.map((storage) => storage.id));
     }, []);
 
     const resetAllDrafts = useCallback(() => {
         resetChannelDraft(true);
         resetModelConfigDraft();
-        resetObjectStorageDraft(true);
+        resetObjectStorageDraft();
         setTestedObjectStorageId("");
         setObjectStorageTestUrl("");
     }, [resetChannelDraft, resetModelConfigDraft, resetObjectStorageDraft]);
@@ -311,7 +314,10 @@ export function AppConfigModal() {
                 const [channelId, modelName] = value.split("::");
                 return existing.get(value) || createDraftModelConfig(channelId, modelName, group.capability);
             });
-            return [...configs.filter((configItem) => configItem.modelType !== group.capability), ...next];
+            const added = next.filter((configItem) => !existing.has(modelConfigValue(configItem))).reverse();
+            const selected = new Set(values);
+            const retained = configs.filter((configItem) => configItem.modelType === group.capability && selected.has(modelConfigValue(configItem)));
+            return [...configs.filter((configItem) => configItem.modelType !== group.capability), ...added, ...retained];
         });
     };
 
@@ -331,8 +337,18 @@ export function AppConfigModal() {
         setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType && modelConfigValue(configItem) === model ? { ...configItem, creditCost } : configItem)));
     };
 
+    const updateModelCreditUnit = (modelType: ModelCapability, model: string, creditUnit: ServerModelConfig["creditUnit"]) => {
+        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType && modelConfigValue(configItem) === model
+            ? { ...configItem, creditUnit: modelType === "video" && creditUnit === "second" ? "second" : "generation" }
+            : configItem)));
+    };
+
     const updateModelThinkingConfiguration = (model: string, patch: Pick<ServerModelConfig, "thinkingEnabled"> | Pick<ServerModelConfig, "reasoningEffort">) => {
         setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === "text" && modelConfigValue(configItem) === model ? { ...configItem, ...patch } : configItem)));
+    };
+
+    const toggleModelCapabilityCollapsed = (modelType: ModelCapability) => {
+        setCollapsedModelCapabilityTypes((types) => (types.includes(modelType) ? types.filter((type) => type !== modelType) : [...types, modelType]));
     };
 
     const setDefaultDraftModel = (modelType: ModelCapability, model: string) => {
@@ -364,6 +380,7 @@ export function AppConfigModal() {
                     capabilities: configItem.capabilities,
                     sortOrder: configItem.sortOrder,
                     creditCost: configItem.creditCost,
+                    creditUnit: configItem.creditUnit,
                     thinkingEnabled: configItem.thinkingEnabled,
                     reasoningEffort: configItem.reasoningEffort,
                 });
@@ -385,6 +402,7 @@ export function AppConfigModal() {
                         capabilities: configItem.capabilities,
                         sortOrder: configItem.sortOrder,
                         creditCost: configItem.creditCost,
+                        creditUnit: configItem.creditUnit,
                         thinkingEnabled: configItem.thinkingEnabled,
                         reasoningEffort: configItem.reasoningEffort,
                     });
@@ -435,8 +453,8 @@ export function AppConfigModal() {
             name: `对象存储 ${draftObjectStorages.length + 1}`,
             defaultStorage: draftObjectStorages.length === 0 || isDefaultObjectStoragePlaceholder(draftObjectStorages[0]),
         });
-        setDraftObjectStorages((storages) => (isDefaultObjectStoragePlaceholder(storages[0]) ? [storage] : [...storages, storage]));
-        setCollapsedObjectStorageIds((ids) => ids.filter((id) => id !== storage.id));
+        setDraftObjectStorages((storages) => (isDefaultObjectStoragePlaceholder(storages[0]) ? [storage] : [storage, ...storages]));
+        setCollapsedObjectStorageIds((ids) => [...ids, storage.id]);
     };
 
     const setDraftDefaultObjectStorage = (id: string) => {
@@ -475,7 +493,7 @@ export function AppConfigModal() {
         setRefreshingObjectStorages(true);
         try {
             await refreshObjectStorages();
-            resetObjectStorageDraft(true);
+            resetObjectStorageDraft();
             message.success("对象存储配置已刷新");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "刷新对象存储失败");
@@ -643,7 +661,13 @@ export function AppConfigModal() {
                                                             <Button size="small" icon={collapsed ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />} onClick={() => toggleChannelCollapsed(channel.id)}>
                                                                 {collapsed ? "展开" : "收起"}
                                                             </Button>
-                                                            <Button size="small" disabled={isSaving} loading={loadingChannelId === channel.id} onClick={() => void refreshChannelModels(channel)}>
+                                                            <Button
+                                                                size="small"
+                                                                disabled={isSaving || channel.apiFormat === "minimax"}
+                                                                loading={loadingChannelId === channel.id}
+                                                                title={channel.apiFormat === "minimax" ? "MiniMax 请手动配置 MiniMax-H3" : undefined}
+                                                                onClick={() => void refreshChannelModels(channel)}
+                                                            >
                                                                 拉取模型
                                                             </Button>
                                                             <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={isSaving} onClick={() => removeChannel(channel.id)} />
@@ -669,7 +693,7 @@ export function AppConfigModal() {
                                                                     showSearch
                                                                     allowClear
                                                                     maxTagCount="responsive"
-                                                                    placeholder="输入模型名，或点击拉取模型"
+                                                                    placeholder={channel.apiFormat === "minimax" ? "请输入 MiniMax-H3" : "输入模型名，或点击拉取模型"}
                                                                     value={channel.models}
                                                                     disabled={isSaving}
                                                                     onChange={(models) => updateDraftChannel(channel.id, { models })}
@@ -731,72 +755,93 @@ export function AppConfigModal() {
                                             {capabilityGroups.map((group) => {
                                                 const models = draftConfig[group.modelsKey];
                                                 if (!models.length) return null;
+                                                const collapsed = collapsedModelCapabilityTypes.includes(group.capability);
                                                 return (
                                                     <div key={group.capability}>
-                                                        <div className="mb-2 text-xs font-medium text-[var(--studio-muted)]">{group.label}</div>
-                                                        <div className="space-y-2">
-                                                            {models.map((model) => {
-                                                                const capabilities = draftConfig.modelCapabilities.find((item) => item.model === model)?.capabilities || [];
-                                                                return (
-                                                            <div key={model} className="flex flex-wrap items-center gap-3 rounded border border-[var(--studio-line)] bg-[var(--studio-panel)] px-3 py-2">
-                                                                {(() => {
-                                                                    const modelConfig = draftModelConfigs.find((item) => item.modelType === group.capability && modelConfigValue(item) === model);
-                                                                    const showThinkingConfiguration = modelConfig && isOpenAiTextModel(modelConfig, draftChannels);
-                                                                    return (
-                                                                        <>
-                                                                        <span className="min-w-40 text-sm">{modelOptionLabel(draftConfig, model)}</span>
-                                                                        <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
-                                                                            消耗积分
-                                                                            <InputNumber
-                                                                                min={0}
-                                                                                precision={0}
-                                                                                value={modelConfig?.creditCost ?? 0}
-                                                                                disabled={isSaving}
-                                                                                className="w-24"
-                                                                                onChange={(value) => updateModelCreditCost(group.capability, model, Number(value) || 0)}
-                                                                            />
-                                                                        </span>
-                                                                        {MODEL_CAPABILITY_OPTIONS[group.capability].map((option) => (
-                                                                            <Checkbox
-                                                                                key={option.value}
-                                                                                checked={capabilities.includes(option.value)}
-                                                                                disabled={isSaving}
-                                                                                onChange={(event) => updateModelCapabilities(group.capability, model, option.value, event.target.checked)}
-                                                                            >
-                                                                                {option.label}
-                                                                            </Checkbox>
-                                                                        ))}
-                                                                        {showThinkingConfiguration && modelConfig ? (
-                                                                            <>
-                                                                                <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
-                                                                                    开启思考模式
-                                                                                    <Switch
-                                                                                        size="small"
-                                                                                        checked={modelConfig.thinkingEnabled}
-                                                                                        disabled={isSaving}
-                                                                                        onChange={(thinkingEnabled) => updateModelThinkingConfiguration(model, { thinkingEnabled })}
-                                                                                    />
-                                                                                </span>
-                                                                                <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
-                                                                                    思考强度
-                                                                                    <Select
-                                                                                        size="small"
-                                                                                        value={modelConfig.reasoningEffort}
-                                                                                        disabled={isReasoningEffortDisabled(isSaving, modelConfig.thinkingEnabled)}
-                                                                                        className="w-20"
-                                                                                        options={reasoningEffortOptions}
-                                                                                        onChange={(reasoningEffort: "high" | "max") => updateModelThinkingConfiguration(model, { reasoningEffort })}
-                                                                                    />
-                                                                                </span>
-                                                                            </>
-                                                                        ) : null}
-                                                                        </>
-                                                                    );
-                                                                })()}
-                                                                    </div>
-                                                                );
-                                                            })}
+                                                        <div className="mb-2 flex items-center justify-between gap-3">
+                                                            <div className="text-xs font-medium text-[var(--studio-muted)]">{group.label}</div>
+                                                            <Button size="small" icon={collapsed ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />} onClick={() => toggleModelCapabilityCollapsed(group.capability)}>
+                                                                {collapsed ? "展开" : "收起"}
+                                                            </Button>
                                                         </div>
+                                                        {collapsed ? null : (
+                                                            <div className="space-y-2">
+                                                                {models.map((model) => {
+                                                                    const capabilities = draftConfig.modelCapabilities.find((item) => item.model === model)?.capabilities || [];
+                                                                    return (
+                                                                        <div key={model} className="flex flex-wrap items-center gap-3 rounded border border-[var(--studio-line)] bg-[var(--studio-panel)] px-3 py-2">
+                                                                            {(() => {
+                                                                                const modelConfig = draftModelConfigs.find((item) => item.modelType === group.capability && modelConfigValue(item) === model);
+                                                                                const showThinkingConfiguration = modelConfig && isOpenAiTextModel(modelConfig, draftChannels);
+                                                                                return (
+                                                                                    <>
+                                                                                        <span className="min-w-40 text-sm">{modelOptionLabel(draftConfig, model)}</span>
+                                                                                        <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
+                                                                                            {group.capability === "video" && modelConfig?.creditUnit === "second" ? "每秒积分" : "每次积分"}
+                                                                                            <InputNumber
+                                                                                                min={0}
+                                                                                                precision={0}
+                                                                                                value={modelConfig?.creditCost ?? 0}
+                                                                                                disabled={isSaving}
+                                                                                                className="w-24"
+                                                                                                onChange={(value) => updateModelCreditCost(group.capability, model, Number(value) || 0)}
+                                                                                            />
+                                                                                        </span>
+                                                                                        {group.capability === "video" && modelConfig ? (
+                                                                                            <Select
+                                                                                                size="small"
+                                                                                                value={modelConfig.creditUnit === "second" ? "second" : "generation"}
+                                                                                                disabled={isSaving}
+                                                                                                className="w-24"
+                                                                                                options={[
+                                                                                                    { value: "generation", label: "按次" },
+                                                                                                    { value: "second", label: "按秒" },
+                                                                                                ]}
+                                                                                                onChange={(creditUnit: ServerModelConfig["creditUnit"]) => updateModelCreditUnit(group.capability, model, creditUnit)}
+                                                                                            />
+                                                                                        ) : null}
+                                                                                        {MODEL_CAPABILITY_OPTIONS[group.capability].map((option) => (
+                                                                                            <Checkbox
+                                                                                                key={option.value}
+                                                                                                checked={capabilities.includes(option.value)}
+                                                                                                disabled={isSaving}
+                                                                                                onChange={(event) => updateModelCapabilities(group.capability, model, option.value, event.target.checked)}
+                                                                                            >
+                                                                                                {option.label}
+                                                                                            </Checkbox>
+                                                                                        ))}
+                                                                                        {showThinkingConfiguration && modelConfig ? (
+                                                                                            <>
+                                                                                                <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
+                                                                                                    开启思考模式
+                                                                                                    <Switch
+                                                                                                        size="small"
+                                                                                                        checked={modelConfig.thinkingEnabled}
+                                                                                                        disabled={isSaving}
+                                                                                                        onChange={(thinkingEnabled) => updateModelThinkingConfiguration(model, { thinkingEnabled })}
+                                                                                                    />
+                                                                                                </span>
+                                                                                                <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
+                                                                                                    思考强度
+                                                                                                    <Select
+                                                                                                        size="small"
+                                                                                                        value={modelConfig.reasoningEffort}
+                                                                                                        disabled={isReasoningEffortDisabled(isSaving, modelConfig.thinkingEnabled)}
+                                                                                                        className="w-20"
+                                                                                                        options={reasoningEffortOptions}
+                                                                                                        onChange={(reasoningEffort: "high" | "max") => updateModelThinkingConfiguration(model, { reasoningEffort })}
+                                                                                                    />
+                                                                                                </span>
+                                                                                            </>
+                                                                                        ) : null}
+                                                                                    </>
+                                                                                );
+                                                                            })()}
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 );
                                             })}
@@ -978,6 +1023,7 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         defaultModel: false,
         sortOrder: 0,
         creditCost: 0,
+        creditUnit: "generation",
         thinkingEnabled: true,
         reasoningEffort: "high",
     };
@@ -988,10 +1034,9 @@ function sameValue(first: unknown, second: unknown) {
 }
 
 function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelConfig) {
-    return first.modelType === second.modelType && first.sortOrder === second.sortOrder && first.creditCost === second.creditCost
+    return first.modelType === second.modelType && first.sortOrder === second.sortOrder && first.creditCost === second.creditCost && first.creditUnit === second.creditUnit
         && first.thinkingEnabled === second.thinkingEnabled && first.reasoningEffort === second.reasoningEffort && sameValue(first.capabilities, second.capabilities);
 }
-
 
 function modelConfigValue(config: Pick<ServerModelConfig, "channelId" | "modelName">) {
     return `${config.channelId}::${config.modelName}`;
@@ -1006,6 +1051,7 @@ function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "gemini") return "Gemini";
     if (apiFormat === "anthropic") return "Anthropic";
     if (apiFormat === "seedance") return "Seedance";
+    if (apiFormat === "minimax") return "MiniMax";
     return "OpenAI";
 }
 

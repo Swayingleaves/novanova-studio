@@ -568,6 +568,45 @@ class PersistenceServiceTest {
         Assertions.assertEquals("high", created.reasoningEffort());
     }
 
+    /** 视频模型的按秒计费单位应在创建、更新和查询间完整往返。 */
+    @Test
+    void shouldRoundTripVideoCreditUnit() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"video-model\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
+
+        PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "video-model", "video", List.of(), 0, 3, true, "high", "second")).block();
+
+        Assertions.assertNotNull(created);
+        Assertions.assertEquals("second", created.creditUnit());
+        ArgumentCaptor<PersistenceRecords.UserAiModelConfigRecord> captor = ArgumentCaptor.forClass(PersistenceRecords.UserAiModelConfigRecord.class);
+        verify(repository).createPlatformAiModelConfig(captor.capture());
+        Assertions.assertEquals("second", captor.getValue().getCreditUnit());
+
+        when(repository.getPlatformAiModelConfig(created.id())).thenReturn(Mono.just(captor.getValue()));
+        when(repository.updatePlatformAiModelConfig(captor.getValue())).thenReturn(Mono.just(1L));
+        PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
+                created.id(), "video", List.of(), 0, 4, true, "high", "second")).block();
+
+        Assertions.assertNotNull(updated);
+        Assertions.assertEquals("second", updated.creditUnit());
+    }
+
+    /** 图片模型禁止选择按秒计费。 */
+    @Test
+    void shouldRejectSecondCreditUnitForImageModel() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"image-model\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(
+                new PersistenceDtos.CreateModelConfigRequest("channel-1", "image-model", "image", List.of(), 0, 3, true, "high", "second")).block());
+
+        Assertions.assertTrue(exception.getMessage().contains("只有视频模型"));
+    }
+
     /**
      * 构建包含指定轮次的生成记录。
      *

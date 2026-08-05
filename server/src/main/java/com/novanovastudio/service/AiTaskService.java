@@ -14,6 +14,7 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
+import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.entity.AiGenerationTask;
 import com.novanovastudio.repository.AiTaskRepository;
@@ -31,6 +32,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
@@ -58,6 +61,12 @@ public class AiTaskService {
 
     /** 文本任务类型 */
     private static final String TYPE_TEXT = AiTaskTypes.TEXT;
+
+    /** 按次计费单位。 */
+    private static final String CREDIT_UNIT_GENERATION = "generation";
+
+    /** 按秒计费单位。 */
+    private static final String CREDIT_UNIT_SECOND = "second";
 
     /** 等待状态 */
     private static final String STATUS_PENDING = "pending";
@@ -112,6 +121,15 @@ public class AiTaskService {
 
     /** 响应式事务操作器 */
     private final TransactionalOperator transactionalOperator;
+
+    /** 风格解析服务。 */
+    @Autowired
+    private GenerationStyleService generationStyleService;
+
+    /** 风格提示词优化服务，懒加载以避免其对本服务的反向依赖形成初始化环。 */
+    @Autowired
+    @Lazy
+    private PromptOptimizationService promptOptimizationService;
 
     /**
      * 服务启动时恢复未完成任务
@@ -169,28 +187,28 @@ public class AiTaskService {
             AiTaskDtos.CreateAiTaskRequest request,
             Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
         // 校验任务类型并解析可用模型渠道。
-        return Mono.defer(() -> {
-            validateTaskType(request.taskType());
-            validateGenerationSource(request.taskType(), request.generationSource());
-            return resolveModel(request.taskType(), request.model()).flatMap(resolvedModel -> {
+        return prepareStyledRequest(userId, request).flatMap(preparedRequest -> Mono.defer(() -> {
+            validateTaskType(preparedRequest.taskType());
+            validateGenerationSource(preparedRequest.taskType(), preparedRequest.generationSource());
+            return resolveModel(preparedRequest.taskType(), preparedRequest.model()).flatMap(resolvedModel -> {
                 String taskId = UUID.randomUUID().toString();
-                int creditCost = calculateTaskCredits(request, resolvedModel);
-                log.info("创建AI生成任务: taskId={}, userId={}, taskType={}, generationSource={}, model={}, channel={}", taskId, userId, request.taskType(), request.generationSource(), request.model(), resolvedModel.channel().name());
+                int creditCost = calculateTaskCredits(preparedRequest, resolvedModel);
+                log.info("创建AI生成任务: taskId={}, userId={}, taskType={}, generationSource={}, model={}, channel={}", taskId, userId, preparedRequest.taskType(), preparedRequest.generationSource(), preparedRequest.model(), resolvedModel.channel().name());
                 AiGenerationTask task = new AiGenerationTask();
                 task.setId(taskId);
                 task.setUserId(userId);
-                task.setTaskType(request.taskType());
+                task.setTaskType(preparedRequest.taskType());
                 task.setModel(resolvedModel.model());
                 task.setProvider(resolvedModel.channel().name());
                 task.setStatus(STATUS_PENDING);
                 task.setProgress(0);
-                task.setRequestData(toJson(request));
+                task.setRequestData(toJson(preparedRequest));
                 task.setResultData("{}");
                 return repository.createTask(task)
-                        .then(creditService.chargeTask(userId, taskId, creditCost, request.taskType(), request.generationSource()))
+                        .then(creditService.chargeTask(userId, taskId, creditCost, preparedRequest.taskType(), preparedRequest.generationSource()))
                         .as(transactionalOperator::transactional)
                         .then(getTaskResponse(taskId, userId))
-                        .flatMap(response -> Mono.fromRunnable(() -> orchestrator.prepareTask(taskId, request))
+                        .flatMap(response -> Mono.fromRunnable(() -> orchestrator.prepareTask(taskId, preparedRequest))
                                 .subscribeOn(Schedulers.boundedElastic())
                                 .then(beforeEnqueue.apply(response)
                                         .onErrorResume(exception -> finishTaskWithRefund(task, STATUS_FAILED, "任务创建失败: " + empty(exception.getMessage()), null)
@@ -205,7 +223,28 @@ public class AiTaskService {
                                                 .then(Mono.error(exception)))))
                                 .thenReturn(response));
             });
-        });
+        }));
+    }
+
+    /**
+     * 解析任务风格并在入队前完成强制提示词优化。
+     *
+     * @param userId Long 当前用户ID
+     * @param request CreateAiTaskRequest 原始任务请求
+     * @return Mono<CreateAiTaskRequest> 已替换为优化提示词并携带快照的任务请求
+     */
+    private Mono<AiTaskDtos.CreateAiTaskRequest> prepareStyledRequest(Long userId, AiTaskDtos.CreateAiTaskRequest request) {
+        List<Long> ids = request.generationStyleIds() == null ? List.of() : request.generationStyleIds();
+        List<GenerationStyleDtos.GenerationStyleSnapshot> snapshots = request.generationStyleSnapshots() == null ? List.of() : request.generationStyleSnapshots();
+        if (ids.isEmpty() && snapshots.isEmpty()) return Mono.just(request);
+        if (!TYPE_IMAGE.equals(request.taskType()) && !TYPE_VIDEO.equals(request.taskType())) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "风格只支持图片或视频任务"));
+        }
+        return generationStyleService.resolveStyles(request.taskType(), ids, snapshots)
+                .flatMap(styles -> promptOptimizationService.optimizeAndWait(userId, request.taskType(), request.prompt(), styles, response -> Mono.empty())
+                        .map(optimizedPrompt -> new AiTaskDtos.CreateAiTaskRequest(
+                                request.taskType(), optimizedPrompt, request.model(), request.parameters(), request.references(),
+                                request.videoReferences(), request.generationSource(), null, styles)));
     }
 
     /**
@@ -319,7 +358,7 @@ public class AiTaskService {
                                     .findFirst()
                                     .map(channel -> new AiTaskDtos.AiModelOption(
                                             config.channelId() + CHANNEL_MODEL_SEPARATOR + config.modelName(),
-                                            config.modelName(), config.modelType(), channel.name(), channel.apiFormat(), config.defaultModel(), config.creditCost()))
+                                            config.modelName(), config.modelType(), channel.name(), channel.apiFormat(), config.defaultModel(), config.creditCost(), config.creditUnit()))
                                     .orElse(null))
                             .filter(java.util.Objects::nonNull)
                             .toList();
@@ -549,7 +588,7 @@ public class AiTaskService {
                                 .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员配置默认" + capabilityLabel(capability) + "模型"));
                     }
                     ResolvedModel resolvedModel = resolveModel(capability, selectedConfig.channelId() + "::" + selectedConfig.modelName(), tuple.getT1());
-                    return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.creditCost(),
+                    return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.creditCost(), selectedConfig.creditUnit(),
                             thinkingEnabled(selectedConfig.thinkingEnabled()), reasoningEffort(selectedConfig.reasoningEffort()));
                 });
     }
@@ -611,7 +650,7 @@ public class AiTaskService {
         }
         validateChannelSupport(channel, capability);
         validateUserChannelAccess(channel);
-        return new ResolvedModel(channel, model, 0, true, "high");
+        return new ResolvedModel(channel, model, 0, CREDIT_UNIT_GENERATION, true, "high");
     }
 
 
@@ -731,11 +770,54 @@ public class AiTaskService {
         if (unitCost == null || unitCost < 0) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "模型积分配置不合法");
         }
+        String creditUnit = resolvedModel.creditUnit();
+        if (!CREDIT_UNIT_GENERATION.equals(creditUnit) && !CREDIT_UNIT_SECOND.equals(creditUnit)) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "模型积分计费单位不合法");
+        }
+        if (CREDIT_UNIT_SECOND.equals(creditUnit) && !TYPE_VIDEO.equals(request.taskType())) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "只有视频模型可以按秒计费");
+        }
         int count = TYPE_IMAGE.equals(request.taskType()) ? imageCount(request.parameters()) : 1;
         try {
-            return Math.multiplyExact(unitCost, count);
+            int total = Math.multiplyExact(unitCost, count);
+            return CREDIT_UNIT_SECOND.equals(creditUnit)
+                    ? Math.multiplyExact(total, videoSeconds(request.parameters()))
+                    : total;
         } catch (ArithmeticException exception) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "本次生成积分计算超出范围");
+        }
+    }
+
+    /**
+     * 解析按秒计费视频的时长。
+     *
+     * @param parameters Map<String, Object> 任务参数
+     * @return int 视频时长（秒）
+     * @throws BusinessException 时长为空、为智能时长或不是正整数时抛出
+     */
+    private int videoSeconds(Map<String, Object> parameters) {
+        Object rawSeconds = parameters == null ? null : parameters.get("seconds");
+        if (rawSeconds == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "按秒计费视频必须指定正整数时长");
+        }
+        try {
+            int seconds;
+            if (rawSeconds instanceof Number number) {
+                double numericSeconds = number.doubleValue();
+                if (!Double.isFinite(numericSeconds) || numericSeconds != Math.rint(numericSeconds)
+                        || numericSeconds > Integer.MAX_VALUE || numericSeconds < Integer.MIN_VALUE) {
+                    throw new NumberFormatException("视频时长必须是整数");
+                }
+                seconds = (int) numericSeconds;
+            } else {
+                seconds = Integer.parseInt(rawSeconds.toString().trim());
+            }
+            if (seconds < 1) {
+                throw new NumberFormatException("视频时长必须大于0");
+            }
+            return seconds;
+        } catch (NumberFormatException exception) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "按秒计费视频必须指定正整数时长");
         }
     }
 
@@ -879,7 +961,7 @@ public class AiTaskService {
      * @param channel AiChannelConfig 渠道配置
      * @param model String 模型名称
      */
-    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, Integer creditCost,
+    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, Integer creditCost, String creditUnit,
                                  boolean thinkingEnabled, String reasoningEffort) {
     }
 }

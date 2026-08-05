@@ -20,9 +20,18 @@ export async function requestServerGeneratedImages(config: AiConfig, prompt: str
         parameters: { count, quality: config.quality, resolution: config.imageResolution, size: config.size },
         references: references.map(toServerReference),
         generationSource,
+        generationStyleIds: options?.generationStyleIds,
+        generationStyleSnapshots: options?.generationStyleSnapshots,
     });
     const completed = await waitAiTask(task.id, { signal: options?.signal });
-    return normalizeImageTaskResult(completed.resultData, nanoid);
+    const snapshots = readGenerationStyleSnapshots(completed.requestData);
+    return normalizeImageTaskResult(completed.resultData, nanoid).map((item) => ({ ...item, generationStyleSnapshots: snapshots }));
+}
+
+function readGenerationStyleSnapshots(value: unknown) {
+    if (!value || typeof value !== "object") return [];
+    const snapshots = (value as { generationStyleSnapshots?: unknown }).generationStyleSnapshots;
+    return Array.isArray(snapshots) ? snapshots as import("@/services/api/server").GenerationStyleSnapshot[] : [];
 }
 
 function normalizeImageCount(value: string): number {

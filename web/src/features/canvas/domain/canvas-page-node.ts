@@ -160,7 +160,16 @@ export function applyGeneratedImageToBatchNodes(
         });
     });
 
-    return result.rootId === result.targetId ? updatedNodes : synchronizeImageBatchRootExecution(updatedNodes, result.rootId);
+    if (result.rootId === result.targetId) return updatedNodes;
+    const withStyleSnapshot = result.attributes.generationStyleSnapshots || result.attributes.generationStyleIds
+        ? updatedNodes.map((node) => node.id === result.rootId
+            ? applyCanvasNodeAttributes(node, {
+                  generationStyleIds: result.attributes.generationStyleIds,
+                  generationStyleSnapshots: result.attributes.generationStyleSnapshots,
+              })
+            : node)
+        : updatedNodes;
+    return synchronizeImageBatchRootExecution(withStyleSnapshot, result.rootId);
 }
 
 export function synchronizeImageBatchRootExecution(nodes: CanvasNode[], rootId: string): CanvasNode[] {

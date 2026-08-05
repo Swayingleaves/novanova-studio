@@ -66,6 +66,8 @@ export function createImageNode(input: CreateCanvasNodeInput): CanvasImageNode {
             count: 1,
             references: [],
             referenceObjectStorages: [],
+            generationStyleIds: [],
+            generationStyleSnapshots: [],
         },
         grouping: {
             isRoot: false,
@@ -110,6 +112,8 @@ export function createVideoNode(input: CreateCanvasNodeInput): CanvasVideoNode {
             count: 1,
             references: [],
             referenceObjectStorages: [],
+            generationStyleIds: [],
+            generationStyleSnapshots: [],
         },
     };
 }

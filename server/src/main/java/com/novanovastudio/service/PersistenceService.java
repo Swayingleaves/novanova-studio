@@ -8,6 +8,7 @@ import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.agent.AgentActivityService;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.common.SensitiveDataCrypto;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
@@ -16,23 +17,17 @@ import com.novanovastudio.repository.PersistenceRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.storage.ObjectStorageService;
 import java.net.URLConnection;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import javax.crypto.Cipher;
-import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.buffer.DataBufferUtils;
@@ -55,6 +50,12 @@ import reactor.core.scheduler.Schedulers;
 @Slf4j
 public class PersistenceService {
 
+    /** 按次计费单位。 */
+    private static final String CREDIT_UNIT_GENERATION = "generation";
+
+    /** 按秒计费单位。 */
+    private static final String CREDIT_UNIT_SECOND = "second";
+
     /** 生成记录标题最大长度 */
     private static final int GENERATION_LOG_TITLE_MAX_LENGTH = 100;
 
@@ -72,15 +73,6 @@ public class PersistenceService {
 
     /** 生成记录失败状态 */
     private static final String GENERATION_STATUS_FAILED = "failed";
-
-    /** 加密配置前缀 */
-    private static final String ENCRYPTED_CONFIG_PREFIX = "v1:";
-
-    /** AES-GCM标签位数 */
-    private static final int GCM_TAG_BITS = 128;
-
-    /** AES-GCM随机数长度 */
-    private static final int GCM_NONCE_BYTES = 12;
 
     /** 服务端虚拟渠道ID */
     private static final String SERVER_CHANNEL_ID = "server";
@@ -188,6 +180,7 @@ public class PersistenceService {
                     record.setDefaultModel(false);
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
                     record.setCreditCost(request.creditCost() == null ? 0 : request.creditCost());
+                    record.setCreditUnit(normalizeCreditUnit(request.modelType(), request.creditUnit()));
                     record.setThinkingEnabled(thinkingEnabled(request.thinkingEnabled()));
                     record.setReasoningEffort(reasoningEffort(request.reasoningEffort()));
                     return repository.createPlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
@@ -204,6 +197,7 @@ public class PersistenceService {
                     record.setCapabilities(JSON.toJSONString(request.capabilities() == null ? List.of() : request.capabilities()));
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
                     record.setCreditCost(request.creditCost() == null ? 0 : request.creditCost());
+                    record.setCreditUnit(normalizeCreditUnit(request.modelType(), request.creditUnit()));
                     record.setThinkingEnabled(thinkingEnabled(request.thinkingEnabled()));
                     record.setReasoningEffort(reasoningEffort(request.reasoningEffort()));
                     return repository.updatePlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
@@ -250,7 +244,27 @@ public class PersistenceService {
     private PersistenceDtos.ModelConfig modelConfigDto(PersistenceRecords.UserAiModelConfigRecord record) {
         return new PersistenceDtos.ModelConfig(record.getModelConfigId(), record.getChannelId(), record.getModelName(), record.getModelType(),
                 parseStringList(record.getCapabilities()), Boolean.TRUE.equals(record.getDefaultModel()), record.getSortOrder(), record.getCreditCost(),
-                thinkingEnabled(record.getThinkingEnabled()), reasoningEffort(record.getReasoningEffort()));
+                thinkingEnabled(record.getThinkingEnabled()), reasoningEffort(record.getReasoningEffort()),
+                normalizeCreditUnit(record.getModelType(), record.getCreditUnit()));
+    }
+
+    /**
+     * 规范化模型计费单位。
+     *
+     * @param modelType String 模型类型
+     * @param creditUnit String 请求中的计费单位
+     * @return String 规范化后的计费单位
+     * @throws BusinessException 计费单位不支持或非视频模型尝试按秒计费时抛出
+     */
+    private String normalizeCreditUnit(String modelType, String creditUnit) {
+        String value = StringUtils.hasText(creditUnit) ? creditUnit : CREDIT_UNIT_GENERATION;
+        if (!Set.of(CREDIT_UNIT_GENERATION, CREDIT_UNIT_SECOND).contains(value)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "积分计费单位只支持generation、second");
+        }
+        if (!"video".equals(modelType) && CREDIT_UNIT_SECOND.equals(value)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "只有视频模型可以按秒计费");
+        }
+        return value;
     }
 
     /**
@@ -1201,17 +1215,11 @@ public class PersistenceService {
      */
     private Mono<String> encryptSecret(String data) {
         // AES-GCM加密属于CPU操作，放入boundedElastic执行。
-        return Mono.fromCallable(() -> {
-            byte[] nonce = new byte[GCM_NONCE_BYTES];
-            secureRandom.nextBytes(nonce);
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(secretKeyBytes(), "AES"), new GCMParameterSpec(GCM_TAG_BITS, nonce));
-            byte[] ciphertext = cipher.doFinal(data.getBytes(StandardCharsets.UTF_8));
-            ByteBuffer buffer = ByteBuffer.allocate(nonce.length + ciphertext.length);
-            buffer.put(nonce);
-            buffer.put(ciphertext);
-            return ENCRYPTED_CONFIG_PREFIX + Base64.getEncoder().encodeToString(buffer.array());
-        }).subscribeOn(Schedulers.boundedElastic()).onErrorMap(exception -> {
+        return Mono.fromCallable(() -> SensitiveDataCrypto.encrypt(data, properties.getApp().getSecretKey()))
+                .subscribeOn(Schedulers.boundedElastic()).onErrorMap(exception -> {
+            if (exception instanceof BusinessException) {
+                return exception;
+            }
             log.error("加密敏感配置失败", exception);
             return new BusinessException(ErrorCode.SYSTEM_ERROR, "加密敏感配置失败: " + exception.getMessage());
         });
@@ -1228,18 +1236,11 @@ public class PersistenceService {
         if (!StringUtils.hasText(value)) {
             return Mono.just("");
         }
-        if (!value.startsWith(ENCRYPTED_CONFIG_PREFIX)) {
-            log.error("敏感配置不是加密格式");
-            return Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR, "敏感配置不是加密格式"));
-        }
-        return Mono.fromCallable(() -> {
-            byte[] payload = Base64.getDecoder().decode(value.substring(ENCRYPTED_CONFIG_PREFIX.length()));
-            byte[] nonce = java.util.Arrays.copyOfRange(payload, 0, GCM_NONCE_BYTES);
-            byte[] ciphertext = java.util.Arrays.copyOfRange(payload, GCM_NONCE_BYTES, payload.length);
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(secretKeyBytes(), "AES"), new GCMParameterSpec(GCM_TAG_BITS, nonce));
-            return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
-        }).subscribeOn(Schedulers.boundedElastic()).onErrorMap(exception -> {
+        return Mono.fromCallable(() -> SensitiveDataCrypto.decrypt(value, properties.getApp().getSecretKey()))
+                .subscribeOn(Schedulers.boundedElastic()).onErrorMap(exception -> {
+            if (exception instanceof BusinessException) {
+                return exception;
+            }
             log.error("解密敏感配置失败", exception);
             return new BusinessException(ErrorCode.SYSTEM_ERROR, "解密敏感配置失败: " + exception.getMessage());
         });
@@ -1458,20 +1459,6 @@ public class PersistenceService {
         } catch (Exception exception) {
             log.error("解析模型列表失败", exception);
             return new ArrayList<>();
-        }
-    }
-
-    /**
-     * 根据APP_SECRET_KEY生成AES密钥
-     *
-     * @return byte[] AES密钥
-     */
-    private byte[] secretKeyBytes() {
-        try {
-            // 使用SHA-256将应用密钥派生为固定长度AES密钥。
-            return MessageDigest.getInstance("SHA-256").digest(properties.getApp().getSecretKey().getBytes(StandardCharsets.UTF_8));
-        } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "生成加密密钥失败: " + exception.getMessage());
         }
     }
 

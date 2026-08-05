@@ -1,12 +1,17 @@
 package com.novanovastudio.controller;
 
 import com.novanovastudio.common.ApiResponse;
+import com.novanovastudio.dto.CreditCardDtos;
 import com.novanovastudio.dto.CreditDtos;
+import com.novanovastudio.service.CreditCardService;
 import com.novanovastudio.service.CreditService;
+import jakarta.validation.Valid;
 import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,6 +30,9 @@ public class CreditController {
 
     /** 积分服务 */
     private final CreditService creditService;
+
+    /** 卡密兑换服务 */
+    private final CreditCardService creditCardService;
 
     /**
      * 查询当前用户的积分消耗概览。
@@ -62,5 +70,36 @@ public class CreditController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize) {
         return creditService.listCreditTransactions(startDate, endDate, generationType, page, pageSize).map(ApiResponse::ok);
+    }
+
+    /**
+     * 兑换积分卡密。
+     *
+     * @param request RedeemCreditsRequest 卡密兑换请求
+     * @return Mono<ApiResponse<RedeemCreditsResponse>> 兑换结果
+     */
+    @PostMapping("/redeemCredits")
+    public Mono<ApiResponse<CreditCardDtos.RedeemCreditsResponse>> redeemCredits(@Valid @RequestBody CreditCardDtos.RedeemCreditsRequest request) {
+        return creditCardService.redeemCredits(request.cardCode()).map(ApiResponse::ok);
+    }
+
+    /**
+     * 查询当前用户的卡密兑换记录。
+     *
+     * @param startDate LocalDate 起始日期
+     * @param endDate LocalDate 结束日期
+     * @param cardCode String 卡密完整值或末四位
+     * @param page int 页码
+     * @param pageSize int 每页数量
+     * @return Mono<ApiResponse<RedemptionRecordListResponse>> 兑换记录
+     */
+    @GetMapping("/listRedemptionRecords")
+    public Mono<ApiResponse<CreditCardDtos.RedemptionRecordListResponse>> listRedemptionRecords(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false) String cardCode,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int pageSize) {
+        return creditCardService.listRedemptionRecords(startDate, endDate, cardCode, page, pageSize).map(ApiResponse::ok);
     }
 }

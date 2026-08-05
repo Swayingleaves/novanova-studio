@@ -1,3 +1,5 @@
+<p align="right"><b>简体中文</b> · <a href="README.en.md">English</a></p>
+
 <p align="center">
   <img src="logo/novanovastudio.png" width="128" alt="Novanova Studio logo">
 </p>
@@ -9,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.novanovastudio.cn/">>>>>在线体验<<<<<</a>
+  <a href="https://www.novanovastudio.cn/">>>>>如果觉得部署麻烦、找便宜渠道麻烦->点我在线体验<<<<<</a>
 </p>
 
 <p align="center">
@@ -18,6 +20,29 @@
 <p align="center">
   <img src="github_images/nova-s2.png" alt="Novanova Studio 画布截图">
 </p>
+
+## 联系我
+- 商业授权
+- 技术支持
+
+<table align="center">
+  <thead>
+    <tr>
+      <th align="center">联系作者</th>
+      <th align="center">加入交流群</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td align="center" width="33%">
+        <img src="github_images/wechat_me.png" alt="作者微信二维码" width="220" />
+      </td>
+      <td align="center" width="33%">
+        <img src="github_images/wechat_group.png" alt="交流群二维码" width="220" />
+      </td>
+    </tr>
+  </tbody>
+</table>
 
 ## ✨ 项目定位
 
@@ -187,12 +212,3 @@ Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不�
 - [开源社区Linux Do](https://linux.do/)
 - [Agentscope-Java](https://java.agentscope.io/v2/en/intro.html)
 
-## 联系我
-- 商业授权
-- 技术支持
-
-<p align="center">
-  <img src="github_images/wechat_me.jpg" width="200">
-  &nbsp;&nbsp;&nbsp;
-  <img src="github_images/wechat_group.jpg" width="200">
-</p>

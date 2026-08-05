@@ -2,13 +2,13 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Sparkles, Square, Video } from "lucide-react";
-import { Button, Tooltip } from "antd";
+import { App, Button, Tooltip } from "antd";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { defaultConfig, normalizeModelOptionValue, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 import { normalizeImageGenerationCount } from "@/features/generation/components/image-settings-panel";
 import { normalizeVideoGenerationCount } from "@/features/generation/components/video-settings-panel";
-import { CreditCostDisplay, requestCreditCost } from "@/features/generation/constants/credits";
+import { getModelCreditUnit, isPositiveVideoSeconds, CreditCostDisplay, requestCreditCost } from "@/features/generation/constants/credits";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptPicker } from "./canvas-prompt-picker";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
@@ -16,6 +16,10 @@ import type { CanvasGenerationMode, CanvasNode, CanvasNodeKind } from "../types"
 import { isImageNode, isTextNode, isVideoNode, type CanvasNodeAttributes } from "../domain/canvas-node";
 import type { CanvasResourceReference } from "../utils/canvas-resource-references";
 import { useCanvasTheme } from "./canvas-theme-provider";
+import type { CanvasTheme } from "@/shared/lib/canvas-theme";
+import type { GenerationStyleOption, GenerationStyleSnapshot } from "@/services/api/server";
+import { GenerationStyleChips, GenerationStyleMenu, useGenerationStyles } from "@/features/generation/components/generation-style-picker";
+import { getStyleCommandRange, parseGenerationStyleMessage, removeStyleCommand } from "@/features/generation/lib/style-command";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
 
@@ -24,8 +28,8 @@ type CanvasNodePromptPanelProps = {
     isRunning: boolean;
     onPromptChange: (nodeId: string, prompt: string) => void;
     onConfigChange: (nodeId: string, patch: CanvasNodeAttributes) => void;
-    onGenerate: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string) => void;
-    onGeneratePrompt: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult: (prompt: string) => void) => void;
+    onGenerate: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, styleIds?: number[], styleSnapshots?: GenerationStyleSnapshot[]) => void;
+    onGeneratePrompt: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult: (prompt: string) => void, styleIds?: number[]) => void;
     onStop: (nodeId: string) => void;
     onMissingConfig: (mode: CanvasNodeGenerationMode) => void;
     isPromptGenerating?: boolean;
@@ -50,7 +54,14 @@ export function CanvasNodePromptPanel({
 }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const theme = useCanvasTheme();
+    const { message } = App.useApp();
     const mode = defaultMode(node.kind);
+    const styleCatalog = useGenerationStyles(mode === "image" || mode === "video" ? mode : undefined);
+    const persistedSnapshots = useMemo(() => !isTextNode(node) ? node.generation.generationStyleSnapshots : [], [node]);
+    const [selectedStyles, setSelectedStyles] = useState<GenerationStyleOption[]>(() => (persistedSnapshots || []).map((style) => ({ id: style.id, name: style.name, generationType: style.generationType })));
+    const [styleMenuOpen, setStyleMenuOpen] = useState(false);
+    const [styleQuery, setStyleQuery] = useState("");
+    const [styleCommand, setStyleCommand] = useState<{ start: number; end: number } | null>(null);
     const promptEditorRef = useRef<PromptEditorHandle>(null);
     const libraryPromptRef = useRef<string | null>(null);
     const config = buildNodeConfig(globalConfig, node, mode);
@@ -63,7 +74,22 @@ export function CanvasNodePromptPanel({
         if (isEditingExistingContent) return "";
         return buildInitialPrompt(mentionReferences);
     });
-    const creditCost = requestCreditCost({ modelCosts: config.modelCosts, model: config.model, taskType: mode, count: mode === "image" || mode === "video" ? config.count : 1 });
+    const creditCost = requestCreditCost({
+        modelCosts: config.modelCosts,
+        model: config.model,
+        taskType: mode,
+        count: mode === "image" || mode === "video" ? config.count : 1,
+        seconds: mode === "video" ? config.videoSeconds : undefined,
+    });
+    const requiresExplicitVideoSeconds = mode === "video"
+        && getModelCreditUnit(config.modelCosts, config.model, "video") === "second";
+
+    useEffect(() => {
+        setSelectedStyles((persistedSnapshots || []).map((style) => ({ id: style.id, name: style.name, generationType: style.generationType })));
+        setStyleMenuOpen(false);
+        setStyleCommand(null);
+        setStyleQuery("");
+    }, [node.id, persistedSnapshots]);
 
     useEffect(() => {
         if (nodePrompt) {
@@ -147,8 +173,15 @@ export function CanvasNodePromptPanel({
     const submit = () => {
         const text = prompt.trim();
         if (!text || isRunning || isPromptGenerating) return;
-        onGenerate(node.id, mode, formatPromptReferenceLabels(text, requiredLabels));
+        if (requiresExplicitVideoSeconds && !isPositiveVideoSeconds(config.videoSeconds)) {
+            message.error("按秒计费的视频模型必须选择具体时长，不能使用智能时长");
+            return;
+        }
+        const styleIds = selectedStyles.map((style) => style.id);
+        const styleSnapshots = persistedSnapshots?.filter((snapshot) => styleIds.includes(snapshot.id)) || [];
+        onGenerate(node.id, mode, formatPromptReferenceLabels(text, requiredLabels), styleIds, styleSnapshots.length === styleIds.length ? styleSnapshots : undefined);
         setPrompt("");
+        setSelectedStyles([]);
     };
 
     return (
@@ -171,7 +204,41 @@ export function CanvasNodePromptPanel({
                 onChange={updatePrompt}
                 onSubmit={submit}
                 onBlur={handleBlur}
+                onPasteText={(value) => {
+                    const parsed = parseGenerationStyleMessage(value, styleCatalog.styles.filter((style) => style.generationType === mode));
+                    if (!parsed || mode === "text") return false;
+                    const nextStyles = parsed.styles as GenerationStyleOption[];
+                    const additions = nextStyles.filter((style) => !selectedStyles.some((item) => item.id === style.id));
+                    const remaining = Math.max(0, 3 - selectedStyles.length);
+                    if (additions.length > remaining) message.warning("最多选择3个风格");
+                    additions.slice(0, remaining).forEach((style) => setSelectedStyles((current) => current.some((item) => item.id === style.id) ? current : [...current, style]));
+                    updatePrompt(parsed.prompt);
+                    return true;
+                }}
+                onStyleInput={(value, cursor) => {
+                    const command = getStyleCommandRange(value, cursor);
+                    setStyleCommand(command ? { start: command.start, end: command.end } : null);
+                    setStyleQuery(command?.query || "");
+                    setStyleMenuOpen(Boolean(command));
+                }}
             />
+
+            {mode !== "text" ? <>
+                <GenerationStyleChips styles={selectedStyles} onRemove={(id) => setSelectedStyles((current) => current.filter((style) => style.id !== id))} className="mt-2" />
+                <div className="mt-2"><GenerationStyleMenu styles={styleCatalog.styles} selected={selectedStyles} loading={styleCatalog.loading} error={styleCatalog.error} open={styleMenuOpen} query={styleQuery} onQueryChange={setStyleQuery} onToggle={() => setStyleMenuOpen((value) => !value)} onSelect={(style) => {
+                    if (selectedStyles.some((item) => item.id === style.id)) return;
+                    if (selectedStyles.length >= 3) {
+                        message.warning("最多选择3个风格");
+                        return;
+                    }
+                    setSelectedStyles((current) => [...current, style]);
+                    const nextPrompt = styleCommand ? removeStyleCommand(prompt, styleCommand.start, styleCommand.end) : prompt;
+                    updatePrompt(nextPrompt);
+                    setStyleCommand(null);
+                    setStyleQuery("");
+                    setStyleMenuOpen(false);
+                }} /></div>
+            </> : null}
 
             {mentionReferences.filter((ref) => ref.active && ref.kind !== "text").length > 0 ? (
                 <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
@@ -228,7 +295,7 @@ export function CanvasNodePromptPanel({
                                 icon={<Sparkles className="size-3.5" />}
                                 loading={isPromptGenerating}
                                 disabled={isRunning || isPromptGenerating || !prompt.trim()}
-                                onClick={() => onGeneratePrompt(node.id, mode, prompt.trim(), updatePrompt)}
+                                onClick={() => onGeneratePrompt(node.id, mode, prompt.trim(), updatePrompt, selectedStyles.map((style) => style.id))}
                                 aria-label="AI优化提示词"
                             />
                         </Tooltip>
@@ -363,15 +430,17 @@ type PromptEditorProps = {
     requiredLabels: string[];
     references: CanvasResourceReference[];
     placeholder: string;
-    theme: ReturnType<typeof canvasThemes>[keyof ReturnType<typeof canvasThemes>];
+    theme: CanvasTheme;
     onChange: (value: string) => void;
     onSubmit: () => void;
     onBlur: () => void;
+    onPasteText?: (value: string) => boolean;
+    onStyleInput?: (value: string, cursor: number) => void;
 };
 
 export type PromptEditorHandle = { insertAtCursor: (text: string) => void; focus: () => void };
 
-const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function PromptEditor({ prompt, requiredLabels, references, placeholder, theme, onChange, onSubmit, onBlur }, ref) {
+const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function PromptEditor({ prompt, requiredLabels, references, placeholder, theme, onChange, onSubmit, onBlur, onPasteText, onStyleInput }, ref) {
     const editorRef = useRef<HTMLDivElement>(null);
     const isComposingRef = useRef(false);
     const pendingRef = useRef<string | null>(null);
@@ -548,7 +617,8 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
         const text = extractText();
         pendingRef.current = text;
         onChange(text);
-    }, [extractText, onChange]);
+        onStyleInput?.(text, getTextOffset() ?? text.length);
+    }, [extractText, getTextOffset, onChange, onStyleInput]);
 
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent) => {
@@ -752,6 +822,11 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
         handleInput();
     }, [handleInput]);
 
+    const handlePaste = useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
+        const text = event.clipboardData.getData("text/plain");
+        if (text && onPasteText?.(text)) event.preventDefault();
+    }, [onPasteText]);
+
     const isEmpty = !prompt;
 
     return (
@@ -774,6 +849,7 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
                 onBlur={handleBlur}
                 onClick={handleEditorClick}
                 onCopy={handleCopy}
+                onPaste={handlePaste}
                 onMouseDown={handleEditorMouseDown}
                 onMouseMove={handleEditorMouseMove}
                 onMouseUp={handleEditorMouseUp}

@@ -98,6 +98,19 @@ class AiHttpClientTest {
     }
 
     /**
+     * MiniMax H3 文档未提供模型列表接口，自动拉取必须明确提示手动配置。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldRejectMiniMaxAutomaticModelRefresh() {
+        BusinessException exception = Assertions.assertThrows(BusinessException.class,
+                () -> new AiHttpClient().fetchChannelModels("https://api.minimaxi.com", "minimax-key", "minimax").block());
+
+        Assertions.assertTrue(exception.getMessage().contains("手动配置 MiniMax-H3"));
+    }
+
+    /**
      * Gemini格式应使用Google鉴权头，并移除模型名称中的models前缀。
      *
      * @throws IOException 本地测试服务创建失败时抛出

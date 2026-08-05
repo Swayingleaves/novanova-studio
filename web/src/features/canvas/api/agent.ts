@@ -18,6 +18,7 @@ export type CreationSettings = {
   watermark?: boolean;
   generationStyleIds?: number[];
   generationStyleSnapshots?: GenerationStyleSnapshot[];
+  generationStyleIdsByType?: { image?: number[]; video?: number[] };
 };
 
 export type GenerationStyleSnapshot = {

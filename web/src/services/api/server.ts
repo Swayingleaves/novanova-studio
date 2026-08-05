@@ -2,7 +2,7 @@
 
 import type { ObjectStorageConfig, ObjectStorageFile } from "@/shared/types/object-storage";
 import { getAuthToken, useUserStore, type ServerUserProfile } from "@/features/auth/stores/use-user-store";
-import type { ApiCallFormat } from "@/features/settings/stores/use-config-store";
+import type { ApiCallFormat, ModelCreditUnit } from "@/features/settings/stores/use-config-store";
 
 type ApiResponse<T> = {
     code: number;
@@ -92,6 +92,8 @@ export type ServerAiTaskCreateInput = {
     references?: ServerAiTaskMediaReference[];
     videoReferences?: ServerAiTaskMediaReference[];
     generationSource?: ServerGenerationSource;
+    generationStyleIds?: number[];
+    generationStyleSnapshots?: GenerationStyleSnapshot[];
 };
 
 export type PromptOptimizationType = "image" | "video";
@@ -128,7 +130,7 @@ export type GenerationStyleOptionListResponse = {
 };
 
 export type ServerAiModelList = {
-    models: Array<{ value: string; label: string; capability: string; provider: string; apiFormat: ApiCallFormat; defaultModel: boolean; creditCost: number }>;
+    models: Array<{ value: string; label: string; capability: string; provider: string; apiFormat: ApiCallFormat; defaultModel: boolean; creditCost: number; creditUnit: ModelCreditUnit }>;
     imageModels: string[];
     videoModels: string[];
     textModels: string[];
@@ -190,6 +192,7 @@ export type ServerModelConfig = {
     defaultModel: boolean;
     sortOrder: number;
     creditCost: number;
+    creditUnit: ModelCreditUnit;
     thinkingEnabled: boolean;
     reasoningEffort: "high" | "max";
 };
@@ -242,6 +245,70 @@ export type ServerAdminCreditTransaction = ServerCreditTransaction & {
 
 export type ServerAdminCreditTransactionList = {
     transactions: ServerAdminCreditTransaction[];
+    total: number;
+};
+
+export type ServerRedeemCreditsResponse = {
+    cardId: number;
+    cardMasked: string;
+    credits: number;
+    creditBalance: number;
+    redeemedAt: string;
+};
+
+export type ServerRedemptionRecord = {
+    id: number;
+    transactionId: number;
+    cardCode: string;
+    cardMasked: string;
+    cardSuffix: string;
+    credits: number;
+    balanceAfter: number;
+    redeemedAt: string;
+};
+
+export type ServerRedemptionRecordList = {
+    records: ServerRedemptionRecord[];
+    total: number;
+};
+
+export type ServerCreditCardBatch = {
+    id: number;
+    quantity: number;
+    creditsPerCard: number;
+    redeemedCount: number;
+    availableCount: number;
+    createdByUserId: number;
+    createdByName: string;
+    createdByEmail: string;
+    createdAt: string;
+};
+
+export type ServerCreditCardBatchList = {
+    batches: ServerCreditCardBatch[];
+    total: number;
+};
+
+export type ServerCreditCard = {
+    id: number;
+    batchId: number;
+    code: string | null;
+    codeMasked: string;
+    codeSuffix: string;
+    credits: number;
+    status: "available" | "redeemed";
+    redeemedByUserId: number | null;
+    redeemedByUsername: string | null;
+    redeemedByNickname: string | null;
+    redeemedByEmail: string | null;
+    redeemedAt: string;
+    createdAt: string;
+    transactionId: number | null;
+    balanceAfter: number | null;
+};
+
+export type ServerCreditCardList = {
+    cards: ServerCreditCard[];
     total: number;
 };
 
@@ -708,7 +775,7 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "thinkingEnabled" | "reasoningEffort">) {
+export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort">) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 
@@ -737,6 +804,18 @@ export function listCreditTransactions(params: { startDate: string; endDate: str
     return serverGet<ServerCreditTransactionList>(`/credit/listCreditTransactions?${query}`);
 }
 
+export function redeemCredits(cardCode: string) {
+    return serverPost<ServerRedeemCreditsResponse>("/credit/redeemCredits", { cardCode });
+}
+
+export function listRedemptionRecords(params: { startDate?: string; endDate?: string; cardCode?: string; page: number; pageSize: number }) {
+    const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
+    if (params.startDate) query.set("startDate", params.startDate);
+    if (params.endDate) query.set("endDate", params.endDate);
+    if (params.cardCode?.trim()) query.set("cardCode", params.cardCode.trim());
+    return serverGet<ServerRedemptionRecordList>(`/credit/listRedemptionRecords?${query}`);
+}
+
 export function getAdminCreditOverview(params: { userId?: number; startDate: string; endDate: string; generationType?: "image" | "video"; trendUnit: "day" | "month" }) {
     const query = new URLSearchParams({ startDate: params.startDate, endDate: params.endDate, trendUnit: params.trendUnit });
     if (params.userId !== undefined) query.set("userId", String(params.userId));
@@ -754,6 +833,24 @@ export function listAdminCreditTransactions(params: { userId?: number; startDate
     if (params.userId !== undefined) query.set("userId", String(params.userId));
     if (params.generationType) query.set("generationType", params.generationType);
     return serverGet<ServerAdminCreditTransactionList>(`/admin/credit/listCreditTransactions?${query}`);
+}
+
+export function generateCreditCards(input: { quantity?: number; creditsPerCard: number }) {
+    return serverPost<{ batchId: number; quantity: number; creditsPerCard: number; cardCodes: string[]; createdAt: string }>("/admin/credit/generateCreditCards", input);
+}
+
+export function listCreditCardBatches(params: { page: number; pageSize: number }) {
+    const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
+    return serverGet<ServerCreditCardBatchList>(`/admin/credit/listCreditCardBatches?${query}`);
+}
+
+export function listCreditCards(params: { batchId?: number; status?: "available" | "redeemed"; cardCode?: string; redeemedUserKeyword?: string; includeCode?: boolean; page: number; pageSize: number }) {
+    const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize), includeCode: String(params.includeCode === true) });
+    if (params.batchId !== undefined) query.set("batchId", String(params.batchId));
+    if (params.status) query.set("status", params.status);
+    if (params.cardCode?.trim()) query.set("cardCode", params.cardCode.trim());
+    if (params.redeemedUserKeyword?.trim()) query.set("redeemedUserKeyword", params.redeemedUserKeyword.trim());
+    return serverGet<ServerCreditCardList>(`/admin/credit/listCreditCards?${query}`);
 }
 
 export function deleteModelConfig(id: string) {

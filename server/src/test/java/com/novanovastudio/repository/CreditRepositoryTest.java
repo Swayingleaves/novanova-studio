@@ -50,4 +50,19 @@ class CreditRepositoryTest {
         Assertions.assertFalse(sql.contains(":userId"));
         Assertions.assertTrue(sql.contains("credit_transactions.transaction_type = 'task_charge'"));
     }
+
+    /**
+     * 卡密库存筛选应组合批次、状态和兑换用户条件。
+     */
+    @Test
+    void shouldBuildCreditCardInventoryFilters() {
+        CreditCardRepository.CardListQuery query = new CreditCardRepository.CardListQuery(8L, "redeemed", "hash", null, "user@example.com");
+
+        String sql = CreditCardRepository.cardFilters(query);
+
+        Assertions.assertTrue(sql.contains("cards.batch_id = :batchId"));
+        Assertions.assertTrue(sql.contains("cards.redeemed_at IS NOT NULL"));
+        Assertions.assertTrue(sql.contains("cards.code_hash = :codeHash"));
+        Assertions.assertTrue(sql.contains(":redeemedUserKeyword"));
+    }
 }

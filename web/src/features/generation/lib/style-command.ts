@@ -37,6 +37,24 @@ export function formatGenerationStyleMessage(prompt: string, styles?: Array<{ na
     return names.length ? `风格：${names.join("、")}\n${prompt}` : prompt;
 }
 
+export type GenerationStyleMessageGroups<T> = {
+    image: T[];
+    video: T[];
+};
+
+/** 格式化画布 Agent 的分组风格消息。 */
+export function formatGroupedGenerationStyleMessage<T extends { name: string; generationType: "image" | "video" }>(prompt: string, styles?: T[]) {
+    const image = (styles || []).filter((style) => style.generationType === "image");
+    const video = (styles || []).filter((style) => style.generationType === "video");
+    if (image.length && !video.length) return formatGenerationStyleMessage(prompt, image);
+    if (video.length && !image.length) return formatGenerationStyleMessage(prompt, video);
+    const lines = [
+        image.length ? `图片风格：${image.map((style) => style.name.trim()).filter(Boolean).join("、")}` : "",
+        video.length ? `视频风格：${video.map((style) => style.name.trim()).filter(Boolean).join("、")}` : "",
+    ].filter(Boolean);
+    return lines.length ? `${lines.join("\n")}\n${prompt}` : prompt;
+}
+
 /**
  * 解析从历史消息粘贴回来的风格消息，并匹配当前可用风格。
  *
@@ -51,5 +69,31 @@ export function parseGenerationStyleMessage<T extends { name: string }>(value: s
     if (!names.length) return null;
     const styles = names.map((name) => availableStyles.find((style) => style.name.trim() === name));
     if (styles.some((style) => !style)) return null;
-    return { prompt: value.slice(match[0].length), styles: styles as T[] };
+    const matchedStyles = styles as T[];
+    if (new Set(matchedStyles.map((style) => style.name.trim())).size !== matchedStyles.length) return null;
+    return { prompt: value.slice(match[0].length), styles: matchedStyles };
+}
+
+/** 解析画布 Agent 的图片/视频分组风格消息。 */
+export function parseGroupedGenerationStyleMessage<T extends { name: string; generationType: "image" | "video" }>(value: string, availableStyles: T[]) {
+    const lines = value.replace(/^\s+/, "").split(/\r?\n/);
+    const groups: GenerationStyleMessageGroups<T> = { image: [], video: [] };
+    let consumed = 0;
+    for (const line of lines) {
+        const match = line.match(/^\s*(图片|视频)风格\s*[:：]\s*(.*?)\s*$/);
+        if (!match) break;
+        const generationType = match[1] === "图片" ? "image" : "video";
+        const names = match[2].split(/[、,，|]/).map((name) => name.trim()).filter(Boolean);
+        if (!names.length) return null;
+        const styles = names.map((name) => availableStyles.find((style) => style.generationType === generationType && style.name.trim() === name));
+        if (styles.some((style) => !style)) return null;
+        groups[generationType].push(...(styles as T[]));
+        consumed += 1;
+    }
+    if (!consumed || (!groups.image.length && !groups.video.length)) return null;
+    const styleCount = groups.image.length + groups.video.length;
+    const styles = [...groups.image, ...groups.video];
+    const styleKeys = styles.map((style) => "id" in style ? String(style.id) : style.name.trim());
+    if (styleCount > 3 || new Set(styleKeys).size !== styleCount) return null;
+    return { prompt: lines.slice(consumed).join("\n"), groups, styles };
 }
