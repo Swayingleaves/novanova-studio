@@ -58,12 +58,15 @@ class AiJsonUtilsTest {
     void shouldOmitBase64ImageContentFromLogResponse() {
         JSONObject response = new JSONObject();
         response.put("data", new JSONArray());
-        response.getJSONArray("data").add(JSONObject.of("b64_json", "abc", "revised_prompt", "测试图片"));
+        String dataUrl = "data:image/png;base64,abc";
+        response.getJSONArray("data").add(JSONObject.of("b64_json", "abc", "url", dataUrl, "revised_prompt", "测试图片"));
 
         JSONObject logResponse = AiJsonUtils.formatResponseForLog(response);
 
         Assertions.assertEquals("Base64内容已省略，字符数=3", logResponse.getJSONArray("data").getJSONObject(0).getString("b64_json"));
+        Assertions.assertEquals("data URL内容已省略，字符数=" + dataUrl.length(), logResponse.getJSONArray("data").getJSONObject(0).getString("url"));
         Assertions.assertEquals("abc", response.getJSONArray("data").getJSONObject(0).getString("b64_json"));
+        Assertions.assertEquals(dataUrl, response.getJSONArray("data").getJSONObject(0).getString("url"));
     }
 
     /**

@@ -14,6 +14,7 @@ import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.service.PersistenceService;
 import java.util.Base64;
+import java.util.Arrays;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -163,6 +164,27 @@ class AiMediaSupportTest {
                 .thenReturn(Mono.just(mediaResponse("https://cos.example/generated.png")));
 
         PersistenceDtos.UploadedMediaResponse response = service.storeGeneratedImageItem(1L, item, null, null, 0).block();
+
+        Assertions.assertNotNull(response);
+        Assertions.assertEquals("https://cos.example/generated.png", response.url());
+        verify(aiHttpClient, never()).downloadRemoteBinary(anyString(), anyString());
+        verify(persistenceService, never()).registerRemoteMediaForUser(any(), any(PersistenceDtos.RegisterRemoteMediaRequest.class));
+    }
+
+    /**
+     * 验证url字段返回base64 data URL时应直接解码并转存，不能走远程下载。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldStoreDataUrlImageResultWithoutRemoteDownload() {
+        byte[] expected = new byte[] {1, 2, 3};
+        String dataUrl = "data:image/png;base64," + Base64.getEncoder().encodeToString(expected);
+        when(persistenceService.storeGeneratedMediaForUser(eq(1L), eq(AiTaskTypes.IMAGE), eq("generated.png"), eq("image/png"),
+                org.mockito.ArgumentMatchers.argThat((byte[] data) -> Arrays.equals(expected, data)), eq(null), eq(null), eq(0)))
+                .thenReturn(Mono.just(mediaResponse("https://cos.example/generated.png")));
+
+        PersistenceDtos.UploadedMediaResponse response = service.storeGeneratedImageItem(1L, imageItem(dataUrl), null, null, 0).block();
 
         Assertions.assertNotNull(response);
         Assertions.assertEquals("https://cos.example/generated.png", response.url());

@@ -70,6 +70,61 @@ class CreationAgentOrchestratorTest {
     }
 
     /**
+     * 主Agent选择当前消息引用时，服务端必须回填完整原文而非采用模型改写内容。
+     */
+    @Test
+    void shouldResolveCurrentPromptFromSourcePromptId() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+        String originalPrompt = "Cloudfalre在今年七月份发布了Monetizaiton Gateway";
+
+        CreationPlan result = orchestrator.resolveTaskPromptSources(planWithSourcePromptId("Cloudflare Monetization Gateway", "current"),
+                session(List.of()), originalPrompt);
+
+        Assertions.assertEquals(originalPrompt, result.tasks().getFirst().prompt());
+    }
+
+    /**
+     * 主Agent选择历史消息引用时，服务端必须保留该消息的完整原文。
+     */
+    @Test
+    void shouldResolveHistoricalPromptFromSourcePromptId() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+        AgentSession session = session(List.of(new AgentMessage("user-1", "user", "生成一只小猫", null)));
+
+        CreationPlan result = orchestrator.resolveTaskPromptSources(planWithSourcePromptId("一只短毛猫", "history-0"),
+                session, "尺寸 9:16");
+
+        Assertions.assertEquals("生成一只小猫", result.tasks().getFirst().prompt());
+    }
+
+    /**
+     * 主Agent引用不存在的用户原文时必须拒绝计划，不能采用模型改写文本。
+     */
+    @Test
+    void shouldRejectUnknownSourcePromptId() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+
+        Assertions.assertThrows(BusinessException.class,
+                () -> orchestrator.resolveTaskPromptSources(planWithSourcePromptId("模型改写内容", "history-99"),
+                        session(List.of()), "生成一只小猫"));
+    }
+
+    /**
+     * 主Agent未提供用户原文引用时必须拒绝计划，避免旧字段回退绕过来源约束。
+     */
+    @Test
+    void shouldRejectMissingSourcePromptId() {
+        CreationAgentOrchestrator orchestrator = orchestrator(
+                mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
+
+        Assertions.assertThrows(BusinessException.class,
+                () -> orchestrator.resolveTaskPromptSources(plan("模型改写内容"), session(List.of()), "生成一只小猫"));
+    }
+
+    /**
      * 多轮补充页面参数时，当前补参消息不得覆盖最初的创作提示词。
      */
     @Test
@@ -264,6 +319,19 @@ class CreationAgentOrchestratorTest {
         return new CreationPlan("model-plan", "生成图片", CreationEntrySource.IMAGE_PAGE, "生成一张图片", "", false,
                 new CreationSettings("image-model", "1:1", "2K", "high", 1, null, null),
                 List.of(new CreationTask("task-1", "image", "generate", prompt, List.of(), null, Map.of())));
+    }
+
+    /**
+     * 构造携带用户原文引用的主Agent候选计划。
+     *
+     * @param prompt String 模型返回的临时提示词
+     * @param sourcePromptId String 服务端用户原文引用
+     * @return CreationPlan 候选计划
+     */
+    private CreationPlan planWithSourcePromptId(String prompt, String sourcePromptId) {
+        return new CreationPlan("model-plan", "生成图片", CreationEntrySource.IMAGE_PAGE, "生成一张图片", "", false,
+                new CreationSettings("image-model", "1:1", "2K", "high", 1, null, null),
+                List.of(new CreationTask("task-1", "image", "generate", prompt, sourcePromptId, List.of(), null, Map.of())));
     }
 
     /**

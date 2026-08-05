@@ -52,7 +52,7 @@ public final class AiJsonUtils {
     /**
      * 构建用于日志输出的AI响应副本。
      * <p>
-     * 图片接口的b64_json字段可能包含大量图片内容，日志副本只保留省略标记和字符数，原始响应不受影响。
+     * 图片接口的b64_json字段或data URL可能包含大量图片内容，日志副本只保留省略标记和字符数，原始响应不受影响。
      *
      * @param response JSONObject 原始AI响应
      * @return JSONObject 可安全写入日志的响应副本
@@ -143,6 +143,9 @@ public final class AiJsonUtils {
             jsonArray.forEach(item -> result.add(omitBase64Content(item)));
             return result;
         }
+        if (value instanceof String text && text.regionMatches(true, 0, "data:", 0, 5)) {
+            return abbreviatedDataUrlContent(text);
+        }
         return value;
     }
 
@@ -155,6 +158,16 @@ public final class AiJsonUtils {
     private static String abbreviatedBase64Content(Object value) {
         int characterCount = value instanceof String text ? text.length() : 0;
         return "Base64内容已省略，字符数=" + characterCount;
+    }
+
+    /**
+     * 生成data URL内容的日志省略标记。
+     *
+     * @param value String data URL原始值
+     * @return String 日志省略标记
+     */
+    private static String abbreviatedDataUrlContent(String value) {
+        return "data URL内容已省略，字符数=" + value.length();
     }
 
     /**

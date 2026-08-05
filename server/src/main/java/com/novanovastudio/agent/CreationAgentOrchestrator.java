@@ -205,8 +205,10 @@ public class CreationAgentOrchestrator {
                                             AtomicReference<String> planId) {
         return modelFactory.defaultTextModel()
                 .flatMap(model -> Mono.justOrEmpty(buildStyleFollowUpPlan(session, request))
-                        .switchIfEmpty(Mono.defer(() -> callMainAgent(userId, session, request, model)))
                         .map(candidate -> planValidator.validate(candidate, request.entrySource(), request.creationSettings()))
+                        .switchIfEmpty(Mono.defer(() -> callMainAgent(userId, session, request, model)
+                                .map(candidate -> planValidator.validate(candidate, request.entrySource(), request.creationSettings()))
+                                .map(candidate -> resolveTaskPromptSources(candidate, session, request.message()))))
                         .flatMap(validated -> {
                             if (StringUtils.hasText(validated.clarificationQuestion())) {
                                 AgentAction action = Boolean.TRUE.equals(validated.canvasGuidance())
@@ -415,6 +417,7 @@ public class CreationAgentOrchestrator {
         input.put("entrySource", request.entrySource());
         input.put("message", request.message());
         input.put("history", historyForAgent(request, session));
+        input.put("promptCandidates", promptSources(session, request.message()));
         input.put("creationSettings", request.creationSettings());
         input.put("generationStyleSelection", generationStyleSelection(request));
         input.put("styleFollowUp", isStyleFollowUpRequest(request));
@@ -436,6 +439,61 @@ public class CreationAgentOrchestrator {
                 .timeout(Duration.ofSeconds(60))
                 .map(message -> message.getStructuredData(CreationPlan.class))
                 .doFinally(signal -> agent.close());
+    }
+
+    /**
+     * 构造主Agent可选择的服务端用户原文引用。
+     * <p>
+     * 当前消息始终使用固定引用，历史消息仅保留与主Agent上下文相同窗口内的用户消息，
+     * 避免模型复制或改写长提示词后再参与执行。
+     *
+     * @param session AgentSession 当前会话
+     * @param currentMessage String 当前用户消息
+     * @return Map<String, String> 原文引用到用户消息的映射
+     */
+    private Map<String, String> promptSources(AgentSession session, String currentMessage) {
+        Map<String, String> sources = new LinkedHashMap<>();
+        sources.put("current", currentMessage);
+        List<com.novanovastudio.agent.dto.AgentMessage> messages = session.messages();
+        for (int index = Math.max(0, messages.size() - 20); index < messages.size(); index++) {
+            com.novanovastudio.agent.dto.AgentMessage message = messages.get(index);
+            if ("user".equals(message.role()) && StringUtils.hasText(message.text())) {
+                sources.put("history-" + index, message.text());
+            }
+        }
+        return sources;
+    }
+
+    /**
+     * 将主Agent选择的用户原文引用解析为可信提示词。
+     * <p>
+     * 主Agent任务必须提供有效引用；引用缺失或不存在时直接拒绝，
+     * 不使用模型返回的改写文本作为替代提示词。
+     *
+     * @param plan CreationPlan 已完成页面能力校验的计划
+     * @param session AgentSession 当前会话
+     * @param currentMessage String 当前用户消息
+     * @return CreationPlan 已回填用户原始提示词的计划
+     * @throws BusinessException 引用不存在时抛出
+     */
+    CreationPlan resolveTaskPromptSources(CreationPlan plan, AgentSession session, String currentMessage) {
+        if (plan == null || plan.tasks() == null || plan.tasks().isEmpty()) {
+            return plan;
+        }
+        Map<String, String> sources = promptSources(session, currentMessage);
+        List<CreationTask> tasks = plan.tasks().stream().map(task -> {
+            if (task == null || !StringUtils.hasText(task.sourcePromptId())) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "主Agent任务缺少用户原始提示词引用");
+            }
+            String prompt = sources.get(task.sourcePromptId());
+            if (!StringUtils.hasText(prompt)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "主Agent任务引用的用户原始提示词不存在");
+            }
+            return new CreationTask(task.taskId(), task.taskType(), task.action(), prompt, task.dependsOn(),
+                    task.toolName(), task.toolArguments());
+        }).toList();
+        return new CreationPlan(plan.planId(), plan.intent(), plan.entrySource(), plan.summary(),
+                plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(), tasks);
     }
 
     /**
