@@ -87,6 +87,7 @@ The project selects an adapter by a provider's `apiFormat` (API request format).
 | Agnes (`agnes`) | ✅ | ✅ | ⚠️ | Configured by the administrator | The text-task adapter supports Agnes Chat Completions, but the AgentScope model factory for the primary Agent does not yet support Agnes. |
 | Anthropic (`anthropic`) | ❌ | ❌ | ✅ | `https://api.anthropic.com/v1` | Uses the Anthropic Messages API for Claude models. |
 | Seedance (`seedance`) | ❌ | ✅ | ❌ | `https://ark.cn-beijing.volces.com/api/v3` | Uses the Volcano Engine Ark video-generation task API. |
+| MiniMax (`minimax`) | ❌ | ✅ | ❌ | `https://api.minimaxi.com` | Uses the MiniMax H3 video-generation V2 API; the model must be configured manually. |
 
 ### Image Generation Models
 
@@ -103,6 +104,7 @@ The project selects an adapter by a provider's `apiFormat` (API request format).
 | OpenAI-compatible | Video models that provide an OpenAI-compatible Videos API; no specific model names are required. | Text-to-video and up to seven reference images; video references are not supported. |
 | Agnes | `agnes-video-v2.0` | Text-to-video with single-image or multiple-image references; video references are not supported. |
 | Seedance | Doubao Seedance 2.0 series, Doubao Seedance 1.5 Pro, Doubao Seedance 1.0 Pro, Doubao Seedance 1.0 Pro Fast, and model IDs or inference endpoint IDs compatible with the same task API. | Text-to-video and reference-image generation; the Seedance 2.0 series supports up to nine reference images and three reference videos. |
+| MiniMax | `MiniMax-H3` | Text-to-video with image or video references; supports up to nine reference images and three reference videos, `768P` or `2K` resolution, and 4-15 second durations. |
 
 ### Chat Models
 
@@ -121,7 +123,7 @@ The project selects an adapter by a provider's `apiFormat` (API request format).
 | Web | Next.js 16, React 19, TypeScript, Ant Design 6, Tailwind CSS, Zustand, React Flow | Creation workspace, conversations, canvas, and configuration interface. |
 | Server | Java 21, Spring Boot 3.5, Spring WebFlux, AgentScope Java, Fastjson2 | Reactive APIs, Agent orchestration, task scheduling, authentication, and business services. |
 | Data and tasks | PostgreSQL 17, Flyway, R2DBC (reactive database connectivity), Redis 8.6, Redis Stream | Persistence for users, projects, tasks, assets, and generation records; asynchronous task delivery and recovery. |
-| AI and storage | OpenAI-, Gemini-, Agnes-, Anthropic-, and Seedance-format providers; COS, OSS, Kodo | Connect models and object storage through the administrator console instead of exposing credentials in the browser. |
+| AI and storage | OpenAI-, Gemini-, Agnes-, Anthropic-, Seedance-, and MiniMax-format providers; COS, OSS, Kodo | Connect models and object storage through the administrator console instead of exposing credentials in the browser. |
 | Deployment | Docker Compose, Nginx, Node.js 22, Maven | Local dependencies, containerized builds, and Linux server deployment. |
 
 ## 📁 Repository Layout

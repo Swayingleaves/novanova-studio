@@ -151,7 +151,7 @@ export function AppConfigModal() {
         const channels = cloneChannels(useConfigStore.getState().config.channels);
         setChannelBaseline(channels);
         setDraftChannels(cloneChannels(channels));
-        if (resetCollapsed) setCollapsedChannelIds(channels.slice(1).map((channel) => channel.id));
+        if (resetCollapsed) setCollapsedChannelIds(channels.map((channel) => channel.id));
     }, []);
 
     const resetModelConfigDraft = useCallback(() => {
@@ -232,7 +232,7 @@ export function AppConfigModal() {
 
     const addChannel = () => {
         const channel = createModelChannel({ name: `渠道 ${draftChannels.length + 1}` });
-        setDraftChannels((channels) => [...channels, channel]);
+        setDraftChannels((channels) => [channel, ...channels]);
         setCollapsedChannelIds((ids) => ids.filter((id) => id !== channel.id));
     };
 
