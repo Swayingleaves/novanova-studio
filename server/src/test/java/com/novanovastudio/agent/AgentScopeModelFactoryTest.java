@@ -4,7 +4,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
+import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.dto.AiTaskDtos;
+import com.novanovastudio.dto.PersistenceDtos;
+import com.novanovastudio.service.PersistenceService;
 import io.agentscope.core.model.AnthropicChatModel;
 import io.agentscope.core.model.GeminiChatModel;
 import io.agentscope.core.model.GenerateOptions;
@@ -14,6 +18,8 @@ import java.lang.reflect.Field;
 import java.util.List;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
 
 /**
  * 平台文本渠道到AgentScope模型的适配测试。
@@ -44,6 +50,48 @@ class AgentScopeModelFactoryTest {
         Assertions.assertEquals("gemini-test", gemini.getModelName());
         Assertions.assertEquals("claude-test", anthropic.getModelName());
         Assertions.assertFalse(openAi.supportsNativeStructuredOutput());
+    }
+
+    /**
+     * 用户明确选择的文本模型应解析渠道、模型和按次积分价格。
+     */
+    @Test
+    void shouldResolveSelectedTextModelAndCreditCost() {
+        PersistenceService persistenceService = mock(PersistenceService.class);
+        AiProviderAdapterRegistry adapterRegistry = mock(AiProviderAdapterRegistry.class);
+        AiTaskDtos.AiChannelConfig channel = channel("openai", "story-model");
+        PersistenceDtos.ModelConfig modelConfig = new PersistenceDtos.ModelConfig(
+                "model-config-1", "channel", "story-model", AiTaskTypes.TEXT, List.of(), true, 1, 6, false, "high");
+        when(persistenceService.getPlatformAiChannels()).thenReturn(Mono.just(List.of(channel)));
+        when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(modelConfig)));
+        when(adapterRegistry.supports(org.mockito.ArgumentMatchers.any(AiTaskDtos.AiChannelConfig.class), org.mockito.ArgumentMatchers.eq(AiTaskTypes.TEXT))).thenReturn(true);
+        when(adapterRegistry.normalizeApiFormat("openai")).thenReturn("openai");
+        AgentScopeModelFactory factory = new AgentScopeModelFactory(persistenceService, adapterRegistry);
+
+        StepVerifier.create(factory.resolveTextModel("channel::story-model"))
+                .assertNext(selection -> {
+                    Assertions.assertEquals("channel::story-model", selection.modelValue());
+                    Assertions.assertEquals("story-model", selection.modelName());
+                    Assertions.assertEquals("测试渠道", selection.provider());
+                    Assertions.assertEquals(6, selection.creditCost());
+                    Assertions.assertEquals("story-model", selection.agentModel().getModelName());
+                })
+                .verifyComplete();
+    }
+
+    /**
+     * 分镜模型必须使用渠道和模型组成的明确编码。
+     */
+    @Test
+    void shouldRejectTextModelWithoutChannelIdentifier() {
+        AgentScopeModelFactory factory = new AgentScopeModelFactory(mock(PersistenceService.class), mock(AiProviderAdapterRegistry.class));
+
+        StepVerifier.create(factory.resolveTextModel("story-model"))
+                .expectErrorSatisfies(error -> {
+                    Assertions.assertInstanceOf(BusinessException.class, error);
+                    Assertions.assertEquals("所选文本模型格式不合法", error.getMessage());
+                })
+                .verify();
     }
 
     /**

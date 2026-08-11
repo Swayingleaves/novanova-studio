@@ -12,6 +12,7 @@ import com.novanovastudio.repository.AiTaskRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.task.AiTaskEventPublisher;
 import com.novanovastudio.task.AiTaskQueue;
+import com.novanovastudio.task.ModelTaskExecutionDispatcher;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.reactive.TransactionalOperator;
@@ -39,6 +40,7 @@ class AiTaskModelAccessTest {
                 persistenceService,
                 mock(AiTaskEventPublisher.class),
                 mock(AiTaskQueue.class),
+                mock(ModelTaskExecutionDispatcher.class),
                 mock(AgentTaskOrchestrator.class),
                 mock(AiProviderAdapterRegistry.class),
                 mock(CreditService.class),

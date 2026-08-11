@@ -12,6 +12,7 @@ export const agnesVideoRatioOptions: Array<{ value: AgnesVideoRatio; label: stri
 ];
 
 export const agnesVideoDurationOptions = [3, 5, 10, 18];
+export const AGNES_VIDEO_KEYFRAME_MAX_REFERENCE_IMAGE_COUNT = 3;
 
 const AGNES_VIDEO_MIN_FRAME_RATE = 1;
 const AGNES_VIDEO_MAX_FRAME_RATE = 60;
@@ -55,6 +56,12 @@ const agnesVideoTimingPresets = [
 
 export function isAgnesVideoConfig(config: AiConfig, model = config.videoModel || config.model) {
     return resolveModelRequestConfig(config, model).apiFormat === "agnes";
+}
+
+/** 返回 Agnes 视频参考图数量不合法的原因；空字符串表示可调用。 */
+export function readAgnesVideoReferenceImageIssue(referenceImageCount: number): string {
+    if (referenceImageCount <= AGNES_VIDEO_KEYFRAME_MAX_REFERENCE_IMAGE_COUNT) return "";
+    return `Agnes 视频最多支持${AGNES_VIDEO_KEYFRAME_MAX_REFERENCE_IMAGE_COUNT}张参考图片，请调整镜头资产关联或切换视频模型`;
 }
 
 export function normalizeAgnesVideoResolution(value: string): AgnesVideoResolution {

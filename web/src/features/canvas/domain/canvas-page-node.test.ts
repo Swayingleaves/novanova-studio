@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createImageNode, createTextNode } from "../constants.ts";
+import { createImageNode, createStoryboardNode, createTextNode } from "../constants.ts";
 import {
     applyCanvasNodeConfig,
     createCanvasConnection,
@@ -60,6 +60,16 @@ test("刷新后只把没有服务端任务标识的运行节点标记为失败",
     assert.equal(first.execution.phase, "running");
     assert.equal(second.execution.phase, "failed");
     assert.equal(second.execution.errorMessage, "页面刷新后生成已中断，请重新生成。");
+});
+
+test("刷新后会把同步分镜生成标记为可重新生成", () => {
+    const storyboard = createStoryboardNode({ id: "storyboard-1", position: { x: 0, y: 0 } });
+    storyboard.execution = { phase: "running" };
+
+    const [restored] = resetInterruptedCanvasNodes([storyboard]);
+
+    assert.equal(restored.execution.phase, "failed");
+    assert.equal(restored.execution.errorMessage, "页面刷新后生成已中断，请重新生成。");
 });
 
 test("框选只返回与矩形相交的节点标识", () => {

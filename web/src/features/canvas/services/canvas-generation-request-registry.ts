@@ -11,7 +11,6 @@ export interface CanvasGenerationRequestRegistry {
     stopByRunningId(runningNodeId: string): Set<string>;
     stopAll(): void;
     isRunning(runningNodeId: string): boolean;
-    snapshot(): Map<string, CanvasGenerationRequest>;
 }
 
 export function createCanvasGenerationRequestRegistry(): CanvasGenerationRequestRegistry {
@@ -45,9 +44,6 @@ export function createCanvasGenerationRequestRegistry(): CanvasGenerationRequest
         },
         isRunning(runningNodeId) {
             return [...requests.values()].some((request) => request.runningNodeId === runningNodeId);
-        },
-        snapshot() {
-            return new Map(requests);
         },
     };
 }

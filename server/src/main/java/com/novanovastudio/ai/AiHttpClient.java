@@ -8,10 +8,13 @@ import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.AiTaskDtos;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -501,6 +504,57 @@ public class AiHttpClient {
     }
 
     /**
+     * 将远程媒体流式下载到本地文件。
+     * <p>
+     * 此方法仅接受已经通过媒体URL校验的HTTP(S)地址，下载过程不将完整视频加载到JVM堆内存。
+     *
+     * @param url String 远程媒体地址
+     * @param defaultMimeType String 默认MIME类型
+     * @param target Path 本地目标文件
+     * @param maximumBytes long 允许下载的最大字节数
+     * @return Mono<RemoteMediaFile> 已下载媒体信息
+     */
+    public Mono<RemoteMediaFile> downloadRemoteMediaToFile(String url, String defaultMimeType, Path target, long maximumBytes) {
+        return callBlocking(() -> {
+            if (maximumBytes < 1) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "远程媒体最大字节数必须大于0");
+            }
+            URI uri = validateRemoteMediaUri(url);
+            HttpRequest request = HttpRequest.newBuilder(uri).timeout(Duration.ofMinutes(10)).GET().build();
+            HttpResponse<InputStream> response = remoteMediaHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                try (InputStream inputStream = response.body()) {
+                    throw AiErrorSupport.providerException(response.statusCode(), "", "download");
+                }
+            }
+            long contentLength = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
+            if (contentLength > maximumBytes) {
+                try (InputStream inputStream = response.body()) {
+                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, "源视频文件超过允许大小限制");
+                }
+            }
+            String mimeType = AiTaskParameterReader.firstNonEmpty(response.headers().firstValue("Content-Type").orElse(defaultMimeType), defaultMimeType);
+            Files.createDirectories(target.toAbsolutePath().getParent());
+            long bytes = 0L;
+            try (InputStream inputStream = response.body(); OutputStream outputStream = Files.newOutputStream(target)) {
+                byte[] buffer = new byte[8192];
+                int readBytes;
+                while ((readBytes = inputStream.read(buffer)) != -1) {
+                    bytes += readBytes;
+                    if (bytes > maximumBytes) {
+                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "源视频文件超过允许大小限制");
+                    }
+                    outputStream.write(buffer, 0, readBytes);
+                }
+            } catch (Exception exception) {
+                Files.deleteIfExists(target);
+                throw exception;
+            }
+            return new RemoteMediaFile(bytes, mimeType);
+        });
+    }
+
+    /**
      * 校验远程媒体地址格式。
      *
      * @param url String 远程媒体地址
@@ -733,6 +787,15 @@ public class AiHttpClient {
      * @param mimeType String MIME类型
      */
     public record RemoteMediaHeaders(Long bytes, String mimeType) {
+    }
+
+    /**
+     * 已流式下载的远程媒体信息。
+     *
+     * @param bytes Long 文件字节数
+     * @param mimeType String MIME类型
+     */
+    public record RemoteMediaFile(Long bytes, String mimeType) {
     }
 
     /**

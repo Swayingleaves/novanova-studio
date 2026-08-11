@@ -4,7 +4,7 @@ import { seedanceReferenceLabel } from "@/features/generation/lib/seedance-video
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceVideo } from "@/features/generation/types/media";
 import type { CanvasConnection, CanvasGenerationMode, CanvasNode } from "../types";
-import { isImageNode, isTextNode, isVideoNode } from "../domain/canvas-node";
+import { isImageNode, isStoryboardNode, isTextNode, isVideoNode } from "../domain/canvas-node";
 import { getGenerationResourceNodes } from "../utils/canvas-resource-references";
 
 type NodeMediaReferences = {
@@ -34,15 +34,22 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNode[], 
 }
 
 export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNode[], connections: CanvasConnection[]): NodeGenerationInput[] {
-    return getGenerationResourceNodes(nodeId, nodes, connections).flatMap((node) => {
+    const inputs: NodeGenerationInput[] = [];
+    for (const node of getGenerationResourceNodes(nodeId, nodes, connections)) {
         const image = readReferenceImage(node);
-        if (image) return [{ nodeId: node.id, type: "image" as const, title: node.title, image }];
+        if (image) {
+            inputs.push({ nodeId: node.id, type: "image", title: node.title, image });
+            continue;
+        }
         const video = readReferenceVideo(node);
-        if (video) return [{ nodeId: node.id, type: "video" as const, title: node.title, video }];
+        if (video) {
+            inputs.push({ nodeId: node.id, type: "video", title: node.title, video });
+            continue;
+        }
         const text = readNodeText(node);
-        if (text) return [{ nodeId: node.id, type: "text" as const, title: node.title, text }];
-        return [];
-    });
+        if (text) inputs.push({ nodeId: node.id, type: "text", title: node.title, text });
+    }
+    return inputs;
 }
 
 export function buildNodeResponseMessages(context: NodeGenerationContext): AiTextMessage[] {
@@ -100,7 +107,8 @@ function collectMediaReferences(inputs: NodeGenerationInput[]): NodeMediaReferen
 
 function readNodeText(node: CanvasNode) {
     if (isTextNode(node)) return node.content.text;
-    return node.generation.prompt;
+    if (isStoryboardNode(node)) return node.content.instruction;
+    return isImageNode(node) || isVideoNode(node) ? node.generation.prompt : "";
 }
 
 function createGenerationLabel(type: NodeGenerationInput["type"], index: number) {

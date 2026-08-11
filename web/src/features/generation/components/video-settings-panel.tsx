@@ -4,9 +4,10 @@ import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
 import { Slider } from "antd";
 
 import { ImageSettingsTheme } from "@/features/generation/components/image-settings-panel";
-import { agnesVideoMaxSeconds, agnesVideoRatioOptions, isAgnesVideoConfig, normalizeAgnesVideoRatio, normalizeAgnesVideoResolution, normalizeAgnesVideoSeconds } from "@/features/generation/lib/agnes-video";
+import { agnesVideoRatioOptions, isAgnesVideoConfig, normalizeAgnesVideoRatio, normalizeAgnesVideoResolution, normalizeAgnesVideoSeconds } from "@/features/generation/lib/agnes-video";
 import { isMiniMaxH3VideoConfig, miniMaxH3ResolutionOptions, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio, normalizeMiniMaxH3Resolution, normalizeMiniMaxH3VideoSettings } from "@/features/generation/lib/minimax-h3-video";
 import { isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution } from "@/features/generation/lib/seedance-video";
+import { readVideoDurationRange } from "@/features/generation/lib/video-duration";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 
@@ -18,6 +19,7 @@ type VideoSettingsPanelProps = {
     onConfigChange: (key: VideoConfigKey, value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
+    showDuration?: boolean;
     className?: string;
     showCount?: boolean;
     onCountChange?: (value: string) => void;
@@ -54,15 +56,7 @@ const GENERIC_SIZE_BY_RATIO: Record<RatioPreset["value"], string> = {
 };
 
 /** 渲染统一的视频设置面板，并按当前模型禁用不支持的配置。 */
-export function VideoSettingsPanel({
-    config,
-    onConfigChange,
-    theme,
-    showTitle = true,
-    className = "w-[388px] space-y-4 px-1 py-0.5",
-    showCount = false,
-    onCountChange,
-}: VideoSettingsPanelProps) {
+export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, showDuration = true, className = "w-[388px] space-y-4 px-1 py-0.5", showCount = false, onCountChange }: VideoSettingsPanelProps) {
     const resolved = resolveModelRequestConfig(config, config.videoModel || config.model);
     const seedance = isSeedanceVideoConfig(resolved);
     const agnes = isAgnesVideoConfig(resolved);
@@ -71,7 +65,7 @@ export function VideoSettingsPanel({
     const ratio = resolveRatio(resolved.size, seedance, agnes, miniMaxH3);
     const resolution = resolveResolution(resolved.vquality, model, seedance, agnes, miniMaxH3);
     const resolutionPresets = miniMaxH3 ? miniMaxH3ResolutionOptions : GENERIC_RESOLUTION_PRESETS;
-    const durationRange = resolveDurationRange(resolved, seedance, agnes, miniMaxH3);
+    const durationRange = readVideoDurationRange(resolved);
     const seconds = resolveSeconds(resolved, seedance, agnes, miniMaxH3, durationRange);
     const [durationDraft, setDurationDraft] = useState(seconds);
     const count = normalizeVideoGenerationCount(config.canvasVideoCount);
@@ -105,16 +99,7 @@ export function VideoSettingsPanel({
                     <div className="grid grid-cols-5 gap-2">
                         {RATIO_PRESETS.map((preset) => {
                             const disabled = !supportsRatio(preset.value, seedance, agnes, miniMaxH3);
-                            return (
-                                <RatioButton
-                                    key={preset.value}
-                                    preset={preset}
-                                    active={ratio === preset.value}
-                                    disabled={disabled}
-                                    theme={theme}
-                                    onClick={() => updateRatio(preset.value)}
-                                />
-                            );
+                            return <RatioButton key={preset.value} preset={preset} active={ratio === preset.value} disabled={disabled} theme={theme} onClick={() => updateRatio(preset.value)} />;
                         })}
                     </div>
                 </Field>
@@ -126,14 +111,7 @@ export function VideoSettingsPanel({
                             const disabled = !miniMaxH3 && (item === "4K" || (item === "1080P" && seedance && isSeedanceFastModel(model)));
                             const disabledReason = item === "4K" ? "当前视频模型不支持 4K" : "当前 fast 模型不支持 1080P";
                             return (
-                                <OptionButton
-                                    key={item}
-                                    active={resolution === displayItem}
-                                    disabled={disabled}
-                                    disabledReason={disabledReason}
-                                    theme={theme}
-                                    onClick={() => onConfigChange("vquality", item.toLowerCase())}
-                                >
+                                <OptionButton key={item} active={resolution === displayItem} disabled={disabled} disabledReason={disabledReason} theme={theme} onClick={() => onConfigChange("vquality", item.toLowerCase())}>
                                     {displayItem}
                                 </OptionButton>
                             );
@@ -141,38 +119,34 @@ export function VideoSettingsPanel({
                     </div>
                 </Field>
 
-                <Field label="视频时长" theme={theme}>
-                    <div className="flex h-8 items-center gap-3">
-                        <div className="min-w-0 flex-1 px-0.5" onMouseDown={stopDown}>
-                            <Slider
+                {showDuration ? (
+                    <Field label="视频时长" theme={theme}>
+                        <div className="flex h-8 items-center gap-3">
+                            <div className="min-w-0 flex-1 px-0.5" onMouseDown={stopDown}>
+                                <Slider min={durationRange.min} max={durationRange.max} step={1} tooltip={{ open: false }} value={durationDraft} onChange={setDurationDraft} onChangeComplete={commitDuration} />
+                            </div>
+                            <input
+                                type="number"
                                 min={durationRange.min}
                                 max={durationRange.max}
-                                step={1}
-                                tooltip={{ open: false }}
                                 value={durationDraft}
-                                onChange={setDurationDraft}
-                                onChangeComplete={commitDuration}
+                                aria-label="视频时长"
+                                className="h-8 w-14 rounded-lg border bg-transparent px-2 text-center text-sm font-medium outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                style={{ borderColor: theme.node.stroke, color: theme.node.text, background: theme.node.fill }}
+                                onMouseDown={stopDown}
+                                onChange={(event) => setDurationDraft(normalizeDurationDraft(event.currentTarget.value, durationRange))}
+                                onBlur={() => commitDuration(durationDraft)}
+                                onKeyDown={(event) => {
+                                    if (event.key !== "Enter") return;
+                                    event.currentTarget.blur();
+                                }}
                             />
+                            <span className="text-sm" style={{ color: theme.node.muted }}>
+                                s
+                            </span>
                         </div>
-                        <input
-                            type="number"
-                            min={durationRange.min}
-                            max={durationRange.max}
-                            value={durationDraft}
-                            aria-label="视频时长"
-                            className="h-8 w-14 rounded-lg border bg-transparent px-2 text-center text-sm font-medium outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                            style={{ borderColor: theme.node.stroke, color: theme.node.text, background: theme.node.fill }}
-                            onMouseDown={stopDown}
-                            onChange={(event) => setDurationDraft(normalizeDurationDraft(event.currentTarget.value, durationRange))}
-                            onBlur={() => commitDuration(durationDraft)}
-                            onKeyDown={(event) => {
-                                if (event.key !== "Enter") return;
-                                event.currentTarget.blur();
-                            }}
-                        />
-                        <span className="text-sm" style={{ color: theme.node.muted }}>s</span>
-                    </div>
-                </Field>
+                    </Field>
+                ) : null}
 
                 {showCount ? (
                     <Field label="生成数量" theme={theme}>
@@ -193,7 +167,9 @@ export function VideoSettingsPanel({
 function Field({ label, theme, children }: { label: string; theme: CanvasTheme; children: ReactNode }) {
     return (
         <div className="space-y-2">
-            <div className="text-sm font-semibold" style={{ color: theme.node.muted }}>{label}</div>
+            <div className="text-sm font-semibold" style={{ color: theme.node.muted }}>
+                {label}
+            </div>
             {children}
         </div>
     );
@@ -261,12 +237,6 @@ function resolveResolution(value: string, model: string, seedance: boolean, agne
     return miniMaxH3 || GENERIC_RESOLUTION_PRESETS.includes(upper as (typeof GENERIC_RESOLUTION_PRESETS)[number]) ? upper : "720P";
 }
 
-function resolveDurationRange(config: AiConfig, seedance: boolean, agnes: boolean, miniMaxH3: boolean) {
-    if (seedance || miniMaxH3) return { min: 4, max: 15 };
-    if (agnes) return { min: 1, max: Math.min(15, Math.floor(agnesVideoMaxSeconds(config.vquality))) };
-    return { min: 1, max: 15 };
-}
-
 function resolveSeconds(config: AiConfig, seedance: boolean, agnes: boolean, miniMaxH3: boolean, range: { min: number; max: number }) {
     const raw = miniMaxH3 ? normalizeMiniMaxH3Duration(config.videoSeconds) : seedance ? normalizeSeedanceDuration(config.videoSeconds) : agnes ? Number(normalizeAgnesVideoSeconds(config.videoSeconds, config.vquality)) : Number(config.videoSeconds || 6);
     return Math.max(range.min, Math.min(range.max, raw));
@@ -279,7 +249,7 @@ function supportsRatio(ratio: RatioPreset["value"], seedance: boolean, agnes: bo
 }
 
 function nearestRatio(value: number): RatioPreset["value"] {
-    return RATIO_PRESETS.filter((item) => item.value !== "adaptive").reduce((best, item) => Math.abs(item.width / item.height - value) < Math.abs(best.width / best.height - value) ? item : best).value;
+    return RATIO_PRESETS.filter((item) => item.value !== "adaptive").reduce((best, item) => (Math.abs(item.width / item.height - value) < Math.abs(best.width / best.height - value) ? item : best)).value;
 }
 
 function normalizeDurationDraft(value: string, range: { min: number; max: number }) {

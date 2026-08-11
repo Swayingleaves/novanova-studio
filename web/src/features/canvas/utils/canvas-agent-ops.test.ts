@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyCanvasAgentOps, type CanvasAgentSnapshot } from "./canvas-agent-ops.ts";
+import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "./canvas-agent-ops.ts";
 
 test("Agent 新增图片节点使用新领域模型", () => {
     const snapshot = emptySnapshot();
@@ -60,6 +60,13 @@ test("Agent 连接操作使用明确的源节点和目标节点", () => {
     assert.deepEqual(connected.connections, [
         { id: "connection-1", source: { nodeId: "text-1" }, target: { nodeId: "image-1" } },
     ]);
+});
+
+test("Agent 不会把分镜节点降级创建为文本节点", () => {
+    const invalidOperation = { type: "add_node", nodeType: "storyboard" } as unknown as CanvasAgentOp;
+    const next = applyCanvasAgentOps(emptySnapshot(), [invalidOperation]);
+
+    assert.deepEqual(next.nodes, []);
 });
 
 function emptySnapshot(): CanvasAgentSnapshot {

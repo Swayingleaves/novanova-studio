@@ -12,8 +12,35 @@
 | Maven | 3.9 或更高版本 | 安装依赖并启动服务端。 |
 | Node.js | 22 | 运行 Next.js 前端。 |
 | pnpm | 11.7.0 | 安装依赖并启动前端。 |
+| FFmpeg | 当前稳定版本 | 视频合成节点使用 `ffmpeg` 合成视频，`ffprobe` 探测视频元数据。 |
 
 PostgreSQL 和 Redis 需要作为本机服务运行。PostgreSQL 账号应当能够访问管理数据库，并在目标数据库不存在时具有创建权限。
+
+### Windows：安装 FFmpeg 和 FFprobe
+
+仅在本地调试视频合成功能时需要安装。`ffprobe.exe` 随 FFmpeg 安装包提供，无需单独安装。
+
+在 PowerShell 中执行：
+
+```powershell
+winget install --id Gyan.FFmpeg.Shared -e
+```
+
+安装完成后关闭并重新打开终端，再验证：
+
+```powershell
+ffmpeg -version
+ffprobe -version
+```
+
+如果命令未加入 `PATH`，可在启动服务前指定可执行文件的绝对路径：
+
+```powershell
+$env:AI_VIDEO_COMPOSITION_FFMPEG_EXECUTABLE = "C:\ffmpeg\bin\ffmpeg.exe"
+$env:AI_VIDEO_COMPOSITION_FFPROBE_EXECUTABLE = "C:\ffmpeg\bin\ffprobe.exe"
+```
+
+从 IDE 调试服务端时，将上述两个环境变量添加到 Spring Boot 运行配置中。请按实际解压或安装目录替换路径。
 
 ## 2. 创建服务端本地环境变量
 

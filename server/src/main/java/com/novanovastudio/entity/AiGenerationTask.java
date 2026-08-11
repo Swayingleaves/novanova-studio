@@ -27,6 +27,9 @@ public class AiGenerationTask {
     /** 渠道名称 */
     private String provider;
 
+    /** 模型配置ID */
+    private String modelConfigId;
+
     /** 状态 */
     private String status;
 

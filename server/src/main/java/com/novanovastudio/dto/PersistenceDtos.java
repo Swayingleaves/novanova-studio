@@ -47,13 +47,21 @@ public final class PersistenceDtos {
     /** 用户模型配置。 */
     public record ModelConfig(String id, String channelId, String modelName, String modelType,
                               List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
-                              Boolean thinkingEnabled, String reasoningEffort, String creditUnit) {
+                              Boolean thinkingEnabled, String reasoningEffort, String creditUnit, Integer requestConcurrency) {
+        /** 保持旧调用方使用默认并发数。 */
+        public ModelConfig(String id, String channelId, String modelName, String modelType,
+                           List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
+                           Boolean thinkingEnabled, String reasoningEffort, String creditUnit) {
+            this(id, channelId, modelName, modelType, capabilities, defaultModel, sortOrder, creditCost,
+                    thinkingEnabled, reasoningEffort, creditUnit, 1);
+        }
+
         /** 保持旧调用方按次计费。 */
         public ModelConfig(String id, String channelId, String modelName, String modelType,
                            List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
                            Boolean thinkingEnabled, String reasoningEffort) {
             this(id, channelId, modelName, modelType, capabilities, defaultModel, sortOrder, creditCost,
-                    thinkingEnabled, reasoningEffort, "generation");
+                    thinkingEnabled, reasoningEffort, "generation", 1);
         }
     }
 
@@ -69,11 +77,21 @@ public final class PersistenceDtos {
                                            @Min(value = 0, message = "模型积分不能小于0") Integer creditCost,
                                            Boolean thinkingEnabled,
                                            @Pattern(regexp = "high|max", message = "思考强度只支持high、max") String reasoningEffort,
-                                           @Pattern(regexp = "generation|second", message = "积分计费单位只支持generation、second") String creditUnit) {
+                                           @Pattern(regexp = "generation|second", message = "积分计费单位只支持generation、second") String creditUnit,
+                                           @Min(value = 1, message = "模型同时并发数不能小于1") Integer requestConcurrency) {
+        /** 保持旧调用方使用默认并发数。 */
+        public CreateModelConfigRequest(String channelId, String modelName, String modelType, List<String> capabilities,
+                                        Integer sortOrder, Integer creditCost, Boolean thinkingEnabled, String reasoningEffort,
+                                        String creditUnit) {
+            this(channelId, modelName, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort,
+                    creditUnit, 1);
+        }
+
         /** 保持旧调用方按次计费。 */
         public CreateModelConfigRequest(String channelId, String modelName, String modelType, List<String> capabilities,
                                         Integer sortOrder, Integer creditCost, Boolean thinkingEnabled, String reasoningEffort) {
-            this(channelId, modelName, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort, "generation");
+            this(channelId, modelName, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort,
+                    "generation", 1);
         }
     }
 
@@ -84,11 +102,19 @@ public final class PersistenceDtos {
                                            @Min(value = 0, message = "模型积分不能小于0") Integer creditCost,
                                            Boolean thinkingEnabled,
                                            @Pattern(regexp = "high|max", message = "思考强度只支持high、max") String reasoningEffort,
-                                           @Pattern(regexp = "generation|second", message = "积分计费单位只支持generation、second") String creditUnit) {
+                                           @Pattern(regexp = "generation|second", message = "积分计费单位只支持generation、second") String creditUnit,
+                                           @Min(value = 1, message = "模型同时并发数不能小于1") Integer requestConcurrency) {
+        /** 保持旧调用方省略并发数时沿用原配置。 */
+        public UpdateModelConfigRequest(String id, String modelType, List<String> capabilities, Integer sortOrder,
+                                        Integer creditCost, Boolean thinkingEnabled, String reasoningEffort, String creditUnit) {
+            this(id, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort, creditUnit, null);
+        }
+
         /** 保持旧调用方按次计费。 */
         public UpdateModelConfigRequest(String id, String modelType, List<String> capabilities, Integer sortOrder,
                                         Integer creditCost, Boolean thinkingEnabled, String reasoningEffort) {
-            this(id, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort, "generation");
+            this(id, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort,
+                    "generation", null);
         }
     }
 

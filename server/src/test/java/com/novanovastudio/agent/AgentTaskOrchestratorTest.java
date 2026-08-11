@@ -687,7 +687,7 @@ class AgentTaskOrchestratorTest {
          * @param channels List<AiChannelConfig> 全站渠道列表
          */
         private StubPersistenceService(List<AiTaskDtos.AiChannelConfig> channels) {
-            super(null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null);
             this.channels = channels;
         }
 

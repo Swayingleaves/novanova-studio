@@ -5,7 +5,7 @@
     "type": "module",
     "packageManager": "pnpm@11.7.0",
     "scripts": {
-        "dev": "NODE_OPTIONS='--max-old-space-size=2048' next dev --turbo -H 0.0.0.0 -p 5555",
+        "dev": "next dev --turbo -H 0.0.0.0 -p 5555",
         "build": "next build",
         "start": "node .next/standalone/server.js",
         "format": "prettier --write .",

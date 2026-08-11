@@ -31,15 +31,19 @@ public class AiTaskRepository {
      */
     public Mono<Void> createTask(AiGenerationTask task) {
         // 创建任务时保存请求快照和初始结果空对象。
-        return databaseClient.sql("""
-                INSERT INTO ai_generation_tasks(id, user_id, task_type, model, provider, status, progress, request_data, result_data)
-                VALUES (:id, :userId, :taskType, :model, :provider, :status, :progress, CAST(:requestData AS jsonb), CAST(:resultData AS jsonb))
+        DatabaseClient.GenericExecuteSpec specification = databaseClient.sql("""
+                INSERT INTO ai_generation_tasks(id, user_id, task_type, model, provider, model_config_id, status, progress, request_data, result_data)
+                VALUES (:id, :userId, :taskType, :model, :provider, :modelConfigId, :status, :progress, CAST(:requestData AS jsonb), CAST(:resultData AS jsonb))
                 """)
                 .bind("id", task.getId())
                 .bind("userId", task.getUserId())
                 .bind("taskType", task.getTaskType())
                 .bind("model", task.getModel())
-                .bind("provider", task.getProvider())
+                .bind("provider", task.getProvider());
+        specification = task.getModelConfigId() == null
+                ? specification.bindNull("modelConfigId", String.class)
+                : specification.bind("modelConfigId", task.getModelConfigId());
+        return specification
                 .bind("status", task.getStatus())
                 .bind("progress", task.getProgress())
                 .bind("requestData", task.getRequestData())
@@ -59,7 +63,7 @@ public class AiTaskRepository {
     public Mono<AiGenerationTask> getTask(Long userId, String taskId) {
         // 前端查询任务时限定用户ID，避免跨用户读取。
         return databaseClient.sql("""
-                SELECT id, user_id, task_type, model, provider, status, progress, request_data::text AS request_data, result_data::text AS result_data,
+                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE user_id = :userId AND id = :taskId
@@ -79,7 +83,7 @@ public class AiTaskRepository {
     public Mono<AiGenerationTask> getTaskById(String taskId) {
         // 异步执行线程按任务ID读取任务，不依赖请求上下文。
         return databaseClient.sql("""
-                SELECT id, user_id, task_type, model, provider, status, progress, request_data::text AS request_data, result_data::text AS result_data,
+                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE id = :taskId
@@ -99,7 +103,7 @@ public class AiTaskRepository {
     public Flux<AiGenerationTask> listTasks(Long userId, List<String> statuses) {
         // 基础查询限定用户ID。
         String sql = """
-                SELECT id, user_id, task_type, model, provider, status, progress, request_data::text AS request_data, result_data::text AS result_data,
+                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE user_id = :userId
@@ -202,11 +206,33 @@ public class AiTaskRepository {
                 FROM ai_generation_tasks
                 WHERE status = 'pending'
                    OR (status = 'running' AND updated_at < :runningRecoverBefore)
-                ORDER BY created_at ASC
+                ORDER BY created_at ASC, id ASC
                 LIMIT 500
                 """)
                 .bind("runningRecoverBefore", runningRecoverBefore)
                 .map((row, metadata) -> row.get("id", String.class))
+                .all();
+    }
+
+    /**
+     * 查询需要启动恢复的未完成任务。
+     *
+     * @param runningRecoverBefore OffsetDateTime 运行中任务恢复阈值
+     * @return Flux<AiGenerationTask> 需要恢复的任务流
+     */
+    public Flux<AiGenerationTask> listRecoverableTasks(OffsetDateTime runningRecoverBefore) {
+        // 恢复时需要保留模型配置ID，才能返回对应的模型并发队列。
+        return databaseClient.sql("""
+                SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
+                       error_message, started_at, completed_at, created_at, updated_at
+                FROM ai_generation_tasks
+                WHERE status = 'pending'
+                   OR (status = 'running' AND updated_at < :runningRecoverBefore)
+                ORDER BY created_at ASC, id ASC
+                LIMIT 500
+                """)
+                .bind("runningRecoverBefore", runningRecoverBefore)
+                .map((row, metadata) -> RowMappers.aiTask(row))
                 .all();
     }
 
@@ -249,6 +275,26 @@ public class AiTaskRepository {
                 .fetch()
                 .rowsUpdated()
                 .map(rows -> rows > 0);
+    }
+
+    /**
+     * 判断模型配置是否仍被未完成任务使用。
+     *
+     * @param modelConfigId String 模型配置业务ID
+     * @return Mono<Boolean> true表示存在等待或运行中的任务
+     */
+    public Mono<Boolean> existsExecutableTasksByModelConfig(String modelConfigId) {
+        return databaseClient.sql("""
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM ai_generation_tasks
+                    WHERE model_config_id = :modelConfigId
+                      AND status IN ('pending', 'running')
+                ) AS has_executable_tasks
+                """)
+                .bind("modelConfigId", modelConfigId)
+                .map((row, metadata) -> Boolean.TRUE.equals(row.get("has_executable_tasks", Boolean.class)))
+                .one();
     }
 
     /**

@@ -35,7 +35,7 @@ export type ServerMediaInfo = {
 
 export type ServerAiTaskType = "image" | "video" | "text";
 export type ServerAiTaskStatus = "pending" | "running" | "success" | "failed" | "canceled";
-export type ServerGenerationSource = "imagePage" | "videoPage" | "canvas";
+export type ServerGenerationSource = "imagePage" | "videoPage" | "canvas" | "storyboard";
 
 export type ServerAiTaskMediaReference = {
     id?: string;
@@ -195,6 +195,7 @@ export type ServerModelConfig = {
     creditUnit: ModelCreditUnit;
     thinkingEnabled: boolean;
     reasoningEffort: "high" | "max";
+    requestConcurrency: number;
 };
 
 export type CreditSettings = {
@@ -775,7 +776,7 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort">) {
+export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency">) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 
@@ -979,7 +980,7 @@ async function serverGet<T>(path: string, options?: { auth?: boolean }) {
     return serverFetch<T>(path, { method: "GET" }, options);
 }
 
-async function serverPost<T = string>(path: string, body: unknown, options?: { auth?: boolean }) {
+export async function serverPost<T = string>(path: string, body: unknown, options?: { auth?: boolean }) {
     return serverFetch<T>(
         path,
         {

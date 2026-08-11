@@ -13,10 +13,15 @@ import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.entity.PersistenceRecords;
+import com.novanovastudio.repository.AiTaskRepository;
 import com.novanovastudio.repository.PersistenceRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.storage.ObjectStorageService;
+import com.novanovastudio.task.ModelTaskExecutionDispatcher;
+import java.io.InputStream;
 import java.net.URLConnection;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
@@ -86,6 +91,9 @@ public class PersistenceService {
     /** 业务仓储 */
     private final PersistenceRepository repository;
 
+    /** AI任务仓储 */
+    private final AiTaskRepository aiTaskRepository;
+
     /** Agent执行活动服务 */
     private final AgentActivityService agentActivityService;
 
@@ -100,6 +108,9 @@ public class PersistenceService {
 
     /** 对象存储服务 */
     private final ObjectStorageService objectStorageService;
+
+    /** 模型任务执行调度器 */
+    private final ModelTaskExecutionDispatcher modelTaskExecutionDispatcher;
 
     /**
      * 查询全站AI渠道列表
@@ -183,6 +194,7 @@ public class PersistenceService {
                     record.setCreditUnit(normalizeCreditUnit(request.modelType(), request.creditUnit()));
                     record.setThinkingEnabled(thinkingEnabled(request.thinkingEnabled()));
                     record.setReasoningEffort(reasoningEffort(request.reasoningEffort()));
+                    record.setRequestConcurrency(normalizeRequestConcurrency(request.requestConcurrency()));
                     return repository.createPlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
                 });
     }
@@ -200,13 +212,23 @@ public class PersistenceService {
                     record.setCreditUnit(normalizeCreditUnit(request.modelType(), request.creditUnit()));
                     record.setThinkingEnabled(thinkingEnabled(request.thinkingEnabled()));
                     record.setReasoningEffort(reasoningEffort(request.reasoningEffort()));
-                    return repository.updatePlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
+                    record.setRequestConcurrency(normalizeRequestConcurrency(
+                            request.requestConcurrency() == null ? record.getRequestConcurrency() : request.requestConcurrency()));
+                    PersistenceDtos.ModelConfig modelConfig = modelConfigDto(record);
+                    return repository.updatePlatformAiModelConfig(record)
+                            .then(isModelQueueType(modelConfig.modelType())
+                                    ? modelTaskExecutionDispatcher.refresh(record.getModelConfigId())
+                                    : Mono.empty())
+                            .thenReturn(modelConfig);
                 });
     }
 
     /** 删除全站模型配置。 */
     public Mono<Void> deleteModelConfig(String id) {
-        return repository.deletePlatformAiModelConfig(id).then();
+        return aiTaskRepository.existsExecutableTasksByModelConfig(id)
+                .flatMap(hasExecutableTasks -> Boolean.TRUE.equals(hasExecutableTasks)
+                        ? Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "模型仍有关联的等待或运行任务，暂不能删除"))
+                        : repository.deletePlatformAiModelConfig(id).then());
     }
 
     /** 设置全站类型默认模型。 */
@@ -245,7 +267,7 @@ public class PersistenceService {
         return new PersistenceDtos.ModelConfig(record.getModelConfigId(), record.getChannelId(), record.getModelName(), record.getModelType(),
                 parseStringList(record.getCapabilities()), Boolean.TRUE.equals(record.getDefaultModel()), record.getSortOrder(), record.getCreditCost(),
                 thinkingEnabled(record.getThinkingEnabled()), reasoningEffort(record.getReasoningEffort()),
-                normalizeCreditUnit(record.getModelType(), record.getCreditUnit()));
+                normalizeCreditUnit(record.getModelType(), record.getCreditUnit()), normalizeRequestConcurrency(record.getRequestConcurrency()));
     }
 
     /**
@@ -265,6 +287,30 @@ public class PersistenceService {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "只有视频模型可以按秒计费");
         }
         return value;
+    }
+
+    /**
+     * 规范化模型同时并发数。
+     *
+     * @param requestConcurrency Integer 请求中的模型同时并发数
+     * @return int 至少为1的模型同时并发数
+     */
+    private int normalizeRequestConcurrency(Integer requestConcurrency) {
+        int value = requestConcurrency == null ? 1 : requestConcurrency;
+        if (value < 1) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "模型同时并发数不能小于1");
+        }
+        return value;
+    }
+
+    /**
+     * 判断模型是否使用模型并发队列。
+     *
+     * @param modelType String 模型类型
+     * @return boolean 是否为图片或视频模型
+     */
+    private boolean isModelQueueType(String modelType) {
+        return "image".equals(modelType) || "video".equals(modelType);
     }
 
     /**
@@ -946,6 +992,38 @@ public class PersistenceService {
     }
 
     /**
+     * 为指定用户从本地文件保存生成媒体。
+     * <p>
+     * 视频合成任务使用此方法流式上传FFmpeg输出文件，避免将完整成片加载到JVM堆内存。
+     *
+     * @param userId Long 用户ID
+     * @param kind String 媒体类型
+     * @param fileName String 文件名
+     * @param mimeType String MIME类型
+     * @param file Path 本地媒体文件
+     * @param width Integer 宽度
+     * @param height Integer 高度
+     * @param durationMs Integer 时长毫秒
+     * @return Mono<UploadedMediaResponse> 媒体响应
+     */
+    public Mono<PersistenceDtos.UploadedMediaResponse> storeGeneratedMediaFileForUser(
+            Long userId, String kind, String fileName, String mimeType, Path file, Integer width, Integer height, Integer durationMs) {
+        return getPlatformObjectStorageConfig().flatMap(objectStorageConfig -> Mono.fromCallable(() -> Files.size(file))
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMap(bytes -> {
+                    String normalizedKind = normalizeMediaKind(kind);
+                    String storageKey = normalizedKind + ":" + newId();
+                    String objectKey = buildObjectKey(objectStorageConfig, normalizedKind, fileName, mimeType);
+                    return putObject(objectStorageConfig, objectKey, file, firstNonEmpty(mimeType, "application/octet-stream"))
+                            .flatMap(publicUrl -> {
+                                PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, null, publicUrl, objectKey,
+                                        objectStorageConfig, mimeType, bytes, width, height, durationMs, null);
+                                return repository.saveMedia(record).thenReturn(mediaResponse(record));
+                            });
+                }));
+    }
+
+    /**
      * 查询媒体信息
      *
      * @param storageKey String 媒体存储键
@@ -968,6 +1046,62 @@ public class PersistenceService {
         return repository.getMedia(userId, storageKey)
                 .map(this::mediaResponse)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "媒体不存在")));
+    }
+
+    /**
+     * 将指定用户的视频媒体流式下载到本地文件。
+     *
+     * @param userId Long 用户ID
+     * @param storageKey String 媒体存储键
+     * @param target Path 本地目标文件
+     * @return Mono<DownloadedMediaFile> 已下载媒体信息
+     */
+    public Mono<DownloadedMediaFile> downloadVideoMediaToFileForUser(Long userId, String storageKey, Path target) {
+        String normalizedStorageKey = firstNonEmpty(storageKey);
+        if (!StringUtils.hasText(normalizedStorageKey)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "视频媒体存储键不能为空"));
+        }
+        return repository.getMedia(userId, normalizedStorageKey)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "视频媒体不存在")))
+                .flatMap(record -> {
+                    if (!"video".equals(normalizeMediaKind(record.getKind()))) {
+                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "合成输入必须是视频媒体"));
+                    }
+                    String sourceUrl = firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl());
+                    if (!StringUtils.hasText(sourceUrl)) {
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "视频媒体没有可下载的地址"));
+                    }
+                    String mimeType = firstNonEmpty(record.getMimeType(), "video/mp4");
+                    long maximumBytes = Math.max(1L, properties.getAi().getVideoComposition().getMaximumInputBytes());
+                    log.info("下载视频合成源媒体: userId={}, storageKey={}", userId, normalizedStorageKey);
+                    return aiHttpClient.downloadRemoteMediaToFile(sourceUrl, mimeType, target, maximumBytes)
+                            .map(downloaded -> new DownloadedMediaFile(normalizedStorageKey, target, downloaded.mimeType(), downloaded.bytes()));
+                });
+    }
+
+    /**
+     * 校验指定用户拥有可用于合成的视频媒体。
+     *
+     * @param userId Long 用户ID
+     * @param storageKey String 媒体存储键
+     * @return Mono<Void> 校验结果
+     */
+    public Mono<Void> validateVideoMediaForUser(Long userId, String storageKey) {
+        String normalizedStorageKey = firstNonEmpty(storageKey);
+        if (!StringUtils.hasText(normalizedStorageKey)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "视频媒体存储键不能为空"));
+        }
+        return repository.getMedia(userId, normalizedStorageKey)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "视频媒体不存在")))
+                .flatMap(record -> {
+                    if (!"video".equals(normalizeMediaKind(record.getKind()))) {
+                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "合成输入必须是视频媒体"));
+                    }
+                    if (!StringUtils.hasText(firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl()))) {
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "视频媒体没有可下载的地址"));
+                    }
+                    return Mono.empty();
+                });
     }
 
     /**
@@ -1079,6 +1213,19 @@ public class PersistenceService {
     }
 
     /**
+     * 删除指定用户的媒体记录。
+     * <p>
+     * 异步媒体任务没有HTTP请求上下文时，使用任务已保存的用户ID执行归属限定删除。
+     *
+     * @param userId Long 媒体所属用户ID
+     * @param storageKeys List<String> 媒体存储键列表
+     * @return Mono<Void> 删除结果
+     */
+    public Mono<Void> deleteMediaForUser(Long userId, List<String> storageKeys) {
+        return repository.deleteMedia(userId, storageKeys);
+    }
+
+    /**
      * 获取全站默认对象存储配置。
      *
      * @return Mono<ObjectStorageConfig> 全站对象存储配置
@@ -1130,6 +1277,35 @@ public class PersistenceService {
         // COS上传使用阻塞HttpClient，放入boundedElastic执行。
         return Mono.fromCallable(() -> objectStorageService.putObject(config, key, new java.io.ByteArrayInputStream(data), data.length, mimeType))
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * 将本地文件流式上传到对象存储。
+     *
+     * @param config ObjectStorageConfig 对象存储配置
+     * @param key String 对象Key
+     * @param file Path 本地文件
+     * @param mimeType String MIME类型
+     * @return Mono<String> 公开访问URL
+     */
+    private Mono<String> putObject(PersistenceDtos.ObjectStorageConfig config, String key, Path file, String mimeType) {
+        return Mono.fromCallable(() -> {
+            long bytes = Files.size(file);
+            try (InputStream inputStream = Files.newInputStream(file)) {
+                return objectStorageService.putObject(config, key, inputStream, bytes, mimeType);
+            }
+        }).subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * 流式下载到本地的视频媒体信息。
+     *
+     * @param storageKey String 媒体存储键
+     * @param path Path 本地文件路径
+     * @param mimeType String MIME类型
+     * @param bytes Long 文件字节数
+     */
+    public record DownloadedMediaFile(String storageKey, Path path, String mimeType, Long bytes) {
     }
 
     /**

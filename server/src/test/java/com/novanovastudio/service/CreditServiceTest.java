@@ -85,6 +85,82 @@ class CreditServiceTest {
     }
 
     /**
+     * 分镜首次生成应使用独立操作标识扣除一次文本模型积分。
+     */
+    @Test
+    void shouldChargeStoryboardOperation() {
+        String operationId = "storyboard-operation-1";
+        String reason = "分镜首次生成扣费（操作ID：" + operationId + "）";
+        when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_CHARGE, -6, reason))
+                .thenReturn(Mono.just(11L));
+        when(creditRepository.changeBalance(8L, -6)).thenReturn(Mono.just(94));
+        when(creditRepository.updateTransactionBalance(11L, 94)).thenReturn(Mono.empty());
+
+        StepVerifier.create(creditService.chargeOperation(8L, operationId, 6, "分镜首次生成"))
+                .verifyComplete();
+
+        verify(creditRepository).updateTransactionBalance(11L, 94);
+    }
+
+    /**
+     * 分镜操作余额不足时不得写入余额快照。
+     */
+    @Test
+    void shouldRejectStoryboardOperationWhenBalanceIsInsufficient() {
+        String operationId = "storyboard-operation-2";
+        String reason = "分镜提示词合成扣费（操作ID：" + operationId + "）";
+        when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_CHARGE, -18, reason))
+                .thenReturn(Mono.just(12L));
+        when(creditRepository.changeBalance(8L, -18)).thenReturn(Mono.empty());
+
+        StepVerifier.create(creditService.chargeOperation(8L, operationId, 18, "分镜提示词合成"))
+                .expectError(BusinessException.class)
+                .verify();
+
+        verify(creditRepository, never()).updateTransactionBalance(anyLong(), anyInt());
+    }
+
+    /**
+     * 分镜Agent失败后的退款必须读取原始扣费金额。
+     */
+    @Test
+    void shouldRefundStoryboardOperationWithOriginalChargeAmount() {
+        String operationId = "storyboard-operation-3";
+        String chargeReason = "分镜提示词合成扣费（操作ID：" + operationId + "）";
+        String refundReason = "分镜提示词合成退款（操作ID：" + operationId + "）";
+        when(creditRepository.getOperationChargeAmount(8L, chargeReason)).thenReturn(Mono.just(18));
+        when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_REFUND, 18, refundReason))
+                .thenReturn(Mono.just(13L));
+        when(creditRepository.changeBalance(8L, 18)).thenReturn(Mono.just(100));
+        when(creditRepository.updateTransactionBalance(13L, 100)).thenReturn(Mono.empty());
+
+        StepVerifier.create(creditService.refundOperation(8L, operationId, "分镜提示词合成"))
+                .verifyComplete();
+
+        verify(creditRepository).updateTransactionBalance(13L, 100);
+    }
+
+    /**
+     * 分镜退款未成功更新余额时必须向上游报错，避免把未退款误判为完成。
+     */
+    @Test
+    void shouldFailWhenStoryboardRefundCannotUpdateBalance() {
+        String operationId = "storyboard-operation-4";
+        String chargeReason = "分镜提示词合成扣费（操作ID：" + operationId + "）";
+        String refundReason = "分镜提示词合成退款（操作ID：" + operationId + "）";
+        when(creditRepository.getOperationChargeAmount(8L, chargeReason)).thenReturn(Mono.just(18));
+        when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_REFUND, 18, refundReason))
+                .thenReturn(Mono.just(14L));
+        when(creditRepository.changeBalance(8L, 18)).thenReturn(Mono.empty());
+
+        StepVerifier.create(creditService.refundOperation(8L, operationId, "分镜提示词合成"))
+                .expectErrorMatches(error -> error instanceof BusinessException && "分镜提示词合成退款失败".equals(error.getMessage()))
+                .verify();
+
+        verify(creditRepository, never()).updateTransactionBalance(anyLong(), anyInt());
+    }
+
+    /**
      * 管理员零金额调整应直接拒绝。
      */
     @Test

@@ -570,6 +570,9 @@ public class NovanovaProperties {
         /** AI图片结果配置 */
         private Image image = new Image();
 
+        /** 视频合成任务配置 */
+        private VideoComposition videoComposition = new VideoComposition();
+
         /**
          * 获取AI任务队列配置。
          *
@@ -625,6 +628,24 @@ public class NovanovaProperties {
         }
 
         /**
+         * 获取视频合成任务配置。
+         *
+         * @return VideoComposition 视频合成任务配置
+         */
+        public VideoComposition getVideoComposition() {
+            return videoComposition;
+        }
+
+        /**
+         * 设置视频合成任务配置。
+         *
+         * @param videoComposition VideoComposition 视频合成任务配置
+         */
+        public void setVideoComposition(VideoComposition videoComposition) {
+            this.videoComposition = videoComposition;
+        }
+
+        /**
          * AI图片结果配置。
          */
         public static class Image {
@@ -648,6 +669,180 @@ public class NovanovaProperties {
              */
             public void setUploadHttpResultToObjectStorage(boolean uploadHttpResultToObjectStorage) {
                 this.uploadHttpResultToObjectStorage = uploadHttpResultToObjectStorage;
+            }
+        }
+
+        /**
+         * 视频合成任务配置。
+         */
+        public static class VideoComposition {
+
+            /** 全站同时执行的合成任务数量 */
+            private int concurrency = 1;
+
+            /** 单个源视频最大字节数 */
+            private long maximumInputBytes = 524_288_000L;
+
+            /** 单次合成允许的源视频总时长秒数 */
+            private int maximumTotalDurationSeconds = 600;
+
+            /** FFmpeg进程超时秒数 */
+            private int executionTimeoutSeconds = 1800;
+
+            /** Redis活动任务租约秒数 */
+            private int activeLeaseSeconds = 180;
+
+            /** Redis活动任务租约续期间隔秒数 */
+            private int leaseRenewSeconds = 60;
+
+            /** FFmpeg可执行文件路径 */
+            private String ffmpegExecutable = "ffmpeg";
+
+            /** FFprobe可执行文件路径 */
+            private String ffprobeExecutable = "ffprobe";
+
+            /**
+             * 获取全站同时执行的合成任务数量。
+             *
+             * @return int 并发数
+             */
+            public int getConcurrency() {
+                return concurrency;
+            }
+
+            /**
+             * 设置全站同时执行的合成任务数量。
+             *
+             * @param concurrency int 并发数
+             */
+            public void setConcurrency(int concurrency) {
+                this.concurrency = concurrency;
+            }
+
+            /**
+             * 获取单个源视频最大字节数。
+             *
+             * @return long 最大字节数
+             */
+            public long getMaximumInputBytes() {
+                return maximumInputBytes;
+            }
+
+            /**
+             * 设置单个源视频最大字节数。
+             *
+             * @param maximumInputBytes long 最大字节数
+             */
+            public void setMaximumInputBytes(long maximumInputBytes) {
+                this.maximumInputBytes = maximumInputBytes;
+            }
+
+            /**
+             * 获取单次合成允许的源视频总时长秒数。
+             *
+             * @return int 最大总时长秒数
+             */
+            public int getMaximumTotalDurationSeconds() {
+                return maximumTotalDurationSeconds;
+            }
+
+            /**
+             * 设置单次合成允许的源视频总时长秒数。
+             *
+             * @param maximumTotalDurationSeconds int 最大总时长秒数
+             */
+            public void setMaximumTotalDurationSeconds(int maximumTotalDurationSeconds) {
+                this.maximumTotalDurationSeconds = maximumTotalDurationSeconds;
+            }
+
+            /**
+             * 获取FFmpeg进程超时秒数。
+             *
+             * @return int 超时秒数
+             */
+            public int getExecutionTimeoutSeconds() {
+                return executionTimeoutSeconds;
+            }
+
+            /**
+             * 设置FFmpeg进程超时秒数。
+             *
+             * @param executionTimeoutSeconds int 超时秒数
+             */
+            public void setExecutionTimeoutSeconds(int executionTimeoutSeconds) {
+                this.executionTimeoutSeconds = executionTimeoutSeconds;
+            }
+
+            /**
+             * 获取Redis活动任务租约秒数。
+             *
+             * @return int 租约秒数
+             */
+            public int getActiveLeaseSeconds() {
+                return activeLeaseSeconds;
+            }
+
+            /**
+             * 设置Redis活动任务租约秒数。
+             *
+             * @param activeLeaseSeconds int 租约秒数
+             */
+            public void setActiveLeaseSeconds(int activeLeaseSeconds) {
+                this.activeLeaseSeconds = activeLeaseSeconds;
+            }
+
+            /**
+             * 获取Redis活动任务租约续期间隔秒数。
+             *
+             * @return int 续期间隔秒数
+             */
+            public int getLeaseRenewSeconds() {
+                return leaseRenewSeconds;
+            }
+
+            /**
+             * 设置Redis活动任务租约续期间隔秒数。
+             *
+             * @param leaseRenewSeconds int 续期间隔秒数
+             */
+            public void setLeaseRenewSeconds(int leaseRenewSeconds) {
+                this.leaseRenewSeconds = leaseRenewSeconds;
+            }
+
+            /**
+             * 获取FFmpeg可执行文件路径。
+             *
+             * @return String FFmpeg路径
+             */
+            public String getFfmpegExecutable() {
+                return ffmpegExecutable;
+            }
+
+            /**
+             * 设置FFmpeg可执行文件路径。
+             *
+             * @param ffmpegExecutable String FFmpeg路径
+             */
+            public void setFfmpegExecutable(String ffmpegExecutable) {
+                this.ffmpegExecutable = ffmpegExecutable;
+            }
+
+            /**
+             * 获取FFprobe可执行文件路径。
+             *
+             * @return String FFprobe路径
+             */
+            public String getFfprobeExecutable() {
+                return ffprobeExecutable;
+            }
+
+            /**
+             * 设置FFprobe可执行文件路径。
+             *
+             * @param ffprobeExecutable String FFprobe路径
+             */
+            public void setFfprobeExecutable(String ffprobeExecutable) {
+                this.ffprobeExecutable = ffprobeExecutable;
             }
         }
 
@@ -872,6 +1067,9 @@ public class NovanovaProperties {
             /** 画布Agent文件路径 */
             private String agentCanvasFile = "";
 
+            /** 分镜脚本Agent文件路径 */
+            private String agentStoryboardFile = "";
+
             /**
              * 获取图片提示词优化文件路径。
              *
@@ -996,6 +1194,24 @@ public class NovanovaProperties {
              */
             public void setAgentCanvasFile(String agentCanvasFile) {
                 this.agentCanvasFile = agentCanvasFile;
+            }
+
+            /**
+             * 获取分镜脚本Agent文件路径。
+             *
+             * @return String 分镜脚本Agent文件路径
+             */
+            public String getAgentStoryboardFile() {
+                return agentStoryboardFile;
+            }
+
+            /**
+             * 设置分镜脚本Agent文件路径。
+             *
+             * @param agentStoryboardFile String 分镜脚本Agent文件路径
+             */
+            public void setAgentStoryboardFile(String agentStoryboardFile) {
+                this.agentStoryboardFile = agentStoryboardFile;
             }
 
         }

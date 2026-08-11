@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Bot, Keyboard } from "lucide-react";
 import { Button, Modal, Tooltip } from "antd";
 
@@ -18,7 +18,6 @@ type CanvasTopBarProps = {
     onBackToProjects: () => void;
     agentOpen: boolean;
     onToggleAgent: () => void;
-    taskPanel: ReactNode;
 };
 
 const SHORTCUT_GROUPS = [
@@ -100,7 +99,6 @@ export function CanvasTopBar(props: CanvasTopBarProps) {
 
                 <div className="pointer-events-auto flex items-center gap-1">
                     <UserStatusActions variant="canvas" onOpenShortcuts={() => setShortcutsOpen(true)} />
-                    {props.taskPanel}
                     <Button
                         type="text"
                         className="!px-2"

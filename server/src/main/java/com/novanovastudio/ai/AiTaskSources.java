@@ -19,8 +19,11 @@ public final class AiTaskSources {
     /** 无限画布来源 */
     public static final String CANVAS = "canvas";
 
+    /** 分镜来源 */
+    public static final String STORYBOARD = "storyboard";
+
     /** 支持记录的生成来源 */
-    private static final Set<String> SUPPORTED_SOURCES = Set.of(IMAGE_PAGE, VIDEO_PAGE, CANVAS);
+    private static final Set<String> SUPPORTED_SOURCES = Set.of(IMAGE_PAGE, VIDEO_PAGE, CANVAS, STORYBOARD);
 
     /**
      * 禁止实例化。

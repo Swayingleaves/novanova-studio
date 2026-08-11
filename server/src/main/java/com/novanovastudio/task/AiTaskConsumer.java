@@ -2,7 +2,6 @@ package com.novanovastudio.task;
 
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.logging.MappedDiagnosticContext;
-import com.novanovastudio.service.AiTaskService;
 import jakarta.annotation.PreDestroy;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
@@ -37,11 +36,8 @@ public class AiTaskConsumer {
     /** AI任务队列 */
     private final AiTaskQueue taskQueue;
 
-    /** Redis任务锁 */
-    private final RedisTaskLock taskLock;
-
-    /** AI任务服务 */
-    private final AiTaskService aiTaskService;
+    /** AI任务执行器 */
+    private final AiTaskExecutionRunner taskExecutionRunner;
 
     /** 服务配置 */
     private final NovanovaProperties properties;
@@ -164,36 +160,8 @@ public class AiTaskConsumer {
      * @return Mono<Void> 处理结果
      */
     private Mono<Void> handleMessage(String consumerName, AiTaskQueueMessage message) {
-        String lockValue = taskLock.newLockValue(consumerName);
-        return taskLock.tryLock(message.taskId(), lockValue)
-                .flatMap(locked -> {
-                    if (!Boolean.TRUE.equals(locked)) {
-                        log.info("跳过AI任务队列消息: taskId={}, reason={}", message.taskId(), "未获取到锁");
-                        return taskQueue.acknowledge(message);
-                    }
-                    Disposable renewDisposable = Flux.interval(Duration.ofSeconds(properties.getAi().getTask().getLockRenewSeconds()))
-                            .flatMap(ignored -> taskLock.renew(message.taskId(), lockValue))
-                            .contextWrite(context -> MappedDiagnosticContext.put(
-                                    context, MappedDiagnosticContext.TASK_ID, message.taskId()))
-                            .subscribe(renewed -> {
-                                if (!Boolean.TRUE.equals(renewed)) {
-                                    log.info("AI任务锁续期未生效: taskId={}", message.taskId());
-                                }
-                            });
-                    return aiTaskService.executeQueuedTask(message.taskId())
-                            .then(taskQueue.acknowledge(message))
-                            .doFinally(signal -> {
-                                renewDisposable.dispose();
-                                taskLock.release(message.taskId(), lockValue)
-                                        .contextWrite(context -> MappedDiagnosticContext.put(
-                                                context, MappedDiagnosticContext.TASK_ID, message.taskId()))
-                                        .subscribe(
-                                                ignored -> {
-                                                },
-                                                exception -> log.error("释放AI任务锁失败: taskId={}", message.taskId(), exception)
-                                        );
-                            });
-                });
+        return taskExecutionRunner.execute(consumerName, message.taskId())
+                .then(taskQueue.acknowledge(message));
     }
 
     /**

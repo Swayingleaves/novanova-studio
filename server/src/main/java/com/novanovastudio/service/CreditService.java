@@ -130,6 +130,55 @@ public class CreditService {
     }
 
     /**
+     * 扣除同步业务操作积分。
+     * <p>
+     * 操作标识只在当前业务的扣费与退款之间关联，不会改变普通文本生成的零积分规则。
+     *
+     * @param userId Long 用户ID
+     * @param operationId String 稳定操作标识
+     * @param credits int 应扣积分
+     * @param operationName String 业务名称
+     * @return Mono<Void> 操作完成信号
+     */
+    public Mono<Void> chargeOperation(Long userId, String operationId, int credits, String operationName) {
+        if (credits < 0) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "积分扣费金额不能小于0"));
+        }
+        if (credits == 0) {
+            return Mono.empty();
+        }
+        String chargeReason = operationReason(operationName, "扣费", operationId);
+        return creditRepository.claimOperationTransaction(userId, operationId, TRANSACTION_TASK_CHARGE, -credits, chargeReason)
+                .flatMap(transactionId -> creditRepository.changeBalance(userId, -credits)
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分不足，无法执行" + operationName)))
+                        .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
+                .then()
+                .as(transactionalOperator::transactional);
+    }
+
+    /**
+     * 退还失败同步业务操作的原始扣费积分。
+     *
+     * @param userId Long 用户ID
+     * @param operationId String 稳定操作标识
+     * @param operationName String 业务名称
+     * @return Mono<Void> 操作完成信号
+     */
+    public Mono<Void> refundOperation(Long userId, String operationId, String operationName) {
+        String chargeReason = operationReason(operationName, "扣费", operationId);
+        String refundReason = operationReason(operationName, "退款", operationId);
+        return creditRepository.getOperationChargeAmount(userId, chargeReason)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "未找到需要退款的" + operationName + "扣费流水")))
+                .flatMap(credits -> creditRepository.claimOperationTransaction(userId, operationId, TRANSACTION_TASK_REFUND, credits, refundReason)
+                        .flatMap(transactionId -> creditRepository.changeBalance(userId, credits)
+                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, operationName + "退款失败")))
+                                .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
+                        .then())
+                .then()
+                .as(transactionalOperator::transactional);
+    }
+
+    /**
      * 管理员增减用户积分。
      *
      * @param userId Long 目标用户ID
@@ -315,5 +364,22 @@ public class CreditService {
      */
     private String taskReason(String taskType, String action) {
         return ("video".equals(taskType) ? "视频" : "图片") + "生成任务" + action;
+    }
+
+    /**
+     * 构建可追溯的同步业务积分流水原因。
+     *
+     * @param operationName String 业务名称
+     * @param action String 扣费或退款
+     * @param operationId String 稳定操作标识
+     * @return String 流水原因
+     */
+    private String operationReason(String operationName, String action, String operationId) {
+        String normalizedName = operationName == null ? "业务操作" : operationName.trim();
+        String normalizedId = operationId == null ? "" : operationId.trim();
+        if (normalizedName.isEmpty() || normalizedId.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "业务积分操作标识不能为空");
+        }
+        return normalizedName + action + "（操作ID：" + normalizedId + "）";
     }
 }

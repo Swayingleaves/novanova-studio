@@ -7,7 +7,8 @@ import {
     updateCanvasNodeTitle,
     type CanvasNodeAttributes,
 } from "../domain/canvas-node.ts";
-import type { CanvasConnection, CanvasNode, CanvasNodeKind, CanvasViewTransform } from "../types.ts";
+import { readVideoCompositionConnectionError, synchronizeVideoCompositionInputs } from "../domain/video-composition";
+import type { CanvasConnection, CanvasGenerationMode, CanvasNode, CanvasViewTransform } from "../types.ts";
 
 export type CanvasAgentNodeAttributes = CanvasNodeAttributes;
 
@@ -22,7 +23,8 @@ type CanvasAgentCommonFields = {
     id?: string;
     ids?: string[];
     nodeId?: string;
-    nodeType?: CanvasNodeKind;
+    /** 通用 Agent 只允许创建普通生成节点，分镜脚本由专属工作流创建。 */
+    nodeType?: CanvasGenerationMode;
     title?: string;
     position?: { x: number; y: number };
     x?: number;
@@ -35,7 +37,7 @@ type CanvasAgentCommonFields = {
     sourceNodeId?: string;
     targetNodeId?: string;
     viewport?: CanvasViewTransform;
-    mode?: CanvasNodeKind;
+    mode?: CanvasGenerationMode;
     prompt?: string;
     recovery?: boolean;
     generationStyleSnapshots?: import("@/services/api/server").GenerationStyleSnapshot[];
@@ -96,7 +98,9 @@ export function summarizeCanvasAgentOps(ops?: CanvasAgentOp[]): string {
 }
 
 export function applyCanvasAgentOps(snapshot: CanvasAgentSnapshot, ops?: CanvasAgentOp[]): CanvasAgentSnapshot {
-    return normalizeOps(ops).reduce((state, op, index) => OPERATION_REDUCERS[op.type](state, op, index), snapshot);
+    const updated = normalizeOps(ops).reduce((state, op, index) => OPERATION_REDUCERS[op.type](state, op, index), snapshot);
+    const nodes = synchronizeVideoCompositionInputs(updated.nodes, updated.connections);
+    return nodes === updated.nodes ? updated : { ...updated, nodes };
 }
 
 function normalizeOps(ops?: CanvasAgentOp[]): CanvasAgentOp[] {
@@ -104,7 +108,8 @@ function normalizeOps(ops?: CanvasAgentOp[]): CanvasAgentOp[] {
 }
 
 function reduceAddNode(snapshot: CanvasAgentSnapshot, op: CanvasAgentOp, index: number): CanvasAgentSnapshot {
-    const kind = readNodeKind(op.nodeType) || "text";
+    const kind = readNodeKind(op.nodeType);
+    if (!kind) return snapshot;
     const position = readPosition(op, index);
     const input = { id: op.id || `${kind}-${Date.now()}-${index}`, title: op.title, position };
     const created = kind === "image" ? createImageNode(input) : kind === "video" ? createVideoNode(input) : createTextNode(input);
@@ -157,6 +162,7 @@ function reduceConnectNodes(snapshot: CanvasAgentSnapshot, op: CanvasAgentOp): C
     const nodeIds = new Set(snapshot.nodes.map((node) => node.id));
     if (!nodeIds.has(op.sourceNodeId) || !nodeIds.has(op.targetNodeId)) return snapshot;
     if (snapshot.connections.some((connection) => connection.source.nodeId === op.sourceNodeId && connection.target.nodeId === op.targetNodeId)) return snapshot;
+    if (readVideoCompositionConnectionError(op.sourceNodeId, op.targetNodeId, snapshot.nodes, snapshot.connections)) return snapshot;
     const nextConnection: CanvasConnection = { id: op.id || nanoid(), source: { nodeId: op.sourceNodeId }, target: { nodeId: op.targetNodeId } };
     return { ...snapshot, connections: [...snapshot.connections, nextConnection] };
 }
@@ -177,7 +183,7 @@ function resolveDeletedNodeIds(nodes: CanvasNode[], op: CanvasAgentOp): Set<stri
     return new Set(kind ? nodes.filter((node) => node.kind === kind).map((node) => node.id) : []);
 }
 
-function readNodeKind(nodeType?: CanvasNodeKind): CanvasNodeKind | null {
+function readNodeKind(nodeType?: unknown): CanvasGenerationMode | null {
     return nodeType === "image" || nodeType === "text" || nodeType === "video" ? nodeType : null;
 }
 

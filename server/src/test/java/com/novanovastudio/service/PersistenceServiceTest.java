@@ -14,9 +14,11 @@ import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.entity.PersistenceRecords;
+import com.novanovastudio.repository.AiTaskRepository;
 import com.novanovastudio.repository.PersistenceRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.storage.ObjectStorageService;
+import com.novanovastudio.task.ModelTaskExecutionDispatcher;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -43,6 +45,10 @@ class PersistenceServiceTest {
     @Mock
     private PersistenceRepository repository;
 
+    /** AI任务仓储 */
+    @Mock
+    private AiTaskRepository aiTaskRepository;
+
     /** Agent执行活动服务 */
     @Mock
     private AgentActivityService agentActivityService;
@@ -63,6 +69,10 @@ class PersistenceServiceTest {
     @Mock
     private ObjectStorageService objectStorageService;
 
+    /** 模型任务执行调度器 */
+    @Mock
+    private ModelTaskExecutionDispatcher modelTaskExecutionDispatcher;
+
     /** 待测试服务 */
     private PersistenceService service;
 
@@ -74,7 +84,8 @@ class PersistenceServiceTest {
         org.mockito.Mockito.lenient().when(agentActivityService.activitiesForRound(
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(JSONObject.class)))
                 .thenReturn(new JSONArray());
-        service = new PersistenceService(repository, agentActivityService, aiHttpClient, currentUserProvider, properties, objectStorageService);
+        service = new PersistenceService(repository, aiTaskRepository, agentActivityService, aiHttpClient, currentUserProvider, properties, objectStorageService, modelTaskExecutionDispatcher);
+        org.mockito.Mockito.lenient().when(modelTaskExecutionDispatcher.refresh(org.mockito.ArgumentMatchers.anyString())).thenReturn(Mono.empty());
     }
 
     /**
@@ -592,6 +603,69 @@ class PersistenceServiceTest {
 
         Assertions.assertNotNull(updated);
         Assertions.assertEquals("second", updated.creditUnit());
+    }
+
+    /** 模型同时并发数应默认取1，并在创建、更新和查询间完整往返。 */
+    @Test
+    void shouldRoundTripModelRequestConcurrency() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"image-model\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
+
+        PersistenceDtos.ModelConfig defaultCreated = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "image-model", "image", List.of(), 0, 0, true, "high", "generation", null)).block();
+
+        Assertions.assertNotNull(defaultCreated);
+        Assertions.assertEquals(1, defaultCreated.requestConcurrency());
+
+        PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "image-model", "image", List.of(), 0, 0, true, "high", "generation", 3)).block();
+
+        Assertions.assertNotNull(created);
+        Assertions.assertEquals(3, created.requestConcurrency());
+        ArgumentCaptor<PersistenceRecords.UserAiModelConfigRecord> captor = ArgumentCaptor.forClass(PersistenceRecords.UserAiModelConfigRecord.class);
+        verify(repository, times(2)).createPlatformAiModelConfig(captor.capture());
+        PersistenceRecords.UserAiModelConfigRecord record = captor.getAllValues().getLast();
+        Assertions.assertEquals(3, record.getRequestConcurrency());
+
+        when(repository.getPlatformAiModelConfig(created.id())).thenReturn(Mono.just(record));
+        when(repository.updatePlatformAiModelConfig(record)).thenReturn(Mono.just(1L));
+        PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
+                created.id(), "image", List.of(), 0, 0, true, "high", "generation", 2)).block();
+
+        Assertions.assertNotNull(updated);
+        Assertions.assertEquals(2, updated.requestConcurrency());
+        verify(modelTaskExecutionDispatcher).refresh(created.id());
+        when(repository.listPlatformAiModelConfigs()).thenReturn(Flux.just(record));
+        PersistenceDtos.ModelConfig listed = service.listModelConfigs().block().getFirst();
+        Assertions.assertEquals(2, listed.requestConcurrency());
+    }
+
+    /** 模型同时并发数小于1时应拒绝创建。 */
+    @Test
+    void shouldRejectModelRequestConcurrencyBelowOne() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"image-model\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(
+                new PersistenceDtos.CreateModelConfigRequest("channel-1", "image-model", "image", List.of(), 0, 0,
+                        true, "high", "generation", 0)).block());
+
+        Assertions.assertTrue(exception.getMessage().contains("同时并发数不能小于1"));
+    }
+
+    /** 存在等待或运行任务的模型配置不得删除，避免任务失去执行队列。 */
+    @Test
+    void shouldRejectDeletingModelConfigWithExecutableTasks() {
+        when(aiTaskRepository.existsExecutableTasksByModelConfig("model-config-1")).thenReturn(Mono.just(true));
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class,
+                () -> service.deleteModelConfig("model-config-1").block());
+
+        Assertions.assertTrue(exception.getMessage().contains("等待或运行任务"));
+        verifyNoInteractions(repository);
     }
 
     /** 图片模型禁止选择按秒计费。 */

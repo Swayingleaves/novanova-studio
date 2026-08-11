@@ -2,12 +2,12 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { CloudUpload, Copy, Download, FolderPlus, Info, Minus, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
+import { Clapperboard, CloudUpload, Copy, Download, FolderPlus, Info, Minus, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
 
 import { formatBytes, getDataUrlByteSize } from "@/features/generation/lib/image-utils";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { CanvasNode, CanvasNodeKind, CanvasViewTransform } from "../types";
-import { isImageNode, isTextNode, isVideoNode } from "../domain/canvas-node";
+import { isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
 import { buildImageToolbarTools } from "./canvas-image-toolbar-tools";
 import { useCanvasTheme } from "./canvas-theme-provider";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
@@ -20,6 +20,7 @@ type ToolbarAction = {
     onClick: () => void;
     active?: boolean;
     danger?: boolean;
+    disabled?: boolean;
 };
 
 type ToolbarActionFactoryContext = {
@@ -37,6 +38,7 @@ type ToolbarActionFactoryContext = {
     onDecreaseFont: (node: CanvasNode) => void;
     onIncreaseFont: (node: CanvasNode) => void;
     onUpload: (node: CanvasNode) => void;
+    onGenerateStoryboardVideos: (node: CanvasNode) => void;
 };
 
 type CanvasNodeHoverToolbarProps = {
@@ -57,6 +59,7 @@ type CanvasNodeHoverToolbarProps = {
     onRetry: (node: CanvasNode) => void;
     onToggleFreeResize: (node: CanvasNode) => void;
     onDelete: (node: CanvasNode) => void;
+    onGenerateStoryboardVideos: (node: CanvasNode) => void;
 };
 
 export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
@@ -70,15 +73,15 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
     const hasImage = isImageNode(node) && Boolean(node.content.source);
     const hasVideo = isVideoNode(node) && Boolean(node.content.source);
     const isText = isTextNode(node);
-    const canRetry = node.execution.phase === "failed";
+    const canRetry = node.execution.phase === "failed" && !isVideoCompositionNode(node);
 
     const copyImagePrompt = (targetNode: CanvasNode) => {
-        const prompt = isTextNode(targetNode) ? "" : targetNode.generation.prompt.trim();
+        const prompt = isImageNode(targetNode) || isVideoNode(targetNode) ? targetNode.generation.prompt.trim() : "";
         if (!prompt) {
             message.warning("暂无可复制的提示词");
             return;
         }
-        const styles = !isTextNode(targetNode) ? targetNode.generation.generationStyleSnapshots : [];
+        const styles = isImageNode(targetNode) || isVideoNode(targetNode) ? targetNode.generation.generationStyleSnapshots : [];
         copyText(formatGenerationStyleMessage(prompt, styles), "提示词已复制");
     };
 
@@ -106,6 +109,7 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
         onDecreaseFont: props.onDecreaseFont,
         onIncreaseFont: props.onIncreaseFont,
         onUpload: props.onUpload,
+        onGenerateStoryboardVideos: props.onGenerateStoryboardVideos,
     });
     const imageActions = imageToolbarTools.map((tool) => ({
         id: tool.id,
@@ -204,7 +208,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNode 
                             <InfoRow label="位置" value={`${Math.round(node.frame.position.x)}, ${Math.round(node.frame.position.y)}`} />
                             <InfoRow label="状态" value={node.execution.phase} />
                             {batchCount > 1 ? <InfoRow label="图片组" value={`${batchCount} 张`} /> : null}
-                            {!isTextNode(node) && node.generation.prompt ? (
+                            {(isImageNode(node) || isVideoNode(node)) && node.generation.prompt ? (
                                 <InfoRow
                                     label="提示词"
                                     value={
@@ -226,7 +230,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNode 
                                 />
                             ) : null}
                             {imageBytes ? <InfoRow label="图片大小" value={formatBytes(imageBytes)} /> : null}
-                            {!isTextNode(node) && node.content.objectStorage?.url ? (
+                            {(isImageNode(node) || isVideoNode(node)) && node.content.objectStorage?.url ? (
                                 <InfoRow
                                     label="云储存地址"
                                     value={
@@ -271,6 +275,16 @@ function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarA
             onClick: () => context.onRetry(context.node),
         });
     }
+    if (isStoryboardNode(context.node)) {
+        actions.splice(1, 0, {
+            id: "generateStoryboardVideos",
+            title: context.node.storyboard.shots.length ? "批量生成分镜视频" : "请先生成分镜镜头",
+            label: "批量视频",
+            icon: <Clapperboard className="size-4" />,
+            disabled: !context.node.storyboard.shots.length,
+            onClick: () => context.onGenerateStoryboardVideos(context.node),
+        });
+    }
     if (context.hasImage || context.hasVideo || context.isText) {
         actions.push({
             id: "saveAsset",
@@ -283,7 +297,7 @@ function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarA
     if (context.hasImage || context.hasVideo) {
         actions.push({
             id: "uploadObjectStorage",
-            title: !isTextNode(context.node) && context.node.content.objectStorage?.url ? "复制云储存地址" : "上传到云储存",
+            title: (isImageNode(context.node) || isVideoNode(context.node)) && context.node.content.objectStorage?.url ? "复制云储存地址" : "上传到云储存",
             label: "云储存",
             icon: <CloudUpload className="size-4" />,
             onClick: () => context.onUploadObjectStorage(context.node),
@@ -355,6 +369,8 @@ function buildNodeInfoJson(node: CanvasNode | null) {
 function readNodeTypeLabel(type: CanvasNodeKind) {
     if (type === "text") return "文本";
     if (type === "image") return "图片";
+    if (type === "storyboard") return "分镜脚本";
+    if (type === "videoComposition") return "合成视频";
     return "视频";
 }
 
@@ -366,6 +382,7 @@ function ToolbarActionButton({
     showLabel,
     active = false,
     danger = false,
+    disabled = false,
 }: ToolbarAction & { showLabel: boolean }) {
     const theme = useCanvasTheme();
     const hasText = showLabel && Boolean(label);
@@ -377,28 +394,31 @@ function ToolbarActionButton({
             color="#ffffff"
             styles={{ root: { color: "#242529", boxShadow: "0 8px 24px rgba(15,23,42,.16)", fontSize: 13, fontWeight: 500 } }}
         >
-            <button
-                type="button"
-                className={`relative flex h-12 w-[78px] shrink-0 items-center justify-center whitespace-nowrap ${danger ? "text-[#ef4444]" : ""}`}
-                onClick={onClick}
-                aria-label={title}
-            >
-                <span
-                    className={`flex h-9 items-center rounded-lg transition ${
-                        hasText ? "gap-1.5 px-1.5" : "justify-center px-2"
-                    }`}
-                    style={active ? { background: theme.toolbar.activeBg, color: theme.toolbar.activeText } : undefined}
-                    onMouseEnter={(event) => {
-                        if (!active) event.currentTarget.style.background = theme.toolbar.itemHover;
-                    }}
-                    onMouseLeave={(event) => {
-                        if (!active) event.currentTarget.style.background = "";
-                    }}
+            <span className="inline-flex">
+                <button
+                    type="button"
+                    disabled={disabled}
+                    className={`relative flex h-12 w-[78px] shrink-0 items-center justify-center whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-40 ${danger ? "text-[#ef4444]" : ""}`}
+                    onClick={onClick}
+                    aria-label={title}
                 >
-                    {icon}
-                    {hasText ? <span className="truncate">{label}</span> : null}
-                </span>
-            </button>
+                    <span
+                        className={`flex h-9 items-center rounded-lg transition ${
+                            hasText ? "gap-1.5 px-1.5" : "justify-center px-2"
+                        }`}
+                        style={active ? { background: theme.toolbar.activeBg, color: theme.toolbar.activeText } : undefined}
+                        onMouseEnter={(event) => {
+                            if (!active && !disabled) event.currentTarget.style.background = theme.toolbar.itemHover;
+                        }}
+                        onMouseLeave={(event) => {
+                            if (!active) event.currentTarget.style.background = "";
+                        }}
+                    >
+                        {icon}
+                        {hasText ? <span className="truncate">{label}</span> : null}
+                    </span>
+                </button>
+            </span>
         </Tooltip>
     );
 }

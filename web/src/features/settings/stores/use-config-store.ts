@@ -525,7 +525,16 @@ export function normalizeModelCreditUnit(value: unknown, modelType: ModelCapabil
 
 /** 归一化服务端模型配置，兼容未返回计费单位的历史接口。 */
 export function normalizeServerModelConfig(config: ServerModelConfig): ServerModelConfig {
-    return { ...config, creditUnit: normalizeModelCreditUnit(config.creditUnit, config.modelType) };
+    return {
+        ...config,
+        creditUnit: normalizeModelCreditUnit(config.creditUnit, config.modelType),
+        requestConcurrency: normalizeModelRequestConcurrency(config.requestConcurrency),
+    };
+}
+
+/** 归一化模型同时并发数，缺省时使用默认值1。 */
+export function normalizeModelRequestConcurrency(value: unknown) {
+    return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : 1;
 }
 
 function normalizeApiBaseUrl(baseUrl: string) {

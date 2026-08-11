@@ -4,6 +4,7 @@ import { nodeSizeFromRatio } from "../utils/canvas-node-size.ts";
 import {
     applyCanvasNodeAttributes,
     isImageNode,
+    isStoryboardNode,
     isTextNode,
     updateCanvasNodeExecution,
     updateCanvasNodeFrame,
@@ -12,7 +13,7 @@ import {
 
 export function applyCanvasNodeConfig(node: CanvasNode, attributes: CanvasNodeAttributes): CanvasNode {
     const updated = applyCanvasNodeAttributes(node, attributes);
-    if (isTextNode(updated) || typeof attributes.size !== "string" || updated.content.source) return updated;
+    if (isTextNode(updated) || isStoryboardNode(updated) || typeof attributes.size !== "string" || !isImageNode(updated) || updated.content.source) return updated;
 
     const template = getCanvasNodeTemplate(updated.kind);
     const size = nodeSizeFromRatio(attributes.size, template.width, template.height);
@@ -47,7 +48,7 @@ export function createCanvasConnection(id: string, sourceNodeId: string, targetN
 
 export function resetInterruptedCanvasNodes(nodes: CanvasNode[]): CanvasNode[] {
     return nodes.map((node) => {
-        if (node.execution.phase !== "running" || node.execution.taskId) return node;
+        if (node.execution.phase !== "running" || node.execution.taskId || (isStoryboardNode(node) && node.storyboard.assetGeneration?.phase === "running")) return node;
         return updateCanvasNodeExecution(node, {
             phase: "failed",
             errorMessage: "页面刷新后生成已中断，请重新生成。",
@@ -56,7 +57,9 @@ export function resetInterruptedCanvasNodes(nodes: CanvasNode[]): CanvasNode[] {
 }
 
 export function readCanvasNodeContent(node: CanvasNode): string {
-    return isTextNode(node) ? node.content.text : node.content.source;
+    if (isTextNode(node)) return node.content.text;
+    if (isStoryboardNode(node)) return node.content.instruction;
+    return isImageNode(node) || node.kind === "video" ? node.content.source : "";
 }
 
 export function readCanvasNodePrompt(node: CanvasNode): string {

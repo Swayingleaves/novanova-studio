@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createImageNode, createTextNode, createVideoNode } from "../constants.ts";
+import { createImageNode, createStoryboardNode, createTextNode, createVideoNode } from "../constants.ts";
 import {
     applyCanvasNodeAttributes,
     isImageNode,
+    isStoryboardNode,
     isTextNode,
     isVideoNode,
     updateCanvasNodeExecution,
@@ -13,6 +14,8 @@ import {
     updateImageNodeGeneration,
     updateImageNodeGrouping,
     updateImageNodeContent,
+    updateStoryboardNodeData,
+    updateStoryboardNodeContent,
     updateTextNodeContent,
     updateVideoNodeContent,
     updateVideoNodeGeneration,
@@ -54,11 +57,32 @@ test("不同节点类型由判别字段可靠缩小", () => {
     const image = createImageNode({ id: "image-1", position: { x: 0, y: 0 } });
     const text = createTextNode({ id: "text-1", position: { x: 0, y: 0 } });
     const video = createVideoNode({ id: "video-1", position: { x: 0, y: 0 } });
+    const storyboard = createStoryboardNode({ id: "storyboard-1", position: { x: 0, y: 0 } });
 
     assert.equal(isImageNode(image), true);
     assert.equal(isTextNode(text), true);
     assert.equal(isVideoNode(video), true);
     assert.equal(isVideoNode(image), false);
+    assert.equal(isStoryboardNode(storyboard), true);
+    assert.equal(isStoryboardNode(text), false);
+});
+
+test("分镜节点属性更新保留镜头与资产编辑数据", () => {
+    const original = createStoryboardNode({ id: "storyboard-1", position: { x: 0, y: 0 } });
+    const withInstruction = applyCanvasNodeAttributes(original, { content: "夜晚追逐片段", model: "channel-1::text-model" });
+    if (!isStoryboardNode(withInstruction)) throw new Error("应返回分镜节点");
+    const withVisualStyle = updateStoryboardNodeContent(withInstruction, { visualStyle: "国风手绘厚涂" });
+    const updated = updateStoryboardNodeData(withVisualStyle, {
+        shots: [{ id: "shot-1", shotNumber: 1, durationSeconds: 5, visualDescription: "雨夜街道", shotSize: "远景", lightingAtmosphere: "霓虹反光", dialogueVoiceover: "", soundEffect: "雨声", cameraMovement: "推进", finalPrompt: "待生成提示词", assetIds: ["asset-1"] }],
+        assets: [{ id: "asset-1", kind: "scene", name: "雨夜街道", description: "潮湿路面" }],
+    });
+
+    assert.equal(updated.content.instruction, "夜晚追逐片段");
+    assert.equal(updated.content.visualStyle, "国风手绘厚涂");
+    assert.equal(updated.content.model, "channel-1::text-model");
+    assert.equal(updated.storyboard.shots[0].finalPrompt, "待生成提示词");
+    assert.deepEqual(updated.storyboard.shots[0].assetIds, ["asset-1"]);
+    assert.equal(updated.storyboard.assets[0].kind, "scene");
 });
 
 test("图片生成配置和批量关系独立更新", () => {

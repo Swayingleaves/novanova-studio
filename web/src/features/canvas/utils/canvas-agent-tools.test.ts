@@ -167,3 +167,12 @@ test("批量画布操作禁止夹带生成", () => {
     assert.deepEqual(execution.ops, []);
     assert.match(execution.result.message, /不能执行生成/);
 });
+
+test("通用 Agent 不允许直接创建分镜节点", () => {
+    const execution = resolveCanvasAgentTool("canvas_create_node", { nodeType: "storyboard" });
+
+    assert.ok(execution);
+    assert.equal(execution.result.ok, false);
+    assert.deepEqual(execution.ops, []);
+    assert.match(execution.result.message, /分镜脚本请通过剧本文本节点创建/);
+});

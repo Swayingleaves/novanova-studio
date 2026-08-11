@@ -1,7 +1,7 @@
 import axios from "axios";
 
 import { getMediaBlob, uploadMediaFile, type UploadedFile } from "@/features/storage/services/file-storage";
-import { agnesVideoDimensions, agnesVideoTiming } from "@/features/generation/lib/agnes-video";
+import { agnesVideoDimensions, agnesVideoTiming, readAgnesVideoReferenceImageIssue } from "@/features/generation/lib/agnes-video";
 import { boolConfig, buildSeedancePromptText, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution, seedanceVideoReferenceError, SEEDANCE_REFERENCE_LIMITS } from "@/features/generation/lib/seedance-video";
 import { createAiTask, waitAiTask, type ServerAiTaskMediaReference, type ServerGenerationSource } from "@/services/api/server";
 import { logApiRequestParameters, logApiResponseParameters } from "@/services/api/request-log";
@@ -244,6 +244,8 @@ async function createAgnesTask(config: AiConfig, model: string, prompt: string, 
     const requestModel = modelOptionName(model);
     if (requestModel !== AGNES_VIDEO_MODEL) throw new Error(`Agnes 调用格式当前仅支持 ${AGNES_VIDEO_MODEL}`);
     const referenceUrls = references.map(referenceImageObjectStorageUrl);
+    const referenceIssue = readAgnesVideoReferenceImageIssue(referenceUrls.length);
+    if (referenceIssue) throw new Error(referenceIssue);
     const dimensions = agnesVideoDimensions(config.size, config.vquality);
     const timing = agnesVideoTiming(config.videoSeconds, config.vquality);
     const payload: Record<string, unknown> = {
@@ -255,8 +257,7 @@ async function createAgnesTask(config: AiConfig, model: string, prompt: string, 
         frame_rate: timing.frameRate,
     };
     if (referenceUrls.length === 1) payload.image = referenceUrls[0];
-    // if (referenceUrls.length > 1) payload.extra_body = { image: referenceUrls, mode: "keyframes" };
-    if (referenceUrls.length > 1) payload.extra_body = { image: referenceUrls};
+    if (referenceUrls.length > 1) payload.extra_body = { mode: "keyframes", image: referenceUrls };
 
     videoApiLog("创建 Agnes 视频任务", {
         "地址": safeLogUrl(requestUrl),
