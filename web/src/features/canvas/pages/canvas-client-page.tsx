@@ -23,6 +23,8 @@ import { nanoid } from "nanoid";
 import { getDataUrlByteSize } from "@/features/generation/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/shared/lib/canvas-theme";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
+import { AssetPreviewDialog } from "@/features/assets/components/asset-preview-dialog";
+import { downloadAsset } from "@/features/assets/lib/asset-download";
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { cropDataUrl, splitDataUrl } from "../utils/canvas-image-data";
@@ -52,6 +54,7 @@ import { CanvasThemeProvider, useCanvasTheme } from "../components/canvas-theme-
 import type { CanvasImageSplitParams } from "../components/canvas-node-split-dialog";
 import { buildNodeGenerationContext, buildNodeResponseMessages, hydrateNodeGenerationContext } from "../components/canvas-node-generation";
 import { CanvasNodeHoverToolbar } from "../components/canvas-node-hover-toolbar";
+import { CanvasNavigationPanel, CanvasStoryboardAssetPreviewDialog, type CanvasNavigationAsset, type CanvasNavigationPanelState, type CanvasNavigationTab } from "../components/canvas-navigation-panel";
 import { CanvasFlow } from "../components/canvas-flow";
 import { StoryboardWorkspace } from "../components/storyboard-workspace";
 import { StoryboardVideoGenerationModal, type StoryboardVideoGenerationSettings } from "../components/storyboard-video-generation-modal";
@@ -87,6 +90,7 @@ import { useCanvasStore } from "../stores/use-canvas-store";
 import { readCanvasSystemClipboard } from "../services/canvas-system-clipboard";
 import { saveCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
+import { useCopyText } from "@/shared/hooks/use-copy-text";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { positionCanvasAgentAddNodeOps, type CanvasAgentToolResult } from "../utils/canvas-agent-tools";
 import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
@@ -170,6 +174,7 @@ export default function CanvasPage() {
 
 function CanvasWorkspacePage() {
     const { message, modal } = App.useApp();
+    const copyText = useCopyText();
     const { optimizingOperationId: promptGeneratingNodeId, optimizePrompt } = usePromptOptimization();
     const params = useParams<{ id: string }>();
     const router = useRouter();
@@ -280,6 +285,7 @@ function CanvasWorkspacePage() {
         [message, openConfigDialog, userRole],
     );
     const addAsset = useAssetStore((state) => state.addAsset);
+    const assets = useAssetStore((state) => state.assets);
     const cleanupAssetImages = useAssetStore((state) => state.cleanupImages);
     const hydrated = useCanvasStore((state) => state.hydrated);
     const findDocument = useCanvasStore((state) => state.findDocument);
@@ -310,6 +316,9 @@ function CanvasWorkspacePage() {
     const [showImageInfo, setShowImageInfo] = useState(false);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const [navigationPanelState, setNavigationPanelState] = useState<CanvasNavigationPanelState | "hidden">("expanded");
+    const [navigationPanelTab, setNavigationPanelTab] = useState<CanvasNavigationTab>("nodes");
+    const [previewAsset, setPreviewAsset] = useState<CanvasNavigationAsset | null>(null);
     const [projectLoaded, setProjectLoaded] = useState(false);
     const [toolbarNodeId, setToolbarNodeId] = useState<string | null>(null);
     const [nodeImageSettingsOpen, setNodeImageSettingsOpen] = useState(false);
@@ -340,6 +349,8 @@ function CanvasWorkspacePage() {
     const [generatingStoryboardVideoNodeId, setGeneratingStoryboardVideoNodeId] = useState<string | null>(null);
     const [composingStoryboardNodeId, setComposingStoryboardNodeId] = useState<string | null>(null);
     const [composingStoryboardShot, setComposingStoryboardShot] = useState<{ nodeId: string; shotId: string } | null>(null);
+    const previewLibraryAsset = previewAsset?.source === "library" ? previewAsset.asset : null;
+    const previewStoryboardAsset = previewAsset?.source === "storyboard" ? previewAsset : null;
 
     useEffect(() => {
         resetThinkings();
@@ -348,6 +359,11 @@ function CanvasWorkspacePage() {
     useEffect(() => {
         setInitialPrompt(readInitialPromptFromLocation());
     }, []);
+    useEffect(() => {
+        setNavigationPanelState("expanded");
+        setNavigationPanelTab("nodes");
+        setPreviewAsset(null);
+    }, [projectId]);
     const { start: startGenerationRequest, finish: finishGenerationRequest, stopByRunningId: stopRegisteredGenerationRequests, isRunning: isGenerationRunning } = useCanvasGenerationRequests();
 
     const nodesRef = useRef(nodes);
@@ -655,19 +671,11 @@ function CanvasWorkspacePage() {
     pendingConnectionCreateRef.current = pendingConnectionCreate;
     selectionBoxRef.current = selectionBox;
 
-    const requestFocusNodes = useCallback((nodeIds: string[]) => {
-        pendingFocusNodeIdsRef.current = nodeIds.filter(Boolean);
-    }, []);
-
-    const focusPendingNodes = useCallback(() => {
-        const nodeIds = pendingFocusNodeIdsRef.current;
-        if (!nodeIds.length) return;
-
+    const focusCanvasNodes = useCallback((nodeIds: string[]) => {
+        if (!nodeIds.length) return false;
         const idSet = new Set(nodeIds);
         const targetNodes = nodesRef.current.filter((node) => idSet.has(node.id));
-        if (!targetNodes.length) return;
-
-        pendingFocusNodeIdsRef.current = [];
+        if (!targetNodes.length) return false;
         const bounds = targetNodes.reduce(
             (acc, node) => ({
                 left: Math.min(acc.left, node.frame.position.x),
@@ -685,11 +693,34 @@ function CanvasWorkspacePage() {
             y: size.height / 2 - centerY * scale,
             k: scale,
         });
+        return true;
     }, [size.height, size.width]);
+
+    const requestFocusNodes = useCallback((nodeIds: string[]) => {
+        pendingFocusNodeIdsRef.current = nodeIds.filter(Boolean);
+    }, []);
+
+    const focusPendingNodes = useCallback(() => {
+        const nodeIds = pendingFocusNodeIdsRef.current;
+        if (!nodeIds.length || !focusCanvasNodes(nodeIds)) return;
+        pendingFocusNodeIdsRef.current = [];
+    }, [focusCanvasNodes]);
 
     useLayoutEffect(() => {
         focusPendingNodes();
     }, [focusPendingNodes, nodes]);
+
+    const handleNavigationNodeLocate = useCallback((nodeId: string) => {
+        focusCanvasNodes([nodeId]);
+        setSelectedNodeIds(new Set([nodeId]));
+        setSelectedConnectionId(null);
+        setDialogNodeId(null);
+        setToolbarNodeId(null);
+        setSelectionBox(null);
+        setContextMenu(null);
+        setEdgeDeletePopover(null);
+        setPendingConnectionCreate(null);
+    }, [focusCanvasNodes]);
 
     const setConnecting = useCallback((next: ConnectionHandle | null) => {
         connectingParamsRef.current = next;
@@ -3401,9 +3432,20 @@ function CanvasWorkspacePage() {
     const assistantOpen = assistantMounted;
     const openAgent = () => setAssistantMounted(true);
     const closeAgent = () => setAssistantMounted(false);
+    const openNavigationPanel = () => setNavigationPanelState("expanded");
 
     // Phase 2-3: 转换为 React Flow 格式
     const hiddenBatchNodeIds = useMemo(() => new Set(nodes.filter((node) => isHiddenBatchChild(node, nodes, collapsingBatchIds)).map((node) => node.id)), [collapsingBatchIds, nodes]);
+    const navigationNodes = useMemo(() => nodes.filter((node) => !hiddenBatchNodeIds.has(node.id)), [hiddenBatchNodeIds, nodes]);
+    const navigationAssets = useMemo<CanvasNavigationAsset[]>(
+        () => [
+            ...assets.map((asset) => ({ id: `library:${asset.id}`, source: "library" as const, asset })),
+            ...nodes.flatMap((node) => isStoryboardNode(node)
+                ? node.storyboard.assets.map((asset) => ({ id: `storyboard:${node.id}:${asset.id}`, source: "storyboard" as const, asset, storyboardNodeTitle: node.title }))
+                : []),
+        ],
+        [assets, nodes],
+    );
     const hiddenBatchEdgeNodeIds = useMemo(
         () =>
             new Set(
@@ -3655,6 +3697,8 @@ function CanvasWorkspacePage() {
                     onFinishTitleEditing={finishTitleEditing}
                     onCancelTitleEditing={() => setTitleEditing(false)}
                     onBackToProjects={confirmBackToProjects}
+                    navigationPanelHidden={navigationPanelState === "hidden"}
+                    onOpenNavigationPanel={openNavigationPanel}
                     agentOpen={assistantOpen}
                     onToggleAgent={() => (assistantOpen ? closeAgent() : openAgent())}
                 />
@@ -3682,6 +3726,22 @@ function CanvasWorkspacePage() {
                         onPaneContextMenu={handlePaneContextMenu}
                     />
                 </NodeActionProvider>
+
+                {navigationPanelState !== "hidden" ? (
+                    <CanvasNavigationPanel
+                        state={navigationPanelState === "collapsed" ? "collapsed" : "expanded"}
+                        activeTab={navigationPanelTab}
+                        nodes={navigationNodes}
+                        assets={navigationAssets}
+                        selectedNodeIds={selectedNodeIds}
+                        onTabChange={setNavigationPanelTab}
+                        onLocateNode={handleNavigationNodeLocate}
+                        onPreviewAsset={setPreviewAsset}
+                        onCollapse={() => setNavigationPanelState("collapsed")}
+                        onExpand={openNavigationPanel}
+                        onHide={() => setNavigationPanelState("hidden")}
+                    />
+                ) : null}
 
                 {edgeDeletePopover ? (
                     <div
@@ -3838,6 +3898,17 @@ function CanvasWorkspacePage() {
                     onInsertAsset={handleAssetInsert}
                     onCloseAssetPicker={() => setAssetPickerOpen(false)}
                 />
+                <AssetPreviewDialog
+                    asset={previewLibraryAsset}
+                    onClose={() => setPreviewAsset(null)}
+                    onCopy={() => {
+                        if (previewLibraryAsset?.kind === "text") copyText(previewLibraryAsset.data.content, "文本已复制");
+                    }}
+                    onDownload={() => {
+                        if (previewLibraryAsset) downloadAsset(previewLibraryAsset);
+                    }}
+                />
+                <CanvasStoryboardAssetPreviewDialog asset={previewStoryboardAsset} onClose={() => setPreviewAsset(null)} />
             </section>
             <StoryboardWorkspace
                 open={Boolean(openedStoryboardNode)}

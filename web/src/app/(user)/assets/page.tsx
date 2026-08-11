@@ -3,11 +3,11 @@
 import { useMemo, useRef, useState } from "react";
 import { App, Button, Empty, Input, Modal, Pagination, Segmented } from "antd";
 import { Download, Plus, Search, Upload } from "lucide-react";
-import { saveAs } from "file-saver";
 
 import { AssetEditorDialog } from "@/features/assets/components/asset-editor-dialog";
 import { AssetLibraryCard } from "@/features/assets/components/asset-library-card";
 import { AssetPreviewDialog } from "@/features/assets/components/asset-preview-dialog";
+import { downloadAsset } from "@/features/assets/lib/asset-download";
 import { paginateAssets, queryAssets } from "@/features/assets/lib/asset-query";
 import { exportAssets, readAssetPackage } from "@/features/assets/lib/asset-transfer";
 import { useAssetStore, type Asset, type AssetKind } from "@/features/assets/stores/use-asset-store";
@@ -53,12 +53,6 @@ export default function AssetsPage() {
     };
     const copyAsset = (asset: Asset) => {
         if (asset.kind === "text") copyText(asset.data.content, "文本已复制");
-    };
-    const downloadAsset = (asset: Asset) => {
-        if (asset.kind === "text") return;
-        const source = asset.kind === "video" ? asset.data.url : asset.data.dataUrl;
-        const extension = asset.data.mimeType.split("/")[1] || (asset.kind === "video" ? "mp4" : "png");
-        saveAs(source, `${asset.title || "资产"}.${extension}`);
     };
     const exportAll = async () => {
         if (!assets.length) return void message.warning("暂无资产可导出");

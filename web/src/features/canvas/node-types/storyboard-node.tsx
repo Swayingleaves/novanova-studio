@@ -209,15 +209,15 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
                     {generated ? (
                         <button
                             type="button"
-                            className="nodrag nopan flex w-full items-center justify-between rounded-md px-3 py-2 text-sm font-medium transition-[filter,transform] duration-150 hover:brightness-95 active:translate-y-px motion-reduce:transition-none"
+                            className="nodrag nopan flex w-full items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-[filter,transform] duration-150 hover:brightness-95 active:translate-y-px motion-reduce:transition-none"
                             style={{ background: theme.node.activeStroke, color: theme.node.panel }}
                             onClick={(event) => {
                                 event.stopPropagation();
                                 actions.onOpenStoryboard(data);
                             }}
                         >
-                            打开分镜脚本
                             <ExternalLink className="size-4" />
+                            打开分镜脚本
                         </button>
                     ) : null}
                     <button
