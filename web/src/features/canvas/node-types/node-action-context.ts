@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { CanvasNode, CanvasPoint } from "../types";
+import type { CanvasNode, CanvasPoint, CanvasStoryboardNode, CanvasVideoCompositionNode, CanvasVideoNode } from "../types";
 
 export type BatchImagePreview = {
   id: string;
@@ -25,7 +25,17 @@ export type NodeActions = {
   onCrop: (node: CanvasNode) => void;
   onSplit: (node: CanvasNode) => void;
   onViewImage: (node: CanvasNode) => void;
+  onViewVideo: (node: CanvasNode) => void;
   onRetry: (node: CanvasNode) => void;
+  onOpenStoryboard: (node: CanvasStoryboardNode) => void;
+  onStoryboardInstructionChange?: (nodeId: string, instruction: string) => void;
+  onStoryboardVisualStyleChange?: (nodeId: string, visualStyle: string) => void;
+  onStoryboardModelChange?: (nodeId: string, model: string) => void;
+  onGenerateStoryboard?: (node: CanvasStoryboardNode) => void;
+  videoNodesById?: Map<string, CanvasVideoNode>;
+  onVideoCompositionInputOrderChange?: (nodeId: string, inputVideoNodeIds: string[]) => void;
+  onComposeVideo?: (node: CanvasVideoCompositionNode) => void;
+  onMissingTextModelConfig?: () => void;
   onToggleBatch?: (nodeId: string) => void;
   batchOpeningRootIds?: Set<string>;
   batchCollapsingRootIds?: Set<string>;
@@ -53,7 +63,9 @@ const NodeActionContext = createContext<NodeActions>({
   onCrop: noop,
   onSplit: noop,
   onViewImage: noop,
+  onViewVideo: noop,
   onRetry: noop,
+  onOpenStoryboard: noop,
   onToggleFreeResize: noop,
   onDelete: noop,
 });

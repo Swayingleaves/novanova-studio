@@ -4,7 +4,9 @@ import {
     type CanvasNodeFrame,
     type CanvasNodeKind,
     type CanvasPoint,
+    type CanvasStoryboardNode,
     type CanvasTextNode,
+    type CanvasVideoCompositionNode,
     type CanvasVideoNode,
 } from "./types.ts";
 
@@ -40,10 +42,24 @@ const VIDEO_NODE_TEMPLATE: CanvasNodeTemplate = {
     height: 236,
 };
 
+const VIDEO_COMPOSITION_NODE_TEMPLATE: CanvasNodeTemplate = {
+    title: "合成视频",
+    width: 440,
+    height: 380,
+};
+
+const STORYBOARD_NODE_TEMPLATE: CanvasNodeTemplate = {
+    title: "分镜脚本",
+    width: 360,
+    height: 380,
+};
+
 const CANVAS_NODE_TEMPLATES: Record<CanvasNodeKind, CanvasNodeTemplate> = {
     image: IMAGE_NODE_TEMPLATE,
     text: TEXT_NODE_TEMPLATE,
     video: VIDEO_NODE_TEMPLATE,
+    storyboard: STORYBOARD_NODE_TEMPLATE,
+    videoComposition: VIDEO_COMPOSITION_NODE_TEMPLATE,
 };
 
 export function createImageNode(input: CreateCanvasNodeInput): CanvasImageNode {
@@ -92,6 +108,25 @@ export function createTextNode(input: CreateCanvasNodeInput & { text?: string })
     };
 }
 
+export function createStoryboardNode(input: CreateCanvasNodeInput): CanvasStoryboardNode {
+    return {
+        id: input.id,
+        kind: "storyboard",
+        title: input.title?.trim() || STORYBOARD_NODE_TEMPLATE.title,
+        frame: createNodeFrame(STORYBOARD_NODE_TEMPLATE, input.position),
+        execution: createIdleExecution(),
+        content: {
+            instruction: "",
+            visualStyle: "",
+            model: "",
+        },
+        storyboard: {
+            shots: [],
+            assets: [],
+        },
+    };
+}
+
 export function createVideoNode(input: CreateCanvasNodeInput): CanvasVideoNode {
     return {
         id: input.id,
@@ -114,6 +149,19 @@ export function createVideoNode(input: CreateCanvasNodeInput): CanvasVideoNode {
             referenceObjectStorages: [],
             generationStyleIds: [],
             generationStyleSnapshots: [],
+        },
+    };
+}
+
+export function createVideoCompositionNode(input: CreateCanvasNodeInput): CanvasVideoCompositionNode {
+    return {
+        id: input.id,
+        kind: "videoComposition",
+        title: input.title?.trim() || VIDEO_COMPOSITION_NODE_TEMPLATE.title,
+        frame: createNodeFrame(VIDEO_COMPOSITION_NODE_TEMPLATE, input.position),
+        execution: createIdleExecution(),
+        composition: {
+            inputVideoNodeIds: [],
         },
     };
 }

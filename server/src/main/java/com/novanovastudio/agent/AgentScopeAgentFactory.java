@@ -68,6 +68,17 @@ public class AgentScopeAgentFactory {
     }
 
     /**
+     * 创建分镜脚本Agent。
+     *
+     * @param model Model 用户明确选择的文本模型
+     * @return ReActAgent 分镜脚本Agent
+     */
+    public ReActAgent storyboardAgent(Model model) {
+        return build("storyboard-agent", promptService.get(PromptTemplateType.AGENT_STORYBOARD), model,
+                "只能返回当前请求对应的分镜结构化结果，不得调用工具、解释或输出额外文本。", false);
+    }
+
+    /**
      * 构建无业务工具权限的ReActAgent。
      *
      * @param name String Agent名称

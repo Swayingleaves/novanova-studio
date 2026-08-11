@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -16,6 +17,7 @@ import com.novanovastudio.ai.AiProviderException;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.config.NovanovaProperties;
+import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.entity.AiGenerationTask;
@@ -23,6 +25,7 @@ import com.novanovastudio.repository.AiTaskRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.task.AiTaskEventPublisher;
 import com.novanovastudio.task.AiTaskQueue;
+import com.novanovastudio.task.ModelTaskExecutionDispatcher;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Assertions;
@@ -67,6 +70,10 @@ class AiTaskServiceTest {
     @Mock
     private AiTaskQueue taskQueue;
 
+    /** 模型任务执行调度器 */
+    @Mock
+    private ModelTaskExecutionDispatcher modelTaskExecutionDispatcher;
+
     /** Agent任务编排器 */
     @Mock
     private AgentTaskOrchestrator orchestrator;
@@ -99,17 +106,23 @@ class AiTaskServiceTest {
     void setUp() {
         executionOrder = new ArrayList<>();
         service = new AiTaskService(repository, currentUserProvider, properties, persistenceService,
-                eventPublisher, taskQueue, orchestrator, adapterRegistry, creditService, transactionalOperator);
+                eventPublisher, taskQueue, modelTaskExecutionDispatcher, orchestrator, adapterRegistry, creditService, transactionalOperator);
 
         AiTaskDtos.AiChannelConfig channel = new AiTaskDtos.AiChannelConfig(
                 "channel-1", "图片渠道", "https://example.com", "key", "openai", List.of("model-1"));
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(7L));
         when(persistenceService.getPlatformAiChannels()).thenReturn(Mono.just(List.of(channel)));
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(
-                new PersistenceDtos.ModelConfig("model-config-1", "channel-1", "model-1", AiTaskTypes.IMAGE, List.of(), true, 0, 0, true, "high")
+                new PersistenceDtos.ModelConfig("model-config-1", "channel-1", "model-1", AiTaskTypes.IMAGE, List.of(), true, 0, 0, true, "high"),
+                new PersistenceDtos.ModelConfig("model-config-2", "channel-1", "model-1", AiTaskTypes.VIDEO, List.of(), true, 0, 0, true, "high"),
+                new PersistenceDtos.ModelConfig("model-config-3", "channel-1", "model-1", AiTaskTypes.TEXT, List.of(), true, 0, 0, true, "high")
         )));
         providerAdapter = mock(AiProviderAdapter.class);
         when(adapterRegistry.resolve(any(AiTaskDtos.AiChannelConfig.class), eq(AiTaskTypes.IMAGE)))
+                .thenReturn(providerAdapter);
+        when(adapterRegistry.resolve(any(AiTaskDtos.AiChannelConfig.class), eq(AiTaskTypes.VIDEO)))
+                .thenReturn(providerAdapter);
+        when(adapterRegistry.resolve(any(AiTaskDtos.AiChannelConfig.class), eq(AiTaskTypes.TEXT)))
                 .thenReturn(providerAdapter);
         when(repository.createTask(any(AiGenerationTask.class))).thenReturn(Mono.defer(() -> {
             executionOrder.add("create");
@@ -131,10 +144,14 @@ class AiTaskServiceTest {
             executionOrder.add("enqueue");
             return Mono.empty();
         }));
+        org.mockito.Mockito.lenient().when(modelTaskExecutionDispatcher.enqueue(anyString(), anyString())).thenReturn(Mono.defer(() -> {
+            executionOrder.add("modelEnqueue");
+            return Mono.empty();
+        }));
     }
 
     /**
-     * 任务入库并读取响应后，应先完成入队前处理，再发布事件和写入队列。
+     * 图片任务入库并读取响应后，应先完成入队前处理，再发布事件和写入模型队列。
      */
     @Test
     void shouldRunBeforeEnqueueAfterTaskResponseAndBeforePublishAndEnqueue() {
@@ -145,7 +162,36 @@ class AiTaskServiceTest {
         })).block();
 
         Assertions.assertNotNull(response);
-        Assertions.assertEquals(List.of("create", "read", "beforeEnqueue", "publish", "enqueue"), executionOrder);
+        Assertions.assertEquals(List.of("create", "read", "beforeEnqueue", "publish", "modelEnqueue"), executionOrder);
+        verify(modelTaskExecutionDispatcher).enqueue(eq("model-config-1"), anyString());
+    }
+
+    /** 视频任务应按对应模型配置进入模型队列。 */
+    @Test
+    void shouldEnqueueVideoTaskToModelQueue() {
+        AiTaskDtos.CreateAiTaskRequest request = new AiTaskDtos.CreateAiTaskRequest(
+                AiTaskTypes.VIDEO, "生成视频", "channel-1::model-1", java.util.Map.of("seconds", 5), List.of(), List.of(), AiTaskSources.VIDEO_PAGE);
+
+        AiTaskDtos.AiGenerationTaskResponse response = service.createTask(request).block();
+
+        Assertions.assertNotNull(response);
+        Assertions.assertTrue(executionOrder.contains("modelEnqueue"));
+        verify(modelTaskExecutionDispatcher).enqueue(eq("model-config-2"), anyString());
+    }
+
+    /**
+     * 文本任务应继续使用全局AI任务队列。
+     */
+    @Test
+    void shouldEnqueueTextTaskToGlobalQueue() {
+        AiTaskDtos.CreateAiTaskRequest request = new AiTaskDtos.CreateAiTaskRequest(
+                AiTaskTypes.TEXT, "生成文本", "channel-1::model-1", java.util.Map.of(), List.of(), List.of(), null);
+
+        AiTaskDtos.AiGenerationTaskResponse response = service.createTask(request).block();
+
+        Assertions.assertNotNull(response);
+        Assertions.assertTrue(executionOrder.contains("enqueue"));
+        Assertions.assertFalse(executionOrder.contains("modelEnqueue"));
     }
 
     /**
@@ -181,6 +227,45 @@ class AiTaskServiceTest {
         verify(creditService).refundTask(7L, "task-1", AiTaskTypes.IMAGE);
     }
 
+    /** 已持久化模型配置缺失时，图片任务不得按同名模型改投。 */
+    @Test
+    void shouldFailAndRefundWhenQueuedModelConfigIsMissing() {
+        AiGenerationTask queuedTask = task("task-1");
+        queuedTask.setModelConfigId("deleted-model-config");
+        when(repository.getTaskById("task-1")).thenReturn(Mono.just(queuedTask));
+        when(repository.markTaskRunningIfExecutable("task-1")).thenReturn(Mono.just(true));
+        when(eventPublisher.isCancelRequested("task-1")).thenReturn(Mono.just(false));
+
+        service.executeQueuedTask("task-1").block();
+
+        verify(creditService).refundTask(7L, "task-1", AiTaskTypes.IMAGE);
+        verify(providerAdapter, never()).execute(any());
+    }
+
+    /**
+     * 分镜来源不能创建文本任务。
+     */
+    @Test
+    void shouldRejectStoryboardSourceForTextTask() {
+        AiTaskDtos.CreateAiTaskRequest request = new AiTaskDtos.CreateAiTaskRequest(
+                AiTaskTypes.TEXT, "文本任务", "channel-1::model-1", java.util.Map.of(), List.of(), List.of(), AiTaskSources.STORYBOARD);
+
+        Assertions.assertThrows(BusinessException.class, () -> service.createTask(request).block());
+    }
+
+    /**
+     * 分镜来源应允许创建视频任务。
+     */
+    @Test
+    void shouldAllowStoryboardSourceForVideoTask() {
+        AiTaskDtos.CreateAiTaskRequest request = new AiTaskDtos.CreateAiTaskRequest(
+                AiTaskTypes.VIDEO, "生成分镜视频", "channel-1::model-1", java.util.Map.of("seconds", 5), List.of(), List.of(), AiTaskSources.STORYBOARD);
+
+        AiTaskDtos.AiGenerationTaskResponse response = service.createTask(request).block();
+
+        Assertions.assertNotNull(response);
+    }
+
     /**
      * 构建图片生成任务请求。
      *
@@ -204,6 +289,7 @@ class AiTaskServiceTest {
         task.setTaskType(AiTaskTypes.IMAGE);
         task.setModel("model-1");
         task.setProvider("图片渠道");
+        task.setModelConfigId("model-config-1");
         task.setStatus("pending");
         task.setProgress(0);
         task.setRequestData("{}");

@@ -81,14 +81,14 @@ class AiTaskCreditCalculationTest {
         try {
             Class<?> resolvedModelType = Class.forName("com.novanovastudio.service.AiTaskService$ResolvedModel");
             Constructor<?> constructor = resolvedModelType.getDeclaredConstructor(
-                    AiTaskDtos.AiChannelConfig.class, String.class, Integer.class, String.class, boolean.class, String.class);
+                    AiTaskDtos.AiChannelConfig.class, String.class, String.class, Integer.class, String.class, boolean.class, String.class);
             constructor.setAccessible(true);
             Object resolvedModel = constructor.newInstance(
                     new AiTaskDtos.AiChannelConfig("channel", "测试渠道", "https://example.com", "key", "openai", List.of("model")),
-                    "model", creditCost, creditUnit, true, "high");
+                    "model", "model-config", creditCost, creditUnit, true, "high");
             Method method = AiTaskService.class.getDeclaredMethod("calculateTaskCredits", AiTaskDtos.CreateAiTaskRequest.class, resolvedModelType);
             method.setAccessible(true);
-            return (Integer) method.invoke(new AiTaskService(null, null, null, null, null, null, null, null, null, null), request, resolvedModel);
+            return (Integer) method.invoke(new AiTaskService(null, null, null, null, null, null, null, null, null, null, null), request, resolvedModel);
         } catch (InvocationTargetException exception) {
             if (exception.getCause() instanceof RuntimeException runtimeException) throw runtimeException;
             throw new IllegalStateException(exception.getCause());

@@ -6,7 +6,12 @@ import type {
     CanvasImageNode,
     CanvasNode,
     CanvasNodeFrame,
+    CanvasStoryboardAsset,
+    CanvasStoryboardNode,
+    CanvasStoryboardShot,
     CanvasTextNode,
+    CanvasVideoCompositionData,
+    CanvasVideoCompositionNode,
     CanvasVideoContent,
     CanvasVideoGenerationSettings,
     CanvasVideoNode,
@@ -53,6 +58,10 @@ export type CanvasNodeAttributes = {
     objectStorage?: ObjectStorageFile;
     generationStyleIds?: number[];
     generationStyleSnapshots?: GenerationStyleSnapshot[];
+    storyboardShots?: CanvasStoryboardShot[];
+    storyboardAssets?: CanvasStoryboardAsset[];
+    videoCompositionInputVideoNodeIds?: string[];
+    videoCompositionResultVideoNodeId?: string;
 };
 
 export function isImageNode(node: CanvasNode): node is CanvasImageNode {
@@ -65,6 +74,14 @@ export function isTextNode(node: CanvasNode): node is CanvasTextNode {
 
 export function isVideoNode(node: CanvasNode): node is CanvasVideoNode {
     return node.kind === "video";
+}
+
+export function isVideoCompositionNode(node: CanvasNode): node is CanvasVideoCompositionNode {
+    return node.kind === "videoComposition";
+}
+
+export function isStoryboardNode(node: CanvasNode): node is CanvasStoryboardNode {
+    return node.kind === "storyboard";
 }
 
 export function updateCanvasNodeTitle<Node extends CanvasNode>(node: Node, title: string): Node {
@@ -132,6 +149,27 @@ export function updateVideoNodeGeneration(node: CanvasVideoNode, patch: Partial<
     };
 }
 
+export function updateVideoCompositionNodeData(node: CanvasVideoCompositionNode, patch: Partial<CanvasVideoCompositionData>): CanvasVideoCompositionNode {
+    return {
+        ...node,
+        composition: mergeDefined(node.composition, patch),
+    };
+}
+
+export function updateStoryboardNodeContent(node: CanvasStoryboardNode, patch: Partial<CanvasStoryboardNode["content"]>): CanvasStoryboardNode {
+    return {
+        ...node,
+        content: mergeDefined(node.content, patch),
+    };
+}
+
+export function updateStoryboardNodeData(node: CanvasStoryboardNode, patch: Partial<CanvasStoryboardNode["storyboard"]>): CanvasStoryboardNode {
+    return {
+        ...node,
+        storyboard: mergeDefined(node.storyboard, patch),
+    };
+}
+
 export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasNodeAttributes): CanvasNode {
     if (!attributes) return node;
     const phase = mapExecutionPhase(attributes.status, node.execution.phase);
@@ -142,13 +180,14 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
         startedAt: attributes.startedAt,
         completedAt: attributes.completedAt,
     };
-    const executed = attributes.status === "success"
+    const executed: CanvasNode = attributes.status === "success"
         ? {
               ...node,
-              execution: mergeDefined(
-                  { phase: "succeeded" as const },
-                  { startedAt: attributes.startedAt ?? node.execution.startedAt, completedAt: attributes.completedAt },
-              ),
+              execution: {
+                  phase: "succeeded",
+                  ...(attributes.startedAt ?? node.execution.startedAt ? { startedAt: attributes.startedAt ?? node.execution.startedAt } : {}),
+                  ...(attributes.completedAt ? { completedAt: attributes.completedAt } : {}),
+              },
           }
         : attributes.status === "idle"
             ? { ...node, execution: { phase: "idle" as const } }
@@ -193,6 +232,22 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
             usesReferenceImages: attributes.batchUsesReferenceImages,
             primaryImageId: attributes.primaryImageId,
             expanded: attributes.imageBatchExpanded,
+        });
+    }
+    if (isStoryboardNode(framed)) {
+        const withContent = updateStoryboardNodeContent(framed, {
+            instruction: attributes.content,
+            model: attributes.model,
+        });
+        return updateStoryboardNodeData(withContent, {
+            shots: attributes.storyboardShots,
+            assets: attributes.storyboardAssets,
+        });
+    }
+    if (isVideoCompositionNode(framed)) {
+        return updateVideoCompositionNodeData(framed, {
+            inputVideoNodeIds: attributes.videoCompositionInputVideoNodeIds,
+            resultVideoNodeId: attributes.videoCompositionResultVideoNodeId,
         });
     }
     const withContent = updateVideoNodeContent(framed, {

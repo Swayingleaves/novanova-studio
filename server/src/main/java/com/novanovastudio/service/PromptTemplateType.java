@@ -21,5 +21,7 @@ public enum PromptTemplateType {
     /** 视频生成Agent模板 */
     AGENT_VIDEO,
     /** 画布Agent模板 */
-    AGENT_CANVAS
+    AGENT_CANVAS,
+    /** 分镜脚本Agent模板 */
+    AGENT_STORYBOARD
 }

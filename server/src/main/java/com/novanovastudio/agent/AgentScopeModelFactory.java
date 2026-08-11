@@ -2,6 +2,8 @@ package com.novanovastudio.agent;
 
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.service.PersistenceService;
@@ -63,6 +65,61 @@ public class AgentScopeModelFactory {
                     return selectedModel.<Mono<Model>>map(model -> Mono.just(createModel(model.channel(),
                                     thinkingEnabled(model.config().thinkingEnabled()), reasoningEffort(model.config().reasoningEffort()))))
                             .orElseGet(() -> Mono.error(new IllegalStateException("未配置可用的默认文本模型")));
+                });
+    }
+
+    /**
+     * 解析用户明确选择的文本模型，供独立业务Agent调用并读取模型单价。
+     *
+     * @param selectedModel String 前端传入的channelId::model编码
+     * @return Mono<TextModelSelection> 已校验的AgentScope模型与计费配置
+     */
+    public Mono<TextModelSelection> resolveTextModel(String selectedModel) {
+        if (!StringUtils.hasText(selectedModel)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "分镜脚本必须选择文本模型"));
+        }
+        String normalizedModel = selectedModel.trim();
+        int separatorIndex = normalizedModel.indexOf("::");
+        if (separatorIndex <= 0 || separatorIndex >= normalizedModel.length() - 2) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "所选文本模型格式不合法"));
+        }
+        String channelId = normalizedModel.substring(0, separatorIndex);
+        String modelName = normalizedModel.substring(separatorIndex + 2);
+        return Mono.zip(persistenceService.getPlatformAiChannels(), persistenceService.getPlatformModelConfigs())
+                .flatMap(tuple -> {
+                    PersistenceDtos.ModelConfig modelConfig = tuple.getT2().stream()
+                            .filter(config -> AiTaskTypes.TEXT.equals(config.modelType())
+                                    && channelId.equals(config.channelId())
+                                    && modelName.equals(config.modelName()))
+                            .findFirst()
+                            .orElse(null);
+                    if (modelConfig == null) {
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "所选文本模型不可用，请联系管理员检查模型配置"));
+                    }
+                    AiTaskDtos.AiChannelConfig channel = tuple.getT1().stream()
+                            .filter(item -> channelId.equals(item.id())
+                                    && item.models() != null
+                                    && item.models().contains(modelName)
+                                    && StringUtils.hasText(item.baseUrl())
+                                    && StringUtils.hasText(item.apiKey())
+                                    && adapterRegistry.supports(item, AiTaskTypes.TEXT))
+                            .findFirst()
+                            .orElse(null);
+                    if (channel == null) {
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "所选文本模型渠道不可用，请联系管理员检查渠道配置"));
+                    }
+                    Integer creditCost = modelConfig.creditCost();
+                    if (creditCost == null || creditCost < 0) {
+                        return Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR, "所选文本模型积分配置不合法"));
+                    }
+                    AiTaskDtos.AiChannelConfig scopedChannel = new AiTaskDtos.AiChannelConfig(
+                            channel.id(), channel.name(), channel.baseUrl(), channel.apiKey(), channel.apiFormat(), List.of(modelName));
+                    return Mono.just(new TextModelSelection(
+                            createModel(scopedChannel, thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort())),
+                            normalizedModel,
+                            modelName,
+                            channel.name(),
+                            creditCost));
                 });
     }
 
@@ -141,6 +198,18 @@ public class AgentScopeModelFactory {
      * @param config ModelConfig 文本模型配置
      */
     private record ResolvedTextModel(AiTaskDtos.AiChannelConfig channel, PersistenceDtos.ModelConfig config) {
+    }
+
+    /**
+     * 已解析的文本模型与积分配置。
+     *
+     * @param agentModel Model AgentScope模型实例
+     * @param modelValue String 渠道模型编码
+     * @param modelName String 模型名称
+     * @param provider String 渠道名称
+     * @param creditCost int 单次积分价格
+     */
+    public record TextModelSelection(Model agentModel, String modelValue, String modelName, String provider, int creditCost) {
     }
 
     /**

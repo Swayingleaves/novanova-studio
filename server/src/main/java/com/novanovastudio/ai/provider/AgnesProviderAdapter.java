@@ -37,6 +37,16 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
     private static final String AGNES_VIDEO_MODEL = "Agnes-Video-V2.0";
 
     /**
+     * Agnes 视频关键帧允许的最大参考图片数量
+     */
+    private static final int AGNES_VIDEO_KEYFRAME_MAX_REFERENCE_IMAGE_COUNT = 3;
+
+    /**
+     * Agnes 视频参考图片超过关键帧上限时的错误信息
+     */
+    private static final String AGNES_VIDEO_REFERENCE_IMAGE_LIMIT_MESSAGE = "Agnes 视频最多支持3张参考图片，请调整镜头资产关联或切换视频模型";
+
+    /**
      * AI HTTP客户端
      */
     private final AiHttpClient aiHttpClient;
@@ -241,7 +251,11 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
         if (!AiTaskParameterReader.safeReferences(context.request().videoReferences()).isEmpty()) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "Agnes 调用格式暂不支持参考视频，请移除参考素材"));
         }
-        return Flux.fromIterable(AiTaskParameterReader.safeReferences(context.request().references()))
+        var imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
+        if (imageReferences.size() > AGNES_VIDEO_KEYFRAME_MAX_REFERENCE_IMAGE_COUNT) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, AGNES_VIDEO_REFERENCE_IMAGE_LIMIT_MESSAGE));
+        }
+        return Flux.fromIterable(imageReferences)
                 .concatMap(reference -> mediaSupport.resolveReferenceUrl(context.task().getUserId(), reference))
                 .collectList()
                 .flatMap(referenceUrls -> {
@@ -254,12 +268,7 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                     payload.put("height", dimensions.height());
                     payload.put("num_frames", timing.numFrames());
                     payload.put("frame_rate", timing.frameRate());
-                    if (referenceUrls.size() == 1) {
-                        payload.put("image", referenceUrls.get(0));
-                    }
-                    if (referenceUrls.size() > 1) {
-                        payload.put("extra_body", Map.of("image", referenceUrls));
-                    }
+                    applyAgnesVideoReferenceImages(payload, referenceUrls);
                     log.info("创建Agnes视频任务: taskId={}, width={}, height={}, frames={}, frameRate={}", context.task().getId(), dimensions.width(), dimensions.height(), timing.numFrames(), timing.frameRate());
                     return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/videos", payload);
                 })
@@ -291,6 +300,29 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                                         )));
                             });
                 });
+    }
+
+    /**
+     * 根据参考图片数量写入 Agnes 视频请求参数。
+     *
+     * @param payload Map<String, Object> Agnes 视频请求载荷
+     * @param referenceUrls List<String> 保持关联顺序的参考图片公网地址
+     * @throws BusinessException 当参考图片超过 Agnes 关键帧上限时抛出
+     */
+    private static void applyAgnesVideoReferenceImages(Map<String, Object> payload, List<String> referenceUrls) {
+        if (referenceUrls.size() > AGNES_VIDEO_KEYFRAME_MAX_REFERENCE_IMAGE_COUNT) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, AGNES_VIDEO_REFERENCE_IMAGE_LIMIT_MESSAGE);
+        }
+        if (referenceUrls.size() == 1) {
+            payload.put("image", referenceUrls.get(0));
+            return;
+        }
+        if (referenceUrls.size() > 1) {
+            Map<String, Object> extraBody = new java.util.LinkedHashMap<>();
+            extraBody.put("mode", "keyframes");
+            extraBody.put("image", referenceUrls);
+            payload.put("extra_body", extraBody);
+        }
     }
 
     /**

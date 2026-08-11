@@ -234,9 +234,31 @@ novanova:
       agent-video-file: ${AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE:file:./server/config/prompts/agent-video.md}
       # 画布 Agent 系统提示词文件路径
       agent-canvas-file: ${AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE:file:./server/config/prompts/agent-canvas.md}
+      # 分镜脚本 Agent 系统提示词文件路径
+      agent-storyboard-file: ${AI_SYSTEM_PROMPT_AGENT_STORYBOARD_FILE:file:./server/config/prompts/agent-storyboard.md}
     image:
       # 是否将第三方HTTP图片结果下载并转存到默认对象存储
       upload-http-result-to-object-storage: ${AI_IMAGE_HTTP_RESULT_UPLOAD_TO_OBJECT_STORAGE:false}
+    # ----------------------------------------------------------
+    # 画布视频合成任务配置
+    # 使用独立Redis FIFO队列，不占用AI模型并发额度。
+    # ----------------------------------------------------------
+    video-composition:
+      # 全站同时执行的FFmpeg合成任务数量，由Redis活动租约统一限流
+      concurrency: ${AI_VIDEO_COMPOSITION_CONCURRENCY:1}
+      # 单个源视频允许下载的最大字节数，默认500MB
+      maximum-input-bytes: ${AI_VIDEO_COMPOSITION_MAXIMUM_INPUT_BYTES:524288000}
+      # 单次合成允许的源视频总时长，默认10分钟
+      maximum-total-duration-seconds: ${AI_VIDEO_COMPOSITION_MAXIMUM_TOTAL_DURATION_SECONDS:600}
+      # 单个FFmpeg进程最长执行时间，默认30分钟
+      execution-timeout-seconds: ${AI_VIDEO_COMPOSITION_EXECUTION_TIMEOUT_SECONDS:1800}
+      # Redis活动任务租约，任务执行期间会按下方间隔自动续约
+      active-lease-seconds: ${AI_VIDEO_COMPOSITION_ACTIVE_LEASE_SECONDS:180}
+      # Redis活动任务租约续期间隔
+      lease-renew-seconds: ${AI_VIDEO_COMPOSITION_LEASE_RENEW_SECONDS:60}
+      # FFmpeg和FFprobe可执行文件路径，本地开发可通过环境变量覆盖
+      ffmpeg-executable: ${AI_VIDEO_COMPOSITION_FFMPEG_EXECUTABLE:ffmpeg}
+      ffprobe-executable: ${AI_VIDEO_COMPOSITION_FFPROBE_EXECUTABLE:ffprobe}
     # ----------------------------------------------------------
     # AI 任务消费配置
     # 基于 Redis Stream + Consumer Group 实现，不是队列也不是栈。

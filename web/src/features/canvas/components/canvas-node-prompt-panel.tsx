@@ -2,7 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Sparkles, Square, Video } from "lucide-react";
-import { App, Button, Tooltip } from "antd";
+import { App, Button, Modal, Tooltip } from "antd";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { defaultConfig, normalizeModelOptionValue, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
@@ -14,7 +14,7 @@ import { CanvasPromptPicker } from "./canvas-prompt-picker";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import type { CanvasGenerationMode, CanvasNode, CanvasNodeKind } from "../types";
 import { isImageNode, isTextNode, isVideoNode, type CanvasNodeAttributes } from "../domain/canvas-node";
-import type { CanvasResourceReference } from "../utils/canvas-resource-references";
+import { buildNodeGenerationReferences, type CanvasResourceReference } from "../utils/canvas-resource-references";
 import { useCanvasTheme } from "./canvas-theme-provider";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import type { GenerationStyleOption, GenerationStyleSnapshot } from "@/services/api/server";
@@ -22,6 +22,11 @@ import { GenerationStyleChips, GenerationStyleMenu, useGenerationStyles } from "
 import { getStyleCommandRange, parseGenerationStyleMessage, removeStyleCommand } from "@/features/generation/lib/style-command";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
+
+type DisplayReference = {
+    reference: CanvasResourceReference;
+    canInsert: boolean;
+};
 
 type CanvasNodePromptPanelProps = {
     node: CanvasNode;
@@ -57,11 +62,12 @@ export function CanvasNodePromptPanel({
     const { message } = App.useApp();
     const mode = defaultMode(node.kind);
     const styleCatalog = useGenerationStyles(mode === "image" || mode === "video" ? mode : undefined);
-    const persistedSnapshots = useMemo(() => !isTextNode(node) ? node.generation.generationStyleSnapshots : [], [node]);
+    const persistedSnapshots = useMemo(() => isImageNode(node) || isVideoNode(node) ? node.generation.generationStyleSnapshots : [], [node]);
     const [selectedStyles, setSelectedStyles] = useState<GenerationStyleOption[]>(() => (persistedSnapshots || []).map((style) => ({ id: style.id, name: style.name, generationType: style.generationType })));
     const [styleMenuOpen, setStyleMenuOpen] = useState(false);
     const [styleQuery, setStyleQuery] = useState("");
     const [styleCommand, setStyleCommand] = useState<{ start: number; end: number } | null>(null);
+    const [referencePreview, setReferencePreview] = useState<CanvasResourceReference | null>(null);
     const promptEditorRef = useRef<PromptEditorHandle>(null);
     const libraryPromptRef = useRef<string | null>(null);
     const config = buildNodeConfig(globalConfig, node, mode);
@@ -69,6 +75,20 @@ export function CanvasNodePromptPanel({
     const hasTextContent = isTextNode(node) && Boolean(node.content.text.trim());
     const hasImageContent = isImageNode(node) && Boolean(node.content.source);
     const isEditingExistingContent = hasTextContent || hasImageContent;
+    const displayReferences = useMemo<DisplayReference[]>(() => {
+        const references: DisplayReference[] = [];
+        const previewUrls = new Set<string>();
+        mentionReferences.filter((reference) => reference.active && reference.kind !== "text").forEach((reference) => {
+            references.push({ reference, canInsert: true });
+            if (reference.previewUrl) previewUrls.add(reference.previewUrl);
+        });
+        buildNodeGenerationReferences(node).forEach((reference) => {
+            if (reference.previewUrl && previewUrls.has(reference.previewUrl)) return;
+            references.push({ reference, canInsert: false });
+            if (reference.previewUrl) previewUrls.add(reference.previewUrl);
+        });
+        return references;
+    }, [mentionReferences, node]);
     const [prompt, setPrompt] = useState(() => {
         if (nodePrompt) return nodePrompt;
         if (isEditingExistingContent) return "";
@@ -90,6 +110,10 @@ export function CanvasNodePromptPanel({
         setStyleCommand(null);
         setStyleQuery("");
     }, [node.id, persistedSnapshots]);
+
+    useEffect(() => {
+        setReferencePreview(null);
+    }, [node.id]);
 
     useEffect(() => {
         if (nodePrompt) {
@@ -240,26 +264,67 @@ export function CanvasNodePromptPanel({
                 }} /></div>
             </> : null}
 
-            {mentionReferences.filter((ref) => ref.active && ref.kind !== "text").length > 0 ? (
+            {displayReferences.length > 0 ? (
                 <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
-                    {mentionReferences
-                        .filter((ref) => ref.active && ref.kind !== "text")
-                        .map((ref) => (
-                            <button
-                                key={ref.nodeId}
-                                type="button"
-                                className="inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium transition hover:brightness-110 active:scale-95"
-                                style={{ background: `${theme.node.activeStroke}1a`, color: theme.node.activeStroke, border: `1px solid ${theme.node.activeStroke}38` }}
-                                onClick={(event) => {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    promptEditorRef.current?.insertAtCursor(ref.label);
-                                }}
-                            >
-                                <ReferenceChipThumb reference={ref} />
-                                {ref.label}
-                            </button>
-                        ))}
+                    {displayReferences.map(({ reference, canInsert }) => {
+                        const canPreview = mode === "video" && reference.kind === "image" && Boolean(reference.previewUrl);
+                        const style = { background: `${theme.node.activeStroke}1a`, color: theme.node.activeStroke, border: `1px solid ${theme.node.activeStroke}38` };
+                        if (!canInsert) {
+                            return canPreview ? (
+                                <button
+                                    key={reference.nodeId}
+                                    type="button"
+                                    title="放大查看参考图"
+                                    aria-label={`放大查看${reference.label}`}
+                                    className="inline-flex cursor-zoom-in items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium transition hover:brightness-110 active:scale-95"
+                                    style={style}
+                                    onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        setReferencePreview(reference);
+                                    }}
+                                >
+                                    <ReferenceChipThumb reference={reference} />
+                                    {reference.label}
+                                </button>
+                            ) : (
+                                <span key={reference.nodeId} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium" style={style}>
+                                    <ReferenceChipThumb reference={reference} />
+                                    {reference.label}
+                                </span>
+                            );
+                        }
+                        return (
+                            <span key={reference.nodeId} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium" style={style}>
+                                {canPreview ? (
+                                    <button
+                                        type="button"
+                                        title="放大查看参考图"
+                                        aria-label={`放大查看${reference.label}`}
+                                        className="inline-flex cursor-zoom-in rounded"
+                                        onClick={(event) => {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            setReferencePreview(reference);
+                                        }}
+                                    >
+                                        <ReferenceChipThumb reference={reference} />
+                                    </button>
+                                ) : <ReferenceChipThumb reference={reference} />}
+                                <button
+                                    type="button"
+                                    className="cursor-pointer transition hover:brightness-110 active:scale-95"
+                                    onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        promptEditorRef.current?.insertAtCursor(reference.label);
+                                    }}
+                                >
+                                    {reference.label}
+                                </button>
+                            </span>
+                        );
+                    })}
                 </div>
             ) : null}
 
@@ -325,6 +390,9 @@ export function CanvasNodePromptPanel({
                     </Button>
                 </div>
             </div>
+            <Modal title={referencePreview?.title || "参考图"} open={Boolean(referencePreview?.previewUrl)} centered footer={null} width="auto" destroyOnHidden onCancel={() => setReferencePreview(null)}>
+                {referencePreview?.previewUrl ? <img src={referencePreview.previewUrl} alt={referencePreview.title || "参考图"} className="max-h-[80vh] max-w-full object-contain" /> : null}
+            </Modal>
         </div>
     );
 }
@@ -335,7 +403,7 @@ function defaultMode(type: CanvasNodeKind): CanvasNodeGenerationMode {
 
 function buildNodeConfig(globalConfig: AiConfig, node: CanvasNode, mode: CanvasNodeGenerationMode): AiConfig {
     const defaultModel = mode === "image" ? globalConfig.imageModel : mode === "video" ? globalConfig.videoModel : globalConfig.textModel;
-    const generation = isTextNode(node) ? null : node.generation;
+    const generation = isImageNode(node) || isVideoNode(node) ? node.generation : null;
     const model = normalizeModelOptionValue(generation?.model || defaultModel || globalConfig.model || defaultConfig.model, globalConfig.channels);
     return {
         ...globalConfig,
@@ -355,7 +423,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNode, mode: CanvasN
 }
 
 function readNodePrompt(node: CanvasNode): string {
-    return isTextNode(node) ? node.content.text : node.generation.prompt;
+    return isTextNode(node) ? node.content.text : isImageNode(node) || isVideoNode(node) ? node.generation.prompt : "";
 }
 
 function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: boolean, hasTextContent: boolean) {

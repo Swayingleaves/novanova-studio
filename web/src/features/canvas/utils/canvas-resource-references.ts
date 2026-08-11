@@ -31,6 +31,30 @@ export function buildNodeMentionReferences(node: CanvasNode, nodes: CanvasNode[]
     return mapReferences(getMentionResourceNodes(node.id, nodes, connections), true);
 }
 
+export function buildNodeGenerationReferences(node: CanvasNode): CanvasResourceReference[] {
+    if (!isImageNode(node) && !isVideoNode(node)) return [];
+
+    const countByKind: Record<"image" | "video", number> = { image: 0, video: 0 };
+    return node.generation.references.flatMap((reference, index) => {
+        const objectStorage = node.generation.referenceObjectStorages.find((file) => file.url === reference || file.key === reference.replace(/^image:/, ""));
+        const previewUrl = objectStorage?.url || (reference.startsWith("http") || reference.startsWith("data:") ? reference : "");
+        if (!previewUrl) return [];
+
+        const kind = objectStorage?.mimeType.startsWith("video/") || /\.(mp4|webm|mov|m4v)(?:[?#]|$)/i.test(reference) ? "video" : "image";
+        countByKind[kind] += 1;
+        const label = kind === "image" ? `参考图${countByKind.image}` : `参考视频${countByKind.video}`;
+        return [{
+            id: `${node.id}-generation-reference-${index}`,
+            nodeId: `${node.id}-generation-reference-${index}`,
+            kind,
+            label,
+            title: label,
+            previewUrl,
+            active: true,
+        }];
+    });
+}
+
 export function getMentionResourceNodes(nodeId: string, nodes: CanvasNode[], connections: CanvasConnection[]): CanvasNode[] {
     return resolveContextResourceNodes(nodeId, buildGraphIndex(nodes, connections), true);
 }
@@ -112,12 +136,12 @@ function resolveResourceKind(node: CanvasNode): CanvasResourceKind | null {
 }
 
 function readPreviewUrl(node: CanvasNode): string | undefined {
-    return isTextNode(node) ? undefined : node.content.source;
+    return isImageNode(node) || isVideoNode(node) ? node.content.source : undefined;
 }
 
 function readTextContent(node: CanvasNode): string {
     if (isTextNode(node)) return node.content.text.trim();
-    return node.generation.prompt.trim();
+    return isImageNode(node) || isVideoNode(node) ? node.generation.prompt.trim() : "";
 }
 
 function uniqueNodes(nodes: CanvasNode[]): CanvasNode[] {

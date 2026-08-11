@@ -1,15 +1,13 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { ImageIcon, List, Video } from "lucide-react";
+import { Clapperboard, ImageIcon, List, Video } from "lucide-react";
 
 import type { CanvasTheme, CanvasBackgroundMode } from "@/shared/lib/canvas-theme";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
-import type { CanvasTaskPanelTask } from "../components/canvas-task-panel";
-import type { CanvasGenerationRequest } from "../services/canvas-generation-request-registry";
 import { readCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
 import { formatGroupedGenerationStyleMessage } from "@/features/generation/lib/style-command";
-import { createImageNode, createTextNode, createVideoNode, getCanvasNodeTemplate } from "../constants";
+import { createImageNode, createStoryboardNode, createTextNode, createVideoCompositionNode, createVideoNode, getCanvasNodeTemplate } from "../constants";
 import { applyCanvasNodeAttributes, isImageNode, isTextNode, isVideoNode, type CanvasNodeAttributes } from "../domain/canvas-node";
 import {
     type CanvasAssistantMessage,
@@ -54,7 +52,7 @@ export type CanvasHistoryEntry = Pick<CanvasClipboard, "nodes" | "connections"> 
 };
 
 const CONNECTION_CREATE_MENU_WIDTH = 300;
-const CONNECTION_CREATE_MENU_HEIGHT = 328;
+const CONNECTION_CREATE_MENU_HEIGHT = 400;
 const AGENT_HISTORY_MESSAGE_LIMIT = 12;
 
 export function createCanvasNode(kind: CanvasNodeKind, position: CanvasPoint, attributes?: CanvasNodeAttributes): CanvasNode {
@@ -66,7 +64,15 @@ export function createCanvasNode(kind: CanvasNodeKind, position: CanvasPoint, at
             y: position.y - template.height / 2,
         },
     };
-    const node = kind === "image" ? createImageNode(input) : kind === "video" ? createVideoNode(input) : createTextNode(input);
+    const node = kind === "image"
+        ? createImageNode(input)
+        : kind === "video"
+            ? createVideoNode(input)
+            : kind === "storyboard"
+                ? createStoryboardNode(input)
+                : kind === "videoComposition"
+                    ? createVideoCompositionNode(input)
+                    : createTextNode(input);
     return applyCanvasNodeAttributes(node, { ...readCanvasLastUsedGenerationSettings(kind), ...attributes });
 }
 
@@ -126,10 +132,12 @@ export function CanvasLoadingShell() {
 
 export function ConnectionCreateMenu({
     pending,
+    sourceNode,
     onCreate,
     onClose,
 }: {
     pending: PendingConnectionCreate;
+    sourceNode: CanvasNode | null;
     onCreate: (type: PendingConnectionCreateNodeType) => void;
     onClose: () => void;
 }) {
@@ -161,6 +169,16 @@ export function ConnectionCreateMenu({
                 <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title="文本生成" description="脚本、广告词、品牌文案" onClick={() => onCreate("text")} />
                 <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title="图片生成" onClick={() => onCreate("image")} />
                 <ConnectionCreateOption theme={theme} icon={<Video className="size-5" />} title="视频生成" onClick={() => onCreate("video")} />
+                <ConnectionCreateOption
+                    theme={theme}
+                    icon={<Clapperboard className="size-5" />}
+                    title="合成视频"
+                    description={sourceNode && isVideoNode(sourceNode) ? "按拖拽顺序拼接多个视频" : "仅支持视频节点"}
+                    disabled={!sourceNode || !isVideoNode(sourceNode)}
+                    disabledReason="仅支持视频节点"
+                    onClick={() => onCreate("videoComposition")}
+                />
+                {sourceNode && isTextNode(sourceNode) ? <ConnectionCreateOption theme={theme} icon={<Clapperboard className="size-5" />} title="分镜脚本" description="根据剧本生成镜头和资产清单" onClick={() => onCreate("storyboard")} /> : null}
             </div>
         </div>
     );
@@ -172,20 +190,28 @@ function ConnectionCreateOption({
     title,
     description,
     onClick,
+    disabled = false,
+    disabledReason,
 }: {
     theme: CanvasTheme;
     icon: ReactNode;
     title: string;
     description?: string;
     onClick?: () => void;
+    disabled?: boolean;
+    disabledReason?: string;
 }) {
     return (
         <button
             type="button"
-            className="flex h-16 w-full cursor-pointer items-center gap-3 rounded-2xl px-3 text-left transition"
-            style={{ color: theme.node.text }}
+            className="flex h-16 w-full items-center gap-3 rounded-2xl px-3 text-left transition disabled:cursor-not-allowed"
+            style={{ color: theme.node.text, opacity: disabled ? 0.45 : 1 }}
+            disabled={disabled}
+            title={disabled ? disabledReason : title}
             onClick={onClick}
-            onMouseEnter={(event) => (event.currentTarget.style.background = theme.node.fill)}
+            onMouseEnter={(event) => {
+                if (!disabled) event.currentTarget.style.background = theme.node.fill;
+            }}
             onMouseLeave={(event) => (event.currentTarget.style.background = "transparent")}
         >
             <span className="grid size-11 shrink-0 place-items-center rounded-xl" style={{ background: theme.node.fill, color: theme.node.muted }}>
@@ -236,71 +262,6 @@ export function PendingConnectionLine({
             <path d={pathD} stroke={theme.node.muted} strokeWidth="2.5" strokeDasharray="6 6" strokeLinecap="round" fill="none" opacity="0.9" />
         </svg>
     );
-}
-
-export function buildCanvasTasks(nodes: CanvasNode[], generationRequestByNodeId: Map<string, CanvasGenerationRequest>): CanvasTaskPanelTask[] {
-    return nodes
-        .flatMap((node, index) => {
-            if (!isGeneratedMediaNode(node)) return [];
-            const request = generationRequestByNodeId.get(node.id);
-            const content = readNodeContent(node);
-            const status = mapTaskStatus(node, content);
-            const prompt = readNodePrompt(node);
-            const fallbackName = isVideoNode(node) ? "视频任务" : isTextNode(node) ? "文本任务" : "图片任务";
-            const taskType: CanvasTaskPanelTask["type"] = node.kind;
-            const name = (node.title || prompt || fallbackName).trim();
-            return [
-                {
-                    id: `task-${node.id}`,
-                    nodeId: node.id,
-                    runningNodeId: request?.runningNodeId || node.id,
-                    name: truncateTaskName(name, fallbackName),
-                    type: taskType,
-                    status,
-                    isRunning: Boolean(request),
-                    prompt,
-                    content,
-                    errorDetails: node.execution.errorMessage,
-                    width: node.frame.naturalWidth || node.frame.width,
-                    height: node.frame.naturalHeight || node.frame.height,
-                    bytes: isTextNode(node) ? undefined : node.content.bytes,
-                    durationMs: isVideoNode(node) ? node.content.durationMilliseconds : undefined,
-                    startedAt: node.execution.startedAt,
-                    completedAt: node.execution.completedAt,
-                    batchCount: isImageNode(node) && node.grouping.isRoot ? Math.max(1, node.grouping.childIds.length + 1) : undefined,
-                    sortIndex: index,
-                },
-            ];
-        })
-        .sort((first, second) => Number(second.isRunning) - Number(first.isRunning) || second.sortIndex - first.sortIndex)
-        .map(({ sortIndex, ...task }) => task);
-}
-
-function isGeneratedMediaNode(node: CanvasNode) {
-    if (node.execution.phase === "running" || node.execution.phase === "failed") return true;
-    if (isTextNode(node)) return Boolean(node.content.text);
-    if (isImageNode(node)) return Boolean(node.generation.prompt || node.generation.model || node.generation.references.length || node.grouping.isRoot || node.grouping.rootId);
-    return Boolean(node.generation.prompt || node.generation.model || node.generation.references.length);
-}
-
-function readNodeContent(node: CanvasNode) {
-    return isTextNode(node) ? node.content.text : node.content.source;
-}
-
-function readNodePrompt(node: CanvasNode) {
-    return isTextNode(node) ? undefined : node.generation.prompt.trim() || undefined;
-}
-
-function mapTaskStatus(node: CanvasNode, content: string): CanvasTaskPanelTask["status"] {
-    if (node.execution.phase === "running") return "loading";
-    if (node.execution.phase === "failed") return "error";
-    if (node.execution.phase === "succeeded" || content) return "success";
-    return "idle";
-}
-
-function truncateTaskName(value: string, fallback: string) {
-    const text = value.trim() || fallback;
-    return text.length > 32 ? text.slice(0, 32) : text;
 }
 
 export function isHiddenBatchChild(node: CanvasNode, nodes: CanvasNode[], collapsingBatchIds?: Set<string>) {

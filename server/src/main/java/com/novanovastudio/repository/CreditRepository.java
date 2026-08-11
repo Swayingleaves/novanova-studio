@@ -184,6 +184,46 @@ public class CreditRepository {
     }
 
     /**
+     * 创建不关联生成任务的业务积分流水并抢占幂等键。
+     * <p>
+     * 分镜等同步 Agent 操作没有独立任务表，使用稳定操作标识写入原因字段，并在同一事务中取得 PostgreSQL 事务级咨询锁，
+     * 避免重复扣费或退款。此方法不会修改普通生成任务的流水语义。
+     *
+     * @param userId Long 用户ID
+     * @param operationId String 稳定操作标识
+     * @param transactionType String 流水类型
+     * @param changeAmount int 积分变动值
+     * @param reason String 变动原因
+     * @return Mono<Long> 新流水ID，幂等键已存在时为空
+     */
+    public Mono<Long> claimOperationTransaction(Long userId, String operationId, String transactionType, int changeAmount, String reason) {
+        String lockKey = "credit-operation:" + operationId + ":" + transactionType;
+        return databaseClient.sql("SELECT pg_advisory_xact_lock(hashtext(:lockKey))")
+                .bind("lockKey", lockKey)
+                .fetch()
+                .all()
+                .then(databaseClient.sql("""
+                        INSERT INTO user_credit_transactions(user_id, transaction_type, change_amount, balance_after, reason)
+                        SELECT :userId, :transactionType, :changeAmount, 0, :reason
+                        WHERE NOT EXISTS (
+                            SELECT 1
+                            FROM user_credit_transactions
+                            WHERE user_id = :userId
+                              AND task_id IS NULL
+                              AND transaction_type = :transactionType
+                              AND reason = :reason
+                        )
+                        RETURNING id
+                        """)
+                        .bind("userId", userId)
+                        .bind("transactionType", transactionType)
+                        .bind("changeAmount", changeAmount)
+                        .bind("reason", reason)
+                        .map((row, metadata) -> row.get("id", Long.class))
+                        .one());
+    }
+
+    /**
      * 更新任务积分流水的余额快照。
      *
      * @param transactionId Long 流水ID
@@ -208,6 +248,28 @@ public class CreditRepository {
     public Mono<Integer> getTaskChargeAmount(String taskId) {
         return databaseClient.sql("SELECT -change_amount AS credit_amount FROM user_credit_transactions WHERE task_id = :taskId AND transaction_type = 'task_charge'")
                 .bind("taskId", taskId)
+                .map((row, metadata) -> row.get("credit_amount", Integer.class))
+                .one();
+    }
+
+    /**
+     * 查询业务操作的原始扣费金额。
+     *
+     * @param userId Long 用户ID
+     * @param chargeReason String 扣费流水原因
+     * @return Mono<Integer> 原始扣费的积分绝对值
+     */
+    public Mono<Integer> getOperationChargeAmount(Long userId, String chargeReason) {
+        return databaseClient.sql("""
+                SELECT -change_amount AS credit_amount
+                FROM user_credit_transactions
+                WHERE user_id = :userId
+                  AND task_id IS NULL
+                  AND transaction_type = 'task_charge'
+                  AND reason = :chargeReason
+                """)
+                .bind("userId", userId)
+                .bind("chargeReason", chargeReason)
                 .map((row, metadata) -> row.get("credit_amount", Integer.class))
                 .one();
     }

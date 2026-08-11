@@ -1,21 +1,21 @@
 "use client";
 
-import { memo, useState, useRef } from "react";
+import { memo, useState } from "react";
 import { NodeResizer, type NodeProps, type Node } from "@xyflow/react";
 import { Play, Video } from "lucide-react";
 import type { CanvasVideoNode } from "../types";
 import { useNodeActions } from "./node-action-context";
-import { CanvasConnectionHandles, NodeHoverSurface } from "./shared";
+import { CanvasConnectionHandles, NodeError, NodeHoverSurface, NodeLoading } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 
 export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<Node<CanvasVideoNode>>) {
   const actions = useNodeActions();
   const theme = useCanvasTheme();
   const hasContent = Boolean(data.content.source);
-  const [playing, setPlaying] = useState(false);
+  const isLoading = data.execution.phase === "running";
+  const isError = data.execution.phase === "failed";
   const [hovered, setHovered] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const borderColor = selected ? theme.node.activeStroke : theme.node.stroke;
+  const borderColor = selected ? theme.node.activeStroke : isError ? "#ef4444" : theme.node.stroke;
 
   return (
     <>
@@ -33,12 +33,16 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {hasContent ? (
+      {isLoading ? (
+        <NodeLoading />
+      ) : isError ? (
+        <NodeError node={data} />
+      ) : hasContent ? (
         <div className="relative h-full min-h-0 w-full min-w-0 overflow-hidden rounded-[inherit]">
-          <video ref={videoRef} src={data.content.source} className="block h-full w-full object-contain" data-canvas-no-zoom controls={playing} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => setPlaying(false)} />
-          {!playing && hovered ? (
+          <video src={data.content.source} className="pointer-events-none block h-full w-full object-contain" data-canvas-no-zoom muted preload="metadata" />
+          {hovered ? (
             <div className="pointer-events-auto absolute inset-0 flex items-center justify-center" style={{ background: "rgba(2,6,23,0.22)" }}>
-              <button type="button" className="flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition hover:scale-105" style={{ background: theme.node.panel, color: theme.node.text }} onClick={() => videoRef.current?.play()}>
+              <button type="button" className="flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition hover:scale-105" style={{ background: theme.node.panel, color: theme.node.text }} onClick={() => actions.onViewVideo(data)} aria-label="放大播放视频">
                 <Play className="size-7 ml-0.5" />
               </button>
             </div>

@@ -24,3 +24,7 @@ test("历史流水缺少来源时明确显示未记录", () => {
     assert.equal(generationSourceLabel(null), "未记录");
     assert.equal(generationSourceLabel("canvas"), "无限画布");
 });
+
+test("分镜任务来源显示为分镜脚本", () => {
+    assert.equal(generationSourceLabel("storyboard"), "分镜脚本");
+});

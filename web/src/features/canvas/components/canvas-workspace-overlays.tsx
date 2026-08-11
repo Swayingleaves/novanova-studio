@@ -4,7 +4,7 @@ import type { ChangeEvent, RefObject } from "react";
 import { Modal } from "antd";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
-import { isImageNode } from "../domain/canvas-node";
+import { isImageNode, isVideoNode } from "../domain/canvas-node";
 import type { CanvasNode, CanvasNodeKind, CanvasPoint, ContextMenuState } from "../types";
 import { CanvasNodeContextMenu } from "./canvas-context-menu";
 import { CanvasNodeCropDialog, type CanvasImageCropRect } from "./canvas-node-crop-dialog";
@@ -43,7 +43,8 @@ type CanvasWorkspaceOverlaysProps = {
 export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
     const cropSource = readImageSource(props.cropNode);
     const splitSource = readImageSource(props.splitNode);
-    const previewSource = readImageSource(props.previewNode);
+    const previewSource = readMediaSource(props.previewNode);
+    const previewIsVideo = Boolean(props.previewNode && isVideoNode(props.previewNode));
 
     const deleteContextTarget = () => {
         const menu = props.contextMenu;
@@ -82,8 +83,17 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
                 <CanvasNodeSplitDialog dataUrl={splitSource} open loading={props.splitLoading} onClose={props.onCloseSplit} onConfirm={(params) => props.onSplit(props.splitNode!, params)} />
             ) : null}
 
-            <Modal title={props.previewNode?.title || "图片详情"} open={Boolean(previewSource)} centered footer={null} width="auto" onCancel={props.onClosePreview}>
-                {previewSource ? <img src={previewSource} alt={props.previewNode?.title || "图片"} className="max-h-[80vh] max-w-full object-contain" /> : null}
+            <Modal
+                title={props.previewNode?.title || (previewIsVideo ? "视频播放" : "图片详情")}
+                open={Boolean(previewSource)}
+                centered
+                footer={null}
+                width={previewIsVideo ? "min(960px, calc(100vw - 32px))" : "auto"}
+                destroyOnHidden
+                onCancel={props.onClosePreview}
+            >
+                {previewSource && previewIsVideo ? <video src={previewSource} className="block max-h-[80vh] w-full max-w-full object-contain" autoPlay controls playsInline /> : null}
+                {previewSource && !previewIsVideo ? <img src={previewSource} alt={props.previewNode?.title || "图片"} className="max-h-[80vh] max-w-full object-contain" /> : null}
             </Modal>
 
             <Modal
@@ -106,4 +116,8 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
 
 function readImageSource(node: CanvasNode | null): string {
     return node && isImageNode(node) ? node.content.source : "";
+}
+
+function readMediaSource(node: CanvasNode | null): string {
+    return node && (isImageNode(node) || isVideoNode(node)) ? node.content.source : "";
 }

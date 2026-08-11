@@ -5,6 +5,7 @@ import com.novanovastudio.entity.EmailVerificationCode;
 import com.novanovastudio.entity.PersistenceRecords;
 import com.novanovastudio.entity.User;
 import com.novanovastudio.entity.UserIdentityBinding;
+import com.novanovastudio.entity.VideoCompositionTask;
 import io.r2dbc.postgresql.codec.Json;
 import io.r2dbc.spi.Row;
 import java.time.OffsetDateTime;
@@ -136,6 +137,7 @@ public final class RowMappers {
         record.setCreditUnit(row.get("credit_unit", String.class));
         record.setThinkingEnabled(row.get("thinking_enabled", Boolean.class));
         record.setReasoningEffort(row.get("reasoning_effort", String.class));
+        record.setRequestConcurrency(row.get("request_concurrency", Integer.class));
         record.setCreatedAt(row.get("created_at", OffsetDateTime.class));
         record.setUpdatedAt(row.get("updated_at", OffsetDateTime.class));
         return record;
@@ -257,9 +259,33 @@ public final class RowMappers {
         task.setTaskType(row.get("task_type", String.class));
         task.setModel(row.get("model", String.class));
         task.setProvider(row.get("provider", String.class));
+        task.setModelConfigId(row.get("model_config_id", String.class));
         task.setStatus(row.get("status", String.class));
         task.setProgress(row.get("progress", Integer.class));
         task.setRequestData(jsonText(row, "request_data"));
+        task.setResultData(jsonText(row, "result_data"));
+        task.setErrorMessage(row.get("error_message", String.class));
+        task.setStartedAt(row.get("started_at", OffsetDateTime.class));
+        task.setCompletedAt(row.get("completed_at", OffsetDateTime.class));
+        task.setCreatedAt(row.get("created_at", OffsetDateTime.class));
+        task.setUpdatedAt(row.get("updated_at", OffsetDateTime.class));
+        return task;
+    }
+
+    /**
+     * 映射视频合成任务行。
+     *
+     * @param row Row 数据库行
+     * @return VideoCompositionTask 视频合成任务实体
+     */
+    public static VideoCompositionTask videoCompositionTask(Row row) {
+        // 将video_composition_tasks表字段转换为视频合成任务实体。
+        VideoCompositionTask task = new VideoCompositionTask();
+        task.setId(row.get("id", String.class));
+        task.setUserId(row.get("user_id", Long.class));
+        task.setStatus(row.get("status", String.class));
+        task.setProgress(row.get("progress", Integer.class));
+        task.setSourceStorageKeys(jsonText(row, "source_storage_keys"));
         task.setResultData(jsonText(row, "result_data"));
         task.setErrorMessage(row.get("error_message", String.class));
         task.setStartedAt(row.get("started_at", OffsetDateTime.class));

@@ -110,7 +110,7 @@ export interface CanvasViewport {
     zoom: number;
 }
 
-export type CanvasNodeKind = "image" | "text" | "video";
+export type CanvasNodeKind = "image" | "text" | "video" | "storyboard" | "videoComposition";
 
 export type CanvasExecutionPhase = "idle" | "running" | "succeeded" | "failed";
 
@@ -207,12 +207,106 @@ export interface CanvasTextNode extends CanvasNodeBase<"text"> {
     };
 }
 
+export type CanvasStoryboardShotSize =
+    | "大特写"
+    | "特写"
+    | "近景"
+    | "头肩景"
+    | "中景"
+    | "中远景"
+    | "全景"
+    | "远景"
+    | "大远景"
+    | "大全景";
+
+export type CanvasStoryboardAssetKind = "character" | "scene" | "prop";
+
+export interface CanvasStoryboardAssetImage {
+    source: string;
+    storageKey?: string;
+    mimeType?: string;
+    objectStorage?: ObjectStorageFile;
+}
+
+export type CanvasStoryboardAssetGenerationPhase = "idle" | "running" | "succeeded" | "failed";
+
+export type CanvasStoryboardAssetGenerationItemStatus = "pending" | "running" | "succeeded" | "failed";
+
+export interface CanvasStoryboardAssetGenerationSettings {
+    model: string;
+    quality: string;
+    imageResolution: string;
+    size: string;
+}
+
+export interface CanvasStoryboardAssetGenerationState {
+    phase: CanvasStoryboardAssetGenerationPhase;
+    selectedAssetIds: string[];
+    taskIds: Record<string, string>;
+    statuses: Record<string, CanvasStoryboardAssetGenerationItemStatus>;
+    errors: Record<string, string>;
+    settings: CanvasStoryboardAssetGenerationSettings;
+    progress: number;
+    errorMessage?: string;
+    startedAt?: string;
+    completedAt?: string;
+}
+
+export interface CanvasStoryboardAsset {
+    id: string;
+    kind: CanvasStoryboardAssetKind;
+    name: string;
+    description: string;
+    image?: CanvasStoryboardAssetImage;
+}
+
+export interface CanvasStoryboardShot {
+    id: string;
+    shotNumber: number;
+    durationSeconds: number;
+    visualDescription: string;
+    shotSize: CanvasStoryboardShotSize;
+    lightingAtmosphere: string;
+    dialogueVoiceover: string;
+    soundEffect: string;
+    cameraMovement: string;
+    finalPrompt: string;
+    assetIds: string[];
+}
+
+export interface CanvasStoryboardNode extends CanvasNodeBase<"storyboard"> {
+    content: {
+        instruction: string;
+        visualStyle: string;
+        model: string;
+    };
+    storyboard: {
+        shots: CanvasStoryboardShot[];
+        assets: CanvasStoryboardAsset[];
+        assetGeneration?: CanvasStoryboardAssetGenerationState;
+    };
+}
+
 export interface CanvasVideoNode extends CanvasNodeBase<"video"> {
     content: CanvasVideoContent;
     generation: CanvasVideoGenerationSettings;
 }
 
-export type CanvasNode = CanvasImageNode | CanvasTextNode | CanvasVideoNode;
+/** 视频合成节点的持久化数据。 */
+export interface CanvasVideoCompositionData {
+    /** 按最终合成顺序排列的直接输入视频节点ID。 */
+    inputVideoNodeIds: string[];
+    /** 最近一次合成创建的结果视频节点ID。 */
+    resultVideoNodeId?: string;
+}
+
+/** 画布视频合成节点。 */
+export interface CanvasVideoCompositionNode extends CanvasNodeBase<"videoComposition"> {
+    /** 视频合成业务数据。 */
+    composition: CanvasVideoCompositionData;
+}
+
+export type CanvasNode = CanvasImageNode | CanvasTextNode | CanvasVideoNode | CanvasStoryboardNode | CanvasVideoCompositionNode;
 
 export interface CanvasConnectionEndpoint {
     nodeId: string;

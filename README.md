@@ -155,7 +155,7 @@ flowchart LR
 .
 ├── web/                         # Next.js 前端与创作工作台
 ├── server/                      # Spring Boot、Agent 与任务服务
-│   ├── config/prompts/          # 图片、视频、画布 Agent 与提示词优化模板
+│   ├── config/prompts/          # 图片、视频、画布、分镜 Agent 与提示词优化模板
 │   └── src/main/resources/      # 应用配置与 Flyway 数据库迁移
 ├── docker-compose.yml           # PostgreSQL、Redis、前后端与 Nginx 编排
 ├── .env.example                 # 本地与部署环境变量样例
@@ -183,6 +183,7 @@ Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不�
 | `agent-image.md` | 图片生成与编辑 Agent 的工具与行为约束。 | `AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE` |
 | `agent-video.md` | 视频生成与编辑 Agent 的工具与行为约束。 | `AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE` |
 | `agent-canvas.md` | 画布 Agent 的状态理解与画布操作约束。 | `AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE` |
+| `agent-storyboard.md` | 分镜脚本与中文提示词合成 Agent 的行为约束。 | `AI_SYSTEM_PROMPT_AGENT_STORYBOARD_FILE` |
 | `optimization-image.md` | 图片提示词优化策略。 | `AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE` |
 | `optimization-video.md` | 视频提示词优化策略。 | `AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE` |
 
@@ -213,4 +214,3 @@ Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不�
 
 - [开源社区Linux Do](https://linux.do/)
 - [Agentscope-Java](https://java.agentscope.io/v2/en/intro.html)
-

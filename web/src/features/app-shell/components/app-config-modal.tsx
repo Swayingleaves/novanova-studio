@@ -343,6 +343,12 @@ export function AppConfigModal() {
             : configItem)));
     };
 
+    const updateModelRequestConcurrency = (modelType: ModelCapability, model: string, requestConcurrency: number) => {
+        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType && modelConfigValue(configItem) === model
+            ? { ...configItem, requestConcurrency: Math.max(1, Math.floor(requestConcurrency)) }
+            : configItem)));
+    };
+
     const updateModelThinkingConfiguration = (model: string, patch: Pick<ServerModelConfig, "thinkingEnabled"> | Pick<ServerModelConfig, "reasoningEffort">) => {
         setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === "text" && modelConfigValue(configItem) === model ? { ...configItem, ...patch } : configItem)));
     };
@@ -383,6 +389,7 @@ export function AppConfigModal() {
                     creditUnit: configItem.creditUnit,
                     thinkingEnabled: configItem.thinkingEnabled,
                     reasoningEffort: configItem.reasoningEffort,
+                    requestConcurrency: configItem.requestConcurrency,
                 });
                 createdConfigIds.set(configItem.id, saved.id);
             }
@@ -405,6 +412,7 @@ export function AppConfigModal() {
                         creditUnit: configItem.creditUnit,
                         thinkingEnabled: configItem.thinkingEnabled,
                         reasoningEffort: configItem.reasoningEffort,
+                        requestConcurrency: configItem.requestConcurrency,
                     });
                 }
             }
@@ -800,6 +808,19 @@ export function AppConfigModal() {
                                                                                                 onChange={(creditUnit: ServerModelConfig["creditUnit"]) => updateModelCreditUnit(group.capability, model, creditUnit)}
                                                                                             />
                                                                                         ) : null}
+                                                                                        {(group.capability === "image" || group.capability === "video") && modelConfig ? (
+                                                                                            <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
+                                                                                                同时并发数
+                                                                                                <InputNumber
+                                                                                                    min={1}
+                                                                                                    precision={0}
+                                                                                                    value={modelConfig.requestConcurrency}
+                                                                                                    disabled={isSaving}
+                                                                                                    className="w-20"
+                                                                                                    onChange={(value) => updateModelRequestConcurrency(group.capability, model, Number(value) || 1)}
+                                                                                                />
+                                                                                            </span>
+                                                                                        ) : null}
                                                                                         {MODEL_CAPABILITY_OPTIONS[group.capability].map((option) => (
                                                                                             <Checkbox
                                                                                                 key={option.value}
@@ -1026,6 +1047,7 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         creditUnit: "generation",
         thinkingEnabled: true,
         reasoningEffort: "high",
+        requestConcurrency: 1,
     };
 }
 
@@ -1034,7 +1056,7 @@ function sameValue(first: unknown, second: unknown) {
 }
 
 function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelConfig) {
-    return first.modelType === second.modelType && first.sortOrder === second.sortOrder && first.creditCost === second.creditCost && first.creditUnit === second.creditUnit
+    return first.modelType === second.modelType && first.sortOrder === second.sortOrder && first.creditCost === second.creditCost && first.creditUnit === second.creditUnit && first.requestConcurrency === second.requestConcurrency
         && first.thinkingEnabled === second.thinkingEnabled && first.reasoningEffort === second.reasoningEffort && sameValue(first.capabilities, second.capabilities);
 }
 

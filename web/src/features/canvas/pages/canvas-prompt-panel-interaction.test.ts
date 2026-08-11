@@ -25,6 +25,17 @@ test("首次从连线构建引用提示词时记录已有标签", () => {
     assert.ok(emptyPromptBranch.includes("prevLabelsRef.current = requiredLabels"), "空提示词初始化时未记录已有引用标签，会重复追加图片引用");
 });
 
+test("节点提示面板展示已持久化的生成参考图", () => {
+    assert.ok(promptPanelSource.includes("buildNodeGenerationReferences(node)"), "提示面板未读取节点已保存的生成参考图");
+    assert.ok(promptPanelSource.includes("canInsert: false"), "已保存的生成参考图不应作为连线标签写回提示词");
+});
+
+test("视频节点参考图支持放大预览", () => {
+    assert.ok(promptPanelSource.includes('mode === "video" && reference.kind === "image"'), "视频节点未识别可预览的参考图");
+    assert.ok(promptPanelSource.includes('title="放大查看参考图"'), "参考图缺少放大查看入口");
+    assert.ok(promptPanelSource.includes("setReferencePreview(reference)"), "参考图点击后未打开预览");
+});
+
 test("图片和视频节点提供AI提示词优化入口", () => {
     assert.ok(promptPanelSource.includes('title="AI优化提示词"'), "提示面板缺少AI提示词优化说明");
     assert.ok(promptPanelSource.includes("<Sparkles"), "提示面板缺少Sparkles图标");

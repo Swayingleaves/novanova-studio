@@ -6,7 +6,7 @@ import { canvasThemes } from "@/shared/lib/canvas-theme";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import type { CanvasConnection, CanvasDocument, CanvasNode } from "../types";
-import { isImageNode, isTextNode, isVideoNode } from "../domain/canvas-node";
+import { isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
 
 const previewWidth = 320;
 const previewHeight = 180;
@@ -125,10 +125,16 @@ function PreviewDots({ color }: { color: string }) {
 
 function PreviewNodeShape({ node, theme }: { node: PreviewNode; theme: CanvasTheme }) {
     const label = nodeLabel(node);
-    const content = isTextNode(node) ? node.content.text : node.content.source || node.generation.prompt;
+    const content = isTextNode(node)
+        ? node.content.text
+        : isStoryboardNode(node)
+            ? node.storyboard.shots.length ? `已生成 ${node.storyboard.shots.length} 个镜头` : node.content.instruction
+            : isVideoCompositionNode(node)
+                ? `${node.composition.inputVideoNodeIds.length} 段视频`
+                : node.content.source || node.generation.prompt;
     const showText = node.previewWidth >= 42 && node.previewHeight >= 24;
 
-    if (!isTextNode(node) && node.content.source) {
+    if ((isImageNode(node) || isVideoNode(node)) && node.content.source) {
         return (
             <g>
                 <rect x={node.previewX} y={node.previewY} width={node.previewWidth} height={node.previewHeight} rx="6" fill={isVideoNode(node) ? "#111827" : theme.node.panel} stroke={theme.node.stroke} />
@@ -249,6 +255,8 @@ function nodeLabel(node: CanvasNode) {
     if (node.title) return node.title;
     if (isImageNode(node)) return "图片";
     if (isTextNode(node)) return "文本";
+    if (isStoryboardNode(node)) return "分镜脚本";
+    if (isVideoCompositionNode(node)) return "合成视频";
     return "视频";
 }
 

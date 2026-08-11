@@ -21,6 +21,7 @@ import com.novanovastudio.repository.AiTaskRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.task.AiTaskEventPublisher;
 import com.novanovastudio.task.AiTaskQueue;
+import com.novanovastudio.task.ModelTaskExecutionDispatcher;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
@@ -110,6 +111,9 @@ public class AiTaskService {
     /** AI任务队列 */
     private final AiTaskQueue taskQueue;
 
+    /** 模型任务执行调度器 */
+    private final ModelTaskExecutionDispatcher modelTaskExecutionDispatcher;
+
     /** AgentScope编排器 */
     private final AgentTaskOrchestrator orchestrator;
 
@@ -140,8 +144,9 @@ public class AiTaskService {
         OffsetDateTime runningRecoverBefore = OffsetDateTime.now().minusSeconds(properties.getAi().getTask().getRunningRecoverSeconds());
         taskQueue.ensureConsumerGroup()
                 .then(repository.recoverTimeoutRunningTasks(runningRecoverBefore))
-                .thenMany(repository.listRecoverableTaskIds(runningRecoverBefore))
-                .flatMap(taskQueue::enqueue)
+                .thenMany(repository.listRecoverableTasks(runningRecoverBefore))
+                // 按创建时间顺序恢复，避免同一模型的等待任务在并发订阅时乱序。
+                .concatMap(this::dispatchRecoveredTask)
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe(
                         ignored -> {
@@ -200,6 +205,7 @@ public class AiTaskService {
                 task.setTaskType(preparedRequest.taskType());
                 task.setModel(resolvedModel.model());
                 task.setProvider(resolvedModel.channel().name());
+                task.setModelConfigId(resolvedModel.modelConfigId());
                 task.setStatus(STATUS_PENDING);
                 task.setProgress(0);
                 task.setRequestData(toJson(preparedRequest));
@@ -214,7 +220,7 @@ public class AiTaskService {
                                         .onErrorResume(exception -> finishTaskWithRefund(task, STATUS_FAILED, "任务创建失败: " + empty(exception.getMessage()), null)
                                                 .then(Mono.error(exception))))
                                 .then(Mono.defer(() -> eventPublisher.publish(userId, new AiTaskDtos.AiTaskEvent(EVENT_TASK, response))
-                                        .then(taskQueue.enqueue(taskId))
+                                        .then(dispatchTask(task, resolvedModel))
                                         .onErrorResume(exception -> finishTaskWithRefund(task, STATUS_FAILED, "任务入队失败: " + empty(exception.getMessage()), null)
                                                 .flatMap(updated -> Boolean.TRUE.equals(updated)
                                                         ? getTaskResponse(taskId, userId)
@@ -245,6 +251,54 @@ public class AiTaskService {
                         .map(optimizedPrompt -> new AiTaskDtos.CreateAiTaskRequest(
                                 request.taskType(), optimizedPrompt, request.model(), request.parameters(), request.references(),
                                 request.videoReferences(), request.generationSource(), null, styles)));
+    }
+
+    /**
+     * 分派已持久化的AI任务。
+     *
+     * @param task AiGenerationTask 已持久化任务
+     * @param resolvedModel ResolvedModel 已解析模型
+     * @return Mono<Void> 入队结果
+     */
+    private Mono<Void> dispatchTask(AiGenerationTask task, ResolvedModel resolvedModel) {
+        if (isModelQueueTask(task.getTaskType())) {
+            return modelTaskExecutionDispatcher.enqueue(resolvedModel.modelConfigId(), task.getId());
+        }
+        return taskQueue.enqueue(task.getId());
+    }
+
+    /**
+     * 分派服务启动时恢复的任务。
+     *
+     * @param task AiGenerationTask 待恢复任务
+     * @return Mono<Void> 恢复入队结果
+     */
+    private Mono<Void> dispatchRecoveredTask(AiGenerationTask task) {
+        if (!isModelQueueTask(task.getTaskType())) {
+            return taskQueue.enqueue(task.getId());
+        }
+        if (!StringUtils.hasText(task.getModelConfigId())) {
+            return failRecoveredTask(task, new BusinessException(ErrorCode.BUSINESS_ERROR, "任务缺少模型配置ID"));
+        }
+        return modelTaskExecutionDispatcher.enqueue(task.getModelConfigId(), task.getId())
+                .onErrorResume(exception -> failRecoveredTask(task, exception));
+    }
+
+    /**
+     * 将无法恢复的任务标记为失败并发布状态事件。
+     *
+     * @param task AiGenerationTask 无法恢复的任务
+     * @param exception Throwable 恢复异常
+     * @return Mono<Void> 失败处理结果
+     */
+    private Mono<Void> failRecoveredTask(AiGenerationTask task, Throwable exception) {
+        String message = "任务恢复失败: " + empty(exception.getMessage());
+        return finishTaskWithRefund(task, STATUS_FAILED, message, null)
+                .flatMap(updated -> Boolean.TRUE.equals(updated)
+                        ? getTaskResponse(task.getId(), task.getUserId())
+                                .flatMap(response -> eventPublisher.publish(task.getUserId(), new AiTaskDtos.AiTaskEvent(EVENT_TASK, response)))
+                        : Mono.empty())
+                .then();
     }
 
     /**
@@ -399,8 +453,7 @@ public class AiTaskService {
                                                 return updateTaskState(taskId, STATUS_CANCELED, 100, "任务已取消", null);
                                             }
                                             AiTaskDtos.CreateAiTaskRequest request = JSON.parseObject(task.getRequestData(), AiTaskDtos.CreateAiTaskRequest.class);
-                                            String selectedModel = firstNonEmpty(request.model(), task.getModel());
-                                            return resolveModel(task.getTaskType(), selectedModel)
+                                            return resolveTaskModel(task, request)
                                                     .flatMap(resolvedModel -> {
                                                         AiProviderAdapter adapter = adapterRegistry.resolve(resolvedModel.channel(), task.getTaskType());
                                                         AiTaskExecutionContext context = new AiTaskExecutionContext(
@@ -553,6 +606,9 @@ public class AiTaskService {
         if (!TYPE_TEXT.equals(taskType) && !AiTaskSources.isSupported(generationSource)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "图片或视频生成任务必须提供有效来源");
         }
+        if (AiTaskSources.STORYBOARD.equals(generationSource) && !List.of(TYPE_IMAGE, TYPE_VIDEO).contains(taskType)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "分镜来源仅支持图片或视频生成任务");
+        }
     }
 
     /**
@@ -588,8 +644,43 @@ public class AiTaskService {
                                 .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员配置默认" + capabilityLabel(capability) + "模型"));
                     }
                     ResolvedModel resolvedModel = resolveModel(capability, selectedConfig.channelId() + "::" + selectedConfig.modelName(), tuple.getT1());
-                    return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.creditCost(), selectedConfig.creditUnit(),
+                    return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.id(), selectedConfig.creditCost(), selectedConfig.creditUnit(),
                             thinkingEnabled(selectedConfig.thinkingEnabled()), reasoningEffort(selectedConfig.reasoningEffort()));
+                });
+    }
+
+    /**
+     * 按任务持久化的模型配置解析执行模型。
+     * <p>
+     * 图片和视频任务必须绑定创建时的模型配置，避免模型配置调整或删除后按同名模型错误改投。
+     * 文本任务继续沿用全局队列的既有解析策略。</p>
+     *
+     * @param task AiGenerationTask 已持久化任务
+     * @param request CreateAiTaskRequest 任务请求快照
+     * @return Mono<ResolvedModel> 可执行模型
+     */
+    private Mono<ResolvedModel> resolveTaskModel(AiGenerationTask task, AiTaskDtos.CreateAiTaskRequest request) {
+        if (!isModelQueueTask(task.getTaskType())) {
+            return resolveModel(task.getTaskType(), firstNonEmpty(request.model(), task.getModel()));
+        }
+        if (!StringUtils.hasText(task.getModelConfigId())) {
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "任务缺少模型配置ID"));
+        }
+        return Mono.zip(persistenceService.getPlatformAiChannels(), persistenceService.getPlatformModelConfigs())
+                .map(tuple -> {
+                    PersistenceDtos.ModelConfig modelConfig = tuple.getT2().stream()
+                            .filter(config -> task.getModelConfigId().equals(config.id()))
+                            .findFirst()
+                            .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "任务使用的模型配置不存在"));
+                    if (!task.getTaskType().equals(modelConfig.modelType())) {
+                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "任务使用的模型配置类型不匹配");
+                    }
+                    if (!task.getModel().equals(modelConfig.modelName())) {
+                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "任务使用的模型配置与任务模型不匹配");
+                    }
+                    ResolvedModel channelModel = resolveModel(task.getTaskType(), modelConfig.channelId() + CHANNEL_MODEL_SEPARATOR + modelConfig.modelName(), tuple.getT1());
+                    return new ResolvedModel(channelModel.channel(), channelModel.model(), modelConfig.id(), modelConfig.creditCost(),
+                            modelConfig.creditUnit(), thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort()));
                 });
     }
 
@@ -650,7 +741,7 @@ public class AiTaskService {
         }
         validateChannelSupport(channel, capability);
         validateUserChannelAccess(channel);
-        return new ResolvedModel(channel, model, 0, CREDIT_UNIT_GENERATION, true, "high");
+        return new ResolvedModel(channel, model, "", 0, CREDIT_UNIT_GENERATION, true, "high");
     }
 
 
@@ -703,6 +794,16 @@ public class AiTaskService {
                 && channel.models().contains(config.modelName())
                 && StringUtils.hasText(channel.baseUrl())
                 && StringUtils.hasText(channel.apiKey()));
+    }
+
+    /**
+     * 判断任务是否应进入模型并发队列。
+     *
+     * @param taskType String 任务类型
+     * @return boolean 是否为图片或视频任务
+     */
+    private boolean isModelQueueTask(String taskType) {
+        return TYPE_IMAGE.equals(taskType) || TYPE_VIDEO.equals(taskType);
     }
 
     /**
@@ -961,7 +1062,7 @@ public class AiTaskService {
      * @param channel AiChannelConfig 渠道配置
      * @param model String 模型名称
      */
-    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, Integer creditCost, String creditUnit,
+    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, String modelConfigId, Integer creditCost, String creditUnit,
                                  boolean thinkingEnabled, String reasoningEffort) {
     }
 }

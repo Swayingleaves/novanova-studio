@@ -27,6 +27,7 @@ export function generationSourceLabel(generationSource: ServerGenerationSource |
     if (generationSource === "imagePage") return "图片创作";
     if (generationSource === "videoPage") return "视频创作";
     if (generationSource === "canvas") return "无限画布";
+    if (generationSource === "storyboard") return "分镜脚本";
     return "未记录";
 }
 

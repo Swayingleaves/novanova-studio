@@ -1,7 +1,7 @@
 import { nanoid } from "nanoid";
 
 import { getCanvasNodeTemplate } from "../constants";
-import type { CanvasPoint } from "../types";
+import type { CanvasGenerationMode, CanvasPoint } from "../types";
 import type { CanvasAgentOp } from "./canvas-agent-ops";
 
 export type CanvasAgentToolResult = {
@@ -51,16 +51,20 @@ export function resolveCanvasAgentTool(
         case "canvas_run_generation":
             return createRunGenerationExecution(args);
         case "canvas_create_node":
-            return successExecution(name, [{
-                type: "add_node",
-                nodeType: args.nodeType as CanvasAgentOp["nodeType"],
-                title: args.title as string,
-                x: args.x as number,
-                y: args.y as number,
-                width: args.width as number,
-                height: args.height as number,
-                attributes: readNodeAttributes(args),
-            }]);
+            {
+                const nodeType = readOptionalGenerationMode(args.nodeType);
+                if (!nodeType) return failureExecution("节点类型仅支持文本、图片或视频，分镜脚本请通过剧本文本节点创建");
+                return successExecution(name, [{
+                    type: "add_node",
+                    nodeType,
+                    title: args.title as string,
+                    x: args.x as number,
+                    y: args.y as number,
+                    width: args.width as number,
+                    height: args.height as number,
+                    attributes: readNodeAttributes(args),
+                }]);
+            }
         case "canvas_create_text_node":
             return successExecution(name, [{
                 type: "add_node",
@@ -110,18 +114,29 @@ export function resolveCanvasAgentTool(
 /** 将缺少坐标的新增节点放到当前视口中心，并错开批量节点。 */
 export function positionCanvasAgentAddNodeOps(ops: CanvasAgentOp[], canvasCenter: CanvasPoint): CanvasAgentOp[] {
     let fallbackIndex = 0;
-    return ops.map((operation) => {
-        if (operation.type !== "add_node" || operation.position) return operation;
-        const kind = operation.nodeType || "text";
+    const positionedOperations: CanvasAgentOp[] = [];
+    for (const operation of ops) {
+        if (operation.type !== "add_node") {
+            positionedOperations.push(operation);
+            continue;
+        }
+        const kind = operation.nodeType === undefined ? "text" : readOptionalGenerationMode(operation.nodeType);
+        if (!kind) continue;
+        if (operation.position) {
+            positionedOperations.push(operation);
+            continue;
+        }
         const template = getCanvasNodeTemplate(kind);
         const offset = fallbackIndex * 36;
         fallbackIndex += 1;
-        return {
+        positionedOperations.push({
             ...operation,
+            nodeType: kind,
             x: typeof operation.x === "number" ? operation.x : canvasCenter.x - template.width / 2 + offset,
             y: typeof operation.y === "number" ? operation.y : canvasCenter.y - template.height / 2 + offset,
-        };
-    });
+        });
+    }
+    return positionedOperations;
 }
 
 function createGenerationExecution(
@@ -323,7 +338,7 @@ function normalizeAgentOps(value: unknown): CanvasAgentOp[] {
     });
 }
 
-function readOptionalGenerationMode(value: unknown): "text" | "image" | "video" | undefined {
+function readOptionalGenerationMode(value: unknown): CanvasGenerationMode | undefined {
     return value === "text" || value === "image" || value === "video" ? value : undefined;
 }
 

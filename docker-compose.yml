@@ -150,6 +150,7 @@ services:
       AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE: ${AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE:-file:/app/config/prompts/agent-image.md}
       AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE: ${AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE:-file:/app/config/prompts/agent-video.md}
       AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE: ${AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE:-file:/app/config/prompts/agent-canvas.md}
+      AI_SYSTEM_PROMPT_AGENT_STORYBOARD_FILE: ${AI_SYSTEM_PROMPT_AGENT_STORYBOARD_FILE:-file:/app/config/prompts/agent-storyboard.md}
       AI_IMAGE_HTTP_RESULT_UPLOAD_TO_OBJECT_STORAGE: ${AI_IMAGE_HTTP_RESULT_UPLOAD_TO_OBJECT_STORAGE:-false}
     ports:
       - "127.0.0.1:${SERVER_PORT:-8080}:8080"

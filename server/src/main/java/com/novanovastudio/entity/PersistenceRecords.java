@@ -213,6 +213,9 @@ public final class PersistenceRecords {
         /** 思考强度 */
         private String reasoningEffort;
 
+        /** 模型同时执行请求数量 */
+        private Integer requestConcurrency;
+
         /** 创建时间 */
         private OffsetDateTime createdAt;
 

@@ -20,7 +20,8 @@ data/
 /.cursor/
 /deploy.sh
 /.agents/
-/docs/
+/docs/*
+!/docs/backend-database.md
 AGENTS.md
 CLAUDE.md
 skills-lock.json

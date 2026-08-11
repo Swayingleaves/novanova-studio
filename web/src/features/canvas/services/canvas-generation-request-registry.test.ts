@@ -12,7 +12,8 @@ test("启动同一目标的新请求会中止旧请求", () => {
     registry.start("target", "origin", "running", second);
 
     assert.equal(first.signal.aborted, true);
-    assert.equal(registry.snapshot().get("target")?.controller, second);
+    assert.equal(registry.finish("target", second), true);
+    assert.equal(registry.isRunning("running"), false);
 });
 
 test("按运行节点停止会返回全部受影响节点", () => {
@@ -34,5 +35,5 @@ test("停止全部请求会中止控制器并清空注册表", () => {
 
     assert.equal(first.signal.aborted, true);
     assert.equal(second.signal.aborted, true);
-    assert.equal(registry.snapshot().size, 0);
+    assert.equal(registry.isRunning("running"), false);
 });

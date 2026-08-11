@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, Bot, Keyboard } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Bot, Keyboard, PanelLeftOpen } from "lucide-react";
 import { Button, Modal, Tooltip } from "antd";
 
 import { UserStatusActions } from "@/features/app-shell/components/user-status-actions";
@@ -16,9 +16,10 @@ type CanvasTopBarProps = {
     onFinishTitleEditing: () => void;
     onCancelTitleEditing: () => void;
     onBackToProjects: () => void;
+    navigationPanelHidden: boolean;
+    onOpenNavigationPanel: () => void;
     agentOpen: boolean;
     onToggleAgent: () => void;
-    taskPanel: ReactNode;
 };
 
 const SHORTCUT_GROUPS = [
@@ -99,8 +100,12 @@ export function CanvasTopBar(props: CanvasTopBarProps) {
                 </div>
 
                 <div className="pointer-events-auto flex items-center gap-1">
+                    {props.navigationPanelHidden ? (
+                        <Tooltip title="显示画布导航">
+                            <Button type="text" aria-label="显示画布导航" icon={<PanelLeftOpen className="size-4" />} onClick={props.onOpenNavigationPanel} style={toolbarButtonStyle} />
+                        </Tooltip>
+                    ) : null}
                     <UserStatusActions variant="canvas" onOpenShortcuts={() => setShortcutsOpen(true)} />
-                    {props.taskPanel}
                     <Button
                         type="text"
                         className="!px-2"

@@ -2,6 +2,7 @@ import { type Node, type NodeChange, type NodePositionChange, type NodeRemoveCha
 import type { CanvasNode, CanvasConnection } from "../types";
 import { nanoid } from "nanoid";
 import { updateCanvasNodeFrame } from "../domain/canvas-node.ts";
+import { readVideoCompositionConnectionError } from "../domain/video-composition";
 
 const canvasEdgeStyle = { stroke: "var(--canvas-edge-stroke)", strokeWidth: 4 };
 type NodePositionChangeWithPosition = NodePositionChange & { position: XYPosition };
@@ -54,6 +55,7 @@ export function connectionExists(connections: CanvasConnection[], source: string
  */
 export function createNodesChangeHandler(
   setNodes: (updater: CanvasNode[] | ((prev: CanvasNode[]) => CanvasNode[])) => void,
+  onRemoveNodes?: (nodeIds: Set<string>) => void,
 ) {
   let rafId: number | null = null;
   const pendingPos = new Map<string, XYPosition>();
@@ -74,6 +76,8 @@ export function createNodesChangeHandler(
       const remove = new Set(pendingRemove);
       pendingPos.clear();
       pendingRemove.clear();
+
+      if (remove.size) onRemoveNodes?.(remove);
 
       setNodes((prev) => {
         let changed = false;
@@ -128,10 +132,17 @@ function isEdgeRemoveChange(change: EdgeChange<Edge>): change is EdgeRemoveChang
 export function createConnectHandler(
   setConnections: (updater: CanvasConnection[] | ((prev: CanvasConnection[]) => CanvasConnection[])) => void,
   connectionsRef: { current: CanvasConnection[] },
+  nodesRef: { current: CanvasNode[] },
+  onRejected?: (message: string) => void,
 ) {
   return (connection: Connection) => {
     if (!connection.source || !connection.target) return;
     if (connection.source === connection.target) return;
+    const errorMessage = readVideoCompositionConnectionError(connection.source, connection.target, nodesRef.current, connectionsRef.current);
+    if (errorMessage) {
+      onRejected?.(errorMessage);
+      return;
+    }
     if (connectionExists(connectionsRef.current, connection.source, connection.target)) return;
     const newConn: CanvasConnection = {
       id: nanoid(),
