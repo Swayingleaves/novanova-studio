@@ -88,7 +88,7 @@ class StoryboardAgentServiceTest {
                         声音：Rainfall and distant thunder.
 
                         视觉风格：%s
-                        """.formatted(VISUAL_STYLE).trim()));
+                        """.formatted(VISUAL_STYLE).trim())));
 
         BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> invokePromptValidation(shots, result));
 
