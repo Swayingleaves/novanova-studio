@@ -20,12 +20,14 @@ import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/featu
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
 import { createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, normalizeAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { findLatestPendingConversation, hasPendingImageConversation } from "@/features/generation/lib/generation-conversation-recovery";
+import { reconcileGenerationLogTasks } from "@/features/generation/lib/generation-log-task-reconciliation";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
 import { formatImageGenerationSettingsSummary } from "@/features/generation/lib/generation-settings-summary";
 import { loadImageLastUsedSettings, saveImageLastUsedSettings, type ImageLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
+import { GENERATION_STYLE_SELECTION_LIMIT_MESSAGE, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { formatBytes } from "@/features/generation/lib/image-utils";
 import type { ReferenceImage } from "@/features/generation/types/image";
 import { PromptSelectDialog } from "@/features/prompts/components/prompt-select-dialog";
@@ -38,7 +40,7 @@ import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
-import { deleteGenerationLogs, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
+import { deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
 
 type GeneratedImage = {
     id: string;
@@ -110,6 +112,7 @@ export default function ImagePage() {
     const [styleOptions, setStyleOptions] = useState<CreationStyleOption[]>([]);
     const [selectedStyles, setSelectedStyles] = useState<CreationStyleOption[]>([]);
     const [styleLoading, setStyleLoading] = useState(false);
+    const [styleError, setStyleError] = useState<string | null>(null);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -137,12 +140,13 @@ export default function ImagePage() {
     useEffect(() => {
         let cancelled = false;
         setStyleLoading(true);
+        setStyleError(null);
         void listGenerationStyles("image")
             .then((result) => {
                 if (!cancelled) setStyleOptions(result.styles);
             })
             .catch((error) => {
-                if (!cancelled) message.error(error instanceof Error ? error.message : "图片风格加载失败");
+                if (!cancelled) setStyleError(error instanceof Error ? error.message : "图片风格加载失败");
             })
             .finally(() => {
                 if (!cancelled) setStyleLoading(false);
@@ -214,7 +218,7 @@ export default function ImagePage() {
         return nextConversations;
     }, []);
 
-    const { sessionId, isStreaming, isStopping, sendMessage, cancelMessage, resetSession, restoreSession } = useAgentChatSSE({
+    const { sessionId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, canChangeSession, resetSession, restoreSession } = useAgentChatSSE({
         entrySource: "imagePage",
         creationSettings: agentCreationSettings,
         onTextDelta: (msgId, delta) => {
@@ -287,7 +291,7 @@ export default function ImagePage() {
             }
         },
         onToolResult: (callId, ok, resultMsg, data) => {
-            const status = data?.canceled ? "canceled" : ok ? "success" : "failed";
+            const status: ToolCallState["status"] = data?.canceled ? "canceled" : ok ? "success" : "failed";
             setToolCalls((prev) => {
                 const next = prev.map((c) => (c.callId === callId ? { ...c, status, resultMessage: resultMsg, resultData: data } : c));
                 toolCallsRef.current = next;
@@ -425,7 +429,7 @@ export default function ImagePage() {
     const historySettingsSummary = !imageDraftSettingsModified && activeId && latestRound?.config ? buildImageSettingsSummary(latestRound.config, effectiveConfig, latestRound.config.imageModel || latestRound.config.model || "") : "";
     const settingsSummary = draftSettingsSummary || historySettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingImageConversation(activeConversation) : false;
-    const canGenerate = Boolean(prompt.trim()) && !isStreaming && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
+    const canGenerate = Boolean(prompt.trim()) && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
 
     useEffect(() => {
@@ -437,7 +441,7 @@ export default function ImagePage() {
     useEffect(() => {
         let cancelled = false;
         void refreshConversations().then((nextConversations) => {
-            if (cancelled || activeIdRef.current) return;
+            if (cancelled || activeIdRef.current || !canChangeSession()) return;
             const pendingConversation = findLatestPendingConversation(nextConversations, hasPendingImageConversation);
             if (!pendingConversation) return;
             activeIdRef.current = pendingConversation.id;
@@ -447,14 +451,24 @@ export default function ImagePage() {
         return () => {
             cancelled = true;
         };
-    }, [refreshConversations, restoreSession]);
+    }, [canChangeSession, refreshConversations, restoreSession]);
 
     useEffect(() => {
         if (!hasRunningGeneration(conversations)) return;
-        const refreshTimer = window.setInterval(() => {
-            void refreshConversations();
-        }, 2_000);
-        return () => window.clearInterval(refreshTimer);
+        let cancelled = false;
+        let refreshTimer: number | undefined;
+        void getAiTaskPollingIntervalMilliseconds()
+            .then((intervalMilliseconds) => {
+                if (cancelled) return;
+                refreshTimer = window.setInterval(() => {
+                    void refreshConversations();
+                }, intervalMilliseconds);
+            })
+            .catch((error) => console.error("读取AI任务轮询配置失败", error));
+        return () => {
+            cancelled = true;
+            if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
+        };
     }, [conversations, refreshConversations]);
 
     const addReferences = async (files?: FileList | File[] | null) => {
@@ -501,6 +515,7 @@ export default function ImagePage() {
     };
 
     const generate = async () => {
+        if (isStreaming || isQueued) return;
         const text = prompt.trim();
         if (!text) {
             message.error("请输入生图提示词");
@@ -526,6 +541,7 @@ export default function ImagePage() {
     };
 
     const regenerateRound = async (round: Round) => {
+        if (!canChangeSession()) return;
         await regenerateImageRound(round, {
             fallbackModel: model,
             appendUserMessage: (text, generationStyles) => {
@@ -541,6 +557,10 @@ export default function ImagePage() {
     };
 
     const newConversation = () => {
+        if (!canChangeSession()) {
+            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            return;
+        }
         setActiveId(null);
         activeIdRef.current = null;
         setImageDraftSettingsModified(false);
@@ -561,6 +581,10 @@ export default function ImagePage() {
     };
 
     const selectConversation = (conversation: Conversation) => {
+        if (!canChangeSession()) {
+            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            return;
+        }
         if (getGenerationConversationStatus(conversation) !== "none" && conversation.generationStatus !== "running") {
             setConversations((current) => current.map((item) => (item.id === conversation.id ? { ...item, generationViewedAt: item.generationCompletedAt } : item)));
             void markGenerationLogViewed(conversation.id).catch(() => void refreshConversations());
@@ -588,6 +612,10 @@ export default function ImagePage() {
     };
 
     const deleteSelected = () => {
+        if (activeIdRef.current && selectedIds.includes(activeIdRef.current) && !canChangeSession()) {
+            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            return;
+        }
         const imageKeys = conversations
             .filter((conversation) => selectedIds.includes(conversation.id))
             .flatMap((conversation) => conversation.rounds.flatMap((round) => round.results.flatMap((result) => (result.image?.storageKey ? [result.image.storageKey] : []))));
@@ -599,6 +627,7 @@ export default function ImagePage() {
             setPrompt("");
             setReferences([]);
             setSelectedStyles([]);
+            resetSession();
         }
         setSelectedIds([]);
         setManagementMode(false);
@@ -731,6 +760,10 @@ export default function ImagePage() {
     };
 
     const deleteConversation = async (conversationId: string) => {
+        if (activeIdRef.current === conversationId && !canChangeSession()) {
+            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            return;
+        }
         const conversation = conversationsRef.current.find((item) => item.id === conversationId);
         const imageKeys = conversation?.rounds.flatMap((round) => round.results.flatMap((result) => (result.image?.storageKey ? [result.image.storageKey] : []))) || [];
         await Promise.all([deleteStoredImages(imageKeys), deleteGenerationLogs([conversationId])]);
@@ -778,7 +811,7 @@ export default function ImagePage() {
             icon: <Sparkles className="size-3.5" />,
             placement: "submit",
             iconOnly: true,
-            disabled: !prompt.trim() || isStreaming || activeConversationPending || isPromptOptimizing,
+            disabled: !prompt.trim() || isStreaming || isQueued || activeConversationPending || isPromptOptimizing,
             loading: isPromptOptimizing,
             onClick: () => void optimizePrompt({ operationId: "image-page", generationType: "image", prompt, generationStyleIds: selectedStyles.map((style) => style.id), onSuccess: setPrompt }),
         },
@@ -900,8 +933,10 @@ export default function ImagePage() {
                     styleOptions,
                     selectedStyles,
                     styleLoading,
+                    styleError,
                     actions: composerActions,
                     running: isStreaming || activeConversationPending,
+                    queued: isQueued,
                     canSubmit: canGenerate,
                     stopping: isStopping,
                     focusWhenValueSet: focusInitialPrompt,
@@ -913,8 +948,8 @@ export default function ImagePage() {
                                 message.info("该风格已选择");
                                 return current;
                             }
-                            if (current.length >= 3) {
-                                message.warning("最多选择3个风格");
+                            if (current.length >= MAX_GENERATION_STYLE_SELECTION_COUNT) {
+                                message.warning(GENERATION_STYLE_SELECTION_LIMIT_MESSAGE);
                                 return current;
                             }
                             return [...current, style];
@@ -923,7 +958,7 @@ export default function ImagePage() {
                     onStyleRemove: (styleId) => setSelectedStyles((current) => current.filter((style) => style.id !== styleId)),
                     onPasteImages: (files) => void addReferences(files),
                     onSubmit: () => void generate(),
-                    onStop: isStreaming ? () => void cancelMessage() : undefined,
+                    onStop: isStreaming || isQueued ? () => void cancelMessage() : undefined,
                 }}
                 settings={{
                     open: settingsOpen,
@@ -1389,7 +1424,8 @@ async function readConversations() {
 
     try {
         const values = await listGenerationLogs<Conversation>("image");
-        const conversations = await Promise.all(values.map(normalizeConversation));
+        const reconciledValues = await reconcileGenerationLogTasks("image", values);
+        const conversations = await Promise.all(reconciledValues.map(normalizeConversation));
         return conversations.sort((left, right) => (right.updatedAt || right.createdAt || 0) - (left.updatedAt || left.createdAt || 0));
     } catch {
         return [];

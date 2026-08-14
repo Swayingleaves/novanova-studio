@@ -14,7 +14,7 @@ public interface AiProviderAdapter {
     /**
      * 获取渠道调用格式
      *
-     * @return String 渠道调用格式，例如openai、agnes、gemini、seedance、minimax
+     * @return String 渠道调用格式，例如openai、newapi、evolink、agnes、gemini、seedance、minimax
      */
     String apiFormat();
 

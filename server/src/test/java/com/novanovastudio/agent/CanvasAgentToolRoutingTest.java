@@ -4,6 +4,7 @@ import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.agent.dto.AgentTool;
 import com.novanovastudio.agent.dto.AgentToolResult;
 import com.novanovastudio.agent.dto.AgentToolResult.ToolResult;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.List;
@@ -47,6 +48,7 @@ class CanvasAgentToolRoutingTest {
         ImmediateResultEmitter emitter = new ImmediateResultEmitter();
         AgentExecutionRegistry executionRegistry = new AgentExecutionRegistry();
         executionRegistry.open(1L, "session-1");
+        emitter.bindRequest("session-1", "request-1");
         AgentTaskOrchestrator orchestrator = new AgentTaskOrchestrator(
                 null, null, null, null, emitter, null, null, List.of(), executionRegistry);
         emitter.setOrchestrator(orchestrator);
@@ -98,6 +100,32 @@ class CanvasAgentToolRoutingTest {
     }
 
     /**
+     * 请求ID不匹配的画布工具结果不得唤醒当前主Agent请求的等待器。
+     *
+     * @throws Exception 反射读取等待器失败时抛出
+     */
+    @Test
+    void shouldRejectToolResultFromAnotherAgentRequest() throws Exception {
+        AgentEventEmitter emitter = new AgentEventEmitter(
+                new AgentActivityService(org.mockito.Mockito.mock(com.novanovastudio.repository.PersistenceRepository.class)));
+        AgentExecutionRegistry executionRegistry = new AgentExecutionRegistry();
+        executionRegistry.open(1L, "session-1");
+        emitter.bindRequest("session-1", "request-current");
+        AgentTaskOrchestrator orchestrator = new AgentTaskOrchestrator(
+                null, null, null, null, emitter, null, null, List.of(), executionRegistry);
+
+        reactor.core.Disposable subscription = invokeWaitForFrontendResult(orchestrator).subscribe();
+        try {
+            orchestrator.submitToolResult(1L, new AgentToolResult("session-1", "request-other", "call-1",
+                    new AgentToolResult.ToolResult(true, "不应被接收", Map.of())));
+
+            Assertions.assertTrue(hasPendingToolResult(orchestrator, "session-1", "call-1"));
+        } finally {
+            subscription.dispose();
+        }
+    }
+
+    /**
      * 调用前端工具等待方法。
      *
      * @param orchestrator Agent任务编排器
@@ -111,6 +139,24 @@ class CanvasAgentToolRoutingTest {
         method.setAccessible(true);
         return (Mono<ToolResult>) method.invoke(orchestrator, 1L, "session-1", "call-1",
                 "canvas_generate_image", Map.of("prompt", "小猫在吃鱼", "size", "9:16"));
+    }
+
+    /**
+     * 判断指定工具调用是否仍在等待前端回传。
+     *
+     * @param orchestrator Agent任务编排器
+     * @param sessionId String 会话ID
+     * @param callId String 工具调用ID
+     * @return boolean 是否仍在等待
+     * @throws Exception 反射读取等待器失败时抛出
+     */
+    @SuppressWarnings("unchecked")
+    private boolean hasPendingToolResult(AgentTaskOrchestrator orchestrator, String sessionId, String callId) throws Exception {
+        Field field = AgentTaskOrchestrator.class.getDeclaredField("pendingResults");
+        field.setAccessible(true);
+        Map<String, Map<String, ?>> pendingResults = (Map<String, Map<String, ?>>) field.get(orchestrator);
+        Map<String, ?> sessionResults = pendingResults.get(sessionId);
+        return sessionResults != null && sessionResults.containsKey(callId);
     }
 
     /**
@@ -148,6 +194,7 @@ class CanvasAgentToolRoutingTest {
             if (!"tool-execute".equals(event.type())) return;
             orchestrator.submitToolResult(userId, new AgentToolResult(
                     event.sessionId(),
+                    "request-1",
                     event.callId(),
                     new AgentToolResult.ToolResult(true, "画布节点生成完成，共 1 个",
                             Map.of("successfulNodeIds", List.of("image-node-1"), "failures", List.of()))));

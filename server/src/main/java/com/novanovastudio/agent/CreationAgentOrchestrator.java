@@ -3,6 +3,7 @@ package com.novanovastudio.agent;
 import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.agent.dto.AgentAction;
 import com.novanovastudio.agent.dto.AgentChatRequest;
+import com.novanovastudio.agent.dto.CreationAgentChatResponse;
 import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.agent.dto.CreationPlan;
 import com.novanovastudio.agent.dto.CreationSettings;
@@ -13,16 +14,20 @@ import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.logging.MappedDiagnosticContext;
 import com.novanovastudio.service.AiTaskService;
 import com.novanovastudio.repository.AgentPlanRepository;
+import com.novanovastudio.repository.CreationAgentRequestRepository;
+import com.novanovastudio.entity.CreationAgentRequest;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.model.Model;
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,7 +39,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
-import reactor.core.publisher.SignalType;
 
 /**
  * 图片、视频和画布入口的配置驱动主Agent编排器。
@@ -67,12 +71,16 @@ public class CreationAgentOrchestrator {
     private final AiTaskService aiTaskService;
     /** Java固定注册的画布工具 */
     private final AgentToolRegistry toolRegistry;
-    /** 由新版编排器管理的活跃会话 */
-    private final Set<String> activeSessions = ConcurrentHashMap.newKeySet();
-    /** 每个用户当前唯一的活跃主Agent会话 */
-    private final Map<Long, String> activeUserSessions = new ConcurrentHashMap<>();
-    /** 活跃会话对应的服务端计划ID */
-    private final Map<String, String> activePlanIds = new ConcurrentHashMap<>();
+    /** 主Agent请求持久化仓储 */
+    private final CreationAgentRequestRepository requestRepository;
+    /** 主Agent请求分区调度器 */
+    private final CreationAgentRequestDispatcher requestDispatcher;
+    /** 主Agent请求Redis队列 */
+    private final CreationAgentRequestQueue requestQueue;
+    /** 本实例正在执行的请求上下文 */
+    private final Map<String, ActiveRequestExecution> activeRequests = new ConcurrentHashMap<>();
+    /** 已领取请求的可取消订阅，用于及时中断前端工具等待 */
+    private final Map<String, Disposable> claimedRequestSubscriptions = new ConcurrentHashMap<>();
     /** 画布图片命令的原始用户提示词格式 */
     private static final Pattern CANVAS_IMAGE_COMMAND_PATTERN = Pattern.compile(
             "^(?:生成|创建|绘制|制作)\\s*(?:一张|一幅|一个)?\\s*(?:图片|图像)\\s*[：:]\\s*(.+)$",
@@ -93,87 +101,123 @@ public class CreationAgentOrchestrator {
     }
 
     /**
-     * 启动一次主Agent对话并立即返回会话ID。
+     * 创建并排队一次主Agent对话，立即返回本次请求标识。
      *
      * @param userId Long 用户ID
      * @param request AgentChatRequest 对话请求
-     * @return Mono<String> 会话ID
+     * @return Mono<CreationAgentChatResponse> 会话、请求和状态
      */
-    public Mono<String> startChat(Long userId, AgentChatRequest request) {
+    public Mono<CreationAgentChatResponse> startChat(Long userId, AgentChatRequest request) {
         validateRequest(request);
-        String existingSessionId = activeUserSessions.get(userId);
-        if (existingSessionId != null && activeSessions.contains(existingSessionId)) {
-            log.warn("用户已有活跃的主Agent计划，忽略重复请求: userId={}, activeSession={}", userId, existingSessionId);
-            return Mono.just(existingSessionId);
-        }
-        // 先清理执行已结束但映射尚未完成同步的旧会话，避免吞掉用户的重试请求。
-        if (existingSessionId != null) {
-            activeUserSessions.remove(userId, existingSessionId);
-        }
         return sessionService.getOrCreateSession(userId, request.sessionId(), request.entrySource())
                 .flatMap(session -> {
                     if (!request.entrySource().equals(session.profile())) {
                         return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "会话入口来源与当前页面不一致"));
                     }
-                    String concurrentSessionId = activeUserSessions.putIfAbsent(userId, session.id());
-                    if (concurrentSessionId != null) {
-                        return Mono.just(concurrentSessionId);
-                    }
-                    executionRegistry.open(userId, session.id());
-                    activeSessions.add(session.id());
-                    AtomicReference<String> planId = new AtomicReference<>();
-                    Map<String, String> inheritedDiagnosticContext = MappedDiagnosticContext.currentValues();
-                    Mono<Void> execution = resolveRetryRequest(userId, session, request)
-                            .flatMap(effectiveRequest -> executeConversation(userId, session, effectiveRequest, planId))
-                            .onErrorResume(exception -> handleExecutionError(userId, session.id(), planId.get(), exception))
-                            .doFinally(signal -> finishExecution(planId.get(), signal, userId, session.id()))
-                            .contextWrite(context -> MappedDiagnosticContext.put(
-                                    MappedDiagnosticContext.put(
-                                            MappedDiagnosticContext.putAll(context, inheritedDiagnosticContext),
-                                            MappedDiagnosticContext.USER_ID, userId),
-                                    MappedDiagnosticContext.SESSION_ID, session.id()));
-                    Disposable subscription = execution.subscribe();
-                    executionRegistry.attachSubscription(session.id(), subscription);
-                    return Mono.just(session.id());
+                    AgentChatRequest snapshot = requestWithSessionId(request, session.id());
+                    CreationAgentRequest queuedRequest = new CreationAgentRequest();
+                    queuedRequest.setId(UUID.randomUUID().toString());
+                    queuedRequest.setUserId(userId);
+                    queuedRequest.setSessionId(session.id());
+                    queuedRequest.setEntrySource(snapshot.entrySource());
+                    queuedRequest.setRequestData(JSON.toJSONString(snapshot));
+                    queuedRequest.setStatus("queued");
+                    queuedRequest.setCreatedAt(OffsetDateTime.now());
+                    return requestRepository.create(queuedRequest)
+                            .then(Mono.fromRunnable(() -> eventEmitter.emit(userId,
+                                    AgentEvent.queueStatus(session.id(), queuedRequest.getId(), "queued", "排队中"))))
+                            .then(requestDispatcher.enqueue(queuedRequest))
+                            .then(requestRepository.findStatusById(queuedRequest.getId())
+                                    .defaultIfEmpty("queued")
+                                    .map(status -> new CreationAgentChatResponse(session.id(), queuedRequest.getId(), status)));
                 });
     }
 
     /**
-     * 判断会话是否由新版创作Agent管理。
+     * 判断会话是否存在本实例正在执行的主Agent请求。
      *
      * @param sessionId String 会话ID
      * @return boolean 是否活跃
      */
     public boolean isActive(String sessionId) {
-        return activeSessions.contains(sessionId);
+        return activeRequests.values().stream().anyMatch(active -> active.sessionId().equals(sessionId));
     }
 
     /**
-     * 停止新版主Agent计划及其全部排队中和运行中的生成任务。
+     * 按请求ID精确停止主Agent请求及其关联的生成任务。
      *
      * @param userId Long 用户ID
-     * @param sessionId String 会话ID
+     * @param requestId String 主Agent请求ID
      * @return Mono<Void> 取消完成信号
      */
-    public Mono<Void> cancelChat(Long userId, String sessionId) {
-        AgentExecutionRegistry.AgentCancellation cancellation = executionRegistry.requestCancellation(userId, sessionId);
-        if (!cancellation.active() || !activeSessions.contains(sessionId)) {
-            return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "当前会话没有正在执行的生成任务"));
+    public Mono<Void> cancelChat(Long userId, String requestId) {
+        return requestRepository.findByIdForUser(userId, requestId)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求不存在")))
+                .flatMap(request -> cancelRequest(userId, request));
+    }
+
+    /**
+     * 执行已由分区调度器领取的主Agent请求。
+     *
+     * @param requestId String 主Agent请求ID
+     * @return Mono<Void> 请求执行完成信号
+     */
+    public Mono<Void> executeClaimedRequest(String requestId) {
+        AtomicBoolean cleaned = new AtomicBoolean();
+        Runnable cleanup = () -> {
+            if (cleaned.compareAndSet(false, true)) {
+                claimedRequestSubscriptions.remove(requestId);
+                clearClaimedRequestExecution(requestId);
+            }
+        };
+        return requestRepository.findById(requestId)
+                .flatMap(request -> requestRepository.markRunningIfQueued(requestId)
+                        .filter(Boolean::booleanValue)
+                        .flatMap(ignored -> executeRunningRequest(request)))
+                .doOnSubscribe(subscription -> claimedRequestSubscriptions.put(requestId, subscription::cancel))
+                .doOnSuccess(ignored -> cleanup.run())
+                .doOnError(exception -> cleanup.run())
+                .doFinally(signal -> cleanup.run());
+    }
+
+    /**
+     * 终止当前实例已领取的运行请求，不会影响其他请求。
+     *
+     * @param requestId String 主Agent请求ID
+     * @return Mono<Void> 停止执行完成信号
+     */
+    public Mono<Void> stopClaimedExecution(String requestId) {
+        ActiveRequestExecution active = activeRequests.get(requestId);
+        if (active == null || !active.cancellationHandled().compareAndSet(false, true)) {
+            return Mono.empty();
         }
-        String planId = activePlanIds.get(sessionId);
-        Mono<Void> cancelPlan = StringUtils.hasText(planId) ? planRepository.cancelPlan(planId) : Mono.empty();
+        AgentExecutionRegistry.AgentCancellation cancellation = executionRegistry.requestCancellation(active.userId(), active.sessionId());
+        String planId = active.planId().get();
         return reactor.core.publisher.Flux.fromIterable(cancellation.tasks())
-                .flatMap(task -> aiTaskService.cancelTaskForUser(userId, task.taskId())
+                .flatMap(task -> aiTaskService.cancelTaskForUser(active.userId(), task.taskId())
                         .onErrorResume(exception -> {
-                            log.error("取消主Agent关联任务失败: sessionId={}, taskId={}", sessionId, task.taskId(), exception);
+                            log.error("取消主Agent关联任务失败: requestId={}, taskId={}", requestId, task.taskId(), exception);
                             return Mono.empty();
                         }))
-                .then(cancelPlan)
-                .doFinally(signal -> {
-                    executionRegistry.disposeWhenReady(sessionId);
-                    eventEmitter.emit(userId, AgentEvent.canceled(sessionId, "已停止生成"));
-                    log.info("已停止主Agent创作计划: userId={}, sessionId={}, taskCount={}", userId, sessionId, cancellation.tasks().size());
-                });
+                .then(requestRepository.findById(requestId)
+                        .flatMap(request -> completePlanForTerminalRequest(request, planId, "已停止生成")))
+                .doFinally(signal -> executionRegistry.disposeWhenReady(active.sessionId()));
+    }
+
+    /**
+     * 中断已失去活动租约的本实例请求，防止旧执行线程继续创建任务。
+     *
+     * @param requestId String 主Agent请求ID
+     * @param message String 中断说明
+     * @return Mono<Void> 中断收尾完成信号
+     */
+    public Mono<Void> interruptClaimedExecution(String requestId, String message) {
+        return requestRepository.interruptRunningIfRunning(requestId, message)
+                .flatMap(interrupted -> Boolean.TRUE.equals(interrupted)
+                        ? requestQueue.markCancelRequested(requestId)
+                                .then(requestRepository.findById(requestId))
+                                .flatMap(request -> interruptPersistedRequest(request, message))
+                        : Mono.empty());
     }
 
     /**
@@ -182,14 +226,20 @@ public class CreationAgentOrchestrator {
      * @param userId Long 用户ID
      * @param session AgentSession 会话
      * @param request AgentChatRequest 对话请求
-     * @param planId AtomicReference<String> 当前计划编号引用
+     * @param active ActiveRequestExecution 当前请求执行上下文
      * @return Mono<Void> 执行完成信号
      */
     private Mono<Void> executeConversation(Long userId, AgentSession session, AgentChatRequest request,
-                                           AtomicReference<String> planId) {
+                                           ActiveRequestExecution active) {
         String userMessageId = UUID.randomUUID().toString();
-        return sessionService.appendUserMessage(session.id(), userMessageId, request.message())
-                .then(createAndExecutePlan(userId, session, request, planId));
+        return isRequestCancellationRequested(active)
+                .flatMap(canceled -> Boolean.TRUE.equals(canceled)
+                        ? Mono.empty()
+                        : sessionService.appendUserMessage(session.id(), userMessageId, request.message())
+                                .then(isRequestCancellationRequested(active))
+                                .flatMap(canceledAfterAppend -> Boolean.TRUE.equals(canceledAfterAppend)
+                                        ? Mono.empty()
+                                        : createAndExecutePlan(userId, session, request, active)));
     }
 
     /**
@@ -198,18 +248,22 @@ public class CreationAgentOrchestrator {
      * @param userId Long 用户ID
      * @param session AgentSession 会话
      * @param request AgentChatRequest 原始请求
-     * @param planId AtomicReference<String> 当前计划编号引用
+     * @param active ActiveRequestExecution 当前请求执行上下文
      * @return Mono<Void> 执行完成信号
      */
     private Mono<Void> createAndExecutePlan(Long userId, AgentSession session, AgentChatRequest request,
-                                            AtomicReference<String> planId) {
-        return modelFactory.defaultTextModel()
+                                            ActiveRequestExecution active) {
+        return isRequestCancellationRequested(active)
+                .flatMap(canceled -> Boolean.TRUE.equals(canceled) ? Mono.empty() : modelFactory.defaultTextModel()
                 .flatMap(model -> Mono.justOrEmpty(buildStyleFollowUpPlan(session, request))
                         .map(candidate -> planValidator.validate(candidate, request.entrySource(), request.creationSettings()))
                         .switchIfEmpty(Mono.defer(() -> callMainAgent(userId, session, request, model)
                                 .map(candidate -> planValidator.validate(candidate, request.entrySource(), request.creationSettings()))
                                 .map(candidate -> resolveTaskPromptSources(candidate, session, request.message()))))
-                        .flatMap(validated -> {
+                        .flatMap(validated -> isRequestCancellationRequested(active).flatMap(canceledAfterPlanning -> {
+                            if (Boolean.TRUE.equals(canceledAfterPlanning)) {
+                                return Mono.empty();
+                            }
                             if (StringUtils.hasText(validated.clarificationQuestion())) {
                                 AgentAction action = Boolean.TRUE.equals(validated.canvasGuidance())
                                         ? AgentAction.navigateToCanvas(request.message())
@@ -217,16 +271,23 @@ public class CreationAgentOrchestrator {
                                 return completeWithMessage(userId, session.id(), validated.clarificationQuestion(), action);
                             }
                             CreationPlan plan = withServerPlanId(validated, session, request.message());
-                            planId.set(plan.planId());
-                            activePlanIds.put(session.id(), plan.planId());
+                            active.planId().set(plan.planId());
                             return planRepository.create(userId, session.id(), plan)
-                                    .then(Mono.fromRunnable(() -> eventEmitter.emit(userId,
-                                                    AgentEvent.planCreated(session.id(), plan.planId(), plan.summary(), plan.tasks().size()))))
-                                    .then(planExecutor.execute(userId, session.id(), plan, request, model)
-                                            .contextWrite(context -> MappedDiagnosticContext.put(
-                                                    context, MappedDiagnosticContext.PLAN_ID, plan.planId())))
-                                    .flatMap(summary -> completeWithMessage(userId, session.id(), summary.message()));
-                        }));
+                                    .then(requestRepository.updatePlanId(active.requestId(), plan.planId()))
+                                    .then(isRequestCancellationRequested(active))
+                                    .flatMap(canceledAfterPlanCreation -> Boolean.TRUE.equals(canceledAfterPlanCreation)
+                                            ? requestRepository.findById(active.requestId())
+                                                    .flatMap(current -> completePlanForTerminalRequest(current, plan.planId(), "已停止生成"))
+                                            : Mono.fromRunnable(() -> eventEmitter.emit(userId,
+                                                            AgentEvent.planCreated(session.id(), plan.planId(), plan.summary(), plan.tasks().size())))
+                                                    .then(planExecutor.execute(userId, session.id(), plan, request, model)
+                                                            .contextWrite(context -> MappedDiagnosticContext.put(
+                                                                    context, MappedDiagnosticContext.PLAN_ID, plan.planId())))
+                                                    .flatMap(summary -> {
+                                                        active.setCompletion(summary.status(), summary.message());
+                                                        return completeWithMessage(userId, session.id(), summary.message());
+                                                    }));
+                        }))));
     }
 
     /**
@@ -721,43 +782,345 @@ public class CreationAgentOrchestrator {
     }
 
     /**
-     * 在订阅取消时标记计划取消，并清理执行登记。
+     * 执行已条件切换为running的主Agent请求。
      *
-     * @param planId String 计划ID
-     * @param signal SignalType Reactor终止信号
-     * @param userId Long 用户ID
-     * @param sessionId String 会话ID
+     * @param queuedRequest CreationAgentRequest 已领取请求
+     * @return Mono<Void> 请求执行完成信号
      */
-    private void finishExecution(String planId, SignalType signal, Long userId, String sessionId) {
-        if (SignalType.CANCEL.equals(signal) && StringUtils.hasText(planId)) {
-            planRepository.updatePlanStatus(planId, "canceled", "已停止生成")
-                    .subscribe(null, exception -> log.error("更新取消计划状态失败: planId={}", planId, exception));
-        }
-        executionRegistry.complete(sessionId);
-        activeSessions.remove(sessionId);
-        activeUserSessions.remove(userId, sessionId);
-        activePlanIds.remove(sessionId);
+    private Mono<Void> executeRunningRequest(CreationAgentRequest queuedRequest) {
+        return requestRepository.findById(queuedRequest.getId())
+                .filter(current -> "running".equals(current.getStatus()))
+                .flatMap(current -> requestQueue.isCancelRequested(current.getId())
+                        .flatMap(cancelRequested -> Boolean.TRUE.equals(cancelRequested)
+                                ? finishClaimedRequest(current, "canceled", "已停止生成", null)
+                                : executeRunningRequestSnapshot(current)));
     }
 
     /**
-     * 记录执行异常、关闭计划状态并推送用户可见错误。
+     * 校验已领取请求快照后加载最新会话并执行既有计划链路。
+     *
+     * @param queuedRequest CreationAgentRequest 当前运行请求
+     * @return Mono<Void> 请求执行完成信号
+     */
+    private Mono<Void> executeRunningRequestSnapshot(CreationAgentRequest queuedRequest) {
+        AgentChatRequest request;
+        try {
+            request = JSON.parseObject(queuedRequest.getRequestData(), AgentChatRequest.class);
+        } catch (Exception exception) {
+            return finishClaimedRequest(queuedRequest, "failed", "主Agent请求数据无效", exception);
+        }
+        if (request == null || !queuedRequest.getSessionId().equals(request.sessionId())
+                || !queuedRequest.getEntrySource().equals(request.entrySource())) {
+            return finishClaimedRequest(queuedRequest, "failed", "主Agent请求数据与持久化记录不一致", null);
+        }
+        return sessionService.getOrCreateSession(queuedRequest.getUserId(), queuedRequest.getSessionId(), queuedRequest.getEntrySource())
+                .flatMap(session -> {
+                    if (!queuedRequest.getEntrySource().equals(session.profile())) {
+                        return finishClaimedRequest(queuedRequest, "failed", "会话入口来源与请求不一致", null);
+                    }
+                    ActiveRequestExecution active = new ActiveRequestExecution(queuedRequest.getId(), queuedRequest.getUserId(),
+                            session.id(), new AtomicReference<>(), new AtomicReference<>("success"), new AtomicReference<>(""),
+                            new AtomicBoolean());
+                    executionRegistry.open(queuedRequest.getUserId(), session.id(), registration -> requestRepository
+                            .appendTaskId(queuedRequest.getId(), registration.taskId())
+                            .then(requestQueue.isCancelRequested(queuedRequest.getId()))
+                            .doOnNext(cancelRequested -> {
+                                if (Boolean.TRUE.equals(cancelRequested)) {
+                                    executionRegistry.requestCancellation(queuedRequest.getUserId(), session.id());
+                                }
+                            })
+                            .then());
+                    Disposable subscription = claimedRequestSubscriptions.get(queuedRequest.getId());
+                    if (subscription != null) {
+                        executionRegistry.attachSubscription(session.id(), subscription);
+                    }
+                    activeRequests.put(queuedRequest.getId(), active);
+                    eventEmitter.bindRequest(session.id(), queuedRequest.getId());
+                    return isRequestCancellationRequested(active)
+                            .flatMap(canceled -> Boolean.TRUE.equals(canceled)
+                                    ? finishClaimedRequest(queuedRequest, "canceled", "已停止生成", null)
+                                    : Mono.fromRunnable(() -> eventEmitter.emit(queuedRequest.getUserId(), AgentEvent.queueStatus(
+                                                    session.id(), queuedRequest.getId(), "running", "生成中")))
+                                            .then(resolveRetryRequest(queuedRequest.getUserId(), session, request))
+                                            .flatMap(effectiveRequest -> executeConversation(queuedRequest.getUserId(), session,
+                                                    effectiveRequest, active))
+                                            .then(isRequestCancellationRequested(active))
+                                            .then(finishClaimedRequest(queuedRequest, active.requestStatus(),
+                                                    active.completionMessage().get(), null)))
+                            .onErrorResume(exception -> finishClaimedRequest(queuedRequest, "failed", errorMessage(exception), exception));
+                });
+    }
+
+    /**
+     * 查询Redis取消标记，并同步到当前实例的会话执行登记。
+     *
+     * @param active ActiveRequestExecution 当前请求执行上下文
+     * @return Mono<Boolean> 是否已请求取消
+     */
+    private Mono<Boolean> isRequestCancellationRequested(ActiveRequestExecution active) {
+        return requestQueue.isCancelRequested(active.requestId())
+                .doOnNext(canceled -> {
+                    if (Boolean.TRUE.equals(canceled)) {
+                        executionRegistry.requestCancellation(active.userId(), active.sessionId());
+                    }
+                });
+    }
+
+    /**
+     * 按当前持久化状态精确取消排队或运行中的请求。
      *
      * @param userId Long 用户ID
-     * @param sessionId String 会话ID
-     * @param planId String 计划ID
-     * @param exception Throwable 执行异常
-     * @return Mono<Void> 异常收尾信号
+     * @param request CreationAgentRequest 请求实体
+     * @return Mono<Void> 取消完成信号
      */
-    private Mono<Void> handleExecutionError(Long userId, String sessionId, String planId, Throwable exception) {
-        log.error("主Agent对话执行失败: sessionId={}, planId={}", sessionId, planId, exception);
-        String message = errorMessage(exception);
-        eventEmitter.emit(userId, AgentEvent.error(sessionId, message));
-        return StringUtils.hasText(planId)
-                ? planRepository.updatePlanStatus(planId, "failed", message).onErrorResume(updateException -> {
-                    log.error("更新失败计划状态异常: planId={}", planId, updateException);
-                    return Mono.empty();
-                })
+    private Mono<Void> cancelRequest(Long userId, CreationAgentRequest request) {
+        return switch (request.getStatus()) {
+            case "queued" -> cancelQueuedRequest(userId, request);
+            case "running" -> cancelRunningRequest(userId, request);
+            default -> Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求已结束"));
+        };
+    }
+
+    /**
+     * 取消仍在Redis等待队列中的请求；若领取竞态已发生则转入运行取消。
+     *
+     * @param userId Long 用户ID
+     * @param request CreationAgentRequest 请求实体
+     * @return Mono<Void> 取消完成信号
+     */
+    private Mono<Void> cancelQueuedRequest(Long userId, CreationAgentRequest request) {
+        return requestRepository.cancelQueuedIfQueued(userId, request.getId(), "已停止生成")
+                .flatMap(canceled -> {
+                    if (Boolean.TRUE.equals(canceled)) {
+                        return requestQueue.removeQueuedRequest(userId, request.getEntrySource(), request.getId())
+                                // Redis 已领取但数据库尚未切为 running 时，取消会先成功写入数据库。
+                                // 此时释放该租约，后续请求无需等待领取线程回收。
+                                .then(requestQueue.releaseActiveRequest(userId, request.getEntrySource(), request.getId()))
+                                .then(Mono.fromRunnable(() -> eventEmitter.emit(userId, AgentEvent.canceled(request.getSessionId(),
+                                        "已停止排队").withRequestId(request.getId()))))
+                                .then(requestDispatcher.dispatchAvailable(userId, request.getEntrySource()));
+                    }
+                    return requestRepository.findByIdForUser(userId, request.getId())
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求不存在")))
+                            .flatMap(current -> "running".equals(current.getStatus())
+                                    ? cancelRunningRequest(userId, current)
+                                    : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求已结束")));
+                });
+    }
+
+    /**
+     * 取消已运行请求，并向领取实例写入Redis取消标记。
+     *
+     * @param userId Long 用户ID
+     * @param request CreationAgentRequest 请求实体
+     * @return Mono<Void> 取消完成信号
+     */
+    private Mono<Void> cancelRunningRequest(Long userId, CreationAgentRequest request) {
+        return requestRepository.cancelRunningIfRunning(userId, request.getId(), "已停止生成")
+                .filter(Boolean::booleanValue)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求已结束")))
+                .then(requestQueue.markCancelRequested(request.getId()))
+                .then(stopClaimedExecution(request.getId()))
+                .then(requestRepository.findByIdForUser(userId, request.getId()))
+                .flatMap(this::cancelPersistedRequestTasks)
+                .doOnSuccess(ignored -> eventEmitter.emit(userId, AgentEvent.canceled(request.getSessionId(),
+                        "已停止生成").withRequestId(request.getId())));
+    }
+
+    /**
+     * 取消已持久化到请求记录中的底层任务和关联计划。
+     *
+     * @param request CreationAgentRequest 请求实体
+     * @return Mono<Void> 取消完成信号
+     */
+    private Mono<Void> cancelPersistedRequestTasks(CreationAgentRequest request) {
+        Mono<Void> cancelPlan = StringUtils.hasText(request.getPlanId())
+                ? planRepository.cancelPlan(request.getPlanId())
                 : Mono.empty();
+        return reactor.core.publisher.Flux.fromIterable(requestRepository.taskIds(request))
+                .concatMap(taskId -> aiTaskService.cancelTaskForUser(request.getUserId(), taskId)
+                        .onErrorResume(exception -> {
+                            log.error("取消已持久化主Agent任务失败: requestId={}, taskId={}", request.getId(), taskId, exception);
+                            return Mono.empty();
+                        }))
+                .then(cancelPlan);
+    }
+
+    /**
+     * 取消中断请求已登记的任务，并将已创建计划标记为失败。
+     *
+     * @param request CreationAgentRequest 已中断请求
+     * @param message String 中断说明
+     * @return Mono<Void> 收尾完成信号
+     */
+    private Mono<Void> interruptPersistedRequest(CreationAgentRequest request, String message) {
+        ActiveRequestExecution active = activeRequests.get(request.getId());
+        AgentExecutionRegistry.AgentCancellation cancellation = active == null
+                ? AgentExecutionRegistry.AgentCancellation.inactive()
+                : executionRegistry.requestCancellation(active.userId(), active.sessionId());
+        Set<String> taskIds = new LinkedHashSet<>(requestRepository.taskIds(request));
+        cancellation.tasks().forEach(task -> taskIds.add(task.taskId()));
+        String planId = StringUtils.hasText(request.getPlanId()) ? request.getPlanId()
+                : active == null ? "" : active.planId().get();
+        return reactor.core.publisher.Flux.fromIterable(taskIds)
+                .concatMap(taskId -> aiTaskService.cancelTaskForUser(request.getUserId(), taskId)
+                        .onErrorResume(exception -> {
+                            log.error("中断主Agent请求时取消底层任务失败: requestId={}, taskId={}", request.getId(), taskId, exception);
+                            return Mono.empty();
+                        }))
+                .then(completePlanForTerminalRequest(request, planId, message))
+                .then(Mono.<Void>fromRunnable(() -> eventEmitter.emit(request.getUserId(),
+                        AgentEvent.error(request.getSessionId(), message).withRequestId(request.getId()))))
+                .doFinally(signal -> {
+                    if (active != null) {
+                        executionRegistry.disposeWhenReady(active.sessionId());
+                    }
+                });
+    }
+
+    /**
+     * 完成已领取请求并清理本实例执行资源。
+     *
+     * @param request CreationAgentRequest 请求实体
+     * @param status String success、failed或canceled
+     * @param message String 终态说明
+     * @param exception Throwable 原始异常，可为空
+     * @return Mono<Void> 收尾完成信号
+     */
+    private Mono<Void> finishClaimedRequest(CreationAgentRequest request, String status, String message, Throwable exception) {
+        ActiveRequestExecution active = activeRequests.get(request.getId());
+        String planId = active == null ? request.getPlanId() : active.planId().get();
+        boolean cancellationRequested = active != null && executionRegistry.isCancelRequested(active.sessionId());
+        String requestedStatus = cancellationRequested ? "canceled" : status;
+        String requestedMessage = cancellationRequested ? "已停止生成" : message;
+        return requestRepository.finishRunning(request.getId(), requestedStatus, requestedMessage)
+                .flatMap(updated -> {
+                    if (!Boolean.TRUE.equals(updated)) {
+                        return requestRepository.findById(request.getId())
+                                .defaultIfEmpty(request)
+                                .flatMap(current -> completePlanForTerminalRequest(current, planId, requestedMessage));
+                    }
+                    return completePlanForStatus(requestedStatus, planId, requestedMessage, request.getId())
+                            .then(Mono.fromRunnable(() -> {
+                        if (exception != null && !"canceled".equals(requestedStatus)) {
+                            log.error("主Agent对话执行失败: requestId={}, sessionId={}, planId={}",
+                                    request.getId(), request.getSessionId(), planId, exception);
+                        }
+                        if ("failed".equals(requestedStatus)) {
+                            eventEmitter.emit(request.getUserId(), AgentEvent.error(request.getSessionId(), requestedMessage)
+                                    .withRequestId(request.getId()));
+                        } else if ("canceled".equals(requestedStatus)) {
+                            eventEmitter.emit(request.getUserId(), AgentEvent.canceled(request.getSessionId(), requestedMessage)
+                                    .withRequestId(request.getId()));
+                        }
+                    }));
+                });
+    }
+
+    /**
+     * 根据主Agent请求的持久化终态收敛关联计划，防止旧实例将中断请求错误覆盖为取消。
+     *
+     * @param request CreationAgentRequest 当前持久化请求
+     * @param fallbackPlanId String 本实例已知但尚未回写的计划ID
+     * @param fallbackMessage String 请求记录没有说明时使用的终态说明
+     * @return Mono<Void> 计划状态收敛完成信号
+     */
+    Mono<Void> completePlanForTerminalRequest(CreationAgentRequest request, String fallbackPlanId, String fallbackMessage) {
+        if (request == null) {
+            return Mono.empty();
+        }
+        String planId = StringUtils.hasText(request.getPlanId()) ? request.getPlanId() : fallbackPlanId;
+        String message = StringUtils.hasText(request.getErrorMessage()) ? request.getErrorMessage() : fallbackMessage;
+        return completePlanForStatus(request.getStatus(), planId, message, request.getId());
+    }
+
+    /**
+     * 按请求终态更新关联计划。
+     *
+     * @param requestStatus String 主Agent请求状态
+     * @param planId String 关联计划ID
+     * @param message String 终态说明
+     * @param requestId String 主Agent请求ID
+     * @return Mono<Void> 计划状态更新完成信号
+     */
+    private Mono<Void> completePlanForStatus(String requestStatus, String planId, String message, String requestId) {
+        if (!StringUtils.hasText(planId)) {
+            return Mono.empty();
+        }
+        Mono<Void> completion = switch (requestStatus) {
+            case "canceled" -> planRepository.cancelPlan(planId);
+            case "failed" -> planRepository.updatePlanStatus(planId, "failed", message);
+            case "interrupted" -> planRepository.markInterruptedPlanFailed(planId, message);
+            default -> Mono.empty();
+        };
+        return completion.onErrorResume(exception -> {
+            log.error("收敛主Agent请求关联计划失败: requestId={}, planId={}, requestStatus={}",
+                    requestId, planId, requestStatus, exception);
+            return Mono.empty();
+        });
+    }
+
+    /**
+     * 清理被取消订阅遗留的本实例执行登记。
+     *
+     * @param requestId String 主Agent请求ID
+     */
+    private void clearClaimedRequestExecution(String requestId) {
+        ActiveRequestExecution active = activeRequests.remove(requestId);
+        if (active != null) {
+            executionRegistry.complete(active.sessionId());
+            eventEmitter.unbindRequest(active.sessionId(), requestId);
+        }
+    }
+
+    /**
+     * 将请求复制为明确携带服务端会话ID的完整快照。
+     *
+     * @param request AgentChatRequest 原始请求
+     * @param sessionId String 服务端会话ID
+     * @return AgentChatRequest 完整请求快照
+     */
+    private AgentChatRequest requestWithSessionId(AgentChatRequest request, String sessionId) {
+        return new AgentChatRequest(sessionId, request.entrySource(), request.message(), request.canvasSnapshot(),
+                request.references(), request.attachments(), request.history(), request.creationSettings());
+    }
+
+    /**
+     * 本实例正在执行的主Agent请求上下文。
+     *
+     * @param requestId String 主Agent请求ID
+     * @param userId Long 用户ID
+     * @param sessionId String Agent会话ID
+     * @param planId AtomicReference<String> 当前创作计划ID
+     * @param completionStatus AtomicReference<String> 请求最终状态
+     * @param completionMessage AtomicReference<String> 请求最终说明
+     */
+    private record ActiveRequestExecution(String requestId, Long userId, String sessionId,
+                                          AtomicReference<String> planId,
+                                          AtomicReference<String> completionStatus,
+                                          AtomicReference<String> completionMessage,
+                                          AtomicBoolean cancellationHandled) {
+
+        /**
+         * 保存计划执行汇总对应的主Agent请求终态。
+         *
+         * @param planStatus String 计划执行状态
+         * @param message String 计划执行说明
+         */
+        private void setCompletion(String planStatus, String message) {
+            completionStatus.set("canceled".equals(planStatus) ? "canceled"
+                    : "success".equals(planStatus) ? "success" : "failed");
+            completionMessage.set("success".equals(planStatus) ? "" : (message == null ? "" : message));
+        }
+
+        /**
+         * 获取可持久化的主Agent请求终态。
+         *
+         * @return String success、failed或canceled
+         */
+        private String requestStatus() {
+            return completionStatus.get();
+        }
     }
 
     /**

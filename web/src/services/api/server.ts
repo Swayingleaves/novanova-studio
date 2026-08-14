@@ -37,6 +37,10 @@ export type ServerAiTaskType = "image" | "video" | "text";
 export type ServerAiTaskStatus = "pending" | "running" | "success" | "failed" | "canceled";
 export type ServerGenerationSource = "imagePage" | "videoPage" | "canvas" | "storyboard";
 
+export type ServerRuntimeConfig = {
+    aiTaskPollingIntervalSeconds: number;
+};
+
 export type ServerAiTaskMediaReference = {
     id?: string;
     name?: string;
@@ -111,9 +115,13 @@ export type GenerationStyleOption = {
     id: number;
     name: string;
     generationType: GenerationStyleType;
+    coverUrl: string;
+    category: string;
 };
 
 export type ServerGenerationStyle = GenerationStyleSnapshot & {
+    coverUrl: string;
+    category: string;
     status: number;
     sortOrder: number;
     createdAt: string;
@@ -569,6 +577,8 @@ export type ServerGenerationStyleInput = {
     generationType: GenerationStyleType;
     name: string;
     stylePrompt: string;
+    coverUrl: string;
+    category: string;
     status?: number;
     sortOrder?: number;
 };
@@ -732,6 +742,36 @@ export function getAiTaskInfo(taskId: string) {
     return serverGet<ServerAiTask>(`/ai/task/getTaskInfo?taskId=${encodeURIComponent(taskId)}`);
 }
 
+let runtimeConfigPromise: Promise<ServerRuntimeConfig> | null = null;
+
+/**
+ * 读取服务端统一运行时配置。
+ *
+ * @return Promise<ServerRuntimeConfig> 服务端运行时配置
+ */
+export function getRuntimeConfig(): Promise<ServerRuntimeConfig> {
+    if (!runtimeConfigPromise) {
+        runtimeConfigPromise = serverGet<ServerRuntimeConfig>("/config/getRuntimeConfig", { auth: false }).catch((error) => {
+            runtimeConfigPromise = null;
+            throw error;
+        });
+    }
+    return runtimeConfigPromise;
+}
+
+/**
+ * 获取统一的AI异步任务状态轮询间隔毫秒数。
+ *
+ * @return Promise<number> 轮询间隔毫秒数
+ */
+export async function getAiTaskPollingIntervalMilliseconds(): Promise<number> {
+    const seconds = (await getRuntimeConfig()).aiTaskPollingIntervalSeconds;
+    if (!Number.isInteger(seconds) || seconds <= 0) {
+        throw new Error("服务端返回的AI任务轮询间隔无效");
+    }
+    return seconds * 1000;
+}
+
 export function cancelAiTask(taskId: string) {
     return serverPost<ServerAiTask>("/ai/task/cancelTask", { taskId });
 }
@@ -893,6 +933,7 @@ export async function waitAiTask(taskId: string, options: { signal?: AbortSignal
         throw new DOMException("Aborted", "AbortError");
     }
     if (isFinalAiTaskStatus(initial.status)) return completedAiTask(initial);
+    const pollingIntervalMilliseconds = await getAiTaskPollingIntervalMilliseconds();
     return new Promise<ServerAiTask>((resolve, reject) => {
         let settled = false;
         const cleanupFns: Array<() => void> = [];
@@ -921,7 +962,7 @@ export async function waitAiTask(taskId: string, options: { signal?: AbortSignal
             void getAiTaskInfo(taskId)
                 .then(onTask)
                 .catch((error) => finish(() => reject(error)));
-        }, 5000);
+        }, pollingIntervalMilliseconds);
         cleanupFns.push(() => window.clearInterval(pollTimer));
         if (options.signal) {
             const onAbort = () => {
@@ -955,8 +996,8 @@ export function readAiTaskError(error: unknown): AiTaskErrorDetails {
 
 function completedAiTask(task: ServerAiTask): ServerAiTask {
     if (task.status === "success") return task;
-    const rawResult = task.resultData && typeof task.resultData === "object" ? task.resultData as Record<string, unknown> : undefined;
-    const rawError = rawResult?.error && typeof rawResult.error === "object" ? rawResult.error as Record<string, unknown> : undefined;
+    const rawResult = task.resultData && typeof task.resultData === "object" ? (task.resultData as Record<string, unknown>) : undefined;
+    const rawError = rawResult?.error && typeof rawResult.error === "object" ? (rawResult.error as Record<string, unknown>) : undefined;
     const message = readOptionalText(rawError?.message) || task.errorMessage || (task.status === "canceled" ? "任务已取消" : "生成失败");
     throw new AiTaskFailureError(message, {
         source: readOptionalText(rawError?.source) || "task",

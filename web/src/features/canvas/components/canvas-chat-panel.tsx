@@ -15,6 +15,7 @@ import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import type { CanvasAssistantMessage, CanvasAssistantReference, CanvasNode } from "../types";
 import type { GenerationStyleOption } from "@/services/api/server";
 import { formatGroupedGenerationStyleMessage } from "@/features/generation/lib/style-command";
+import { GENERATION_STYLE_SELECTION_LIMIT_MESSAGE, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { GenerationStyleChips, useGenerationStyles } from "@/features/generation/components/generation-style-picker";
 import { isImageNode, isTextNode, isVideoNode } from "../domain/canvas-node";
 import { AgentChatComposer } from "./canvas-agent-chat-ui";
@@ -37,6 +38,7 @@ type CanvasChatPanelProps = {
     onNewSession: () => void;
     onStop: () => void;
     isStreaming?: boolean;
+    isQueued?: boolean;
     config: AiConfig;
     model: string;
     onModelChange: (model: string) => void;
@@ -49,7 +51,25 @@ type CanvasChatPanelProps = {
  * 基于 assistant-ui 的画布 AI 对话面板
  * 承载画布内的对话、节点引用和模型选择交互
  */
-export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, completedThinkings = [], activeThinking = null, onSend, onNewSession, onStop, isStreaming = false, config, model, onModelChange, onMissingConfig, initialPrompt = "", sessionId = null }: CanvasChatPanelProps) {
+export function CanvasChatPanel({
+    onCollapse,
+    nodes,
+    onNodeDropRef,
+    messages,
+    completedThinkings = [],
+    activeThinking = null,
+    onSend,
+    onNewSession,
+    onStop,
+    isStreaming = false,
+    isQueued = false,
+    config,
+    model,
+    onModelChange,
+    onMissingConfig,
+    initialPrompt = "",
+    sessionId = null,
+}: CanvasChatPanelProps) {
     const theme = useCanvasTheme();
     const { message } = App.useApp();
     const copyText = useCopyText();
@@ -83,7 +103,12 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, co
         (text: string) => {
             if (!text.trim()) return;
             const references = droppedNodes.map(nodeToReference).filter((item): item is CanvasAssistantReference => Boolean(item));
-            onSend(text.trim(), references, selectedStyles.map((style) => style.id), selectedStyles);
+            onSend(
+                text.trim(),
+                references,
+                selectedStyles.map((style) => style.id),
+                selectedStyles,
+            );
             setPrompt("");
             setDroppedNodeIds(new Set());
             setSelectedStyles([]);
@@ -113,7 +138,9 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, co
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
-    }, [activeThinking, completedThinkings, messages, isStreaming]);
+    }, [activeThinking, completedThinkings, messages, isQueued, isStreaming]);
+
+    const requestActive = isStreaming || isQueued;
 
     useEffect(() => {
         const handleWindowResize = () => setPanelWidth((current) => clampPanelWidth(current));
@@ -190,14 +217,8 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, co
             <div className="flex items-center justify-between px-4 py-3 text-sm font-medium shrink-0" style={{ borderBottom: `1px solid ${theme.toolbar.border}` }}>
                 <span>画布Agent</span>
                 <div className="flex items-center gap-1">
-                    {isStreaming ? (
-                        <button
-                            type="button"
-                            className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100"
-                            onClick={onStop}
-                            title="停止生成"
-                            aria-label="停止生成"
-                        >
+                    {requestActive ? (
+                        <button type="button" className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100" onClick={onStop} title={isQueued ? "取消排队" : "停止生成"} aria-label={isQueued ? "取消排队" : "停止生成"}>
                             <Square className="size-3.5" />
                         </button>
                     ) : null}
@@ -205,7 +226,7 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, co
                         type="button"
                         className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-25"
                         onClick={handleNewSession}
-                        disabled={isStreaming}
+                        disabled={requestActive}
                         title="新对话"
                         aria-label="新对话"
                     >
@@ -228,7 +249,7 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, co
                         messages.map((msg) => (
                             <div key={msg.id} className="space-y-1.5">
                                 <ChatBubble role={msg.role as "user" | "assistant"} text={msg.text} theme={theme} onCopy={() => copyText(formatGroupedGenerationStyleMessage(msg.text, msg.generationStyles), "消息已复制")} />
-                                {msg.generationStyles?.length ? <GenerationStyleChips styles={msg.generationStyles} /> : null}
+                                {msg.generationStyles?.length ? <GenerationStyleChips styles={msg.generationStyles.map((style) => ({ ...style, coverUrl: "", category: "" }))} /> : null}
                                 {msg.references?.length ? <MessageReferences references={msg.references} theme={theme} /> : null}
                             </div>
                         ))
@@ -248,9 +269,9 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, co
                                 }}
                             />
                         ))}
-                    {isStreaming ? (
+                    {requestActive ? (
                         <div className="text-xs" style={{ color: theme.node.muted }}>
-                            <span className="inline-block animate-pulse">● 生成中...</span>
+                            <span className="inline-block animate-pulse">● {isQueued ? "排队中..." : "生成中..."}</span>
                         </div>
                     ) : null}
                 </div>
@@ -260,7 +281,7 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, co
             <div className="shrink-0" style={{ borderTop: `1px solid ${theme.toolbar.border}` }}>
                 <AgentChatComposer
                     prompt={prompt}
-                    sending={isStreaming}
+                    sending={requestActive}
                     placeholder="输入消息，Enter 发送..."
                     theme={theme}
                     onPromptChange={setPrompt}
@@ -269,9 +290,9 @@ export function CanvasChatPanel({ onCollapse, nodes, onNodeDropRef, messages, co
                     selectedStyles={selectedStyles}
                     styleLoading={styleCatalog.loading}
                     styleError={styleCatalog.error}
-                    onStyleSelect={(style) => setSelectedStyles((current) => current.some((item) => item.id === style.id) || current.length >= 3 ? current : [...current, style])}
+                    onStyleSelect={(style) => setSelectedStyles((current) => (current.some((item) => item.id === style.id) || current.length >= MAX_GENERATION_STYLE_SELECTION_COUNT ? current : [...current, style]))}
                     onStyleRemove={(id) => setSelectedStyles((current) => current.filter((style) => style.id !== id))}
-                    onStyleLimit={() => message.warning("最多选择3个风格")}
+                    onStyleLimit={() => message.warning(GENERATION_STYLE_SELECTION_LIMIT_MESSAGE)}
                     droppedNodes={droppedNodes}
                     onDroppedNodeRemove={(nodeId) => {
                         setDroppedNodeIds((prev) => {

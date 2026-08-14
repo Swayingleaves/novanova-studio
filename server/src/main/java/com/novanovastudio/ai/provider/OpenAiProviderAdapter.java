@@ -7,6 +7,8 @@ import com.alibaba.fastjson2.TypeReference;
 import com.novanovastudio.ai.*;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.config.NovanovaProperties;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +34,9 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
 
     /** AI媒体支持 */
     private final AiMediaSupport mediaSupport;
+
+    /** 服务配置 */
+    private final NovanovaProperties properties;
 
     /**
      * 获取渠道调用格式
@@ -243,8 +248,9 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
      * @return Mono<JSONObject> 第三方任务结果
      */
     private Mono<JSONObject> pollVideoTask(AiTaskExecutionContext context, String providerTaskId) {
+        Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
         return Flux.range(0, 120)
-                .concatMap(attempt -> Mono.delay(java.time.Duration.ofMillis(2500))
+                .concatMap(attempt -> Mono.delay(pollingInterval)
                         .then(context.isCancelRequested())
                         .flatMap(cancelRequested -> {
                             if (Boolean.TRUE.equals(cancelRequested)) {

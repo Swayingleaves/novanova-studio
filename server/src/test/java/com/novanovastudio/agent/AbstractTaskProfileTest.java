@@ -16,6 +16,7 @@ import com.novanovastudio.agent.dto.AgentTool;
 import com.novanovastudio.agent.dto.AgentToolResult.ToolResult;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.service.AiTaskService;
@@ -56,6 +57,9 @@ class AbstractTaskProfileTest {
     @Mock
     private AgentExecutionRegistry executionRegistry;
 
+    /** 服务配置 */
+    private NovanovaProperties properties;
+
     /** 测试用事件发射器 */
     private AgentEventEmitter eventEmitter;
 
@@ -80,7 +84,9 @@ class AbstractTaskProfileTest {
         savedRounds = new ArrayList<>();
         savedTitles = new ArrayList<>();
         executionOrder = new ArrayList<>();
-        profile = new TestTaskProfile(aiTaskService, persistenceService, executionRegistry);
+        properties = new NovanovaProperties();
+        properties.getAi().getTask().setPollingIntervalSeconds(1);
+        profile = new TestTaskProfile(aiTaskService, persistenceService, executionRegistry, properties);
     }
 
     /**
@@ -235,7 +241,7 @@ class AbstractTaskProfileTest {
      */
     @Test
     void shouldRejectUploadedImageWhenVideoModelLacksImageToVideoCapability() {
-        TestVideoProfile videoProfile = new TestVideoProfile(aiTaskService, persistenceService, executionRegistry);
+        TestVideoProfile videoProfile = new TestVideoProfile(aiTaskService, persistenceService, executionRegistry, properties);
         when(persistenceService.getMediaInfoForUser(7L, "image:cat-dog"))
                 .thenReturn(Mono.just(new PersistenceDtos.UploadedMediaResponse(
                         "image:cat-dog", "https://storage.example.com/cat-dog.png", 1024L,
@@ -367,10 +373,11 @@ class AbstractTaskProfileTest {
          * @param aiTaskService AiTaskService AI任务服务
          * @param persistenceService PersistenceService 生成记录持久化服务
          * @param executionRegistry AgentExecutionRegistry 执行注册表
+         * @param properties NovanovaProperties 服务配置
          */
         private TestTaskProfile(AiTaskService aiTaskService, PersistenceService persistenceService,
-                                AgentExecutionRegistry executionRegistry) {
-            super(aiTaskService, persistenceService, executionRegistry);
+                                AgentExecutionRegistry executionRegistry, NovanovaProperties properties) {
+            super(aiTaskService, persistenceService, executionRegistry, properties);
         }
 
         /**
@@ -435,10 +442,11 @@ class AbstractTaskProfileTest {
          * @param aiTaskService AiTaskService AI任务服务
          * @param persistenceService PersistenceService 生成记录持久化服务
          * @param executionRegistry AgentExecutionRegistry 执行注册表
+         * @param properties NovanovaProperties 服务配置
          */
         private TestVideoProfile(AiTaskService aiTaskService, PersistenceService persistenceService,
-                                 AgentExecutionRegistry executionRegistry) {
-            super(aiTaskService, persistenceService, executionRegistry);
+                                 AgentExecutionRegistry executionRegistry, NovanovaProperties properties) {
+            super(aiTaskService, persistenceService, executionRegistry, properties);
         }
 
         /**

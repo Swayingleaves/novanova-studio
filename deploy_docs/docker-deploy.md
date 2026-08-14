@@ -45,6 +45,7 @@ openssl rand -base64 48
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | 改为实际的域名，例如 `https://www.yourdomain.com`。 |
 | `TZ` | 容器和 Java 日志时区，默认是 `Asia/Shanghai`。 |
 | `NEXT_PUBLIC_CREDIT_STORE_URL` | 可选，发卡网站地址；未配置时购买积分页面显示“没有配置发卡网站”。 |
+| `AI_TASK_POLLING_INTERVAL_SECONDS` | 所有 AI 异步任务状态轮询间隔（服务端渠道、内部等待、视频合成恢复和前端状态查询），单位为秒，必须大于 0，默认 `3`。 |
 
 ### Nginx 路径配置
 

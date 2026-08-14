@@ -87,10 +87,10 @@ public class CreationPlanExecutor {
     public Mono<PlanExecutionSummary> execute(Long userId, String sessionId, CreationPlan plan,
                                               AgentChatRequest request, Model model) {
         Map<String, TaskExecutionResult> completed = new LinkedHashMap<>();
-        return planRepository.updatePlanStatus(plan.planId(), "running", "")
+        return planRepository.updateCreationAgentPlanStatus(plan.planId(), "running", "")
                 .then(executeLayer(userId, sessionId, plan, request, model, new ArrayList<>(plan.tasks()), completed))
                 .map(results -> summarize(plan, results))
-                .flatMap(summary -> planRepository.updatePlanStatus(plan.planId(), summary.status(),
+                .flatMap(summary -> planRepository.updateCreationAgentPlanStatus(plan.planId(), summary.status(),
                         "success".equals(summary.status()) ? "" : summary.message()).thenReturn(summary));
     }
 
@@ -763,9 +763,9 @@ public class CreationPlanExecutor {
                     executionRegistry.beginTaskCreation(sessionId);
                     return promptOptimizationService.optimizeAndWait(userId, taskType, originalPrompt, styles, response -> {
                         optimizationTaskId.set(response.id());
-                        boolean canceled = executionRegistry.registerTask(sessionId,
-                                new AgentExecutionRegistry.AgentTaskRegistration(response.id(), "", "", null));
-                        return canceled ? aiTaskService.cancelTaskForUser(userId, response.id()).then() : Mono.empty();
+                        return executionRegistry.registerTaskAndPersist(sessionId,
+                                        new AgentExecutionRegistry.AgentTaskRegistration(response.id(), "", "", null))
+                                .flatMap(canceled -> canceled ? aiTaskService.cancelTaskForUser(userId, response.id()).then() : Mono.empty());
                     });
                 })
                 .doFinally(signal -> {

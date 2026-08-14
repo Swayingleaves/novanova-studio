@@ -325,6 +325,11 @@ public class AgentTaskOrchestrator {
      * @param result AgentToolResult 工具结果
      */
     public void submitToolResult(Long userId, AgentToolResult result) {
+        if (result.requestId() != null && !matchesActiveRequest(result.sessionId(), result.requestId())) {
+            log.warn("拒绝非当前主Agent请求的画布工具结果: userId={}, sessionId={}, requestId={}",
+                    userId, result.sessionId(), result.requestId());
+            return;
+        }
         if (!executionRegistry.isOwnedBy(userId, result.sessionId())) {
             log.warn("拒绝非会话所属用户回传工具结果: userId={}, sessionId={}", userId, result.sessionId());
             return;
@@ -344,6 +349,17 @@ public class AgentTaskOrchestrator {
         }
         sink.success(new ToolResult(result.result().ok(), result.result().message(),
                 result.result().data(), result.result().error()));
+    }
+
+    /**
+     * 判断画布工具结果是否属于当前运行的统一主Agent请求。
+     *
+     * @param sessionId String 会话ID
+     * @param requestId String 主Agent请求ID
+     * @return boolean 是否匹配
+     */
+    private boolean matchesActiveRequest(String sessionId, String requestId) {
+        return eventEmitter.matchesBoundRequest(sessionId, requestId);
     }
 
     /**

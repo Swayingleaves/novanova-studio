@@ -27,6 +27,7 @@ class NovanovaPropertiesTest {
         Assertions.assertEquals(4, task.getConsumerConcurrency());
         Assertions.assertEquals(4, task.getReadBatchSize());
         Assertions.assertEquals(5, task.getReadBlockSeconds());
+        Assertions.assertEquals(3, task.getPollingIntervalSeconds());
         Assertions.assertEquals(300, task.getLockTtlSeconds());
         Assertions.assertEquals(60, task.getLockRenewSeconds());
         Assertions.assertEquals(300, task.getPendingClaimIdleSeconds());

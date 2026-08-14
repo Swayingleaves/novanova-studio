@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.config.NovanovaProperties;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Assertions;
@@ -24,7 +25,7 @@ class SeedanceProviderAdapterTest {
      */
     @Test
     void shouldOnlySupportVideoTasks() {
-        SeedanceProviderAdapter adapter = new SeedanceProviderAdapter(null, null);
+        SeedanceProviderAdapter adapter = new SeedanceProviderAdapter(null, null, new NovanovaProperties());
 
         Assertions.assertEquals("seedance", adapter.apiFormat());
         Assertions.assertTrue(adapter.supports(AiTaskTypes.VIDEO));

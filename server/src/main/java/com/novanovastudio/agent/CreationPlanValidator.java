@@ -10,6 +10,7 @@ import com.novanovastudio.agent.dto.AgentTool;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.GenerationStyleDtos;
+import com.novanovastudio.service.GenerationStyleService;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -148,7 +149,7 @@ public class CreationPlanValidator {
         }
         if (hasStyleSnapshots) {
             List<GenerationStyleDtos.GenerationStyleSnapshot> snapshots = settings.generationStyleSnapshots();
-            if (snapshots.size() > 3) {
+            if (snapshots.size() > GenerationStyleService.MAX_HISTORY_STYLE_SNAPSHOT_COUNT) {
                 throw invalid("最多保留3个风格快照");
             }
             Set<Long> ids = new HashSet<>();
@@ -166,8 +167,8 @@ public class CreationPlanValidator {
 
     /** 校验一组风格ID的数量、非空和重复约束。 */
     private void validateStyleIds(List<Long> ids) {
-        if (ids.size() > 3) {
-            throw invalid("最多选择3个风格");
+        if (ids.size() > GenerationStyleService.MAX_SELECTED_STYLE_COUNT) {
+            throw invalid("最多选择1个风格");
         }
         if (ids.stream().anyMatch(Objects::isNull) || ids.stream().anyMatch(id -> id <= 0)) {
             throw invalid("风格ID不合法");

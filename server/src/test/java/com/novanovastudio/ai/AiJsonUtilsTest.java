@@ -85,4 +85,14 @@ class AiJsonUtilsTest {
         Assertions.assertEquals(503, exception.getDetails().httpStatus());
         Assertions.assertFalse(exception.getDetails().safeToRetry());
     }
+
+    /**
+     * 测试字符串状态码不会被当作数值错误码解析。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldIgnoreNonNumericEnvelopeCode() {
+        Assertions.assertDoesNotThrow(() -> AiJsonUtils.validateEnvelope(JSONObject.of("code", "success", "data", new JSONObject()), "polling"));
+    }
 }

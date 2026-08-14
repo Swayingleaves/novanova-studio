@@ -1,7 +1,15 @@
 package com.novanovastudio.agent;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.agent.dto.AgentMessage;
 import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentSession;
@@ -9,13 +17,17 @@ import com.novanovastudio.agent.dto.CreationPlan;
 import com.novanovastudio.agent.dto.CreationSettings;
 import com.novanovastudio.agent.dto.CreationTask;
 import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.entity.CreationAgentRequest;
 import com.novanovastudio.repository.AgentPlanRepository;
+import com.novanovastudio.repository.CreationAgentRequestRepository;
 import com.novanovastudio.service.AiTaskService;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import reactor.core.publisher.Mono;
 
 /**
  * 统一主Agent入口路由和提示词约束测试。
@@ -264,6 +276,128 @@ class CreationAgentOrchestratorTest {
     }
 
     /**
+     * 同一用户同一入口连续提交时，每次都必须创建独立请求并进入队列，不能复用或忽略旧请求。
+     */
+    @Test
+    void shouldPersistAndQueueEverySameEntryRequest() {
+        AgentSessionService sessionService = mock(AgentSessionService.class);
+        CreationAgentRequestRepository requestRepository = mock(CreationAgentRequestRepository.class);
+        CreationAgentRequestDispatcher requestDispatcher = mock(CreationAgentRequestDispatcher.class);
+        AgentEventEmitter eventEmitter = mock(AgentEventEmitter.class);
+        AgentSession agentSession = session(List.of());
+        when(sessionService.getOrCreateSession(1L, null, CreationEntrySource.IMAGE_PAGE)).thenReturn(Mono.just(agentSession));
+        when(requestRepository.create(any(CreationAgentRequest.class))).thenReturn(Mono.empty());
+        when(requestDispatcher.enqueue(any(CreationAgentRequest.class))).thenReturn(Mono.empty());
+        when(requestRepository.findStatusById(anyString())).thenReturn(Mono.just("queued"));
+        CreationAgentOrchestrator orchestrator = queuedOrchestrator(sessionService, eventEmitter,
+                mock(AgentPlanRepository.class), mock(AiTaskService.class), requestRepository, requestDispatcher,
+                mock(CreationAgentRequestQueue.class));
+
+        var first = orchestrator.startChat(1L, chatRequest("第一条图片请求")).block();
+        var second = orchestrator.startChat(1L, chatRequest("第二条图片请求")).block();
+
+        Assertions.assertNotNull(first);
+        Assertions.assertNotNull(second);
+        Assertions.assertEquals("session", first.sessionId());
+        Assertions.assertEquals("session", second.sessionId());
+        Assertions.assertEquals("queued", first.status());
+        Assertions.assertEquals("queued", second.status());
+        Assertions.assertNotEquals(first.requestId(), second.requestId());
+
+        ArgumentCaptor<CreationAgentRequest> requestCaptor = ArgumentCaptor.forClass(CreationAgentRequest.class);
+        verify(requestRepository, times(2)).create(requestCaptor.capture());
+        verify(requestDispatcher, times(2)).enqueue(any(CreationAgentRequest.class));
+        List<CreationAgentRequest> requests = requestCaptor.getAllValues();
+        Assertions.assertEquals(first.requestId(), requests.getFirst().getId());
+        Assertions.assertEquals(second.requestId(), requests.get(1).getId());
+        Assertions.assertEquals("第一条图片请求", JSON.parseObject(requests.getFirst().getRequestData(), AgentChatRequest.class).message());
+        Assertions.assertEquals("第二条图片请求", JSON.parseObject(requests.get(1).getRequestData(), AgentChatRequest.class).message());
+        Assertions.assertEquals("session", JSON.parseObject(requests.getFirst().getRequestData(), AgentChatRequest.class).sessionId());
+    }
+
+    /**
+     * 取消排队请求只能移除目标请求，不能影响同分区正在运行或其他入口的请求。
+     */
+    @Test
+    void shouldCancelOnlyTargetQueuedRequest() {
+        CreationAgentRequestRepository requestRepository = mock(CreationAgentRequestRepository.class);
+        CreationAgentRequestDispatcher requestDispatcher = mock(CreationAgentRequestDispatcher.class);
+        CreationAgentRequestQueue requestQueue = mock(CreationAgentRequestQueue.class);
+        AgentPlanRepository planRepository = mock(AgentPlanRepository.class);
+        AiTaskService aiTaskService = mock(AiTaskService.class);
+        CreationAgentRequest queued = queuedRequest("request-b", "queued", "");
+        when(requestRepository.findByIdForUser(1L, "request-b")).thenReturn(Mono.just(queued));
+        when(requestRepository.cancelQueuedIfQueued(1L, "request-b", "已停止生成")).thenReturn(Mono.just(true));
+        when(requestQueue.removeQueuedRequest(1L, CreationEntrySource.IMAGE_PAGE, "request-b")).thenReturn(Mono.empty());
+        when(requestQueue.releaseActiveRequest(1L, CreationEntrySource.IMAGE_PAGE, "request-b")).thenReturn(Mono.empty());
+        when(requestDispatcher.dispatchAvailable(1L, CreationEntrySource.IMAGE_PAGE)).thenReturn(Mono.empty());
+        CreationAgentOrchestrator orchestrator = queuedOrchestrator(mock(AgentSessionService.class), mock(AgentEventEmitter.class),
+                planRepository, aiTaskService, requestRepository, requestDispatcher, requestQueue);
+
+        orchestrator.cancelChat(1L, "request-b").block();
+
+        verify(requestRepository).cancelQueuedIfQueued(1L, "request-b", "已停止生成");
+        verify(requestQueue).removeQueuedRequest(1L, CreationEntrySource.IMAGE_PAGE, "request-b");
+        verify(requestQueue).releaseActiveRequest(1L, CreationEntrySource.IMAGE_PAGE, "request-b");
+        verify(requestDispatcher).dispatchAvailable(1L, CreationEntrySource.IMAGE_PAGE);
+        verify(requestRepository, never()).cancelRunningIfRunning(anyLong(), anyString(), anyString());
+        verify(requestQueue, never()).markCancelRequested(anyString());
+        verify(planRepository, never()).cancelPlan(anyString());
+        verify(aiTaskService, never()).cancelTaskForUser(anyLong(), anyString());
+    }
+
+    /**
+     * 取消运行请求必须写入跨实例取消标记，并取消已创建计划和底层任务。
+     */
+    @Test
+    void shouldMarkAndCancelRunningRequestResources() {
+        CreationAgentRequestRepository requestRepository = mock(CreationAgentRequestRepository.class);
+        CreationAgentRequestDispatcher requestDispatcher = mock(CreationAgentRequestDispatcher.class);
+        CreationAgentRequestQueue requestQueue = mock(CreationAgentRequestQueue.class);
+        AgentPlanRepository planRepository = mock(AgentPlanRepository.class);
+        AiTaskService aiTaskService = mock(AiTaskService.class);
+        CreationAgentRequest running = queuedRequest("request-running", "running", "plan-1");
+        running.setTaskIds("[\"task-1\"]");
+        when(requestRepository.findByIdForUser(1L, "request-running")).thenReturn(Mono.just(running));
+        when(requestRepository.cancelRunningIfRunning(1L, "request-running", "已停止生成")).thenReturn(Mono.just(true));
+        when(requestQueue.markCancelRequested("request-running")).thenReturn(Mono.empty());
+        when(requestRepository.taskIds(running)).thenReturn(List.of("task-1"));
+        when(planRepository.cancelPlan("plan-1")).thenReturn(Mono.empty());
+        when(aiTaskService.cancelTaskForUser(1L, "task-1")).thenReturn(Mono.empty());
+        CreationAgentOrchestrator orchestrator = queuedOrchestrator(mock(AgentSessionService.class), mock(AgentEventEmitter.class),
+                planRepository, aiTaskService, requestRepository, requestDispatcher, requestQueue);
+
+        orchestrator.cancelChat(1L, "request-running").block();
+
+        verify(requestRepository).cancelRunningIfRunning(1L, "request-running", "已停止生成");
+        verify(requestQueue).markCancelRequested("request-running");
+        verify(planRepository).cancelPlan("plan-1");
+        verify(aiTaskService).cancelTaskForUser(1L, "task-1");
+        verify(requestQueue, never()).removeQueuedRequest(anyLong(), anyString(), anyString());
+        verify(requestDispatcher, never()).dispatchAvailable(anyLong(), anyString());
+    }
+
+    /**
+     * 旧实例收到中断取消标记后，必须保持关联计划失败，不能覆盖为已取消。
+     */
+    @Test
+    void shouldKeepInterruptedRequestPlanFailedWhenOldInstanceStops() {
+        AgentPlanRepository planRepository = mock(AgentPlanRepository.class);
+        CreationAgentRequest interrupted = queuedRequest("request-interrupted", "interrupted", "plan-1");
+        interrupted.setErrorMessage("服务重启导致请求已中断");
+        when(planRepository.markInterruptedPlanFailed("plan-1", "服务重启导致请求已中断"))
+                .thenReturn(Mono.empty());
+        CreationAgentOrchestrator orchestrator = queuedOrchestrator(mock(AgentSessionService.class), mock(AgentEventEmitter.class),
+                planRepository, mock(AiTaskService.class), mock(CreationAgentRequestRepository.class),
+                mock(CreationAgentRequestDispatcher.class), mock(CreationAgentRequestQueue.class));
+
+        orchestrator.completePlanForTerminalRequest(interrupted, "plan-1", "已停止生成").block();
+
+        verify(planRepository).markInterruptedPlanFailed("plan-1", "服务重启导致请求已中断");
+        verify(planRepository, never()).cancelPlan("plan-1");
+    }
+
+    /**
      * 构造主Agent编排器。
      *
      * @param sessionService AgentSessionService 会话服务
@@ -284,7 +418,75 @@ class CreationAgentOrchestratorTest {
                 mock(CreationPlanExecutor.class),
                 planRepository,
                 mock(AiTaskService.class),
-                new AgentToolRegistry());
+                new AgentToolRegistry(),
+                mock(CreationAgentRequestRepository.class),
+                mock(CreationAgentRequestDispatcher.class),
+                mock(CreationAgentRequestQueue.class));
+    }
+
+    /**
+     * 构造用于主Agent请求队列测试的编排器。
+     *
+     * @param sessionService Agent会话服务
+     * @param eventEmitter Agent事件发射器
+     * @param planRepository 创作计划仓储
+     * @param aiTaskService 底层AI任务服务
+     * @param requestRepository 主Agent请求仓储
+     * @param requestDispatcher 主Agent请求调度器
+     * @param requestQueue 主Agent请求Redis队列
+     * @return CreationAgentOrchestrator 主Agent编排器
+     */
+    private CreationAgentOrchestrator queuedOrchestrator(AgentSessionService sessionService,
+                                                          AgentEventEmitter eventEmitter,
+                                                          AgentPlanRepository planRepository,
+                                                          AiTaskService aiTaskService,
+                                                          CreationAgentRequestRepository requestRepository,
+                                                          CreationAgentRequestDispatcher requestDispatcher,
+                                                          CreationAgentRequestQueue requestQueue) {
+        return new CreationAgentOrchestrator(
+                sessionService,
+                eventEmitter,
+                mock(AgentExecutionRegistry.class),
+                mock(AgentScopeModelFactory.class),
+                mock(AgentScopeAgentFactory.class),
+                mock(CreationPlanValidator.class),
+                mock(CreationPlanExecutor.class),
+                planRepository,
+                aiTaskService,
+                new AgentToolRegistry(),
+                requestRepository,
+                requestDispatcher,
+                requestQueue);
+    }
+
+    /**
+     * 构造图片入口主Agent聊天请求。
+     *
+     * @param message String 用户消息
+     * @return AgentChatRequest 聊天请求
+     */
+    private AgentChatRequest chatRequest(String message) {
+        return new AgentChatRequest(null, CreationEntrySource.IMAGE_PAGE, message, Map.of(), List.of(), List.of(), List.of(), null);
+    }
+
+    /**
+     * 构造主Agent请求记录。
+     *
+     * @param requestId String 请求ID
+     * @param status String 请求状态
+     * @param planId String 创作计划ID
+     * @return CreationAgentRequest 请求记录
+     */
+    private CreationAgentRequest queuedRequest(String requestId, String status, String planId) {
+        CreationAgentRequest request = new CreationAgentRequest();
+        request.setId(requestId);
+        request.setUserId(1L);
+        request.setSessionId("session");
+        request.setEntrySource(CreationEntrySource.IMAGE_PAGE);
+        request.setStatus(status);
+        request.setPlanId(planId);
+        request.setTaskIds("[]");
+        return request;
     }
 
     /**

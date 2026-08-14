@@ -1,8 +1,10 @@
 package com.novanovastudio.service;
 
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.ai.AiTaskPollingSupport;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.dto.PromptOptimizationDtos;
@@ -35,29 +37,46 @@ public class PromptOptimizationService {
     /** 生成风格服务 */
     private final GenerationStyleService generationStyleService;
 
+    /** 服务配置 */
+    private final NovanovaProperties properties;
+
     /**
      * 创建提示词优化服务。
      *
      * @param aiTaskService AI任务服务
      * @param systemPromptTemplateService 系统提示词模板服务
      * @param generationStyleService 生成风格服务
+     * @param properties NovanovaProperties 服务配置
      */
     @Autowired
     public PromptOptimizationService(AiTaskService aiTaskService, SystemPromptTemplateService systemPromptTemplateService,
-                                     GenerationStyleService generationStyleService) {
+                                     GenerationStyleService generationStyleService, NovanovaProperties properties) {
         this.aiTaskService = aiTaskService;
         this.systemPromptTemplateService = systemPromptTemplateService;
         this.generationStyleService = generationStyleService;
+        this.properties = properties;
     }
 
     /**
-     * 保留无风格测试和旧调用方使用的构造方式。
+     * 保留无风格调用方的构造方式，轮询仍通过统一配置工具读取默认配置。
      *
      * @param aiTaskService AI任务服务
      * @param systemPromptTemplateService 系统提示词模板服务
      */
     public PromptOptimizationService(AiTaskService aiTaskService, SystemPromptTemplateService systemPromptTemplateService) {
-        this(aiTaskService, systemPromptTemplateService, null);
+        this(aiTaskService, systemPromptTemplateService, null, new NovanovaProperties());
+    }
+
+    /**
+     * 保留带风格服务调用方的构造方式，轮询仍通过统一配置工具读取默认配置。
+     *
+     * @param aiTaskService AI任务服务
+     * @param systemPromptTemplateService 系统提示词模板服务
+     * @param generationStyleService 生成风格服务
+     */
+    public PromptOptimizationService(AiTaskService aiTaskService, SystemPromptTemplateService systemPromptTemplateService,
+                                     GenerationStyleService generationStyleService) {
+        this(aiTaskService, systemPromptTemplateService, generationStyleService, new NovanovaProperties());
     }
 
     /**
@@ -150,8 +169,9 @@ public class PromptOptimizationService {
                                         Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
         PromptOptimizationDtos.OptimizePromptRequest request = new PromptOptimizationDtos.OptimizePromptRequest(generationType, prompt);
         systemPrompt(generationType);
+        Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
         return aiTaskService.createTaskForUser(userId, optimizationTaskRequest(request, styles), beforeEnqueue)
-                .flatMap(created -> reactor.core.publisher.Flux.interval(Duration.ZERO, Duration.ofSeconds(1))
+                .flatMap(created -> reactor.core.publisher.Flux.interval(Duration.ZERO, pollingInterval)
                         .concatMap(ignored -> aiTaskService.getTaskForUser(userId, created.id()))
                         .filter(task -> List.of("success", "failed", "canceled").contains(task.status()))
                         .next()

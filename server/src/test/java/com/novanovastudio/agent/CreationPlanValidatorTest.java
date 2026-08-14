@@ -111,18 +111,34 @@ class CreationPlanValidatorTest {
     }
 
     /**
-     * 画布图片和视频风格总数超过三项时必须拒绝。
+     * 画布图片和视频风格总数超过一项时必须拒绝。
      */
     @Test
-    void shouldRejectMoreThanThreeCanvasStylesAcrossTypes() {
+    void shouldRejectMultipleCanvasStylesAcrossTypes() {
         CreationPlan plan = plan(CreationEntrySource.CANVAS, List.of(
                 canvasGenerationTask("image-task", "image", "canvas_generate_image",
                         Map.of("prompt", "一只小猫", "size", "16:9"))));
         CreationSettings settings = new CreationSettings("image-model", "16:9", "2K", "high", 1, null, null,
-                null, null, Map.of("image", List.of(1L, 2L), "video", List.of(3L, 4L)));
+                null, null, Map.of("image", List.of(1L), "video", List.of(2L)));
 
         Assertions.assertThrows(BusinessException.class,
                 () -> validator.validate(plan, CreationEntrySource.CANVAS, settings));
+    }
+
+    /**
+     * 图片和视频页面的普通风格ID也只能提交一个。
+     */
+    @Test
+    void shouldRejectMultipleDirectStyleIds() {
+        CreationPlan plan = plan(CreationEntrySource.IMAGE_PAGE,
+                List.of(task("image-task", "image", List.of())));
+        CreationSettings settings = new CreationSettings("image-model", "1:1", "2K", "high", 1, null, null,
+                List.of(1L, 2L), null);
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class,
+                () -> validator.validate(plan, CreationEntrySource.IMAGE_PAGE, settings));
+
+        Assertions.assertTrue(exception.getMessage().contains("最多选择1个风格"));
     }
 
     /**

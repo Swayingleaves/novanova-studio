@@ -7,16 +7,16 @@
 package com.novanovastudio.controller;
 
 import com.novanovastudio.agent.AgentEventEmitter;
-import com.novanovastudio.agent.AgentTaskOrchestrator;
 import com.novanovastudio.agent.CreationAgentOrchestrator;
 import com.novanovastudio.agent.CreationEntrySource;
+import com.novanovastudio.agent.AgentToolResultRelay;
 import com.novanovastudio.agent.dto.AgentCancelRequest;
 import com.novanovastudio.agent.dto.AgentChatRequest;
+import com.novanovastudio.agent.dto.CreationAgentChatResponse;
 import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.agent.dto.AgentToolResult;
 import com.novanovastudio.common.ApiResponse;
 import com.novanovastudio.security.CurrentUserProvider;
-import java.util.Map;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -39,44 +39,40 @@ import reactor.core.publisher.Mono;
 @Slf4j
 public class AgentController {
 
-    private final AgentTaskOrchestrator orchestrator;
     private final CreationAgentOrchestrator creationAgentOrchestrator;
     private final AgentEventEmitter eventEmitter;
+    private final AgentToolResultRelay toolResultRelay;
     private final CurrentUserProvider currentUserProvider;
 
     /**
-     * 发起对话。接收用户消息、入口来源和生成设置，异步启动主Agent计划，立即返回sessionId。
+     * 发起对话。接收用户消息、入口来源和生成设置，创建主Agent请求并进入对应分区队列。
      *
      * @param request AgentChatRequest 对话请求
-     * @return Mono<ApiResponse<Map<String, String>>> sessionId
+     * @return Mono<ApiResponse<CreationAgentChatResponse>> 会话、请求和当前排队状态
      */
     @PostMapping("/chat")
-    public Mono<ApiResponse<Map<String, String>>> chat(@RequestBody AgentChatRequest request) {
+    public Mono<ApiResponse<CreationAgentChatResponse>> chat(@RequestBody AgentChatRequest request) {
         if (request == null || !CreationEntrySource.supported(request.entrySource())) {
             return Mono.error(new com.novanovastudio.common.BusinessException(
                     com.novanovastudio.common.ErrorCode.PARAM_INVALID, "Agent入口来源不合法"));
         }
         log.info("Agent 对话请求: entrySource={}, sessionId={}, message={}", request.entrySource(), request.sessionId(), request.message());
         return currentUserProvider.currentUserId()
-            .flatMap(userId -> creationAgentOrchestrator.supports(request.entrySource())
-                    ? creationAgentOrchestrator.startChat(userId, request)
-                    : orchestrator.startChat(userId, request))
-            .map(sessionId -> ApiResponse.ok(Map.of("sessionId", sessionId)));
+            .flatMap(userId -> creationAgentOrchestrator.startChat(userId, request))
+            .map(ApiResponse::ok);
     }
 
     /**
-     * 停止当前用户的活跃 Agent 会话及其关联生成任务。
+     * 按请求ID停止当前用户的主Agent请求及其关联生成任务。
      *
      * @param request AgentCancelRequest 会话取消请求
      * @return Mono<ApiResponse<Void>> 停止结果
      */
     @PostMapping("/cancelChat")
     public Mono<ApiResponse<Void>> cancelChat(@Valid @RequestBody AgentCancelRequest request) {
-        log.info("停止 Agent 对话请求: sessionId={}", request.sessionId());
+        log.info("停止 Agent 对话请求: sessionId={}, requestId={}", request.sessionId(), request.requestId());
         return currentUserProvider.currentUserId()
-                .flatMap(userId -> creationAgentOrchestrator.isActive(request.sessionId())
-                        ? creationAgentOrchestrator.cancelChat(userId, request.sessionId())
-                        : orchestrator.cancelChat(userId, request.sessionId()))
+                .flatMap(userId -> creationAgentOrchestrator.cancelChat(userId, request.requestId()))
                 .thenReturn(ApiResponse.ok(null));
     }
 
@@ -102,12 +98,11 @@ public class AgentController {
      * @return Mono<ApiResponse<Void>>
      */
     @PostMapping("/tool-result")
-    public Mono<ApiResponse<Void>> submitToolResult(@RequestBody AgentToolResult request) {
-        log.info("Agent 工具结果回传: sessionId={}, callId={}", request.sessionId(), request.callId());
+    public Mono<ApiResponse<Void>> submitToolResult(@Valid @RequestBody AgentToolResult request) {
+        log.info("Agent 工具结果回传: sessionId={}, requestId={}, callId={}",
+                request.sessionId(), request.requestId(), request.callId());
         return currentUserProvider.currentUserId()
-            .flatMap(userId -> {
-                orchestrator.submitToolResult(userId, request);
-                return Mono.just(ApiResponse.ok(null));
-            });
+            .flatMap(userId -> toolResultRelay.publish(userId, request))
+            .thenReturn(ApiResponse.ok(null));
     }
 }

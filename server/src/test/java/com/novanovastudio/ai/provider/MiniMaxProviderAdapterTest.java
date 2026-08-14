@@ -16,6 +16,7 @@ import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.GeneratedBinary;
 import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.entity.AiGenerationTask;
@@ -43,7 +44,7 @@ class MiniMaxProviderAdapterTest {
      */
     @Test
     void shouldOnlySupportVideoTasks() {
-        MiniMaxProviderAdapter adapter = new MiniMaxProviderAdapter(null, null);
+        MiniMaxProviderAdapter adapter = new MiniMaxProviderAdapter(null, null, new NovanovaProperties());
 
         Assertions.assertEquals("minimax", adapter.apiFormat());
         Assertions.assertTrue(adapter.supports(AiTaskTypes.VIDEO));
@@ -153,7 +154,7 @@ class MiniMaxProviderAdapterTest {
     void shouldPollAndStoreMiniMaxVideoResult() {
         AiHttpClient aiHttpClient = mock(AiHttpClient.class);
         AiMediaSupport mediaSupport = mock(AiMediaSupport.class);
-        MiniMaxProviderAdapter adapter = new MiniMaxProviderAdapter(aiHttpClient, mediaSupport);
+        MiniMaxProviderAdapter adapter = new MiniMaxProviderAdapter(aiHttpClient, mediaSupport, new NovanovaProperties());
         String providerTaskId = "provider-task-1";
         String remoteUrl = "https://cdn.example.com/video.mp4";
         PersistenceDtos.UploadedMediaResponse stored = new PersistenceDtos.UploadedMediaResponse(
@@ -188,7 +189,7 @@ class MiniMaxProviderAdapterTest {
     @Test
     void shouldPropagateMiniMaxFailureResponse() {
         AiHttpClient aiHttpClient = mock(AiHttpClient.class);
-        MiniMaxProviderAdapter adapter = new MiniMaxProviderAdapter(aiHttpClient, mock(AiMediaSupport.class));
+        MiniMaxProviderAdapter adapter = new MiniMaxProviderAdapter(aiHttpClient, mock(AiMediaSupport.class), new NovanovaProperties());
         when(aiHttpClient.sendJsonRequest(any(AiTaskDtos.AiChannelConfig.class), eq("POST"), eq("/v2/video_generation"), any()))
                 .thenReturn(Mono.just(JSON.parseObject("{\"task_id\":\"provider-task-2\"}")));
         when(aiHttpClient.sendJsonRequest(any(AiTaskDtos.AiChannelConfig.class), eq("GET"), eq("/v2/query/video_generation/provider-task-2"), isNull()))
@@ -212,7 +213,7 @@ class MiniMaxProviderAdapterTest {
     @Test
     void shouldCancelQueuedMiniMaxTask() {
         AiHttpClient aiHttpClient = mock(AiHttpClient.class);
-        MiniMaxProviderAdapter adapter = new MiniMaxProviderAdapter(aiHttpClient, mock(AiMediaSupport.class));
+        MiniMaxProviderAdapter adapter = new MiniMaxProviderAdapter(aiHttpClient, mock(AiMediaSupport.class), new NovanovaProperties());
         String queryPath = "/v2/query/video_generation/provider-task-3";
         when(aiHttpClient.sendJsonRequest(any(AiTaskDtos.AiChannelConfig.class), eq("POST"), eq("/v2/video_generation"), any()))
                 .thenReturn(Mono.just(JSON.parseObject("{\"task_id\":\"provider-task-3\"}")));

@@ -2,8 +2,10 @@ package com.novanovastudio.service;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
+import com.novanovastudio.ai.AiTaskPollingSupport;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.dto.VideoCompositionDtos;
 import com.novanovastudio.entity.VideoCompositionTask;
@@ -88,6 +90,9 @@ public class VideoCompositionTaskService {
     /** 视频合成任务取消标记 */
     private final VideoCompositionTaskCancellation cancellation;
 
+    /** 服务配置 */
+    private final NovanovaProperties properties;
+
     /** 未完成任务恢复订阅 */
     private Disposable recoveryDisposable;
 
@@ -99,7 +104,8 @@ public class VideoCompositionTaskService {
         if (recoveryDisposable != null) {
             recoveryDisposable.dispose();
         }
-        recoveryDisposable = Flux.interval(Duration.ZERO, Duration.ofSeconds(30))
+        Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
+        recoveryDisposable = Flux.interval(Duration.ZERO, pollingInterval)
                 .concatMap(ignored -> recoverUnfinishedTasksOnce().onErrorResume(exception -> {
                     log.error("恢复视频合成任务失败", exception);
                     return Mono.<Void>empty();

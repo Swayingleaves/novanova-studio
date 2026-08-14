@@ -619,7 +619,7 @@ public class AiHttpClient {
             throw new BusinessException(ErrorCode.PARAM_MISSING, "接口格式不能为空");
         }
         String normalizedFormat = apiFormat.trim().toLowerCase(Locale.ROOT);
-        Set<String> supportedFormats = Set.of("openai", "gemini", "anthropic", "agnes", "seedance", "minimax");
+        Set<String> supportedFormats = Set.of("openai", "newapi", "evolink", "gemini", "anthropic", "agnes", "seedance", "minimax");
         if (!supportedFormats.contains(normalizedFormat)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "不支持的接口格式: " + normalizedFormat);
         }

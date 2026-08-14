@@ -37,6 +37,10 @@ public final class GenerationStyleRecords {
         private String name;
         /** 风格提示词。 */
         private String stylePrompt;
+        /** 风格封面地址。 */
+        private String coverUrl;
+        /** 风格分类。 */
+        private String category;
         /** 启用状态。 */
         private Integer status;
         /** 排序值。 */

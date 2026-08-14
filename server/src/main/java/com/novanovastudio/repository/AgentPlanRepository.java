@@ -103,6 +103,54 @@ public class AgentPlanRepository {
     }
 
     /**
+     * 在关联主Agent请求未中断时更新计划状态。
+     *
+     * @param planId String 计划ID
+     * @param status String 新状态
+     * @param errorMessage String 状态说明
+     * @return Mono<Void> 更新完成信号
+     */
+    public Mono<Void> updateCreationAgentPlanStatus(String planId, String status, String errorMessage) {
+        return databaseClient.sql("""
+                UPDATE agent_plan
+                SET status = :status, error_message = :errorMessage, updated_at = NOW(),
+                    completed_at = CASE WHEN :terminal THEN NOW() ELSE completed_at END
+                WHERE id = :planId
+                  AND (status <> 'canceled' OR :status = 'canceled')
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM creation_agent_request
+                      WHERE plan_id = :planId AND status = 'interrupted'
+                  )
+                """)
+                .bind("status", status)
+                .bind("errorMessage", text(errorMessage))
+                .bind("terminal", java.util.Set.of("success", "partial_failed", "failed", "canceled").contains(status))
+                .bind("planId", planId)
+                .then();
+    }
+
+    /**
+     * 将因主Agent活动租约失效而中断的计划写为失败终态。
+     * <p>
+     * 该方法允许覆盖旧实例晚到的取消状态，保证请求已中断时计划不会被错误标记为已取消。
+     *
+     * @param planId String 计划ID
+     * @param errorMessage String 中断说明
+     * @return Mono<Void> 更新完成信号
+     */
+    public Mono<Void> markInterruptedPlanFailed(String planId, String errorMessage) {
+        return databaseClient.sql("""
+                UPDATE agent_plan
+                SET status = 'failed', error_message = :errorMessage, updated_at = NOW(), completed_at = NOW()
+                WHERE id = :planId
+                """)
+                .bind("errorMessage", text(errorMessage))
+                .bind("planId", planId)
+                .then();
+    }
+
+    /**
      * 将计划中尚未完成的任务和计划本身统一标记为已取消。
      *
      * @param planId String 计划ID

@@ -8,9 +8,11 @@ import com.novanovastudio.ai.AiMediaSupport;
 import com.novanovastudio.ai.AiProviderAdapter;
 import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.AiTaskParameterReader;
+import com.novanovastudio.ai.AiTaskPollingSupport;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -46,9 +48,6 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
     /** 最大参考视频数量 */
     private static final int MAXIMUM_REFERENCE_VIDEO_COUNT = 3;
 
-    /** 视频任务轮询间隔 */
-    private static final Duration POLLING_INTERVAL = Duration.ofSeconds(5);
-
     /** 视频任务最大轮询次数 */
     private static final int MAXIMUM_POLLING_ATTEMPTS = 120;
 
@@ -73,6 +72,9 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
 
     /** AI媒体支持 */
     private final AiMediaSupport mediaSupport;
+
+    /** 服务配置 */
+    private final NovanovaProperties properties;
 
     /**
      * 获取渠道调用格式。
@@ -170,8 +172,9 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
      */
     private Mono<JSONObject> pollSeedanceVideoTask(AiTaskExecutionContext context, String providerTaskId) {
         String taskPath = VIDEO_TASK_PATH + "/" + providerTaskId;
+        Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
         return Flux.range(0, MAXIMUM_POLLING_ATTEMPTS)
-                .concatMap(attempt -> Mono.delay(POLLING_INTERVAL)
+                .concatMap(attempt -> Mono.delay(pollingInterval)
                         .then(context.isCancelRequested())
                         .flatMap(cancelRequested -> Boolean.TRUE.equals(cancelRequested)
                                 ? cancelSeedanceVideoTask(context, providerTaskId)

@@ -11,6 +11,7 @@ import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.ai.AiMediaSupport;
 import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.entity.AiGenerationTask;
 import java.util.ArrayList;
@@ -34,7 +35,7 @@ class OpenAiProviderAdapterTest {
     @Test
     void shouldSendThinkingConfigurationToChatCompletions() {
         AiHttpClient aiHttpClient = mock(AiHttpClient.class);
-        OpenAiProviderAdapter adapter = new OpenAiProviderAdapter(aiHttpClient, mock(AiMediaSupport.class));
+        OpenAiProviderAdapter adapter = new OpenAiProviderAdapter(aiHttpClient, mock(AiMediaSupport.class), new NovanovaProperties());
         List<JSONObject> payloads = new ArrayList<>();
         when(aiHttpClient.sendJsonRequest(any(AiTaskDtos.AiChannelConfig.class), eq("POST"), eq("/chat/completions"), any()))
                 .thenAnswer(invocation -> {
@@ -59,7 +60,7 @@ class OpenAiProviderAdapterTest {
     @Test
     void shouldNormalizeImageRatioToPixelSize() {
         AiHttpClient aiHttpClient = mock(AiHttpClient.class);
-        OpenAiProviderAdapter adapter = new OpenAiProviderAdapter(aiHttpClient, mock(AiMediaSupport.class));
+        OpenAiProviderAdapter adapter = new OpenAiProviderAdapter(aiHttpClient, mock(AiMediaSupport.class), new NovanovaProperties());
         List<JSONObject> payloads = new ArrayList<>();
         when(aiHttpClient.sendJsonRequest(any(AiTaskDtos.AiChannelConfig.class), eq("POST"), eq("/images/generations"), any()))
                 .thenAnswer(invocation -> {

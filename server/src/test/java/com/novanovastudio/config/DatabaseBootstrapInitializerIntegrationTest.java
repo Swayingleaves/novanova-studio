@@ -46,6 +46,7 @@ class DatabaseBootstrapInitializerIntegrationTest {
         "api_request_logs",
         "assets",
         "canvas_projects",
+        "creation_agent_request",
         "email_verification_codes",
         "generation_logs",
         "homepage_showcases",
@@ -82,17 +83,16 @@ class DatabaseBootstrapInitializerIntegrationTest {
             initializeDatabase(targetDatabaseName, postgresqlContainer.getUsername(), postgresqlContainer.getPassword());
 
             Assertions.assertTrue(databaseExists(targetDatabaseName));
-            Flyway.configure()
+            Flyway flyway = Flyway.configure()
                 .dataSource(targetJdbcUrl(targetDatabaseName), postgresqlContainer.getUsername(), postgresqlContainer.getPassword())
                 .locations("classpath:db/migration")
-                .load()
-                .migrate();
+                .load();
+            int expectedMigrationCount = flyway.info().pending().length;
+            flyway.migrate();
 
-            Assertions.assertEquals(2, queryCount(targetDatabaseName, "flyway_schema_history"));
-            Assertions.assertEquals("2", queryString(
-                targetDatabaseName,
-                "SELECT MAX(CAST(version AS INTEGER)) FROM flyway_schema_history WHERE success = TRUE"
-            ));
+            Assertions.assertEquals(expectedMigrationCount, queryCount(targetDatabaseName, "flyway_schema_history"));
+            Assertions.assertEquals("1", queryString(targetDatabaseName,
+                    "SELECT COUNT(*) FROM flyway_schema_history WHERE success = TRUE AND version = '13'"));
             Assertions.assertTrue(readBusinessTableNames(targetDatabaseName).containsAll(BUSINESS_TABLE_NAMES));
             Assertions.assertEquals(877, queryCount(targetDatabaseName, "prompt_library"));
             Assertions.assertEquals(1, queryCount(targetDatabaseName, "platform_credit_settings"));
@@ -104,6 +104,7 @@ class DatabaseBootstrapInitializerIntegrationTest {
             assertColumnExists(targetDatabaseName, "platform_object_storage_configs", "access_key_encrypted");
             assertColumnExists(targetDatabaseName, "platform_object_storage_configs", "endpoint");
             assertIndexExists(targetDatabaseName, "idx_user_credit_transactions_charge_created");
+            assertIndexExists(targetDatabaseName, "idx_creation_agent_request_recovery");
         } finally {
             dropDatabaseIfExists(targetDatabaseName);
         }

@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.agent.dto.AgentTool;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.service.AiTaskService;
 import com.novanovastudio.service.PersistenceService;
 import com.novanovastudio.service.PromptTemplateType;
@@ -31,10 +32,12 @@ public class ImageProfile extends AbstractTaskProfile {
      * @param persistenceService PersistenceService 生成记录持久化服务
      * @param systemPromptTemplateService SystemPromptTemplateService 系统提示词模板服务
      * @param executionRegistry AgentExecutionRegistry Agent 会话执行登记
+     * @param properties NovanovaProperties 服务配置
      */
     public ImageProfile(@Lazy AiTaskService aiTaskService, PersistenceService persistenceService,
-                        SystemPromptTemplateService systemPromptTemplateService, AgentExecutionRegistry executionRegistry) {
-        super(aiTaskService, persistenceService, executionRegistry);
+                        SystemPromptTemplateService systemPromptTemplateService, AgentExecutionRegistry executionRegistry,
+                        NovanovaProperties properties) {
+        super(aiTaskService, persistenceService, executionRegistry, properties);
         this.systemPromptTemplateService = systemPromptTemplateService;
     }
 

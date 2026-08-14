@@ -1,4 +1,4 @@
-import { serverPost, type ServerMediaInfo } from "./server";
+import { getAiTaskPollingIntervalMilliseconds, serverPost, type ServerMediaInfo } from "./server";
 
 /** 视频合成任务状态。 */
 export type VideoCompositionTaskStatus = "pending" | "running" | "succeeded" | "failed" | "canceled";
@@ -57,11 +57,8 @@ export function cancelCompositionTask(taskId: string): Promise<VideoCompositionT
  * @param options 轮询选项
  * @return 结束状态的任务
  */
-export async function waitVideoCompositionTask(
-    taskId: string,
-    options: { signal?: AbortSignal; onProgress?: (task: VideoCompositionTask) => void; pollIntervalMilliseconds?: number } = {},
-): Promise<VideoCompositionTask> {
-    const pollIntervalMilliseconds = Math.max(500, options.pollIntervalMilliseconds || 2000);
+export async function waitVideoCompositionTask(taskId: string, options: { signal?: AbortSignal; onProgress?: (task: VideoCompositionTask) => void } = {}): Promise<VideoCompositionTask> {
+    const pollIntervalMilliseconds = await getAiTaskPollingIntervalMilliseconds();
     while (true) {
         throwIfAborted(options.signal);
         const task = await getCompositionTask(taskId);
