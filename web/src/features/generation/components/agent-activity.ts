@@ -65,14 +65,92 @@ export function finishRunningAgentActivities(
     });
 }
 
+/**
+ * 在轮次完成后，根据已知活动终态补齐仍处于执行中的步骤，避免时间线残留 loading。
+ */
+export function finishRoundAgentActivities(messages: ChatMessageItem[], description: string): ChatMessageItem[] {
+    const hasRunningActivity = messages.some((item) => isAgentActivityState(item.detail)
+        && (item.detail.status === "running" || item.detail.status === "pending"));
+    if (!hasRunningActivity) {
+        return messages;
+    }
+    const statuses = messages
+        .map((item) => isAgentActivityState(item.detail) ? item.detail.status : null)
+        .filter((status): status is AgentActivityStatus => status !== null);
+    if (statuses.includes("failed")) {
+        return finishRunningAgentActivities(messages, "failed", description);
+    }
+    if (statuses.includes("canceled")) {
+        return finishRunningAgentActivities(messages, "canceled", description);
+    }
+    return messages.map((item) => {
+        if (!isAgentActivityState(item.detail)
+                || (item.detail.status !== "running" && item.detail.status !== "pending")) {
+            return item;
+        }
+        return { ...item, detail: { ...item.detail, status: "success", description } };
+    });
+}
+
 /** 从历史记录中恢复结构合法的Agent执行活动。 */
 export function normalizeAgentActivities(value: unknown): AgentActivityState[] {
     return Array.isArray(value) ? value.filter(isAgentActivityState) : [];
 }
 
+/**
+ * 历史轮次已经有终态结果时，将遗留的执行中活动收尾，兼容旧数据未正确落终态的情况。
+ */
+export function normalizeHistoricalAgentActivities(
+    value: unknown,
+    terminalStatus: "success" | "failed" | "canceled" | null,
+): AgentActivityState[] {
+    const activities = normalizeAgentActivities(value);
+    if (!terminalStatus) {
+        return activities;
+    }
+    return activities.map((activity) => (
+        activity.status === "running" || activity.status === "pending"
+            ? { ...activity, status: terminalStatus }
+            : activity
+    ));
+}
+
 /** 根据服务端计划任务状态创建可展示的活动状态。 */
 export function getPlanTaskActivityStatus(status: string): AgentActivityStatus | null {
     return PLAN_TASK_STATUS_MAP[status] || null;
+}
+
+const TERMINAL_ACTIVITY_STATUSES: ReadonlySet<AgentActivityStatus> = new Set(["success", "failed", "canceled", "skipped"]);
+
+/**
+ * 合并计划任务状态活动：活动已处于终态时忽略后到的中间运行状态（诊断/调整/重试），
+ * 避免服务端 diagnosing 与终态事件乱序到达时，活动状态从失败/成功回退为执行中。
+ */
+export function mergePlanTaskActivityMessage(
+    messages: ChatMessageItem[],
+    planId: string,
+    taskId: string,
+    status: string,
+    statusMessage: string,
+): ChatMessageItem[] {
+    const activityStatus = getPlanTaskActivityStatus(status);
+    if (!activityStatus) {
+        return messages;
+    }
+    const activityId = `task-${planId}-${taskId}`;
+    const existing = messages.find((item) => item.id === activityMessageId(activityId));
+    const existingStatus = existing && isAgentActivityState(existing.detail) ? existing.detail.status : null;
+    if (existingStatus !== null && TERMINAL_ACTIVITY_STATUSES.has(existingStatus)
+            && (activityStatus === "running" || activityStatus === "pending")) {
+        return messages;
+    }
+    return upsertAgentActivityMessage(messages, {
+        id: activityId,
+        type: "plan-task-status",
+        title: "执行创作任务",
+        description: statusMessage,
+        status: activityStatus,
+    });
 }
 
 /** 创建工具执行活动，并提取用户可理解的关键生成参数。 */

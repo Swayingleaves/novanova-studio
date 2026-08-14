@@ -184,6 +184,19 @@ public class AgentEventEmitter {
     }
 
     /**
+     * 保存指定生成轮次的最新执行活动，并在保存快照时强制收尾残留的执行中活动。
+     *
+     * @param userId Long 当前用户ID
+     * @param sessionId String Agent会话ID
+     * @param roundId String 生成轮次ID
+     * @param terminalStatus String 轮次终态
+     * @return Mono<Void> 保存结果
+     */
+    public Mono<Void> persistRoundActivities(Long userId, String sessionId, String roundId, String terminalStatus) {
+        return activityService.persistRoundActivities(userId, sessionId, roundId, terminalStatus);
+    }
+
+    /**
      * 清理用户连接。
      *
      * @param userId Long 用户ID

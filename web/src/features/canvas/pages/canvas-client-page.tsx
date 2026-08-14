@@ -2606,9 +2606,12 @@ function CanvasWorkspacePage() {
             if (!sessionId) return;
             updateAssistantSession(sessionId, (session) => ({
                 ...session,
-                messages: session.messages.map((item) => item.id === `plan-${planId}`
-                    ? { ...item, meta: status === "failed" ? `失败：${statusMessage}` : statusMessage }
-                    : item),
+                messages: session.messages.map((item) => {
+                    if (item.id !== `plan-${planId}`) return item;
+                    // 已标记失败的计划不被后到的诊断/调整/重试等中间状态覆盖，避免失败显示回退为执行中。
+                    if (item.meta?.startsWith("失败：") && status !== "failed") return item;
+                    return { ...item, meta: status === "failed" ? `失败：${statusMessage}` : statusMessage };
+                }),
                 updatedAt: new Date().toISOString(),
             }));
         },

@@ -33,7 +33,7 @@ import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
-import { createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, normalizeAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
+import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, mergePlanTaskActivityMessage, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { hasPendingVideoConversation } from "@/features/generation/lib/generation-conversation-recovery";
 import { reconcileGenerationLogTasks } from "@/features/generation/lib/generation-log-task-reconciliation";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
@@ -312,17 +312,17 @@ export default function VideoPage() {
         onTaskComplete: (messageId, text, action) => {
             const streamed = streamingTextRef.current;
             setChatMessages((prev) => {
-                let next = prev;
+                let next = finishRoundAgentActivities(prev, text || "已完成");
                 if (streamed && streamed.text) {
                     const assistantMessage = { id: streamed.messageId, role: "assistant" as const, text: streamed.text, ...(action ? { action } : {}) };
-                    next = prev.some((item) => item.id === streamed.messageId)
-                        ? prev.map((item) => item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)
-                        : [...prev, assistantMessage];
+                    next = next.some((item) => item.id === streamed.messageId)
+                        ? next.map((item) => item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)
+                        : [...next, assistantMessage];
                 } else if (text || action) {
-                    const lastMessage = prev.at(-1);
+                    const lastMessage = next.at(-1);
                     next = lastMessage?.role === "assistant" && lastMessage.text === text
-                        ? action ? prev.map((item, index) => index === prev.length - 1 ? { ...item, action } : item) : prev
-                        : [...prev, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
+                        ? action ? next.map((item, index) => index === next.length - 1 ? { ...item, action } : item) : next
+                        : [...next, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
                 }
                 chatMessagesRef.current = next;
                 return next;
@@ -391,16 +391,8 @@ export default function VideoPage() {
             });
         },
         onPlanTaskStatus: (planId, taskId, status, statusMessage) => {
-            const activityStatus = getPlanTaskActivityStatus(status);
-            if (!activityStatus) return;
             setChatMessages((prev) => {
-                const next = upsertAgentActivityMessage(prev, {
-                    id: `task-${planId}-${taskId}`,
-                    type: "plan-task-status",
-                    title: "执行创作任务",
-                    description: statusMessage,
-                    status: activityStatus,
-                });
+                const next = mergePlanTaskActivityMessage(prev, planId, taskId, status, statusMessage);
                 chatMessagesRef.current = next;
                 return next;
             });
@@ -1462,7 +1454,7 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
 
             return {
                 ...round,
-                activities: normalizeAgentActivities(round.activities),
+                activities: normalizeHistoricalAgentActivities(round.activities, normalizeVideoRoundActivityStatus(normalizedResult)),
                 references: normalizedReferences,
                 videoReferences: normalizedVideoReferences,
                 result:
@@ -1490,6 +1482,19 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
         generationCompletedAt: raw.generationCompletedAt,
         generationViewedAt: raw.generationViewedAt,
     };
+}
+
+function normalizeVideoRoundActivityStatus(result: GenerationResult | null | undefined): "success" | "failed" | "canceled" | null {
+    if (!result || result.status === "pending") {
+        return null;
+    }
+    if (result.status === "canceled") {
+        return "canceled";
+    }
+    if (result.status === "failed") {
+        return "failed";
+    }
+    return "success";
 }
 
 function readVideoStorageKey(value: unknown): string {

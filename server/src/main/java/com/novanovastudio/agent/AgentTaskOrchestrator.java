@@ -641,6 +641,17 @@ public class AgentTaskOrchestrator {
     }
 
     /**
+     * 计算终态工具结果对应的轮次状态，避免活动快照在持久化时残留执行中。
+     *
+     * @param result ToolResult 工具结果
+     * @return String success、failed或canceled
+     */
+    private String terminalToolStatus(ToolResult result) {
+        boolean canceled = result != null && result.data() != null && Boolean.TRUE.equals(result.data().get("canceled"));
+        return canceled ? "canceled" : result != null && result.ok() ? "success" : "failed";
+    }
+
+    /**
      * 从工具调用和结果构建终态生成轮次，并按首个工具调用ID更新 generation_log。
      *
      * @param sessionId String Agent会话ID
@@ -870,7 +881,8 @@ public class AgentTaskOrchestrator {
                     if (!profile.isTerminalTool(toolName)) {
                         return Mono.just(result);
                     }
-                    return eventEmitter.persistRoundActivities(userId, sessionId, callId).thenReturn(result);
+                    return eventEmitter.persistRoundActivities(userId, sessionId, callId, terminalToolStatus(result))
+                            .thenReturn(result);
                 });
         }
 

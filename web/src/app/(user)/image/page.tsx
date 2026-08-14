@@ -18,7 +18,7 @@ import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
-import { createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, normalizeAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
+import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, mergePlanTaskActivityMessage, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { findLatestPendingConversation, hasPendingImageConversation } from "@/features/generation/lib/generation-conversation-recovery";
 import { reconcileGenerationLogTasks } from "@/features/generation/lib/generation-log-task-reconciliation";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
@@ -312,17 +312,17 @@ export default function ImagePage() {
             // 将流式文本保存为持久消息
             const streamed = streamingTextRef.current;
             setChatMessages((prev) => {
-                let next = prev;
+                let next = finishRoundAgentActivities(prev, text || "已完成");
                 if (streamed && streamed.text) {
                     const assistantMessage = { id: streamed.messageId, role: "assistant" as const, text: streamed.text, ...(action ? { action } : {}) };
-                    next = prev.some((item) => item.id === streamed.messageId)
-                        ? prev.map((item) => item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)
-                        : [...prev, assistantMessage];
+                    next = next.some((item) => item.id === streamed.messageId)
+                        ? next.map((item) => item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)
+                        : [...next, assistantMessage];
                 } else if (text || action) {
-                    const lastMessage = prev.at(-1);
+                    const lastMessage = next.at(-1);
                     next = lastMessage?.role === "assistant" && lastMessage.text === text
-                        ? action ? prev.map((item, index) => index === prev.length - 1 ? { ...item, action } : item) : prev
-                        : [...prev, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
+                        ? action ? next.map((item, index) => index === next.length - 1 ? { ...item, action } : item) : next
+                        : [...next, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
                 }
                 chatMessagesRef.current = next;
                 return next;
@@ -385,16 +385,8 @@ export default function ImagePage() {
             });
         },
         onPlanTaskStatus: (planId, taskId, status, statusMessage) => {
-            const activityStatus = getPlanTaskActivityStatus(status);
-            if (!activityStatus) return;
             setChatMessages((prev) => {
-                const next = upsertAgentActivityMessage(prev, {
-                    id: `task-${planId}-${taskId}`,
-                    type: "plan-task-status",
-                    title: "执行创作任务",
-                    description: statusMessage,
-                    status: activityStatus,
-                });
+                const next = mergePlanTaskActivityMessage(prev, planId, taskId, status, statusMessage);
                 chatMessagesRef.current = next;
                 return next;
             });
@@ -1434,11 +1426,8 @@ async function readConversations() {
 
 async function normalizeConversation(raw: Partial<Conversation>): Promise<Conversation> {
     const rounds = await Promise.all(
-        (raw.rounds || []).map(async (round) => ({
-            ...round,
-            activities: normalizeAgentActivities(round.activities),
-            references: await Promise.all((round.references || []).map(async (reference) => ({ ...reference, dataUrl: await resolveImageUrl(reference.storageKey, reference.dataUrl) }))),
-            results: await Promise.all(
+        (raw.rounds || []).map(async (round) => {
+            const normalizedResults = await Promise.all(
                 (round.results || []).map(async (result) => {
                     if (!result.image) return result;
                     const storageInfo = await resolveImageStorageInfo(result.image.storageKey, result.image.dataUrl, result.image.objectStorage);
@@ -1451,8 +1440,15 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
                         },
                     };
                 }),
-            ),
-        })),
+            );
+            const terminalStatus = normalizeImageRoundActivityStatus(normalizedResults);
+            return {
+                ...round,
+                activities: normalizeHistoricalAgentActivities(round.activities, terminalStatus),
+                references: await Promise.all((round.references || []).map(async (reference) => ({ ...reference, dataUrl: await resolveImageUrl(reference.storageKey, reference.dataUrl) }))),
+                results: normalizedResults,
+            };
+        }),
     );
 
     return {
@@ -1465,4 +1461,18 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
         generationCompletedAt: raw.generationCompletedAt,
         generationViewedAt: raw.generationViewedAt,
     };
+}
+
+function normalizeImageRoundActivityStatus(results: Round["results"]): "success" | "failed" | "canceled" | null {
+    const statuses = results.map((result) => result.status);
+    if (!statuses.length || statuses.includes("pending")) {
+        return null;
+    }
+    if (statuses.includes("success")) {
+        return "success";
+    }
+    if (statuses.includes("canceled") && !statuses.includes("failed")) {
+        return "canceled";
+    }
+    return "failed";
 }
