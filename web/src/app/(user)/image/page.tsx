@@ -417,8 +417,9 @@ export default function ImagePage() {
     const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "image", count: 1 });
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
     const latestRound = activeConversation?.rounds.at(-1);
+    const historyModel = !imageDraftSettingsModified && activeId && latestRound?.config ? latestRound.config.imageModel || latestRound.config.model || "" : "";
     const draftSettingsSummary = imageDraftSettingsModified ? buildImageSettingsSummary(config, effectiveConfig, model) : "";
-    const historySettingsSummary = !imageDraftSettingsModified && activeId && latestRound?.config ? buildImageSettingsSummary(latestRound.config, effectiveConfig, latestRound.config.imageModel || latestRound.config.model || "") : "";
+    const historySettingsSummary = !imageDraftSettingsModified && activeId && latestRound?.config ? buildImageSettingsSummary(latestRound.config, effectiveConfig, historyModel) : "";
     const settingsSummary = draftSettingsSummary || historySettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingImageConversation(activeConversation) : false;
     const canGenerate = Boolean(prompt.trim()) && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
@@ -963,9 +964,9 @@ export default function ImagePage() {
                                 <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">模型</label>
                                 <ModelPicker
                                     config={effectiveConfig}
-                                    value={model}
+                                    value={historyModel || model}
                                     onChange={(value) => {
-                                        if (value !== model) {
+                                        if (value !== (historyModel || model)) {
                                             setImageDraftSettingsModified(true);
                                         }
                                         updateConfig("imageModel", value);
