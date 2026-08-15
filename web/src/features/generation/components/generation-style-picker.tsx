@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button, Input, Popover, Skeleton, Tooltip } from "antd";
-import { Check, ChevronDown, Image as ImageIcon, ImageOff, Palette, Search, Video, X } from "lucide-react";
+import { Check, ChevronDown, ImageOff, Palette, Search, X } from "lucide-react";
 
 import { listGenerationStyles, type GenerationStyleOption, type GenerationStyleType } from "@/services/api/server";
 import { ALL_GENERATION_STYLE_CATEGORY, collectGenerationStyleCategories, filterGenerationStyles, isGenerationStyleSelected, MAX_GENERATION_STYLE_SELECTION_COUNT, usesGenerationStyleDefaultCover } from "@/features/generation/lib/generation-style-library";
@@ -233,9 +233,8 @@ export function GenerationStyleMenu({
                             >
                                 <GenerationStyleCover style={style} className="aspect-[3/4] w-full" />
                                 <span className="absolute inset-x-0 bottom-0 h-16 bg-[linear-gradient(to_top,var(--studio-surface),transparent)]" aria-hidden="true" />
-                                <span className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-1 p-2">
+                                <span className="absolute inset-x-0 bottom-0 p-2">
                                     <span className="min-w-0 truncate text-xs font-medium text-[var(--studio-ink)]">{style.name}</span>
-                                    <StyleTypeIcon generationType={style.generationType} />
                                 </span>
                                 {isSelected ? (
                                     <span className="absolute right-1.5 top-1.5 grid size-5 place-items-center rounded-full bg-[var(--studio-action)] text-[var(--studio-action-foreground)]">
@@ -325,8 +324,4 @@ function StyleLibraryState({ icon, text }: { icon: ReactNode; text: string }) {
             <span>{text}</span>
         </div>
     );
-}
-
-function StyleTypeIcon({ generationType }: { generationType: GenerationStyleType }) {
-    return generationType === "video" ? <Video className="size-3.5 shrink-0 text-[var(--studio-action)]" aria-label="视频风格" /> : <ImageIcon className="size-3.5 shrink-0 text-[var(--studio-action)]" aria-label="图片风格" />;
 }
