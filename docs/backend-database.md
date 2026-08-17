@@ -71,6 +71,7 @@ flowchart TB
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `request_concurrency` | `INTEGER` | 模型同时执行请求数量，最小值为 `1`，默认值为 `1`。 |
+| `custom_body_parameters` | `JSONB` | 模型 JSON POST 请求的自定义请求体参数，顶层必须为 JSON 对象，默认 `{}`。 |
 
 ### `ai_generation_tasks`
 
