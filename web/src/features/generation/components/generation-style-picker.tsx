@@ -324,7 +324,7 @@ function StylePreviewStack({ style, onPreview }: { style: GenerationStyleSelecti
 
 function StylePreviewModal({ style, onClose }: { style: GenerationStyleSelection | null; onClose: () => void }) {
     return (
-        <Modal title={style?.name} open={Boolean(style)} footer={null} centered destroyOnHidden zIndex={1200} onCancel={onClose} styles={{ body: { display: "grid", minHeight: 320, placeItems: "center", padding: 16 } }}>
+        <Modal title={style?.name} open={Boolean(style)} footer={null} centered destroyOnHidden focusable={{ focusTriggerAfterClose: false }} zIndex={1200} onCancel={onClose} styles={{ body: { display: "grid", minHeight: 320, placeItems: "center", padding: 16 } }}>
             {style ? <GenerationStyleCover style={style} className="max-h-[70vh] h-auto w-auto max-w-full rounded-md object-contain" /> : null}
         </Modal>
     );
