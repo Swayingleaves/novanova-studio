@@ -670,9 +670,9 @@ export function AppConfigModal() {
                                                             </Button>
                                                             <Button
                                                                 size="small"
-                                                                disabled={isSaving || channel.apiFormat === "minimax" || channel.apiFormat === "evolink"}
+                                                                disabled={isSaving || channel.apiFormat === "minimax"}
                                                                 loading={loadingChannelId === channel.id}
-                                                                title={channel.apiFormat === "minimax" ? "MiniMax 请手动配置 MiniMax-H3" : channel.apiFormat === "evolink" ? "Evolink 暂无模型列表接口，请手动配置模型" : undefined}
+                                                                title={channel.apiFormat === "minimax" ? "MiniMax 请手动配置 MiniMax-H3" : undefined}
                                                                 onClick={() => void refreshChannelModels(channel)}
                                                             >
                                                                 拉取模型
@@ -700,7 +700,7 @@ export function AppConfigModal() {
                                                                     showSearch
                                                                     allowClear
                                                                     maxTagCount="responsive"
-                                                                    placeholder={channel.apiFormat === "minimax" ? "请输入 MiniMax-H3" : channel.apiFormat === "evolink" ? "请输入 Evolink 模型名" : "输入模型名，或点击拉取模型"}
+                                                                    placeholder={channel.apiFormat === "minimax" ? "请输入 MiniMax-H3" : "输入模型名，或点击拉取模型"}
                                                                     value={channel.models}
                                                                     disabled={isSaving}
                                                                     onChange={(models) => updateDraftChannel(channel.id, { models })}
