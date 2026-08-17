@@ -38,7 +38,7 @@ public class GenerationStyleRepository {
         int pageSize = Math.max(1, request.pageSize());
         int offset = (Math.max(1, request.page()) - 1) * pageSize;
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                SELECT id, generation_type, name, style_prompt, status, sort_order, created_at, updated_at, deleted_at
+                SELECT id, generation_type, name, style_prompt, cover_url, category, status, sort_order, created_at, updated_at, deleted_at
                 FROM generation_styles
                 %s
                 ORDER BY sort_order ASC, id ASC
@@ -75,7 +75,7 @@ public class GenerationStyleRepository {
             return Flux.empty();
         }
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                SELECT id, generation_type, name, style_prompt, status, sort_order, created_at, updated_at, deleted_at
+                SELECT id, generation_type, name, style_prompt, cover_url, category, status, sort_order, created_at, updated_at, deleted_at
                 FROM generation_styles
                 WHERE deleted_at IS NULL AND status = 1 AND generation_type = :generationType
                   AND id IN (%s)
@@ -92,13 +92,15 @@ public class GenerationStyleRepository {
      */
     public Mono<Long> createStyle(GenerationStyleRecords.StyleRecord record) {
         return databaseClient.sql("""
-                INSERT INTO generation_styles(generation_type, name, style_prompt, status, sort_order)
-                VALUES (:generationType, :name, :stylePrompt, :status, :sortOrder)
+                INSERT INTO generation_styles(generation_type, name, style_prompt, cover_url, category, status, sort_order)
+                VALUES (:generationType, :name, :stylePrompt, :coverUrl, :category, :status, :sortOrder)
                 RETURNING id
                 """)
                 .bind("generationType", record.getGenerationType())
                 .bind("name", record.getName())
                 .bind("stylePrompt", record.getStylePrompt())
+                .bind("coverUrl", record.getCoverUrl())
+                .bind("category", record.getCategory())
                 .bind("status", record.getStatus())
                 .bind("sortOrder", record.getSortOrder())
                 .map((row, metadata) -> row.get("id", Long.class))
@@ -117,6 +119,8 @@ public class GenerationStyleRepository {
                 SET generation_type = :generationType,
                     name = :name,
                     style_prompt = :stylePrompt,
+                    cover_url = :coverUrl,
+                    category = :category,
                     status = :status,
                     sort_order = :sortOrder,
                     updated_at = CURRENT_TIMESTAMP
@@ -126,6 +130,8 @@ public class GenerationStyleRepository {
                 .bind("generationType", record.getGenerationType())
                 .bind("name", record.getName())
                 .bind("stylePrompt", record.getStylePrompt())
+                .bind("coverUrl", record.getCoverUrl())
+                .bind("category", record.getCategory())
                 .bind("status", record.getStatus())
                 .bind("sortOrder", record.getSortOrder())
                 .fetch()
@@ -193,7 +199,7 @@ public class GenerationStyleRepository {
         }
         String keyword = request.keyword() == null ? "" : request.keyword().trim().toLowerCase(Locale.ROOT);
         if (!keyword.isBlank()) {
-            conditions.add("(LOWER(name) LIKE :keyword OR LOWER(style_prompt) LIKE :keyword)");
+            conditions.add("(LOWER(name) LIKE :keyword OR LOWER(style_prompt) LIKE :keyword OR LOWER(category) LIKE :keyword)");
             binds.add(new BindValue("keyword", "%" + keyword + "%"));
         }
         return new QueryParts("WHERE " + String.join(" AND ", conditions), binds);
@@ -226,6 +232,8 @@ public class GenerationStyleRepository {
         record.setGenerationType(row.get("generation_type", String.class));
         record.setName(row.get("name", String.class));
         record.setStylePrompt(row.get("style_prompt", String.class));
+        record.setCoverUrl(row.get("cover_url", String.class));
+        record.setCategory(row.get("category", String.class));
         record.setStatus(row.get("status", Integer.class));
         record.setSortOrder(row.get("sort_order", Integer.class));
         record.setCreatedAt(row.get("created_at", java.time.OffsetDateTime.class));

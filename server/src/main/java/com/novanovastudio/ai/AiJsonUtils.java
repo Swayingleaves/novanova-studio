@@ -119,11 +119,33 @@ public final class AiJsonUtils {
      * @param stage String 调用阶段
      */
     public static void validateEnvelope(JSONObject response, String stage) {
-        if (response != null && response.containsKey("code") && response.getIntValue("code") != 0) {
-            int providerCode = response.getIntValue("code");
+        Integer providerCode = numericEnvelopeCode(response);
+        if (providerCode != null && providerCode != 0) {
             int status = providerCode >= 400 && providerCode <= 599 ? providerCode : 400;
             throw AiErrorSupport.providerException(status, response.toJSONString(), stage);
         }
+    }
+
+    /**
+     * 读取统一响应中的数值错误码。
+     * <p>
+     * 部分兼容OpenAI的渠道使用success等字符串表示调用结果，该字段不是数值错误码，不能按统一错误码处理。
+     *
+     * @param response JSONObject 响应JSON
+     * @return Integer 数值错误码；不存在或不是数值时返回null
+     */
+    private static Integer numericEnvelopeCode(JSONObject response) {
+        if (response == null || !response.containsKey("code")) return null;
+        Object value = response.get("code");
+        if (value instanceof Number number) return number.intValue();
+        if (value instanceof String text) {
+            try {
+                return Integer.valueOf(text.trim());
+            } catch (NumberFormatException exception) {
+                return null;
+            }
+        }
+        return null;
     }
 
     /**

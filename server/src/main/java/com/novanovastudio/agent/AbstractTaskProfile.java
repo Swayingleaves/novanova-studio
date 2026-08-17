@@ -22,8 +22,10 @@ import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.ai.AiErrorDetails;
 import com.novanovastudio.ai.AiErrorSupport;
+import com.novanovastudio.ai.AiTaskPollingSupport;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.service.AiTaskService;
@@ -43,7 +45,6 @@ import reactor.core.publisher.Mono;
 @Slf4j
 public abstract class AbstractTaskProfile implements AgentLoopProfile {
 
-    private static final Duration POLL_INTERVAL = Duration.ofSeconds(1);
     private static final Duration TIMEOUT = Duration.ofSeconds(300);
     /** 仅供生成轮次快照使用的内部参数键，不能进入渠道请求。 */
     private static final String INTERNAL_STYLE_SNAPSHOTS = "generationStyleSnapshots";
@@ -56,18 +57,23 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
     /** Agent 会话执行登记 */
     protected final AgentExecutionRegistry executionRegistry;
 
+    /** 服务配置 */
+    protected final NovanovaProperties properties;
+
     /**
      * 创建异步生成任务 Profile。
      *
      * @param aiTaskService AiTaskService AI任务服务
      * @param persistenceService PersistenceService 生成记录持久化服务
      * @param executionRegistry AgentExecutionRegistry Agent 会话执行登记
+     * @param properties NovanovaProperties 服务配置
      */
     protected AbstractTaskProfile(AiTaskService aiTaskService, PersistenceService persistenceService,
-                                  AgentExecutionRegistry executionRegistry) {
+                                  AgentExecutionRegistry executionRegistry, NovanovaProperties properties) {
         this.aiTaskService = aiTaskService;
         this.persistenceService = persistenceService;
         this.executionRegistry = executionRegistry;
+        this.properties = properties;
     }
 
     // ===== 子类必须实现的差异点 =====
@@ -201,18 +207,20 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                                             effectiveVideoReferences, 100, createdAt, "canceled");
                                                     String title = originalPrompt.length() > 30
                                                             ? originalPrompt.substring(0, 30) : originalPrompt;
-                                                    boolean cancellationRequested = executionRegistry.registerTask(sessionId,
-                                                            new AgentExecutionRegistry.AgentTaskRegistration(response.id(), logType(), title, canceledRound));
-                                                    if (cancellationRequested || executionRegistry.isCancelRequested(sessionId)) {
-                                                        return aiTaskService.cancelTaskForUser(userId, response.id())
-                                                                .then(saveCanceledRound(userId, sessionId, callId, response.id(),
+                                                    return executionRegistry.registerTaskAndPersist(sessionId,
+                                                                    new AgentExecutionRegistry.AgentTaskRegistration(response.id(), logType(), title, canceledRound))
+                                                            .flatMap(cancellationRequested -> {
+                                                                if (cancellationRequested || executionRegistry.isCancelRequested(sessionId)) {
+                                                                    return aiTaskService.cancelTaskForUser(userId, response.id())
+                                                                            .then(saveCanceledRound(userId, sessionId, callId, response.id(),
+                                                                                    originalPrompt, generationPrompt, model, params,
+                                                                                    effectiveReferences, effectiveVideoReferences, createdAt));
+                                                                }
+                                                                return savePendingRound(userId, sessionId, callId, response.id(),
                                                                         originalPrompt, generationPrompt, model, params,
-                                                                        effectiveReferences, effectiveVideoReferences, createdAt));
-                                                    }
-                                                    return savePendingRound(userId, sessionId, callId, response.id(),
-                                                            originalPrompt, generationPrompt, model, params,
-                                                            effectiveReferences, effectiveVideoReferences,
-                                                            response.progress() != null ? response.progress() : 0, createdAt);
+                                                                        effectiveReferences, effectiveVideoReferences,
+                                                                        response.progress() != null ? response.progress() : 0, createdAt);
+                                                            });
                                                 })
                                                 .doFinally(signal -> executionRegistry.completeTaskCreation(sessionId))
                                                 .flatMap(response -> pollUntilComplete(userId, response, emitter, sessionId, callId,
@@ -442,8 +450,9 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         return Mono.deferContextual(ctx -> {
             AtomicReference<TaskProgressSnapshot> previousSnapshot = new AtomicReference<>(
                     new TaskProgressSnapshot(initialTask.status(), initialProgress));
-            return Flux.interval(Duration.ZERO, POLL_INTERVAL)
-            .take(TIMEOUT.toSeconds())
+            Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
+            return Flux.interval(Duration.ZERO, pollingInterval)
+            .take(TIMEOUT)
             .concatMap(i -> aiTaskService.getTaskForUser(userId, taskId))
             .concatMap(task -> {
                 // 先更新后端活动快照，再保存轮次，确保数据库中的执行过程与当前进度一致。

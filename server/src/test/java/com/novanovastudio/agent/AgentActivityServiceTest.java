@@ -87,6 +87,24 @@ class AgentActivityServiceTest {
     }
 
     /**
+     * 持久化轮次终态时应收尾仍处于执行中的计划任务活动。
+     */
+    @Test
+    void shouldPersistTerminalStatusForRunningPlanTaskActivity() {
+        service.record(AgentEvent.planTaskStatus("conversation-1", "plan-1", "round-1", "running", "子Agent正在准备任务"));
+        when(repository.saveGenerationRoundActivities(9L, "conversation-1", "round-1", anyString()))
+                .thenReturn(Mono.just(1L));
+
+        service.persistRoundActivities(9L, "conversation-1", "round-1", "failed").block();
+
+        ArgumentCaptor<String> activitiesCaptor = ArgumentCaptor.forClass(String.class);
+        verify(repository).saveGenerationRoundActivities(9L, "conversation-1", "round-1", activitiesCaptor.capture());
+        JSONObject activity = JSON.parseArray(activitiesCaptor.getValue()).getJSONObject(0);
+        Assertions.assertEquals("failed", activity.getString("status"));
+        Assertions.assertEquals("子Agent正在准备任务", activity.getString("description"));
+    }
+
+    /**
      * 构建生成结果。
      *
      * @param id String 结果ID

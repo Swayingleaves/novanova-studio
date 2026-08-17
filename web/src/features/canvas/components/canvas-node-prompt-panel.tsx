@@ -19,6 +19,7 @@ import { useCanvasTheme } from "./canvas-theme-provider";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import type { GenerationStyleOption, GenerationStyleSnapshot } from "@/services/api/server";
 import { GenerationStyleChips, GenerationStyleMenu, useGenerationStyles } from "@/features/generation/components/generation-style-picker";
+import { filterGenerationStyles, GENERATION_STYLE_SELECTION_LIMIT_MESSAGE, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { getStyleCommandRange, parseGenerationStyleMessage, removeStyleCommand } from "@/features/generation/lib/style-command";
 
 export type CanvasNodeGenerationMode = CanvasGenerationMode;
@@ -62,11 +63,12 @@ export function CanvasNodePromptPanel({
     const { message } = App.useApp();
     const mode = defaultMode(node.kind);
     const styleCatalog = useGenerationStyles(mode === "image" || mode === "video" ? mode : undefined);
-    const persistedSnapshots = useMemo(() => isImageNode(node) || isVideoNode(node) ? node.generation.generationStyleSnapshots : [], [node]);
-    const [selectedStyles, setSelectedStyles] = useState<GenerationStyleOption[]>(() => (persistedSnapshots || []).map((style) => ({ id: style.id, name: style.name, generationType: style.generationType })));
+    const persistedSnapshots = useMemo(() => (isImageNode(node) || isVideoNode(node) ? node.generation.generationStyleSnapshots : []), [node]);
+    const [selectedStyles, setSelectedStyles] = useState<GenerationStyleOption[]>(() => (persistedSnapshots || []).map((style) => ({ id: style.id, name: style.name, generationType: style.generationType, coverUrl: "", category: "" })));
     const [styleMenuOpen, setStyleMenuOpen] = useState(false);
     const [styleQuery, setStyleQuery] = useState("");
     const [styleCommand, setStyleCommand] = useState<{ start: number; end: number } | null>(null);
+    const [highlightedStyleIndex, setHighlightedStyleIndex] = useState(0);
     const [referencePreview, setReferencePreview] = useState<CanvasResourceReference | null>(null);
     const promptEditorRef = useRef<PromptEditorHandle>(null);
     const libraryPromptRef = useRef<string | null>(null);
@@ -78,10 +80,12 @@ export function CanvasNodePromptPanel({
     const displayReferences = useMemo<DisplayReference[]>(() => {
         const references: DisplayReference[] = [];
         const previewUrls = new Set<string>();
-        mentionReferences.filter((reference) => reference.active && reference.kind !== "text").forEach((reference) => {
-            references.push({ reference, canInsert: true });
-            if (reference.previewUrl) previewUrls.add(reference.previewUrl);
-        });
+        mentionReferences
+            .filter((reference) => reference.active && reference.kind !== "text")
+            .forEach((reference) => {
+                references.push({ reference, canInsert: true });
+                if (reference.previewUrl) previewUrls.add(reference.previewUrl);
+            });
         buildNodeGenerationReferences(node).forEach((reference) => {
             if (reference.previewUrl && previewUrls.has(reference.previewUrl)) return;
             references.push({ reference, canInsert: false });
@@ -101,11 +105,10 @@ export function CanvasNodePromptPanel({
         count: mode === "image" || mode === "video" ? config.count : 1,
         seconds: mode === "video" ? config.videoSeconds : undefined,
     });
-    const requiresExplicitVideoSeconds = mode === "video"
-        && getModelCreditUnit(config.modelCosts, config.model, "video") === "second";
+    const requiresExplicitVideoSeconds = mode === "video" && getModelCreditUnit(config.modelCosts, config.model, "video") === "second";
 
     useEffect(() => {
-        setSelectedStyles((persistedSnapshots || []).map((style) => ({ id: style.id, name: style.name, generationType: style.generationType })));
+        setSelectedStyles((persistedSnapshots || []).map((style) => ({ id: style.id, name: style.name, generationType: style.generationType, coverUrl: "", category: "" })));
         setStyleMenuOpen(false);
         setStyleCommand(null);
         setStyleQuery("");
@@ -185,6 +188,19 @@ export function CanvasNodePromptPanel({
         setPrompt(value);
         if (!isEditingExistingContent) onPromptChange(node.id, value);
     };
+    const filteredStyles = useMemo(() => filterGenerationStyles(styleCatalog.styles, styleQuery), [styleCatalog.styles, styleQuery]);
+    const closeStyleMenu = () => {
+        setStyleMenuOpen(false);
+        setStyleCommand(null);
+        setStyleQuery("");
+        setHighlightedStyleIndex(0);
+    };
+    const chooseStyle = (style: GenerationStyleOption) => {
+        if (selectedStyles.some((item) => item.id === style.id)) return;
+        setSelectedStyles([style]);
+        updatePrompt(styleCommand ? removeStyleCommand(prompt, styleCommand.start, styleCommand.end) : prompt);
+        closeStyleMenu();
+    };
 
     const applyPromptFromLibrary = (value: string) => {
         libraryPromptRef.current = value;
@@ -203,7 +219,14 @@ export function CanvasNodePromptPanel({
         }
         const styleIds = selectedStyles.map((style) => style.id);
         const styleSnapshots = persistedSnapshots?.filter((snapshot) => styleIds.includes(snapshot.id)) || [];
-        onGenerate(node.id, mode, formatPromptReferenceLabels(text, requiredLabels), styleIds, styleSnapshots.length === styleIds.length ? styleSnapshots : undefined);
+        const usesHistoricalSnapshots = styleSnapshots.length === styleIds.length;
+        onGenerate(
+            node.id,
+            mode,
+            formatPromptReferenceLabels(text, requiredLabels),
+            usesHistoricalSnapshots ? undefined : styleIds,
+            usesHistoricalSnapshots && styleSnapshots.length ? styleSnapshots : undefined,
+        );
         setPrompt("");
         setSelectedStyles([]);
     };
@@ -229,13 +252,18 @@ export function CanvasNodePromptPanel({
                 onSubmit={submit}
                 onBlur={handleBlur}
                 onPasteText={(value) => {
-                    const parsed = parseGenerationStyleMessage(value, styleCatalog.styles.filter((style) => style.generationType === mode));
+                    const parsed = parseGenerationStyleMessage(
+                        value,
+                        styleCatalog.styles.filter((style) => style.generationType === mode),
+                    );
                     if (!parsed || mode === "text") return false;
                     const nextStyles = parsed.styles as GenerationStyleOption[];
                     const additions = nextStyles.filter((style) => !selectedStyles.some((item) => item.id === style.id));
-                    const remaining = Math.max(0, 3 - selectedStyles.length);
-                    if (additions.length > remaining) message.warning("最多选择3个风格");
-                    additions.slice(0, remaining).forEach((style) => setSelectedStyles((current) => current.some((item) => item.id === style.id) ? current : [...current, style]));
+                    const remaining = Math.max(0, MAX_GENERATION_STYLE_SELECTION_COUNT - selectedStyles.length);
+                    if (additions.length > remaining) {
+                        message.warning(GENERATION_STYLE_SELECTION_LIMIT_MESSAGE);
+                    }
+                    additions.slice(0, remaining).forEach((style) => setSelectedStyles((current) => (current.some((item) => item.id === style.id) ? current : [...current, style])));
                     updatePrompt(parsed.prompt);
                     return true;
                 }}
@@ -245,24 +273,63 @@ export function CanvasNodePromptPanel({
                     setStyleQuery(command?.query || "");
                     setStyleMenuOpen(Boolean(command));
                 }}
+                onStyleMenuKeyDown={(event) => {
+                    if (!styleMenuOpen) return false;
+                    if (event.key === "ArrowDown") {
+                        event.preventDefault();
+                        setHighlightedStyleIndex((value) => Math.min(value + 1, Math.max(0, filteredStyles.length - 1)));
+                        return true;
+                    }
+                    if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        setHighlightedStyleIndex((value) => Math.max(value - 1, 0));
+                        return true;
+                    }
+                    if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        const style = filteredStyles[highlightedStyleIndex];
+                        if (style) chooseStyle(style);
+                        return true;
+                    }
+                    if (event.key === "Escape") {
+                        event.preventDefault();
+                        closeStyleMenu();
+                        return true;
+                    }
+                    return false;
+                }}
             />
 
-            {mode !== "text" ? <>
-                <GenerationStyleChips styles={selectedStyles} onRemove={(id) => setSelectedStyles((current) => current.filter((style) => style.id !== id))} className="mt-2" />
-                <div className="mt-2"><GenerationStyleMenu styles={styleCatalog.styles} selected={selectedStyles} loading={styleCatalog.loading} error={styleCatalog.error} open={styleMenuOpen} query={styleQuery} onQueryChange={setStyleQuery} onToggle={() => setStyleMenuOpen((value) => !value)} onSelect={(style) => {
-                    if (selectedStyles.some((item) => item.id === style.id)) return;
-                    if (selectedStyles.length >= 3) {
-                        message.warning("最多选择3个风格");
-                        return;
-                    }
-                    setSelectedStyles((current) => [...current, style]);
-                    const nextPrompt = styleCommand ? removeStyleCommand(prompt, styleCommand.start, styleCommand.end) : prompt;
-                    updatePrompt(nextPrompt);
-                    setStyleCommand(null);
-                    setStyleQuery("");
-                    setStyleMenuOpen(false);
-                }} /></div>
-            </> : null}
+            {mode !== "text" ? (
+                <>
+                    <GenerationStyleChips styles={selectedStyles} onRemove={(id) => setSelectedStyles((current) => current.filter((style) => style.id !== id))} className="mt-2" />
+                    <div className="mt-2">
+                        <GenerationStyleMenu
+                            styles={styleCatalog.styles}
+                            selected={selectedStyles}
+                            loading={styleCatalog.loading}
+                            error={styleCatalog.error}
+                            open={styleMenuOpen}
+                            query={styleQuery}
+                            highlightedIndex={highlightedStyleIndex}
+                            placement="topLeft"
+                            onOpenChange={(open) => {
+                                if (open) {
+                                    setStyleCommand(null);
+                                    setStyleQuery("");
+                                    setHighlightedStyleIndex(0);
+                                    setStyleMenuOpen(true);
+                                } else {
+                                    closeStyleMenu();
+                                }
+                            }}
+                            onQueryChange={setStyleQuery}
+                            onHighlightedIndexChange={setHighlightedStyleIndex}
+                            onSelect={chooseStyle}
+                        />
+                    </div>
+                </>
+            ) : null}
 
             {displayReferences.length > 0 ? (
                 <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
@@ -310,7 +377,9 @@ export function CanvasNodePromptPanel({
                                     >
                                         <ReferenceChipThumb reference={reference} />
                                     </button>
-                                ) : <ReferenceChipThumb reference={reference} />}
+                                ) : (
+                                    <ReferenceChipThumb reference={reference} />
+                                )}
                                 <button
                                     type="button"
                                     className="cursor-pointer transition hover:brightness-110 active:scale-95"
@@ -360,7 +429,15 @@ export function CanvasNodePromptPanel({
                                 icon={<Sparkles className="size-3.5" />}
                                 loading={isPromptGenerating}
                                 disabled={isRunning || isPromptGenerating || !prompt.trim()}
-                                onClick={() => onGeneratePrompt(node.id, mode, prompt.trim(), updatePrompt, selectedStyles.map((style) => style.id))}
+                                onClick={() =>
+                                    onGeneratePrompt(
+                                        node.id,
+                                        mode,
+                                        prompt.trim(),
+                                        updatePrompt,
+                                        selectedStyles.slice(0, MAX_GENERATION_STYLE_SELECTION_COUNT).map((style) => style.id),
+                                    )
+                                }
                                 aria-label="AI优化提示词"
                             />
                         </Tooltip>
@@ -415,9 +492,11 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNode, mode: CanvasN
         videoSeconds: isVideoNode(node) ? node.generation.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds : globalConfig.videoSeconds || defaultConfig.videoSeconds,
         vquality: isVideoNode(node) ? node.generation.quality || globalConfig.vquality || defaultConfig.vquality : globalConfig.vquality || defaultConfig.vquality,
         videoWatermark: isVideoNode(node) ? node.generation.watermark || globalConfig.videoWatermark || defaultConfig.videoWatermark : globalConfig.videoWatermark || defaultConfig.videoWatermark,
-        count: String(mode === "video"
-            ? normalizeVideoGenerationCount((isVideoNode(node) ? node.generation.count : undefined) || globalConfig.canvasVideoCount || defaultConfig.canvasVideoCount)
-            : normalizeImageGenerationCount((isImageNode(node) ? node.generation.count : undefined) || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count)),
+        count: String(
+            mode === "video"
+                ? normalizeVideoGenerationCount((isVideoNode(node) ? node.generation.count : undefined) || globalConfig.canvasVideoCount || defaultConfig.canvasVideoCount)
+                : normalizeImageGenerationCount((isImageNode(node) ? node.generation.count : undefined) || (mode === "image" ? globalConfig.canvasImageCount || globalConfig.count : globalConfig.count) || defaultConfig.count),
+        ),
         canvasVideoCount: String(normalizeVideoGenerationCount((isVideoNode(node) ? node.generation.count : undefined) || globalConfig.canvasVideoCount || defaultConfig.canvasVideoCount)),
     };
 }
@@ -504,11 +583,12 @@ type PromptEditorProps = {
     onBlur: () => void;
     onPasteText?: (value: string) => boolean;
     onStyleInput?: (value: string, cursor: number) => void;
+    onStyleMenuKeyDown?: (event: React.KeyboardEvent) => boolean;
 };
 
 export type PromptEditorHandle = { insertAtCursor: (text: string) => void; focus: () => void };
 
-const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function PromptEditor({ prompt, requiredLabels, references, placeholder, theme, onChange, onSubmit, onBlur, onPasteText, onStyleInput }, ref) {
+const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function PromptEditor({ prompt, requiredLabels, references, placeholder, theme, onChange, onSubmit, onBlur, onPasteText, onStyleInput, onStyleMenuKeyDown }, ref) {
     const editorRef = useRef<HTMLDivElement>(null);
     const isComposingRef = useRef(false);
     const pendingRef = useRef<string | null>(null);
@@ -690,12 +770,13 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
 
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent) => {
+            if (onStyleMenuKeyDown?.(event)) return;
             if (event.key === "Enter" && !event.shiftKey && !isComposingRef.current) {
                 event.preventDefault();
                 onSubmit();
             }
         },
-        [onSubmit],
+        [onStyleMenuKeyDown, onSubmit],
     );
 
     const handleBlur = useCallback(() => {
@@ -890,10 +971,13 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
         handleInput();
     }, [handleInput]);
 
-    const handlePaste = useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
-        const text = event.clipboardData.getData("text/plain");
-        if (text && onPasteText?.(text)) event.preventDefault();
-    }, [onPasteText]);
+    const handlePaste = useCallback(
+        (event: React.ClipboardEvent<HTMLDivElement>) => {
+            const text = event.clipboardData.getData("text/plain");
+            if (text && onPasteText?.(text)) event.preventDefault();
+        },
+        [onPasteText],
+    );
 
     const isEmpty = !prompt;
 

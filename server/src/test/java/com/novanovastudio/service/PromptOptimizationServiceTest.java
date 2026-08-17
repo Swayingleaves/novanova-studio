@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.dto.PromptOptimizationDtos;
@@ -45,7 +46,7 @@ class PromptOptimizationServiceTest {
     void shouldCreateImagePromptOptimizationTask() {
         when(aiTaskService.createTask(any())).thenReturn(Mono.just(taskResponse()));
         SystemPromptTemplateService templateService = promptTemplateService();
-        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, templateService);
+        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, templateService, null, new NovanovaProperties());
 
         service.optimizePrompt(new PromptOptimizationDtos.OptimizePromptRequest(AiTaskTypes.IMAGE, "一只猫")).block();
 
@@ -63,7 +64,7 @@ class PromptOptimizationServiceTest {
     void shouldCreateVideoPromptOptimizationTask() {
         when(aiTaskService.createTask(any())).thenReturn(Mono.just(taskResponse()));
         SystemPromptTemplateService templateService = promptTemplateService();
-        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, templateService);
+        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, templateService, null, new NovanovaProperties());
 
         service.optimizePrompt(new PromptOptimizationDtos.OptimizePromptRequest(AiTaskTypes.VIDEO, "海边奔跑")).block();
 
@@ -71,22 +72,19 @@ class PromptOptimizationServiceTest {
         Assertions.assertEquals(templateService.get(PromptTemplateType.OPTIMIZATION_VIDEO), request.parameters().get("systemPrompt"));
     }
 
-    /** 手动提示词优化应按选择顺序注入风格提示词块。 */
+    /** 手动提示词优化应注入当前选择的风格提示词块。 */
     @Test
     void shouldComposeSelectedStylesForManualOptimization() {
         when(aiTaskService.createTask(any())).thenReturn(Mono.just(taskResponse()));
-        when(generationStyleService.resolveStyles(eq(AiTaskTypes.IMAGE), eq(List.of(2L, 1L)), any()))
+        when(generationStyleService.resolveStyles(eq(AiTaskTypes.IMAGE), eq(List.of(2L)), any()))
                 .thenReturn(Mono.just(List.of(
-                        new GenerationStyleDtos.GenerationStyleSnapshot(2L, "水彩", "image", "watercolor"),
-                        new GenerationStyleDtos.GenerationStyleSnapshot(1L, "电影感", "image", "cinematic"))));
-        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, promptTemplateService(), generationStyleService);
+                        new GenerationStyleDtos.GenerationStyleSnapshot(2L, "水彩", "image", "watercolor"))));
+        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, promptTemplateService(), generationStyleService, new NovanovaProperties());
 
-        service.optimizePrompt(new PromptOptimizationDtos.OptimizePromptRequest(AiTaskTypes.IMAGE, "一只猫", List.of(2L, 1L))).block();
+        service.optimizePrompt(new PromptOptimizationDtos.OptimizePromptRequest(AiTaskTypes.IMAGE, "一只猫", List.of(2L))).block();
 
         AiTaskDtos.CreateAiTaskRequest request = capturedRequest();
-        Assertions.assertTrue(request.prompt().indexOf("水彩") < request.prompt().indexOf("电影感"));
         Assertions.assertTrue(request.prompt().contains("watercolor"));
-        Assertions.assertTrue(request.prompt().contains("cinematic"));
     }
 
     /**
@@ -94,7 +92,7 @@ class PromptOptimizationServiceTest {
      */
     @Test
     void shouldRejectUnsupportedGenerationType() {
-        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, promptTemplateService());
+        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, promptTemplateService(), null, new NovanovaProperties());
 
         Assertions.assertThrows(BusinessException.class,
                 () -> service.optimizePrompt(new PromptOptimizationDtos.OptimizePromptRequest(AiTaskTypes.TEXT, "测试")));
@@ -109,7 +107,7 @@ class PromptOptimizationServiceTest {
         when(aiTaskService.getTaskForUser(1L, "task-1")).thenReturn(Mono.just(new AiTaskDtos.AiGenerationTaskResponse(
                 "task-1", AiTaskTypes.TEXT, "chat-model", "默认渠道", "failed", 100,
                 null, null, "优化服务失败", "", "", "", "")));
-        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, promptTemplateService());
+        PromptOptimizationService service = new PromptOptimizationService(aiTaskService, promptTemplateService(), null, new NovanovaProperties());
 
         StepVerifier.create(service.optimizeAndWait(1L, AiTaskTypes.IMAGE, "一只猫"))
                 .expectErrorSatisfies(error -> {

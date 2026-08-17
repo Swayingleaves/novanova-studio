@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button, Tooltip } from "antd";
 import { ArrowUp, ImagePlus, LoaderCircle, X } from "lucide-react";
 
@@ -10,6 +10,7 @@ import { isImageNode } from "../domain/canvas-node";
 import type { CanvasNode } from "../types";
 import type { GenerationStyleOption } from "@/services/api/server";
 import { GenerationStyleChips, GenerationStyleMenu } from "@/features/generation/components/generation-style-picker";
+import { filterGenerationStyles, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { getStyleCommandRange, parseGenerationStyleMessage, parseGroupedGenerationStyleMessage, removeStyleCommand } from "@/features/generation/lib/style-command";
 
 type CanvasTheme = (typeof canvasThemes)[keyof typeof canvasThemes];
@@ -37,11 +38,34 @@ type AgentChatComposerProps = {
     onStyleLimit?: () => void;
 };
 
-export function AgentChatComposer({ prompt, attachments = [], disabled, sending, placeholder, theme, onPromptChange, onSubmit, onAddFiles, onRemoveAttachment, left, droppedNodes = [], onDroppedNodeRemove, styleOptions = [], selectedStyles = [], styleLoading = false, styleError, onStyleSelect, onStyleRemove, onStyleLimit }: AgentChatComposerProps) {
+export function AgentChatComposer({
+    prompt,
+    attachments = [],
+    disabled,
+    sending,
+    placeholder,
+    theme,
+    onPromptChange,
+    onSubmit,
+    onAddFiles,
+    onRemoveAttachment,
+    left,
+    droppedNodes = [],
+    onDroppedNodeRemove,
+    styleOptions = [],
+    selectedStyles = [],
+    styleLoading = false,
+    styleError,
+    onStyleSelect,
+    onStyleRemove,
+    onStyleLimit,
+}: AgentChatComposerProps) {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [styleMenuOpen, setStyleMenuOpen] = useState(false);
     const [styleCommand, setStyleCommand] = useState<{ start: number; end: number } | null>(null);
     const [styleQuery, setStyleQuery] = useState("");
+    const [highlightedStyleIndex, setHighlightedStyleIndex] = useState(0);
+    const filteredStyles = useMemo(() => filterGenerationStyles(styleOptions, styleQuery), [styleOptions, styleQuery]);
 
     useEffect(() => {
         const missingNodeIds = droppedNodes.map((node) => node.id).filter((nodeId) => !containsToken(prompt, nodeId));
@@ -66,13 +90,15 @@ export function AgentChatComposer({ prompt, attachments = [], disabled, sending,
         setStyleQuery(command?.query || "");
         setStyleMenuOpen(Boolean(command));
     };
+    const closeStyleMenu = () => {
+        setStyleMenuOpen(false);
+        setStyleCommand(null);
+        setStyleQuery("");
+        setHighlightedStyleIndex(0);
+    };
     const chooseStyle = (style: GenerationStyleOption) => {
         if (selectedStyles.some((item) => item.id === style.id)) {
-            setStyleMenuOpen(false);
-            return;
-        }
-        if (selectedStyles.length >= 3) {
-            onStyleLimit?.();
+            closeStyleMenu();
             return;
         }
         onStyleSelect?.(style);
@@ -80,7 +106,7 @@ export function AgentChatComposer({ prompt, attachments = [], disabled, sending,
         onPromptChange(next);
         setStyleCommand(null);
         setStyleQuery("");
-        setStyleMenuOpen(false);
+        closeStyleMenu();
     };
 
     return (
@@ -100,7 +126,27 @@ export function AgentChatComposer({ prompt, attachments = [], disabled, sending,
                     onChange={(event) => updatePrompt(event.target.value, event.target.selectionStart ?? event.target.value.length)}
                     onKeyDown={(event) => {
                         if (styleMenuOpen) {
-                            if (event.key === "Escape") { event.preventDefault(); setStyleMenuOpen(false); setStyleCommand(null); return; }
+                            if (event.key === "ArrowDown") {
+                                event.preventDefault();
+                                setHighlightedStyleIndex((value) => Math.min(value + 1, Math.max(0, filteredStyles.length - 1)));
+                                return;
+                            }
+                            if (event.key === "ArrowUp") {
+                                event.preventDefault();
+                                setHighlightedStyleIndex((value) => Math.max(value - 1, 0));
+                                return;
+                            }
+                            if (event.key === "Enter" && !event.shiftKey) {
+                                event.preventDefault();
+                                const style = filteredStyles[highlightedStyleIndex];
+                                if (style) chooseStyle(style);
+                                return;
+                            }
+                            if (event.key === "Escape") {
+                                event.preventDefault();
+                                closeStyleMenu();
+                                return;
+                            }
                         }
                         handleKeyDown(event);
                     }}
@@ -110,12 +156,11 @@ export function AgentChatComposer({ prompt, attachments = [], disabled, sending,
                         if (parsed && onStyleSelect) {
                             event.preventDefault();
                             const additions = parsed.styles.filter((style) => !selectedStyles.some((selected) => selected.id === style.id));
-                            const remaining = Math.max(0, 3 - selectedStyles.length);
+                            const remaining = Math.max(0, MAX_GENERATION_STYLE_SELECTION_COUNT - selectedStyles.length);
                             if (additions.length > remaining) onStyleLimit?.();
                             additions.slice(0, remaining).forEach((style) => onStyleSelect(style as GenerationStyleOption));
                             onPromptChange(parsed.prompt);
-                            setStyleMenuOpen(false);
-                            setStyleCommand(null);
+                            closeStyleMenu();
                             return;
                         }
                         if (!onAddFiles) return;
@@ -127,8 +172,48 @@ export function AgentChatComposer({ prompt, attachments = [], disabled, sending,
                 />
                 <div className="mt-2 flex items-center justify-between gap-2">
                     <div className="flex min-w-0 items-center gap-1">
-                        {onAddFiles ? <><input ref={fileInputRef} hidden type="file" accept="image/*" multiple onChange={(event) => { void onAddFiles(event.target.files); event.target.value = ""; }} /><Tooltip title="上传图片"><Button type="text" shape="circle" disabled={sending} icon={<ImagePlus className="size-4" />} style={{ color: theme.node.muted }} onClick={() => fileInputRef.current?.click()} /></Tooltip></> : null}
-                        <GenerationStyleMenu styles={styleOptions} selected={selectedStyles} loading={styleLoading} error={styleError} open={styleMenuOpen} onToggle={() => setStyleMenuOpen((value) => !value)} onSelect={chooseStyle} query={styleQuery} onQueryChange={setStyleQuery} grouped />
+                        {onAddFiles ? (
+                            <>
+                                <input
+                                    ref={fileInputRef}
+                                    hidden
+                                    type="file"
+                                    accept="image/*"
+                                    multiple
+                                    onChange={(event) => {
+                                        void onAddFiles(event.target.files);
+                                        event.target.value = "";
+                                    }}
+                                />
+                                <Tooltip title="上传图片">
+                                    <Button type="text" shape="circle" disabled={sending} icon={<ImagePlus className="size-4" />} style={{ color: theme.node.muted }} onClick={() => fileInputRef.current?.click()} />
+                                </Tooltip>
+                            </>
+                        ) : null}
+                        <GenerationStyleMenu
+                            styles={styleOptions}
+                            selected={selectedStyles}
+                            loading={styleLoading}
+                            error={styleError}
+                            open={styleMenuOpen}
+                            query={styleQuery}
+                            highlightedIndex={highlightedStyleIndex}
+                            grouped
+                            placement="topLeft"
+                            onOpenChange={(open) => {
+                                if (open) {
+                                    setStyleCommand(null);
+                                    setStyleQuery("");
+                                    setHighlightedStyleIndex(0);
+                                    setStyleMenuOpen(true);
+                                } else {
+                                    closeStyleMenu();
+                                }
+                            }}
+                            onQueryChange={setStyleQuery}
+                            onHighlightedIndexChange={setHighlightedStyleIndex}
+                            onSelect={chooseStyle}
+                        />
                         {left}
                     </div>
                     <Button type="primary" shape="circle" disabled={!canSubmit} icon={sending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />} onClick={onSubmit} aria-label="发送" />
@@ -139,11 +224,42 @@ export function AgentChatComposer({ prompt, attachments = [], disabled, sending,
 }
 
 function NodeReferenceList({ nodes, theme, onRemove }: { nodes: CanvasNode[]; theme: CanvasTheme; onRemove: (nodeId: string) => void }) {
-    return <div className="mb-2 flex flex-wrap gap-2">{nodes.map((node) => <span key={node.id} className="inline-flex max-w-full items-center gap-2 rounded-lg border px-2 py-1 text-xs" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>{isImageNode(node) && node.content.source ? <img src={node.content.source} alt="" className="size-6 rounded object-cover" /> : null}<span className="max-w-36 truncate">{node.title || node.id}</span><button type="button" aria-label={`移除 ${node.title || node.id}`} onClick={() => onRemove(node.id)}><X className="size-3" /></button></span>)}</div>;
+    return (
+        <div className="mb-2 flex flex-wrap gap-2">
+            {nodes.map((node) => (
+                <span key={node.id} className="inline-flex max-w-full items-center gap-2 rounded-lg border px-2 py-1 text-xs" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
+                    {isImageNode(node) && node.content.source ? <img src={node.content.source} alt="" className="size-6 rounded object-cover" /> : null}
+                    <span className="max-w-36 truncate">{node.title || node.id}</span>
+                    <button type="button" aria-label={`移除 ${node.title || node.id}`} onClick={() => onRemove(node.id)}>
+                        <X className="size-3" />
+                    </button>
+                </span>
+            ))}
+        </div>
+    );
 }
 
 function AttachmentList({ attachments, theme, onRemove }: { attachments: CanvasAgentChatAttachment[]; theme: CanvasTheme; onRemove?: (id: string) => void }) {
-    return <div className="mb-2 flex gap-2 overflow-x-auto">{attachments.map((attachment) => <div key={attachment.id} className="group relative size-14 shrink-0 overflow-hidden rounded-lg border" style={{ borderColor: theme.node.stroke }}><img src={attachment.url} alt={attachment.name} className="size-full object-cover" />{onRemove ? <button type="button" className="absolute right-1 top-1 grid size-5 place-items-center rounded-full opacity-0 group-hover:opacity-100" style={{ background: theme.toolbar.panel }} onClick={() => onRemove(attachment.id)} aria-label="移除图片"><X className="size-3" /></button> : null}</div>)}</div>;
+    return (
+        <div className="mb-2 flex gap-2 overflow-x-auto">
+            {attachments.map((attachment) => (
+                <div key={attachment.id} className="group relative size-14 shrink-0 overflow-hidden rounded-lg border" style={{ borderColor: theme.node.stroke }}>
+                    <img src={attachment.url} alt={attachment.name} className="size-full object-cover" />
+                    {onRemove ? (
+                        <button
+                            type="button"
+                            className="absolute right-1 top-1 grid size-5 place-items-center rounded-full opacity-0 group-hover:opacity-100"
+                            style={{ background: theme.toolbar.panel }}
+                            onClick={() => onRemove(attachment.id)}
+                            aria-label="移除图片"
+                        >
+                            <X className="size-3" />
+                        </button>
+                    ) : null}
+                </div>
+            ))}
+        </div>
+    );
 }
 
 function containsToken(value: string, token: string): boolean {
@@ -151,5 +267,8 @@ function containsToken(value: string, token: string): boolean {
 }
 
 function removeToken(value: string, token: string): string {
-    return value.split(/\s+/).filter((item) => item && item !== token).join(" ");
+    return value
+        .split(/\s+/)
+        .filter((item) => item && item !== token)
+        .join(" ");
 }

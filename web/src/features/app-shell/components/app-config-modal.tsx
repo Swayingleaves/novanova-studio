@@ -64,6 +64,8 @@ const capabilityGroups: Array<{ capability: ModelCapability; modelsKey: "textMod
 
 const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
     { label: "OpenAI", value: "openai" },
+    { label: "New API", value: "newapi" },
+    { label: "Evolink", value: "evolink" },
     { label: "Gemini", value: "gemini" },
     { label: "Agnes", value: "agnes" },
     { label: "Anthropic", value: "anthropic" },
@@ -671,9 +673,9 @@ export function AppConfigModal() {
                                                             </Button>
                                                             <Button
                                                                 size="small"
-                                                                disabled={isSaving || channel.apiFormat === "minimax"}
+                                                                disabled={isSaving || channel.apiFormat === "minimax" || channel.apiFormat === "evolink"}
                                                                 loading={loadingChannelId === channel.id}
-                                                                title={channel.apiFormat === "minimax" ? "MiniMax 请手动配置 MiniMax-H3" : undefined}
+                                                                title={channel.apiFormat === "minimax" ? "MiniMax 请手动配置 MiniMax-H3" : channel.apiFormat === "evolink" ? "Evolink 暂无模型列表接口，请手动配置模型" : undefined}
                                                                 onClick={() => void refreshChannelModels(channel)}
                                                             >
                                                                 拉取模型
@@ -701,7 +703,7 @@ export function AppConfigModal() {
                                                                     showSearch
                                                                     allowClear
                                                                     maxTagCount="responsive"
-                                                                    placeholder={channel.apiFormat === "minimax" ? "请输入 MiniMax-H3" : "输入模型名，或点击拉取模型"}
+                                                                    placeholder={channel.apiFormat === "minimax" ? "请输入 MiniMax-H3" : channel.apiFormat === "evolink" ? "请输入 Evolink 模型名" : "输入模型名，或点击拉取模型"}
                                                                     value={channel.models}
                                                                     disabled={isSaving}
                                                                     onChange={(models) => updateDraftChannel(channel.id, { models })}
@@ -1069,6 +1071,8 @@ function uniqueModels(models: string[]) {
 }
 
 function apiFormatLabel(apiFormat: ApiCallFormat) {
+    if (apiFormat === "newapi") return "New API";
+    if (apiFormat === "evolink") return "Evolink";
     if (apiFormat === "agnes") return "Agnes";
     if (apiFormat === "gemini") return "Gemini";
     if (apiFormat === "anthropic") return "Anthropic";

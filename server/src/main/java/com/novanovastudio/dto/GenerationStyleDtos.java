@@ -31,8 +31,10 @@ public final class GenerationStyleDtos {
      * @param id 风格ID
      * @param name 风格名称
      * @param generationType 生成类型
+     * @param coverUrl 封面地址
+     * @param category 风格分类
      */
-    public record StyleOption(Long id, String name, String generationType) {
+    public record StyleOption(Long id, String name, String generationType, String coverUrl, String category) {
     }
 
     /**
@@ -42,12 +44,14 @@ public final class GenerationStyleDtos {
      * @param generationType 生成类型
      * @param name 风格名称
      * @param stylePrompt 风格提示词
+     * @param coverUrl 封面地址
+     * @param category 风格分类
      * @param status 状态
      * @param sortOrder 排序值
      * @param createdAt 创建时间
      * @param updatedAt 更新时间
      */
-    public record StyleItem(Long id, String generationType, String name, String stylePrompt,
+    public record StyleItem(Long id, String generationType, String name, String stylePrompt, String coverUrl, String category,
                             Integer status, Integer sortOrder, String createdAt, String updatedAt) {
     }
 
@@ -86,12 +90,16 @@ public final class GenerationStyleDtos {
      * @param generationType 生成类型
      * @param name 风格名称
      * @param stylePrompt 风格提示词
+     * @param coverUrl 封面地址
+     * @param category 风格分类
      * @param status 状态
      * @param sortOrder 排序值
      */
     public record CreateStyleRequest(@NotBlank(message = "风格类型不能为空") String generationType,
                                      @NotBlank(message = "风格名称不能为空") String name,
                                      @NotBlank(message = "风格提示词不能为空") String stylePrompt,
+                                     @NotBlank(message = "风格封面不能为空") String coverUrl,
+                                     @NotBlank(message = "风格分类不能为空") String category,
                                      Integer status, Integer sortOrder) {
     }
 
@@ -102,12 +110,16 @@ public final class GenerationStyleDtos {
      * @param generationType 生成类型
      * @param name 风格名称
      * @param stylePrompt 风格提示词
+     * @param coverUrl 封面地址
+     * @param category 风格分类
      * @param status 状态
      * @param sortOrder 排序值
      */
     public record UpdateStyleRequest(Long id, @NotBlank(message = "风格类型不能为空") String generationType,
                                      @NotBlank(message = "风格名称不能为空") String name,
                                      @NotBlank(message = "风格提示词不能为空") String stylePrompt,
+                                     @NotBlank(message = "风格封面不能为空") String coverUrl,
+                                     @NotBlank(message = "风格分类不能为空") String category,
                                      Integer status, Integer sortOrder) {
     }
 

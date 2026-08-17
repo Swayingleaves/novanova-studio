@@ -103,8 +103,27 @@ public class AgentActivityService {
      * @return Mono<Void> 保存结果
      */
     public Mono<Void> persistRoundActivities(Long userId, String sessionId, String roundId) {
+        return persistRoundActivities(userId, sessionId, roundId, null);
+    }
+
+    /**
+     * 原子保存指定轮次的最新执行活动，并可显式附带轮次终态用于收尾残留的执行中活动。
+     *
+     * @param userId Long 当前用户ID
+     * @param sessionId String Agent会话ID及生成记录ID
+     * @param roundId String 生成轮次ID
+     * @param terminalStatus String 轮次终态，可为success、failed、canceled或空
+     * @return Mono<Void> 保存结果
+     */
+    public Mono<Void> persistRoundActivities(Long userId, String sessionId, String roundId, String terminalStatus) {
         JSONObject round = new JSONObject();
         round.put("id", roundId);
+        if (StringUtils.hasText(terminalStatus)) {
+            JSONObject result = new JSONObject();
+            result.put("id", roundId);
+            result.put("status", terminalStatus);
+            round.put("result", result);
+        }
         JSONArray activities = activitiesForRound(sessionId, round);
         if (activities.isEmpty()) {
             return Mono.empty();

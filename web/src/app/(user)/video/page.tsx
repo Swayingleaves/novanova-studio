@@ -33,13 +33,14 @@ import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
-import { createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, normalizeAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
+import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, mergePlanTaskActivityMessage, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { hasPendingVideoConversation } from "@/features/generation/lib/generation-conversation-recovery";
+import { reconcileGenerationLogTasks } from "@/features/generation/lib/generation-log-task-reconciliation";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
-import { deleteGenerationLogs, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
+import { deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
 import { findLatestPlayableVideo, hasPlayableVideoUrl } from "./video-display";
 
 type GeneratedVideo = {
@@ -109,6 +110,7 @@ export default function VideoPage() {
     const [styleOptions, setStyleOptions] = useState<CreationStyleOption[]>([]);
     const [selectedStyles, setSelectedStyles] = useState<CreationStyleOption[]>([]);
     const [styleLoading, setStyleLoading] = useState(false);
+    const [styleError, setStyleError] = useState<string | null>(null);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
@@ -137,12 +139,13 @@ export default function VideoPage() {
     useEffect(() => {
         let cancelled = false;
         setStyleLoading(true);
+        setStyleError(null);
         void listGenerationStyles("video")
             .then((result) => {
                 if (!cancelled) setStyleOptions(result.styles);
             })
             .catch((error) => {
-                if (!cancelled) message.error(error instanceof Error ? error.message : "视频风格加载失败");
+                if (!cancelled) setStyleError(error instanceof Error ? error.message : "视频风格加载失败");
             })
             .finally(() => {
                 if (!cancelled) setStyleLoading(false);
@@ -217,7 +220,7 @@ export default function VideoPage() {
         return nextConversations;
     }, []);
 
-    const { sessionId, isStreaming, isStopping, sendMessage, cancelMessage, resetSession, restoreSession } = useAgentChatSSE({
+    const { sessionId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, canChangeSession, resetSession, restoreSession } = useAgentChatSSE({
         entrySource: "videoPage",
         creationSettings: agentCreationSettings,
         onTextDelta: (msgId, delta) => {
@@ -289,7 +292,7 @@ export default function VideoPage() {
             }
         },
         onToolResult: (callId, ok, resultMsg, data) => {
-            const status = data?.canceled ? "canceled" : ok ? "success" : "failed";
+            const status: ToolCallState["status"] = data?.canceled ? "canceled" : ok ? "success" : "failed";
             setToolCalls((prev) => {
                 const next = prev.map((c) => (c.callId === callId ? { ...c, status, resultMessage: resultMsg, resultData: data } : c));
                 toolCallsRef.current = next;
@@ -308,17 +311,17 @@ export default function VideoPage() {
         onTaskComplete: (messageId, text, action) => {
             const streamed = streamingTextRef.current;
             setChatMessages((prev) => {
-                let next = prev;
+                let next = finishRoundAgentActivities(prev, text || "已完成");
                 if (streamed && streamed.text) {
                     const assistantMessage = { id: streamed.messageId, role: "assistant" as const, text: streamed.text, ...(action ? { action } : {}) };
-                    next = prev.some((item) => item.id === streamed.messageId)
-                        ? prev.map((item) => item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)
-                        : [...prev, assistantMessage];
+                    next = next.some((item) => item.id === streamed.messageId)
+                        ? next.map((item) => item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)
+                        : [...next, assistantMessage];
                 } else if (text || action) {
-                    const lastMessage = prev.at(-1);
+                    const lastMessage = next.at(-1);
                     next = lastMessage?.role === "assistant" && lastMessage.text === text
-                        ? action ? prev.map((item, index) => index === prev.length - 1 ? { ...item, action } : item) : prev
-                        : [...prev, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
+                        ? action ? next.map((item, index) => index === next.length - 1 ? { ...item, action } : item) : next
+                        : [...next, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
                 }
                 chatMessagesRef.current = next;
                 return next;
@@ -387,16 +390,8 @@ export default function VideoPage() {
             });
         },
         onPlanTaskStatus: (planId, taskId, status, statusMessage) => {
-            const activityStatus = getPlanTaskActivityStatus(status);
-            if (!activityStatus) return;
             setChatMessages((prev) => {
-                const next = upsertAgentActivityMessage(prev, {
-                    id: `task-${planId}-${taskId}`,
-                    type: "plan-task-status",
-                    title: "执行创作任务",
-                    description: statusMessage,
-                    status: activityStatus,
-                });
+                const next = mergePlanTaskActivityMessage(prev, planId, taskId, status, statusMessage);
                 chatMessagesRef.current = next;
                 return next;
             });
@@ -431,7 +426,7 @@ export default function VideoPage() {
     const historySettingsSummary = !videoDraftSettingsModified && activeId && latestRound?.config ? buildVideoSettingsSummary(latestRound.config, effectiveConfig, latestRound.config.videoModel || latestRound.config.model || "") : "";
     const settingsSummary = draftSettingsSummary || historySettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingVideoConversation(activeConversation) : false;
-    const canGenerate = Boolean(prompt.trim()) && !isStreaming && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
+    const canGenerate = Boolean(prompt.trim()) && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
 
     useEffect(() => {
@@ -443,21 +438,31 @@ export default function VideoPage() {
     useEffect(() => {
         let cancelled = false;
         void refreshConversations().then(() => {
-            if (cancelled) return;
+            if (cancelled || !canChangeSession()) return;
             activeIdRef.current = null;
             setActiveId(null);
         });
         return () => {
             cancelled = true;
         };
-    }, [refreshConversations]);
+    }, [canChangeSession, refreshConversations]);
 
     useEffect(() => {
         if (!hasRunningGeneration(conversations)) return;
-        const refreshTimer = window.setInterval(() => {
-            void refreshConversations();
-        }, 2_000);
-        return () => window.clearInterval(refreshTimer);
+        let cancelled = false;
+        let refreshTimer: number | undefined;
+        void getAiTaskPollingIntervalMilliseconds()
+            .then((intervalMilliseconds) => {
+                if (cancelled) return;
+                refreshTimer = window.setInterval(() => {
+                    void refreshConversations();
+                }, intervalMilliseconds);
+            })
+            .catch((error) => console.error("读取AI任务轮询配置失败", error));
+        return () => {
+            cancelled = true;
+            if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
+        };
     }, [conversations, refreshConversations]);
 
     const addReferences = async (files?: FileList | File[] | null) => {
@@ -559,6 +564,7 @@ export default function VideoPage() {
     };
 
     const generate = async () => {
+        if (isStreaming || isQueued) return;
         const text = prompt.trim();
         if (!text) {
             message.error("请输入视频提示词");
@@ -608,6 +614,7 @@ export default function VideoPage() {
     };
 
     const regenerateRound = async (round: Round) => {
+        if (!canChangeSession()) return;
         const videoModel = round.config.videoModel || round.config.model || model;
         const size = round.config.size;
         const resolution = round.config.vquality;
@@ -634,6 +641,10 @@ export default function VideoPage() {
     };
 
     const newConversation = () => {
+        if (!canChangeSession()) {
+            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            return;
+        }
         setActiveId(null);
         activeIdRef.current = null;
         setVideoDraftSettingsModified(false);
@@ -655,6 +666,10 @@ export default function VideoPage() {
     };
 
     const selectConversation = (conversation: Conversation) => {
+        if (!canChangeSession()) {
+            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            return;
+        }
         if (getGenerationConversationStatus(conversation) !== "none" && conversation.generationStatus !== "running") {
             setConversations((current) => current.map((item) => (item.id === conversation.id ? { ...item, generationViewedAt: item.generationCompletedAt } : item)));
             void markGenerationLogViewed(conversation.id).catch(() => void refreshConversations());
@@ -682,6 +697,10 @@ export default function VideoPage() {
     };
 
     const deleteSelected = () => {
+        if (activeIdRef.current && selectedIds.includes(activeIdRef.current) && !canChangeSession()) {
+            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            return;
+        }
         const mediaKeys = conversations.filter((conversation) => selectedIds.includes(conversation.id)).flatMap((conversation) => conversation.rounds.flatMap((round) => (round.result.video?.storageKey ? [round.result.video.storageKey] : [])));
         void Promise.all([deleteStoredMedia(mediaKeys), deleteGenerationLogs(selectedIds)]).then(refreshConversations);
         if (activeId && selectedIds.includes(activeId)) {
@@ -692,6 +711,7 @@ export default function VideoPage() {
             setReferences([]);
             setVideoReferences([]);
             setSelectedStyles([]);
+            resetSession();
         }
         setSelectedIds([]);
         setManagementMode(false);
@@ -832,6 +852,10 @@ export default function VideoPage() {
     };
 
     const deleteConversation = async (conversationId: string) => {
+        if (activeIdRef.current === conversationId && !canChangeSession()) {
+            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            return;
+        }
         const conversation = conversationsRef.current.find((item) => item.id === conversationId);
         const mediaKeys = conversation?.rounds.flatMap((round) => (round.result.video?.storageKey ? [round.result.video.storageKey] : [])) || [];
         await Promise.all([deleteStoredMedia(mediaKeys), deleteGenerationLogs([conversationId])]);
@@ -901,7 +925,7 @@ export default function VideoPage() {
             icon: <Sparkles className="size-3.5" />,
             placement: "submit",
             iconOnly: true,
-            disabled: !prompt.trim() || isStreaming || activeConversationPending || isPromptOptimizing,
+            disabled: !prompt.trim() || isStreaming || isQueued || activeConversationPending || isPromptOptimizing,
             loading: isPromptOptimizing,
             onClick: () => void optimizePrompt({ operationId: "video-page", generationType: "video", prompt, generationStyleIds: selectedStyles.map((style) => style.id), onSuccess: setPrompt }),
         },
@@ -1007,30 +1031,20 @@ export default function VideoPage() {
                     styleOptions,
                     selectedStyles,
                     styleLoading,
+                    styleError,
                     actions: composerActions,
                     running: isStreaming || activeConversationPending,
+                    queued: isQueued,
                     canSubmit: canGenerate,
                     stopping: isStopping,
                     focusWhenValueSet: focusInitialPrompt,
                     creditCost,
                     onChange: setPrompt,
-                    onStyleSelect: (style) => {
-                        setSelectedStyles((current) => {
-                            if (current.some((selected) => selected.id === style.id)) {
-                                message.info("该风格已选择");
-                                return current;
-                            }
-                            if (current.length >= 3) {
-                                message.warning("最多选择3个风格");
-                                return current;
-                            }
-                            return [...current, style];
-                        });
-                    },
+                    onStyleSelect: (style) => setSelectedStyles([style]),
                     onStyleRemove: (styleId) => setSelectedStyles((current) => current.filter((style) => style.id !== styleId)),
                     onPasteImages: (files) => void addReferences(files),
                     onSubmit: () => void generate(),
-                    onStop: isStreaming ? () => void cancelMessage() : undefined,
+                    onStop: isStreaming || isQueued ? () => void cancelMessage() : undefined,
                 }}
                 settings={{
                     open: settingsOpen,
@@ -1404,7 +1418,8 @@ async function readConversations() {
 
     try {
         const values = await listGenerationLogs<Conversation>("video");
-        const conversations = await Promise.all(values.map(normalizeConversation));
+        const reconciledValues = await reconcileGenerationLogTasks("video", values);
+        const conversations = await Promise.all(reconciledValues.map(normalizeConversation));
         return conversations.sort((left, right) => (right.updatedAt || right.createdAt || 0) - (left.updatedAt || left.createdAt || 0));
     } catch {
         return [];
@@ -1426,7 +1441,7 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
 
             return {
                 ...round,
-                activities: normalizeAgentActivities(round.activities),
+                activities: normalizeHistoricalAgentActivities(round.activities, normalizeVideoRoundActivityStatus(normalizedResult)),
                 references: normalizedReferences,
                 videoReferences: normalizedVideoReferences,
                 result:
@@ -1454,6 +1469,19 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
         generationCompletedAt: raw.generationCompletedAt,
         generationViewedAt: raw.generationViewedAt,
     };
+}
+
+function normalizeVideoRoundActivityStatus(result: GenerationResult | null | undefined): "success" | "failed" | "canceled" | null {
+    if (!result || result.status === "pending") {
+        return null;
+    }
+    if (result.status === "canceled") {
+        return "canceled";
+    }
+    if (result.status === "failed") {
+        return "failed";
+    }
+    return "success";
 }
 
 function readVideoStorageKey(value: unknown): string {

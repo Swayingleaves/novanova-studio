@@ -53,6 +53,7 @@ export type AgentChatHistoryMessage = {
 
 export interface AgentToolResultParams {
   sessionId: string;
+  requestId: string;
   callId: string;
   result: { ok: boolean; message: string; data?: Record<string, unknown> };
 }
@@ -60,6 +61,7 @@ export interface AgentToolResultParams {
 export interface AgentEvent {
   type: string;
   sessionId: string;
+  requestId?: string;
   callId?: string;
   name?: string;
   arguments?: Record<string, unknown>;
@@ -79,12 +81,14 @@ export interface AgentEvent {
   action?: AgentAction;
 }
 
+export type AgentRequestStatus = "queued" | "running" | "success" | "failed" | "canceled" | "interrupted";
+
 type ApiResponse<T> = { code: number; data: T; msg: string };
 
 /**
  * 发起 Agent 对话，返回 sessionId 供前端订阅事件流
  */
-export async function agentChat(params: AgentChatParams): Promise<{ sessionId: string }> {
+export async function agentChat(params: AgentChatParams): Promise<{ sessionId: string; requestId: string; status: AgentRequestStatus }> {
   const token = getAuthToken();
   const res = await fetch(`${serverBaseUrl()}/ai/agent/chat`, {
     method: "POST",
@@ -95,7 +99,7 @@ export async function agentChat(params: AgentChatParams): Promise<{ sessionId: s
     cache: "no-store",
     body: JSON.stringify(params),
   });
-  const payload = (await res.json().catch(() => null)) as ApiResponse<{ sessionId: string }> | null;
+  const payload = (await res.json().catch(() => null)) as ApiResponse<{ sessionId: string; requestId: string; status: AgentRequestStatus }> | null;
   if (!res.ok || !payload) throw new Error(payload?.msg || `Agent Chat 请求失败: ${res.status}`);
   if (payload.code !== 0) throw new Error(payload.msg || "Agent Chat 请求失败");
   return payload.data;
@@ -104,7 +108,7 @@ export async function agentChat(params: AgentChatParams): Promise<{ sessionId: s
 /**
  * 停止当前 Agent 会话及其关联的生成任务。
  */
-export async function cancelAgentChat(sessionId: string): Promise<void> {
+export async function cancelAgentChat(sessionId: string, requestId: string): Promise<void> {
   const token = getAuthToken();
   const res = await fetch(`${serverBaseUrl()}/ai/agent/cancelChat`, {
     method: "POST",
@@ -113,7 +117,7 @@ export async function cancelAgentChat(sessionId: string): Promise<void> {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     cache: "no-store",
-    body: JSON.stringify({ sessionId }),
+    body: JSON.stringify({ sessionId, requestId }),
   });
   const payload = (await res.json().catch(() => null)) as ApiResponse<null> | null;
   if (!res.ok || !payload || payload.code !== 0) {

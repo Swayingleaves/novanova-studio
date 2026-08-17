@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.VideoCompositionDtos;
 import com.novanovastudio.repository.VideoCompositionTaskRepository;
 import com.novanovastudio.security.CurrentUserProvider;
@@ -63,7 +64,8 @@ class VideoCompositionTaskServiceTest {
                 mock(VideoCompositionMediaProcessor.class),
                 taskDispatcher,
                 mock(VideoCompositionTaskQueue.class),
-                cancellation
+                cancellation,
+                new NovanovaProperties()
         );
     }
 

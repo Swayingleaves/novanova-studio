@@ -336,6 +336,7 @@ function CanvasWorkspacePage() {
     const initialPromptHandledRef = useRef(false);
     const [agentUndoSnapshot, setAgentUndoSnapshot] = useState<CanvasAgentSnapshot | null>(null);
     const [agentRunning, setAgentRunning] = useState(false);
+    const [agentQueued, setAgentQueued] = useState(false);
     const { completedThinkings, activeThinking, onThoughtDelta, onThoughtComplete, resetThinkings } = useAgentThinking();
     const [titleEditing, setTitleEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState("");
@@ -2543,6 +2544,7 @@ function CanvasWorkspacePage() {
         onTaskDisplayComplete: () => {
             activeAgentAssistantMessageIdRef.current = null;
             setAgentRunning(false);
+            setAgentQueued(false);
         },
     });
 
@@ -2578,6 +2580,15 @@ function CanvasWorkspacePage() {
             resetTextStream(false);
             activeAgentAssistantMessageIdRef.current = null;
             setAgentRunning(false);
+            setAgentQueued(false);
+        },
+        onQueueStatus: (status) => {
+            setAgentQueued(status === "queued");
+            setAgentRunning(status === "running");
+        },
+        onRequestFinished: () => {
+            setAgentQueued(false);
+            setAgentRunning(false);
         },
         onPlanCreated: (planId, summary, taskCount) => {
             const sessionId = activeAgentSessionIdRef.current;
@@ -2595,9 +2606,12 @@ function CanvasWorkspacePage() {
             if (!sessionId) return;
             updateAssistantSession(sessionId, (session) => ({
                 ...session,
-                messages: session.messages.map((item) => item.id === `plan-${planId}`
-                    ? { ...item, meta: status === "failed" ? `失败：${statusMessage}` : statusMessage }
-                    : item),
+                messages: session.messages.map((item) => {
+                    if (item.id !== `plan-${planId}`) return item;
+                    // 已标记失败的计划不被后到的诊断/调整/重试等中间状态覆盖，避免失败显示回退为执行中。
+                    if (item.meta?.startsWith("失败：") && status !== "failed") return item;
+                    return { ...item, meta: status === "failed" ? `失败：${statusMessage}` : statusMessage };
+                }),
                 updatedAt: new Date().toISOString(),
             }));
         },
@@ -2623,11 +2637,12 @@ function CanvasWorkspacePage() {
                 appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: `错误: ${errorMessage}` });
             }
             setAgentRunning(false);
+            setAgentQueued(false);
         },
     });
 
     const handleCreateAgentSession = useCallback(() => {
-        if (agentRunning) return;
+        if (agentRunning || agentQueued) return;
         resetThinkings();
         const activeSession = chatSessions.find((session) => session.id === activeChatId);
         if (activeSession && activeSession.messages.length === 0) {
@@ -2649,7 +2664,7 @@ function CanvasWorkspacePage() {
         activeAgentAssistantMessageIdRef.current = null;
         resetAgentSession();
         handleAssistantSessionsChange([...chatSessions, newSession], sessionId);
-    }, [activeChatId, agentRunning, chatSessions, handleAssistantSessionsChange, resetAgentSession, resetThinkings]);
+    }, [activeChatId, agentQueued, agentRunning, chatSessions, handleAssistantSessionsChange, resetAgentSession, resetThinkings]);
 
     const startTitleEditing = useCallback(() => {
         setTitleDraft(currentDocument?.identity.title || "未命名画布");
@@ -3944,7 +3959,7 @@ function CanvasWorkspacePage() {
                     initialPrompt={initialPrompt}
                     sessionId={activeChatId}
                     onSend={async (text, references = [], generationStyleIds = [], generationStyles = []) => {
-                        if (agentRunning) return;
+                        if (agentRunning || agentQueued) return;
                         const now = new Date().toISOString();
                         const sessionId = activeChatId || nanoid();
                         const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text, references, generationStyles };
@@ -3953,7 +3968,8 @@ function CanvasWorkspacePage() {
                         activeAgentAssistantMessageIdRef.current = null;
                         resetTextStream(false);
                         resetThinkings();
-                        setAgentRunning(true);
+                        setAgentRunning(false);
+                        setAgentQueued(true);
 
                         if (!activeChatId) {
                             const newSession: CanvasAssistantSession = {
@@ -3983,9 +3999,11 @@ function CanvasWorkspacePage() {
                             resetThinkings();
                             appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
                             setAgentRunning(false);
+                            setAgentQueued(false);
                         }
                     }}
                     isStreaming={agentRunning}
+                    isQueued={agentQueued}
                     config={config}
                     model={config.agentModel}
                     onModelChange={(model) => updateConfig("agentModel", model)}

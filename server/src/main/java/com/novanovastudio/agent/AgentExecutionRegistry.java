@@ -3,7 +3,9 @@ package com.novanovastudio.agent;
 import com.alibaba.fastjson2.JSONObject;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import reactor.core.Disposable;
+import reactor.core.publisher.Mono;
 import org.springframework.stereotype.Component;
 
 /**
@@ -25,7 +27,19 @@ public class AgentExecutionRegistry {
      * @param sessionId String Agent 会话ID
      */
     public void open(Long userId, String sessionId) {
-        executions.put(sessionId, new ExecutionState(userId));
+        open(userId, sessionId, null);
+    }
+
+    /**
+     * 登记新的Agent会话执行，并在任务创建前持久化任务关联。
+     *
+     * @param userId Long 当前用户ID
+     * @param sessionId String Agent会话ID
+     * @param taskRegistrar Function<AgentTaskRegistration, Mono<Void>> 任务持久化处理器，可为空
+     */
+    public void open(Long userId, String sessionId,
+                     Function<AgentTaskRegistration, Mono<Void>> taskRegistrar) {
+        executions.put(sessionId, new ExecutionState(userId, taskRegistrar));
     }
 
     /**
@@ -78,6 +92,35 @@ public class AgentExecutionRegistry {
             state.tasks.put(task.taskId(), task);
             return state.cancelRequested;
         }
+    }
+
+    /**
+     * 登记生成任务并在任务进入底层队列前完成关联持久化。
+     *
+     * @param sessionId String Agent会话ID
+     * @param task AgentTaskRegistration 任务与取消态轮次信息
+     * @return Mono<Boolean> 当前会话是否已请求取消
+     */
+    public Mono<Boolean> registerTaskAndPersist(String sessionId, AgentTaskRegistration task) {
+        ExecutionState state = executions.get(sessionId);
+        if (state == null) {
+            return Mono.just(true);
+        }
+        boolean canceled;
+        Function<AgentTaskRegistration, Mono<Void>> taskRegistrar;
+        synchronized (state) {
+            state.tasks.put(task.taskId(), task);
+            canceled = state.cancelRequested;
+            taskRegistrar = state.taskRegistrar;
+        }
+        if (taskRegistrar == null) {
+            return Mono.just(canceled);
+        }
+        return taskRegistrar.apply(task).then(Mono.fromSupplier(() -> {
+            synchronized (state) {
+                return state.cancelRequested;
+            }
+        }));
     }
 
     /**
@@ -296,8 +339,18 @@ public class AgentExecutionRegistry {
          *
          * @param userId Long 会话所属用户ID
          */
-        private ExecutionState(Long userId) {
+        /** 底层任务关联持久化处理器 */
+        private final Function<AgentTaskRegistration, Mono<Void>> taskRegistrar;
+
+        /**
+         * 创建会话执行状态。
+         *
+         * @param userId Long 会话所属用户ID
+         * @param taskRegistrar Function<AgentTaskRegistration, Mono<Void>> 任务持久化处理器
+         */
+        private ExecutionState(Long userId, Function<AgentTaskRegistration, Mono<Void>> taskRegistrar) {
             this.userId = userId;
+            this.taskRegistrar = taskRegistrar;
         }
     }
 }

@@ -1,28 +1,54 @@
 "use client";
 
-import { Button, Input, Tooltip } from "antd";
+import { App, Button, Input, Tooltip } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Bot, ChevronDown, LoaderCircle, Palette, Square, X } from "lucide-react";
+import { ArrowUp, Bot, Square, X } from "lucide-react";
 
 import type { CreationComposerProps } from "@/features/generation/components/creation-workspace-types";
 import { CreditCostDisplay } from "@/features/generation/constants/credits";
+import { GenerationStyleCover, GenerationStyleMenu } from "@/features/generation/components/generation-style-picker";
+import { filterGenerationStyles, GENERATION_STYLE_SELECTION_LIMIT_MESSAGE, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { getStyleCommandRange, parseGenerationStyleMessage, removeStyleCommand } from "@/features/generation/lib/style-command";
 
-export function CreationComposer({ agentLabel = "Novanova Agent", value, placeholder, references, styleOptions, selectedStyles, styleLoading, actions, running, canSubmit, creditCost, compact, focusWhenValueSet, stopping, onChange, onStyleSelect, onStyleRemove, onPasteImages, onSubmit, onStop }: CreationComposerProps) {
+export function CreationComposer({
+    agentLabel = "Novanova Agent",
+    value,
+    placeholder,
+    references,
+    styleOptions,
+    selectedStyles,
+    styleLoading,
+    styleError,
+    actions,
+    running,
+    queued = false,
+    canSubmit,
+    creditCost,
+    compact,
+    focusWhenValueSet,
+    stopping,
+    onChange,
+    onStyleSelect,
+    onStyleRemove,
+    onPasteImages,
+    onSubmit,
+    onStop,
+}: CreationComposerProps) {
+    const { message } = App.useApp();
     const inputRef = useRef<TextAreaRef>(null);
     const focusedValueRef = useRef(false);
-    const [styleMenuOpen, setStyleMenuOpen] = useState(false);
+    const [styleMenuOpen, setStyleMenuOpenState] = useState(false);
     const [styleQuery, setStyleQuery] = useState("");
     const [styleCommand, setStyleCommand] = useState<{ start: number; end: number } | null>(null);
     const [highlightedStyleIndex, setHighlightedStyleIndex] = useState(0);
     const toolbarActions = actions.filter((action) => action.placement !== "submit");
     const submitActions = actions.filter((action) => action.placement === "submit");
+    const requestActive = running || queued;
     const availableStyles = styleOptions ?? [];
     const activeStyles = selectedStyles ?? [];
     const filteredStyles = useMemo(() => {
-        const query = styleQuery.trim().toLowerCase();
-        return availableStyles.filter((style) => !query || style.name.toLowerCase().includes(query));
+        return filterGenerationStyles(availableStyles, styleQuery);
     }, [availableStyles, styleQuery]);
 
     useEffect(() => {
@@ -40,15 +66,19 @@ export function CreationComposer({ agentLabel = "Novanova Agent", value, placeho
         const command = getStyleCommandRange(nextValue, cursor);
         if (!command) {
             setStyleCommand(null);
-            setStyleMenuOpen(false);
+            closeStyleMenu();
             return;
         }
         setStyleCommand({ start: command.start, end: command.end });
         setStyleQuery(command.query);
-        setStyleMenuOpen(true);
+        setStyleMenuOpenState(true);
     };
 
     const chooseStyle = (style: NonNullable<CreationComposerProps["styleOptions"]>[number]) => {
+        if (activeStyles.some((selected) => selected.id === style.id)) {
+            message.info("该风格已选择");
+            return;
+        }
         onStyleSelect?.(style);
         if (styleCommand) {
             const nextValue = removeStyleCommand(value, styleCommand.start, styleCommand.end);
@@ -61,20 +91,21 @@ export function CreationComposer({ agentLabel = "Novanova Agent", value, placeho
         }
         setStyleCommand(null);
         setStyleQuery("");
-        setStyleMenuOpen(false);
+        closeStyleMenu();
     };
 
-    const toggleStyleMenu = () => {
+    const closeStyleMenu = () => {
+        setStyleMenuOpenState(false);
         setStyleCommand(null);
         setStyleQuery("");
         setHighlightedStyleIndex(0);
-        setStyleMenuOpen((open) => {
-            const nextOpen = !open;
-            if (nextOpen) {
-                requestAnimationFrame(() => inputRef.current?.focus({ cursor: "end" }));
-            }
-            return nextOpen;
-        });
+    };
+    const openStyleMenu = () => {
+        setStyleCommand(null);
+        setStyleQuery("");
+        setHighlightedStyleIndex(0);
+        setStyleMenuOpenState(true);
+        requestAnimationFrame(() => inputRef.current?.focus({ cursor: "end" }));
     };
 
     const pasteStyleMessage = (pastedText: string) => {
@@ -84,12 +115,17 @@ export function CreationComposer({ agentLabel = "Novanova Agent", value, placeho
         const textarea = inputRef.current?.resizableTextArea?.textArea;
         const start = textarea?.selectionStart ?? value.length;
         const end = textarea?.selectionEnd ?? start;
+        const additions = parsed.styles.filter((style) => !activeStyles.some((selected) => selected.id === style.id));
+        const remaining = Math.max(0, MAX_GENERATION_STYLE_SELECTION_COUNT - activeStyles.length);
+        if (additions.length > remaining) {
+            message.warning(GENERATION_STYLE_SELECTION_LIMIT_MESSAGE);
+        }
         const nextValue = `${value.slice(0, start)}${parsed.prompt}${value.slice(end)}`;
-        parsed.styles.forEach((style) => onStyleSelect(style));
+        additions.slice(0, remaining).forEach((style) => onStyleSelect(style));
         onChange(nextValue);
         setStyleCommand(null);
         setStyleQuery("");
-        setStyleMenuOpen(false);
+        closeStyleMenu();
         requestAnimationFrame(() => {
             const nextTextarea = inputRef.current?.resizableTextArea?.textArea;
             const cursor = start + parsed.prompt.length;
@@ -128,13 +164,13 @@ export function CreationComposer({ agentLabel = "Novanova Agent", value, placeho
                             <span className="sr-only">Agent 已就绪</span>
                             <span className="truncate">{agentLabel}</span>
                         </span>
-                        <span>{value.length} / 2000</span>
+                        <span>{queued ? "排队中" : running ? "生成中" : `${value.length} / 2000`}</span>
                     </div>
                     {references.length || activeStyles.length ? (
                         <div className={`flex flex-wrap gap-2 overflow-hidden transition-all duration-200 ${compact ? "invisible mb-0 max-h-0 opacity-0" : "mb-3 max-h-56 opacity-100"}`}>
                             {activeStyles.map((style) => (
                                 <div key={`style-${style.id}`} className="creation-composer-chip">
-                                    <Palette className="size-4 shrink-0 text-[var(--studio-action)]" />
+                                    <GenerationStyleCover style={style} className="size-5 shrink-0 overflow-hidden rounded-sm" />
                                     <span className="min-w-0 max-w-32 truncate text-xs font-medium text-[var(--studio-muted)]">{style.name}</span>
                                     <button type="button" className="creation-composer-chip-remove" onClick={() => onStyleRemove?.(style.id)} aria-label={`移除风格${style.name}`}>
                                         <X className="size-3.5" />
@@ -195,62 +231,44 @@ export function CreationComposer({ agentLabel = "Novanova Agent", value, placeho
                                     }
                                     if (event.key === "Escape") {
                                         event.preventDefault();
-                                        setStyleMenuOpen(false);
-                                        setStyleCommand(null);
+                                        closeStyleMenu();
                                         return;
                                     }
                                 }
                                 if (event.key === "Enter" && !event.shiftKey) {
                                     event.preventDefault();
-                                    if (canSubmit && !running) {
+                                    if (canSubmit && !requestActive) {
                                         onSubmit();
                                     }
                                 }
                             }}
                         />
-                        {styleMenuOpen ? (
-                            <div className="absolute bottom-full left-0 z-30 mb-2 max-h-64 w-full max-w-sm overflow-auto rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-1.5 shadow-[var(--studio-shadow)]">
-                                {styleLoading ? (
-                                    <div className="flex items-center gap-2 px-3 py-3 text-xs text-[var(--studio-muted)]"><LoaderCircle className="size-3.5 animate-spin" />加载风格...</div>
-                                ) : filteredStyles.length ? (
-                                    filteredStyles.map((style, index) => (
-                                        <button
-                                            type="button"
-                                            key={style.id}
-                                            className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors ${index === highlightedStyleIndex ? "bg-[var(--studio-primary-soft)] text-[var(--studio-ink)]" : "text-[var(--studio-text)] hover:bg-[var(--studio-primary-soft)]"}`}
-                                            onMouseEnter={() => setHighlightedStyleIndex(index)}
-                                            onMouseDown={(event) => event.preventDefault()}
-                                            onClick={() => chooseStyle(style)}
-                                        >
-                                            <span className="truncate">{style.name}</span>
-                                            {activeStyles.some((selected) => selected.id === style.id) ? <span className="text-xs text-[var(--studio-muted)]">已选</span> : null}
-                                        </button>
-                                    ))
-                                ) : (
-                                    <div className="px-3 py-3 text-xs text-[var(--studio-muted)]">暂无匹配风格</div>
-                                )}
-                            </div>
-                        ) : null}
                     </div>
 
                     <div className={`creation-composer-toolbar flex flex-wrap items-center gap-2 overflow-hidden transition-all duration-200 ${compact ? "invisible mt-0 max-h-0 opacity-0" : "mt-3 max-h-24 opacity-100"}`}>
-                        <Button
-                            size="small"
-                            className="creation-composer-action"
-                            icon={<Palette className="size-3.5" />}
-                            aria-expanded={styleMenuOpen}
-                            aria-haspopup="listbox"
-                            onClick={toggleStyleMenu}
-                        >
-                            风格
-                            <ChevronDown className="ml-0.5 size-3" />
-                        </Button>
+                        <GenerationStyleMenu
+                            styles={availableStyles}
+                            selected={activeStyles}
+                            loading={styleLoading}
+                            error={styleError}
+                            open={styleMenuOpen}
+                            query={styleQuery}
+                            highlightedIndex={highlightedStyleIndex}
+                            placement="topLeft"
+                            onOpenChange={(open) => {
+                                if (open) openStyleMenu();
+                                else closeStyleMenu();
+                            }}
+                            onQueryChange={setStyleQuery}
+                            onHighlightedIndexChange={setHighlightedStyleIndex}
+                            onSelect={chooseStyle}
+                        />
                         {toolbarActions.map(renderAction)}
                         <div className="flex-1" />
                         <div className="flex shrink-0 items-center gap-2">
                             {submitActions.map(renderAction)}
-                            {running && onStop ? (
-                                <Tooltip title="停止生成">
+                            {requestActive && onStop ? (
+                                <Tooltip title={queued ? "取消排队" : "停止生成"}>
                                     <Button
                                         type="primary"
                                         size="small"
@@ -258,7 +276,7 @@ export function CreationComposer({ agentLabel = "Novanova Agent", value, placeho
                                         disabled={stopping}
                                         loading={stopping}
                                         onClick={onStop}
-                                        aria-label={stopping ? "正在停止生成" : "停止生成"}
+                                        aria-label={stopping ? "正在停止生成" : queued ? "取消排队" : "停止生成"}
                                         icon={<Square className="size-3.5 fill-current" strokeWidth={2.2} />}
                                     />
                                 </Tooltip>
@@ -266,12 +284,12 @@ export function CreationComposer({ agentLabel = "Novanova Agent", value, placeho
                                 <button
                                     type="button"
                                     className="creation-composer-submit-trigger creation-composer-submit-trigger-cost"
-                                    disabled={!canSubmit || running}
+                                    disabled={!canSubmit || requestActive}
                                     onClick={onSubmit}
-                                    aria-label={running ? "生成中" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
+                                    aria-label={queued ? "排队中" : running ? "生成中" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
                                 >
-                                    {running ? (
-                                        "生成中"
+                                    {queued || running ? (
+                                        queued ? "排队中" : "生成中"
                                     ) : (
                                         <>
                                             <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />

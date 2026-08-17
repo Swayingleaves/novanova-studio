@@ -866,6 +866,9 @@ public class NovanovaProperties {
             /** 读取阻塞秒数 */
             private int readBlockSeconds = 5;
 
+            /** 异步AI任务状态轮询间隔秒数，包括供应商、内部等待和视频合成恢复 */
+            private int pollingIntervalSeconds = 3;
+
             /** 任务锁TTL秒数 */
             private int lockTtlSeconds = 300;
 
@@ -966,6 +969,24 @@ public class NovanovaProperties {
              */
             public void setReadBlockSeconds(int readBlockSeconds) {
                 this.readBlockSeconds = readBlockSeconds;
+            }
+
+            /**
+             * 获取异步AI任务状态轮询间隔秒数。
+             *
+             * @return int 轮询间隔秒数
+             */
+            public int getPollingIntervalSeconds() {
+                return pollingIntervalSeconds;
+            }
+
+            /**
+             * 设置异步AI任务状态轮询间隔秒数。
+             *
+             * @param pollingIntervalSeconds int 轮询间隔秒数
+             */
+            public void setPollingIntervalSeconds(int pollingIntervalSeconds) {
+                this.pollingIntervalSeconds = pollingIntervalSeconds;
             }
 
             /**

@@ -27,8 +27,10 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 public class GenerationStyleService {
 
-    /** 最大风格数量。 */
-    public static final int MAX_STYLE_COUNT = 3;
+    /** 当前生成请求最多选择一个风格。 */
+    public static final int MAX_SELECTED_STYLE_COUNT = 1;
+    /** 历史重生成最多保留三个风格快照。 */
+    public static final int MAX_HISTORY_STYLE_SNAPSHOT_COUNT = 3;
     /** 默认排序值。 */
     private static final int DEFAULT_SORT_ORDER = 1000;
     /** 最大分页数量。 */
@@ -71,7 +73,8 @@ public class GenerationStyleService {
      * @return 操作完成信号
      */
     public Mono<Void> createStyle(GenerationStyleDtos.CreateStyleRequest request) {
-        GenerationStyleRecords.StyleRecord record = buildRecord(request.generationType(), request.name(), request.stylePrompt(), request.status(), request.sortOrder());
+        GenerationStyleRecords.StyleRecord record = buildRecord(
+                request.generationType(), request.name(), request.stylePrompt(), request.coverUrl(), request.category(), request.status(), request.sortOrder());
         return repository.createStyle(record)
                 .doOnSuccess(id -> log.info("创建生成风格成功: id={}, type={}", id, record.getGenerationType()))
                 .then();
@@ -87,7 +90,8 @@ public class GenerationStyleService {
         if (request.id() == null || request.id() <= 0) {
             return Mono.error(invalid("风格ID不能为空"));
         }
-        GenerationStyleRecords.StyleRecord record = buildRecord(request.generationType(), request.name(), request.stylePrompt(), request.status(), request.sortOrder());
+        GenerationStyleRecords.StyleRecord record = buildRecord(
+                request.generationType(), request.name(), request.stylePrompt(), request.coverUrl(), request.category(), request.status(), request.sortOrder());
         record.setId(request.id());
         return repository.updateStyle(record)
                 .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "风格不存在")))
@@ -177,7 +181,7 @@ public class GenerationStyleService {
      */
     private List<GenerationStyleDtos.GenerationStyleSnapshot> validateSnapshots(
             String generationType, List<GenerationStyleDtos.GenerationStyleSnapshot> snapshots) {
-        if (snapshots.size() > MAX_STYLE_COUNT) {
+        if (snapshots.size() > MAX_HISTORY_STYLE_SNAPSHOT_COUNT) {
             throw invalid("最多保留3个风格快照");
         }
         Map<Long, Boolean> ids = new LinkedHashMap<>();
@@ -213,8 +217,8 @@ public class GenerationStyleService {
         if (ids.stream().distinct().count() != ids.size()) {
             throw invalid("风格不能重复选择");
         }
-        if (ids.size() > MAX_STYLE_COUNT) {
-            throw invalid("最多选择3个风格");
+        if (ids.size() > MAX_SELECTED_STYLE_COUNT) {
+            throw invalid("最多选择1个风格");
         }
         return ids;
     }
@@ -238,12 +242,14 @@ public class GenerationStyleService {
     }
 
     /** 构建风格记录。 */
-    private GenerationStyleRecords.StyleRecord buildRecord(String generationType, String name, String stylePrompt,
-                                                           Integer status, Integer sortOrder) {
+    private GenerationStyleRecords.StyleRecord buildRecord(String generationType, String name, String stylePrompt, String coverUrl,
+                                                           String category, Integer status, Integer sortOrder) {
         GenerationStyleRecords.StyleRecord record = new GenerationStyleRecords.StyleRecord();
         record.setGenerationType(normalizeGenerationType(generationType));
         record.setName(required(name, "风格名称不能为空"));
         record.setStylePrompt(required(stylePrompt, "风格提示词不能为空"));
+        record.setCoverUrl(required(coverUrl, "风格封面不能为空"));
+        record.setCategory(required(category, "风格分类不能为空"));
         record.setStatus(normalizeStatus(status));
         if (sortOrder != null && sortOrder < 0) {
             throw invalid("风格排序值不能小于0");
@@ -268,12 +274,12 @@ public class GenerationStyleService {
 
     /** 风格记录转用户选项。 */
     private GenerationStyleDtos.StyleOption toOption(GenerationStyleRecords.StyleRecord record) {
-        return new GenerationStyleDtos.StyleOption(record.getId(), record.getName(), record.getGenerationType());
+        return new GenerationStyleDtos.StyleOption(record.getId(), record.getName(), record.getGenerationType(), record.getCoverUrl(), record.getCategory());
     }
 
     /** 风格记录转管理端条目。 */
     private GenerationStyleDtos.StyleItem toItem(GenerationStyleRecords.StyleRecord record) {
-        return new GenerationStyleDtos.StyleItem(record.getId(), record.getGenerationType(), record.getName(), record.getStylePrompt(),
+        return new GenerationStyleDtos.StyleItem(record.getId(), record.getGenerationType(), record.getName(), record.getStylePrompt(), record.getCoverUrl(), record.getCategory(),
                 record.getStatus(), record.getSortOrder(), formatTime(record.getCreatedAt()), formatTime(record.getUpdatedAt()));
     }
 

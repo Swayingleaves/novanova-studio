@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import type { AgentAction } from "@/features/canvas/api/agent";
 import type { AgentActivityState, ThinkingBlockState } from "@/features/chat/types";
+import type { GenerationStyleOption } from "@/services/api/server";
 
 export type CreationConversationStatus = "running" | "unreadSuccess" | "unreadFailed" | "none";
 
@@ -22,12 +23,7 @@ export type CreationReferenceChip = {
     onRemove: () => void;
 };
 
-export type CreationStyleOption = {
-    id: number;
-    name: string;
-    generationType: "image" | "video";
-    stylePrompt?: string;
-};
+export type CreationStyleOption = GenerationStyleOption;
 
 export type CreationThreadRound = {
     id: string;
@@ -91,8 +87,10 @@ export type CreationComposerProps = {
     styleOptions?: CreationStyleOption[];
     selectedStyles?: CreationStyleOption[];
     styleLoading?: boolean;
+    styleError?: string | null;
     actions: CreationComposerAction[];
     running: boolean;
+    queued?: boolean;
     canSubmit: boolean;
     creditCost: number;
     compact?: boolean;

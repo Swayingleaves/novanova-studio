@@ -1,10 +1,10 @@
 "use client";
 
-import { type Key, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type Key, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, App, Button, DatePicker, Empty, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Skeleton, Space, Table, Tabs, Tag } from "antd";
+import { Alert, App, Button, Checkbox, DatePicker, Empty, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Edit, Image as ImageIcon, Plus, Power, Search, Send, Trash2, Upload, Video } from "lucide-react";
 
@@ -47,15 +47,9 @@ import { useUserStore, type ServerUserProfile, type ServerUserRole } from "@/fea
 import { getHomepageTargetPath } from "@/features/homepage/api/homepage-showcases";
 import { adminCreditFilterKey, adminCreditUserLabel } from "./admin-credit-utils";
 import { CreditCardManagement } from "./components/credit-card-management";
-import {
-    CREDIT_TRANSACTION_PAGE_SIZE,
-    formatCredits,
-    formatCreditTime,
-    generationSourceLabel,
-    generationTypeLabel,
-    normalizeGenerationDistribution,
-    normalizeModelDistribution,
-} from "@/app/(user)/credits/credit-page-utils";
+import { GenerationStyleCover } from "@/features/generation/components/generation-style-picker";
+import { uploadImage } from "@/features/storage/services/image-storage";
+import { CREDIT_TRANSACTION_PAGE_SIZE, formatCredits, formatCreditTime, generationSourceLabel, generationTypeLabel, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
 
 const PAGE_SIZE = 20;
 
@@ -124,7 +118,12 @@ const ADMIN_CREDIT_COLUMNS: ColumnsType<ServerAdminCreditTransaction> = [
         width: 132,
         render: (generationType: ServerAdminCreditTransaction["generationType"]) => {
             const Icon = generationType === "video" ? Video : ImageIcon;
-            return <span className="inline-flex items-center gap-2 text-[var(--studio-text)]"><Icon className="size-4 text-[var(--studio-primary)]" />{generationTypeLabel(generationType)}</span>;
+            return (
+                <span className="inline-flex items-center gap-2 text-[var(--studio-text)]">
+                    <Icon className="size-4 text-[var(--studio-primary)]" />
+                    {generationTypeLabel(generationType)}
+                </span>
+            );
         },
     },
     {
@@ -176,12 +175,15 @@ function CreditConsumptionManagement() {
         const users = userQuery.data?.users || [];
         return selectedUser && !users.some((user) => user.id === selectedUser.id) ? [selectedUser, ...users] : users;
     }, [selectedUser, userQuery.data?.users]);
-    const filters = useMemo(() => ({
-        userId: selectedUser?.id,
-        startDate: dateRange[0].format("YYYY-MM-DD"),
-        endDate: dateRange[1].format("YYYY-MM-DD"),
-        generationType: generationType === "all" ? undefined : generationType,
-    }), [dateRange, generationType, selectedUser?.id]);
+    const filters = useMemo(
+        () => ({
+            userId: selectedUser?.id,
+            startDate: dateRange[0].format("YYYY-MM-DD"),
+            endDate: dateRange[1].format("YYYY-MM-DD"),
+            generationType: generationType === "all" ? undefined : generationType,
+        }),
+        [dateRange, generationType, selectedUser?.id],
+    );
     const filterKey = adminCreditFilterKey(filters);
     const overviewQuery = useQuery({
         queryKey: ["admin-credit-overview", ...filterKey, trendUnit],
@@ -260,15 +262,29 @@ function CreditConsumptionManagement() {
                     type="error"
                     showIcon
                     message="积分数据加载失败"
-                    action={<Button size="small" onClick={() => { void overviewQuery.refetch(); void transactionsQuery.refetch(); }}>重新加载</Button>}
+                    action={
+                        <Button
+                            size="small"
+                            onClick={() => {
+                                void overviewQuery.refetch();
+                                void transactionsQuery.refetch();
+                            }}
+                        >
+                            重新加载
+                        </Button>
+                    }
                 />
             ) : null}
 
             <section className="mt-6" aria-labelledby="admin-credit-statistics-title">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                     <div>
-                        <h2 id="admin-credit-statistics-title" className="text-base font-semibold text-[var(--studio-ink)]">消耗统计</h2>
-                        <p className="mt-1 text-sm text-[var(--studio-muted)]">{selectedUser ? `${adminCreditUserLabel(selectedUser)}本期` : "全部用户本期"}共消耗 {formatCredits(totalConsumed)} 积分</p>
+                        <h2 id="admin-credit-statistics-title" className="text-base font-semibold text-[var(--studio-ink)]">
+                            消耗统计
+                        </h2>
+                        <p className="mt-1 text-sm text-[var(--studio-muted)]">
+                            {selectedUser ? `${adminCreditUserLabel(selectedUser)}本期` : "全部用户本期"}共消耗 {formatCredits(totalConsumed)} 积分
+                        </p>
                     </div>
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
@@ -283,7 +299,17 @@ function CreditConsumptionManagement() {
                         title="积分消耗趋势"
                         loading={overviewQuery.isLoading}
                         empty={!trend.some((item) => item.value > 0)}
-                        extra={<Segmented value={trendUnit} size="small" options={[{ label: "按日", value: "day" }, { label: "按月", value: "month" }]} onChange={(value) => setTrendUnit(value as TrendUnit)} />}
+                        extra={
+                            <Segmented
+                                value={trendUnit}
+                                size="small"
+                                options={[
+                                    { label: "按日", value: "day" },
+                                    { label: "按月", value: "month" },
+                                ]}
+                                onChange={(value) => setTrendUnit(value as TrendUnit)}
+                            />
+                        }
                     >
                         <CreditChart type="bar" data={trend} ariaLabel="管理员积分消耗趋势柱状图" />
                     </CreditChartPanel>
@@ -293,7 +319,9 @@ function CreditConsumptionManagement() {
             <section className="mt-8 border-t border-[var(--studio-line)] pt-6" aria-labelledby="admin-credit-transactions-title">
                 <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                     <div>
-                        <h2 id="admin-credit-transactions-title" className="text-base font-semibold text-[var(--studio-ink)]">积分消耗明细</h2>
+                        <h2 id="admin-credit-transactions-title" className="text-base font-semibold text-[var(--studio-ink)]">
+                            积分消耗明细
+                        </h2>
                         <p className="mt-1 text-sm text-[var(--studio-muted)]">{selectedUser ? `${adminCreditUserLabel(selectedUser)}最近使用的积分记录` : "所有用户最近使用的积分记录"}</p>
                     </div>
                     <span className="text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} 条记录</span>
@@ -578,11 +606,7 @@ function UserManagement() {
                 ].map((item, index) => (
                     <div key={item.label} className={`min-w-0 px-5 py-4 ${index > 0 ? "border-t border-[var(--studio-line)] sm:border-l sm:border-t-0" : ""}`}>
                         <div className="text-sm text-[var(--studio-muted)]">{item.label}</div>
-                        {statisticsQuery.isLoading ? (
-                            <Skeleton.Input active size="small" className="mt-2 !h-8 !w-24" />
-                        ) : (
-                            <div className="mt-2 text-2xl font-semibold tabular-nums text-[var(--studio-ink)]">{item.value?.toLocaleString() ?? "--"}</div>
-                        )}
+                        {statisticsQuery.isLoading ? <Skeleton.Input active size="small" className="mt-2 !h-8 !w-24" /> : <div className="mt-2 text-2xl font-semibold tabular-nums text-[var(--studio-ink)]">{item.value?.toLocaleString() ?? "--"}</div>}
                     </div>
                 ))}
             </section>
@@ -592,7 +616,11 @@ function UserManagement() {
                     type="error"
                     showIcon
                     message="用户统计加载失败"
-                    action={<Button size="small" onClick={() => void statisticsQuery.refetch()}>重新加载</Button>}
+                    action={
+                        <Button size="small" onClick={() => void statisticsQuery.refetch()}>
+                            重新加载
+                        </Button>
+                    }
                 />
             ) : null}
             <div className="mb-4 flex items-center justify-between gap-3">
@@ -1200,6 +1228,8 @@ type GenerationStyleFormValues = {
     generationType: "image" | "video";
     name: string;
     stylePrompt: string;
+    coverUrl: string;
+    category: string;
     sortOrder?: number;
     status?: number;
 };
@@ -1222,25 +1252,33 @@ function GenerationStyleManagement() {
     const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
     const [editOpen, setEditOpen] = useState(false);
     const [editingStyle, setEditingStyle] = useState<ServerGenerationStyle | null>(null);
+    const [coverUploading, setCoverUploading] = useState(false);
+    const coverInputRef = useRef<HTMLInputElement>(null);
+    const coverUrl = Form.useWatch("coverUrl", form) || "";
+    const coverName = Form.useWatch("name", form) || "风格封面";
 
-    const loadStyles = useCallback(async (nextPage = page) => {
-        setLoading(true);
-        try {
-            const result = await listAdminGenerationStyles({
-                page: nextPage,
-                pageSize: PAGE_SIZE,
-                keyword: keyword || undefined,
-                generationType,
-                status,
-            });
-            setStyles(result.styles);
-            setTotal(result.total);
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "查询风格失败");
-        } finally {
-            setLoading(false);
-        }
-    }, [generationType, keyword, message, page, status]);
+    const loadStyles = useCallback(
+        async (nextPage = page) => {
+            setLoading(true);
+            try {
+                const result = await listAdminGenerationStyles({
+                    page: nextPage,
+                    pageSize: PAGE_SIZE,
+                    keyword: keyword || undefined,
+                    generationType,
+                    status,
+                });
+                setStyles(result.styles);
+                setTotal(result.total);
+                setSelectedRowKeys((current) => current.filter((id) => result.styles.some((style) => style.id === Number(id))));
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "查询风格失败");
+            } finally {
+                setLoading(false);
+            }
+        },
+        [generationType, keyword, message, page, status],
+    );
 
     useEffect(() => {
         void loadStyles(page);
@@ -1248,7 +1286,7 @@ function GenerationStyleManagement() {
 
     const openCreate = () => {
         setEditingStyle(null);
-        form.setFieldsValue({ generationType: "image", name: "", stylePrompt: "", sortOrder: 1000, status: 1 });
+        form.setFieldsValue({ generationType: "image", name: "", stylePrompt: "", coverUrl: "", category: "", sortOrder: 1000, status: 1 });
         setEditOpen(true);
     };
 
@@ -1258,6 +1296,8 @@ function GenerationStyleManagement() {
             generationType: style.generationType,
             name: style.name,
             stylePrompt: style.stylePrompt,
+            coverUrl: style.coverUrl || "",
+            category: style.category || "",
             sortOrder: style.sortOrder ?? 1000,
             status: style.status ?? 1,
         });
@@ -1271,6 +1311,8 @@ function GenerationStyleManagement() {
                 generationType: values.generationType,
                 name: values.name.trim(),
                 stylePrompt: values.stylePrompt.trim(),
+                coverUrl: values.coverUrl.trim(),
+                category: values.category.trim(),
                 sortOrder: values.sortOrder ?? 1000,
                 status: values.status ?? 1,
             };
@@ -1330,83 +1372,189 @@ function GenerationStyleManagement() {
         });
     };
 
-    const columns: ColumnsType<ServerGenerationStyle> = [
-        { title: "名称", dataIndex: "name", ellipsis: true, width: 180 },
-        {
-            title: "类型",
-            dataIndex: "generationType",
-            width: 100,
-            render: (value: string) => <Tag color={value === "video" ? "purple" : "blue"}>{value === "video" ? "视频" : "图片"}</Tag>,
-        },
-        { title: "风格提示词", dataIndex: "stylePrompt", ellipsis: true },
-        { title: "排序", dataIndex: "sortOrder", width: 80, align: "right" },
-        {
-            title: "状态",
-            dataIndex: "status",
-            width: 90,
-            render: (value: number) => (value === 1 ? <Tag color="green">启用</Tag> : <Tag>停用</Tag>),
-        },
-        {
-            title: "操作",
-            width: 150,
-            render: (_, style) => (
-                <Space size="small">
-                    <Button size="small" icon={<Edit className="size-3.5" />} onClick={() => openEdit(style)}>编辑</Button>
-                    <Button size="small" icon={<Power className="size-3.5" />} onClick={() => changeStatus(style)}>{style.status === 1 ? "停用" : "启用"}</Button>
-                </Space>
-            ),
-        },
-    ];
+    const uploadCover = async (file: File | undefined) => {
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            message.error("请选择图片文件");
+            return;
+        }
+        setCoverUploading(true);
+        try {
+            const uploaded = await uploadImage(file);
+            form.setFieldValue("coverUrl", uploaded.url);
+            message.success("封面已上传");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "封面上传失败");
+        } finally {
+            setCoverUploading(false);
+        }
+    };
 
     return (
         <div>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <Space wrap>
-                    <Input.Search value={keyword} allowClear placeholder="搜索名称或提示词" onChange={(event) => setKeyword(event.target.value)} onSearch={() => { setPage(1); void loadStyles(1); }} />
+                    <Input.Search
+                        value={keyword}
+                        allowClear
+                        placeholder="搜索名称、分类或提示词"
+                        onChange={(event) => setKeyword(event.target.value)}
+                        onSearch={() => {
+                            setPage(1);
+                            void loadStyles(1);
+                        }}
+                    />
                     <Select
                         value={generationType}
-                        options={[{ label: "全部类型", value: "all" }, { label: "图片", value: "image" }, { label: "视频", value: "video" }]}
-                        onChange={(value) => { setGenerationType(value); setPage(1); }}
+                        options={[
+                            { label: "全部类型", value: "all" },
+                            { label: "图片", value: "image" },
+                            { label: "视频", value: "video" },
+                        ]}
+                        onChange={(value) => {
+                            setGenerationType(value);
+                            setPage(1);
+                        }}
                     />
                     <Select
                         allowClear
                         placeholder="全部状态"
                         value={status}
-                        options={[{ label: "启用", value: 1 }, { label: "停用", value: 0 }]}
-                        onChange={(value) => { setStatus(value); setPage(1); }}
+                        options={[
+                            { label: "启用", value: 1 },
+                            { label: "停用", value: 0 },
+                        ]}
+                        onChange={(value) => {
+                            setStatus(value);
+                            setPage(1);
+                        }}
                     />
                 </Space>
                 <Space>
-                    {selectedRowKeys.length ? <Button danger icon={<Trash2 className="size-3.5" />} onClick={() => deleteStyles(selectedRowKeys.map(Number))}>批量删除</Button> : null}
-                    <Button type="primary" icon={<Plus className="size-4" />} onClick={openCreate}>新增风格</Button>
+                    {selectedRowKeys.length ? (
+                        <Button danger icon={<Trash2 className="size-3.5" />} onClick={() => deleteStyles(selectedRowKeys.map(Number))}>
+                            批量删除
+                        </Button>
+                    ) : null}
+                    <Button type="primary" icon={<Plus className="size-4" />} onClick={openCreate}>
+                        新增风格
+                    </Button>
                 </Space>
             </div>
-            <Table
-                rowKey="id"
-                columns={columns}
-                dataSource={styles}
-                loading={loading}
-                rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }}
-                pagination={{ current: page, pageSize: PAGE_SIZE, total, showSizeChanger: false, onChange: setPage }}
-                scroll={{ x: 820 }}
-            />
-            <Modal title={editingStyle ? "编辑风格" : "新增风格"} open={editOpen} onOk={saveStyle} onCancel={() => setEditOpen(false)} okText="保存" cancelText="取消">
+            {loading ? (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                    {Array.from({ length: 10 }, (_, index) => (
+                        <Skeleton.Image key={index} active className="!h-auto !w-full [&_.ant-skeleton-image]:aspect-[3/4] [&_.ant-skeleton-image]:h-auto [&_.ant-skeleton-image]:w-full" />
+                    ))}
+                </div>
+            ) : styles.length ? (
+                <>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+                        {styles.map((style) => {
+                            const selected = selectedRowKeys.includes(style.id);
+                            return (
+                                <article
+                                    key={style.id}
+                                    className={`group relative overflow-hidden rounded-md border bg-[var(--studio-surface)] transition ${selected ? "border-[var(--studio-action)] ring-1 ring-[var(--studio-action)]" : "border-[var(--studio-line)] hover:border-[var(--studio-line-strong)]"}`}
+                                >
+                                    <div className="relative aspect-[3/4] overflow-hidden bg-[var(--studio-surface-raised)]">
+                                        <GenerationStyleCover key={style.coverUrl} style={style} className="size-full transition duration-200 group-hover:scale-[1.02] motion-reduce:transform-none" />
+                                        <span className="absolute left-2 top-2">
+                                            <Checkbox
+                                                checked={selected}
+                                                aria-label={`选择风格${style.name}`}
+                                                onChange={(event) => setSelectedRowKeys((current) => (event.target.checked ? [...new Set([...current, style.id])] : current.filter((id) => id !== style.id)))}
+                                            />
+                                        </span>
+                                        <span
+                                            className={`absolute right-2 top-2 rounded-sm border px-1.5 py-0.5 text-[11px] ${style.status === 1 ? "border-[var(--studio-success)] text-[var(--studio-success)]" : "border-[var(--studio-line-strong)] text-[var(--studio-muted)]"}`}
+                                        >
+                                            {style.status === 1 ? "启用" : "停用"}
+                                        </span>
+                                        <span className="absolute bottom-2 left-2 rounded-sm bg-[var(--studio-surface)] px-1.5 py-0.5 text-[11px] text-[var(--studio-muted)]">{style.generationType === "video" ? "视频" : "图片"}</span>
+                                    </div>
+                                    <div className="min-w-0 border-t border-[var(--studio-line)] p-2.5">
+                                        <div className="flex min-w-0 items-center justify-between gap-2">
+                                            <span className="truncate text-sm font-medium text-[var(--studio-ink)]" title={style.name}>
+                                                {style.name}
+                                            </span>
+                                            <span className="shrink-0 text-[11px] text-[var(--studio-muted)]">#{style.sortOrder}</span>
+                                        </div>
+                                        <p className="mt-1 truncate text-xs text-[var(--studio-muted)]">{style.category || "未分类"}</p>
+                                        <div className="mt-2 flex items-center justify-end gap-1">
+                                            <Tooltip title="编辑">
+                                                <Button type="text" size="small" shape="circle" icon={<Edit className="size-3.5" />} onClick={() => openEdit(style)} aria-label={`编辑风格${style.name}`} />
+                                            </Tooltip>
+                                            <Tooltip title={style.status === 1 ? "停用" : "启用"}>
+                                                <Button type="text" size="small" shape="circle" icon={<Power className="size-3.5" />} onClick={() => changeStatus(style)} aria-label={`${style.status === 1 ? "停用" : "启用"}风格${style.name}`} />
+                                            </Tooltip>
+                                        </div>
+                                    </div>
+                                </article>
+                            );
+                        })}
+                    </div>
+                    <div className="mt-5 flex justify-end">
+                        <Pagination current={page} pageSize={PAGE_SIZE} total={total} showSizeChanger={false} onChange={setPage} />
+                    </div>
+                </>
+            ) : (
+                <Empty description="暂无风格" className="border border-dashed border-[var(--studio-line)] py-12" />
+            )}
+            <Modal title={editingStyle ? "编辑风格" : "新增风格"} open={editOpen} onOk={saveStyle} onCancel={() => setEditOpen(false)} okText="保存" cancelText="取消" confirmLoading={coverUploading}>
                 <Form form={form} layout="vertical">
                     <Form.Item name="name" label="风格名称" rules={[{ required: true, message: "请输入风格名称" }]}>
                         <Input placeholder="例如：电影感" />
                     </Form.Item>
+                    <Form.Item name="category" label="分类" rules={[{ required: true, message: "请输入风格分类" }]}>
+                        <Input placeholder="例如：人像、国风、电影" maxLength={100} />
+                    </Form.Item>
+                    <Form.Item name="coverUrl" label="封面" rules={[{ required: true, message: "请上传或填写风格封面" }]}>
+                        <Input placeholder="https://..." />
+                    </Form.Item>
+                    <div className="mb-4 flex items-start gap-3">
+                        <div className="h-28 w-[84px] shrink-0 overflow-hidden rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface-raised)]">
+                            <GenerationStyleCover key={coverUrl} style={{ name: coverName, coverUrl }} className="size-full" />
+                        </div>
+                        <div className="min-w-0">
+                            <input
+                                ref={coverInputRef}
+                                hidden
+                                type="file"
+                                accept="image/*"
+                                onChange={(event) => {
+                                    void uploadCover(event.target.files?.[0]);
+                                    event.target.value = "";
+                                }}
+                            />
+                            <Button icon={<Upload className="size-3.5" />} loading={coverUploading} onClick={() => coverInputRef.current?.click()}>
+                                上传封面
+                            </Button>
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">上传后会保存对象存储公开地址。</p>
+                        </div>
+                    </div>
                     <Form.Item name="stylePrompt" label="风格提示词" rules={[{ required: true, message: "请输入风格提示词" }]}>
                         <Input.TextArea rows={6} placeholder="描述需要注入生成提示词的风格特征" />
                     </Form.Item>
                     <div className="grid grid-cols-3 gap-3">
                         <Form.Item name="generationType" label="类型" rules={[{ required: true, message: "请选择类型" }]}>
-                            <Select options={[{ label: "图片", value: "image" }, { label: "视频", value: "video" }]} />
+                            <Select
+                                options={[
+                                    { label: "图片", value: "image" },
+                                    { label: "视频", value: "video" },
+                                ]}
+                            />
                         </Form.Item>
                         <Form.Item name="sortOrder" label="排序">
                             <InputNumber className="w-full" min={0} />
                         </Form.Item>
                         <Form.Item name="status" label="状态">
-                            <Select options={[{ label: "启用", value: 1 }, { label: "停用", value: 0 }]} />
+                            <Select
+                                options={[
+                                    { label: "启用", value: 1 },
+                                    { label: "停用", value: 0 },
+                                ]}
+                            />
                         </Form.Item>
                     </div>
                 </Form>

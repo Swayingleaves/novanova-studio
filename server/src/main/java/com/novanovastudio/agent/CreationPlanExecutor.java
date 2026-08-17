@@ -87,10 +87,10 @@ public class CreationPlanExecutor {
     public Mono<PlanExecutionSummary> execute(Long userId, String sessionId, CreationPlan plan,
                                               AgentChatRequest request, Model model) {
         Map<String, TaskExecutionResult> completed = new LinkedHashMap<>();
-        return planRepository.updatePlanStatus(plan.planId(), "running", "")
+        return planRepository.updateCreationAgentPlanStatus(plan.planId(), "running", "")
                 .then(executeLayer(userId, sessionId, plan, request, model, new ArrayList<>(plan.tasks()), completed))
                 .map(results -> summarize(plan, results))
-                .flatMap(summary -> planRepository.updatePlanStatus(plan.planId(), summary.status(),
+                .flatMap(summary -> planRepository.updateCreationAgentPlanStatus(plan.planId(), summary.status(),
                         "success".equals(summary.status()) ? "" : summary.message()).thenReturn(summary));
     }
 
@@ -248,8 +248,12 @@ public class CreationPlanExecutor {
         ready.forEach(task -> taskById.put(task.taskId(), task));
         Map<String, RecoveryTaskDecision> decisionByTaskId = new LinkedHashMap<>();
         recoveryPlan.decisions().forEach(decision -> decisionByTaskId.put(decision.taskId(), decision));
-        recoveryPlan.decisions().forEach(decision -> emit(userId, AgentEvent.planTaskStatus(
-                sessionId, plan.planId(), decision.taskId(), "diagnosing", recoveryPlan.message())));
+        // 仅对将要重试的任务展示诊断状态；STOP/ASK_USER 决策直接发失败终态，
+        // 避免 diagnosing 与 failed 事件乱序到达前端，导致活动状态从终态回退为执行中。
+        recoveryPlan.decisions().stream()
+                .filter(decision -> !"ASK_USER".equals(decision.action()) && !"STOP".equals(decision.action()))
+                .forEach(decision -> emit(userId, AgentEvent.planTaskStatus(
+                        sessionId, plan.planId(), decision.taskId(), "diagnosing", recoveryPlan.message())));
         return Flux.fromIterable(layerResults)
                 .flatMapSequential(result -> {
                     RecoveryTaskDecision decision = decisionByTaskId.get(result.taskId());
@@ -763,9 +767,9 @@ public class CreationPlanExecutor {
                     executionRegistry.beginTaskCreation(sessionId);
                     return promptOptimizationService.optimizeAndWait(userId, taskType, originalPrompt, styles, response -> {
                         optimizationTaskId.set(response.id());
-                        boolean canceled = executionRegistry.registerTask(sessionId,
-                                new AgentExecutionRegistry.AgentTaskRegistration(response.id(), "", "", null));
-                        return canceled ? aiTaskService.cancelTaskForUser(userId, response.id()).then() : Mono.empty();
+                        return executionRegistry.registerTaskAndPersist(sessionId,
+                                        new AgentExecutionRegistry.AgentTaskRegistration(response.id(), "", "", null))
+                                .flatMap(canceled -> canceled ? aiTaskService.cancelTaskForUser(userId, response.id()).then() : Mono.empty());
                     });
                 })
                 .doFinally(signal -> {
@@ -842,7 +846,7 @@ public class CreationPlanExecutor {
                             : null;
                     return planRepository.updateTask(plan.planId(), task.taskId(), status, promptStrategy, actualPrompt,
                                     result.data(), "success".equals(status) ? "" : result.message())
-                            .then(eventEmitter.persistRoundActivities(userId, sessionId, task.taskId()))
+                            .then(eventEmitter.persistRoundActivities(userId, sessionId, task.taskId(), status))
                             .thenReturn(new TaskExecutionResult(task.taskId(), status, result.message(), data,
                                     promptStrategy, actualPrompt, new LinkedHashMap<>(arguments), error, recoveryAttempt));
                 });

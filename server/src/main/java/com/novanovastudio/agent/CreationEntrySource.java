@@ -1,6 +1,7 @@
 package com.novanovastudio.agent;
 
 import com.novanovastudio.ai.AiTaskSources;
+import java.util.Set;
 
 /**
  * Agent 对话入口来源及其页面能力边界。
@@ -17,6 +18,9 @@ public final class CreationEntrySource {
     /** 无限画布 */
     public static final String CANVAS = AiTaskSources.CANVAS;
 
+    /** 统一主Agent支持的入口来源 */
+    private static final Set<String> SUPPORTED_SOURCES = Set.of(IMAGE_PAGE, VIDEO_PAGE, CANVAS);
+
     private CreationEntrySource() {
     }
 
@@ -27,6 +31,6 @@ public final class CreationEntrySource {
      * @return boolean 是否受支持
      */
     public static boolean supported(String value) {
-        return AiTaskSources.isSupported(value);
+        return value != null && SUPPORTED_SOURCES.contains(value);
     }
 }

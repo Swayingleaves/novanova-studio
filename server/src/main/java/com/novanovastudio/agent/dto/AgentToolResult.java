@@ -8,19 +8,23 @@ package com.novanovastudio.agent.dto;
 
 import com.novanovastudio.ai.AiErrorDetails;
 import com.novanovastudio.ai.AiErrorSupport;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import java.util.Map;
 
 /**
  * 前端工具执行结果回传
  *
  * @param sessionId String 会话ID
+ * @param requestId String 主Agent请求ID
  * @param callId    String 工具调用ID
  * @param result    ToolResult 工具执行结果
  */
 public record AgentToolResult(
-    String sessionId,
-    String callId,
-    ToolResult result
+    @NotBlank(message = "会话ID不能为空") String sessionId,
+    @NotBlank(message = "主Agent请求ID不能为空") String requestId,
+    @NotBlank(message = "工具调用ID不能为空") String callId,
+    @NotNull(message = "工具执行结果不能为空") ToolResult result
 ) {
 
     /**

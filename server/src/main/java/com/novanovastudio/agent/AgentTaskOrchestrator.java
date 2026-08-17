@@ -325,6 +325,11 @@ public class AgentTaskOrchestrator {
      * @param result AgentToolResult 工具结果
      */
     public void submitToolResult(Long userId, AgentToolResult result) {
+        if (result.requestId() != null && !matchesActiveRequest(result.sessionId(), result.requestId())) {
+            log.warn("拒绝非当前主Agent请求的画布工具结果: userId={}, sessionId={}, requestId={}",
+                    userId, result.sessionId(), result.requestId());
+            return;
+        }
         if (!executionRegistry.isOwnedBy(userId, result.sessionId())) {
             log.warn("拒绝非会话所属用户回传工具结果: userId={}, sessionId={}", userId, result.sessionId());
             return;
@@ -344,6 +349,17 @@ public class AgentTaskOrchestrator {
         }
         sink.success(new ToolResult(result.result().ok(), result.result().message(),
                 result.result().data(), result.result().error()));
+    }
+
+    /**
+     * 判断画布工具结果是否属于当前运行的统一主Agent请求。
+     *
+     * @param sessionId String 会话ID
+     * @param requestId String 主Agent请求ID
+     * @return boolean 是否匹配
+     */
+    private boolean matchesActiveRequest(String sessionId, String requestId) {
+        return eventEmitter.matchesBoundRequest(sessionId, requestId);
     }
 
     /**
@@ -625,6 +641,17 @@ public class AgentTaskOrchestrator {
     }
 
     /**
+     * 计算终态工具结果对应的轮次状态，避免活动快照在持久化时残留执行中。
+     *
+     * @param result ToolResult 工具结果
+     * @return String success、failed或canceled
+     */
+    private String terminalToolStatus(ToolResult result) {
+        boolean canceled = result != null && result.data() != null && Boolean.TRUE.equals(result.data().get("canceled"));
+        return canceled ? "canceled" : result != null && result.ok() ? "success" : "failed";
+    }
+
+    /**
      * 从工具调用和结果构建终态生成轮次，并按首个工具调用ID更新 generation_log。
      *
      * @param sessionId String Agent会话ID
@@ -854,7 +881,8 @@ public class AgentTaskOrchestrator {
                     if (!profile.isTerminalTool(toolName)) {
                         return Mono.just(result);
                     }
-                    return eventEmitter.persistRoundActivities(userId, sessionId, callId).thenReturn(result);
+                    return eventEmitter.persistRoundActivities(userId, sessionId, callId, terminalToolStatus(result))
+                            .thenReturn(result);
                 });
         }
 

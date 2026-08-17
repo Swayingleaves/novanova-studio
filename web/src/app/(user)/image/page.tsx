@@ -18,8 +18,9 @@ import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
-import { createToolExecutionActivity, finishRunningAgentActivities, getPlanTaskActivityStatus, normalizeAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
+import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, mergePlanTaskActivityMessage, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { findLatestPendingConversation, hasPendingImageConversation } from "@/features/generation/lib/generation-conversation-recovery";
+import { reconcileGenerationLogTasks } from "@/features/generation/lib/generation-log-task-reconciliation";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
@@ -38,7 +39,7 @@ import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
-import { deleteGenerationLogs, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
+import { deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
 
 type GeneratedImage = {
     id: string;
@@ -110,6 +111,7 @@ export default function ImagePage() {
     const [styleOptions, setStyleOptions] = useState<CreationStyleOption[]>([]);
     const [selectedStyles, setSelectedStyles] = useState<CreationStyleOption[]>([]);
     const [styleLoading, setStyleLoading] = useState(false);
+    const [styleError, setStyleError] = useState<string | null>(null);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -137,12 +139,13 @@ export default function ImagePage() {
     useEffect(() => {
         let cancelled = false;
         setStyleLoading(true);
+        setStyleError(null);
         void listGenerationStyles("image")
             .then((result) => {
                 if (!cancelled) setStyleOptions(result.styles);
             })
             .catch((error) => {
-                if (!cancelled) message.error(error instanceof Error ? error.message : "图片风格加载失败");
+                if (!cancelled) setStyleError(error instanceof Error ? error.message : "图片风格加载失败");
             })
             .finally(() => {
                 if (!cancelled) setStyleLoading(false);
@@ -214,7 +217,7 @@ export default function ImagePage() {
         return nextConversations;
     }, []);
 
-    const { sessionId, isStreaming, isStopping, sendMessage, cancelMessage, resetSession, restoreSession } = useAgentChatSSE({
+    const { sessionId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, canChangeSession, resetSession, restoreSession } = useAgentChatSSE({
         entrySource: "imagePage",
         creationSettings: agentCreationSettings,
         onTextDelta: (msgId, delta) => {
@@ -287,7 +290,7 @@ export default function ImagePage() {
             }
         },
         onToolResult: (callId, ok, resultMsg, data) => {
-            const status = data?.canceled ? "canceled" : ok ? "success" : "failed";
+            const status: ToolCallState["status"] = data?.canceled ? "canceled" : ok ? "success" : "failed";
             setToolCalls((prev) => {
                 const next = prev.map((c) => (c.callId === callId ? { ...c, status, resultMessage: resultMsg, resultData: data } : c));
                 toolCallsRef.current = next;
@@ -308,17 +311,17 @@ export default function ImagePage() {
             // 将流式文本保存为持久消息
             const streamed = streamingTextRef.current;
             setChatMessages((prev) => {
-                let next = prev;
+                let next = finishRoundAgentActivities(prev, text || "已完成");
                 if (streamed && streamed.text) {
                     const assistantMessage = { id: streamed.messageId, role: "assistant" as const, text: streamed.text, ...(action ? { action } : {}) };
-                    next = prev.some((item) => item.id === streamed.messageId)
-                        ? prev.map((item) => item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)
-                        : [...prev, assistantMessage];
+                    next = next.some((item) => item.id === streamed.messageId)
+                        ? next.map((item) => item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)
+                        : [...next, assistantMessage];
                 } else if (text || action) {
-                    const lastMessage = prev.at(-1);
+                    const lastMessage = next.at(-1);
                     next = lastMessage?.role === "assistant" && lastMessage.text === text
-                        ? action ? prev.map((item, index) => index === prev.length - 1 ? { ...item, action } : item) : prev
-                        : [...prev, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
+                        ? action ? next.map((item, index) => index === next.length - 1 ? { ...item, action } : item) : next
+                        : [...next, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
                 }
                 chatMessagesRef.current = next;
                 return next;
@@ -381,16 +384,8 @@ export default function ImagePage() {
             });
         },
         onPlanTaskStatus: (planId, taskId, status, statusMessage) => {
-            const activityStatus = getPlanTaskActivityStatus(status);
-            if (!activityStatus) return;
             setChatMessages((prev) => {
-                const next = upsertAgentActivityMessage(prev, {
-                    id: `task-${planId}-${taskId}`,
-                    type: "plan-task-status",
-                    title: "执行创作任务",
-                    description: statusMessage,
-                    status: activityStatus,
-                });
+                const next = mergePlanTaskActivityMessage(prev, planId, taskId, status, statusMessage);
                 chatMessagesRef.current = next;
                 return next;
             });
@@ -421,11 +416,12 @@ export default function ImagePage() {
     const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "image", count: 1 });
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
     const latestRound = activeConversation?.rounds.at(-1);
+    const historyModel = !imageDraftSettingsModified && activeId && latestRound?.config ? latestRound.config.imageModel || latestRound.config.model || "" : "";
     const draftSettingsSummary = imageDraftSettingsModified ? buildImageSettingsSummary(config, effectiveConfig, model) : "";
-    const historySettingsSummary = !imageDraftSettingsModified && activeId && latestRound?.config ? buildImageSettingsSummary(latestRound.config, effectiveConfig, latestRound.config.imageModel || latestRound.config.model || "") : "";
+    const historySettingsSummary = !imageDraftSettingsModified && activeId && latestRound?.config ? buildImageSettingsSummary(latestRound.config, effectiveConfig, historyModel) : "";
     const settingsSummary = draftSettingsSummary || historySettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingImageConversation(activeConversation) : false;
-    const canGenerate = Boolean(prompt.trim()) && !isStreaming && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
+    const canGenerate = Boolean(prompt.trim()) && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
 
     useEffect(() => {
@@ -437,7 +433,7 @@ export default function ImagePage() {
     useEffect(() => {
         let cancelled = false;
         void refreshConversations().then((nextConversations) => {
-            if (cancelled || activeIdRef.current) return;
+            if (cancelled || activeIdRef.current || !canChangeSession()) return;
             const pendingConversation = findLatestPendingConversation(nextConversations, hasPendingImageConversation);
             if (!pendingConversation) return;
             activeIdRef.current = pendingConversation.id;
@@ -447,14 +443,24 @@ export default function ImagePage() {
         return () => {
             cancelled = true;
         };
-    }, [refreshConversations, restoreSession]);
+    }, [canChangeSession, refreshConversations, restoreSession]);
 
     useEffect(() => {
         if (!hasRunningGeneration(conversations)) return;
-        const refreshTimer = window.setInterval(() => {
-            void refreshConversations();
-        }, 2_000);
-        return () => window.clearInterval(refreshTimer);
+        let cancelled = false;
+        let refreshTimer: number | undefined;
+        void getAiTaskPollingIntervalMilliseconds()
+            .then((intervalMilliseconds) => {
+                if (cancelled) return;
+                refreshTimer = window.setInterval(() => {
+                    void refreshConversations();
+                }, intervalMilliseconds);
+            })
+            .catch((error) => console.error("读取AI任务轮询配置失败", error));
+        return () => {
+            cancelled = true;
+            if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
+        };
     }, [conversations, refreshConversations]);
 
     const addReferences = async (files?: FileList | File[] | null) => {
@@ -501,6 +507,7 @@ export default function ImagePage() {
     };
 
     const generate = async () => {
+        if (isStreaming || isQueued) return;
         const text = prompt.trim();
         if (!text) {
             message.error("请输入生图提示词");
@@ -526,6 +533,7 @@ export default function ImagePage() {
     };
 
     const regenerateRound = async (round: Round) => {
+        if (!canChangeSession()) return;
         await regenerateImageRound(round, {
             fallbackModel: model,
             appendUserMessage: (text, generationStyles) => {
@@ -541,6 +549,10 @@ export default function ImagePage() {
     };
 
     const newConversation = () => {
+        if (!canChangeSession()) {
+            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            return;
+        }
         setActiveId(null);
         activeIdRef.current = null;
         setImageDraftSettingsModified(false);
@@ -561,6 +573,10 @@ export default function ImagePage() {
     };
 
     const selectConversation = (conversation: Conversation) => {
+        if (!canChangeSession()) {
+            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            return;
+        }
         if (getGenerationConversationStatus(conversation) !== "none" && conversation.generationStatus !== "running") {
             setConversations((current) => current.map((item) => (item.id === conversation.id ? { ...item, generationViewedAt: item.generationCompletedAt } : item)));
             void markGenerationLogViewed(conversation.id).catch(() => void refreshConversations());
@@ -588,6 +604,10 @@ export default function ImagePage() {
     };
 
     const deleteSelected = () => {
+        if (activeIdRef.current && selectedIds.includes(activeIdRef.current) && !canChangeSession()) {
+            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            return;
+        }
         const imageKeys = conversations
             .filter((conversation) => selectedIds.includes(conversation.id))
             .flatMap((conversation) => conversation.rounds.flatMap((round) => round.results.flatMap((result) => (result.image?.storageKey ? [result.image.storageKey] : []))));
@@ -599,6 +619,7 @@ export default function ImagePage() {
             setPrompt("");
             setReferences([]);
             setSelectedStyles([]);
+            resetSession();
         }
         setSelectedIds([]);
         setManagementMode(false);
@@ -731,6 +752,10 @@ export default function ImagePage() {
     };
 
     const deleteConversation = async (conversationId: string) => {
+        if (activeIdRef.current === conversationId && !canChangeSession()) {
+            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            return;
+        }
         const conversation = conversationsRef.current.find((item) => item.id === conversationId);
         const imageKeys = conversation?.rounds.flatMap((round) => round.results.flatMap((result) => (result.image?.storageKey ? [result.image.storageKey] : []))) || [];
         await Promise.all([deleteStoredImages(imageKeys), deleteGenerationLogs([conversationId])]);
@@ -778,7 +803,7 @@ export default function ImagePage() {
             icon: <Sparkles className="size-3.5" />,
             placement: "submit",
             iconOnly: true,
-            disabled: !prompt.trim() || isStreaming || activeConversationPending || isPromptOptimizing,
+            disabled: !prompt.trim() || isStreaming || isQueued || activeConversationPending || isPromptOptimizing,
             loading: isPromptOptimizing,
             onClick: () => void optimizePrompt({ operationId: "image-page", generationType: "image", prompt, generationStyleIds: selectedStyles.map((style) => style.id), onSuccess: setPrompt }),
         },
@@ -900,30 +925,20 @@ export default function ImagePage() {
                     styleOptions,
                     selectedStyles,
                     styleLoading,
+                    styleError,
                     actions: composerActions,
                     running: isStreaming || activeConversationPending,
+                    queued: isQueued,
                     canSubmit: canGenerate,
                     stopping: isStopping,
                     focusWhenValueSet: focusInitialPrompt,
                     creditCost,
                     onChange: setPrompt,
-                    onStyleSelect: (style) => {
-                        setSelectedStyles((current) => {
-                            if (current.some((selected) => selected.id === style.id)) {
-                                message.info("该风格已选择");
-                                return current;
-                            }
-                            if (current.length >= 3) {
-                                message.warning("最多选择3个风格");
-                                return current;
-                            }
-                            return [...current, style];
-                        });
-                    },
+                    onStyleSelect: (style) => setSelectedStyles([style]),
                     onStyleRemove: (styleId) => setSelectedStyles((current) => current.filter((style) => style.id !== styleId)),
                     onPasteImages: (files) => void addReferences(files),
                     onSubmit: () => void generate(),
-                    onStop: isStreaming ? () => void cancelMessage() : undefined,
+                    onStop: isStreaming || isQueued ? () => void cancelMessage() : undefined,
                 }}
                 settings={{
                     open: settingsOpen,
@@ -936,9 +951,9 @@ export default function ImagePage() {
                                 <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">模型</label>
                                 <ModelPicker
                                     config={effectiveConfig}
-                                    value={model}
+                                    value={historyModel || model}
                                     onChange={(value) => {
-                                        if (value !== model) {
+                                        if (value !== (historyModel || model)) {
                                             setImageDraftSettingsModified(true);
                                         }
                                         updateConfig("imageModel", value);
@@ -1389,7 +1404,8 @@ async function readConversations() {
 
     try {
         const values = await listGenerationLogs<Conversation>("image");
-        const conversations = await Promise.all(values.map(normalizeConversation));
+        const reconciledValues = await reconcileGenerationLogTasks("image", values);
+        const conversations = await Promise.all(reconciledValues.map(normalizeConversation));
         return conversations.sort((left, right) => (right.updatedAt || right.createdAt || 0) - (left.updatedAt || left.createdAt || 0));
     } catch {
         return [];
@@ -1398,11 +1414,8 @@ async function readConversations() {
 
 async function normalizeConversation(raw: Partial<Conversation>): Promise<Conversation> {
     const rounds = await Promise.all(
-        (raw.rounds || []).map(async (round) => ({
-            ...round,
-            activities: normalizeAgentActivities(round.activities),
-            references: await Promise.all((round.references || []).map(async (reference) => ({ ...reference, dataUrl: await resolveImageUrl(reference.storageKey, reference.dataUrl) }))),
-            results: await Promise.all(
+        (raw.rounds || []).map(async (round) => {
+            const normalizedResults = await Promise.all(
                 (round.results || []).map(async (result) => {
                     if (!result.image) return result;
                     const storageInfo = await resolveImageStorageInfo(result.image.storageKey, result.image.dataUrl, result.image.objectStorage);
@@ -1415,8 +1428,15 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
                         },
                     };
                 }),
-            ),
-        })),
+            );
+            const terminalStatus = normalizeImageRoundActivityStatus(normalizedResults);
+            return {
+                ...round,
+                activities: normalizeHistoricalAgentActivities(round.activities, terminalStatus),
+                references: await Promise.all((round.references || []).map(async (reference) => ({ ...reference, dataUrl: await resolveImageUrl(reference.storageKey, reference.dataUrl) }))),
+                results: normalizedResults,
+            };
+        }),
     );
 
     return {
@@ -1429,4 +1449,18 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
         generationCompletedAt: raw.generationCompletedAt,
         generationViewedAt: raw.generationViewedAt,
     };
+}
+
+function normalizeImageRoundActivityStatus(results: Round["results"]): "success" | "failed" | "canceled" | null {
+    const statuses = results.map((result) => result.status);
+    if (!statuses.length || statuses.includes("pending")) {
+        return null;
+    }
+    if (statuses.includes("success")) {
+        return "success";
+    }
+    if (statuses.includes("canceled") && !statuses.includes("failed")) {
+        return "canceled";
+    }
+    return "failed";
 }

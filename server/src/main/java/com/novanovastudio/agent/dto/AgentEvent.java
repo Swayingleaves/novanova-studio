@@ -30,6 +30,7 @@ import java.util.Map;
  * @param taskId           String 关联任务ID
  * @param status           String 状态
  * @param action           AgentAction 前端交互动作
+ * @param requestId        String 主Agent请求ID
  */
 public record AgentEvent(
     String type,
@@ -50,8 +51,42 @@ public record AgentEvent(
     Integer progress,
     String taskId,
     String status,
-    AgentAction action
+    AgentAction action,
+    String requestId
 ) {
+
+    /**
+     * 兼容现有事件构造调用，默认不关联统一主Agent请求。
+     *
+     * @param type String 事件类型
+     * @param sessionId String 会话ID
+     * @param callId String 工具调用ID
+     * @param name String 工具名称
+     * @param arguments Map 工具参数
+     * @param delta String 文本增量
+     * @param messageId String 消息ID
+     * @param text String 文本内容
+     * @param errorMessage String 错误信息
+     * @param thoughtId String 思考ID
+     * @param thoughtDelta String 思考增量
+     * @param thoughtDurationMs Integer 思考耗时
+     * @param resultOk Boolean 工具结果状态
+     * @param resultMessage String 工具结果说明
+     * @param resultData Map 工具结果数据
+     * @param progress Integer 进度
+     * @param taskId String 关联任务ID
+     * @param status String 状态
+     * @param action AgentAction 前端动作
+     */
+    public AgentEvent(String type, String sessionId, String callId, String name, Map<String, Object> arguments,
+                      String delta, String messageId, String text, String errorMessage, String thoughtId,
+                      String thoughtDelta, Integer thoughtDurationMs, Boolean resultOk, String resultMessage,
+                      Map<String, Object> resultData, Integer progress, String taskId, String status,
+                      AgentAction action) {
+        this(type, sessionId, callId, name, arguments, delta, messageId, text, errorMessage, thoughtId,
+                thoughtDelta, thoughtDurationMs, resultOk, resultMessage, resultData, progress, taskId, status,
+                action, null);
+    }
 
     /**
      * 构造流式文本增量事件
@@ -242,6 +277,35 @@ public record AgentEvent(
     public static AgentEvent promptPrepared(String sessionId, String planId, String taskId, String strategy) {
         return new AgentEvent("prompt-prepared", sessionId, taskId, null, null, null, null, "提示词已准备", null, null, null, null,
                 null, null, Map.of("planId", planId, "taskId", taskId, "strategy", strategy), null, null, "prepared", null);
+    }
+
+    /**
+     * 构造主Agent排队或领取状态事件。
+     *
+     * @param sessionId String 会话ID
+     * @param requestId String 主Agent请求ID
+     * @param status String queued或running
+     * @param message String 状态说明
+     * @return AgentEvent 排队状态事件
+     */
+    public static AgentEvent queueStatus(String sessionId, String requestId, String status, String message) {
+        return new AgentEvent("queue-status", sessionId, null, null, null, null, null, message, null,
+                null, null, null, null, null, null, null, null, status, null, requestId);
+    }
+
+    /**
+     * 返回携带指定主Agent请求ID的事件副本。
+     *
+     * @param value String 主Agent请求ID
+     * @return AgentEvent 新事件
+     */
+    public AgentEvent withRequestId(String value) {
+        if (value == null || value.equals(requestId)) {
+            return this;
+        }
+        return new AgentEvent(type, sessionId, callId, name, arguments, delta, messageId, text, errorMessage,
+                thoughtId, thoughtDelta, thoughtDurationMs, resultOk, resultMessage, resultData, progress, taskId,
+                status, action, value);
     }
 
 }

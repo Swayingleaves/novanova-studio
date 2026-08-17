@@ -72,6 +72,7 @@ if (!(Test-Path -LiteralPath .env)) {
 | `POSTGRES_ADMINISTRATOR_DATABASE` | 自动创建目标数据库时连接的管理数据库。 |
 | `REDIS_HOST` / `REDIS_PORT` | 本机 Redis 的地址和端口。 |
 | `REDIS_PASSWORD` / `REDIS_DATABASE` | Redis 密码和逻辑数据库编号。 |
+| `AI_TASK_POLLING_INTERVAL_SECONDS` | 所有 AI 异步任务状态轮询间隔（服务端渠道、内部等待、视频合成恢复和前端状态查询），单位为秒，必须大于 0，默认 `3`。 |
 
 ## 3. 创建前端本地环境变量
 
