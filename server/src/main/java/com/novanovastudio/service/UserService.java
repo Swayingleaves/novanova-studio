@@ -213,13 +213,9 @@ public class UserService {
                                                 user.setStatus(STATUS_NORMAL);
                                                 user.setRegisteredAt(OffsetDateTime.now(ZoneOffset.UTC));
                                                 return userRepository.registerUserWithEmailCode(user, codeRecord.getId())
-                                                        .flatMap(userId -> creditService.initializeAccount(userId).thenReturn(userId))
+                                                        .flatMap(userId -> creditService.initializeAccount(userId).then(userRepository.findById(userId)))
                                                         .as(transactionalOperator::transactional)
-                                                        .map(userId -> {
-                                                            user.setId(userId);
-                                                            user.setCreatedAt(OffsetDateTime.now(ZoneOffset.UTC));
-                                                            return buildAuthResponse(user);
-                                                        });
+                                                        .map(this::buildAuthResponse);
                                             });
                                 })));
     }

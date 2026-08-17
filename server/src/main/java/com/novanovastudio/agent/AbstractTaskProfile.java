@@ -269,7 +269,17 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         return Flux.fromIterable(attachments)
                 .concatMap(attachment -> {
                     if (!StringUtils.hasText(attachment.storageKey())) {
-                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考素材缺少媒体存储键，请重新上传后再试"));
+                        String referenceUrl = StringUtils.hasText(attachment.url()) ? attachment.url().trim() : "";
+                        if (!referenceUrl.matches("(?i)^https?://.+")) {
+                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考素材必须提供媒体存储键或公开URL"));
+                        }
+                        String mimeType = attachment.type();
+                        if (!StringUtils.hasText(mimeType)
+                                || (!mimeType.startsWith("image/") && !mimeType.startsWith("video/"))) {
+                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考素材必须是图片或视频"));
+                        }
+                        String name = StringUtils.hasText(attachment.name()) ? attachment.name() : "reference";
+                        return Mono.just(new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, "", referenceUrl));
                     }
                     return persistenceService.getMediaInfoForUser(userId, attachment.storageKey())
                             .map(media -> {

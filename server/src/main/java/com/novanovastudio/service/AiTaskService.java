@@ -1,5 +1,6 @@
 package com.novanovastudio.service;
 
+import com.alibaba.fastjson2.JSONObject;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentTaskOrchestrator;
@@ -462,6 +463,7 @@ public class AiTaskService {
                                                                 resolvedModel.model(),
                                                                 resolvedModel.thinkingEnabled(),
                                                                 resolvedModel.reasoningEffort(),
+                                                                resolvedModel.customBodyParameters(),
                                                                 request,
                                                                 () -> eventPublisher.isCancelRequested(taskId),
                                                                 progress -> updateTaskState(taskId, STATUS_RUNNING, progress, "", null),
@@ -645,7 +647,7 @@ public class AiTaskService {
                     }
                     ResolvedModel resolvedModel = resolveModel(capability, selectedConfig.channelId() + "::" + selectedConfig.modelName(), tuple.getT1());
                     return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.id(), selectedConfig.creditCost(), selectedConfig.creditUnit(),
-                            thinkingEnabled(selectedConfig.thinkingEnabled()), reasoningEffort(selectedConfig.reasoningEffort()));
+                            thinkingEnabled(selectedConfig.thinkingEnabled()), reasoningEffort(selectedConfig.reasoningEffort()), selectedConfig.customBodyParameters());
                 });
     }
 
@@ -680,7 +682,7 @@ public class AiTaskService {
                     }
                     ResolvedModel channelModel = resolveModel(task.getTaskType(), modelConfig.channelId() + CHANNEL_MODEL_SEPARATOR + modelConfig.modelName(), tuple.getT1());
                     return new ResolvedModel(channelModel.channel(), channelModel.model(), modelConfig.id(), modelConfig.creditCost(),
-                            modelConfig.creditUnit(), thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort()));
+                            modelConfig.creditUnit(), thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort()), modelConfig.customBodyParameters());
                 });
     }
 
@@ -741,7 +743,7 @@ public class AiTaskService {
         }
         validateChannelSupport(channel, capability);
         validateUserChannelAccess(channel);
-        return new ResolvedModel(channel, model, "", 0, CREDIT_UNIT_GENERATION, true, "high");
+        return new ResolvedModel(channel, model, "", 0, CREDIT_UNIT_GENERATION, true, "high", new JSONObject());
     }
 
 
@@ -1063,6 +1065,6 @@ public class AiTaskService {
      * @param model String 模型名称
      */
     private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, String modelConfigId, Integer creditCost, String creditUnit,
-                                 boolean thinkingEnabled, String reasoningEffort) {
+                                 boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters) {
     }
 }

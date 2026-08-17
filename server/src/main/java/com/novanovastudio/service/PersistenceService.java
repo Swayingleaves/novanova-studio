@@ -195,6 +195,10 @@ public class PersistenceService {
                     record.setThinkingEnabled(thinkingEnabled(request.thinkingEnabled()));
                     record.setReasoningEffort(reasoningEffort(request.reasoningEffort()));
                     record.setRequestConcurrency(normalizeRequestConcurrency(request.requestConcurrency()));
+                    JSONObject customBodyParameters = request.customBodyParameters() == null
+                            ? normalizeCustomBodyParameters(record.getCustomBodyParameters())
+                            : normalizeCustomBodyParameters(request.customBodyParameters());
+                    record.setCustomBodyParameters(JSON.toJSONString(customBodyParameters));
                     return repository.createPlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
                 });
     }
@@ -214,6 +218,10 @@ public class PersistenceService {
                     record.setReasoningEffort(reasoningEffort(request.reasoningEffort()));
                     record.setRequestConcurrency(normalizeRequestConcurrency(
                             request.requestConcurrency() == null ? record.getRequestConcurrency() : request.requestConcurrency()));
+                    JSONObject customBodyParameters = request.customBodyParameters() == null
+                            ? normalizeCustomBodyParameters(record.getCustomBodyParameters())
+                            : normalizeCustomBodyParameters(request.customBodyParameters());
+                    record.setCustomBodyParameters(JSON.toJSONString(customBodyParameters));
                     PersistenceDtos.ModelConfig modelConfig = modelConfigDto(record);
                     return repository.updatePlatformAiModelConfig(record)
                             .then(isModelQueueType(modelConfig.modelType())
@@ -267,7 +275,21 @@ public class PersistenceService {
         return new PersistenceDtos.ModelConfig(record.getModelConfigId(), record.getChannelId(), record.getModelName(), record.getModelType(),
                 parseStringList(record.getCapabilities()), Boolean.TRUE.equals(record.getDefaultModel()), record.getSortOrder(), record.getCreditCost(),
                 thinkingEnabled(record.getThinkingEnabled()), reasoningEffort(record.getReasoningEffort()),
-                normalizeCreditUnit(record.getModelType(), record.getCreditUnit()), normalizeRequestConcurrency(record.getRequestConcurrency()));
+                normalizeCreditUnit(record.getModelType(), record.getCreditUnit()), normalizeRequestConcurrency(record.getRequestConcurrency()),
+                normalizeCustomBodyParameters(record.getCustomBodyParameters()));
+    }
+
+    /** 规范化模型自定义JSON请求体参数。 */
+    private JSONObject normalizeCustomBodyParameters(JSONObject parameters) {
+        return parameters == null ? new JSONObject() : JSON.parseObject(JSON.toJSONString(parameters));
+    }
+
+    /** 规范化模型自定义JSON请求体参数字符串。 */
+    private JSONObject normalizeCustomBodyParameters(String value) {
+        if (!StringUtils.hasText(value)) return new JSONObject();
+        JSONObject parameters = parseJson(value);
+        if (parameters == null) throw new BusinessException(ErrorCode.PARAM_INVALID, "模型自定义JSON必须是对象");
+        return parameters;
     }
 
     /**

@@ -104,6 +104,25 @@ class MiniMaxProviderAdapterTest {
     }
 
     /**
+     * 单张图片且没有参考视频时应构建为首帧图生视频请求。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldBuildMiniMaxH3ImageToVideoContent() {
+        JSONObject payload = toJsonObject(MiniMaxProviderAdapter.buildRequestPayload(
+                "MiniMax-H3",
+                "让图片中的人物向镜头走来",
+                Map.of("size", "9:16", "resolution", "768p", "seconds", "5"),
+                List.of("https://example.com/first-frame.png"),
+                List.of()
+        ));
+
+        Assertions.assertEquals("adaptive", payload.getString("ratio"));
+        Assertions.assertEquals("first_frame", payload.getJSONArray("content").getJSONObject(1).getString("role"));
+    }
+
+    /**
      * 非法模型、比例、分辨率、时长或纯文生自适应比例必须明确失败。
      *
      * @return void 无返回值

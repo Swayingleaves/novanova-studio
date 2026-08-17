@@ -123,7 +123,7 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
         payload.put("output_format", "png");
         AiTaskParameterReader.putNonAuto(payload, context.request().parameters(), "quality");
         putImageSize(payload, context.request().parameters());
-        return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/images/generations", payload)
+        return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/images/generations", com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .flatMap(response -> storeImageItems(context, AiJsonUtils.responseArrayPayload(response, "data")));
     }
 
@@ -197,7 +197,7 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
     private Mono<JSONObject> createVideoTask(AiTaskExecutionContext context, List<String> imageUrls, List<String> videoUrls) {
         Map<String, Object> payload = buildVideoRequestPayload(context.model(), context.request().prompt(), context.request().parameters(), imageUrls, videoUrls);
         log.info("创建New API视频任务: taskId={}, model={}, imageCount={}, videoCount={}", context.task().getId(), context.model(), imageUrls.size(), videoUrls.size());
-        return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_GENERATION_PATH, payload)
+        return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_GENERATION_PATH, com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .map(AiJsonUtils::responsePayload)
                 .flatMap(created -> {
                     String providerTaskId = AiTaskParameterReader.firstNonEmpty(created.getString("id"), created.getString("task_id"));

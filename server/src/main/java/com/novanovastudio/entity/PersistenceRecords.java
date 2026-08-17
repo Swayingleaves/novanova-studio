@@ -216,6 +216,9 @@ public final class PersistenceRecords {
         /** 模型同时执行请求数量 */
         private Integer requestConcurrency;
 
+        /** 模型JSON POST请求的自定义请求体参数JSON */
+        private String customBodyParameters;
+
         /** 创建时间 */
         private OffsetDateTime createdAt;
 

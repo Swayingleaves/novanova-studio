@@ -1,6 +1,7 @@
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
 import type { GenerationStyleSnapshot } from "@/services/api/server";
+import { imageReferenceAttachments } from "@/features/generation/lib/reference-attachments";
 
 type ImageRoundRegenerateInput = {
     prompt: string;
@@ -38,12 +39,7 @@ type RegenerateImageRoundOptions = {
 };
 
 export function buildImageRoundRegeneratePayload(round: ImageRoundRegenerateInput, fallbackModel: string): ImageRoundRegeneratePayload {
-    const attachments = round.references.map((reference) => ({
-        url: reference.dataUrl,
-        type: reference.type,
-        name: reference.name,
-        storageKey: reference.storageKey,
-    }));
+    const attachments = imageReferenceAttachments(round.references);
     return {
         prompt: round.prompt,
         attachments: attachments.length ? attachments : undefined,

@@ -188,7 +188,16 @@ public class CreationAgentOrchestrator {
      */
     public Mono<Void> stopClaimedExecution(String requestId) {
         ActiveRequestExecution active = activeRequests.get(requestId);
-        if (active == null || !active.cancellationHandled().compareAndSet(false, true)) {
+        if (active == null) {
+            // 请求已被调度器领取但尚未建立执行上下文时，也必须终止订阅，触发调度器释放名额并补位。
+            return Mono.<Void>fromRunnable(() -> {
+                Disposable subscription = claimedRequestSubscriptions.get(requestId);
+                if (subscription != null) {
+                    subscription.dispose();
+                }
+            });
+        }
+        if (!active.cancellationHandled().compareAndSet(false, true)) {
             return Mono.empty();
         }
         AgentExecutionRegistry.AgentCancellation cancellation = executionRegistry.requestCancellation(active.userId(), active.sessionId());

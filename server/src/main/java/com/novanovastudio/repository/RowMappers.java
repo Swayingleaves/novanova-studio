@@ -138,6 +138,7 @@ public final class RowMappers {
         record.setThinkingEnabled(row.get("thinking_enabled", Boolean.class));
         record.setReasoningEffort(row.get("reasoning_effort", String.class));
         record.setRequestConcurrency(row.get("request_concurrency", Integer.class));
+        record.setCustomBodyParameters(row.get("custom_body_parameters", String.class));
         record.setCreatedAt(row.get("created_at", OffsetDateTime.class));
         record.setUpdatedAt(row.get("updated_at", OffsetDateTime.class));
         return record;

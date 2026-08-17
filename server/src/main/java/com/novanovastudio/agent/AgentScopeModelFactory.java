@@ -1,5 +1,6 @@
 package com.novanovastudio.agent;
 
+import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.common.BusinessException;
@@ -63,7 +64,8 @@ public class AgentScopeModelFactory {
                             .flatMap(java.util.Optional::stream)
                             .findFirst();
                     return selectedModel.<Mono<Model>>map(model -> Mono.just(createModel(model.channel(),
-                                    thinkingEnabled(model.config().thinkingEnabled()), reasoningEffort(model.config().reasoningEffort()))))
+                                    thinkingEnabled(model.config().thinkingEnabled()), reasoningEffort(model.config().reasoningEffort()),
+                                    model.config().customBodyParameters())))
                             .orElseGet(() -> Mono.error(new IllegalStateException("未配置可用的默认文本模型")));
                 });
     }
@@ -115,7 +117,8 @@ public class AgentScopeModelFactory {
                     AiTaskDtos.AiChannelConfig scopedChannel = new AiTaskDtos.AiChannelConfig(
                             channel.id(), channel.name(), channel.baseUrl(), channel.apiKey(), channel.apiFormat(), List.of(modelName));
                     return Mono.just(new TextModelSelection(
-                            createModel(scopedChannel, thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort())),
+                            createModel(scopedChannel, thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort()),
+                                    modelConfig.customBodyParameters()),
                             normalizedModel,
                             modelName,
                             channel.name(),
@@ -130,7 +133,7 @@ public class AgentScopeModelFactory {
      * @return Model AgentScope模型
      */
     Model createModel(AiTaskDtos.AiChannelConfig channel) {
-        return createModel(channel, true, "high");
+        return createModel(channel, true, "high", new JSONObject());
     }
 
     /**
@@ -142,15 +145,30 @@ public class AgentScopeModelFactory {
      * @return Model AgentScope模型
      */
     Model createModel(AiTaskDtos.AiChannelConfig channel, boolean thinkingEnabled, String reasoningEffort) {
+        return createModel(channel, thinkingEnabled, reasoningEffort, new JSONObject());
+    }
+
+    /**
+     * 按渠道、思考配置和自定义请求体参数创建AgentScope模型。
+     *
+     * @param channel AiChannelConfig 文本模型渠道
+     * @param thinkingEnabled boolean 是否开启思考模式
+     * @param reasoningEffort String 思考强度
+     * @param customBodyParameters JSONObject 自定义JSON请求体参数
+     * @return Model AgentScope模型
+     */
+    Model createModel(AiTaskDtos.AiChannelConfig channel, boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters) {
         String modelName = channel.models().getFirst();
         return switch (adapterRegistry.normalizeApiFormat(channel.apiFormat())) {
             case "openai" -> new StructuredOutputFallbackModel(OpenAIChatModel.builder()
                     .apiKey(channel.apiKey()).baseUrl(channel.baseUrl()).endpointPath("/chat/completions")
-                    .modelName(modelName).stream(true).generateOptions(openAiGenerateOptions(thinkingEnabled, reasoningEffort)).build());
+                    .modelName(modelName).stream(true).generateOptions(openAiGenerateOptions(thinkingEnabled, reasoningEffort, customBodyParameters)).build());
             case "gemini" -> GeminiChatModel.builder()
-                    .apiKey(channel.apiKey()).baseUrl(channel.baseUrl()).modelName(modelName).streamEnabled(true).build();
+                    .apiKey(channel.apiKey()).baseUrl(channel.baseUrl()).modelName(modelName).streamEnabled(true)
+                    .defaultOptions(GenerateOptions.builder().additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters).build()).build();
             case "anthropic" -> AnthropicChatModel.builder()
-                    .apiKey(channel.apiKey()).baseUrl(channel.baseUrl()).modelName(modelName).stream(true).build();
+                    .apiKey(channel.apiKey()).baseUrl(channel.baseUrl()).modelName(modelName).stream(true)
+                    .defaultOptions(GenerateOptions.builder().additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters).build()).build();
             default -> throw new IllegalStateException("AgentScope暂不支持该文本渠道格式: " + channel.apiFormat());
         };
     }
@@ -162,12 +180,13 @@ public class AgentScopeModelFactory {
      * @param reasoningEffort String 思考强度
      * @return GenerateOptions AgentScope生成参数
      */
-    private GenerateOptions openAiGenerateOptions(boolean thinkingEnabled, String reasoningEffort) {
+    private GenerateOptions openAiGenerateOptions(boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters) {
         GenerateOptions.Builder builder = GenerateOptions.builder()
                 .additionalBodyParam("thinking", Map.of("type", thinkingEnabled ? "enabled" : "disabled"));
         if (thinkingEnabled) {
             builder.reasoningEffort(reasoningEffort(reasoningEffort));
         }
+        builder.additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters);
         return builder.build();
     }
 

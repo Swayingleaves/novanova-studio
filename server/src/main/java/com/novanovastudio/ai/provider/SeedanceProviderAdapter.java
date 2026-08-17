@@ -149,7 +149,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
                 context.model(), context.request().prompt(), context.request().parameters(), imageUrls, videoUrls);
         log.info("创建Seedance视频任务: taskId={}, model={}, imageCount={}, videoCount={}",
                 context.task().getId(), context.model(), imageUrls.size(), videoUrls.size());
-        return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_TASK_PATH, payload)
+        return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_TASK_PATH, com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .map(AiJsonUtils::responsePayload)
                 .flatMap(created -> {
                     String providerTaskId = AiTaskParameterReader.firstNonEmpty(created.getString("id"));

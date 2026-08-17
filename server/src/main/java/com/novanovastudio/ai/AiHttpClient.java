@@ -82,6 +82,7 @@ public class AiHttpClient {
             HttpRequest.Builder builder = baseBearerRequest(channel, path).header("Content-Type", "application/json");
             applyRequestMethod(builder, normalizedMethod, jsonBody);
             HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+            log.info("AI响应 状态码: {} body:{}", response.statusCode(), response.body().length() > MODEL_RESPONSE_LOG_MAXIMUM_CHARACTERS ? response.body().substring(0, MODEL_RESPONSE_LOG_MAXIMUM_CHARACTERS) + "..." : response.body());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw AiErrorSupport.providerException(response.statusCode(), response.body(), requestStage(normalizedMethod));
             }

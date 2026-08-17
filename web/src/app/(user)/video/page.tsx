@@ -9,7 +9,9 @@ import { bindPendingVideoSize, renderPendingVideoToolCall, VideoGeneratingCard }
 import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
+import type { AgentAttachment } from "@/features/canvas/api/agent";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
+import { RecentReferenceImagePicker } from "@/features/generation/components/recent-reference-image-picker";
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/features/generation/components/video-settings-panel";
 import { getModelCreditUnit, isPositiveVideoSeconds, requestCreditCost } from "@/features/generation/constants/credits";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
@@ -37,7 +39,10 @@ import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningA
 import { hasPendingVideoConversation } from "@/features/generation/lib/generation-conversation-recovery";
 import { reconcileGenerationLogTasks } from "@/features/generation/lib/generation-log-task-reconciliation";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
+import { selectGenerationAttachments } from "@/features/generation/lib/generation-retry";
+import { imageReferenceAttachments, referenceMediaType, referenceMediaUrl, videoReferenceAttachments } from "@/features/generation/lib/reference-attachments";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
+import { useRecentReferenceImages } from "@/features/generation/hooks/use-recent-reference-images";
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
@@ -97,11 +102,13 @@ export default function VideoPage() {
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const configHydrated = useConfigStore((state) => state.hydrated);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const userId = useUserStore((state) => state.user?.id);
     const userRole = useUserStore((state) => state.user?.role);
     const addAsset = useAssetStore((state) => state.addAsset);
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
     const theme = canvasThemes[resolvedTheme];
     const { optimizingOperationId, optimizePrompt } = usePromptOptimization();
+    const { recentReferenceImageUrls, recordRecentReferenceImage } = useRecentReferenceImages(userId);
     const isPromptOptimizing = optimizingOperationId === "video-page";
 
     const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -507,6 +514,7 @@ export default function VideoPage() {
                     const file = imageFiles[index];
                     try {
                         const image = await uploadImage(file);
+                        recordRecentReferenceImage(image.objectStorage?.url);
                         setReferences((current) =>
                             current.map((reference) =>
                                 reference.id === placeholder.id
@@ -583,10 +591,16 @@ export default function VideoPage() {
         const quality = config.vquality || "720p";
         const watermark = config.videoWatermark ?? true;
         pendingVideoSizeRef.current = size;
-        const attachments = [
-            ...references.map((reference) => ({ id: reference.id, name: reference.name, url: reference.dataUrl, type: reference.type })),
-            ...videoReferences.map((reference) => ({ id: reference.id, name: reference.name, url: reference.url, type: reference.type })),
+        const currentAttachments = [
+            ...imageReferenceAttachments(references),
+            ...videoReferenceAttachments(videoReferences),
         ];
+        const previousAttachments = [
+            ...imageReferenceAttachments(latestRound?.references || []),
+            ...videoReferenceAttachments(latestRound?.videoReferences || []),
+        ];
+        const allRefs = selectGenerationAttachments(text, currentAttachments, previousAttachments);
+        const attachments = buildChatAttachments(allRefs);
 
         setChatMessages((prev) => {
             const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments, generationStyles: selectedStyles }];
@@ -594,9 +608,6 @@ export default function VideoPage() {
             return next;
         });
 
-        const imageRefs = references.map((reference) => ({ url: reference.objectStorage?.url || reference.dataUrl, type: reference.type, name: reference.name, storageKey: reference.storageKey }));
-        const videoRefs = videoReferences.map((reference) => ({ url: reference.objectStorage?.url || reference.url, type: reference.type, name: reference.name, storageKey: reference.storageKey }));
-        const allRefs = [...imageRefs, ...videoRefs];
         await sendMessage(text, allRefs.length ? allRefs : undefined, {
             model: videoModel,
             size,
@@ -618,13 +629,23 @@ export default function VideoPage() {
         const videoModel = round.config.videoModel || round.config.model || model;
         const size = round.config.size;
         const resolution = round.config.vquality;
+        const attachments = [
+            ...imageReferenceAttachments(round.references),
+            ...videoReferenceAttachments(round.videoReferences),
+        ];
         if (size) pendingVideoSizeRef.current = size;
         setChatMessages((prev) => {
-            const next = [...prev, { id: nanoid(), role: "user" as const, text: round.prompt, generationStyles: round.generationStyleSnapshots }];
+            const next = [...prev, {
+                id: nanoid(),
+                role: "user" as const,
+                text: round.prompt,
+                attachments: buildChatAttachments(attachments),
+                generationStyles: round.generationStyleSnapshots,
+            }];
             chatMessagesRef.current = next;
             return next;
         });
-        await sendMessage(round.prompt, undefined, {
+        await sendMessage(round.prompt, attachments.length ? attachments : undefined, {
             model: videoModel,
             ...(size ? { size } : {}),
             ...(resolution ? {
@@ -906,11 +927,29 @@ export default function VideoPage() {
                 };
             }),
     ];
+    const addRecentReference = (url: string) => {
+        if (references.length >= SEEDANCE_REFERENCE_LIMITS.images) {
+            message.warning(`最多可添加 ${SEEDANCE_REFERENCE_LIMITS.images} 张参考图`);
+            return;
+        }
+        setReferences((current) => {
+            if (current.some((reference) => reference.dataUrl === url)) return current;
+            return [...current, { id: nanoid(), name: "最近上传的参考图", type: "image/*", dataUrl: url }];
+        });
+    };
     const composerActions: CreationComposerAction[] = [
         {
             key: "upload",
             label: "素材",
             icon: <Upload className="size-3.5" />,
+            popoverContent: (
+                <RecentReferenceImagePicker
+                    urls={recentReferenceImageUrls}
+                    selectedUrls={references.map((reference) => reference.dataUrl)}
+                    disabled={references.length >= SEEDANCE_REFERENCE_LIMITS.images}
+                    onSelect={addRecentReference}
+                />
+            ),
             onClick: () => fileInputRef.current?.click(),
         },
         {
@@ -1434,8 +1473,16 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
 
             const video = normalizedResult?.video ? { ...normalizedResult.video, storageKey: readVideoStorageKey(normalizedResult.video) } : undefined;
             const [normalizedReferences, normalizedVideoReferences, storageInfo] = await Promise.all([
-                Promise.all((round.references || []).map(async (reference) => ({ ...reference, dataUrl: await resolveImageUrl(reference.storageKey, reference.dataUrl) }))),
-                Promise.all((round.videoReferences || []).map(async (reference) => ({ ...reference, url: reference.storageKey ? await resolveMediaUrl(reference.storageKey, reference.url) : reference.url }))),
+                Promise.all((round.references || []).map(async (reference) => ({
+                    ...reference,
+                    type: referenceMediaType(reference, "image/*"),
+                    dataUrl: await resolveImageUrl(reference.storageKey, referenceMediaUrl(reference)),
+                }))),
+                Promise.all((round.videoReferences || []).map(async (reference) => ({
+                    ...reference,
+                    type: referenceMediaType(reference, "video/*"),
+                    url: reference.storageKey ? await resolveMediaUrl(reference.storageKey, referenceMediaUrl(reference)) : referenceMediaUrl(reference),
+                }))),
                 video ? resolveMediaStorageInfo(video.storageKey, video.url, video.objectStorage) : Promise.resolve(null),
             ]);
 
@@ -1469,6 +1516,15 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
         generationCompletedAt: raw.generationCompletedAt,
         generationViewedAt: raw.generationViewedAt,
     };
+}
+
+function buildChatAttachments(attachments: AgentAttachment[]) {
+    return attachments.map((attachment, index) => ({
+        id: `reference-${index}-${attachment.storageKey || attachment.url || "unknown"}`,
+        name: attachment.name,
+        url: attachment.url,
+        type: attachment.type,
+    }));
 }
 
 function normalizeVideoRoundActivityStatus(result: GenerationResult | null | undefined): "success" | "failed" | "canceled" | null {

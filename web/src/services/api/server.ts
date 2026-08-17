@@ -204,6 +204,7 @@ export type ServerModelConfig = {
     thinkingEnabled: boolean;
     reasoningEffort: "high" | "max";
     requestConcurrency: number;
+    customBodyParameters: Record<string, unknown>;
 };
 
 export type CreditSettings = {
@@ -816,7 +817,7 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency">) {
+export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "customBodyParameters">) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 

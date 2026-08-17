@@ -128,7 +128,7 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
         payload.put("generate_audio", true);
         payload.put("content_filter", true);
         log.info("创建Evolink视频任务: taskId={}, model={}", context.task().getId(), context.model());
-        return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_GENERATION_PATH, payload)
+        return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_GENERATION_PATH, com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .map(AiJsonUtils::responsePayload)
                 .flatMap(created -> {
                     String providerTaskId = created.getString("id");

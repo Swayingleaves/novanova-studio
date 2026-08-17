@@ -1,5 +1,6 @@
 package com.novanovastudio.ai;
 
+import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.entity.AiGenerationTask;
 import java.util.function.Function;
@@ -17,6 +18,7 @@ import reactor.core.publisher.Mono;
  * @param model String 实际请求模型
  * @param thinkingEnabled boolean 是否开启思考模式
  * @param reasoningEffort String 思考强度
+ * @param customBodyParameters JSONObject 模型JSON POST请求的自定义请求体参数
  * @param request CreateAiTaskRequest 原始任务请求
  * @param cancelChecker Supplier<Mono<Boolean>> 取消状态检查器
  * @param progressReporter IntFunction<Mono<Void>> 进度上报器
@@ -27,10 +29,19 @@ public record AiTaskExecutionContext(AiGenerationTask task,
                                      String model,
                                      boolean thinkingEnabled,
                                      String reasoningEffort,
+                                     JSONObject customBodyParameters,
                                      AiTaskDtos.CreateAiTaskRequest request,
                                      Supplier<Mono<Boolean>> cancelChecker,
                                      IntFunction<Mono<Void>> progressReporter,
                                      Function<String, Mono<Void>> deltaEmitter) {
+
+    /** 保持旧调用方使用空自定义请求体参数。 */
+    public AiTaskExecutionContext(AiGenerationTask task, AiTaskDtos.AiChannelConfig channel, String model,
+                                  boolean thinkingEnabled, String reasoningEffort, AiTaskDtos.CreateAiTaskRequest request,
+                                  Supplier<Mono<Boolean>> cancelChecker, IntFunction<Mono<Void>> progressReporter,
+                                  Function<String, Mono<Void>> deltaEmitter) {
+        this(task, channel, model, thinkingEnabled, reasoningEffort, new JSONObject(), request, cancelChecker, progressReporter, deltaEmitter);
+    }
 
     /**
      * 判断任务是否已请求取消

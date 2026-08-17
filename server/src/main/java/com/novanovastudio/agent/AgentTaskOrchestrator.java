@@ -18,6 +18,7 @@ import com.novanovastudio.agent.dto.AgentToolResult;
 import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.ai.AiErrorDetails;
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
+import com.novanovastudio.ai.AiRequestBodySupport;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -972,14 +973,15 @@ public class AgentTaskOrchestrator {
     private Mono<AiResponse> callAiApi(ResolvedTextModel textModel, AgentLoopProfile profile, List<AiMessage> messages,
                                        boolean requireTool, Consumer<String> textDeltaConsumer) {
         AiTaskDtos.AiChannelConfig channel = textModel.channel();
+        JSONObject customBodyParameters = textModel.customBodyParameters();
         if ("openai".equalsIgnoreCase(channel.apiFormat())) {
             return callStreamingChatCompletionsApi(channel, profile, messages, requireTool, textDeltaConsumer,
-                    new ThinkingConfiguration(textModel.thinkingEnabled(), textModel.reasoningEffort()));
+                    new ThinkingConfiguration(textModel.thinkingEnabled(), textModel.reasoningEffort()), customBodyParameters);
         }
         if ("anthropic".equalsIgnoreCase(channel.apiFormat())) {
-            return callStreamingAnthropicMessagesApi(channel, profile, messages, requireTool, textDeltaConsumer);
+            return callStreamingAnthropicMessagesApi(channel, profile, messages, requireTool, textDeltaConsumer, customBodyParameters);
         }
-        return callStreamingChatCompletionsApi(channel, profile, messages, requireTool, textDeltaConsumer, null);
+        return callStreamingChatCompletionsApi(channel, profile, messages, requireTool, textDeltaConsumer, null, customBodyParameters);
     }
 
     /**
@@ -993,18 +995,19 @@ public class AgentTaskOrchestrator {
      * @return Mono<AiResponse> AI响应
      */
     private Mono<AiResponse> callChatCompletionsApi(AiTaskDtos.AiChannelConfig channel, AgentLoopProfile profile, List<AiMessage> messages,
-                                                     boolean requireTool, ThinkingConfiguration thinkingConfiguration) {
+                                                     boolean requireTool, ThinkingConfiguration thinkingConfiguration, JSONObject customBodyParameters) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", firstModel(channel));
         body.put("messages", messages.stream().map(this::toChatMessage).toList());
         body.put("tools", toApiTools(profile.tools()));
         body.put("tool_choice", requireTool ? "required" : "auto");
         applyThinkingConfiguration(body, thinkingConfiguration);
-        return aiHttpClient.sendJsonRequest(channel, "POST", "/chat/completions", body)
+        return aiHttpClient.sendJsonRequest(channel, "POST", "/chat/completions", AiRequestBodySupport.mergeCustomBodyParameters(body, customBodyParameters))
             .map(this::parseChatCompletionsResponse);
     }
 
-    private Mono<AiResponse> callAnthropicMessagesApi(AiTaskDtos.AiChannelConfig channel, AgentLoopProfile profile, List<AiMessage> messages, boolean requireTool) {
+    private Mono<AiResponse> callAnthropicMessagesApi(AiTaskDtos.AiChannelConfig channel, AgentLoopProfile profile, List<AiMessage> messages,
+                                                       boolean requireTool, JSONObject customBodyParameters) {
         String systemPrompt = messages.stream()
             .filter(m -> "system".equals(m.role()))
             .map(AiMessage::content)
@@ -1020,7 +1023,7 @@ public class AgentTaskOrchestrator {
             .map(this::toAnthropicMessage).toList());
         body.put("tools", toAnthropicTools(profile.tools()));
         body.put("tool_choice", Map.of("type", requireTool ? "any" : "auto"));
-        return aiHttpClient.sendAnthropicJsonRequest(channel, "/v1/messages", body)
+        return aiHttpClient.sendAnthropicJsonRequest(channel, "/v1/messages", AiRequestBodySupport.mergeCustomBodyParameters(body, customBodyParameters))
             .map(this::parseAnthropicResponse);
     }
 
@@ -1037,7 +1040,7 @@ public class AgentTaskOrchestrator {
      */
     private Mono<AiResponse> callStreamingChatCompletionsApi(AiTaskDtos.AiChannelConfig channel, AgentLoopProfile profile,
                                                               List<AiMessage> messages, boolean requireTool, Consumer<String> textDeltaConsumer,
-                                                              ThinkingConfiguration thinkingConfiguration) {
+                                                              ThinkingConfiguration thinkingConfiguration, JSONObject customBodyParameters) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", firstModel(channel));
         body.put("messages", messages.stream().map(this::toChatMessage).toList());
@@ -1046,13 +1049,13 @@ public class AgentTaskOrchestrator {
         applyThinkingConfiguration(body, thinkingConfiguration);
         body.put("stream", true);
         ChatStreamAccumulator accumulator = new ChatStreamAccumulator(textDeltaConsumer);
-        return aiHttpClient.sendStreamingJsonRequest(channel, "/chat/completions", body)
+        return aiHttpClient.sendStreamingJsonRequest(channel, "/chat/completions", AiRequestBodySupport.mergeCustomBodyParameters(body, customBodyParameters))
                 .takeUntil("[DONE]"::equals)
                 .filter(data -> !"[DONE]".equals(data))
                 .doOnNext(accumulator::accept)
                 .then(Mono.fromSupplier(accumulator::response))
                 .onErrorResume(error -> fallbackWhenStreamingUnsupported(error,
-                        callChatCompletionsApi(channel, profile, messages, requireTool, thinkingConfiguration), textDeltaConsumer, channel));
+                        callChatCompletionsApi(channel, profile, messages, requireTool, thinkingConfiguration, customBodyParameters), textDeltaConsumer, channel));
     }
 
     /**
@@ -1074,7 +1077,8 @@ public class AgentTaskOrchestrator {
 
     /** 流式调用Anthropic Messages API并聚合最终响应。 */
     private Mono<AiResponse> callStreamingAnthropicMessagesApi(AiTaskDtos.AiChannelConfig channel, AgentLoopProfile profile,
-                                                                List<AiMessage> messages, boolean requireTool, Consumer<String> textDeltaConsumer) {
+                                                                List<AiMessage> messages, boolean requireTool, Consumer<String> textDeltaConsumer,
+                                                                JSONObject customBodyParameters) {
         String systemPrompt = messages.stream().filter(message -> "system".equals(message.role()))
                 .map(AiMessage::content).findFirst().orElse("");
         Map<String, Object> body = new LinkedHashMap<>();
@@ -1086,11 +1090,11 @@ public class AgentTaskOrchestrator {
         body.put("tool_choice", Map.of("type", requireTool ? "any" : "auto"));
         body.put("stream", true);
         AnthropicStreamAccumulator accumulator = new AnthropicStreamAccumulator(textDeltaConsumer);
-        return aiHttpClient.sendAnthropicStreamingRequest(channel, "/v1/messages", body)
+        return aiHttpClient.sendAnthropicStreamingRequest(channel, "/v1/messages", AiRequestBodySupport.mergeCustomBodyParameters(body, customBodyParameters))
                 .doOnNext(accumulator::accept)
                 .then(Mono.fromSupplier(accumulator::response))
                 .onErrorResume(error -> fallbackWhenStreamingUnsupported(error,
-                        callAnthropicMessagesApi(channel, profile, messages, requireTool), textDeltaConsumer, channel));
+                        callAnthropicMessagesApi(channel, profile, messages, requireTool, customBodyParameters), textDeltaConsumer, channel));
     }
 
     /** 仅在上游明确拒绝流式参数时使用非流式兼容路径。 */
@@ -1569,7 +1573,7 @@ public class AgentTaskOrchestrator {
                                     .findFirst()
                                     .map(channel -> Mono.just(new ResolvedTextModel(
                                             new AiTaskDtos.AiChannelConfig(channel.id(), channel.name(), channel.baseUrl(), channel.apiKey(), channel.apiFormat(), List.of(config.modelName())),
-                                            thinkingEnabled(config.thinkingEnabled()), reasoningEffort(config.reasoningEffort()))))
+                                            thinkingEnabled(config.thinkingEnabled()), reasoningEffort(config.reasoningEffort()), config.customBodyParameters())))
                                     .orElseGet(() -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员完整配置文本模型渠道"))))
                             .orElseGet(() -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "所选文本模型未在管理员启用的模型中配置")));
                 });
@@ -1612,7 +1616,8 @@ public class AgentTaskOrchestrator {
      * @param thinkingEnabled boolean 是否开启思考模式
      * @param reasoningEffort String 思考强度
      */
-    private record ResolvedTextModel(AiTaskDtos.AiChannelConfig channel, boolean thinkingEnabled, String reasoningEffort) {
+    private record ResolvedTextModel(AiTaskDtos.AiChannelConfig channel, boolean thinkingEnabled, String reasoningEffort,
+                                     JSONObject customBodyParameters) {
     }
 
     /**

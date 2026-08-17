@@ -1,6 +1,6 @@
 "use client";
 
-import { App, Button, Input, Tooltip } from "antd";
+import { App, Button, Input, Popover, Tooltip } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Bot, Square, X } from "lucide-react";
@@ -135,8 +135,8 @@ export function CreationComposer({
         return true;
     };
 
-    const renderAction = (action: CreationComposerProps["actions"][number]) => (
-        <Tooltip key={action.key} title={action.label}>
+    const renderAction = (action: CreationComposerProps["actions"][number]) => {
+        const button = (
             <Button
                 size="small"
                 className={["creation-composer-action", action.iconOnly ? "creation-composer-action-icon" : "", action.className].filter(Boolean).join(" ")}
@@ -148,8 +148,16 @@ export function CreationComposer({
             >
                 {action.iconOnly ? null : <span className="creation-composer-action-label">{action.label}</span>}
             </Button>
-        </Tooltip>
-    );
+        );
+        if (action.popoverContent) {
+            return (
+                <Popover key={action.key} content={action.popoverContent} trigger="hover" placement="topLeft" mouseEnterDelay={0.1} mouseLeaveDelay={0.15}>
+                    {button}
+                </Popover>
+            );
+        }
+        return <Tooltip key={action.key} title={action.label}>{button}</Tooltip>;
+    };
 
     return (
         <div className="creation-composer-band">

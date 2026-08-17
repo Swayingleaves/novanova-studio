@@ -93,7 +93,7 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
         messages.add(Map.of("role", "user", "content", context.request().prompt()));
         payload.put("messages", messages);
         applyThinkingConfiguration(payload, context);
-        return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/chat/completions", payload)
+        return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/chat/completions", AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .map(AiJsonUtils::responsePayload)
                 .map(response -> AiJsonUtils.jsonObject(Map.of("content", readChatCompletionsText(response))));
     }
@@ -120,7 +120,7 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
         if (StringUtils.hasText(imageSize)) {
             payload.put("size", imageSize);
         }
-        return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/images/generations", payload)
+        return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/images/generations", AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .flatMap(response -> storeImageItems(context, AiJsonUtils.responseArrayPayload(response, "data")));
     }
 

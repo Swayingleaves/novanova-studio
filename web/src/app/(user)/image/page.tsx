@@ -11,6 +11,7 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/com
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
+import { RecentReferenceImagePicker } from "@/features/generation/components/recent-reference-image-picker";
 import { ImageSettingsPanel, imageQualityLabel, imageResolutionLabel, imageSizeLabel } from "@/features/generation/components/image-settings-panel";
 import { requestCreditCost } from "@/features/generation/constants/credits";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
@@ -22,7 +23,10 @@ import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningA
 import { findLatestPendingConversation, hasPendingImageConversation } from "@/features/generation/lib/generation-conversation-recovery";
 import { reconcileGenerationLogTasks } from "@/features/generation/lib/generation-log-task-reconciliation";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
+import { selectGenerationAttachments } from "@/features/generation/lib/generation-retry";
+import { imageReferenceAttachments, referenceMediaType, referenceMediaUrl } from "@/features/generation/lib/reference-attachments";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
+import { useRecentReferenceImages } from "@/features/generation/hooks/use-recent-reference-images";
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
 import { formatImageGenerationSettingsSummary } from "@/features/generation/lib/generation-settings-summary";
 import { loadImageLastUsedSettings, saveImageLastUsedSettings, type ImageLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
@@ -98,11 +102,13 @@ export default function ImagePage() {
     const configHydrated = useConfigStore((state) => state.hydrated);
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const userId = useUserStore((state) => state.user?.id);
     const userRole = useUserStore((state) => state.user?.role);
     const addAsset = useAssetStore((state) => state.addAsset);
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
     const theme = canvasThemes[resolvedTheme];
     const { optimizingOperationId, optimizePrompt } = usePromptOptimization();
+    const { recentReferenceImageUrls, recordRecentReferenceImage } = useRecentReferenceImages(userId);
     const isPromptOptimizing = optimizingOperationId === "image-page";
 
     const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -481,6 +487,7 @@ export default function ImagePage() {
                 try {
                     const file = imageFiles[index];
                     const image = await uploadImage(file);
+                    recordRecentReferenceImage(image.objectStorage?.url);
                     setReferences((current) =>
                         current.map((reference) =>
                             reference.id === placeholder.id
@@ -524,8 +531,10 @@ export default function ImagePage() {
         });
 
         // Send via Agent SSE — chat model resolved server-side from user config
-        const refs = references.map((r) => ({ url: r.dataUrl, type: r.type, name: r.name, storageKey: r.storageKey }));
-        await sendMessage(text, refs.length ? refs : undefined, agentCreationSettings);
+        const currentAttachments = imageReferenceAttachments(references);
+        const previousAttachments = imageReferenceAttachments(latestRound?.references || []);
+        const attachments = selectGenerationAttachments(text, currentAttachments, previousAttachments);
+        await sendMessage(text, attachments.length ? attachments : undefined, agentCreationSettings);
 
         setPrompt("");
         setReferences([]);
@@ -784,11 +793,18 @@ export default function ImagePage() {
             onRemove: () => setReferences((current) => current.filter((item) => item.id !== reference.id)),
         };
     });
+    const addRecentReference = (url: string) => {
+        setReferences((current) => {
+            if (current.some((reference) => reference.dataUrl === url)) return current;
+            return [...current, { id: nanoid(), name: "最近上传的参考图", type: "image/*", dataUrl: url }];
+        });
+    };
     const composerActions: CreationComposerAction[] = [
         {
             key: "upload",
             label: "参考图",
             icon: <Upload className="size-3.5" />,
+            popoverContent: <RecentReferenceImagePicker urls={recentReferenceImageUrls} selectedUrls={references.map((reference) => reference.dataUrl)} onSelect={addRecentReference} />,
             onClick: () => fileInputRef.current?.click(),
         },
         {
@@ -1433,7 +1449,11 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
             return {
                 ...round,
                 activities: normalizeHistoricalAgentActivities(round.activities, terminalStatus),
-                references: await Promise.all((round.references || []).map(async (reference) => ({ ...reference, dataUrl: await resolveImageUrl(reference.storageKey, reference.dataUrl) }))),
+                references: await Promise.all((round.references || []).map(async (reference) => ({
+                    ...reference,
+                    type: referenceMediaType(reference, "image/*"),
+                    dataUrl: await resolveImageUrl(reference.storageKey, referenceMediaUrl(reference)),
+                }))),
                 results: normalizedResults,
             };
         }),

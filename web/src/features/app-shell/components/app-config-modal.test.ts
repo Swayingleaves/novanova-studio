@@ -15,3 +15,10 @@ test("模型配置创建和更新请求都携带同时并发数", () => {
     assert.equal((source.match(/requestConcurrency: configItem\.requestConcurrency/g) || []).length, 2);
     assert.match(source, /first\.requestConcurrency === second\.requestConcurrency/);
 });
+
+test("模型配置通过编辑弹窗维护自定义 JSON 参数", () => {
+    assert.match(source, /openModelConfigEditor/);
+    assert.match(source, /自定义 JSON/);
+    assert.match(source, /JSON\.parse\(editingCustomBodyParameters/);
+    assert.match(source, /customBodyParameters: configItem\.customBodyParameters/g);
+});

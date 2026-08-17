@@ -605,6 +605,36 @@ class PersistenceServiceTest {
         Assertions.assertEquals("second", updated.creditUnit());
     }
 
+    /** 模型自定义JSON请求体参数应在创建、更新和查询间完整往返。 */
+    @Test
+    void shouldRoundTripModelCustomBodyParameters() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"image-model\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
+
+        PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "image-model", "image", List.of(), 0, 0, true, "high", "generation", 1,
+                JSON.parseObject("{\"like\":true}"))).block();
+
+        Assertions.assertNotNull(created);
+        Assertions.assertEquals(true, created.customBodyParameters().getBoolean("like"));
+        ArgumentCaptor<PersistenceRecords.UserAiModelConfigRecord> captor = ArgumentCaptor.forClass(PersistenceRecords.UserAiModelConfigRecord.class);
+        verify(repository).createPlatformAiModelConfig(captor.capture());
+        PersistenceRecords.UserAiModelConfigRecord record = captor.getValue();
+        Assertions.assertEquals(true, JSON.parseObject(record.getCustomBodyParameters()).getBoolean("like"));
+
+        when(repository.getPlatformAiModelConfig(created.id())).thenReturn(Mono.just(record));
+        when(repository.updatePlatformAiModelConfig(record)).thenReturn(Mono.just(1L));
+        PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
+                created.id(), "image", List.of(), 0, 0, true, "high", "generation", 1,
+                JSON.parseObject("{\"like\":false,\"seed\":1}"))).block();
+
+        Assertions.assertNotNull(updated);
+        Assertions.assertEquals(false, updated.customBodyParameters().getBoolean("like"));
+        Assertions.assertEquals(1, updated.customBodyParameters().getInteger("seed"));
+    }
+
     /** 模型同时并发数应默认取1，并在创建、更新和查询间完整往返。 */
     @Test
     void shouldRoundTripModelRequestConcurrency() {

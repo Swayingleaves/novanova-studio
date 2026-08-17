@@ -529,9 +529,14 @@ export function normalizeModelCreditUnit(value: unknown, modelType: ModelCapabil
 export function normalizeServerModelConfig(config: ServerModelConfig): ServerModelConfig {
     return {
         ...config,
+        customBodyParameters: isJsonObject(config.customBodyParameters) ? { ...config.customBodyParameters } : {},
         creditUnit: normalizeModelCreditUnit(config.creditUnit, config.modelType),
         requestConcurrency: normalizeModelRequestConcurrency(config.requestConcurrency),
     };
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 /** 归一化模型同时并发数，缺省时使用默认值1。 */

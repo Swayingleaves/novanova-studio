@@ -2,7 +2,7 @@
 
 import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Switch, Tabs } from "antd";
 import { nanoid } from "nanoid";
-import { ChevronDown, ChevronUp, CloudUpload, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
+import { ChevronDown, ChevronUp, CloudUpload, Pencil, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -147,6 +147,8 @@ export function AppConfigModal() {
     const [draftObjectStorages, setDraftObjectStorages] = useState<ObjectStorageConfig[]>([]);
     const [creditBaseline, setCreditBaseline] = useState(100);
     const [draftInitialCredits, setDraftInitialCredits] = useState(100);
+    const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
+    const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
     const initializedRef = useRef(false);
 
     const resetChannelDraft = useCallback((resetCollapsed = false) => {
@@ -323,36 +325,29 @@ export function AppConfigModal() {
         });
     };
 
-    const updateModelCapabilities = (modelType: ModelCapability, model: string, capability: string, checked: boolean) => {
-        setDraftModelConfigs((configs) =>
-            configs.map((configItem) => {
-                if (configItem.modelType !== modelType || modelConfigValue(configItem) !== model) return configItem;
-                return {
-                    ...configItem,
-                    capabilities: checked ? uniqueModels([...configItem.capabilities, capability]) : configItem.capabilities.filter((value) => value !== capability),
-                };
-            }),
-        );
+    const openModelConfigEditor = (configItem: ServerModelConfig) => {
+        setEditingModelConfig(cloneModelConfig(configItem));
+        setEditingCustomBodyParameters(JSON.stringify(configItem.customBodyParameters || {}, null, 2));
     };
 
-    const updateModelCreditCost = (modelType: ModelCapability, model: string, creditCost: number) => {
-        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType && modelConfigValue(configItem) === model ? { ...configItem, creditCost } : configItem)));
+    const updateEditingModelConfig = (patch: Partial<ServerModelConfig>) => {
+        setEditingModelConfig((configItem) => (configItem ? { ...configItem, ...patch } : configItem));
     };
 
-    const updateModelCreditUnit = (modelType: ModelCapability, model: string, creditUnit: ServerModelConfig["creditUnit"]) => {
-        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType && modelConfigValue(configItem) === model
-            ? { ...configItem, creditUnit: modelType === "video" && creditUnit === "second" ? "second" : "generation" }
-            : configItem)));
-    };
-
-    const updateModelRequestConcurrency = (modelType: ModelCapability, model: string, requestConcurrency: number) => {
-        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType && modelConfigValue(configItem) === model
-            ? { ...configItem, requestConcurrency: Math.max(1, Math.floor(requestConcurrency)) }
-            : configItem)));
-    };
-
-    const updateModelThinkingConfiguration = (model: string, patch: Pick<ServerModelConfig, "thinkingEnabled"> | Pick<ServerModelConfig, "reasoningEffort">) => {
-        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === "text" && modelConfigValue(configItem) === model ? { ...configItem, ...patch } : configItem)));
+    const saveModelConfigEditor = () => {
+        if (!editingModelConfig) return;
+        let customBodyParameters: Record<string, unknown>;
+        try {
+            const parsed = JSON.parse(editingCustomBodyParameters.trim() || "{}");
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("模型自定义JSON必须是对象");
+            customBodyParameters = parsed as Record<string, unknown>;
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "模型自定义JSON格式不正确");
+            return;
+        }
+        const nextConfig = { ...editingModelConfig, customBodyParameters };
+        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.id === nextConfig.id ? nextConfig : configItem)));
+        setEditingModelConfig(null);
     };
 
     const toggleModelCapabilityCollapsed = (modelType: ModelCapability) => {
@@ -392,6 +387,7 @@ export function AppConfigModal() {
                     thinkingEnabled: configItem.thinkingEnabled,
                     reasoningEffort: configItem.reasoningEffort,
                     requestConcurrency: configItem.requestConcurrency,
+                    customBodyParameters: configItem.customBodyParameters,
                 });
                 createdConfigIds.set(configItem.id, saved.id);
             }
@@ -415,6 +411,7 @@ export function AppConfigModal() {
                         thinkingEnabled: configItem.thinkingEnabled,
                         reasoningEffort: configItem.reasoningEffort,
                         requestConcurrency: configItem.requestConcurrency,
+                        customBodyParameters: configItem.customBodyParameters,
                     });
                 }
             }
@@ -760,7 +757,7 @@ export function AppConfigModal() {
                                     </div>
                                     <div className="mt-6 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
                                         <div className="text-sm font-semibold">模型能力配置</div>
-                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">为每个模型勾选支持的细能力，用于判断工具调用（如视频编辑降级）。</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">点击模型后的编辑按钮配置积分、能力与自定义 JSON 参数。</div>
                                         <div className="mt-3 space-y-4">
                                             {capabilityGroups.map((group) => {
                                                 const models = draftConfig[group.modelsKey];
@@ -777,89 +774,15 @@ export function AppConfigModal() {
                                                         {collapsed ? null : (
                                                             <div className="space-y-2">
                                                                 {models.map((model) => {
-                                                                    const capabilities = draftConfig.modelCapabilities.find((item) => item.model === model)?.capabilities || [];
+                                                                    const modelConfig = draftModelConfigs.find((item) => item.modelType === group.capability && modelConfigValue(item) === model);
+                                                                    if (!modelConfig) return null;
                                                                     return (
-                                                                        <div key={model} className="flex flex-wrap items-center gap-3 rounded border border-[var(--studio-line)] bg-[var(--studio-panel)] px-3 py-2">
-                                                                            {(() => {
-                                                                                const modelConfig = draftModelConfigs.find((item) => item.modelType === group.capability && modelConfigValue(item) === model);
-                                                                                const showThinkingConfiguration = modelConfig && isOpenAiTextModel(modelConfig, draftChannels);
-                                                                                return (
-                                                                                    <>
-                                                                                        <span className="min-w-40 text-sm">{modelOptionLabel(draftConfig, model)}</span>
-                                                                                        <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
-                                                                                            {group.capability === "video" && modelConfig?.creditUnit === "second" ? "每秒积分" : "每次积分"}
-                                                                                            <InputNumber
-                                                                                                min={0}
-                                                                                                precision={0}
-                                                                                                value={modelConfig?.creditCost ?? 0}
-                                                                                                disabled={isSaving}
-                                                                                                className="w-24"
-                                                                                                onChange={(value) => updateModelCreditCost(group.capability, model, Number(value) || 0)}
-                                                                                            />
-                                                                                        </span>
-                                                                                        {group.capability === "video" && modelConfig ? (
-                                                                                            <Select
-                                                                                                size="small"
-                                                                                                value={modelConfig.creditUnit === "second" ? "second" : "generation"}
-                                                                                                disabled={isSaving}
-                                                                                                className="w-24"
-                                                                                                options={[
-                                                                                                    { value: "generation", label: "按次" },
-                                                                                                    { value: "second", label: "按秒" },
-                                                                                                ]}
-                                                                                                onChange={(creditUnit: ServerModelConfig["creditUnit"]) => updateModelCreditUnit(group.capability, model, creditUnit)}
-                                                                                            />
-                                                                                        ) : null}
-                                                                                        {(group.capability === "image" || group.capability === "video") && modelConfig ? (
-                                                                                            <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
-                                                                                                同时并发数
-                                                                                                <InputNumber
-                                                                                                    min={1}
-                                                                                                    precision={0}
-                                                                                                    value={modelConfig.requestConcurrency}
-                                                                                                    disabled={isSaving}
-                                                                                                    className="w-20"
-                                                                                                    onChange={(value) => updateModelRequestConcurrency(group.capability, model, Number(value) || 1)}
-                                                                                                />
-                                                                                            </span>
-                                                                                        ) : null}
-                                                                                        {MODEL_CAPABILITY_OPTIONS[group.capability].map((option) => (
-                                                                                            <Checkbox
-                                                                                                key={option.value}
-                                                                                                checked={capabilities.includes(option.value)}
-                                                                                                disabled={isSaving}
-                                                                                                onChange={(event) => updateModelCapabilities(group.capability, model, option.value, event.target.checked)}
-                                                                                            >
-                                                                                                {option.label}
-                                                                                            </Checkbox>
-                                                                                        ))}
-                                                                                        {showThinkingConfiguration && modelConfig ? (
-                                                                                            <>
-                                                                                                <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
-                                                                                                    开启思考模式
-                                                                                                    <Switch
-                                                                                                        size="small"
-                                                                                                        checked={modelConfig.thinkingEnabled}
-                                                                                                        disabled={isSaving}
-                                                                                                        onChange={(thinkingEnabled) => updateModelThinkingConfiguration(model, { thinkingEnabled })}
-                                                                                                    />
-                                                                                                </span>
-                                                                                                <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
-                                                                                                    思考强度
-                                                                                                    <Select
-                                                                                                        size="small"
-                                                                                                        value={modelConfig.reasoningEffort}
-                                                                                                        disabled={isReasoningEffortDisabled(isSaving, modelConfig.thinkingEnabled)}
-                                                                                                        className="w-20"
-                                                                                                        options={reasoningEffortOptions}
-                                                                                                        onChange={(reasoningEffort: "high" | "max") => updateModelThinkingConfiguration(model, { reasoningEffort })}
-                                                                                                    />
-                                                                                                </span>
-                                                                                            </>
-                                                                                        ) : null}
-                                                                                    </>
-                                                                                );
-                                                                            })()}
+                                                                        <div key={model} className="flex items-center justify-between gap-3 rounded border border-[var(--studio-line)] bg-[var(--studio-panel)] px-3 py-2">
+                                                                            <span className="min-w-0 truncate text-sm">{modelOptionLabel(draftConfig, model)}</span>
+                                                                            <div className="flex shrink-0 items-center gap-2">
+                                                                                {modelConfig.defaultModel ? <span className="text-xs text-[var(--studio-muted)]">默认</span> : null}
+                                                                                <Button size="small" icon={<Pencil className="size-3.5" />} disabled={isSaving} onClick={() => openModelConfigEditor(modelConfig)}>编辑</Button>
+                                                                            </div>
                                                                         </div>
                                                                     );
                                                                 })}
@@ -1020,6 +943,85 @@ export function AppConfigModal() {
                     ]}
                 />
             )}
+            <Modal
+                title={editingModelConfig ? `${modelOptionLabel(draftConfig, modelConfigValue(editingModelConfig))} 配置` : "模型配置"}
+                open={Boolean(editingModelConfig)}
+                centered
+                destroyOnHidden
+                okText="确认"
+                cancelText="取消"
+                onCancel={() => setEditingModelConfig(null)}
+                onOk={saveModelConfigEditor}
+            >
+                {editingModelConfig ? (
+                    <Form layout="vertical" requiredMark={false}>
+                        <Form.Item label={editingModelConfig.modelType === "video" && editingModelConfig.creditUnit === "second" ? "每秒积分" : "每次积分"}>
+                            <InputNumber
+                                min={0}
+                                precision={0}
+                                value={editingModelConfig.creditCost}
+                                className="w-full"
+                                onChange={(value) => updateEditingModelConfig({ creditCost: Math.max(0, Number(value) || 0) })}
+                            />
+                        </Form.Item>
+                        {editingModelConfig.modelType === "video" ? (
+                            <Form.Item label="积分计费单位">
+                                <Select
+                                    value={editingModelConfig.creditUnit}
+                                    options={[{ value: "generation", label: "按次" }, { value: "second", label: "按秒" }]}
+                                    onChange={(creditUnit: ServerModelConfig["creditUnit"]) => updateEditingModelConfig({ creditUnit })}
+                                />
+                            </Form.Item>
+                        ) : null}
+                        {editingModelConfig.modelType === "image" || editingModelConfig.modelType === "video" ? (
+                            <Form.Item label="同时并发数">
+                                <InputNumber
+                                    min={1}
+                                    precision={0}
+                                    value={editingModelConfig.requestConcurrency}
+                                    className="w-full"
+                                    onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })}
+                                />
+                            </Form.Item>
+                        ) : null}
+                        <Form.Item label="模型能力">
+                            <div className="flex flex-wrap gap-x-4 gap-y-2">
+                                {MODEL_CAPABILITY_OPTIONS[editingModelConfig.modelType].map((option) => (
+                                    <Checkbox
+                                        key={option.value}
+                                        checked={editingModelConfig.capabilities.includes(option.value)}
+                                        onChange={(event) => updateEditingModelConfig({
+                                            capabilities: event.target.checked
+                                                ? uniqueModels([...editingModelConfig.capabilities, option.value])
+                                                : editingModelConfig.capabilities.filter((value) => value !== option.value),
+                                        })}
+                                    >
+                                        {option.label}
+                                    </Checkbox>
+                                ))}
+                            </div>
+                        </Form.Item>
+                        {editingModelConfig.modelType === "text" && isOpenAiTextModel(editingModelConfig, draftChannels) ? (
+                            <>
+                                <Form.Item label="开启思考模式">
+                                    <Switch checked={editingModelConfig.thinkingEnabled} onChange={(thinkingEnabled) => updateEditingModelConfig({ thinkingEnabled })} />
+                                </Form.Item>
+                                <Form.Item label="思考强度">
+                                    <Select
+                                        value={editingModelConfig.reasoningEffort}
+                                        disabled={isReasoningEffortDisabled(false, editingModelConfig.thinkingEnabled)}
+                                        options={reasoningEffortOptions}
+                                        onChange={(reasoningEffort: "high" | "max") => updateEditingModelConfig({ reasoningEffort })}
+                                    />
+                                </Form.Item>
+                            </>
+                        ) : null}
+                        <Form.Item label="自定义 JSON" extra="仅在 JSON 格式的 POST 请求中合并；同名字段覆盖系统参数。">
+                            <Input.TextArea value={editingCustomBodyParameters} autoSize={{ minRows: 5, maxRows: 12 }} spellCheck={false} onChange={(event) => setEditingCustomBodyParameters(event.target.value)} />
+                        </Form.Item>
+                    </Form>
+                ) : null}
+            </Modal>
         </Modal>
     );
 }
@@ -1029,7 +1031,11 @@ function cloneChannels(channels: ModelChannel[]) {
 }
 
 function cloneModelConfigs(configs: ServerModelConfig[]) {
-    return configs.map((config) => ({ ...config, capabilities: [...config.capabilities] }));
+    return configs.map(cloneModelConfig);
+}
+
+function cloneModelConfig(config: ServerModelConfig): ServerModelConfig {
+    return { ...config, capabilities: [...config.capabilities], customBodyParameters: { ...(config.customBodyParameters || {}) } };
 }
 
 function cloneObjectStorages(storages: ObjectStorageConfig[]) {
@@ -1050,6 +1056,7 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         thinkingEnabled: true,
         reasoningEffort: "high",
         requestConcurrency: 1,
+        customBodyParameters: {},
     };
 }
 
@@ -1059,7 +1066,8 @@ function sameValue(first: unknown, second: unknown) {
 
 function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelConfig) {
     return first.modelType === second.modelType && first.sortOrder === second.sortOrder && first.creditCost === second.creditCost && first.creditUnit === second.creditUnit && first.requestConcurrency === second.requestConcurrency
-        && first.thinkingEnabled === second.thinkingEnabled && first.reasoningEffort === second.reasoningEffort && sameValue(first.capabilities, second.capabilities);
+        && first.thinkingEnabled === second.thinkingEnabled && first.reasoningEffort === second.reasoningEffort
+        && sameValue(first.capabilities, second.capabilities) && sameValue(first.customBodyParameters, second.customBodyParameters);
 }
 
 function modelConfigValue(config: Pick<ServerModelConfig, "channelId" | "modelName">) {

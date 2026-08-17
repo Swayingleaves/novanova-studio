@@ -66,6 +66,7 @@ export type CreationComposerAction = {
     label: string;
     icon: ReactNode;
     className?: string;
+    popoverContent?: ReactNode;
     placement?: "toolbar" | "submit";
     iconOnly?: boolean;
     disabled?: boolean;

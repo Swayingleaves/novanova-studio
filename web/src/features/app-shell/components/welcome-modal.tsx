@@ -30,6 +30,7 @@ export function WelcomeModal() {
     };
 
     if (!user || user.welcomeRead) return null;
+    const creditBalanceText = user.creditBalance.toLocaleString("zh-CN");
 
     return (
         <Modal open closable={!acknowledging} footer={null} centered width={520} mask={{ closable: false }} keyboard={false} onCancel={() => void acknowledge()} styles={{ body: { padding: 0 } }}>
@@ -44,7 +45,7 @@ export function WelcomeModal() {
                         <img src="/images/gift.png" alt="" aria-hidden="true" className="size-30 shrink-0 object-contain" />
                         <div className="min-w-0">
                             <p className="text-sm font-semibold text-[var(--studio-primary)]">
-                                100 Credits <span className="ml-1 text-[var(--studio-ink)]">已到账</span>
+                                {creditBalanceText} Credits <span className="ml-1 text-[var(--studio-ink)]">已到账</span>
                             </p>
                             <p className="mt-0.5 text-xs leading-5 text-[var(--studio-muted)]">用于体验 AI 视觉创作</p>
                         </div>

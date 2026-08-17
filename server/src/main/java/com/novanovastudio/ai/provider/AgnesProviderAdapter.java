@@ -122,7 +122,7 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                     payload.put("stream", true);
                     // 建立连接前上报进度10%，表示任务已开始进入流式调用阶段。
                     return context.updateRunningProgress(10)
-                            .thenMany(aiHttpClient.sendStreamingJsonRequest(context.channel(), "/chat/completions", payload))
+                            .thenMany(aiHttpClient.sendStreamingJsonRequest(context.channel(), "/chat/completions", com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters())))
                             .index()
                             .concatMap(tuple -> {
                                 long index = tuple.getT1();
@@ -226,7 +226,7 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
         payload.put("size", resolveAgnesRequestSize(context));
         AiTaskParameterReader.putNonAuto(payload, context.request().parameters(), "quality");
         payload.put("extra_body", extraBody);
-        return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/images/generations", payload)
+        return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/images/generations", com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .flatMap(response -> {
                     JSONArray data = AiJsonUtils.responseArrayPayload(response, "data");
                     if (data == null || data.isEmpty()) {
@@ -275,7 +275,7 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                     payload.put("frame_rate", timing.frameRate());
                     applyAgnesVideoReferenceImages(payload, referenceUrls);
                     log.info("创建Agnes视频任务: taskId={}, width={}, height={}, frames={}, frameRate={}", context.task().getId(), dimensions.width(), dimensions.height(), timing.numFrames(), timing.frameRate());
-                    return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/videos", payload);
+                    return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/videos", com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()));
                 })
                 .flatMap(created -> {
                     JSONObject payload = agnesObjectPayload(created);

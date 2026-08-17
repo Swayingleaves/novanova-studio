@@ -126,6 +126,8 @@ public class CreationAgentRequestDispatcher {
     public Mono<Void> recoverRequests() {
         return requestQueue.listExpiredActiveRequests()
                 .concatMap(this::recoverExpiredActiveRequest)
+                .thenMany(requestQueue.listActiveRequests()
+                        .concatMap(this::recoverCanceledActiveRequest))
                 .thenMany(requestRepository.listRunningRequests()
                         .concatMap(this::interruptIfLeaseExpired))
                 .thenMany(requestRepository.listQueuedRequests()
@@ -134,6 +136,24 @@ public class CreationAgentRequestDispatcher {
                                     request.getId(), "queued", "排队中"));
                             return enqueue(request);
                         }))
+                .then();
+    }
+
+    /**
+     * 立即收敛已取消但仍占用活动名额的请求，避免服务重启后等待完整租约周期。
+     *
+     * @param activeRequest CreationAgentRequestQueue.ActiveRequest 当前活动请求
+     * @return Mono<Void> 收敛完成信号
+     */
+    private Mono<Void> recoverCanceledActiveRequest(CreationAgentRequestQueue.ActiveRequest activeRequest) {
+        return requestRepository.findById(activeRequest.requestId())
+                .filter(request -> "canceled".equals(request.getStatus()))
+                .flatMap(request -> requestQueue.claimCanceledActiveRecovery(activeRequest.userId(),
+                                activeRequest.entrySource(), activeRequest.requestId())
+                        .flatMap(recoveryClaim -> recoverWithClaim(recoveryClaim, "主Agent请求已取消")
+                                .then(dispatchAvailable(activeRequest.userId(), activeRequest.entrySource()))
+                                .onErrorResume(exception -> requestQueue.releaseRecoveryClaim(recoveryClaim)
+                                        .then(Mono.error(exception)))))
                 .then();
     }
 

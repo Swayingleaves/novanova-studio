@@ -83,7 +83,7 @@ public class GeminiProviderAdapter implements AiProviderAdapter {
             payload.put("systemInstruction", Map.of("parts", List.of(Map.of("text", systemPrompt))));
         }
         payload.putAll(textPayload(context.request().prompt()));
-        return aiHttpClient.sendGeminiJsonRequest(context.channel(), generateContentPath(context.model()), payload)
+        return aiHttpClient.sendGeminiJsonRequest(context.channel(), generateContentPath(context.model()), AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .map(this::parseGeminiText)
                 .map(content -> AiJsonUtils.jsonObject(Map.of("content", content)));
     }
@@ -115,7 +115,7 @@ public class GeminiProviderAdapter implements AiProviderAdapter {
                     Map<String, Object> payload = new java.util.LinkedHashMap<>();
                     payload.put("contents", List.of(Map.of("role", "user", "parts", parts)));
                     payload.put("generationConfig", Map.of("responseModalities", List.of("TEXT", "IMAGE")));
-                    return aiHttpClient.sendGeminiJsonRequest(context.channel(), generateContentPath(context.model()), payload);
+                    return aiHttpClient.sendGeminiJsonRequest(context.channel(), generateContentPath(context.model()), AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()));
                 })
                 .flatMap(response -> {
                     List<JSONObject> imageItems = parseGeminiImages(response);

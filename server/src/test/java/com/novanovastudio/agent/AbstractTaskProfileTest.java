@@ -237,6 +237,48 @@ class AbstractTaskProfileTest {
     }
 
     /**
+     * 公开对象存储图片地址缺少媒体存储键时仍应作为参考图创建任务。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldUsePublicAttachmentUrlWithoutStorageKeyAsTaskReference() {
+        TestVideoProfile videoProfile = new TestVideoProfile(aiTaskService, persistenceService, executionRegistry, properties);
+        when(persistenceService.saveOrUpdateGenerationRound(anyLong(), anyString(), anyString(), anyString(), any(JSONObject.class)))
+                .thenAnswer(invocation -> Mono.defer(() -> {
+                    JSONObject round = invocation.getArgument(4);
+                    savedRounds.add(JSON.parseObject(JSON.toJSONString(round)));
+                    return Mono.empty();
+                }));
+        when(aiTaskService.modelCapabilities(7L, "video-model")).thenReturn(Mono.just(Set.of("image-to-video")));
+        AtomicReference<AiTaskDtos.CreateAiTaskRequest> taskRequestRef = new AtomicReference<>();
+        AiTaskDtos.AiGenerationTaskResponse created = response("success", 100, successfulResultData());
+        when(aiTaskService.createTaskForUser(anyLong(), any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class)))
+                .thenAnswer(invocation -> {
+                    taskRequestRef.set(invocation.getArgument(1));
+                    Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue = invocation.getArgument(2);
+                    return beforeEnqueue.apply(created).thenReturn(created);
+                });
+        when(aiTaskService.getTaskForUser(7L, "task-1"))
+                .thenReturn(Mono.just(response("success", 100, successfulResultData())));
+
+        ToolResult result = videoProfile.executeTool(7L, "generate_video",
+                        Map.of("prompt", "使用最近上传参考图生成视频", "model", "video-model"),
+                        "使用最近上传参考图生成视频",
+                        List.of(new AgentChatRequest.Attachment("https://storage.example.com/recent.png", "image/*", "最近上传的参考图", "")),
+                        eventEmitter, "session-1", "call-1")
+                .block(Duration.ofSeconds(10));
+
+        Assertions.assertNotNull(result);
+        Assertions.assertTrue(result.ok());
+        Assertions.assertNotNull(taskRequestRef.get());
+        Assertions.assertEquals("", taskRequestRef.get().references().getFirst().storageKey());
+        Assertions.assertEquals("https://storage.example.com/recent.png", taskRequestRef.get().references().getFirst().url());
+        Assertions.assertEquals("https://storage.example.com/recent.png",
+                savedRounds.getFirst().getJSONArray("references").getJSONObject(0).getString("url"));
+        verify(persistenceService, never()).getMediaInfoForUser(anyLong(), anyString());
+    }
+
+    /**
      * 图生视频能力缺失时不得创建任务。
      */
     @Test

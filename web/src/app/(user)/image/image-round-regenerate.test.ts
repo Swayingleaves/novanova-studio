@@ -45,6 +45,33 @@ test("buildImageRoundRegeneratePayload 保留历史配置与参考图并固定�
     ]);
 });
 
+test("buildImageRoundRegeneratePayload 保留仅含公开 URL 的历史参考图", () => {
+    const payload = buildImageRoundRegeneratePayload(
+        {
+            prompt: "使用参考图生成海报",
+            config: {},
+            references: [
+                {
+                    id: "recent-reference-1",
+                    name: "最近上传的参考图",
+                    type: "image/webp",
+                    dataUrl: "",
+                    url: "https://storage.example.com/recent-reference.webp",
+                },
+            ],
+        },
+        "fallback-model",
+    );
+
+    assert.deepEqual(payload.attachments, [
+        {
+            url: "https://storage.example.com/recent-reference.webp",
+            type: "image/webp",
+            name: "最近上传的参考图",
+        },
+    ]);
+});
+
 test("regenerateImageRound 会追加用户消息并发送重新生成请求", async () => {
     const userMessages: string[] = [];
     const sendCalls: Array<{ message: string; attachments?: { url: string; type: string; name: string }[]; creationSettings?: Record<string, unknown> }> = [];
