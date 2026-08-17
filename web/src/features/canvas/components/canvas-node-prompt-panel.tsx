@@ -197,11 +197,7 @@ export function CanvasNodePromptPanel({
     };
     const chooseStyle = (style: GenerationStyleOption) => {
         if (selectedStyles.some((item) => item.id === style.id)) return;
-        if (selectedStyles.length >= MAX_GENERATION_STYLE_SELECTION_COUNT) {
-            message.warning(GENERATION_STYLE_SELECTION_LIMIT_MESSAGE);
-            return;
-        }
-        setSelectedStyles((current) => [...current, style]);
+        setSelectedStyles([style]);
         updatePrompt(styleCommand ? removeStyleCommand(prompt, styleCommand.start, styleCommand.end) : prompt);
         closeStyleMenu();
     };
@@ -329,7 +325,6 @@ export function CanvasNodePromptPanel({
                             }}
                             onQueryChange={setStyleQuery}
                             onHighlightedIndexChange={setHighlightedStyleIndex}
-                            onSelectionLimit={() => message.warning(GENERATION_STYLE_SELECTION_LIMIT_MESSAGE)}
                             onSelect={chooseStyle}
                         />
                     </div>

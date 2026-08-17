@@ -290,7 +290,7 @@ export function CanvasChatPanel({
                     selectedStyles={selectedStyles}
                     styleLoading={styleCatalog.loading}
                     styleError={styleCatalog.error}
-                    onStyleSelect={(style) => setSelectedStyles((current) => (current.some((item) => item.id === style.id) || current.length >= MAX_GENERATION_STYLE_SELECTION_COUNT ? current : [...current, style]))}
+                    onStyleSelect={(style) => setSelectedStyles([style])}
                     onStyleRemove={(id) => setSelectedStyles((current) => current.filter((style) => style.id !== id))}
                     onStyleLimit={() => message.warning(GENERATION_STYLE_SELECTION_LIMIT_MESSAGE)}
                     droppedNodes={droppedNodes}

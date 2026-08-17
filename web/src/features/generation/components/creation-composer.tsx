@@ -79,10 +79,6 @@ export function CreationComposer({
             message.info("该风格已选择");
             return;
         }
-        if (activeStyles.length >= MAX_GENERATION_STYLE_SELECTION_COUNT) {
-            message.warning(GENERATION_STYLE_SELECTION_LIMIT_MESSAGE);
-            return;
-        }
         onStyleSelect?.(style);
         if (styleCommand) {
             const nextValue = removeStyleCommand(value, styleCommand.start, styleCommand.end);
@@ -265,7 +261,6 @@ export function CreationComposer({
                             }}
                             onQueryChange={setStyleQuery}
                             onHighlightedIndexChange={setHighlightedStyleIndex}
-                            onSelectionLimit={() => message.warning(GENERATION_STYLE_SELECTION_LIMIT_MESSAGE)}
                             onSelect={chooseStyle}
                         />
                         {toolbarActions.map(renderAction)}

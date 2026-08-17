@@ -40,7 +40,6 @@ import { getGenerationConversationStatus, hasRunningGeneration, type GenerationL
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
-import { GENERATION_STYLE_SELECTION_LIMIT_MESSAGE, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
 import { findLatestPlayableVideo, hasPlayableVideoUrl } from "./video-display";
 
@@ -1041,19 +1040,7 @@ export default function VideoPage() {
                     focusWhenValueSet: focusInitialPrompt,
                     creditCost,
                     onChange: setPrompt,
-                    onStyleSelect: (style) => {
-                        setSelectedStyles((current) => {
-                            if (current.some((selected) => selected.id === style.id)) {
-                                message.info("该风格已选择");
-                                return current;
-                            }
-                            if (current.length >= MAX_GENERATION_STYLE_SELECTION_COUNT) {
-                                message.warning(GENERATION_STYLE_SELECTION_LIMIT_MESSAGE);
-                                return current;
-                            }
-                            return [...current, style];
-                        });
-                    },
+                    onStyleSelect: (style) => setSelectedStyles([style]),
                     onStyleRemove: (styleId) => setSelectedStyles((current) => current.filter((style) => style.id !== styleId)),
                     onPasteImages: (files) => void addReferences(files),
                     onSubmit: () => void generate(),

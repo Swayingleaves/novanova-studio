@@ -101,10 +101,6 @@ export function AgentChatComposer({
             closeStyleMenu();
             return;
         }
-        if (selectedStyles.length >= MAX_GENERATION_STYLE_SELECTION_COUNT) {
-            onStyleLimit?.();
-            return;
-        }
         onStyleSelect?.(style);
         const next = styleCommand ? removeStyleCommand(prompt, styleCommand.start, styleCommand.end) : prompt;
         onPromptChange(next);
@@ -216,7 +212,6 @@ export function AgentChatComposer({
                             }}
                             onQueryChange={setStyleQuery}
                             onHighlightedIndexChange={setHighlightedStyleIndex}
-                            onSelectionLimit={onStyleLimit}
                             onSelect={chooseStyle}
                         />
                         {left}
