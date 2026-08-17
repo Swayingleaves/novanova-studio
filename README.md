@@ -20,6 +20,9 @@
 <p align="center">
   <img src="github_images/nova-s2.png" alt="Novanova Studio 画布截图">
 </p>
+<p align="center">
+  <img src="github_images/fgk.png" alt="Novanova Studio 画布截图">
+</p>
 
 ## 联系我
 - 商业授权
