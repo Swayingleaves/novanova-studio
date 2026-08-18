@@ -294,13 +294,13 @@ export function CreationComposer({
                                     className="creation-composer-submit-trigger creation-composer-submit-trigger-cost"
                                     disabled={!canSubmit || requestActive}
                                     onClick={onSubmit}
-                                    aria-label={queued ? "排队中" : running ? "生成中" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
+                                    aria-label={queued ? "排队中" : running ? "生成中" : creditCost === null ? "当前配置无法报价" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
                                 >
                                     {queued || running ? (
                                         queued ? "排队中" : "生成中"
                                     ) : (
                                         <>
-                                            <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />
+                                            {creditCost === null ? <span className="text-xs font-medium">不可报价</span> : <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />}
                                             <ArrowUp className="size-[18px] shrink-0" strokeWidth={2.1} />
                                         </>
                                     )}

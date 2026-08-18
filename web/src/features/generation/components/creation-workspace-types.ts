@@ -93,7 +93,7 @@ export type CreationComposerProps = {
     running: boolean;
     queued?: boolean;
     canSubmit: boolean;
-    creditCost: number;
+    creditCost: number | null;
     compact?: boolean;
     focusWhenValueSet?: boolean;
     stopping?: boolean;

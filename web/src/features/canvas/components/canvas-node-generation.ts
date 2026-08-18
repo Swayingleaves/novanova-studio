@@ -78,7 +78,7 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
         referenceImages: await Promise.all(
             context.referenceImages.map(async (image) => ({
                 ...image,
-                dataUrl: await imageToDataUrl(image),
+                dataUrl: (await imageToDataUrl(image)) || image.dataUrl,
             })),
         ),
     };

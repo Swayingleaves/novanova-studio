@@ -14,12 +14,15 @@ import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.agent.dto.AgentMessage;
 import com.novanovastudio.agent.dto.AgentSession;
 import com.novanovastudio.agent.dto.AgentTool;
+import com.novanovastudio.agent.dto.CreationSettings;
 import com.novanovastudio.agent.dto.AgentToolResult;
 import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.ai.AiErrorDetails;
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
 import com.novanovastudio.ai.AiRequestBodySupport;
+import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.logging.MappedDiagnosticContext;
@@ -101,6 +104,9 @@ public class AgentTaskOrchestrator {
     /** sessionId → 当前请求的服务端生成轮次ID，避免上游工具调用ID跨轮重复覆盖历史 */
     private final ConcurrentHashMap<String, String> generationRoundIds = new ConcurrentHashMap<>();
 
+    /** sessionId → 页面提交的生成硬约束，旧Agent Loop执行终态工具时使用 */
+    private final ConcurrentHashMap<String, CreationSettings> creationSettingsBySession = new ConcurrentHashMap<>();
+
     /**
      * 构造编排器。aiTaskService 与本类存在构造器循环依赖，使用 @Lazy 延迟初始化打破循环。
      */
@@ -168,6 +174,9 @@ public class AgentTaskOrchestrator {
                     if (StringUtils.hasText(generationRoundId)) {
                         generationRoundIds.put(session.id(), generationRoundId);
                     }
+                    if (request.creationSettings() != null) {
+                        creationSettingsBySession.put(session.id(), request.creationSettings());
+                    }
                     if (initialVideoRound != null) {
                         initialVideoRounds.put(session.id(), initialVideoRound);
                     }
@@ -185,6 +194,7 @@ public class AgentTaskOrchestrator {
                             activeLoops.remove(userId, session.id());
                             initialVideoRounds.remove(session.id());
                             generationRoundIds.remove(session.id());
+                            creationSettingsBySession.remove(session.id());
                             executionRegistry.complete(session.id());
                         })
                         .subscribe(
@@ -197,6 +207,7 @@ public class AgentTaskOrchestrator {
                     activeLoops.remove(userId, session.id());
                     initialVideoRounds.remove(session.id());
                     generationRoundIds.remove(session.id());
+                    creationSettingsBySession.remove(session.id());
                     executionRegistry.complete(session.id());
                 });
             });
@@ -220,7 +231,7 @@ public class AgentTaskOrchestrator {
         round.put("id", roundId);
         round.put("prompt", prompt);
         round.put("assistantText", "");
-        round.put("config", new JSONObject());
+        round.put("config", initialVideoRoundConfig(request.creationSettings()));
         round.put("result", result);
         round.put("references", attachmentReferences(request.attachments(), "image/"));
         round.put("videoReferences", attachmentReferences(request.attachments(), "video/"));
@@ -228,6 +239,28 @@ public class AgentTaskOrchestrator {
 
         String title = prompt.length() > 30 ? prompt.substring(0, 30) : prompt;
         return new InitialVideoRound(roundId, title, round);
+    }
+
+    /**
+     * 构造旧视频Agent在任务创建前持久化的页面设置快照。
+     *
+     * @param settings CreationSettings 页面提交的生成硬约束
+     * @return JSONObject 可用于历史重生成的配置快照
+     */
+    private JSONObject initialVideoRoundConfig(CreationSettings settings) {
+        JSONObject config = new JSONObject();
+        if (settings == null) {
+            return config;
+        }
+        if (StringUtils.hasText(settings.model())) config.put("model", settings.model());
+        if (StringUtils.hasText(settings.videoModel())) config.put("videoModel", settings.videoModel());
+        if (StringUtils.hasText(settings.size())) config.put("size", settings.size());
+        if (StringUtils.hasText(settings.resolution())) config.put("vquality", settings.resolution());
+        if (StringUtils.hasText(settings.quality())) config.put("quality", settings.quality());
+        if (StringUtils.hasText(settings.seconds())) config.put("videoSeconds", settings.seconds());
+        if (settings.watermark() != null) config.put("videoWatermark", settings.watermark());
+        config.put("videoGenerationMode", VideoGenerationMode.defaultIfBlank(settings.videoGenerationMode()));
+        return config;
     }
 
     /**
@@ -477,7 +510,8 @@ public class AgentTaskOrchestrator {
                                          AiResponse response, int step, String assistantId) {
         AiTaskDtos.AiChannelConfig channel = textModel.channel();
         AiResponse promptAppliedResponse = applyOriginalPromptToTerminalTools(profile, response, messages);
-        AiResponse effectiveResponse = applyGenerationRoundIdsToTerminalTools(profile, sessionId, promptAppliedResponse);
+        AiResponse settingsAppliedResponse = applyCreationSettingsToTerminalTools(profile, sessionId, promptAppliedResponse);
+        AiResponse effectiveResponse = applyGenerationRoundIdsToTerminalTools(profile, sessionId, settingsAppliedResponse);
         return Flux.fromIterable(effectiveResponse.toolCalls())
             .concatMap(toolCall -> executeSingleTool(sessionId, userId, profile, toolCall, attachments))
             .collectList()
@@ -526,6 +560,55 @@ public class AgentTaskOrchestrator {
                 .map(call -> withOriginalPrompt(profile, call, originalPrompt))
                 .toList();
         return new AiResponse(response.text(), toolCalls);
+    }
+
+    /**
+     * 将旧Agent Loop的视频工具参数回写为页面硬约束，禁止语言模型改写模型和计费字段。
+     *
+     * @param profile AgentLoopProfile 当前Agent配置
+     * @param sessionId String 会话ID
+     * @param response AiResponse 原始工具调用响应
+     * @return AiResponse 参数已覆盖的工具调用响应
+     */
+    private AiResponse applyCreationSettingsToTerminalTools(AgentLoopProfile profile, String sessionId, AiResponse response) {
+        if (!"video".equals(profile.name()) || response.toolCalls().isEmpty()) {
+            return response;
+        }
+        CreationSettings settings = creationSettingsBySession.get(sessionId);
+        if (settings == null) {
+            return response;
+        }
+        List<ToolCall> toolCalls = response.toolCalls().stream()
+                .map(call -> withVideoCreationSettings(profile, call, settings))
+                .toList();
+        return new AiResponse(response.text(), toolCalls);
+    }
+
+    /**
+     * 覆盖单个旧视频Agent终态工具调用的页面硬约束。
+     *
+     * @param profile AgentLoopProfile 当前Agent配置
+     * @param call ToolCall 原始工具调用
+     * @param settings CreationSettings 页面提交的生成设置
+     * @return ToolCall 覆盖后的工具调用
+     */
+    private ToolCall withVideoCreationSettings(AgentLoopProfile profile, ToolCall call, CreationSettings settings) {
+        if (!isPromptPassthroughTool(call.function().name()) || !profile.isTerminalTool(call.function().name())) {
+            return call;
+        }
+        Map<String, Object> args = parseArguments(call.function().arguments());
+        String model = StringUtils.hasText(settings.videoModel()) ? settings.videoModel() : settings.model();
+        if (StringUtils.hasText(model)) args.put("model", model);
+        if (StringUtils.hasText(settings.size())) args.put("size", settings.size());
+        if (StringUtils.hasText(settings.resolution())) args.put("resolution", settings.resolution());
+        if (StringUtils.hasText(settings.quality())) args.put("quality", settings.quality());
+        if (StringUtils.hasText(settings.seconds())) args.put("seconds", settings.seconds());
+        if (settings.watermark() != null) args.put("watermark", settings.watermark());
+        args.put("count", 1);
+        args.put("entrySource", AiTaskSources.VIDEO_PAGE);
+        args.put("videoGenerationMode", VideoGenerationMode.defaultIfBlank(settings.videoGenerationMode()));
+        args.remove("reference_urls");
+        return new ToolCall(call.id(), new ToolCallFunction(call.function().name(), JSON.toJSONString(args)));
     }
 
     /**
@@ -1056,6 +1139,24 @@ public class AgentTaskOrchestrator {
                 .then(Mono.fromSupplier(accumulator::response))
                 .onErrorResume(error -> fallbackWhenStreamingUnsupported(error,
                         callChatCompletionsApi(channel, profile, messages, requireTool, thinkingConfiguration, customBodyParameters), textDeltaConsumer, channel));
+    }
+
+    /**
+     * 保留旧测试和旧内部调用使用的Chat Completions流式方法签名。
+     *
+     * @param channel AiChannelConfig 文本模型渠道
+     * @param profile AgentLoopProfile 当前Agent配置
+     * @param messages List<AiMessage> 当前消息列表
+     * @param requireTool boolean 是否强制工具调用
+     * @param textDeltaConsumer Consumer<String> 文本增量消费者
+     * @param thinkingConfiguration ThinkingConfiguration OpenAI兼容渠道思考配置
+     * @return Mono<AiResponse> AI响应
+     */
+    private Mono<AiResponse> callStreamingChatCompletionsApi(AiTaskDtos.AiChannelConfig channel, AgentLoopProfile profile,
+                                                              List<AiMessage> messages, boolean requireTool, Consumer<String> textDeltaConsumer,
+                                                              ThinkingConfiguration thinkingConfiguration) {
+        return callStreamingChatCompletionsApi(channel, profile, messages, requireTool, textDeltaConsumer,
+                thinkingConfiguration, null);
     }
 
     /**

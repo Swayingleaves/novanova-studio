@@ -5,6 +5,8 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.alibaba.fastjson2.TypeReference;
 import com.novanovastudio.ai.AiHttpClient;
+import com.novanovastudio.ai.VideoGenerationMode;
+import com.novanovastudio.ai.VideoResolution;
 import com.novanovastudio.agent.AgentActivityService;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -12,6 +14,7 @@ import com.novanovastudio.common.SensitiveDataCrypto;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
+import com.novanovastudio.dto.VideoBillingConfiguration;
 import com.novanovastudio.entity.PersistenceRecords;
 import com.novanovastudio.repository.AiTaskRepository;
 import com.novanovastudio.repository.PersistenceRepository;
@@ -31,6 +34,8 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -187,11 +192,16 @@ public class PersistenceService {
                     record.setChannelId(request.channelId());
                     record.setModelName(request.modelName());
                     record.setModelType(request.modelType());
-                    record.setCapabilities(JSON.toJSONString(request.capabilities() == null ? List.of() : request.capabilities()));
+                    List<String> capabilities = normalizeModelCapabilities(request.modelType(), request.capabilities());
+                    VideoBillingConfiguration videoBillingConfiguration = normalizeVideoBillingConfiguration(
+                            request.modelType(), capabilities, request.videoBillingConfiguration());
+                    record.setCapabilities(JSON.toJSONString(capabilities));
                     record.setDefaultModel(false);
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
-                    record.setCreditCost(request.creditCost() == null ? 0 : request.creditCost());
-                    record.setCreditUnit(normalizeCreditUnit(request.modelType(), request.creditUnit()));
+                    record.setCreditCost("video".equals(request.modelType()) ? 0 : request.creditCost() == null ? 0 : request.creditCost());
+                    record.setCreditUnit(videoBillingConfiguration == null
+                            ? normalizeCreditUnit(request.modelType(), request.creditUnit())
+                            : videoBillingConfiguration.billingUnit());
                     record.setThinkingEnabled(thinkingEnabled(request.thinkingEnabled()));
                     record.setReasoningEffort(reasoningEffort(request.reasoningEffort()));
                     record.setRequestConcurrency(normalizeRequestConcurrency(request.requestConcurrency()));
@@ -199,6 +209,7 @@ public class PersistenceService {
                             ? normalizeCustomBodyParameters(record.getCustomBodyParameters())
                             : normalizeCustomBodyParameters(request.customBodyParameters());
                     record.setCustomBodyParameters(JSON.toJSONString(customBodyParameters));
+                    record.setVideoBillingConfiguration(videoBillingConfiguration == null ? null : JSON.toJSONString(videoBillingConfiguration));
                     return repository.createPlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
                 });
     }
@@ -209,11 +220,21 @@ public class PersistenceService {
         return repository.getPlatformAiModelConfig(request.id())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "模型配置不存在")))
                 .flatMap(record -> {
+                    List<String> capabilities = normalizeModelCapabilities(request.modelType(), request.capabilities());
+                    VideoBillingConfiguration existingVideoBillingConfiguration = parseVideoBillingConfiguration(record.getVideoBillingConfiguration());
+                    // 视频模型省略配置时沿用旧值；切换为非视频模型时清空旧值，但显式传入仍必须拒绝。
+                    VideoBillingConfiguration requestedVideoBillingConfiguration = "video".equals(request.modelType())
+                            ? request.videoBillingConfiguration() == null ? existingVideoBillingConfiguration : request.videoBillingConfiguration()
+                            : request.videoBillingConfiguration();
+                    VideoBillingConfiguration videoBillingConfiguration = normalizeVideoBillingConfiguration(
+                            request.modelType(), capabilities, requestedVideoBillingConfiguration);
                     record.setModelType(request.modelType());
-                    record.setCapabilities(JSON.toJSONString(request.capabilities() == null ? List.of() : request.capabilities()));
+                    record.setCapabilities(JSON.toJSONString(capabilities));
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
-                    record.setCreditCost(request.creditCost() == null ? 0 : request.creditCost());
-                    record.setCreditUnit(normalizeCreditUnit(request.modelType(), request.creditUnit()));
+                    record.setCreditCost("video".equals(request.modelType()) ? 0 : request.creditCost() == null ? 0 : request.creditCost());
+                    record.setCreditUnit(videoBillingConfiguration == null
+                            ? normalizeCreditUnit(request.modelType(), request.creditUnit())
+                            : videoBillingConfiguration.billingUnit());
                     record.setThinkingEnabled(thinkingEnabled(request.thinkingEnabled()));
                     record.setReasoningEffort(reasoningEffort(request.reasoningEffort()));
                     record.setRequestConcurrency(normalizeRequestConcurrency(
@@ -222,6 +243,7 @@ public class PersistenceService {
                             ? normalizeCustomBodyParameters(record.getCustomBodyParameters())
                             : normalizeCustomBodyParameters(request.customBodyParameters());
                     record.setCustomBodyParameters(JSON.toJSONString(customBodyParameters));
+                    record.setVideoBillingConfiguration(videoBillingConfiguration == null ? null : JSON.toJSONString(videoBillingConfiguration));
                     PersistenceDtos.ModelConfig modelConfig = modelConfigDto(record);
                     return repository.updatePlatformAiModelConfig(record)
                             .then(isModelQueueType(modelConfig.modelType())
@@ -276,7 +298,101 @@ public class PersistenceService {
                 parseStringList(record.getCapabilities()), Boolean.TRUE.equals(record.getDefaultModel()), record.getSortOrder(), record.getCreditCost(),
                 thinkingEnabled(record.getThinkingEnabled()), reasoningEffort(record.getReasoningEffort()),
                 normalizeCreditUnit(record.getModelType(), record.getCreditUnit()), normalizeRequestConcurrency(record.getRequestConcurrency()),
-                normalizeCustomBodyParameters(record.getCustomBodyParameters()));
+                normalizeCustomBodyParameters(record.getCustomBodyParameters()),
+                parseVideoBillingConfiguration(record.getVideoBillingConfiguration()));
+    }
+
+    /**
+     * 规范化视频模型的模式分辨率分档计费配置。
+     *
+     * @param modelType String 模型类型
+     * @param capabilities List<String> 已配置模型能力
+     * @param configuration VideoBillingConfiguration 请求计费配置
+     * @return VideoBillingConfiguration 规范化结果，非视频模型或未配置时返回null
+     */
+    private VideoBillingConfiguration normalizeVideoBillingConfiguration(String modelType, List<String> capabilities,
+                                                                          VideoBillingConfiguration configuration) {
+        if (!"video".equals(modelType)) {
+            if (configuration != null) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "只有视频模型支持视频分档计费配置");
+            }
+            return null;
+        }
+        if (configuration == null) return null;
+        if (!StringUtils.hasText(configuration.billingUnit())) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频模型必须选择按次或按秒计费方式");
+        }
+        String billingUnit = configuration.billingUnit().trim();
+        if (!Set.of(CREDIT_UNIT_GENERATION, CREDIT_UNIT_SECOND).contains(billingUnit)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频模型计费方式只支持按次或按秒");
+        }
+        Integer minimumDurationSeconds = configuration.minimumDurationSeconds();
+        if (minimumDurationSeconds == null || minimumDurationSeconds < 1) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频最短生成时长必须是正整数秒");
+        }
+        Map<String, Map<String, Integer>> inputPrices = configuration.modePrices() == null ? Map.of() : configuration.modePrices();
+        if (inputPrices.keySet().stream().anyMatch(mode -> !VideoGenerationMode.isSupported(mode))) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频价格表包含不支持的生成模式");
+        }
+        Map<String, Map<String, Integer>> normalizedPrices = new LinkedHashMap<>();
+        for (String mode : List.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO,
+                VideoGenerationMode.REFERENCE_TO_VIDEO)) {
+            Map<String, Integer> prices = inputPrices.get(mode);
+            Map<String, Integer> normalizedModePrices = new LinkedHashMap<>();
+            if (prices != null) {
+                if (!prices.isEmpty() && !capabilities.contains(mode)) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "视频价格表只能配置已勾选的生成模式能力");
+                }
+                for (Map.Entry<String, Integer> entry : prices.entrySet()) {
+                    if (!VideoResolution.isSupported(entry.getKey())) {
+                        throw new BusinessException(ErrorCode.PARAM_INVALID, "视频价格表包含不支持的分辨率");
+                    }
+                    if (entry.getValue() == null || entry.getValue() < 0) {
+                        throw new BusinessException(ErrorCode.PARAM_INVALID, "视频分辨率价格必须是不小于0的整数");
+                    }
+                    normalizedModePrices.put(entry.getKey(), entry.getValue());
+                }
+            }
+            normalizedPrices.put(mode, Map.copyOf(normalizedModePrices));
+        }
+        return new VideoBillingConfiguration(billingUnit, minimumDurationSeconds, Map.copyOf(normalizedPrices));
+    }
+
+    /**
+     * 规范化模型细能力，并限制视频模型只能声明三个明确的视频生成模式。
+     *
+     * @param modelType String 模型类型
+     * @param capabilities List<String> 原始细能力列表
+     * @return List<String> 去重后的细能力列表
+     */
+    private List<String> normalizeModelCapabilities(String modelType, List<String> capabilities) {
+        List<String> normalized = capabilities == null ? List.of() : capabilities.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
+        if (!"video".equals(modelType)) {
+            return normalized;
+        }
+        if (normalized.stream().anyMatch(capability -> !VideoGenerationMode.isSupported(capability))) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频模型能力只支持文生视频、图生视频和全能参考");
+        }
+        return normalized;
+    }
+
+    /**
+     * 解析数据库保存的视频分档计费配置。
+     *
+     * @param value String JSON配置文本
+     * @return VideoBillingConfiguration 解析后的配置，未配置时返回null
+     */
+    private VideoBillingConfiguration parseVideoBillingConfiguration(String value) {
+        if (!StringUtils.hasText(value) || "null".equals(value.trim())) return null;
+        try {
+            return JSON.parseObject(value, VideoBillingConfiguration.class);
+        } catch (Exception exception) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频分档计费配置格式不合法");
+        }
     }
 
     /** 规范化模型自定义JSON请求体参数。 */

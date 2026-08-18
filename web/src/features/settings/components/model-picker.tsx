@@ -20,13 +20,14 @@ type ModelPickerProps = {
     fullWidth?: boolean;
     placeholder?: string;
     onMissingConfig?: () => void;
+    modelOptions?: string[];
 };
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, modelOptions }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const current = value || "";
-    const options = useMemo(() => createModelOptions(config, capability, value), [capability, config, value]);
+    const options = useMemo(() => createModelOptions(config, capability, value, modelOptions), [capability, config, modelOptions, value]);
 
     useEffect(() => {
         const closeWhenOtherPickerOpens = (event: Event) => {
@@ -87,9 +88,11 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     );
 }
 
-function createModelOptions(config: AiConfig, capability: ModelCapability | undefined, value: string | undefined) {
+function createModelOptions(config: AiConfig, capability: ModelCapability | undefined, value: string | undefined, modelOptions?: string[]) {
     const retainedLocalValue = config.channelMode === "local" && !capability ? [value] : [];
-    return Array.from(new Set([...retainedLocalValue, ...selectableModelsByCapability(config, capability)].filter(isFilledText)));
+    const configured = selectableModelsByCapability(config, capability);
+    const filtered = modelOptions ? configured.filter((model) => modelOptions.includes(model)) : configured;
+    return Array.from(new Set([...retainedLocalValue, ...filtered].filter(isFilledText)));
 }
 
 function isFilledText(value: string | undefined): value is string {

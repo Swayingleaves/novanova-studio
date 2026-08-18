@@ -8,7 +8,8 @@ import { ModelPicker } from "@/features/settings/components/model-picker";
 import { defaultConfig, normalizeModelOptionValue, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 import { normalizeImageGenerationCount } from "@/features/generation/components/image-settings-panel";
 import { normalizeVideoGenerationCount } from "@/features/generation/components/video-settings-panel";
-import { getModelCreditUnit, isPositiveVideoSeconds, CreditCostDisplay, requestCreditCost } from "@/features/generation/constants/credits";
+import { CreditCostDisplay, requestCreditCost } from "@/features/generation/constants/credits";
+import { availableVideoModelsForMode, quoteVideoGeneration } from "@/features/generation/lib/video-billing";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptPicker } from "./canvas-prompt-picker";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
@@ -98,14 +99,38 @@ export function CanvasNodePromptPanel({
         if (isEditingExistingContent) return "";
         return buildInitialPrompt(mentionReferences);
     });
-    const creditCost = requestCreditCost({
-        modelCosts: config.modelCosts,
-        model: config.model,
-        taskType: mode,
-        count: mode === "image" || mode === "video" ? config.count : 1,
-        seconds: mode === "video" ? config.videoSeconds : undefined,
-    });
-    const requiresExplicitVideoSeconds = mode === "video" && getModelCreditUnit(config.modelCosts, config.model, "video") === "second";
+    const videoReferenceCounts = displayReferences.reduce(
+        (counts, item) => {
+            if (item.reference.kind === "image") counts.images += 1;
+            if (item.reference.kind === "video") counts.videos += 1;
+            return counts;
+        },
+        { images: 0, videos: 0 },
+    );
+    const videoQuote =
+        mode === "video"
+            ? quoteVideoGeneration({
+                  config,
+                  model: config.model,
+                  mode: config.videoGenerationMode,
+                  resolution: config.vquality,
+                  seconds: config.videoSeconds,
+                  imageReferenceCount: videoReferenceCounts.images,
+                  videoReferenceCount: videoReferenceCounts.videos,
+                  taskCount: normalizeVideoGenerationCount(config.count),
+              })
+            : null;
+    const creditCost =
+        mode === "video"
+            ? videoQuote?.available
+                ? videoQuote.credits
+                : null
+            : requestCreditCost({
+                  modelCosts: config.modelCosts,
+                  model: config.model,
+                  taskType: mode,
+                  count: mode === "image" ? config.count : 1,
+              });
 
     useEffect(() => {
         setSelectedStyles((persistedSnapshots || []).map((style) => ({ id: style.id, name: style.name, generationType: style.generationType, coverUrl: "", category: "" })));
@@ -213,20 +238,14 @@ export function CanvasNodePromptPanel({
     const submit = () => {
         const text = prompt.trim();
         if (!text || isRunning || isPromptGenerating) return;
-        if (requiresExplicitVideoSeconds && !isPositiveVideoSeconds(config.videoSeconds)) {
-            message.error("按秒计费的视频模型必须选择具体时长，不能使用智能时长");
+        if (mode === "video" && !videoQuote?.available) {
+            message.error(videoQuote?.reason || "当前视频配置无法报价");
             return;
         }
         const styleIds = selectedStyles.map((style) => style.id);
         const styleSnapshots = persistedSnapshots?.filter((snapshot) => styleIds.includes(snapshot.id)) || [];
         const usesHistoricalSnapshots = styleSnapshots.length === styleIds.length;
-        onGenerate(
-            node.id,
-            mode,
-            formatPromptReferenceLabels(text, requiredLabels),
-            usesHistoricalSnapshots ? undefined : styleIds,
-            usesHistoricalSnapshots && styleSnapshots.length ? styleSnapshots : undefined,
-        );
+        onGenerate(node.id, mode, formatPromptReferenceLabels(text, requiredLabels), usesHistoricalSnapshots ? undefined : styleIds, usesHistoricalSnapshots && styleSnapshots.length ? styleSnapshots : undefined);
         setPrompt("");
         setSelectedStyles([]);
     };
@@ -396,6 +415,7 @@ export function CanvasNodePromptPanel({
                     })}
                 </div>
             ) : null}
+            {mode === "video" && videoQuote && !videoQuote.available ? <p className="mt-2 text-xs text-red-500">{videoQuote.reason}</p> : null}
 
             <div className="mt-2 flex min-w-0 items-center gap-2">
                 <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -413,7 +433,15 @@ export function CanvasNodePromptPanel({
                         </>
                     ) : mode === "video" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="video" className="!h-10 !min-w-0 flex-1" onMissingConfig={() => onMissingConfig("video")} />
+                            <ModelPicker
+                                config={config}
+                                value={config.model}
+                                modelOptions={availableVideoModelsForMode(config, config.videoGenerationMode)}
+                                onChange={(model) => onConfigChange(node.id, { model })}
+                                capability="video"
+                                className="!h-10 !min-w-0 flex-1"
+                                onMissingConfig={() => onMissingConfig("video")}
+                            />
                             <CanvasVideoSettingsPopover config={config} buttonClassName="!h-10 !w-[140px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                         </>
                     ) : (
@@ -446,9 +474,9 @@ export function CanvasNodePromptPanel({
                         type="primary"
                         className="!h-10 !min-w-[88px] shrink-0 !justify-center !rounded-full !px-3"
                         danger={isRunning}
-                        disabled={isPromptGenerating || (!isRunning && !prompt.trim())}
+                        disabled={isPromptGenerating || (!isRunning && (!prompt.trim() || (mode === "video" && !videoQuote?.available)))}
                         onClick={() => (isRunning ? onStop(node.id) : submit())}
-                        aria-label={isRunning ? "停止生成" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
+                        aria-label={isRunning ? "停止生成" : creditCost === null ? "当前视频配置无法报价" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
                     >
                         <span className="flex items-center gap-1.5">
                             {isRunning ? (
@@ -459,7 +487,7 @@ export function CanvasNodePromptPanel({
                                 </>
                             ) : (
                                 <>
-                                    <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />
+                                    {creditCost === null ? <span className="text-xs font-medium">不可报价</span> : <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />}
                                     <ArrowUp className="size-4" />
                                 </>
                             )}
@@ -491,6 +519,7 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNode, mode: CanvasN
         size: generation?.size || globalConfig.size || defaultConfig.size,
         videoSeconds: isVideoNode(node) ? node.generation.seconds || globalConfig.videoSeconds || defaultConfig.videoSeconds : globalConfig.videoSeconds || defaultConfig.videoSeconds,
         vquality: isVideoNode(node) ? node.generation.quality || globalConfig.vquality || defaultConfig.vquality : globalConfig.vquality || defaultConfig.vquality,
+        videoGenerationMode: isVideoNode(node) ? node.generation.videoGenerationMode || globalConfig.videoGenerationMode : globalConfig.videoGenerationMode,
         videoWatermark: isVideoNode(node) ? node.generation.watermark || globalConfig.videoWatermark || defaultConfig.videoWatermark : globalConfig.videoWatermark || defaultConfig.videoWatermark,
         count: String(
             mode === "video"
@@ -513,6 +542,7 @@ function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: bool
 
 function videoConfigPatch(key: keyof AiConfig, value: string) {
     if (key === "videoSeconds") return { seconds: value };
+    if (key === "videoGenerationMode") return { videoGenerationMode: value as AiConfig["videoGenerationMode"] };
     if (key === "videoWatermark") return { watermark: value };
     if (key === "canvasVideoCount") return { count: normalizeVideoGenerationCount(value) };
     return { [key]: value };

@@ -13,6 +13,7 @@ type CanvasLastUsedGenerationSettings = {
         vquality?: string;
         size?: string;
         seconds?: string;
+        videoGenerationMode?: "text-to-video" | "image-to-video" | "reference-to-video";
         watermark?: string;
         count?: number;
     };
@@ -47,6 +48,7 @@ export function saveCanvasLastUsedGenerationSettings(kind: CanvasNodeKind, attri
             ...(typeof attributes.vquality === "string" ? { vquality: attributes.vquality } : {}),
             ...(typeof attributes.size === "string" ? { size: attributes.size } : {}),
             ...(typeof attributes.seconds === "string" ? { seconds: attributes.seconds } : {}),
+            ...(typeof attributes.videoGenerationMode === "string" ? { videoGenerationMode: attributes.videoGenerationMode } : {}),
             ...(typeof attributes.watermark === "string" ? { watermark: attributes.watermark } : {}),
             ...(typeof attributes.count === "number" ? { count: attributes.count } : {}),
         };

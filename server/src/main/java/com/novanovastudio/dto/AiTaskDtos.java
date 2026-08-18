@@ -41,6 +41,7 @@ public final class AiTaskDtos {
      * @param references List<AiTaskMediaReference> 图片引用
      * @param videoReferences List<AiTaskMediaReference> 视频引用
      * @param generationSource String 生成来源
+     * @param videoGenerationMode String 视频生成模式
      */
     public record CreateAiTaskRequest(@NotBlank(message = "任务类型不能为空") String taskType,
                                       @NotBlank(message = "提示词不能为空") String prompt,
@@ -50,11 +51,21 @@ public final class AiTaskDtos {
                                       List<AiTaskMediaReference> videoReferences,
                                       String generationSource,
                                       List<Long> generationStyleIds,
-                                      List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots) {
+                                      List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots,
+                                      String videoGenerationMode) {
+        /** 保持既有调用方不指定视频生成模式。 */
+        public CreateAiTaskRequest(String taskType, String prompt, String model, Map<String, Object> parameters,
+                                   List<AiTaskMediaReference> references, List<AiTaskMediaReference> videoReferences,
+                                   String generationSource, List<Long> generationStyleIds,
+                                   List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots) {
+            this(taskType, prompt, model, parameters, references, videoReferences, generationSource,
+                    generationStyleIds, generationStyleSnapshots, null);
+        }
+
         public CreateAiTaskRequest(String taskType, String prompt, String model, Map<String, Object> parameters,
                                    List<AiTaskMediaReference> references, List<AiTaskMediaReference> videoReferences,
                                    String generationSource) {
-            this(taskType, prompt, model, parameters, references, videoReferences, generationSource, null, null);
+            this(taskType, prompt, model, parameters, references, videoReferences, generationSource, null, null, null);
         }
     }
 
@@ -147,15 +158,24 @@ public final class AiTaskDtos {
      * @param provider String 渠道
      * @param apiFormat String 渠道调用格式
      * @param defaultModel Boolean 是否为默认模型
-     * @param creditCost Integer 当前计费单位对应的积分单价
-     * @param creditUnit String 积分计费单位
+     * @param creditCost Integer 非视频模型当前计费单位对应的积分单价
+     * @param creditUnit String 非视频模型积分计费单位
+     * @param capabilities List<String> 模型细能力列表
+     * @param videoBillingConfiguration VideoBillingConfiguration 视频分档计费配置
      */
     public record AiModelOption(String value, String label, String capability, String provider, String apiFormat,
-                                Boolean defaultModel, Integer creditCost, String creditUnit) {
+                                Boolean defaultModel, Integer creditCost, String creditUnit, List<String> capabilities,
+                                VideoBillingConfiguration videoBillingConfiguration) {
+        /** 保持既有调用方不返回视频分档计费配置。 */
+        public AiModelOption(String value, String label, String capability, String provider, String apiFormat,
+                             Boolean defaultModel, Integer creditCost, String creditUnit) {
+            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, creditUnit, List.of(), null);
+        }
+
         /** 保持旧调用方按次计费。 */
         public AiModelOption(String value, String label, String capability, String provider, String apiFormat,
                              Boolean defaultModel, Integer creditCost) {
-            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, "generation");
+            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, "generation", List.of(), null);
         }
     }
 

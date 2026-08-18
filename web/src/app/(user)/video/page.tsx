@@ -13,7 +13,6 @@ import type { AgentAttachment } from "@/features/canvas/api/agent";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
 import { RecentReferenceImagePicker } from "@/features/generation/components/recent-reference-image-picker";
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/features/generation/components/video-settings-panel";
-import { getModelCreditUnit, isPositiveVideoSeconds, requestCreditCost } from "@/features/generation/constants/credits";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { seedanceReferenceLabel, SEEDANCE_REFERENCE_LIMITS } from "@/features/generation/lib/seedance-video";
 import { formatBytes, formatDuration } from "@/features/generation/lib/image-utils";
@@ -45,6 +44,7 @@ import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-op
 import { useRecentReferenceImages } from "@/features/generation/hooks/use-recent-reference-images";
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
+import { availableVideoModelsForMode, quoteVideoGeneration } from "@/features/generation/lib/video-billing";
 import { deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
 import { findLatestPlayableVideo, hasPlayableVideoUrl } from "./video-display";
 
@@ -69,6 +69,7 @@ type GenerationResult = {
 };
 
 type RoundConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoWatermark"> & {
+    videoGenerationMode?: AiConfig["videoGenerationMode"];
     resolution?: string;
     seconds?: string;
 };
@@ -167,6 +168,7 @@ export default function VideoPage() {
         void loadVideoLastUsedSettings()
             .then((settings) => {
                 updateConfig("vquality", settings.vquality);
+                updateConfig("videoGenerationMode", settings.videoGenerationMode);
                 updateConfig("size", settings.size);
                 updateConfig("videoSeconds", settings.videoSeconds);
                 updateConfig("videoWatermark", settings.videoWatermark);
@@ -200,6 +202,7 @@ export default function VideoPage() {
         quality: videoResolution.includes("1080") ? "high" : videoResolution.includes("480") ? "low" : "medium",
         seconds: config.videoSeconds || "5",
         watermark: String(config.videoWatermark).toLowerCase() === "true",
+        videoGenerationMode: config.videoGenerationMode,
         ...(selectedStyles.length ? { generationStyleIds: selectedStyles.map((style) => style.id) } : {}),
     };
 
@@ -426,14 +429,23 @@ export default function VideoPage() {
         },
     });
 
-    const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "video", count: 1, seconds: config.videoSeconds });
+    const videoQuote = quoteVideoGeneration({
+        config: effectiveConfig,
+        model,
+        mode: config.videoGenerationMode,
+        resolution: config.vquality,
+        seconds: config.videoSeconds,
+        imageReferenceCount: references.length,
+        videoReferenceCount: videoReferences.length,
+    });
+    const creditCost = videoQuote.available ? videoQuote.credits : null;
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
     const latestRound = activeConversation?.rounds.at(-1);
     const draftSettingsSummary = videoDraftSettingsModified ? buildVideoSettingsSummary(config, effectiveConfig, model) : "";
     const historySettingsSummary = !videoDraftSettingsModified && activeId && latestRound?.config ? buildVideoSettingsSummary(latestRound.config, effectiveConfig, latestRound.config.videoModel || latestRound.config.model || "") : "";
     const settingsSummary = draftSettingsSummary || historySettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingVideoConversation(activeConversation) : false;
-    const canGenerate = Boolean(prompt.trim()) && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
+    const canGenerate = Boolean(prompt.trim()) && videoQuote.available && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
 
     useEffect(() => {
@@ -584,10 +596,6 @@ export default function VideoPage() {
         const videoModel = effectiveConfig.videoModel || effectiveConfig.model || model;
         const size = config.size || "16:9";
         const seconds = config.videoSeconds || "5";
-        if (getModelCreditUnit(effectiveConfig.modelCosts, videoModel, "video") === "second" && !isPositiveVideoSeconds(seconds)) {
-            message.error("按秒计费的视频模型必须选择具体时长，不能使用智能时长");
-            return;
-        }
         const quality = config.vquality || "720p";
         const watermark = config.videoWatermark ?? true;
         pendingVideoSizeRef.current = size;
@@ -600,6 +608,19 @@ export default function VideoPage() {
             ...videoReferenceAttachments(latestRound?.videoReferences || []),
         ];
         const allRefs = selectGenerationAttachments(text, currentAttachments, previousAttachments);
+        const selectedVideoQuote = quoteVideoGeneration({
+            config: effectiveConfig,
+            model: videoModel,
+            mode: config.videoGenerationMode,
+            resolution: quality,
+            seconds,
+            imageReferenceCount: allRefs.filter((reference) => reference.type.startsWith("image/")).length,
+            videoReferenceCount: allRefs.filter((reference) => reference.type.startsWith("video/")).length,
+        });
+        if (!selectedVideoQuote.available) {
+            message.error(selectedVideoQuote.reason);
+            return;
+        }
         const attachments = buildChatAttachments(allRefs);
 
         setChatMessages((prev) => {
@@ -615,6 +636,7 @@ export default function VideoPage() {
             quality: quality.includes("1080") ? "high" : quality.includes("480") ? "low" : "medium",
             seconds,
             watermark: String(watermark).toLowerCase() === "true",
+            videoGenerationMode: config.videoGenerationMode,
             ...(selectedStyles.length ? { generationStyleIds: selectedStyles.map((style) => style.id) } : {}),
         });
 
@@ -653,6 +675,7 @@ export default function VideoPage() {
                 quality: resolution.includes("1080") ? "high" : resolution.includes("480") ? "low" : "medium",
             } : {}),
             ...(round.config.videoSeconds ? { seconds: round.config.videoSeconds } : {}),
+            videoGenerationMode: round.config.videoGenerationMode || "text-to-video",
             ...(round.config.videoWatermark !== undefined && round.config.videoWatermark !== null
                 ? { watermark: String(round.config.videoWatermark).toLowerCase() === "true" }
                 : {}),
@@ -1092,6 +1115,7 @@ export default function VideoPage() {
                     content: (
                         <div className="space-y-4">
                             <VideoSettingsPanel config={config} onConfigChange={handleVideoSettingsChange} theme={theme} showTitle={false} className="space-y-4 px-0 py-0" />
+                            {!videoQuote.available ? <div className="text-xs text-red-500">{videoQuote.reason}</div> : null}
                             <div>
                                 <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">模型</label>
                                 <ModelPicker
@@ -1104,6 +1128,7 @@ export default function VideoPage() {
                                         updateConfig("videoModel", value);
                                     }}
                                     capability="video"
+                                    modelOptions={availableVideoModelsForMode(effectiveConfig, config.videoGenerationMode)}
                                     fullWidth
                                     onMissingConfig={() => (userRole === "admin" ? openConfigDialog(false) : message.error("请联系管理员配置默认生视频模型"))}
                                 />

@@ -17,12 +17,14 @@ import com.novanovastudio.agent.dto.AgentMessage;
 import com.novanovastudio.agent.dto.AgentSession;
 import com.novanovastudio.agent.dto.AgentToolResult.ToolResult;
 import com.novanovastudio.agent.dto.AiMessage;
+import com.novanovastudio.agent.dto.CreationSettings;
 import com.novanovastudio.ai.AiJsonUtils;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.ai.AiErrorDetails;
 import com.novanovastudio.ai.AiErrorSupport;
 import com.novanovastudio.ai.AiTaskPollingSupport;
+import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
@@ -31,9 +33,11 @@ import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.service.AiTaskService;
 import com.novanovastudio.service.PersistenceService;
 import java.time.Duration;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
@@ -146,6 +150,9 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         String quality = String.valueOf(args.getOrDefault("quality", "high"));
         String model = String.valueOf(args.getOrDefault("model", ""));
         int count = toInt(args.get("count"), 1);
+        Object rawVideoGenerationMode = args.get("videoGenerationMode");
+        String videoGenerationMode = AiTaskTypes.VIDEO.equals(taskType())
+                ? VideoGenerationMode.defaultIfBlank(rawVideoGenerationMode == null ? "" : String.valueOf(rawVideoGenerationMode)) : null;
 
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("size", size);
@@ -161,6 +168,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         if ("video".equals(name())) {
             if (args.containsKey("seconds")) params.put("seconds", args.get("seconds"));
             if (args.containsKey("watermark")) params.put("watermark", args.get("watermark"));
+            params.put("videoGenerationMode", videoGenerationMode);
         }
         List<GenerationStyleDtos.GenerationStyleSnapshot> styleSnapshots = readStyleSnapshots(args.get(INTERNAL_STYLE_SNAPSHOTS));
         if (!styleSnapshots.isEmpty()) {
@@ -173,11 +181,11 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                     .thenReturn(canceledResult(""));
         }
 
-        List<AiTaskDtos.AiTaskMediaReference> legacyReferences = legacyReferences(args);
-        return resolveAttachmentReferences(userId, attachments)
-                .flatMap(attachedReferences -> validateAttachmentCapabilities(userId, model, attachedReferences)
-                        .flatMap(validatedAttachments -> {
-                            Mono<List<AiTaskDtos.AiTaskMediaReference>> initialReferences = legacyReferences.isEmpty()
+        return Mono.fromSupplier(() -> legacyReferences(args))
+                .flatMap(legacyReferences -> resolveAttachmentReferences(userId, attachments)
+                        .flatMap(attachedReferences -> validateAttachmentCapabilities(userId, model, videoGenerationMode, attachedReferences)
+                                .flatMap(validatedAttachments -> {
+                            Mono<ReferenceGroups> initialReferences = legacyReferences.isEmpty()
                                     && validatedAttachments.imageReferences().isEmpty()
                                     && "edit_image".equals(toolName)
                                     ? latestSuccessfulImageReference(userId)
@@ -185,8 +193,10 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                             return initialReferences.flatMap(references -> preserveLegacyVideoReferenceBehavior(
                                     userId, toolName, model, references, validatedAttachments, emitter, sessionId)
                                     .flatMap(effectiveLegacyReferences -> {
-                                        List<AiTaskDtos.AiTaskMediaReference> effectiveReferences = mergeReferences(validatedAttachments.imageReferences(), effectiveLegacyReferences);
-                                        List<AiTaskDtos.AiTaskMediaReference> effectiveVideoReferences = validatedAttachments.videoReferences();
+                                        List<AiTaskDtos.AiTaskMediaReference> effectiveReferences = mergeReferences(
+                                                validatedAttachments.imageReferences(), effectiveLegacyReferences.imageReferences());
+                                        List<AiTaskDtos.AiTaskMediaReference> effectiveVideoReferences = mergeReferences(
+                                                validatedAttachments.videoReferences(), effectiveLegacyReferences.videoReferences());
                                         String effectiveGenerationSource = String.valueOf(args.getOrDefault("entrySource", generationSource()));
                                         if (!AiTaskSources.isSupported(effectiveGenerationSource)
                                                 || (AiTaskTypes.IMAGE.equals(taskType()) && AiTaskSources.VIDEO_PAGE.equals(effectiveGenerationSource))
@@ -195,9 +205,11 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                         }
                                         Map<String, Object> providerParameters = new LinkedHashMap<>(params);
                                         providerParameters.remove(INTERNAL_STYLE_SNAPSHOTS);
+                                        providerParameters.remove("videoGenerationMode");
                                         AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(
                                                 taskType(), generationPrompt, model.isBlank() ? null : model, providerParameters,
-                                                effectiveReferences, effectiveVideoReferences, effectiveGenerationSource);
+                                                effectiveReferences, effectiveVideoReferences, effectiveGenerationSource,
+                                                null, null, videoGenerationMode);
                                         long createdAt = System.currentTimeMillis();
                                         return Mono.defer(() -> {
                                             executionRegistry.beginTaskCreation(sessionId);
@@ -229,7 +241,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                                         .doFinally(signal -> executionRegistry.removeTask(sessionId, response.id())));
                                         });
                                     }));
-                        }))
+                                }))
+                        )
                 // 预校验失败必须作为结构化终态返回，确保主Agent能够基于明确类别决定询问或停止。
                 .onErrorResume(BusinessException.class, exception -> {
                     AiErrorDetails error = AiErrorSupport.fromThrowable(exception, "task", "execution");
@@ -243,16 +256,26 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @param args Map 工具参数
      * @return List<AiTaskMediaReference> 历史参考媒体引用
      */
-    private List<AiTaskDtos.AiTaskMediaReference> legacyReferences(Map<String, Object> args) {
+    private ReferenceGroups legacyReferences(Map<String, Object> args) {
         Object referenceUrls = args.get("reference_urls");
         if (!(referenceUrls instanceof List<?> values)) {
-            return List.of();
+            return ReferenceGroups.empty();
         }
-        return values.stream()
+        List<AiTaskDtos.AiTaskMediaReference> references = values.stream()
                 .map(String::valueOf)
                 .filter(StringUtils::hasText)
-                .map(url -> new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), "reference", "", "", url))
+                .map(String::trim)
+                .map(url -> {
+                    String mimeType = inferReferenceMimeType(url);
+                    if (!StringUtils.hasText(mimeType)) {
+                        throw new BusinessException(ErrorCode.PARAM_INVALID, "无法识别历史参考素材类型，请重新上传图片或视频素材");
+                    }
+                    return new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), "reference", mimeType, "", url);
+                })
                 .toList();
+        return new ReferenceGroups(
+                references.stream().filter(reference -> reference.mimeType().startsWith("image/")).toList(),
+                references.stream().filter(reference -> reference.mimeType().startsWith("video/")).toList());
     }
 
     /**
@@ -303,27 +326,46 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      *
      * @param userId Long 当前用户ID
      * @param model String 选中的视频模型
+     * @param videoGenerationMode String 页面锁定的视频生成模式
      * @param attachments ReferenceGroups 已校验附件引用
      * @return Mono<ReferenceGroups> 通过校验的附件引用
      */
-    private Mono<ReferenceGroups> validateAttachmentCapabilities(Long userId, String model, ReferenceGroups attachments) {
-        if (!AiTaskTypes.VIDEO.equals(taskType()) || attachments.isEmpty()) {
+    private Mono<ReferenceGroups> validateAttachmentCapabilities(Long userId, String model, String videoGenerationMode,
+                                                                  ReferenceGroups attachments) {
+        if (!AiTaskTypes.VIDEO.equals(taskType()) || attachments.isEmpty() || !StringUtils.hasText(model)) {
             return Mono.just(attachments);
+        }
+        String mode = VideoGenerationMode.defaultIfBlank(videoGenerationMode);
+        if (!VideoGenerationMode.isSupported(mode)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持"));
         }
         return aiTaskService.modelCapabilities(userId, model.isBlank() ? null : model)
                 .flatMap(capabilities -> {
-                    if (!attachments.imageReferences().isEmpty() && !capabilities.contains("image-to-video")) {
-                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "当前模型未配置图生视频能力，请切换支持图生视频的模型"));
-                    }
-                    if (!attachments.videoReferences().isEmpty() && !capabilities.contains("video-to-video")) {
-                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "当前模型未配置视频参考生成能力，请切换支持视频参考的模型"));
+                    if (!capabilities.contains(mode)) {
+                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
+                                "当前模型未配置" + videoModeLabel(mode) + "能力，请切换支持" + videoModeLabel(mode) + "的模型"));
                     }
                     return Mono.just(attachments);
                 });
     }
 
     /**
-     * 保留历史 reference_urls 的原有视频编辑降级逻辑。
+     * 返回视频生成模式的中文名称。
+     *
+     * @param mode String 视频生成模式
+     * @return String 中文名称
+     */
+    private String videoModeLabel(String mode) {
+        return switch (mode) {
+            case VideoGenerationMode.TEXT_TO_VIDEO -> "文生视频";
+            case VideoGenerationMode.IMAGE_TO_VIDEO -> "图生视频";
+            case VideoGenerationMode.REFERENCE_TO_VIDEO -> "全能参考";
+            default -> "视频";
+        };
+    }
+
+    /**
+     * 保留历史 reference_urls，避免Agent静默删除用户参考素材。
      *
      * @param userId Long 当前用户ID
      * @param toolName String 工具名称
@@ -332,24 +374,15 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @param attachments ReferenceGroups 当前请求附件引用
      * @param emitter AgentEventEmitter 事件发射器
      * @param sessionId String 会话ID
-     * @return Mono<List<AiTaskMediaReference>> 生效的历史引用
+     * @return Mono<ReferenceGroups> 生效的历史引用
      */
-    private Mono<List<AiTaskDtos.AiTaskMediaReference>> preserveLegacyVideoReferenceBehavior(
-            Long userId, String toolName, String model, List<AiTaskDtos.AiTaskMediaReference> references,
+    private Mono<ReferenceGroups> preserveLegacyVideoReferenceBehavior(
+            Long userId, String toolName, String model, ReferenceGroups references,
             ReferenceGroups attachments, AgentEventEmitter emitter, String sessionId) {
         if (!"edit_video".equals(toolName) || references.isEmpty() || !attachments.isEmpty()) {
             return Mono.just(references);
         }
-        return aiTaskService.modelCapabilities(userId, model.isBlank() ? null : model)
-                .map(capabilities -> {
-                    boolean allImageReferences = references.stream().allMatch(AbstractTaskProfile::isImageReferenceUrl);
-                    boolean supported = allImageReferences ? capabilities.contains("image-to-video") : capabilities.contains("video-to-video");
-                    if (!supported) {
-                        emitter.emit(userId, AgentEvent.notice(sessionId, "当前模型不支持该参考素材的视频编辑，正在根据修改意图重新生成视频"));
-                        return List.<AiTaskDtos.AiTaskMediaReference>of();
-                    }
-                    return references;
-                });
+        return Mono.just(references);
     }
 
     /**
@@ -387,26 +420,19 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @param ref AiTaskMediaReference 参考素材
      * @return boolean 是否图片 URL
      */
-    private static boolean isImageReferenceUrl(AiTaskDtos.AiTaskMediaReference ref) {
-        String url = ref.url() == null ? "" : ref.url().toLowerCase();
-        return url.endsWith(".jpg") || url.endsWith(".jpeg") || url.endsWith(".png") || url.endsWith(".webp") || url.endsWith(".gif");
-    }
-
     /**
      * 查询最近一张成功图片作为图片编辑参考图。
      *
-     * @return Mono<List<AiTaskMediaReference>> 最近图片引用列表
+     * @return Mono<ReferenceGroups> 最近图片引用分组
      */
-    private Mono<List<AiTaskDtos.AiTaskMediaReference>> latestSuccessfulImageReference(Long userId) {
+    private Mono<ReferenceGroups> latestSuccessfulImageReference(Long userId) {
         return aiTaskService.listTasksForUser(userId, List.of("success"))
                 .map(tasks -> tasks.stream()
                         .filter(task -> "image".equals(task.taskType()))
-                        .flatMap(task -> extractMediaUrls(task.resultData()).stream())
-                        .filter(StringUtils::hasText)
+                        .flatMap(task -> extractMediaReferences(task.resultData(), "image/png", "最近生成图片").stream())
                         .findFirst()
-                        .map(url -> List.of(new AiTaskDtos.AiTaskMediaReference(
-                                UUID.randomUUID().toString(), "最近生成图片", "", "", url)))
-                        .orElseGet(List::of));
+                        .map(reference -> new ReferenceGroups(List.of(reference), List.of()))
+                        .orElseGet(ReferenceGroups::empty));
     }
 
     /** 查询用户最近生成任务记录 */
@@ -829,6 +855,9 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
             }
         }
         String userMsg = request.message();
+        if (request.creationSettings() != null) {
+            userMsg = "[用户设置：" + creationSettingsText(request.creationSettings()) + "]\n\n" + userMsg;
+        }
         if (request.attachments() != null && !request.attachments().isEmpty()) {
             userMsg += "\n[用户上传了 " + request.attachments().size() + " 个参考文件]";
         }
@@ -836,29 +865,109 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         return Mono.just(messages);
     }
 
+    /**
+     * 将页面生成设置整理为旧Agent可读的紧凑文本；实际执行仍由服务端硬覆盖。
+     *
+     * @param settings CreationSettings 页面提交的生成设置
+     * @return String 设置说明
+     */
+    private String creationSettingsText(CreationSettings settings) {
+        List<String> values = new ArrayList<>();
+        if (StringUtils.hasText(settings.model())) values.add("模型=" + settings.model());
+        if (StringUtils.hasText(settings.videoModel())) values.add("视频模型=" + settings.videoModel());
+        if (StringUtils.hasText(settings.size())) values.add("尺寸=" + settings.size());
+        if (StringUtils.hasText(settings.resolution())) values.add("分辨率=" + settings.resolution());
+        if (StringUtils.hasText(settings.quality())) values.add("质量=" + settings.quality());
+        if (StringUtils.hasText(settings.seconds())) values.add("时长=" + settings.seconds());
+        if (settings.watermark() != null) values.add("水印=" + settings.watermark());
+        if (AiTaskTypes.VIDEO.equals(taskType())) {
+            values.add("视频生成模式=" + VideoGenerationMode.defaultIfBlank(settings.videoGenerationMode()));
+        }
+        return String.join("；", values);
+    }
+
     // ===== 工具方法 =====
 
     private List<String> extractMediaUrls(JSONObject resultData) {
+        return extractMediaReferences(resultData, null, "").stream()
+                .map(AiTaskDtos.AiTaskMediaReference::url)
+                .filter(StringUtils::hasText)
+                .toList();
+    }
+
+    /**
+     * 从任务结果中恢复媒体引用，并尽量保留供应商返回的类型和存储键。
+     *
+     * @param resultData JSONObject 任务结果
+     * @param defaultMimeType String 结果缺少类型时使用的已知默认类型
+     * @param name String 引用显示名称
+     * @return List<AiTaskMediaReference> 媒体引用列表
+     */
+    private List<AiTaskDtos.AiTaskMediaReference> extractMediaReferences(JSONObject resultData,
+                                                                          String defaultMimeType, String name) {
         if (resultData == null) return List.of();
-        // 兼容 "items" 数组和 "item" 单对象两种格式
-        var items = resultData.getJSONArray("items");
-        if (items != null && !items.isEmpty()) {
-            List<String> urls = new ArrayList<>();
-            for (int i = 0; i < items.size(); i++) {
-                JSONObject item = items.getJSONObject(i);
-                if (item == null) continue;
-                String url = item.getString("url");
-                if (url != null && !url.isBlank()) urls.add(url);
+        List<JSONObject> items = new ArrayList<>();
+        var array = resultData.getJSONArray("items");
+        if (array != null) {
+            for (int index = 0; index < array.size(); index++) {
+                JSONObject item = array.getJSONObject(index);
+                if (item != null) items.add(item);
             }
-            return urls;
         }
-        // Agnes video 返回单数 item
-        var singleItem = resultData.getJSONObject("item");
-        if (singleItem != null) {
-            String url = singleItem.getString("url");
-            if (url != null && !url.isBlank()) return List.of(url);
+        if (items.isEmpty()) {
+            JSONObject item = resultData.getJSONObject("item");
+            if (item != null) items.add(item);
         }
-        return List.of();
+        return items.stream()
+                .map(item -> {
+                    String url = item.getString("url");
+                    if (!StringUtils.hasText(url)) return null;
+                    String mimeType = StringUtils.hasText(item.getString("mimeType"))
+                            ? item.getString("mimeType") : defaultMimeType;
+                    return new AiTaskDtos.AiTaskMediaReference(
+                            UUID.randomUUID().toString(), StringUtils.hasText(name) ? name : "reference",
+                            mimeType, item.getString("storageKey"), url);
+                })
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    /**
+     * 根据历史参考 URL 的数据类型或扩展名推断 MIME 类型。
+     * <p>无法确认类型时返回空值，由调用方阻止任务创建，避免把视频误当成图片。</p>
+     *
+     * @param value String 历史参考 URL
+     * @return String MIME类型，无法识别时为空
+     */
+    private String inferReferenceMimeType(String value) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.regionMatches(true, 0, "data:", 0, 5)) {
+            int separator = normalized.indexOf(';');
+            if (separator > 5) {
+                String mimeType = normalized.substring(5, separator).toLowerCase(Locale.ROOT);
+                if (mimeType.startsWith("image/") || mimeType.startsWith("video/")) return mimeType;
+            }
+        }
+        String path = normalized;
+        try {
+            String parsedPath = URI.create(normalized).getPath();
+            if (StringUtils.hasText(parsedPath)) path = parsedPath;
+        } catch (IllegalArgumentException ignored) {
+            // 非标准 URL 继续按字符串末尾扩展名判断，无法判断时交给上层返回明确错误。
+        }
+        int queryStart = path.indexOf('?');
+        if (queryStart >= 0) path = path.substring(0, queryStart);
+        int fragmentStart = path.indexOf('#');
+        if (fragmentStart >= 0) path = path.substring(0, fragmentStart);
+        int extensionStart = path.lastIndexOf('.');
+        if (extensionStart < 0 || extensionStart == path.length() - 1) return null;
+        return switch (path.substring(extensionStart + 1).toLowerCase(Locale.ROOT)) {
+            case "jpg", "jpeg", "png", "webp", "gif", "avif", "bmp", "tif", "tiff" -> "image/" +
+                    (path.substring(extensionStart + 1).equalsIgnoreCase("jpg") ? "jpeg" : path.substring(extensionStart + 1).toLowerCase(Locale.ROOT));
+            case "mp4", "mov", "webm", "m4v", "avi", "mkv", "mpeg", "mpg" -> "video/" +
+                    (path.substring(extensionStart + 1).equalsIgnoreCase("mp4") ? "mp4" : path.substring(extensionStart + 1).toLowerCase(Locale.ROOT));
+            default -> null;
+        };
     }
 
     private boolean isTerminal(String status) {

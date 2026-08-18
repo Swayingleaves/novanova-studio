@@ -2,7 +2,7 @@ import type { ComponentProps } from "react";
 import { Zap } from "lucide-react";
 import { Tooltip } from "antd";
 
-export { getModelCreditUnit, isPositiveVideoSeconds, requestCreditCost } from "./credit-calculation";
+export { requestCreditCost } from "./credit-calculation";
 export type { CreditCostOptions, ModelCreditCost } from "./credit-calculation";
 
 /**

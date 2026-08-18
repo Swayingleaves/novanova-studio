@@ -55,7 +55,8 @@ class CreationPlanValidatorTest {
                         Map.of("prompt", "一只小猫", "size", "16:9")),
                 canvasGenerationTask("video-task", "video", "canvas_generate_video",
                         Map.of("prompt", "一只小狗奔跑"))));
-        CreationSettings settings = new CreationSettings("model", "16:9", "720p", "medium", 1, "5", false);
+        CreationSettings settings = new CreationSettings("model", "16:9", "720p", "medium", 1,
+                "5", false, null, null, null, "text-to-video", "video-model");
 
         CreationPlan result = validator.validate(plan, CreationEntrySource.CANVAS, settings);
 
@@ -153,6 +154,30 @@ class CreationPlanValidatorTest {
                 CreationEntrySource.CANVAS, null);
 
         Assertions.assertEquals("canvas_create_text_node", result.tasks().getFirst().toolName());
+    }
+
+    /**
+     * 画布视频工具必须携带独立的视频模型，不能把对话模型当作视频模型。
+     */
+    @Test
+    void shouldRequireVideoModelForCanvasVideoTask() {
+        CreationTask task = new CreationTask("video-task", "video", "generate", "生成视频", List.of(),
+                "canvas_generate_video", Map.of("prompt", "生成视频"));
+        CreationSettings missingVideoModel = new CreationSettings("agent-model", "16:9", "720p", "medium", 1,
+                "3", false, null, null, Map.of(), "text-to-video", null);
+
+        CreationPlan missingResult = validator.validate(plan(CreationEntrySource.CANVAS, List.of(task)),
+                CreationEntrySource.CANVAS, missingVideoModel);
+
+        Assertions.assertTrue(missingResult.tasks().isEmpty());
+        Assertions.assertTrue(missingResult.clarificationQuestion().contains("视频生成模型"));
+
+        CreationSettings settings = new CreationSettings("agent-model", "16:9", "720p", "medium", 1,
+                "3", false, null, null, Map.of(), "text-to-video", "video-model");
+        CreationPlan result = validator.validate(plan(CreationEntrySource.CANVAS, List.of(task)),
+                CreationEntrySource.CANVAS, settings);
+
+        Assertions.assertEquals("canvas_generate_video", result.tasks().getFirst().toolName());
     }
 
     /**

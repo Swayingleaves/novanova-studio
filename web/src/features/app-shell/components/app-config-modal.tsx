@@ -20,7 +20,11 @@ import {
     type ConfigDialogTabKey,
     type ModelCapability,
     type ModelChannel,
+    type VideoBillingConfiguration,
+    type VideoGenerationMode,
+    type VideoResolution,
 } from "@/features/settings/stores/use-config-store";
+import { VIDEO_GENERATION_MODE_OPTIONS, VIDEO_RESOLUTION_OPTIONS, createVideoBillingConfiguration } from "@/features/generation/lib/video-billing";
 import { isObjectStorageReady, objectStorageReadyMessage, testObjectStorageUpload } from "@/features/storage/services/object-storage";
 import { isOpenAiTextModel, isReasoningEffortDisabled, reasoningEffortOptions } from "@/features/settings/lib/model-thinking-configuration";
 import {
@@ -388,6 +392,7 @@ export function AppConfigModal() {
                     reasoningEffort: configItem.reasoningEffort,
                     requestConcurrency: configItem.requestConcurrency,
                     customBodyParameters: configItem.customBodyParameters,
+                    videoBillingConfiguration: configItem.videoBillingConfiguration,
                 });
                 createdConfigIds.set(configItem.id, saved.id);
             }
@@ -412,6 +417,7 @@ export function AppConfigModal() {
                         reasoningEffort: configItem.reasoningEffort,
                         requestConcurrency: configItem.requestConcurrency,
                         customBodyParameters: configItem.customBodyParameters,
+                        videoBillingConfiguration: configItem.videoBillingConfiguration,
                     });
                 }
             }
@@ -781,7 +787,9 @@ export function AppConfigModal() {
                                                                             <span className="min-w-0 truncate text-sm">{modelOptionLabel(draftConfig, model)}</span>
                                                                             <div className="flex shrink-0 items-center gap-2">
                                                                                 {modelConfig.defaultModel ? <span className="text-xs text-[var(--studio-muted)]">默认</span> : null}
-                                                                                <Button size="small" icon={<Pencil className="size-3.5" />} disabled={isSaving} onClick={() => openModelConfigEditor(modelConfig)}>编辑</Button>
+                                                                                <Button size="small" icon={<Pencil className="size-3.5" />} disabled={isSaving} onClick={() => openModelConfigEditor(modelConfig)}>
+                                                                                    编辑
+                                                                                </Button>
                                                                             </div>
                                                                         </div>
                                                                     );
@@ -903,14 +911,30 @@ export function AppConfigModal() {
                                                             </Form.Item>
                                                             <Form.Item label={providerFields.regionLabel} className="mb-0">
                                                                 {storage.provider === "qiniuKodo" ? (
-                                                                    <Select value={storage.region || undefined} options={qiniuRegionOptions} placeholder={providerFields.regionPlaceholder} disabled={isSaving} onChange={(region) => updateDraftObjectStorage(storage.id, { region })} />
+                                                                    <Select
+                                                                        value={storage.region || undefined}
+                                                                        options={qiniuRegionOptions}
+                                                                        placeholder={providerFields.regionPlaceholder}
+                                                                        disabled={isSaving}
+                                                                        onChange={(region) => updateDraftObjectStorage(storage.id, { region })}
+                                                                    />
                                                                 ) : (
-                                                                    <Input value={storage.region} placeholder={providerFields.regionPlaceholder} disabled={isSaving} onChange={(event) => updateDraftObjectStorage(storage.id, { region: event.target.value })} />
+                                                                    <Input
+                                                                        value={storage.region}
+                                                                        placeholder={providerFields.regionPlaceholder}
+                                                                        disabled={isSaving}
+                                                                        onChange={(event) => updateDraftObjectStorage(storage.id, { region: event.target.value })}
+                                                                    />
                                                                 )}
                                                             </Form.Item>
                                                             {storage.provider === "aliyunOss" ? (
                                                                 <Form.Item label="Endpoint" extra="必须填写包含 http:// 或 https:// 的 OSS Endpoint。" className="mb-0 md:col-span-2">
-                                                                    <Input value={storage.endpoint} placeholder="https://oss-cn-hangzhou.aliyuncs.com" disabled={isSaving} onChange={(event) => updateDraftObjectStorage(storage.id, { endpoint: event.target.value })} />
+                                                                    <Input
+                                                                        value={storage.endpoint}
+                                                                        placeholder="https://oss-cn-hangzhou.aliyuncs.com"
+                                                                        disabled={isSaving}
+                                                                        onChange={(event) => updateDraftObjectStorage(storage.id, { endpoint: event.target.value })}
+                                                                    />
                                                                 </Form.Item>
                                                             ) : null}
                                                             <Form.Item label="公开访问地址" required={storage.provider === "qiniuKodo"} extra={providerFields.publicBaseUrlExtra} className="mb-0 md:col-span-2">
@@ -947,6 +971,7 @@ export function AppConfigModal() {
                 title={editingModelConfig ? `${modelOptionLabel(draftConfig, modelConfigValue(editingModelConfig))} 配置` : "模型配置"}
                 open={Boolean(editingModelConfig)}
                 centered
+                width={760}
                 destroyOnHidden
                 okText="确认"
                 cancelText="取消"
@@ -955,33 +980,85 @@ export function AppConfigModal() {
             >
                 {editingModelConfig ? (
                     <Form layout="vertical" requiredMark={false}>
-                        <Form.Item label={editingModelConfig.modelType === "video" && editingModelConfig.creditUnit === "second" ? "每秒积分" : "每次积分"}>
-                            <InputNumber
-                                min={0}
-                                precision={0}
-                                value={editingModelConfig.creditCost}
-                                className="w-full"
-                                onChange={(value) => updateEditingModelConfig({ creditCost: Math.max(0, Number(value) || 0) })}
-                            />
-                        </Form.Item>
-                        {editingModelConfig.modelType === "video" ? (
-                            <Form.Item label="积分计费单位">
-                                <Select
-                                    value={editingModelConfig.creditUnit}
-                                    options={[{ value: "generation", label: "按次" }, { value: "second", label: "按秒" }]}
-                                    onChange={(creditUnit: ServerModelConfig["creditUnit"]) => updateEditingModelConfig({ creditUnit })}
-                                />
+                        {editingModelConfig.modelType !== "video" ? (
+                            <Form.Item label="每次积分">
+                                <InputNumber min={0} precision={0} value={editingModelConfig.creditCost} className="w-full" onChange={(value) => updateEditingModelConfig({ creditCost: Math.max(0, Number(value) || 0) })} />
                             </Form.Item>
+                        ) : null}
+                        {editingModelConfig.modelType === "video" ? (
+                            <>
+                                <Form.Item label="计费方式">
+                                    <Select
+                                        value={editingModelConfig.videoBillingConfiguration?.billingUnit || "generation"}
+                                        options={[
+                                            { value: "generation", label: "按次" },
+                                            { value: "second", label: "按秒" },
+                                        ]}
+                                        onChange={(billingUnit: ServerModelConfig["creditUnit"]) =>
+                                            updateEditingModelConfig({
+                                                creditUnit: billingUnit,
+                                                videoBillingConfiguration: {
+                                                    ...(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration()),
+                                                    billingUnit,
+                                                },
+                                            })
+                                        }
+                                    />
+                                </Form.Item>
+                                <Form.Item label="最短生成时长（秒）">
+                                    <InputNumber
+                                        min={1}
+                                        precision={0}
+                                        value={editingModelConfig.videoBillingConfiguration?.minimumDurationSeconds || 3}
+                                        className="w-full"
+                                        onChange={(value) =>
+                                            updateEditingModelConfig({
+                                                videoBillingConfiguration: {
+                                                    ...(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration()),
+                                                    minimumDurationSeconds: Math.max(1, Math.floor(Number(value) || 1)),
+                                                },
+                                            })
+                                        }
+                                    />
+                                </Form.Item>
+                                <Form.Item label="模式与分辨率价格">
+                                    <div className="space-y-4">
+                                        {VIDEO_GENERATION_MODE_OPTIONS.map((mode) => {
+                                            const prices = editingModelConfig.videoBillingConfiguration?.modePrices?.[mode.value] || {};
+                                            const modeEnabled = editingModelConfig.capabilities.includes(mode.value);
+                                            return (
+                                                <div key={mode.value} className="border-t pt-3 first:border-t-0 first:pt-0">
+                                                    <div className="mb-2 text-sm font-medium">{mode.label}</div>
+                                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                                        {VIDEO_RESOLUTION_OPTIONS.map((resolution) => (
+                                                            <label key={resolution.value} className="space-y-1 text-xs text-[var(--studio-muted)]">
+                                                                <span>{resolution.label}</span>
+                                                                <InputNumber
+                                                                    min={0}
+                                                                    precision={0}
+                                                                    placeholder="未配置"
+                                                                    value={prices[resolution.value]}
+                                                                    className="w-full"
+                                                                    disabled={!modeEnabled}
+                                                                    onChange={(value) =>
+                                                                        updateEditingModelConfig({
+                                                                            videoBillingConfiguration: updateVideoResolutionPrice(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value, resolution.value, value),
+                                                                        })
+                                                                    }
+                                                                />
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </Form.Item>
+                            </>
                         ) : null}
                         {editingModelConfig.modelType === "image" || editingModelConfig.modelType === "video" ? (
                             <Form.Item label="同时并发数">
-                                <InputNumber
-                                    min={1}
-                                    precision={0}
-                                    value={editingModelConfig.requestConcurrency}
-                                    className="w-full"
-                                    onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })}
-                                />
+                                <InputNumber min={1} precision={0} value={editingModelConfig.requestConcurrency} className="w-full" onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })} />
                             </Form.Item>
                         ) : null}
                         <Form.Item label="模型能力">
@@ -990,11 +1067,16 @@ export function AppConfigModal() {
                                     <Checkbox
                                         key={option.value}
                                         checked={editingModelConfig.capabilities.includes(option.value)}
-                                        onChange={(event) => updateEditingModelConfig({
-                                            capabilities: event.target.checked
-                                                ? uniqueModels([...editingModelConfig.capabilities, option.value])
-                                                : editingModelConfig.capabilities.filter((value) => value !== option.value),
-                                        })}
+                                        onChange={(event) =>
+                                            updateEditingModelConfig({
+                                                capabilities: event.target.checked ? uniqueModels([...editingModelConfig.capabilities, option.value]) : editingModelConfig.capabilities.filter((value) => value !== option.value),
+                                                ...(editingModelConfig.modelType === "video" && !event.target.checked
+                                                    ? {
+                                                          videoBillingConfiguration: clearVideoModePrices(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), option.value as VideoGenerationMode),
+                                                      }
+                                                    : {}),
+                                            })
+                                        }
                                     >
                                         {option.label}
                                     </Checkbox>
@@ -1035,7 +1117,12 @@ function cloneModelConfigs(configs: ServerModelConfig[]) {
 }
 
 function cloneModelConfig(config: ServerModelConfig): ServerModelConfig {
-    return { ...config, capabilities: [...config.capabilities], customBodyParameters: { ...(config.customBodyParameters || {}) } };
+    return {
+        ...config,
+        capabilities: [...config.capabilities],
+        customBodyParameters: { ...(config.customBodyParameters || {}) },
+        videoBillingConfiguration: config.modelType === "video" ? cloneVideoBillingConfiguration(config.videoBillingConfiguration || createVideoBillingConfiguration()) : null,
+    };
 }
 
 function cloneObjectStorages(storages: ObjectStorageConfig[]) {
@@ -1057,6 +1144,7 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         reasoningEffort: "high",
         requestConcurrency: 1,
         customBodyParameters: {},
+        videoBillingConfiguration: modelType === "video" ? createVideoBillingConfiguration() : null,
     };
 }
 
@@ -1065,9 +1153,41 @@ function sameValue(first: unknown, second: unknown) {
 }
 
 function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelConfig) {
-    return first.modelType === second.modelType && first.sortOrder === second.sortOrder && first.creditCost === second.creditCost && first.creditUnit === second.creditUnit && first.requestConcurrency === second.requestConcurrency
-        && first.thinkingEnabled === second.thinkingEnabled && first.reasoningEffort === second.reasoningEffort
-        && sameValue(first.capabilities, second.capabilities) && sameValue(first.customBodyParameters, second.customBodyParameters);
+    return (
+        first.modelType === second.modelType &&
+        first.sortOrder === second.sortOrder &&
+        first.creditCost === second.creditCost &&
+        first.creditUnit === second.creditUnit &&
+        first.requestConcurrency === second.requestConcurrency &&
+        first.thinkingEnabled === second.thinkingEnabled &&
+        first.reasoningEffort === second.reasoningEffort &&
+        sameValue(first.capabilities, second.capabilities) &&
+        sameValue(first.customBodyParameters, second.customBodyParameters) &&
+        sameValue(first.videoBillingConfiguration, second.videoBillingConfiguration)
+    );
+}
+
+function cloneVideoBillingConfiguration(configuration: VideoBillingConfiguration): VideoBillingConfiguration {
+    return {
+        ...configuration,
+        modePrices: Object.fromEntries(Object.entries(configuration.modePrices || {}).map(([mode, prices]) => [mode, { ...prices }])) as VideoBillingConfiguration["modePrices"],
+    };
+}
+
+function updateVideoResolutionPrice(configuration: VideoBillingConfiguration, mode: VideoGenerationMode, resolution: VideoResolution, value: number | null) {
+    const modePrices = { ...(configuration.modePrices || {}) };
+    const prices = { ...(modePrices[mode] || {}) };
+    if (value === null) delete prices[resolution];
+    else prices[resolution] = Math.max(0, Math.floor(Number(value) || 0));
+    modePrices[mode] = prices;
+    return { ...configuration, modePrices };
+}
+
+function clearVideoModePrices(configuration: VideoBillingConfiguration, mode: VideoGenerationMode): VideoBillingConfiguration {
+    return {
+        ...configuration,
+        modePrices: { ...configuration.modePrices, [mode]: {} },
+    };
 }
 
 function modelConfigValue(config: Pick<ServerModelConfig, "channelId" | "modelName">) {

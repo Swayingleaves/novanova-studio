@@ -1,6 +1,5 @@
 package com.novanovastudio.service;
 
-import com.alibaba.fastjson2.JSONObject;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentTaskOrchestrator;
@@ -11,12 +10,15 @@ import com.novanovastudio.ai.AiErrorSupport;
 import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.ai.VideoGenerationMode;
+import com.novanovastudio.ai.VideoResolution;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.dto.PersistenceDtos;
+import com.novanovastudio.dto.VideoBillingConfiguration;
 import com.novanovastudio.entity.AiGenerationTask;
 import com.novanovastudio.repository.AiTaskRepository;
 import com.novanovastudio.security.CurrentUserProvider;
@@ -26,6 +28,7 @@ import com.novanovastudio.task.ModelTaskExecutionDispatcher;
 import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -192,13 +195,25 @@ public class AiTaskService {
             Long userId,
             AiTaskDtos.CreateAiTaskRequest request,
             Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
-        // 校验任务类型并解析可用模型渠道。
-        return prepareStyledRequest(userId, request).flatMap(preparedRequest -> Mono.defer(() -> {
+        AiTaskDtos.CreateAiTaskRequest normalizedRequest = normalizeVideoGenerationMode(request);
+        Mono<Void> videoPreflight = TYPE_VIDEO.equals(normalizedRequest.taskType())
+                ? resolveModel(normalizedRequest.taskType(), normalizedRequest.model())
+                .flatMap(resolvedModel -> {
+                    // 视频请求必须在提示词优化等副作用之前完成模式、素材和报价校验。
+                    validateVideoTask(normalizedRequest, resolvedModel);
+                    return validateVideoReferences(userId, normalizedRequest);
+                })
+                : Mono.empty();
+        // 校验视频请求后再解析风格，避免无效视频请求创建无关的优化任务。
+        return videoPreflight.then(Mono.defer(() -> prepareStyledRequest(userId, normalizedRequest))).flatMap(preparedRequest -> Mono.defer(() -> {
             validateTaskType(preparedRequest.taskType());
             validateGenerationSource(preparedRequest.taskType(), preparedRequest.generationSource());
             return resolveModel(preparedRequest.taskType(), preparedRequest.model()).flatMap(resolvedModel -> {
                 String taskId = UUID.randomUUID().toString();
-                int creditCost = calculateTaskCredits(preparedRequest, resolvedModel);
+                VideoBillingQuote videoBillingQuote = TYPE_VIDEO.equals(preparedRequest.taskType())
+                        ? validateVideoTask(preparedRequest, resolvedModel) : null;
+                int creditCost = videoBillingQuote == null
+                        ? calculateTaskCredits(preparedRequest, resolvedModel) : videoBillingQuote.chargedCredits();
                 log.info("创建AI生成任务: taskId={}, userId={}, taskType={}, generationSource={}, model={}, channel={}", taskId, userId, preparedRequest.taskType(), preparedRequest.generationSource(), preparedRequest.model(), resolvedModel.channel().name());
                 AiGenerationTask task = new AiGenerationTask();
                 task.setId(taskId);
@@ -209,7 +224,7 @@ public class AiTaskService {
                 task.setModelConfigId(resolvedModel.modelConfigId());
                 task.setStatus(STATUS_PENDING);
                 task.setProgress(0);
-                task.setRequestData(toJson(preparedRequest));
+                task.setRequestData(toTaskRequestSnapshot(preparedRequest, videoBillingQuote));
                 task.setResultData("{}");
                 return repository.createTask(task)
                         .then(creditService.chargeTask(userId, taskId, creditCost, preparedRequest.taskType(), preparedRequest.generationSource()))
@@ -234,6 +249,21 @@ public class AiTaskService {
     }
 
     /**
+     * 规范化视频生成模式，缺省时固定使用文生视频。
+     *
+     * @param request CreateAiTaskRequest 原始任务请求
+     * @return CreateAiTaskRequest 写入默认模式后的任务请求
+     */
+    private AiTaskDtos.CreateAiTaskRequest normalizeVideoGenerationMode(AiTaskDtos.CreateAiTaskRequest request) {
+        if (!TYPE_VIDEO.equals(request.taskType())) return request;
+        String mode = VideoGenerationMode.defaultIfBlank(request.videoGenerationMode());
+        if (mode.equals(request.videoGenerationMode())) return request;
+        return new AiTaskDtos.CreateAiTaskRequest(request.taskType(), request.prompt(), request.model(), request.parameters(),
+                request.references(), request.videoReferences(), request.generationSource(), request.generationStyleIds(),
+                request.generationStyleSnapshots(), mode);
+    }
+
+    /**
      * 解析任务风格并在入队前完成强制提示词优化。
      *
      * @param userId Long 当前用户ID
@@ -251,7 +281,7 @@ public class AiTaskService {
                 .flatMap(styles -> promptOptimizationService.optimizeAndWait(userId, request.taskType(), request.prompt(), styles, response -> Mono.empty())
                         .map(optimizedPrompt -> new AiTaskDtos.CreateAiTaskRequest(
                                 request.taskType(), optimizedPrompt, request.model(), request.parameters(), request.references(),
-                                request.videoReferences(), request.generationSource(), null, styles)));
+                                request.videoReferences(), request.generationSource(), null, styles, request.videoGenerationMode())));
     }
 
     /**
@@ -413,7 +443,8 @@ public class AiTaskService {
                                     .findFirst()
                                     .map(channel -> new AiTaskDtos.AiModelOption(
                                             config.channelId() + CHANNEL_MODEL_SEPARATOR + config.modelName(),
-                                            config.modelName(), config.modelType(), channel.name(), channel.apiFormat(), config.defaultModel(), config.creditCost(), config.creditUnit()))
+                                            config.modelName(), config.modelType(), channel.name(), channel.apiFormat(), config.defaultModel(),
+                                            config.creditCost(), config.creditUnit(), config.capabilities(), config.videoBillingConfiguration()))
                                     .orElse(null))
                             .filter(java.util.Objects::nonNull)
                             .toList();
@@ -647,7 +678,8 @@ public class AiTaskService {
                     }
                     ResolvedModel resolvedModel = resolveModel(capability, selectedConfig.channelId() + "::" + selectedConfig.modelName(), tuple.getT1());
                     return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.id(), selectedConfig.creditCost(), selectedConfig.creditUnit(),
-                            thinkingEnabled(selectedConfig.thinkingEnabled()), reasoningEffort(selectedConfig.reasoningEffort()), selectedConfig.customBodyParameters());
+                            selectedConfig.capabilities(), selectedConfig.videoBillingConfiguration(), thinkingEnabled(selectedConfig.thinkingEnabled()),
+                            reasoningEffort(selectedConfig.reasoningEffort()), selectedConfig.customBodyParameters());
                 });
     }
 
@@ -682,7 +714,8 @@ public class AiTaskService {
                     }
                     ResolvedModel channelModel = resolveModel(task.getTaskType(), modelConfig.channelId() + CHANNEL_MODEL_SEPARATOR + modelConfig.modelName(), tuple.getT1());
                     return new ResolvedModel(channelModel.channel(), channelModel.model(), modelConfig.id(), modelConfig.creditCost(),
-                            modelConfig.creditUnit(), thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort()), modelConfig.customBodyParameters());
+                            modelConfig.creditUnit(), modelConfig.capabilities(), modelConfig.videoBillingConfiguration(),
+                            thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort()), modelConfig.customBodyParameters());
                 });
     }
 
@@ -743,7 +776,7 @@ public class AiTaskService {
         }
         validateChannelSupport(channel, capability);
         validateUserChannelAccess(channel);
-        return new ResolvedModel(channel, model, "", 0, CREDIT_UNIT_GENERATION, true, "high", new JSONObject());
+        return new ResolvedModel(channel, model, "", 0, CREDIT_UNIT_GENERATION, List.of(), null, true, "high", new JSONObject());
     }
 
 
@@ -869,6 +902,9 @@ public class AiTaskService {
         if (TYPE_TEXT.equals(request.taskType())) {
             return 0;
         }
+        if (TYPE_VIDEO.equals(request.taskType())) {
+            return validateVideoTask(request, resolvedModel).chargedCredits();
+        }
         Integer unitCost = resolvedModel.creditCost();
         if (unitCost == null || unitCost < 0) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "模型积分配置不合法");
@@ -892,6 +928,268 @@ public class AiTaskService {
     }
 
     /**
+     * 校验视频模式、素材、分辨率、时长和分档价格，并计算本次唯一视频任务的扣费。
+     *
+     * @param request CreateAiTaskRequest 视频任务请求
+     * @param resolvedModel ResolvedModel 已解析模型配置
+     * @return VideoBillingQuote 视频计费快照
+     */
+    private VideoBillingQuote validateVideoTask(AiTaskDtos.CreateAiTaskRequest request, ResolvedModel resolvedModel) {
+        String mode = VideoGenerationMode.defaultIfBlank(request.videoGenerationMode());
+        if (!VideoGenerationMode.isSupported(mode)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式只支持文生视频、图生视频和全能参考");
+        }
+        List<AiTaskDtos.AiTaskMediaReference> imageReferences = request.references() == null ? List.of() : request.references();
+        List<AiTaskDtos.AiTaskMediaReference> videoReferences = request.videoReferences() == null ? List.of() : request.videoReferences();
+        if (imageReferences.stream().anyMatch(reference -> reference == null || !isImageMimeType(reference.mimeType()))) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "图片参考列表只能包含图片素材");
+        }
+        if (videoReferences.stream().anyMatch(reference -> reference == null || !isVideoMimeType(reference.mimeType()))) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频参考列表只能包含视频素材");
+        }
+        switch (mode) {
+            case VideoGenerationMode.TEXT_TO_VIDEO -> {
+                if (!imageReferences.isEmpty() || !videoReferences.isEmpty()) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "文生视频不能携带图片或视频参考素材");
+                }
+            }
+            case VideoGenerationMode.IMAGE_TO_VIDEO -> {
+                if (imageReferences.isEmpty()) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "图生视频至少需要一张图片参考素材");
+                }
+                if (!videoReferences.isEmpty()) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "图生视频不能携带视频参考素材");
+                }
+            }
+            case VideoGenerationMode.REFERENCE_TO_VIDEO -> {
+                if (imageReferences.isEmpty() && videoReferences.isEmpty()) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "全能参考至少需要一张图片或一个视频参考素材");
+                }
+            }
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持");
+        }
+        if (resolvedModel.capabilities() == null || !resolvedModel.capabilities().contains(mode)) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前模型未配置" + videoModeLabel(mode) + "能力");
+        }
+        VideoBillingConfiguration configuration = resolvedModel.videoBillingConfiguration();
+        if (configuration == null) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前视频模型未配置分档计费价格");
+        }
+        if ((!CREDIT_UNIT_GENERATION.equals(configuration.billingUnit()) && !CREDIT_UNIT_SECOND.equals(configuration.billingUnit()))
+                || configuration.minimumDurationSeconds() == null || configuration.minimumDurationSeconds() < 1) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前视频模型分档计费配置不合法");
+        }
+        String resolution = videoResolution(request.parameters());
+        Map<String, Integer> modePrices = configuration.modePrices() == null ? null : configuration.modePrices().get(mode);
+        if (modePrices == null || !modePrices.containsKey(resolution)) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前模式未配置" + resolution + "分辨率价格");
+        }
+        int seconds = videoSeconds(request.parameters());
+        if (seconds < configuration.minimumDurationSeconds()) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频时长不能小于模型要求的最短时长" + configuration.minimumDurationSeconds() + "秒");
+        }
+        Integer unitPrice = modePrices.get(resolution);
+        if (unitPrice == null || unitPrice < 0) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前视频模型分辨率价格配置不合法");
+        }
+        try {
+            int chargedCredits = CREDIT_UNIT_SECOND.equals(configuration.billingUnit())
+                    ? Math.multiplyExact(unitPrice, seconds) : unitPrice;
+            return new VideoBillingQuote(mode, resolution, configuration.billingUnit(), unitPrice, seconds, chargedCredits);
+        } catch (ArithmeticException exception) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "本次生成积分计算超出范围");
+        }
+    }
+
+    /**
+     * 在创建任务前校验视频参考素材的来源、归属和实际类型。
+     *
+     * @param userId Long 当前用户ID
+     * @param request CreateAiTaskRequest 视频任务请求
+     * @return Mono<Void> 校验结果
+     */
+    private Mono<Void> validateVideoReferences(Long userId, AiTaskDtos.CreateAiTaskRequest request) {
+        return Flux.concat(
+                        validateVideoReferenceList(userId, request.references(), true),
+                        validateVideoReferenceList(userId, request.videoReferences(), false))
+                .then();
+    }
+
+    /**
+     * 校验一组同类型视频参考素材。
+     *
+     * @param userId Long 当前用户ID
+     * @param references List<AiTaskMediaReference> 参考素材
+     * @param imageReferences boolean 是否为图片参考
+     * @return Flux<Void> 校验结果
+     */
+    private Flux<Void> validateVideoReferenceList(
+            Long userId,
+            List<AiTaskDtos.AiTaskMediaReference> references,
+            boolean imageReferences) {
+        List<AiTaskDtos.AiTaskMediaReference> safeReferences = references == null ? List.of() : references;
+        return Flux.fromIterable(safeReferences)
+                .concatMap(reference -> validateVideoReference(userId, reference, imageReferences));
+    }
+
+    /**
+     * 校验单个视频参考素材。
+     *
+     * @param userId Long 当前用户ID
+     * @param reference AiTaskMediaReference 参考素材
+     * @param imageReference boolean 是否为图片参考
+     * @return Mono<Void> 校验结果
+     */
+    private Mono<Void> validateVideoReference(
+            Long userId,
+            AiTaskDtos.AiTaskMediaReference reference,
+            boolean imageReference) {
+        String referenceLabel = imageReference ? "图片" : "视频";
+        if (reference == null) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, referenceLabel + "参考素材不能为空"));
+        }
+        if (StringUtils.hasText(reference.storageKey())) {
+            String storageKey = reference.storageKey().trim();
+            Mono<PersistenceDtos.UploadedMediaResponse> mediaInfo = persistenceService.getMediaInfoForUser(userId, storageKey);
+            if (mediaInfo == null) {
+                return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
+                        "参考" + referenceLabel + "不存在或不属于当前用户"));
+            }
+            return mediaInfo
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
+                            "参考" + referenceLabel + "不存在或不属于当前用户")))
+                    .onErrorMap(exception -> exception instanceof BusinessException
+                            ? new BusinessException(((BusinessException) exception).getCode(),
+                            "参考" + referenceLabel + "不存在或不属于当前用户")
+                            : exception)
+                    .flatMap(media -> {
+                        if (media == null || !matchesReferenceMimeType(media.mimeType(), imageReference)) {
+                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
+                                    "参考" + referenceLabel + "素材类型与声明不一致"));
+                        }
+                        if (!isReferenceUrl(media.url())) {
+                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
+                                    "参考" + referenceLabel + "素材没有可访问的http或https地址"));
+                        }
+                        return Mono.empty();
+                    });
+        }
+        if (!isHttpReferenceUrl(reference.url())) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
+                    "参考" + referenceLabel + "素材必须提供storageKey或合法http/https URL"));
+        }
+        return Mono.empty();
+    }
+
+    /**
+     * 判断媒体响应是否与引用类型一致。
+     *
+     * @param mimeType String 媒体MIME类型
+     * @param imageReference boolean 是否为图片参考
+     * @return boolean 是否匹配
+     */
+    private boolean matchesReferenceMimeType(String mimeType, boolean imageReference) {
+        return imageReference ? isImageMimeType(mimeType) : isVideoMimeType(mimeType);
+    }
+
+    /**
+     * 判断媒体响应地址是否可供供应商访问。
+     *
+     * @param url String 媒体地址
+     * @return boolean 是否为合法地址
+     */
+    private boolean isReferenceUrl(String url) {
+        return isHttpReferenceUrl(url) || (StringUtils.hasText(url) && url.trim().regionMatches(true, 0, "data:", 0, 5));
+    }
+
+    /**
+     * 判断URL-only引用是否为合法HTTP地址。
+     *
+     * @param url String 媒体地址
+     * @return boolean 是否为HTTP地址
+     */
+    private boolean isHttpReferenceUrl(String url) {
+        if (!StringUtils.hasText(url)) return false;
+        String normalized = url.trim().toLowerCase(Locale.ROOT);
+        return normalized.startsWith("http://") || normalized.startsWith("https://");
+    }
+
+    /**
+     * 构造带视频计费快照的任务请求数据，不把内部计费字段发送给供应商适配器。
+     *
+     * @param request CreateAiTaskRequest 原始任务请求
+     * @param quote VideoBillingQuote 视频计费快照
+     * @return String 任务请求快照JSON
+     */
+    private String toTaskRequestSnapshot(AiTaskDtos.CreateAiTaskRequest request, VideoBillingQuote quote) {
+        JSONObject snapshot = jsonObject(request);
+        if (quote != null) {
+            JSONObject billing = new JSONObject();
+            billing.put("videoGenerationMode", quote.mode());
+            billing.put("resolution", quote.resolution());
+            billing.put("billingUnit", quote.billingUnit());
+            billing.put("unitPrice", quote.unitPrice());
+            billing.put("durationSeconds", quote.durationSeconds());
+            billing.put("chargedCredits", quote.chargedCredits());
+            snapshot.put("videoBilling", billing);
+        }
+        return snapshot.toJSONString();
+    }
+
+    /**
+     * 判断媒体引用是否为视频。
+     *
+     * @param mimeType String 媒体类型
+     * @return boolean 是否为视频
+     */
+    private boolean isVideoMimeType(String mimeType) {
+        return mimeType != null && mimeType.toLowerCase(Locale.ROOT).startsWith("video/");
+    }
+
+    /**
+     * 判断媒体类型是否为图片。
+     *
+     * @param mimeType String 媒体类型
+     * @return boolean 是否为图片
+     */
+    private boolean isImageMimeType(String mimeType) {
+        return mimeType != null && mimeType.toLowerCase(Locale.ROOT).startsWith("image/");
+    }
+
+    /**
+     * 读取并严格校验视频分辨率。
+     *
+     * @param parameters Map<String, Object> 任务参数
+     * @return String 规范化分辨率
+     */
+    private String videoResolution(Map<String, Object> parameters) {
+        Object rawResolution = parameters == null ? null : parameters.get("resolution");
+        if (rawResolution == null || rawResolution.toString().isBlank()) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频任务必须指定分辨率");
+        }
+        String resolution = rawResolution.toString().trim().toLowerCase(Locale.ROOT);
+        if (!VideoResolution.isSupported(resolution)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频分辨率不受支持，不能自动降级");
+        }
+        return resolution;
+    }
+
+    /**
+     * 返回视频模式中文名称。
+     *
+     * @param mode String 视频模式
+     * @return String 中文名称
+     */
+    private String videoModeLabel(String mode) {
+        return switch (mode) {
+            case VideoGenerationMode.TEXT_TO_VIDEO -> "文生视频";
+            case VideoGenerationMode.IMAGE_TO_VIDEO -> "图生视频";
+            case VideoGenerationMode.REFERENCE_TO_VIDEO -> "全能参考";
+            default -> "视频";
+        };
+    }
+
+    /**
      * 解析按秒计费视频的时长。
      *
      * @param parameters Map<String, Object> 任务参数
@@ -901,7 +1199,7 @@ public class AiTaskService {
     private int videoSeconds(Map<String, Object> parameters) {
         Object rawSeconds = parameters == null ? null : parameters.get("seconds");
         if (rawSeconds == null) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "按秒计费视频必须指定正整数时长");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频任务必须指定正整数时长");
         }
         try {
             int seconds;
@@ -920,7 +1218,7 @@ public class AiTaskService {
             }
             return seconds;
         } catch (NumberFormatException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "按秒计费视频必须指定正整数时长");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频任务必须指定正整数时长");
         }
     }
 
@@ -1064,7 +1362,22 @@ public class AiTaskService {
      * @param channel AiChannelConfig 渠道配置
      * @param model String 模型名称
      */
-    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, String modelConfigId, Integer creditCost, String creditUnit,
+    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, String modelConfigId, Integer creditCost,
+                                 String creditUnit, List<String> capabilities, VideoBillingConfiguration videoBillingConfiguration,
                                  boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters) {
+    }
+
+    /**
+     * 视频任务创建时的最终计费快照。
+     *
+     * @param mode String 最终视频生成模式
+     * @param resolution String 最终分辨率
+     * @param billingUnit String 计费方式
+     * @param unitPrice int 模式分辨率单价
+     * @param durationSeconds int 请求视频时长
+     * @param chargedCredits int 实际扣除积分
+     */
+    private record VideoBillingQuote(String mode, String resolution, String billingUnit, int unitPrice,
+                                     int durationSeconds, int chargedCredits) {
     }
 }

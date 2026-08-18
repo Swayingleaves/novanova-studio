@@ -1,25 +1,28 @@
 "use client";
 
 import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
-import { Slider } from "antd";
+import { Segmented, Slider } from "antd";
 
 import { ImageSettingsTheme } from "@/features/generation/components/image-settings-panel";
-import { agnesVideoRatioOptions, isAgnesVideoConfig, normalizeAgnesVideoRatio, normalizeAgnesVideoResolution, normalizeAgnesVideoSeconds } from "@/features/generation/lib/agnes-video";
-import { isMiniMaxH3VideoConfig, miniMaxH3ResolutionOptions, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio, normalizeMiniMaxH3Resolution, normalizeMiniMaxH3VideoSettings } from "@/features/generation/lib/minimax-h3-video";
-import { isSeedanceFastModel, isSeedanceVideoConfig, normalizeSeedanceDuration, normalizeSeedanceRatio, normalizeSeedanceResolution } from "@/features/generation/lib/seedance-video";
+import { agnesVideoRatioOptions, isAgnesVideoConfig, normalizeAgnesVideoRatio, normalizeAgnesVideoSeconds } from "@/features/generation/lib/agnes-video";
+import { isMiniMaxH3VideoConfig, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio } from "@/features/generation/lib/minimax-h3-video";
+import { isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/features/generation/lib/seedance-video";
 import { readVideoDurationRange } from "@/features/generation/lib/video-duration";
+import { VIDEO_GENERATION_MODE_OPTIONS, VIDEO_RESOLUTION_OPTIONS, availableVideoResolutions } from "@/features/generation/lib/video-billing";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
-import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
+import { resolveModelRequestConfig, type AiConfig, type VideoResolution } from "@/features/settings/stores/use-config-store";
 
 /** 视频设置面板支持的配置键。 */
-type VideoConfigKey = "vquality" | "size" | "videoSeconds" | "videoWatermark";
+type VideoConfigKey = "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark";
 
 type VideoSettingsPanelProps = {
     config: AiConfig;
     onConfigChange: (key: VideoConfigKey, value: string) => void;
     theme: CanvasTheme;
     showTitle?: boolean;
+    showGenerationMode?: boolean;
     showDuration?: boolean;
+    resolutionOptions?: VideoResolution[];
     className?: string;
     showCount?: boolean;
     onCountChange?: (value: string) => void;
@@ -42,7 +45,6 @@ const RATIO_PRESETS: RatioPreset[] = [
     { value: "21:9", label: "21:9", width: 21, height: 9 },
 ];
 
-const GENERIC_RESOLUTION_PRESETS = ["480P", "720P", "1080P", "4K"] as const;
 const VIDEO_COUNT_PRESETS = [1, 2, 4] as const;
 const AGNES_RATIOS = new Set<string>(agnesVideoRatioOptions.map((item) => item.value));
 const GENERIC_SIZE_BY_RATIO: Record<RatioPreset["value"], string> = {
@@ -56,29 +58,39 @@ const GENERIC_SIZE_BY_RATIO: Record<RatioPreset["value"], string> = {
 };
 
 /** 渲染统一的视频设置面板，并按当前模型禁用不支持的配置。 */
-export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = true, showDuration = true, className = "w-[388px] space-y-4 px-1 py-0.5", showCount = false, onCountChange }: VideoSettingsPanelProps) {
+export function VideoSettingsPanel({
+    config,
+    onConfigChange,
+    theme,
+    showTitle = true,
+    showGenerationMode = true,
+    showDuration = true,
+    resolutionOptions,
+    className = "w-[388px] space-y-4 px-1 py-0.5",
+    showCount = false,
+    onCountChange,
+}: VideoSettingsPanelProps) {
     const resolved = resolveModelRequestConfig(config, config.videoModel || config.model);
     const seedance = isSeedanceVideoConfig(resolved);
     const agnes = isAgnesVideoConfig(resolved);
     const miniMaxH3 = isMiniMaxH3VideoConfig(resolved);
-    const model = modelOptionName(resolved.model || resolved.videoModel);
     const ratio = resolveRatio(resolved.size, seedance, agnes, miniMaxH3);
-    const resolution = resolveResolution(resolved.vquality, model, seedance, agnes, miniMaxH3);
-    const resolutionPresets = miniMaxH3 ? miniMaxH3ResolutionOptions : GENERIC_RESOLUTION_PRESETS;
-    const durationRange = readVideoDurationRange(resolved);
-    const seconds = resolveSeconds(resolved, seedance, agnes, miniMaxH3, durationRange);
+    const resolution = normalizeConfiguredResolution(resolved.vquality);
+    const pricedResolutions = resolutionOptions || availableVideoResolutions(config, config.videoModel || config.model, config.videoGenerationMode);
+    const resolutionPresets = [
+        ...VIDEO_RESOLUTION_OPTIONS.filter((item) => pricedResolutions.includes(item.value)),
+        ...(!pricedResolutions.includes(resolution as (typeof pricedResolutions)[number]) && VIDEO_RESOLUTION_OPTIONS.some((item) => item.value === resolution) ? VIDEO_RESOLUTION_OPTIONS.filter((item) => item.value === resolution) : []),
+    ];
+    const providerDurationRange = readVideoDurationRange(resolved);
+    const billingMinimumDuration = config.videoModelBillingConfigurations.find((item) => item.model === (config.videoModel || config.model))?.videoBillingConfiguration?.minimumDurationSeconds || 1;
+    const durationRange = { min: Math.max(providerDurationRange.min, billingMinimumDuration), max: providerDurationRange.max };
+    const durationRangeAvailable = durationRange.min <= durationRange.max;
+    const displayDurationRange = durationRangeAvailable ? durationRange : providerDurationRange;
+    const seconds = resolveSeconds(resolved, seedance, agnes, miniMaxH3, displayDurationRange);
     const [durationDraft, setDurationDraft] = useState(seconds);
     const count = normalizeVideoGenerationCount(config.canvasVideoCount);
 
     useEffect(() => setDurationDraft(seconds), [seconds]);
-
-    useEffect(() => {
-        if (!miniMaxH3) return;
-        const normalized = normalizeMiniMaxH3VideoSettings(config.vquality, config.size, config.videoSeconds);
-        if (normalized.vquality !== config.vquality) onConfigChange("vquality", normalized.vquality);
-        if (normalized.size !== config.size) onConfigChange("size", normalized.size);
-        if (normalized.videoSeconds !== config.videoSeconds) onConfigChange("videoSeconds", normalized.videoSeconds);
-    }, [config.size, config.videoSeconds, config.vquality, miniMaxH3, onConfigChange]);
 
     const commitDuration = (value: number) => {
         const normalized = String(normalizeDurationDraft(String(value), durationRange));
@@ -95,6 +107,12 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
             <div className={className} style={{ color: theme.node.text }} onMouseDown={stopDown}>
                 {showTitle ? <div className="text-base font-semibold">视频设置</div> : null}
 
+                {showGenerationMode ? (
+                    <Field label="生成模式" theme={theme}>
+                        <Segmented block options={VIDEO_GENERATION_MODE_OPTIONS} value={config.videoGenerationMode} onChange={(value) => onConfigChange("videoGenerationMode", String(value))} />
+                    </Field>
+                ) : null}
+
                 <Field label="比例" theme={theme}>
                     <div className="grid grid-cols-5 gap-2">
                         {RATIO_PRESETS.map((preset) => {
@@ -105,46 +123,58 @@ export function VideoSettingsPanel({ config, onConfigChange, theme, showTitle = 
                 </Field>
 
                 <Field label="清晰度" theme={theme}>
-                    <div className={`grid gap-2 ${miniMaxH3 ? "grid-cols-2" : "grid-cols-4"}`}>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                         {resolutionPresets.map((item) => {
-                            const displayItem = miniMaxH3 ? item.toUpperCase() : item;
-                            const disabled = !miniMaxH3 && (item === "4K" || (item === "1080P" && seedance && isSeedanceFastModel(model)));
-                            const disabledReason = item === "4K" ? "当前视频模型不支持 4K" : "当前 fast 模型不支持 1080P";
+                            const displayItem = item.label;
+                            const configured = pricedResolutions.includes(item.value);
+                            const disabled = !configured;
+                            const disabledReason = "当前模式未配置该分辨率价格";
                             return (
-                                <OptionButton key={item} active={resolution === displayItem} disabled={disabled} disabledReason={disabledReason} theme={theme} onClick={() => onConfigChange("vquality", item.toLowerCase())}>
+                                <OptionButton key={item.value} active={resolution === item.value} disabled={disabled} disabledReason={disabledReason} theme={theme} onClick={() => onConfigChange("vquality", item.value)}>
                                     {displayItem}
                                 </OptionButton>
                             );
                         })}
+                        {!resolutionPresets.length ? (
+                            <span className="text-xs" style={{ color: theme.node.muted }}>
+                                当前模式没有可用分辨率价格
+                            </span>
+                        ) : null}
                     </div>
                 </Field>
 
                 {showDuration ? (
                     <Field label="视频时长" theme={theme}>
-                        <div className="flex h-8 items-center gap-3">
-                            <div className="min-w-0 flex-1 px-0.5" onMouseDown={stopDown}>
-                                <Slider min={durationRange.min} max={durationRange.max} step={1} tooltip={{ open: false }} value={durationDraft} onChange={setDurationDraft} onChangeComplete={commitDuration} />
+                        {!durationRangeAvailable ? (
+                            <div className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
+                                当前配置要求最少生成 {durationRange.min} 秒，但该模型最多支持 {durationRange.max} 秒，暂时无法生成
                             </div>
-                            <input
-                                type="number"
-                                min={durationRange.min}
-                                max={durationRange.max}
-                                value={durationDraft}
-                                aria-label="视频时长"
-                                className="h-8 w-14 rounded-lg border bg-transparent px-2 text-center text-sm font-medium outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                                style={{ borderColor: theme.node.stroke, color: theme.node.text, background: theme.node.fill }}
-                                onMouseDown={stopDown}
-                                onChange={(event) => setDurationDraft(normalizeDurationDraft(event.currentTarget.value, durationRange))}
-                                onBlur={() => commitDuration(durationDraft)}
-                                onKeyDown={(event) => {
-                                    if (event.key !== "Enter") return;
-                                    event.currentTarget.blur();
-                                }}
-                            />
-                            <span className="text-sm" style={{ color: theme.node.muted }}>
-                                s
-                            </span>
-                        </div>
+                        ) : (
+                            <div className="flex h-8 items-center gap-3">
+                                <div className="min-w-0 flex-1 px-0.5" onMouseDown={stopDown}>
+                                    <Slider min={durationRange.min} max={durationRange.max} step={1} tooltip={{ open: false }} value={durationDraft} onChange={setDurationDraft} onChangeComplete={commitDuration} />
+                                </div>
+                                <input
+                                    type="number"
+                                    min={durationRange.min}
+                                    max={durationRange.max}
+                                    value={durationDraft}
+                                    aria-label="视频时长"
+                                    className="h-8 w-14 rounded-lg border bg-transparent px-2 text-center text-sm font-medium outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                    style={{ borderColor: theme.node.stroke, color: theme.node.text, background: theme.node.fill }}
+                                    onMouseDown={stopDown}
+                                    onChange={(event) => setDurationDraft(normalizeDurationDraft(event.currentTarget.value, durationRange))}
+                                    onBlur={() => commitDuration(durationDraft)}
+                                    onKeyDown={(event) => {
+                                        if (event.key !== "Enter") return;
+                                        event.currentTarget.blur();
+                                    }}
+                                />
+                                <span className="text-sm" style={{ color: theme.node.muted }}>
+                                    s
+                                </span>
+                            </div>
+                        )}
                     </Field>
                 ) : null}
 
@@ -231,15 +261,19 @@ function resolveRatio(size: string, seedance: boolean, agnes: boolean, miniMaxH3
     return nearestRatio(Number(dimensions[1]) / Number(dimensions[2]));
 }
 
-function resolveResolution(value: string, model: string, seedance: boolean, agnes: boolean, miniMaxH3: boolean): string {
-    const normalized = miniMaxH3 ? normalizeMiniMaxH3Resolution(value) : seedance ? normalizeSeedanceResolution(value, model) : agnes ? normalizeAgnesVideoResolution(value) : `${normalizeVideoResolutionValue(value)}p`;
-    const upper = normalized.toUpperCase();
-    return miniMaxH3 || GENERIC_RESOLUTION_PRESETS.includes(upper as (typeof GENERIC_RESOLUTION_PRESETS)[number]) ? upper : "720P";
+function normalizeConfiguredResolution(value: string) {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "768") return "768p";
+    if (normalized === "1080") return "1080p";
+    if (normalized === "480") return "480p";
+    if (normalized === "720") return "720p";
+    if (normalized === "2160p") return "4k";
+    return normalized;
 }
 
-function resolveSeconds(config: AiConfig, seedance: boolean, agnes: boolean, miniMaxH3: boolean, range: { min: number; max: number }) {
-    const raw = miniMaxH3 ? normalizeMiniMaxH3Duration(config.videoSeconds) : seedance ? normalizeSeedanceDuration(config.videoSeconds) : agnes ? Number(normalizeAgnesVideoSeconds(config.videoSeconds, config.vquality)) : Number(config.videoSeconds || 6);
-    return Math.max(range.min, Math.min(range.max, raw));
+function resolveSeconds(config: AiConfig, _seedance: boolean, _agnes: boolean, _miniMaxH3: boolean, range: { min: number; max: number }) {
+    const raw = Number(config.videoSeconds);
+    return Number.isSafeInteger(raw) ? raw : range.min;
 }
 
 function supportsRatio(ratio: RatioPreset["value"], seedance: boolean, agnes: boolean, miniMaxH3: boolean) {
@@ -268,6 +302,7 @@ export function normalizeVideoGenerationCount(value: string | number): 1 | 2 | 4
 
 export function videoResolutionLabel(value: string): string {
     const normalizedValue = value.trim().toLowerCase();
+    if (normalizedValue === "auto") return "Auto";
     if (normalizedValue === "2k") return "2K";
     if (normalizedValue === "768p" || normalizedValue === "768") return "768P";
     const normalized = normalizeVideoResolutionValue(value);

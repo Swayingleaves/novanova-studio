@@ -5,7 +5,7 @@ import test from "node:test";
 const source = readFileSync(new URL("./app-config-modal.tsx", import.meta.url), "utf8");
 
 test("图像和视频模型显示最小为1的整数同时并发数输入", () => {
-    assert.match(source, /group\.capability === "image" \|\| group\.capability === "video"/);
+    assert.match(source, /editingModelConfig\.modelType === "image" \|\| editingModelConfig\.modelType === "video"/);
     assert.match(source, /min=\{1\}/);
     assert.match(source, /precision=\{0\}/);
     assert.match(source, /requestConcurrency:\s*1/);

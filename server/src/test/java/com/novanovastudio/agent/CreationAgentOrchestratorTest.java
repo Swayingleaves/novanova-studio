@@ -212,6 +212,7 @@ class CreationAgentOrchestratorTest {
         Assertions.assertEquals("canvas_run_generation", plan.tasks().getFirst().toolName());
         Assertions.assertEquals("生成图片：小马在奔跑", plan.tasks().getFirst().prompt());
         Assertions.assertEquals("image-1", plan.tasks().getFirst().toolArguments().get("nodeId"));
+        Assertions.assertEquals("image", plan.tasks().getFirst().toolArguments().get("mode"));
     }
 
     /**

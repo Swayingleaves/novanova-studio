@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { defaultConfig } from "@/features/settings/stores/use-config-store";
-import type { CanvasStoryboardNode } from "../types.ts";
-import { createStoryboardAssetGenerationState, readStoryboardAssetGenerationProgress, readStoryboardAssetImageCost, readStoryboardModelCost, readStoryboardShotReferenceImages, readStoryboardVideoCost, readStoryboardVideoReferenceIssue, readStoryboardVideoShotIssue, removeStoryboardAssetAndAssociations, STORYBOARD_ASSET_KIND_LABELS, STORYBOARD_SHOT_SIZES } from "./storyboard.ts";
+import { defaultConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
+import type { CanvasStoryboardNode } from "../types";
+import { createStoryboardAssetGenerationState, readStoryboardAssetGenerationProgress, readStoryboardAssetImageCost, readStoryboardModelCost, readStoryboardShotReferenceImages, readStoryboardVideoCost, readStoryboardVideoGenerationMode, readStoryboardVideoGenerationModes, readStoryboardVideoReferenceIssue, readStoryboardVideoResolutionOptions, readStoryboardVideoShotIssue, removeStoryboardAssetAndAssociations, STORYBOARD_ASSET_KIND_LABELS, STORYBOARD_SHOT_SIZES } from "./storyboard";
 
 test("分镜景别覆盖十种标准选项", () => {
     assert.equal(STORYBOARD_SHOT_SIZES.length, 10);
@@ -32,14 +32,60 @@ test("分镜资产图片费用按勾选数量乘图片模型单价计算", () =>
     assert.equal(readStoryboardAssetImageCost(modelCosts, "channel-1::image-model", 0), 0);
 });
 
-test("分镜视频费用按模型计费单位逐镜头累计", () => {
+test("分镜视频费用按模式分辨率和计费单位逐镜头累计", () => {
     const shots: CanvasStoryboardNode["storyboard"]["shots"] = [
         { id: "shot-1", shotNumber: 1, durationSeconds: 4, visualDescription: "雨夜街道", shotSize: "远景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头一", assetIds: [] },
         { id: "shot-2", shotNumber: 2, durationSeconds: 6, visualDescription: "侦探回头", shotSize: "近景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头二", assetIds: [] },
     ];
 
-    assert.equal(readStoryboardVideoCost([{ model: "video-generation", taskType: "video", credits: 3, unit: "generation" }], "video-generation", shots), 6);
-    assert.equal(readStoryboardVideoCost([{ model: "video-second", taskType: "video", credits: 2, unit: "second" }], "video-second", shots), 20);
+    const config = storyboardVideoConfig({
+        "video-generation": {
+            capabilities: ["text-to-video"],
+            billingUnit: "generation",
+            prices: { auto: 3 },
+        },
+        "video-second": {
+            capabilities: ["text-to-video"],
+            billingUnit: "second",
+            prices: { auto: 2 },
+        },
+    });
+    const videoConfig = { ...config, vquality: "auto" };
+    const generationQuote = readStoryboardVideoCost(config, "video-generation", videoConfig, shots, []);
+    const secondQuote = readStoryboardVideoCost(config, "video-second", videoConfig, shots, []);
+    assert.deepEqual(generationQuote, { available: true, credits: 6 });
+    assert.deepEqual(secondQuote, { available: true, credits: 20 });
+});
+
+test("分镜按图片资产自动切换图生视频并累计各镜头价格", () => {
+    const shots: CanvasStoryboardNode["storyboard"]["shots"] = [
+        { id: "text-shot", shotNumber: 1, durationSeconds: 3, visualDescription: "无参考", shotSize: "中景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头一", assetIds: [] },
+        { id: "image-shot", shotNumber: 2, durationSeconds: 4, visualDescription: "有参考", shotSize: "近景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头二", assetIds: ["asset-1"] },
+    ];
+    const assets = [{ id: "asset-1", kind: "character" as const, name: "角色", description: "", image: { source: "https://example.com/role.png" } }];
+    const config = storyboardVideoConfig({
+        "video-model": {
+            capabilities: ["text-to-video", "image-to-video"],
+            billingUnit: "generation",
+            prices: { auto: 5 },
+            imagePrices: { auto: 8 },
+        },
+    });
+    assert.equal(readStoryboardVideoGenerationMode(shots[0], assets), "text-to-video");
+    assert.equal(readStoryboardVideoGenerationMode(shots[1], assets), "image-to-video");
+    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, shots, assets), { available: true, credits: 13 });
+});
+
+test("分镜任一镜头缺少分档价格时整批不可报价", () => {
+    const shot: CanvasStoryboardNode["storyboard"]["shots"][number] = {
+        id: "shot-1", shotNumber: 1, durationSeconds: 3, visualDescription: "镜头", shotSize: "中景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "最终提示词", assetIds: [],
+    };
+    const config = storyboardVideoConfig({
+        "video-model": { capabilities: ["text-to-video"], billingUnit: "generation", prices: {} },
+    });
+    const quote = readStoryboardVideoCost(config, "video-model", { ...config, vquality: "720p" }, [shot], []);
+    assert.equal(quote.available, false);
+    if (!quote.available) assert.match(quote.reason, /未配置所选分辨率价格/);
 });
 
 test("分镜视频只允许已合成提示词且满足模型时长的镜头", () => {
@@ -153,4 +199,142 @@ test("删除分镜资产会同步清理所有镜头关联", () => {
 
     assert.deepEqual(result.assets.map((asset) => asset.id), ["asset-2"]);
     assert.deepEqual(result.shots.map((shot) => shot.assetIds), [["asset-2"], []]);
+});
+
+type StoryboardVideoDefinition = {
+    capabilities: string[];
+    billingUnit: "generation" | "second";
+    prices: Record<string, number>;
+    imagePrices?: Record<string, number>;
+    referencePrices?: Record<string, number>;
+};
+
+function storyboardVideoConfig(definitions: Record<string, StoryboardVideoDefinition>): AiConfig {
+    return {
+        ...defaultConfig,
+        videoModels: Object.keys(definitions),
+        videoModel: Object.keys(definitions)[0] || "",
+        videoModelBillingConfigurations: Object.entries(definitions).map(([model, definition]) => ({
+            model,
+            capabilities: definition.capabilities,
+            videoBillingConfiguration: {
+                billingUnit: definition.billingUnit,
+                minimumDurationSeconds: 3,
+                modePrices: {
+                    "text-to-video": definition.prices,
+                    "image-to-video": definition.imagePrices || {},
+                    "reference-to-video": definition.referencePrices || {},
+                },
+            },
+        })),
+    };
+}
+
+test("分镜按视频参考自动切换全能参考并携带参考数量报价", () => {
+    const shot: CanvasStoryboardNode["storyboard"]["shots"][number] = {
+        id: "video-shot", shotNumber: 1, durationSeconds: 4, visualDescription: "有视频参考", shotSize: "中景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头一", assetIds: [],
+    };
+    const referenceVideos = [{ id: "video-1", name: "参考视频.mp4", type: "video/mp4", url: "https://example.com/reference.mp4" }];
+    const config = storyboardVideoConfig({
+        "video-model": {
+            capabilities: ["text-to-video", "image-to-video", "reference-to-video"],
+            billingUnit: "generation",
+            prices: { auto: 5 },
+            imagePrices: { auto: 8 },
+            referencePrices: { auto: 12 },
+        },
+    });
+    assert.equal(readStoryboardVideoGenerationMode(shot, [], referenceVideos), "reference-to-video");
+    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, [shot], [], referenceVideos), { available: true, credits: 12 });
+});
+
+test("分镜图片与视频混合参考按全能参考判定并报价", () => {
+    const shot: CanvasStoryboardNode["storyboard"]["shots"][number] = {
+        id: "mixed-shot", shotNumber: 1, durationSeconds: 4, visualDescription: "混合参考", shotSize: "近景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头一", assetIds: ["asset-1"],
+    };
+    const assets = [{ id: "asset-1", kind: "character" as const, name: "角色", description: "", image: { source: "https://example.com/role.png" } }];
+    const referenceVideos = [{ id: "video-1", name: "参考视频.mp4", type: "video/mp4", url: "https://example.com/reference.mp4" }];
+    const config = storyboardVideoConfig({
+        "video-model": {
+            capabilities: ["text-to-video", "image-to-video", "reference-to-video"],
+            billingUnit: "generation",
+            prices: { auto: 5 },
+            imagePrices: { auto: 8 },
+            referencePrices: { auto: 12 },
+        },
+    });
+    assert.equal(readStoryboardVideoGenerationMode(shot, assets, referenceVideos), "reference-to-video");
+    assert.deepEqual(readStoryboardVideoGenerationModes([shot], assets, referenceVideos), ["reference-to-video"]);
+    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, [shot], assets, referenceVideos), { available: true, credits: 12 });
+});
+
+test("分镜批量视频参考应用到全部镜头并统一按全能参考报价", () => {
+    const shots: CanvasStoryboardNode["storyboard"]["shots"] = [
+        { id: "text-shot", shotNumber: 1, durationSeconds: 3, visualDescription: "无参考", shotSize: "中景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头一", assetIds: [] },
+        { id: "image-shot", shotNumber: 2, durationSeconds: 4, visualDescription: "有图", shotSize: "近景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头二", assetIds: ["asset-1"] },
+        { id: "video-shot", shotNumber: 3, durationSeconds: 5, visualDescription: "有视频", shotSize: "全景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头三", assetIds: [] },
+    ];
+    const assets = [{ id: "asset-1", kind: "scene" as const, name: "街道", description: "", image: { source: "https://example.com/street.png" } }];
+    const referenceVideos = [{ id: "video-1", name: "参考视频.mp4", type: "video/mp4", url: "https://example.com/reference.mp4" }];
+    const config = storyboardVideoConfig({
+        "video-model": {
+            capabilities: ["text-to-video", "image-to-video", "reference-to-video"],
+            billingUnit: "generation",
+            prices: { auto: 5 },
+            imagePrices: { auto: 8 },
+            referencePrices: { auto: 12 },
+        },
+    });
+    assert.deepEqual(readStoryboardVideoGenerationModes(shots, assets, referenceVideos), ["reference-to-video"]);
+    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, shots, assets, referenceVideos), { available: true, credits: 36 });
+});
+
+test("分镜无视频参考时按各镜头图片参考分别判定模式", () => {
+    const shots: CanvasStoryboardNode["storyboard"]["shots"] = [
+        { id: "text-shot", shotNumber: 1, durationSeconds: 3, visualDescription: "无参考", shotSize: "中景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头一", assetIds: [] },
+        { id: "image-shot", shotNumber: 2, durationSeconds: 4, visualDescription: "有图", shotSize: "近景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头二", assetIds: ["asset-1"] },
+    ];
+    const assets = [{ id: "asset-1", kind: "scene" as const, name: "街道", description: "", image: { source: "https://example.com/street.png" } }];
+    const config = storyboardVideoConfig({
+        "video-model": {
+            capabilities: ["text-to-video", "image-to-video"],
+            billingUnit: "generation",
+            prices: { auto: 5 },
+            imagePrices: { auto: 8 },
+        },
+    });
+    assert.deepEqual(readStoryboardVideoGenerationModes(shots, assets), ["text-to-video", "image-to-video"]);
+    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, shots, assets), { available: true, credits: 13 });
+});
+
+test("分镜无参考素材时不会静默落入全能参考模式", () => {
+    const shot: CanvasStoryboardNode["storyboard"]["shots"][number] = {
+        id: "shot-1", shotNumber: 1, durationSeconds: 3, visualDescription: "镜头", shotSize: "中景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "最终提示词", assetIds: [],
+    };
+    const config = storyboardVideoConfig({
+        "video-model": { capabilities: ["reference-to-video"], billingUnit: "generation", prices: {}, referencePrices: { auto: 12 } },
+    });
+    const quote = readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, [shot], []);
+    assert.equal(quote.available, false);
+    if (!quote.available) assert.match(quote.reason, /未配置所选视频生成模式/);
+});
+
+test("分镜分辨率选项取全部镜头模式的价格交集", () => {
+    const shots: CanvasStoryboardNode["storyboard"]["shots"] = [
+        { id: "text-shot", shotNumber: 1, durationSeconds: 3, visualDescription: "无参考", shotSize: "中景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头一", assetIds: [] },
+        { id: "image-shot", shotNumber: 2, durationSeconds: 4, visualDescription: "有图", shotSize: "近景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头二", assetIds: ["asset-1"] },
+        { id: "video-shot", shotNumber: 3, durationSeconds: 5, visualDescription: "有视频", shotSize: "全景", lightingAtmosphere: "", dialogueVoiceover: "", soundEffect: "", cameraMovement: "", finalPrompt: "镜头三", assetIds: [] },
+    ];
+    const assets = [{ id: "asset-1", kind: "scene" as const, name: "街道", description: "", image: { source: "https://example.com/street.png" } }];
+    const referenceVideos = [{ id: "video-1", name: "参考视频.mp4", type: "video/mp4", url: "https://example.com/reference.mp4" }];
+    const config = storyboardVideoConfig({
+        "video-model": {
+            capabilities: ["text-to-video", "image-to-video", "reference-to-video"],
+            billingUnit: "generation",
+            prices: { auto: 5, "720p": 6 },
+            imagePrices: { auto: 8, "720p": 9 },
+            referencePrices: { auto: 12 },
+        },
+    });
+    assert.deepEqual(readStoryboardVideoResolutionOptions(config, "video-model", shots, assets, referenceVideos), ["auto"]);
 });

@@ -87,6 +87,8 @@ class AbstractTaskProfileTest {
         properties = new NovanovaProperties();
         properties.getAi().getTask().setPollingIntervalSeconds(1);
         profile = new TestTaskProfile(aiTaskService, persistenceService, executionRegistry, properties);
+        org.mockito.Mockito.lenient().when(executionRegistry.registerTaskAndPersist(anyString(), any(AgentExecutionRegistry.AgentTaskRegistration.class)))
+                .thenReturn(Mono.just(false));
     }
 
     /**
@@ -262,7 +264,8 @@ class AbstractTaskProfileTest {
                 .thenReturn(Mono.just(response("success", 100, successfulResultData())));
 
         ToolResult result = videoProfile.executeTool(7L, "generate_video",
-                        Map.of("prompt", "使用最近上传参考图生成视频", "model", "video-model"),
+                        Map.of("prompt", "使用最近上传参考图生成视频", "model", "video-model",
+                                "videoGenerationMode", "image-to-video"),
                         "使用最近上传参考图生成视频",
                         List.of(new AgentChatRequest.Attachment("https://storage.example.com/recent.png", "image/*", "最近上传的参考图", "")),
                         eventEmitter, "session-1", "call-1")
@@ -291,7 +294,8 @@ class AbstractTaskProfileTest {
         when(aiTaskService.modelCapabilities(7L, "video-model")).thenReturn(Mono.just(Set.of()));
 
         ToolResult result = videoProfile.executeTool(7L, "generate_video",
-                        Map.of("prompt", "让小猫和小狗玩耍", "model", "video-model"),
+                        Map.of("prompt", "让小猫和小狗玩耍", "model", "video-model",
+                                "videoGenerationMode", "image-to-video"),
                         "让小猫和小狗玩耍",
                         List.of(new AgentChatRequest.Attachment("https://untrusted.example.com/cat-dog.png", "image/png", "猫狗.png", "image:cat-dog")),
                         eventEmitter, "session-1", "call-1")
@@ -303,6 +307,62 @@ class AbstractTaskProfileTest {
         Assertions.assertNotNull(result.error());
         Assertions.assertEquals("invalid_parameter", result.error().category());
         Assertions.assertFalse(result.error().safeToRetry());
+        verify(aiTaskService, never()).createTaskForUser(anyLong(), any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class));
+    }
+
+    /**
+     * Agent 历史 reference_urls 应按 URL 扩展名分组，不能把视频误放进图片引用。
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldClassifyLegacyVideoReferencesByMimeType() {
+        AtomicReference<AiTaskDtos.CreateAiTaskRequest> taskRequestRef = new AtomicReference<>();
+        when(persistenceService.saveOrUpdateGenerationRound(anyLong(), anyString(), anyString(), anyString(), any(JSONObject.class)))
+                .thenReturn(Mono.empty());
+        AiTaskDtos.AiGenerationTaskResponse created = response("success", 100, successfulResultData());
+        when(aiTaskService.createTaskForUser(anyLong(), any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class)))
+                .thenAnswer(invocation -> {
+                    taskRequestRef.set(invocation.getArgument(1));
+                    Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue = invocation.getArgument(2);
+                    return beforeEnqueue.apply(created).thenReturn(created);
+                });
+        when(aiTaskService.getTaskForUser(7L, "task-1"))
+                .thenReturn(Mono.just(response("success", 100, successfulResultData())));
+
+        ToolResult result = new TestVideoProfile(aiTaskService, persistenceService, executionRegistry, properties)
+                .executeTool(7L, "edit_video",
+                        Map.of("prompt", "参考图片和视频生成新视频", "model", "video-model",
+                                "videoGenerationMode", "reference-to-video",
+                                "reference_urls", List.of("https://storage.example.com/source.jpg?token=1",
+                                        "https://storage.example.com/source.mp4#download")),
+                        "参考图片和视频生成新视频", List.of(), eventEmitter, "session-1", "call-1")
+                .block(Duration.ofSeconds(10));
+
+        Assertions.assertNotNull(result);
+        Assertions.assertTrue(result.ok());
+        Assertions.assertNotNull(taskRequestRef.get());
+        Assertions.assertEquals(1, taskRequestRef.get().references().size());
+        Assertions.assertEquals("image/jpeg", taskRequestRef.get().references().getFirst().mimeType());
+        Assertions.assertEquals(1, taskRequestRef.get().videoReferences().size());
+        Assertions.assertEquals("video/mp4", taskRequestRef.get().videoReferences().getFirst().mimeType());
+    }
+
+    /**
+     * Agent 无法确认历史参考 URL 的媒体类型时必须停止创建任务。
+     */
+    @Test
+    void shouldRejectLegacyReferenceWithUnknownMimeType() {
+        ToolResult result = new TestVideoProfile(aiTaskService, persistenceService, executionRegistry, properties)
+                .executeTool(7L, "edit_video",
+                        Map.of("prompt", "使用历史参考生成视频", "model", "video-model",
+                                "videoGenerationMode", "reference-to-video",
+                                "reference_urls", List.of("https://storage.example.com/media?id=source")),
+                        "使用历史参考生成视频", List.of(), eventEmitter, "session-1", "call-1")
+                .block(Duration.ofSeconds(10));
+
+        Assertions.assertNotNull(result);
+        Assertions.assertFalse(result.ok());
+        Assertions.assertEquals("无法识别历史参考素材类型，请重新上传图片或视频素材", result.message());
         verify(aiTaskService, never()).createTaskForUser(anyLong(), any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class));
     }
 

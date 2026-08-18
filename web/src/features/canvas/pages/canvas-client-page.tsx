@@ -14,6 +14,7 @@ import { cancelCompositionTask, composeVideo, waitVideoCompositionTask, type Vid
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { normalizeImageGenerationCount } from "@/features/generation/components/image-settings-panel";
 import { normalizeVideoGenerationCount } from "@/features/generation/components/video-settings-panel";
+import { quoteVideoGeneration } from "@/features/generation/lib/video-billing";
 import { defaultConfig, normalizeModelOptionValue, type AiConfig, useConfigStore, useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { getImageBlob, resolveImageUrl, reuseOrUploadImage, uploadImage, type UploadedImage } from "@/features/storage/services/image-storage";
 import { getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/features/storage/services/file-storage";
@@ -32,7 +33,19 @@ import { fitNodeSize, nodeSizeFromRatio } from "../utils/canvas-node-size";
 import { App } from "antd";
 import type { OnConnectEnd, OnConnectStartParams } from "@xyflow/react";
 import { getCanvasNodeTemplate } from "../constants";
-import { applyCanvasNodeAttributes, isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode, updateCanvasNodeExecution, updateCanvasNodeFrame, updateStoryboardNodeContent, updateStoryboardNodeData, type CanvasNodeAttributes } from "../domain/canvas-node";
+import {
+    applyCanvasNodeAttributes,
+    isImageNode,
+    isStoryboardNode,
+    isTextNode,
+    isVideoCompositionNode,
+    isVideoNode,
+    updateCanvasNodeExecution,
+    updateCanvasNodeFrame,
+    updateStoryboardNodeContent,
+    updateStoryboardNodeData,
+    type CanvasNodeAttributes,
+} from "../domain/canvas-node";
 import {
     applyCanvasNodeConfig,
     applyGeneratedImageToBatchNodes,
@@ -93,8 +106,19 @@ import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "../utils/canvas-agent-ops";
 import { positionCanvasAgentAddNodeOps, type CanvasAgentToolResult } from "../utils/canvas-agent-tools";
-import { buildCanvasResourceReferences, buildNodeMentionReferences } from "../utils/canvas-resource-references";
-import { createStoryboardAssetGenerationState, readStoryboardAssetGenerationProgress, readStoryboardAssetImageCost, readStoryboardModelCost, readStoryboardShotReferenceImages, readStoryboardVideoCost, readStoryboardVideoReferenceIssue, readStoryboardVideoShotIssue, STORYBOARD_SHOT_SIZES } from "../domain/storyboard";
+import { buildCanvasResourceReferences, buildNodeMentionReferences, getGenerationResourceNodes } from "../utils/canvas-resource-references";
+import {
+    createStoryboardAssetGenerationState,
+    readStoryboardAssetGenerationProgress,
+    readStoryboardAssetImageCost,
+    readStoryboardModelCost,
+    readStoryboardShotReferenceImages,
+    readStoryboardVideoCost,
+    readStoryboardVideoGenerationMode,
+    readStoryboardVideoReferenceIssue,
+    readStoryboardVideoShotIssue,
+    STORYBOARD_SHOT_SIZES,
+} from "../domain/storyboard";
 import {
     type CanvasAssistantImage,
     type CanvasAssistantMessage,
@@ -113,6 +137,7 @@ import {
     type CanvasStoryboardAssetGenerationState,
     type CanvasTextNode,
     type CanvasVideoCompositionNode,
+    type CanvasVideoGenerationSettings,
     type CanvasVideoNode,
     type ConnectionHandle,
     type ContextMenuState,
@@ -121,6 +146,8 @@ import {
     type CanvasViewTransform,
 } from "../types";
 import type { ReferenceImage } from "@/features/generation/types/image";
+import type { ReferenceVideo } from "@/features/generation/types/media";
+import type { ObjectStorageFile } from "@/shared/types/object-storage";
 
 const VIDEO_NODE_MAX_WIDTH = 420;
 const VIDEO_NODE_MAX_HEIGHT = 420;
@@ -371,7 +398,9 @@ function CanvasWorkspacePage() {
     const connectionsRef = useRef(connections);
     const selectedNodeIdsRef = useRef(selectedNodeIds);
     const viewportRef = useRef(viewport);
-    const generateNodeRef = useRef<((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, recovery: boolean, signal?: AbortSignal, styleContext?: { ids?: number[]; snapshots?: GenerationStyleSnapshot[] }) => Promise<CanvasAgentToolResult>) | null>(null);
+    const generateNodeRef = useRef<
+        ((nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, recovery: boolean, signal?: AbortSignal, styleContext?: { ids?: number[]; snapshots?: GenerationStyleSnapshot[] }) => Promise<CanvasAgentToolResult>) | null
+    >(null);
     const retryNodeRef = useRef<((node: CanvasDomainNode, signal?: AbortSignal) => Promise<CanvasAgentToolResult>) | null>(null);
     const connectingParamsRef = useRef(connectingParams);
     const connectionTargetNodeIdRef = useRef(connectionTargetNodeId);
@@ -388,28 +417,34 @@ function CanvasWorkspacePage() {
         setNodes((currentNodes) => applyVideoCompositionTaskToNodes(currentNodes, compositionNodeId, resultVideoNodeId, task));
     }, []);
 
-    const monitorVideoCompositionTask = useCallback((compositionNodeId: string, resultVideoNodeId: string | undefined, taskId: string) => {
-        compositionPollControllersRef.current.get(taskId)?.abort();
-        const controller = new AbortController();
-        compositionPollControllersRef.current.set(taskId, controller);
-        void waitVideoCompositionTask(taskId, {
-            signal: controller.signal,
-            onProgress: (task) => applyVideoCompositionTask(compositionNodeId, resultVideoNodeId, task),
-        })
-            .then((task) => applyVideoCompositionTask(compositionNodeId, resultVideoNodeId, task))
-            .catch((error) => {
-                if (isVideoCompositionPollingCanceled(error)) return;
-                setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, compositionNodeId, resultVideoNodeId, error instanceof Error ? error.message : "查询视频合成任务失败", taskId));
+    const monitorVideoCompositionTask = useCallback(
+        (compositionNodeId: string, resultVideoNodeId: string | undefined, taskId: string) => {
+            compositionPollControllersRef.current.get(taskId)?.abort();
+            const controller = new AbortController();
+            compositionPollControllersRef.current.set(taskId, controller);
+            void waitVideoCompositionTask(taskId, {
+                signal: controller.signal,
+                onProgress: (task) => applyVideoCompositionTask(compositionNodeId, resultVideoNodeId, task),
             })
-            .finally(() => {
-                if (compositionPollControllersRef.current.get(taskId) === controller) compositionPollControllersRef.current.delete(taskId);
-            });
-    }, [applyVideoCompositionTask]);
+                .then((task) => applyVideoCompositionTask(compositionNodeId, resultVideoNodeId, task))
+                .catch((error) => {
+                    if (isVideoCompositionPollingCanceled(error)) return;
+                    setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, compositionNodeId, resultVideoNodeId, error instanceof Error ? error.message : "查询视频合成任务失败", taskId));
+                })
+                .finally(() => {
+                    if (compositionPollControllersRef.current.get(taskId) === controller) compositionPollControllersRef.current.delete(taskId);
+                });
+        },
+        [applyVideoCompositionTask],
+    );
 
-    useEffect(() => () => {
-        compositionPollControllersRef.current.forEach((controller) => controller.abort());
-        compositionPollControllersRef.current.clear();
-    }, []);
+    useEffect(
+        () => () => {
+            compositionPollControllersRef.current.forEach((controller) => controller.abort());
+            compositionPollControllersRef.current.clear();
+        },
+        [],
+    );
 
     const createHistoryEntry = useCallback(
         (): CanvasHistoryEntry => ({
@@ -555,11 +590,9 @@ function CanvasWorkspacePage() {
                 monitorVideoCompositionTask(node.id, resultVideoNodeId, taskId);
             });
             // 恢复进行中的服务端任务：查询后端运行中任务，匹配存储的 taskId 后重新绑定进度回调。
-            const loadingNodes = restoredNodes.filter((node) => !(isStoryboardNode(node) && node.storyboard.assetGeneration?.phase === "running")
-                && !isVideoCompositionNode(node)
-                && !compositionResultNodeIds.has(node.id)
-                && node.execution.phase === "running"
-                && node.execution.taskId);
+            const loadingNodes = restoredNodes.filter(
+                (node) => !(isStoryboardNode(node) && node.storyboard.assetGeneration?.phase === "running") && !isVideoCompositionNode(node) && !compositionResultNodeIds.has(node.id) && node.execution.phase === "running" && node.execution.taskId,
+            );
             if (!loadingNodes.length) return;
             const { listAiTasks, waitAiTask } = await import("@/services/api/server");
             const runningTasks = await listAiTasks(["pending", "running"]).catch(() => []);
@@ -672,30 +705,33 @@ function CanvasWorkspacePage() {
     pendingConnectionCreateRef.current = pendingConnectionCreate;
     selectionBoxRef.current = selectionBox;
 
-    const focusCanvasNodes = useCallback((nodeIds: string[]) => {
-        if (!nodeIds.length) return false;
-        const idSet = new Set(nodeIds);
-        const targetNodes = nodesRef.current.filter((node) => idSet.has(node.id));
-        if (!targetNodes.length) return false;
-        const bounds = targetNodes.reduce(
-            (acc, node) => ({
-                left: Math.min(acc.left, node.frame.position.x),
-                top: Math.min(acc.top, node.frame.position.y),
-                right: Math.max(acc.right, node.frame.position.x + node.frame.width),
-                bottom: Math.max(acc.bottom, node.frame.position.y + node.frame.height),
-            }),
-            { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
-        );
-        const scale = viewportRef.current.k;
-        const centerX = (bounds.left + bounds.right) / 2;
-        const centerY = (bounds.top + bounds.bottom) / 2;
-        setViewport({
-            x: size.width / 2 - centerX * scale,
-            y: size.height / 2 - centerY * scale,
-            k: scale,
-        });
-        return true;
-    }, [size.height, size.width]);
+    const focusCanvasNodes = useCallback(
+        (nodeIds: string[]) => {
+            if (!nodeIds.length) return false;
+            const idSet = new Set(nodeIds);
+            const targetNodes = nodesRef.current.filter((node) => idSet.has(node.id));
+            if (!targetNodes.length) return false;
+            const bounds = targetNodes.reduce(
+                (acc, node) => ({
+                    left: Math.min(acc.left, node.frame.position.x),
+                    top: Math.min(acc.top, node.frame.position.y),
+                    right: Math.max(acc.right, node.frame.position.x + node.frame.width),
+                    bottom: Math.max(acc.bottom, node.frame.position.y + node.frame.height),
+                }),
+                { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
+            );
+            const scale = viewportRef.current.k;
+            const centerX = (bounds.left + bounds.right) / 2;
+            const centerY = (bounds.top + bounds.bottom) / 2;
+            setViewport({
+                x: size.width / 2 - centerX * scale,
+                y: size.height / 2 - centerY * scale,
+                k: scale,
+            });
+            return true;
+        },
+        [size.height, size.width],
+    );
 
     const requestFocusNodes = useCallback((nodeIds: string[]) => {
         pendingFocusNodeIdsRef.current = nodeIds.filter(Boolean);
@@ -711,17 +747,20 @@ function CanvasWorkspacePage() {
         focusPendingNodes();
     }, [focusPendingNodes, nodes]);
 
-    const handleNavigationNodeLocate = useCallback((nodeId: string) => {
-        focusCanvasNodes([nodeId]);
-        setSelectedNodeIds(new Set([nodeId]));
-        setSelectedConnectionId(null);
-        setDialogNodeId(null);
-        setToolbarNodeId(null);
-        setSelectionBox(null);
-        setContextMenu(null);
-        setEdgeDeletePopover(null);
-        setPendingConnectionCreate(null);
-    }, [focusCanvasNodes]);
+    const handleNavigationNodeLocate = useCallback(
+        (nodeId: string) => {
+            focusCanvasNodes([nodeId]);
+            setSelectedNodeIds(new Set([nodeId]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(null);
+            setToolbarNodeId(null);
+            setSelectionBox(null);
+            setContextMenu(null);
+            setEdgeDeletePopover(null);
+            setPendingConnectionCreate(null);
+        },
+        [focusCanvasNodes],
+    );
 
     const setConnecting = useCallback((next: ConnectionHandle | null) => {
         connectingParamsRef.current = next;
@@ -786,9 +825,7 @@ function CanvasWorkspacePage() {
                 message.warning("合成视频仅支持引用视频节点创建");
                 return;
             }
-            const defaultStoryboardModel = type === "storyboard"
-                ? normalizeModelOptionValue(effectiveConfig.textModel, effectiveConfig.channels)
-                : "";
+            const defaultStoryboardModel = type === "storyboard" ? normalizeModelOptionValue(effectiveConfig.textModel, effectiveConfig.channels) : "";
             const newNode = createCanvasNode(type, pending.position, defaultStoryboardModel ? { model: defaultStoryboardModel } : undefined);
             const connection = normalizeCanvasConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode]);
             if (!connection) {
@@ -852,6 +889,10 @@ function CanvasWorkspacePage() {
     useEffect(() => {
         if (storyboardVideoGenerationNodeId && !openedStoryboardVideoGenerationNode) setStoryboardVideoGenerationNodeId(null);
     }, [openedStoryboardVideoGenerationNode, storyboardVideoGenerationNodeId]);
+    const storyboardReferenceVideos = useMemo(
+        () => (openedStoryboardVideoGenerationNode ? readStoryboardVideoReferences(openedStoryboardVideoGenerationNode.id, nodes, connections) : []),
+        [connections, nodes, openedStoryboardVideoGenerationNode],
+    );
 
     const batchCardStacks = useMemo(() => {
         const imagePreviewsByRootId = new Map<string, BatchImagePreview[]>();
@@ -943,48 +984,51 @@ function CanvasWorkspacePage() {
         nodes.forEach((node) => map.set(node.id, buildNodeMentionReferences(node, nodes, connections)));
         return map;
     }, [connections, nodes]);
-    const cancelVideoCompositionTasksForDeletedNodes = useCallback((nodeIds: Set<string>) => {
-        const runningTasks = nodesRef.current
-            .filter((node): node is CanvasVideoCompositionNode => isVideoCompositionNode(node)
-                && node.execution.phase === "running"
-                && Boolean(node.execution.taskId)
-                && (nodeIds.has(node.id) || Boolean(node.composition.resultVideoNodeId && nodeIds.has(node.composition.resultVideoNodeId))))
-            .map((node) => ({ compositionNodeId: node.id, resultVideoNodeId: node.composition.resultVideoNodeId, taskId: node.execution.taskId as string }));
-        runningTasks.forEach(({ compositionNodeId, resultVideoNodeId, taskId }) => {
-            compositionPollControllersRef.current.get(taskId)?.abort();
-            setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, compositionNodeId, resultVideoNodeId, "任务已取消", taskId));
-            void cancelCompositionTask(taskId)
-                .then((task) => applyVideoCompositionTask(compositionNodeId, resultVideoNodeId, task))
-                .catch((error) => {
-                    setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, compositionNodeId, resultVideoNodeId, error instanceof Error ? error.message : "取消视频合成任务失败", taskId));
-                });
-        });
-        return runningTasks;
-    }, [applyVideoCompositionTask]);
+    const cancelVideoCompositionTasksForDeletedNodes = useCallback(
+        (nodeIds: Set<string>) => {
+            const runningTasks = nodesRef.current
+                .filter(
+                    (node): node is CanvasVideoCompositionNode =>
+                        isVideoCompositionNode(node) && node.execution.phase === "running" && Boolean(node.execution.taskId) && (nodeIds.has(node.id) || Boolean(node.composition.resultVideoNodeId && nodeIds.has(node.composition.resultVideoNodeId))),
+                )
+                .map((node) => ({ compositionNodeId: node.id, resultVideoNodeId: node.composition.resultVideoNodeId, taskId: node.execution.taskId as string }));
+            runningTasks.forEach(({ compositionNodeId, resultVideoNodeId, taskId }) => {
+                compositionPollControllersRef.current.get(taskId)?.abort();
+                setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, compositionNodeId, resultVideoNodeId, "任务已取消", taskId));
+                void cancelCompositionTask(taskId)
+                    .then((task) => applyVideoCompositionTask(compositionNodeId, resultVideoNodeId, task))
+                    .catch((error) => {
+                        setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, compositionNodeId, resultVideoNodeId, error instanceof Error ? error.message : "取消视频合成任务失败", taskId));
+                    });
+            });
+            return runningTasks;
+        },
+        [applyVideoCompositionTask],
+    );
     const agentSnapshot = useMemo<CanvasAgentSnapshot>(
         () => ({ projectId, title: currentDocument?.identity.title || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }),
         [connections, currentDocument?.identity.title, nodes, projectId, selectedNodeIds, viewport],
     );
 
-    const commitAgentSnapshot = useCallback((snapshot: CanvasAgentSnapshot) => {
-        const nextNodeIds = new Set(snapshot.nodes.map((node) => node.id));
-        const deletedNodeIds = new Set(nodesRef.current.filter((node) => !nextNodeIds.has(node.id)).map((node) => node.id));
-        const canceledTasks = deletedNodeIds.size ? cancelVideoCompositionTasksForDeletedNodes(deletedNodeIds) : [];
-        const nextNodes = canceledTasks.reduce(
-            (currentNodes, task) => markVideoCompositionTaskFailed(currentNodes, task.compositionNodeId, task.resultVideoNodeId, "任务已取消"),
-            snapshot.nodes,
-        );
-        nodesRef.current = nextNodes;
-        connectionsRef.current = snapshot.connections;
-        selectedNodeIdsRef.current = new Set(snapshot.selectedNodeIds);
-        viewportRef.current = snapshot.viewport;
-        setNodes(nextNodes);
-        setConnections(snapshot.connections);
-        setSelectedNodeIds(new Set(snapshot.selectedNodeIds));
-        setViewport(snapshot.viewport);
-        setSelectedConnectionId(null);
-        setContextMenu(null);
-    }, [cancelVideoCompositionTasksForDeletedNodes]);
+    const commitAgentSnapshot = useCallback(
+        (snapshot: CanvasAgentSnapshot) => {
+            const nextNodeIds = new Set(snapshot.nodes.map((node) => node.id));
+            const deletedNodeIds = new Set(nodesRef.current.filter((node) => !nextNodeIds.has(node.id)).map((node) => node.id));
+            const canceledTasks = deletedNodeIds.size ? cancelVideoCompositionTasksForDeletedNodes(deletedNodeIds) : [];
+            const nextNodes = canceledTasks.reduce((currentNodes, task) => markVideoCompositionTaskFailed(currentNodes, task.compositionNodeId, task.resultVideoNodeId, "任务已取消"), snapshot.nodes);
+            nodesRef.current = nextNodes;
+            connectionsRef.current = snapshot.connections;
+            selectedNodeIdsRef.current = new Set(snapshot.selectedNodeIds);
+            viewportRef.current = snapshot.viewport;
+            setNodes(nextNodes);
+            setConnections(snapshot.connections);
+            setSelectedNodeIds(new Set(snapshot.selectedNodeIds));
+            setViewport(snapshot.viewport);
+            setSelectedConnectionId(null);
+            setContextMenu(null);
+        },
+        [cancelVideoCompositionTasksForDeletedNodes],
+    );
 
     const applyAgentOps = useCallback(
         async (ops: CanvasAgentOp[] | undefined, signal: AbortSignal) => {
@@ -1010,21 +1054,21 @@ function CanvasWorkspacePage() {
             if (!generationOps.length) {
                 return { snapshot: { ...next, projectId, title: currentDocument?.identity.title || "未命名画布" } };
             }
-            const outcomes = await Promise.all(generationOps.map(async (operation) => {
-                if (!operation.nodeId) throw new Error("生成节点ID不能为空");
-                const target = nodesRef.current.find((node) => node.id === operation.nodeId);
-                if (!target) throw new Error(`生成节点不存在: ${operation.nodeId}`);
-                const prompt = operation.prompt?.trim() || readCanvasNodePrompt(target);
-                const execute = generateNodeRef.current;
-                if (!execute) throw new Error("画布生成执行器尚未就绪");
-                const mode = readCanvasGenerationMode(operation.mode ?? target.kind);
-                if (!mode) throw new Error("分镜脚本节点不能使用通用生成操作，请在分镜脚本节点中生成");
-                const generationType = mode === "image" || mode === "video" ? mode : null;
-                const snapshots = generationType
-                    ? operation.generationStyleSnapshots?.filter((snapshot) => snapshot.generationType === generationType)
-                    : [];
-                return execute(operation.nodeId, mode, prompt, operation.recovery === true, signal, { snapshots });
-            }));
+            const outcomes = await Promise.all(
+                generationOps.map(async (operation) => {
+                    if (!operation.nodeId) throw new Error("生成节点ID不能为空");
+                    const target = nodesRef.current.find((node) => node.id === operation.nodeId);
+                    if (!target) throw new Error(`生成节点不存在: ${operation.nodeId}`);
+                    const prompt = operation.prompt?.trim() || readCanvasNodePrompt(target);
+                    const execute = generateNodeRef.current;
+                    if (!execute) throw new Error("画布生成执行器尚未就绪");
+                    const mode = readCanvasGenerationMode(operation.mode ?? target.kind);
+                    if (!mode) throw new Error("分镜脚本节点不能使用通用生成操作，请在分镜脚本节点中生成");
+                    const generationType = mode === "image" || mode === "video" ? mode : null;
+                    const snapshots = generationType ? operation.generationStyleSnapshots?.filter((snapshot) => snapshot.generationType === generationType) : [];
+                    return execute(operation.nodeId, mode, prompt, operation.recovery === true, signal, { snapshots });
+                }),
+            );
             const result = withCanvasArgumentSources(mergeCanvasGenerationResults(outcomes), generationOps, stateOps);
             return {
                 snapshot: {
@@ -1100,8 +1144,7 @@ function CanvasWorkspacePage() {
             setPreviewNodeId((current) => (current && allIds.has(current) ? null : current));
             setRunningNodeId((current) => (current && allIds.has(current) ? null : current));
             setContextMenu((current) => {
-                const contextTargetDeleted = (current?.type === "node" && allIds.has(current.nodeId))
-                    || (current?.type === "selection" && current.nodeIds.some((nodeId) => allIds.has(nodeId)));
+                const contextTargetDeleted = (current?.type === "node" && allIds.has(current.nodeId)) || (current?.type === "selection" && current.nodeIds.some((nodeId) => allIds.has(nodeId)));
                 return contextTargetDeleted ? null : current;
             });
             cleanupCanvasFiles({ projectId, nodes: nodesRef.current.filter((node) => !allIds.has(node.id)), chatSessions });
@@ -1766,485 +1809,524 @@ function CanvasWorkspacePage() {
         setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyCanvasNodeConfig(node, patch) : node)));
     }, []);
 
-    const resolveStoryboardRequest = useCallback((node: CanvasStoryboardNode, selectedModel?: string) => {
-        const source = findStoryboardScriptSource(node.id, nodesRef.current, connectionsRef.current);
-        if (!source.ok) {
-            message.error(source.error);
-            return null;
-        }
-        const instruction = node.content.instruction.trim();
-        if (!instruction) {
-            message.error("请先填写分镜描述");
-            return null;
-        }
-        const visualStyle = (node.content.visualStyle || "").trim();
-        if (!visualStyle) {
-            message.error("请先填写视觉风格");
-            return null;
-        }
-        const modelValue = selectedModel === undefined ? node.content.model || effectiveConfig.textModel : selectedModel;
-        const model = normalizeModelOptionValue(modelValue, effectiveConfig.channels);
-        if (!model || !effectiveConfig.textModels.includes(model) || !isAiConfigReady(effectiveConfig, model)) {
-            message.error("请选择可用的文本模型后再生成分镜");
-            return null;
-        }
-        return {
-            scriptContent: source.scriptContent,
-            instruction,
-            visualStyle,
-            model,
-            modelCost: readStoryboardModelCost(effectiveConfig.modelCosts, model),
-        };
-    }, [effectiveConfig, isAiConfigReady, message]);
+    const resolveStoryboardRequest = useCallback(
+        (node: CanvasStoryboardNode, selectedModel?: string) => {
+            const source = findStoryboardScriptSource(node.id, nodesRef.current, connectionsRef.current);
+            if (!source.ok) {
+                message.error(source.error);
+                return null;
+            }
+            const instruction = node.content.instruction.trim();
+            if (!instruction) {
+                message.error("请先填写分镜描述");
+                return null;
+            }
+            const visualStyle = (node.content.visualStyle || "").trim();
+            if (!visualStyle) {
+                message.error("请先填写视觉风格");
+                return null;
+            }
+            const modelValue = selectedModel === undefined ? node.content.model || effectiveConfig.textModel : selectedModel;
+            const model = normalizeModelOptionValue(modelValue, effectiveConfig.channels);
+            if (!model || !effectiveConfig.textModels.includes(model) || !isAiConfigReady(effectiveConfig, model)) {
+                message.error("请选择可用的文本模型后再生成分镜");
+                return null;
+            }
+            return {
+                scriptContent: source.scriptContent,
+                instruction,
+                visualStyle,
+                model,
+                modelCost: readStoryboardModelCost(effectiveConfig.modelCosts, model),
+            };
+        },
+        [effectiveConfig, isAiConfigReady, message],
+    );
 
     const handleStoryboardInstructionChange = useCallback((nodeId: string, instruction: string) => {
-        setNodes((prev) => prev.map((node) => node.id === nodeId ? applyCanvasNodeAttributes(node, { content: instruction }) : node));
+        setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyCanvasNodeAttributes(node, { content: instruction }) : node)));
     }, []);
 
     const handleStoryboardVisualStyleChange = useCallback((nodeId: string, visualStyle: string) => {
-        setNodes((prev) => prev.map((node) => node.id === nodeId && isStoryboardNode(node)
-            ? updateStoryboardNodeContent(node, { visualStyle })
-            : node));
+        setNodes((prev) => prev.map((node) => (node.id === nodeId && isStoryboardNode(node) ? updateStoryboardNodeContent(node, { visualStyle }) : node)));
     }, []);
 
-    const handleStoryboardModelChange = useCallback((nodeId: string, model: string) => {
-        const normalizedModel = normalizeModelOptionValue(model, effectiveConfig.channels);
-        setNodes((prev) => prev.map((node) => node.id === nodeId ? applyCanvasNodeAttributes(node, { model: normalizedModel || model }) : node));
-    }, [effectiveConfig.channels]);
+    const handleStoryboardModelChange = useCallback(
+        (nodeId: string, model: string) => {
+            const normalizedModel = normalizeModelOptionValue(model, effectiveConfig.channels);
+            setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyCanvasNodeAttributes(node, { model: normalizedModel || model }) : node)));
+        },
+        [effectiveConfig.channels],
+    );
 
     const handleStoryboardDataChange = useCallback((nodeId: string, updater: (storyboard: CanvasStoryboardNode["storyboard"]) => CanvasStoryboardNode["storyboard"]) => {
-        setNodes((prev) => prev.map((node) => node.id === nodeId && isStoryboardNode(node) ? updateStoryboardNodeData(node, updater(node.storyboard)) : node));
+        setNodes((prev) => prev.map((node) => (node.id === nodeId && isStoryboardNode(node) ? updateStoryboardNodeData(node, updater(node.storyboard)) : node)));
     }, []);
 
     const updateStoryboardAssetGeneration = useCallback((nodeId: string, updater: (state: CanvasStoryboardAssetGenerationState) => CanvasStoryboardAssetGenerationState) => {
-        setNodes((prev) => prev.map((node) => {
-            if (node.id !== nodeId || !isStoryboardNode(node) || !node.storyboard.assetGeneration) return node;
-            return updateStoryboardNodeData(node, { assetGeneration: updater(node.storyboard.assetGeneration) });
-        }));
+        setNodes((prev) =>
+            prev.map((node) => {
+                if (node.id !== nodeId || !isStoryboardNode(node) || !node.storyboard.assetGeneration) return node;
+                return updateStoryboardNodeData(node, { assetGeneration: updater(node.storyboard.assetGeneration) });
+            }),
+        );
     }, []);
 
-    const handleGenerateStoryboardAssets = useCallback(async (nodeId: string, assetIds: string[], settings: CanvasStoryboardAssetGenerationSettings) => {
-        const currentNode = nodesRef.current.find((item): item is CanvasStoryboardNode => item.id === nodeId && isStoryboardNode(item));
-        if (!currentNode || currentNode.execution.phase === "running") return;
-        const visualStyle = (currentNode.content.visualStyle || "").trim();
-        if (!visualStyle) {
-            message.error("请先在分镜脚本节点填写视觉风格");
-            return;
-        }
-        const selectedIds = Array.from(new Set(assetIds));
-        const selectedAssets = currentNode.storyboard.assets.filter((asset) => selectedIds.includes(asset.id));
-        if (!selectedAssets.length) {
-            message.error("请至少勾选一项资产");
-            return;
-        }
-        if (selectedAssets.length !== selectedIds.length) {
-            message.error("所选资产已发生变化，请重新选择");
-            return;
-        }
-        const normalizedModel = normalizeModelOptionValue(settings.model, effectiveConfig.channels);
-        if (!normalizedModel || !effectiveConfig.imageModels.includes(normalizedModel) || !isAiConfigReady(effectiveConfig, normalizedModel)) {
-            message.error("请选择可用的图片模型后再生成资产图片");
-            return;
-        }
-        const unnamedAsset = selectedAssets.find((asset) => !asset.name.trim());
-        if (unnamedAsset) {
-            message.error("请填写已勾选资产的名称后再生成图片");
-            return;
-        }
-        const normalizedSettings: CanvasStoryboardAssetGenerationSettings = { ...settings, model: normalizedModel };
-        const totalCredits = readStoryboardAssetImageCost(effectiveConfig.modelCosts, normalizedModel, selectedAssets.length);
-        if (typeof creditBalance === "number" && totalCredits > creditBalance) {
-            message.error(`积分不足，生成 ${selectedAssets.length} 项资产需要 ${totalCredits} 积分，当前可用 ${creditBalance} 积分`);
-            return;
-        }
-
-        const startedAt = new Date().toISOString();
-        const initialState = createStoryboardAssetGenerationState(selectedIds, normalizedSettings, startedAt);
-        setNodes((prev) => prev.map((node) => node.id === nodeId && isStoryboardNode(node)
-            ? updateCanvasNodeExecution(updateStoryboardNodeData(node, { assetGeneration: initialState }), { phase: "running", taskId: "", progress: 0, errorMessage: "", startedAt, completedAt: undefined })
-            : node));
-
-        const runAssetTask = async (asset: typeof selectedAssets[number]) => {
-            try {
-                updateStoryboardAssetGeneration(nodeId, (state) => ({ ...state, statuses: { ...state.statuses, [asset.id]: "running" } }));
-                const task = await createStoryboardAssetImageTask(nodeId, asset, normalizedSettings, visualStyle);
-                updateStoryboardAssetGeneration(nodeId, (state) => ({ ...state, taskIds: { ...state.taskIds, [asset.id]: task.id }, statuses: { ...state.statuses, [asset.id]: "running" } }));
-                const completed = await waitAiTask(task.id, {
-                    signal: new AbortController().signal,
-                    onProgress: (snapshot) => {
-                        setNodes((prev) => prev.map((node) => node.id === nodeId && isStoryboardNode(node)
-                            ? updateCanvasNodeExecution(node, { progress: Math.max(node.execution.progress || 0, Math.round((snapshot.progress || 0) / selectedAssets.length)) })
-                            : node));
-                    },
-                });
-                const image = readStoryboardAssetImage(completed);
-                setNodes((prev) => prev.map((node) => node.id === nodeId && isStoryboardNode(node) && node.storyboard.assetGeneration
-                    ? updateStoryboardNodeData(node, {
-                          assets: node.storyboard.assets.map((item) => item.id === asset.id ? { ...item, image } : item),
-                          assetGeneration: {
-                              ...node.storyboard.assetGeneration,
-                              statuses: { ...node.storyboard.assetGeneration.statuses, [asset.id]: "succeeded" },
-                              progress: readStoryboardAssetGenerationProgress({ ...node.storyboard.assetGeneration, statuses: { ...node.storyboard.assetGeneration.statuses, [asset.id]: "succeeded" } }),
-                              errors: Object.fromEntries(Object.entries(node.storyboard.assetGeneration.errors).filter(([id]) => id !== asset.id)),
-                          },
-                      })
-                    : node));
-                return true;
-            } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : "资产图片生成失败";
-                updateStoryboardAssetGeneration(nodeId, (state) => {
-                    const statuses = { ...state.statuses, [asset.id]: "failed" as const };
-                    return { ...state, statuses, progress: readStoryboardAssetGenerationProgress({ ...state, statuses }), errors: { ...state.errors, [asset.id]: errorMessage } };
-                });
-                return false;
+    const handleGenerateStoryboardAssets = useCallback(
+        async (nodeId: string, assetIds: string[], settings: CanvasStoryboardAssetGenerationSettings) => {
+            const currentNode = nodesRef.current.find((item): item is CanvasStoryboardNode => item.id === nodeId && isStoryboardNode(item));
+            if (!currentNode || currentNode.execution.phase === "running") return;
+            const visualStyle = (currentNode.content.visualStyle || "").trim();
+            if (!visualStyle) {
+                message.error("请先在分镜脚本节点填写视觉风格");
+                return;
             }
-        };
+            const selectedIds = Array.from(new Set(assetIds));
+            const selectedAssets = currentNode.storyboard.assets.filter((asset) => selectedIds.includes(asset.id));
+            if (!selectedAssets.length) {
+                message.error("请至少勾选一项资产");
+                return;
+            }
+            if (selectedAssets.length !== selectedIds.length) {
+                message.error("所选资产已发生变化，请重新选择");
+                return;
+            }
+            const normalizedModel = normalizeModelOptionValue(settings.model, effectiveConfig.channels);
+            if (!normalizedModel || !effectiveConfig.imageModels.includes(normalizedModel) || !isAiConfigReady(effectiveConfig, normalizedModel)) {
+                message.error("请选择可用的图片模型后再生成资产图片");
+                return;
+            }
+            const unnamedAsset = selectedAssets.find((asset) => !asset.name.trim());
+            if (unnamedAsset) {
+                message.error("请填写已勾选资产的名称后再生成图片");
+                return;
+            }
+            const normalizedSettings: CanvasStoryboardAssetGenerationSettings = { ...settings, model: normalizedModel };
+            const totalCredits = readStoryboardAssetImageCost(effectiveConfig.modelCosts, normalizedModel, selectedAssets.length);
+            if (typeof creditBalance === "number" && totalCredits > creditBalance) {
+                message.error(`积分不足，生成 ${selectedAssets.length} 项资产需要 ${totalCredits} 积分，当前可用 ${creditBalance} 积分`);
+                return;
+            }
 
-        const results = await Promise.all(selectedAssets.map((asset) => runAssetTask(asset)));
-        const completedAt = new Date().toISOString();
-        setNodes((prev) => prev.map((node) => {
-            if (node.id !== nodeId || !isStoryboardNode(node) || !node.storyboard.assetGeneration) return node;
-            const state = node.storyboard.assetGeneration;
-            const hasFailed = state.selectedAssetIds.some((id) => state.statuses[id] === "failed");
-            const finishedState: CanvasStoryboardAssetGenerationState = {
-                ...state,
-                phase: hasFailed ? "failed" : "succeeded",
-                progress: 100,
-                completedAt,
-                errorMessage: hasFailed ? `部分资产图片生成失败（成功 ${results.filter(Boolean).length}/${results.length}）` : "",
+            const startedAt = new Date().toISOString();
+            const initialState = createStoryboardAssetGenerationState(selectedIds, normalizedSettings, startedAt);
+            setNodes((prev) =>
+                prev.map((node) =>
+                    node.id === nodeId && isStoryboardNode(node)
+                        ? updateCanvasNodeExecution(updateStoryboardNodeData(node, { assetGeneration: initialState }), { phase: "running", taskId: "", progress: 0, errorMessage: "", startedAt, completedAt: undefined })
+                        : node,
+                ),
+            );
+
+            const runAssetTask = async (asset: (typeof selectedAssets)[number]) => {
+                try {
+                    updateStoryboardAssetGeneration(nodeId, (state) => ({ ...state, statuses: { ...state.statuses, [asset.id]: "running" } }));
+                    const task = await createStoryboardAssetImageTask(nodeId, asset, normalizedSettings, visualStyle);
+                    updateStoryboardAssetGeneration(nodeId, (state) => ({ ...state, taskIds: { ...state.taskIds, [asset.id]: task.id }, statuses: { ...state.statuses, [asset.id]: "running" } }));
+                    const completed = await waitAiTask(task.id, {
+                        signal: new AbortController().signal,
+                        onProgress: (snapshot) => {
+                            setNodes((prev) =>
+                                prev.map((node) =>
+                                    node.id === nodeId && isStoryboardNode(node) ? updateCanvasNodeExecution(node, { progress: Math.max(node.execution.progress || 0, Math.round((snapshot.progress || 0) / selectedAssets.length)) }) : node,
+                                ),
+                            );
+                        },
+                    });
+                    const image = readStoryboardAssetImage(completed);
+                    setNodes((prev) =>
+                        prev.map((node) =>
+                            node.id === nodeId && isStoryboardNode(node) && node.storyboard.assetGeneration
+                                ? updateStoryboardNodeData(node, {
+                                      assets: node.storyboard.assets.map((item) => (item.id === asset.id ? { ...item, image } : item)),
+                                      assetGeneration: {
+                                          ...node.storyboard.assetGeneration,
+                                          statuses: { ...node.storyboard.assetGeneration.statuses, [asset.id]: "succeeded" },
+                                          progress: readStoryboardAssetGenerationProgress({ ...node.storyboard.assetGeneration, statuses: { ...node.storyboard.assetGeneration.statuses, [asset.id]: "succeeded" } }),
+                                          errors: Object.fromEntries(Object.entries(node.storyboard.assetGeneration.errors).filter(([id]) => id !== asset.id)),
+                                      },
+                                  })
+                                : node,
+                        ),
+                    );
+                    return true;
+                } catch (error) {
+                    const errorMessage = error instanceof Error ? error.message : "资产图片生成失败";
+                    updateStoryboardAssetGeneration(nodeId, (state) => {
+                        const statuses = { ...state.statuses, [asset.id]: "failed" as const };
+                        return { ...state, statuses, progress: readStoryboardAssetGenerationProgress({ ...state, statuses }), errors: { ...state.errors, [asset.id]: errorMessage } };
+                    });
+                    return false;
+                }
             };
-            return updateCanvasNodeExecution(updateStoryboardNodeData(node, { assetGeneration: finishedState }), {
-                phase: hasFailed ? "failed" : "succeeded",
-                progress: 100,
-                errorMessage: finishedState.errorMessage,
-                completedAt,
-            });
-        }));
-        if (results.every(Boolean)) message.success(`已生成 ${results.length} 项资产图片`);
-        else message.warning(`资产图片生成完成，成功 ${results.filter(Boolean).length}/${results.length} 项，失败任务已退款`);
-    }, [creditBalance, effectiveConfig, isAiConfigReady, message, updateStoryboardAssetGeneration]);
 
-    const handleGenerateStoryboardVideos = useCallback(async (nodeId: string, shotIds: string[], selectedModel: string, selectedSettings: StoryboardVideoGenerationSettings) => {
-        if (generatingStoryboardVideoNodeId) return;
-        const currentNode = nodesRef.current.find((item): item is CanvasStoryboardNode => item.id === nodeId && isStoryboardNode(item));
-        if (!currentNode || currentNode.execution.phase === "running") {
-            message.error("分镜脚本正在处理，请稍后再生成视频");
-            return;
-        }
-        const selectedShotIds = Array.from(new Set(shotIds));
-        if (!selectedShotIds.length || selectedShotIds.length !== shotIds.length) {
-            message.error("请选择至少一个有效镜头");
-            return;
-        }
-        const selectedShotIdSet = new Set(selectedShotIds);
-        const selectedShots = currentNode.storyboard.shots.filter((shot) => selectedShotIdSet.has(shot.id));
-        if (selectedShots.length !== selectedShotIds.length) {
-            message.error("所选镜头已发生变化，请重新选择");
-            return;
-        }
-        const normalizedModel = normalizeModelOptionValue(selectedModel, effectiveConfig.channels);
-        const generationConfig = {
-            ...buildGenerationConfig(effectiveConfig, undefined, "video"),
-            ...selectedSettings,
-            model: normalizedModel,
-            videoModel: normalizedModel,
-            count: "1",
-            canvasVideoCount: "1",
-        };
-        const modelCostConfigured = effectiveConfig.modelCosts.some((item) => item.taskType === "video" && item.model === normalizedModel);
-        if (!normalizedModel || !effectiveConfig.videoModels.includes(normalizedModel) || !modelCostConfigured || !isAiConfigReady(generationConfig, normalizedModel)) {
-            message.error("请选择可用的视频模型后再生成");
-            return;
-        }
-        const invalidShot = selectedShots.find((shot) => readStoryboardVideoShotIssue(shot, generationConfig) || readStoryboardVideoReferenceIssue(shot, currentNode.storyboard.assets, generationConfig));
-        if (invalidShot) {
-            const issue = readStoryboardVideoShotIssue(invalidShot, generationConfig) || readStoryboardVideoReferenceIssue(invalidShot, currentNode.storyboard.assets, generationConfig);
-            message.error(`镜号 ${invalidShot.shotNumber} 无法生成视频：${issue}`);
-            return;
-        }
-        const totalCredits = readStoryboardVideoCost(effectiveConfig.modelCosts, normalizedModel, selectedShots);
-        if (typeof creditBalance === "number" && totalCredits > creditBalance) {
-            message.error(`积分不足，生成 ${selectedShots.length} 个视频需要 ${totalCredits} 积分，当前可用 ${creditBalance} 积分`);
-            return;
-        }
-
-        const referenceImagesByShotId = new Map(selectedShots.map((shot) => [shot.id, readStoryboardShotReferenceImages(shot, currentNode.storyboard.assets)]));
-        const uniqueReferenceImages = [...new Map([...referenceImagesByShotId.values()].flat().map((image) => [image.id, image])).values()];
-        const uploadedReferenceImages = await ensureVideoReferenceImagesObjectStorage(uniqueReferenceImages);
-        if (!uploadedReferenceImages) return;
-        const uploadedReferenceImageById = new Map(uploadedReferenceImages.map((image) => [image.id, image]));
-        const preparedReferenceImagesByShotId = new Map(
-            [...referenceImagesByShotId].map(([shotId, references]) => [shotId, references.map((reference) => uploadedReferenceImageById.get(reference.id) || reference)]),
-        );
-        const objectStorageByAssetId = new Map(uploadedReferenceImages.filter((image) => image.objectStorage?.url).map((image) => [image.id, image.objectStorage]));
-        if (objectStorageByAssetId.size) {
+            const results = await Promise.all(selectedAssets.map((asset) => runAssetTask(asset)));
+            const completedAt = new Date().toISOString();
             setNodes((prev) =>
                 prev.map((node) => {
-                    if (node.id !== nodeId || !isStoryboardNode(node)) return node;
-                    return updateStoryboardNodeData(node, {
-                        assets: node.storyboard.assets.map((asset) => {
-                            const objectStorage = objectStorageByAssetId.get(asset.id);
-                            return asset.image && objectStorage ? { ...asset, image: { ...asset.image, objectStorage } } : asset;
-                        }),
+                    if (node.id !== nodeId || !isStoryboardNode(node) || !node.storyboard.assetGeneration) return node;
+                    const state = node.storyboard.assetGeneration;
+                    const hasFailed = state.selectedAssetIds.some((id) => state.statuses[id] === "failed");
+                    const finishedState: CanvasStoryboardAssetGenerationState = {
+                        ...state,
+                        phase: hasFailed ? "failed" : "succeeded",
+                        progress: 100,
+                        completedAt,
+                        errorMessage: hasFailed ? `部分资产图片生成失败（成功 ${results.filter(Boolean).length}/${results.length}）` : "",
+                    };
+                    return updateCanvasNodeExecution(updateStoryboardNodeData(node, { assetGeneration: finishedState }), {
+                        phase: hasFailed ? "failed" : "succeeded",
+                        progress: 100,
+                        errorMessage: finishedState.errorMessage,
+                        completedAt,
                     });
                 }),
             );
-        }
+            if (results.every(Boolean)) message.success(`已生成 ${results.length} 项资产图片`);
+            else message.warning(`资产图片生成完成，成功 ${results.filter(Boolean).length}/${results.length} 项，失败任务已退款`);
+        },
+        [creditBalance, effectiveConfig, isAiConfigReady, message, updateStoryboardAssetGeneration],
+    );
 
-        const videoTemplate = nodeSizeFromRatio(generationConfig.size, getCanvasNodeTemplate("video").width, getCanvasNodeTemplate("video").height) || getCanvasNodeTemplate("video");
-        const createdVideoNodes = selectedShots.map((shot, index) => {
-            const references = preparedReferenceImagesByShotId.get(shot.id) || [];
-            const column = index % 2;
-            const row = Math.floor(index / 2);
-            const id = `video-${nanoid()}`;
-            const node = updateCanvasNodeFrame(
-                {
-                    ...createCanvasNode(
-                        "video",
-                        { x: 0, y: 0 },
-                        {
-                            prompt: shot.finalPrompt.trim(),
-                            status: NODE_STATUS_LOADING,
-                            model: normalizedModel,
-                            size: generationConfig.size,
-                            seconds: String(shot.durationSeconds),
-                            vquality: generationConfig.vquality,
-                            watermark: generationConfig.videoWatermark,
-                            count: 1,
-                            references: generationReferenceUrls({ referenceImages: references, referenceVideos: [] }),
-                            referenceObjectStorages: references.map((reference) => reference.objectStorage).filter((file): file is NonNullable<typeof file> => Boolean(file?.url)),
-                            generationStyleIds: [],
-                            generationStyleSnapshots: [],
-                        },
-                    ),
-                    id,
-                    title: `镜头 ${String(shot.shotNumber).padStart(2, "0")} 视频`,
-                },
-                {
-                    position: {
-                        x: currentNode.frame.position.x + currentNode.frame.width + 96 + column * (videoTemplate.width + 36),
-                        y: currentNode.frame.position.y + row * (videoTemplate.height + 36),
-                    },
-                    width: videoTemplate.width,
-                    height: videoTemplate.height,
-                },
-            );
-            return { id, shot, node };
-        });
-        setGeneratingStoryboardVideoNodeId(nodeId);
-        setNodes((prev) => [...prev, ...createdVideoNodes.map((item) => item.node)]);
-        setConnections((prev) => [...prev, ...createdVideoNodes.map((item) => createRightToLeftConnection(currentNode.id, item.id))]);
-        requestFocusNodes(createdVideoNodes.map((item) => item.id));
-        setSelectedNodeIds(new Set(createdVideoNodes.map((item) => item.id)));
-        setSelectedConnectionId(null);
+    const handleGenerateStoryboardVideos = useCallback(
+        async (nodeId: string, shotIds: string[], selectedModel: string, selectedSettings: StoryboardVideoGenerationSettings) => {
+            if (generatingStoryboardVideoNodeId) return;
+            const currentNode = nodesRef.current.find((item): item is CanvasStoryboardNode => item.id === nodeId && isStoryboardNode(item));
+            if (!currentNode || currentNode.execution.phase === "running") {
+                message.error("分镜脚本正在处理，请稍后再生成视频");
+                return;
+            }
+            const selectedShotIds = Array.from(new Set(shotIds));
+            if (!selectedShotIds.length || selectedShotIds.length !== shotIds.length) {
+                message.error("请选择至少一个有效镜头");
+                return;
+            }
+            const selectedShotIdSet = new Set(selectedShotIds);
+            const selectedShots = currentNode.storyboard.shots.filter((shot) => selectedShotIdSet.has(shot.id));
+            if (selectedShots.length !== selectedShotIds.length) {
+                message.error("所选镜头已发生变化，请重新选择");
+                return;
+            }
+            const normalizedModel = normalizeModelOptionValue(selectedModel, effectiveConfig.channels);
+            const generationConfig = {
+                ...buildGenerationConfig(effectiveConfig, undefined, "video"),
+                ...selectedSettings,
+                model: normalizedModel,
+                videoModel: normalizedModel,
+                count: "1",
+                canvasVideoCount: "1",
+            };
+            if (!normalizedModel || !effectiveConfig.videoModels.includes(normalizedModel) || !isAiConfigReady(generationConfig, normalizedModel)) {
+                message.error("请选择可用的视频模型后再生成");
+                return;
+            }
+            const storyboardReferenceVideos = readStoryboardVideoReferences(nodeId, nodesRef.current, connectionsRef.current);
+            const invalidShot = selectedShots.find((shot) => readStoryboardVideoShotIssue(shot, generationConfig) || readStoryboardVideoReferenceIssue(shot, currentNode.storyboard.assets, generationConfig));
+            if (invalidShot) {
+                const issue = readStoryboardVideoShotIssue(invalidShot, generationConfig) || readStoryboardVideoReferenceIssue(invalidShot, currentNode.storyboard.assets, generationConfig);
+                message.error(`镜号 ${invalidShot.shotNumber} 无法生成视频：${issue}`);
+                return;
+            }
+            const videoQuote = readStoryboardVideoCost(effectiveConfig, normalizedModel, generationConfig, selectedShots, currentNode.storyboard.assets, storyboardReferenceVideos);
+            if (!videoQuote.available) {
+                message.error(videoQuote.reason);
+                return;
+            }
+            if (typeof creditBalance === "number" && videoQuote.credits > creditBalance) {
+                message.error(`积分不足，生成 ${selectedShots.length} 个视频需要 ${videoQuote.credits} 积分，当前可用 ${creditBalance} 积分`);
+                return;
+            }
 
-        try {
-            const results = await Promise.all(createdVideoNodes.map(async ({ id, shot }) => {
-                try {
-                    const references = preparedReferenceImagesByShotId.get(shot.id) || [];
-                    const generatedVideo = await requestVideoGeneration(
-                        { ...generationConfig, videoSeconds: String(shot.durationSeconds), count: "1", canvasVideoCount: "1" },
-                        shot.finalPrompt.trim(),
-                        references,
-                        [],
-                        "storyboard",
-                        {
-                            onProgress: (progress) => {
-                                setNodes((prev) => prev.map((node) => node.id === id ? updateCanvasNodeExecution(node, { progress }) : node));
-                            },
-                            onTaskCreated: (taskId) => {
-                                setNodes((prev) => prev.map((node) => node.id === id ? updateCanvasNodeExecution(node, { taskId }) : node));
-                            },
-                        },
-                    );
-                    const video = await storeGeneratedVideo(generatedVideo);
-                    const completedSize = fitNodeSize(video.width || videoTemplate.width, video.height || videoTemplate.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                    setNodes((prev) => prev.map((node) => {
-                        if (node.id !== id) return node;
-                        const center = { x: node.frame.position.x + node.frame.width / 2, y: node.frame.position.y + node.frame.height / 2 };
-                        return updateCanvasNodeFrame(
-                            applyCanvasNodeAttributes(node, {
-                                ...videoAttributes(video),
+            const referenceImagesByShotId = new Map(selectedShots.map((shot) => [shot.id, readStoryboardShotReferenceImages(shot, currentNode.storyboard.assets)]));
+            const uniqueReferenceImages = [...new Map([...referenceImagesByShotId.values()].flat().map((image) => [image.id, image])).values()];
+            const uploadedReferenceImages = await ensureVideoReferenceImagesObjectStorage(uniqueReferenceImages);
+            if (!uploadedReferenceImages) return;
+            const uploadedReferenceImageById = new Map(uploadedReferenceImages.map((image) => [image.id, image]));
+            const preparedReferenceImagesByShotId = new Map([...referenceImagesByShotId].map(([shotId, references]) => [shotId, references.map((reference) => uploadedReferenceImageById.get(reference.id) || reference)]));
+            const objectStorageByAssetId = new Map(uploadedReferenceImages.filter((image) => image.objectStorage?.url).map((image) => [image.id, image.objectStorage]));
+            if (objectStorageByAssetId.size) {
+                setNodes((prev) =>
+                    prev.map((node) => {
+                        if (node.id !== nodeId || !isStoryboardNode(node)) return node;
+                        return updateStoryboardNodeData(node, {
+                            assets: node.storyboard.assets.map((asset) => {
+                                const objectStorage = objectStorageByAssetId.get(asset.id);
+                                return asset.image && objectStorage ? { ...asset, image: { ...asset.image, objectStorage } } : asset;
+                            }),
+                        });
+                    }),
+                );
+            }
+
+            const videoTemplate = nodeSizeFromRatio(generationConfig.size, getCanvasNodeTemplate("video").width, getCanvasNodeTemplate("video").height) || getCanvasNodeTemplate("video");
+            const createdVideoNodes = selectedShots.map((shot, index) => {
+                const references = preparedReferenceImagesByShotId.get(shot.id) || [];
+                const videoGenerationMode = readStoryboardVideoGenerationMode(shot, currentNode.storyboard.assets, storyboardReferenceVideos);
+                const column = index % 2;
+                const row = Math.floor(index / 2);
+                const id = `video-${nanoid()}`;
+                const node = updateCanvasNodeFrame(
+                    {
+                        ...createCanvasNode(
+                            "video",
+                            { x: 0, y: 0 },
+                            {
                                 prompt: shot.finalPrompt.trim(),
+                                status: NODE_STATUS_LOADING,
                                 model: normalizedModel,
                                 size: generationConfig.size,
                                 seconds: String(shot.durationSeconds),
                                 vquality: generationConfig.vquality,
+                                videoGenerationMode,
                                 watermark: generationConfig.videoWatermark,
                                 count: 1,
-                                references: generationReferenceUrls({ referenceImages: references, referenceVideos: [] }),
-                                referenceObjectStorages: references.map((reference) => reference.objectStorage).filter((file): file is NonNullable<typeof file> => Boolean(file?.url)),
+                                ...generationVideoReferenceAttributes({ referenceImages: references, referenceVideos: storyboardReferenceVideos }),
                                 generationStyleIds: [],
                                 generationStyleSnapshots: [],
-                            }),
-                            { position: { x: center.x - completedSize.width / 2, y: center.y - completedSize.height / 2 }, ...completedSize },
-                        );
-                    }));
-                    return true;
-                } catch (error) {
-                    const structuredError = readAiTaskError(error);
-                    setNodes((prev) => prev.map((node) => node.id === id ? updateCanvasNodeExecution(node, { phase: "failed", errorMessage: structuredError.message }) : node));
-                    return false;
-                }
-            }));
-            if (results.every(Boolean)) message.success(`已创建 ${results.length} 个分镜视频任务`);
-            else message.warning(`分镜视频生成完成，成功 ${results.filter(Boolean).length}/${results.length} 个，失败任务已退款`);
-        } finally {
-            setGeneratingStoryboardVideoNodeId(null);
-        }
-    }, [creditBalance, effectiveConfig, ensureVideoReferenceImagesObjectStorage, generatingStoryboardVideoNodeId, isAiConfigReady, message, requestFocusNodes]);
-
-    const handleGenerateStoryboard = useCallback(async (node: CanvasStoryboardNode) => {
-        const currentNode = nodesRef.current.find((item): item is CanvasStoryboardNode => item.id === node.id && isStoryboardNode(item));
-        if (!currentNode || currentNode.execution.phase === "running") return;
-        const request = resolveStoryboardRequest(currentNode);
-        if (!request) return;
-        if (typeof creditBalance === "number" && request.modelCost > creditBalance) {
-            message.error(`积分不足，首次生成需要 ${request.modelCost} 积分，当前可用 ${creditBalance} 积分`);
-            return;
-        }
-
-        const startedAt = new Date().toISOString();
-        setNodes((prev) => prev.map((item) => item.id === currentNode.id
-            ? updateCanvasNodeExecution(item, { phase: "running", taskId: "", progress: 0, errorMessage: "", startedAt })
-            : item));
-        try {
-            const result = await generateStoryboard({
-                scriptContent: request.scriptContent,
-                instruction: request.instruction,
-                visualStyle: request.visualStyle,
-                model: request.model,
+                            },
+                        ),
+                        id,
+                        title: `镜头 ${String(shot.shotNumber).padStart(2, "0")} 视频`,
+                    },
+                    {
+                        position: {
+                            x: currentNode.frame.position.x + currentNode.frame.width + 96 + column * (videoTemplate.width + 36),
+                            y: currentNode.frame.position.y + row * (videoTemplate.height + 36),
+                        },
+                        width: videoTemplate.width,
+                        height: videoTemplate.height,
+                    },
+                );
+                return { id, shot, node, videoGenerationMode };
             });
-            const completedAt = new Date().toISOString();
-            setNodes((prev) => prev.map((item) => item.id === currentNode.id && isStoryboardNode(item)
-                ? updateCanvasNodeExecution(
-                    replaceStoryboardGenerationResult(item, result.shots, result.assets),
-                    { phase: "succeeded", progress: 100, errorMessage: "", completedAt },
-                )
-                : item));
-            applyStoryboardCreditCharge(result.chargedCredits, setCreditBalance);
-            message.success(`分镜脚本已生成，消耗 ${result.chargedCredits} 积分`);
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : "分镜脚本生成失败";
-            setNodes((prev) => prev.map((item) => item.id === currentNode.id
-                ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage, completedAt: new Date().toISOString() })
-                : item));
-            message.error(errorMessage);
-        }
-    }, [creditBalance, message, resolveStoryboardRequest, setCreditBalance]);
+            setGeneratingStoryboardVideoNodeId(nodeId);
+            setNodes((prev) => [...prev, ...createdVideoNodes.map((item) => item.node)]);
+            setConnections((prev) => [...prev, ...createdVideoNodes.map((item) => createRightToLeftConnection(currentNode.id, item.id))]);
+            requestFocusNodes(createdVideoNodes.map((item) => item.id));
+            setSelectedNodeIds(new Set(createdVideoNodes.map((item) => item.id)));
+            setSelectedConnectionId(null);
 
-    const handleComposeStoryboardPrompts = useCallback(async (nodeId: string, shotIds: string[], selectedModel: string) => {
-        if (composingStoryboardNodeId || composingStoryboardShot) return;
-        const currentNode = nodesRef.current.find((item): item is CanvasStoryboardNode => item.id === nodeId && isStoryboardNode(item));
-        if (!currentNode || currentNode.execution.phase === "running") return;
-        const selectedShotIds = new Set(shotIds);
-        if (!selectedShotIds.size || selectedShotIds.size !== shotIds.length) {
-            message.error("请选择至少一个有效镜头");
-            return;
-        }
-        const selectedShots = currentNode.storyboard.shots.filter((shot) => selectedShotIds.has(shot.id));
-        if (selectedShots.length !== selectedShotIds.size) {
-            message.error("部分选择的镜头不存在或已被删除");
-            return;
-        }
-        const request = resolveStoryboardRequest(currentNode, selectedModel);
-        if (!request) return;
-        const compositionAssets = collectStoryboardCompositionAssets(selectedShots, currentNode.storyboard.assets);
-        const validationError = validateStoryboardComposition(selectedShots, compositionAssets);
-        if (validationError) {
-            message.error(validationError);
-            return;
-        }
-        const totalCredits = request.modelCost * selectedShots.length;
-        if (typeof creditBalance === "number" && totalCredits > creditBalance) {
-            message.error(`积分不足，合成 ${selectedShots.length} 个镜头需要 ${totalCredits} 积分，当前可用 ${creditBalance} 积分`);
-            return;
-        }
-
-        const startedAt = new Date().toISOString();
-        setComposingStoryboardNodeId(currentNode.id);
-        setNodes((prev) => prev.map((item) => item.id === currentNode.id
-            ? updateCanvasNodeExecution(item, { phase: "running", taskId: "", progress: 0, errorMessage: "", startedAt })
-            : item));
-        try {
-            const result = await composeStoryboardPrompts({
-                scriptContent: request.scriptContent,
-                instruction: request.instruction,
-                visualStyle: request.visualStyle,
-                model: request.model,
-                shots: selectedShots,
-                assets: compositionAssets.map(({ id, kind, name, description }) => ({ id, kind, name, description })),
-            });
-            const promptByShotId = new Map(result.prompts.map((prompt) => [prompt.shotId, prompt.finalPrompt]));
-            const completedAt = new Date().toISOString();
-            setNodes((prev) => prev.map((item) => item.id === currentNode.id && isStoryboardNode(item)
-                ? updateCanvasNodeExecution(
-                    updateStoryboardNodeData(item, {
-                        shots: item.storyboard.shots.map((shot) => ({ ...shot, finalPrompt: promptByShotId.get(shot.id) || shot.finalPrompt })),
+            try {
+                const results = await Promise.all(
+                    createdVideoNodes.map(async ({ id, shot, videoGenerationMode }) => {
+                        try {
+                            const references = preparedReferenceImagesByShotId.get(shot.id) || [];
+                            const shotGenerationConfig = {
+                                ...generationConfig,
+                                videoGenerationMode,
+                                videoSeconds: String(shot.durationSeconds),
+                                count: "1",
+                                canvasVideoCount: "1",
+                            };
+                            const generatedVideo = await requestVideoGeneration(shotGenerationConfig, shot.finalPrompt.trim(), references, storyboardReferenceVideos, "storyboard", {
+                                onProgress: (progress) => {
+                                    setNodes((prev) => prev.map((node) => (node.id === id ? updateCanvasNodeExecution(node, { progress }) : node)));
+                                },
+                                onTaskCreated: (taskId) => {
+                                    setNodes((prev) => prev.map((node) => (node.id === id ? updateCanvasNodeExecution(node, { taskId }) : node)));
+                                },
+                            });
+                            const video = await storeGeneratedVideo(generatedVideo);
+                            const completedSize = fitNodeSize(video.width || videoTemplate.width, video.height || videoTemplate.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                            setNodes((prev) =>
+                                prev.map((node) => {
+                                    if (node.id !== id) return node;
+                                    const center = { x: node.frame.position.x + node.frame.width / 2, y: node.frame.position.y + node.frame.height / 2 };
+                                    return updateCanvasNodeFrame(
+                                        applyCanvasNodeAttributes(node, {
+                                            ...videoAttributes(video),
+                                            prompt: shot.finalPrompt.trim(),
+                                            model: normalizedModel,
+                                            size: generationConfig.size,
+                                            seconds: String(shot.durationSeconds),
+                                            vquality: generationConfig.vquality,
+                                            videoGenerationMode,
+                                            watermark: generationConfig.videoWatermark,
+                                            count: 1,
+                                            ...generationVideoReferenceAttributes({ referenceImages: references, referenceVideos: storyboardReferenceVideos }),
+                                            generationStyleIds: [],
+                                            generationStyleSnapshots: [],
+                                        }),
+                                        { position: { x: center.x - completedSize.width / 2, y: center.y - completedSize.height / 2 }, ...completedSize },
+                                    );
+                                }),
+                            );
+                            return true;
+                        } catch (error) {
+                            const structuredError = readAiTaskError(error);
+                            setNodes((prev) => prev.map((node) => (node.id === id ? updateCanvasNodeExecution(node, { phase: "failed", errorMessage: structuredError.message }) : node)));
+                            return false;
+                        }
                     }),
-                    { phase: "succeeded", progress: 100, errorMessage: "", completedAt },
-                )
-                : item));
-            applyStoryboardCreditCharge(result.chargedCredits, setCreditBalance);
-            message.success(`已生成 ${selectedShots.length} 个镜头的最终提示词，消耗 ${result.chargedCredits} 积分`);
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : "提示词合成失败";
-            setNodes((prev) => prev.map((item) => item.id === currentNode.id
-                ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage, completedAt: new Date().toISOString() })
-                : item));
-            message.error(errorMessage);
-        } finally {
-            setComposingStoryboardNodeId((current) => current === nodeId ? null : current);
-        }
-    }, [composingStoryboardNodeId, composingStoryboardShot, creditBalance, message, resolveStoryboardRequest, setCreditBalance]);
+                );
+                if (results.every(Boolean)) message.success(`已创建 ${results.length} 个分镜视频任务`);
+                else message.warning(`分镜视频生成完成，成功 ${results.filter(Boolean).length}/${results.length} 个，失败任务已退款`);
+            } finally {
+                setGeneratingStoryboardVideoNodeId(null);
+            }
+        },
+        [creditBalance, effectiveConfig, ensureVideoReferenceImagesObjectStorage, generatingStoryboardVideoNodeId, isAiConfigReady, message, requestFocusNodes],
+    );
 
-    const handleComposeStoryboardShotPrompt = useCallback(async (nodeId: string, shotId: string) => {
-        if (composingStoryboardNodeId || composingStoryboardShot) return;
-        const currentNode = nodesRef.current.find((item): item is CanvasStoryboardNode => item.id === nodeId && isStoryboardNode(item));
-        if (!currentNode || currentNode.execution.phase === "running") return;
-        const shot = currentNode.storyboard.shots.find((item) => item.id === shotId);
-        if (!shot) {
-            message.error("镜头不存在或已被删除");
-            return;
-        }
-        const request = resolveStoryboardRequest(currentNode);
-        if (!request) return;
-        const compositionAssets = collectStoryboardCompositionAssets([shot], currentNode.storyboard.assets);
-        const validationError = validateStoryboardComposition([shot], compositionAssets);
-        if (validationError) {
-            message.error(validationError);
-            return;
-        }
-        if (typeof creditBalance === "number" && request.modelCost > creditBalance) {
-            message.error(`积分不足，合成镜号 ${shot.shotNumber} 需要 ${request.modelCost} 积分，当前可用 ${creditBalance} 积分`);
-            return;
-        }
+    const handleGenerateStoryboard = useCallback(
+        async (node: CanvasStoryboardNode) => {
+            const currentNode = nodesRef.current.find((item): item is CanvasStoryboardNode => item.id === node.id && isStoryboardNode(item));
+            if (!currentNode || currentNode.execution.phase === "running") return;
+            const request = resolveStoryboardRequest(currentNode);
+            if (!request) return;
+            if (typeof creditBalance === "number" && request.modelCost > creditBalance) {
+                message.error(`积分不足，首次生成需要 ${request.modelCost} 积分，当前可用 ${creditBalance} 积分`);
+                return;
+            }
 
-        setComposingStoryboardShot({ nodeId, shotId });
-        try {
-            const result = await composeStoryboardPrompts({
-                scriptContent: request.scriptContent,
-                instruction: request.instruction,
-                visualStyle: request.visualStyle,
-                model: request.model,
-                shots: [shot],
-                assets: compositionAssets.map(({ id, kind, name, description }) => ({ id, kind, name, description })),
-            });
-            const finalPrompt = result.prompts.find((item) => item.shotId === shotId)?.finalPrompt;
-            if (!finalPrompt) throw new Error("提示词合成完成，但未返回当前镜头结果");
-            setNodes((prev) => prev.map((item) => item.id === nodeId && isStoryboardNode(item)
-                ? updateStoryboardNodeData(item, {
-                    shots: item.storyboard.shots.map((currentShot) => currentShot.id === shotId ? { ...currentShot, finalPrompt } : currentShot),
-                })
-                : item));
-            applyStoryboardCreditCharge(result.chargedCredits, setCreditBalance);
-            message.success(`镜号 ${shot.shotNumber} 的最终提示词已生成，消耗 ${result.chargedCredits} 积分`);
-        } catch (error) {
-            message.error(error instanceof Error ? error.message : "当前镜头提示词生成失败");
-        } finally {
-            setComposingStoryboardShot((current) => current?.nodeId === nodeId && current.shotId === shotId ? null : current);
-        }
-    }, [composingStoryboardNodeId, composingStoryboardShot, creditBalance, message, resolveStoryboardRequest, setCreditBalance]);
+            const startedAt = new Date().toISOString();
+            setNodes((prev) => prev.map((item) => (item.id === currentNode.id ? updateCanvasNodeExecution(item, { phase: "running", taskId: "", progress: 0, errorMessage: "", startedAt }) : item)));
+            try {
+                const result = await generateStoryboard({
+                    scriptContent: request.scriptContent,
+                    instruction: request.instruction,
+                    visualStyle: request.visualStyle,
+                    model: request.model,
+                });
+                const completedAt = new Date().toISOString();
+                setNodes((prev) =>
+                    prev.map((item) =>
+                        item.id === currentNode.id && isStoryboardNode(item) ? updateCanvasNodeExecution(replaceStoryboardGenerationResult(item, result.shots, result.assets), { phase: "succeeded", progress: 100, errorMessage: "", completedAt }) : item,
+                    ),
+                );
+                applyStoryboardCreditCharge(result.chargedCredits, setCreditBalance);
+                message.success(`分镜脚本已生成，消耗 ${result.chargedCredits} 积分`);
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : "分镜脚本生成失败";
+                setNodes((prev) => prev.map((item) => (item.id === currentNode.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage, completedAt: new Date().toISOString() }) : item)));
+                message.error(errorMessage);
+            }
+        },
+        [creditBalance, message, resolveStoryboardRequest, setCreditBalance],
+    );
+
+    const handleComposeStoryboardPrompts = useCallback(
+        async (nodeId: string, shotIds: string[], selectedModel: string) => {
+            if (composingStoryboardNodeId || composingStoryboardShot) return;
+            const currentNode = nodesRef.current.find((item): item is CanvasStoryboardNode => item.id === nodeId && isStoryboardNode(item));
+            if (!currentNode || currentNode.execution.phase === "running") return;
+            const selectedShotIds = new Set(shotIds);
+            if (!selectedShotIds.size || selectedShotIds.size !== shotIds.length) {
+                message.error("请选择至少一个有效镜头");
+                return;
+            }
+            const selectedShots = currentNode.storyboard.shots.filter((shot) => selectedShotIds.has(shot.id));
+            if (selectedShots.length !== selectedShotIds.size) {
+                message.error("部分选择的镜头不存在或已被删除");
+                return;
+            }
+            const request = resolveStoryboardRequest(currentNode, selectedModel);
+            if (!request) return;
+            const compositionAssets = collectStoryboardCompositionAssets(selectedShots, currentNode.storyboard.assets);
+            const validationError = validateStoryboardComposition(selectedShots, compositionAssets);
+            if (validationError) {
+                message.error(validationError);
+                return;
+            }
+            const totalCredits = request.modelCost * selectedShots.length;
+            if (typeof creditBalance === "number" && totalCredits > creditBalance) {
+                message.error(`积分不足，合成 ${selectedShots.length} 个镜头需要 ${totalCredits} 积分，当前可用 ${creditBalance} 积分`);
+                return;
+            }
+
+            const startedAt = new Date().toISOString();
+            setComposingStoryboardNodeId(currentNode.id);
+            setNodes((prev) => prev.map((item) => (item.id === currentNode.id ? updateCanvasNodeExecution(item, { phase: "running", taskId: "", progress: 0, errorMessage: "", startedAt }) : item)));
+            try {
+                const result = await composeStoryboardPrompts({
+                    scriptContent: request.scriptContent,
+                    instruction: request.instruction,
+                    visualStyle: request.visualStyle,
+                    model: request.model,
+                    shots: selectedShots,
+                    assets: compositionAssets.map(({ id, kind, name, description }) => ({ id, kind, name, description })),
+                });
+                const promptByShotId = new Map(result.prompts.map((prompt) => [prompt.shotId, prompt.finalPrompt]));
+                const completedAt = new Date().toISOString();
+                setNodes((prev) =>
+                    prev.map((item) =>
+                        item.id === currentNode.id && isStoryboardNode(item)
+                            ? updateCanvasNodeExecution(
+                                  updateStoryboardNodeData(item, {
+                                      shots: item.storyboard.shots.map((shot) => ({ ...shot, finalPrompt: promptByShotId.get(shot.id) || shot.finalPrompt })),
+                                  }),
+                                  { phase: "succeeded", progress: 100, errorMessage: "", completedAt },
+                              )
+                            : item,
+                    ),
+                );
+                applyStoryboardCreditCharge(result.chargedCredits, setCreditBalance);
+                message.success(`已生成 ${selectedShots.length} 个镜头的最终提示词，消耗 ${result.chargedCredits} 积分`);
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : "提示词合成失败";
+                setNodes((prev) => prev.map((item) => (item.id === currentNode.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage, completedAt: new Date().toISOString() }) : item)));
+                message.error(errorMessage);
+            } finally {
+                setComposingStoryboardNodeId((current) => (current === nodeId ? null : current));
+            }
+        },
+        [composingStoryboardNodeId, composingStoryboardShot, creditBalance, message, resolveStoryboardRequest, setCreditBalance],
+    );
+
+    const handleComposeStoryboardShotPrompt = useCallback(
+        async (nodeId: string, shotId: string) => {
+            if (composingStoryboardNodeId || composingStoryboardShot) return;
+            const currentNode = nodesRef.current.find((item): item is CanvasStoryboardNode => item.id === nodeId && isStoryboardNode(item));
+            if (!currentNode || currentNode.execution.phase === "running") return;
+            const shot = currentNode.storyboard.shots.find((item) => item.id === shotId);
+            if (!shot) {
+                message.error("镜头不存在或已被删除");
+                return;
+            }
+            const request = resolveStoryboardRequest(currentNode);
+            if (!request) return;
+            const compositionAssets = collectStoryboardCompositionAssets([shot], currentNode.storyboard.assets);
+            const validationError = validateStoryboardComposition([shot], compositionAssets);
+            if (validationError) {
+                message.error(validationError);
+                return;
+            }
+            if (typeof creditBalance === "number" && request.modelCost > creditBalance) {
+                message.error(`积分不足，合成镜号 ${shot.shotNumber} 需要 ${request.modelCost} 积分，当前可用 ${creditBalance} 积分`);
+                return;
+            }
+
+            setComposingStoryboardShot({ nodeId, shotId });
+            try {
+                const result = await composeStoryboardPrompts({
+                    scriptContent: request.scriptContent,
+                    instruction: request.instruction,
+                    visualStyle: request.visualStyle,
+                    model: request.model,
+                    shots: [shot],
+                    assets: compositionAssets.map(({ id, kind, name, description }) => ({ id, kind, name, description })),
+                });
+                const finalPrompt = result.prompts.find((item) => item.shotId === shotId)?.finalPrompt;
+                if (!finalPrompt) throw new Error("提示词合成完成，但未返回当前镜头结果");
+                setNodes((prev) =>
+                    prev.map((item) =>
+                        item.id === nodeId && isStoryboardNode(item)
+                            ? updateStoryboardNodeData(item, {
+                                  shots: item.storyboard.shots.map((currentShot) => (currentShot.id === shotId ? { ...currentShot, finalPrompt } : currentShot)),
+                              })
+                            : item,
+                    ),
+                );
+                applyStoryboardCreditCharge(result.chargedCredits, setCreditBalance);
+                message.success(`镜号 ${shot.shotNumber} 的最终提示词已生成，消耗 ${result.chargedCredits} 积分`);
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "当前镜头提示词生成失败");
+            } finally {
+                setComposingStoryboardShot((current) => (current?.nodeId === nodeId && current.shotId === shotId ? null : current));
+            }
+        },
+        [composingStoryboardNodeId, composingStoryboardShot, creditBalance, message, resolveStoryboardRequest, setCreditBalance],
+    );
 
     const downloadNodeImage = useCallback((node: CanvasDomainNode) => {
         if ((!isImageNode(node) && !isVideoNode(node)) || !node.content.source) return;
@@ -2548,7 +2630,11 @@ function CanvasWorkspacePage() {
         },
     });
 
-    const { sendMessage: sendAgentMessage, cancelMessage: cancelAgentMessage, resetSession: resetAgentSession } = useAgentSSE({
+    const {
+        sendMessage: sendAgentMessage,
+        cancelMessage: cancelAgentMessage,
+        resetSession: resetAgentSession,
+    } = useAgentSSE({
         snapshot: agentSnapshot,
         onApplyOps: applyAgentOps,
         onToolExecute: () => {
@@ -2620,9 +2706,7 @@ function CanvasWorkspacePage() {
             if (!sessionId) return;
             updateAssistantSession(sessionId, (session) => ({
                 ...session,
-                messages: session.messages.map((item) => item.id === `plan-${planId}`
-                    ? { ...item, meta: strategy === "OPTIMIZE" ? "提示词已优化" : "保留原始提示词" }
-                    : item),
+                messages: session.messages.map((item) => (item.id === `plan-${planId}` ? { ...item, meta: strategy === "OPTIMIZE" ? "提示词已优化" : "保留原始提示词" } : item)),
                 updatedAt: new Date().toISOString(),
             }));
         },
@@ -2715,6 +2799,22 @@ function CanvasWorkspacePage() {
                 return failedCanvasGenerationResult(nodeId, readAiTaskError(error));
             }
             if (externalSignal?.aborted) return canceledCanvasGenerationResult();
+            if (mode === "video") {
+                const videoQuote = quoteVideoGeneration({
+                    config: generationConfig,
+                    model: generationConfig.model,
+                    mode: generationConfig.videoGenerationMode,
+                    resolution: generationConfig.vquality,
+                    seconds: generationConfig.videoSeconds,
+                    imageReferenceCount: generationContext.referenceImages.length,
+                    videoReferenceCount: generationContext.referenceVideos.length,
+                    taskCount: normalizeVideoGenerationCount(generationConfig.count),
+                });
+                if (!videoQuote.available) {
+                    message.error(videoQuote.reason);
+                    return failedCanvasGenerationResult(nodeId, canvasError("configuration", videoQuote.reason));
+                }
+            }
             setRunningNodeId(nodeId);
             const runController = startGenerationRequest(nodeId, nodeId, nodeId);
             const detachExternalAbort = bindAbortSignal(externalSignal, runController);
@@ -2847,31 +2947,43 @@ function CanvasWorkspacePage() {
                         targetIds.map(async (targetId): Promise<CanvasNodeGenerationOutcome> => {
                             try {
                                 const generationRequest = referenceImages.length
-                                    ? requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, "canvas", { signal: controller.signal, generationStyleIds: styleSnapshots.length ? undefined : styleIds, generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined })
-                                    : requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, "canvas", { signal: controller.signal, generationStyleIds: styleSnapshots.length ? undefined : styleIds, generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined });
+                                    ? requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, "canvas", {
+                                          signal: controller.signal,
+                                          generationStyleIds: styleSnapshots.length ? undefined : styleIds,
+                                          generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined,
+                                      })
+                                    : requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, "canvas", {
+                                          signal: controller.signal,
+                                          generationStyleIds: styleSnapshots.length ? undefined : styleIds,
+                                          generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined,
+                                      });
                                 const [image] = await generationRequest;
                                 if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                                 const completedStyleSnapshots = image.generationStyleSnapshots?.length ? image.generationStyleSnapshots : styleSnapshots;
                                 const uploaded = await reuseOrUploadImage(image);
                                 if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                                 const imageSize = fitNodeSize(uploaded.width, uploaded.height, imageConfig.width, imageConfig.height);
-                                setNodes((currentNodes) => applyGeneratedImageToBatchNodes(currentNodes, {
-                                    rootId,
-                                    targetId,
-                                    attributes: {
-                                        ...imageAttributes(uploaded),
-                                        generationStyleIds: styleIds,
-                                        generationStyleSnapshots: completedStyleSnapshots,
-                                    },
-                                    ...imageSize,
-                                }));
+                                setNodes((currentNodes) =>
+                                    applyGeneratedImageToBatchNodes(currentNodes, {
+                                        rootId,
+                                        targetId,
+                                        attributes: {
+                                            ...imageAttributes(uploaded),
+                                            generationStyleIds: styleIds,
+                                            generationStyleSnapshots: completedStyleSnapshots,
+                                        },
+                                        ...imageSize,
+                                    }),
+                                );
                                 return { nodeId: targetId };
                             } catch (error) {
                                 if (isGenerationCanceled(error)) {
-                                    setNodes((prev) => synchronizeImageBatchRootExecution(
-                                        prev.map((node) => (node.id === targetId ? updateCanvasNodeExecution(node, { phase: "idle", errorMessage: "" }) : node)),
-                                        rootId,
-                                    ));
+                                    setNodes((prev) =>
+                                        synchronizeImageBatchRootExecution(
+                                            prev.map((node) => (node.id === targetId ? updateCanvasNodeExecution(node, { phase: "idle", errorMessage: "" }) : node)),
+                                            rootId,
+                                        ),
+                                    );
                                     return { nodeId: targetId, canceled: true };
                                 }
                                 const structuredError = readAiTaskError(error);
@@ -2935,9 +3047,10 @@ function CanvasWorkspacePage() {
                                         size: generationConfig.size,
                                         seconds: generationConfig.videoSeconds,
                                         vquality: generationConfig.vquality,
+                                        videoGenerationMode: generationConfig.videoGenerationMode,
                                         watermark: generationConfig.videoWatermark,
-                                        count,
-                                        references: generationReferenceUrls(videoGenerationContext),
+                                        count: 1,
+                                        ...generationVideoReferenceAttributes(videoGenerationContext),
                                         generationStyleIds: styleIds,
                                         generationStyleSnapshots: styleSnapshots,
                                     },
@@ -2984,9 +3097,10 @@ function CanvasWorkspacePage() {
                                             size: generationConfig.size,
                                             seconds: generationConfig.videoSeconds,
                                             vquality: generationConfig.vquality,
+                                            videoGenerationMode: generationConfig.videoGenerationMode,
                                             watermark: generationConfig.videoWatermark,
-                                            count,
-                                            references: generationReferenceUrls(videoGenerationContext),
+                                            count: 1,
+                                            ...generationVideoReferenceAttributes(videoGenerationContext),
                                             generationStyleIds: styleIds,
                                             generationStyleSnapshots: generatedVideo.generationStyleSnapshots?.length ? generatedVideo.generationStyleSnapshots : styleSnapshots,
                                         });
@@ -3089,16 +3203,20 @@ function CanvasWorkspacePage() {
                 return canvasGenerationResult(textTargetIds, [], actualToolArguments);
             } catch (error) {
                 if (isGenerationCanceled(error)) {
-                    setNodes((prev) => prev.map((node) =>
-                        node.id === nodeId || pendingChildIds.includes(node.id)
-                            ? updateCanvasNodeExecution(node, { phase: "idle", errorMessage: "" }) : node));
+                    setNodes((prev) => prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? updateCanvasNodeExecution(node, { phase: "idle", errorMessage: "" }) : node)));
                     return canceledCanvasGenerationResult();
                 }
                 const structuredError = readAiTaskError(error);
                 message.error(structuredError.message);
-                setNodes((prev) => prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : updateCanvasNodeExecution(node, { phase: "failed", errorMessage: structuredError.message })) : node)));
+                setNodes((prev) =>
+                    prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : updateCanvasNodeExecution(node, { phase: "failed", errorMessage: structuredError.message })) : node)),
+                );
                 const failedNodeIds = pendingChildIds.length ? pendingChildIds : [nodeId];
-                return canvasGenerationResult([], failedNodeIds.map((failedNodeId) => ({ nodeId: failedNodeId, error: structuredError })), actualToolArguments);
+                return canvasGenerationResult(
+                    [],
+                    failedNodeIds.map((failedNodeId) => ({ nodeId: failedNodeId, error: structuredError })),
+                    actualToolArguments,
+                );
             } finally {
                 detachExternalAbort();
                 finishGenerationRequest(nodeId, runController);
@@ -3132,12 +3250,17 @@ function CanvasWorkspacePage() {
             const batchRoot = isImageNode(node) && node.grouping.rootId ? nodesRef.current.find((item) => item.id === node.grouping.rootId) : null;
             const savedImageNode = isImageNode(node) ? node : batchRoot && isImageNode(batchRoot) ? batchRoot : null;
             const savedImageGeneration = savedImageNode && isImageNode(savedImageNode) ? savedImageNode.generation : null;
+            const savedVideoGeneration = isVideoNode(node) ? node.generation : null;
             const savedStyleSnapshots = savedImageNode?.generation.generationStyleSnapshots?.length
                 ? savedImageNode.generation.generationStyleSnapshots
-                : (isImageNode(node) || isVideoNode(node)) && node.generation.generationStyleSnapshots?.length ? node.generation.generationStyleSnapshots : [];
+                : (isImageNode(node) || isVideoNode(node)) && node.generation.generationStyleSnapshots?.length
+                  ? node.generation.generationStyleSnapshots
+                  : [];
             const savedStyleIds = savedImageNode?.generation.generationStyleIds?.length
                 ? savedImageNode.generation.generationStyleIds
-                : (isImageNode(node) || isVideoNode(node)) && node.generation.generationStyleIds?.length ? node.generation.generationStyleIds : [];
+                : (isImageNode(node) || isVideoNode(node)) && node.generation.generationStyleIds?.length
+                  ? node.generation.generationStyleIds
+                  : [];
             const hasSavedImageGeneration = Boolean(savedImageGeneration && (savedImageGeneration.prompt || savedImageGeneration.model || savedImageGeneration.references.length));
             const retryMode = readCanvasGenerationMode(node.kind);
             if (!retryMode) return failedCanvasGenerationResult(node.id, canvasError("configuration", "分镜脚本节点请使用专属生成入口"));
@@ -3158,7 +3281,7 @@ function CanvasWorkspacePage() {
             }
 
             const context = hasSavedImageGeneration ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, readCanvasNodePrompt(sourceNode)), retryMode);
-            const prompt = (savedImageGeneration?.prompt || context?.prompt || "").trim();
+            const prompt = (savedImageGeneration?.prompt || savedVideoGeneration?.prompt || context?.prompt || "").trim();
             if (!prompt) {
                 message.warning("找不到提示词，无法重试");
                 return failedCanvasGenerationResult(node.id, canvasError("invalid_parameter", "找不到提示词，无法重试", "prompt"));
@@ -3179,6 +3302,35 @@ function CanvasWorkspacePage() {
                 return failedCanvasGenerationResult(node.id, canvasError("configuration", "参考图片已丢失，无法继续重试"));
             }
             const retryImages = retryReferenceImages || [];
+            let retryVideoImages = retryImages;
+            let retryVideoReferences: ReferenceVideo[] = context?.referenceVideos || [];
+            if (isVideoNode(node)) {
+                const savedVideoReferences = await resolveVideoGenerationReferences(savedVideoGeneration);
+                if (savedVideoReferences?.incomplete) {
+                    message.error("已保存的参考素材无法恢复，请重新连接参考节点后再试");
+                    return failedCanvasGenerationResult(node.id, canvasError("configuration", "已保存的参考素材无法恢复，请重新连接参考节点后再试"));
+                }
+                if (savedVideoReferences) {
+                    retryVideoImages = savedVideoReferences.referenceImages;
+                    retryVideoReferences = savedVideoReferences.referenceVideos;
+                }
+            }
+            if (isVideoNode(node)) {
+                const videoQuote = quoteVideoGeneration({
+                    config: generationConfig,
+                    model: generationConfig.model,
+                    mode: generationConfig.videoGenerationMode,
+                    resolution: generationConfig.vquality,
+                    seconds: generationConfig.videoSeconds,
+                    imageReferenceCount: retryVideoImages.length,
+                    videoReferenceCount: retryVideoReferences.length,
+                    taskCount: 1,
+                });
+                if (!videoQuote.available) {
+                    message.error(videoQuote.reason);
+                    return failedCanvasGenerationResult(node.id, canvasError("configuration", videoQuote.reason));
+                }
+            }
             const actualToolArguments = canvasActualGenerationArguments(retryMode, prompt, generationConfig, 1);
             if (externalSignal?.aborted) return canceledCanvasGenerationResult();
 
@@ -3206,12 +3358,12 @@ function CanvasWorkspacePage() {
                     return canvasGenerationResult([node.id], [], actualToolArguments);
                 }
                 if (isVideoNode(node)) {
-                    const videoReferenceImages = await ensureVideoReferenceImagesObjectStorage(retryImages);
+                    const videoReferenceImages = await ensureVideoReferenceImagesObjectStorage(retryVideoImages);
                     if (!videoReferenceImages) {
                         setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "idle", errorMessage: "" }) : item)));
                         return canceledCanvasGenerationResult();
                     }
-                    const generatedVideo = await requestVideoGeneration(generationConfig, prompt, videoReferenceImages, context?.referenceVideos || [], "canvas", {
+                    const generatedVideo = await requestVideoGeneration(generationConfig, prompt, videoReferenceImages, retryVideoReferences, "canvas", {
                         signal: controller.signal,
                         generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds,
                         generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined,
@@ -3239,8 +3391,9 @@ function CanvasWorkspacePage() {
                                     size: generationConfig.size,
                                     seconds: generationConfig.videoSeconds,
                                     vquality: generationConfig.vquality,
+                                    videoGenerationMode: generationConfig.videoGenerationMode,
                                     watermark: generationConfig.videoWatermark,
-                                    references: generationReferenceUrls({ referenceImages: videoReferenceImages, referenceVideos: context?.referenceVideos || [] }),
+                                    ...generationVideoReferenceAttributes({ referenceImages: videoReferenceImages, referenceVideos: retryVideoReferences }),
                                     generationStyleIds: savedStyleIds,
                                     generationStyleSnapshots: completedStyleSnapshots,
                                 }),
@@ -3252,8 +3405,16 @@ function CanvasWorkspacePage() {
                 }
 
                 const image = useReferenceImages
-                    ? await requestEdit(generationConfig, prompt, retryImages, undefined, "canvas", { signal: controller.signal, generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds, generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined }).then((items) => items[0])
-                    : await requestGeneration(generationConfig, prompt, "canvas", { signal: controller.signal, generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds, generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined }).then((items) => items[0]);
+                    ? await requestEdit(generationConfig, prompt, retryImages, undefined, "canvas", {
+                          signal: controller.signal,
+                          generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds,
+                          generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined,
+                      }).then((items) => items[0])
+                    : await requestGeneration(generationConfig, prompt, "canvas", {
+                          signal: controller.signal,
+                          generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds,
+                          generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined,
+                      }).then((items) => items[0]);
                 if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                 const completedStyleSnapshots = image.generationStyleSnapshots?.length ? image.generationStyleSnapshots : savedStyleSnapshots;
                 const uploadedImage = await reuseOrUploadImage(image);
@@ -3288,8 +3449,7 @@ function CanvasWorkspacePage() {
                 return canvasGenerationResult([node.id], [], actualToolArguments);
             } catch (error) {
                 if (isGenerationCanceled(error)) {
-                    setNodes((prev) => prev.map((item) => (item.id === node.id
-                        ? updateCanvasNodeExecution(item, { phase: "idle", errorMessage: "" }) : item)));
+                    setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "idle", errorMessage: "" }) : item)));
                     return canceledCanvasGenerationResult();
                 }
                 const structuredError = readAiTaskError(error);
@@ -3377,72 +3537,77 @@ function CanvasWorkspacePage() {
     );
 
     const handleVideoCompositionInputOrderChange = useCallback((nodeId: string, inputVideoNodeIds: string[]) => {
-        setNodes((currentNodes) => currentNodes.map((node) => {
-            if (node.id !== nodeId || !isVideoCompositionNode(node)) return node;
-            if (node.execution.phase === "running" || !sameNodeIdSet(node.composition.inputVideoNodeIds, inputVideoNodeIds) || sameNodeIds(node.composition.inputVideoNodeIds, inputVideoNodeIds)) return node;
-            return {
-                ...node,
-                composition: {
-                    ...node.composition,
-                    inputVideoNodeIds: [...inputVideoNodeIds],
-                },
-            };
-        }));
+        setNodes((currentNodes) =>
+            currentNodes.map((node) => {
+                if (node.id !== nodeId || !isVideoCompositionNode(node)) return node;
+                if (node.execution.phase === "running" || !sameNodeIdSet(node.composition.inputVideoNodeIds, inputVideoNodeIds) || sameNodeIds(node.composition.inputVideoNodeIds, inputVideoNodeIds)) return node;
+                return {
+                    ...node,
+                    composition: {
+                        ...node.composition,
+                        inputVideoNodeIds: [...inputVideoNodeIds],
+                    },
+                };
+            }),
+        );
     }, []);
 
-    const handleComposeVideo = useCallback(async (node: CanvasVideoCompositionNode) => {
-        if (compositionSubmittingNodeIdsRef.current.has(node.id) || node.execution.phase === "running") return;
-        const videoById = new Map(nodesRef.current.filter((item): item is CanvasVideoNode => isVideoNode(item)).map((item) => [item.id, item]));
-        const currentNode = nodesRef.current.find((item): item is CanvasVideoCompositionNode => item.id === node.id && isVideoCompositionNode(item));
-        if (!currentNode || !canComposeVideo(currentNode, videoById)) {
-            message.warning("至少需要2段已完成且已保存的视频才能合成");
-            return;
-        }
-        compositionSubmittingNodeIdsRef.current.add(node.id);
-        try {
-            const sourceStorageKeys = currentNode.composition.inputVideoNodeIds.map((inputNodeId) => videoById.get(inputNodeId)?.content.storageKey || "");
-            const task = await composeVideo(sourceStorageKeys);
-            const latestNode = nodesRef.current.find((item): item is CanvasVideoCompositionNode => item.id === currentNode.id && isVideoCompositionNode(item));
-            if (!latestNode) {
-                void cancelCompositionTask(task.id).catch(() => undefined);
+    const handleComposeVideo = useCallback(
+        async (node: CanvasVideoCompositionNode) => {
+            if (compositionSubmittingNodeIdsRef.current.has(node.id) || node.execution.phase === "running") return;
+            const videoById = new Map(nodesRef.current.filter((item): item is CanvasVideoNode => isVideoNode(item)).map((item) => [item.id, item]));
+            const currentNode = nodesRef.current.find((item): item is CanvasVideoCompositionNode => item.id === node.id && isVideoCompositionNode(item));
+            if (!currentNode || !canComposeVideo(currentNode, videoById)) {
+                message.warning("至少需要2段已完成且已保存的视频才能合成");
                 return;
             }
-            const resultId = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-            const resultTemplate = getCanvasNodeTemplate("video");
-            const resultCenter = {
-                x: latestNode.frame.position.x + latestNode.frame.width + 96 + resultTemplate.width / 2,
-                y: latestNode.frame.position.y + latestNode.frame.height / 2,
-            };
-            const resultNode = {
-                ...createCanvasNode("video", resultCenter, { status: NODE_STATUS_LOADING, taskId: task.id, progress: task.progress }),
-                id: resultId,
-                title: "合成视频",
-            };
-            setNodes((currentNodes) => [
-                ...currentNodes.map((item) => item.id === latestNode.id && isVideoCompositionNode(item)
-                    ? {
-                          ...item,
-                          execution: { phase: "running" as const, taskId: task.id, progress: task.progress, startedAt: task.startedAt },
-                          composition: { ...item.composition, resultVideoNodeId: resultId },
-                      }
-                    : item),
-                resultNode,
-            ]);
-            setConnections((currentConnections) => [...currentConnections, createRightToLeftConnection(latestNode.id, resultId)]);
-            setSelectedNodeIds(new Set([resultId]));
-            setSelectedConnectionId(null);
-            requestFocusNodes([latestNode.id, resultId]);
-            monitorVideoCompositionTask(latestNode.id, resultId, task.id);
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : "创建视频合成任务失败";
-            message.error(errorMessage);
-            setNodes((currentNodes) => currentNodes.map((item) => item.id === node.id && isVideoCompositionNode(item)
-                ? { ...item, execution: { phase: "failed", errorMessage } }
-                : item));
-        } finally {
-            compositionSubmittingNodeIdsRef.current.delete(node.id);
-        }
-    }, [message, monitorVideoCompositionTask, requestFocusNodes]);
+            compositionSubmittingNodeIdsRef.current.add(node.id);
+            try {
+                const sourceStorageKeys = currentNode.composition.inputVideoNodeIds.map((inputNodeId) => videoById.get(inputNodeId)?.content.storageKey || "");
+                const task = await composeVideo(sourceStorageKeys);
+                const latestNode = nodesRef.current.find((item): item is CanvasVideoCompositionNode => item.id === currentNode.id && isVideoCompositionNode(item));
+                if (!latestNode) {
+                    void cancelCompositionTask(task.id).catch(() => undefined);
+                    return;
+                }
+                const resultId = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                const resultTemplate = getCanvasNodeTemplate("video");
+                const resultCenter = {
+                    x: latestNode.frame.position.x + latestNode.frame.width + 96 + resultTemplate.width / 2,
+                    y: latestNode.frame.position.y + latestNode.frame.height / 2,
+                };
+                const resultNode = {
+                    ...createCanvasNode("video", resultCenter, { status: NODE_STATUS_LOADING, taskId: task.id, progress: task.progress }),
+                    id: resultId,
+                    title: "合成视频",
+                };
+                setNodes((currentNodes) => [
+                    ...currentNodes.map((item) =>
+                        item.id === latestNode.id && isVideoCompositionNode(item)
+                            ? {
+                                  ...item,
+                                  execution: { phase: "running" as const, taskId: task.id, progress: task.progress, startedAt: task.startedAt },
+                                  composition: { ...item.composition, resultVideoNodeId: resultId },
+                              }
+                            : item,
+                    ),
+                    resultNode,
+                ]);
+                setConnections((currentConnections) => [...currentConnections, createRightToLeftConnection(latestNode.id, resultId)]);
+                setSelectedNodeIds(new Set([resultId]));
+                setSelectedConnectionId(null);
+                requestFocusNodes([latestNode.id, resultId]);
+                monitorVideoCompositionTask(latestNode.id, resultId, task.id);
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : "创建视频合成任务失败";
+                message.error(errorMessage);
+                setNodes((currentNodes) => currentNodes.map((item) => (item.id === node.id && isVideoCompositionNode(item) ? { ...item, execution: { phase: "failed", errorMessage } } : item)));
+            } finally {
+                compositionSubmittingNodeIdsRef.current.delete(node.id);
+            }
+        },
+        [message, monitorVideoCompositionTask, requestFocusNodes],
+    );
 
     const assistantOpen = assistantMounted;
     const openAgent = () => setAssistantMounted(true);
@@ -3455,9 +3620,7 @@ function CanvasWorkspacePage() {
     const navigationAssets = useMemo<CanvasNavigationAsset[]>(
         () => [
             ...assets.map((asset) => ({ id: `library:${asset.id}`, source: "library" as const, asset })),
-            ...nodes.flatMap((node) => isStoryboardNode(node)
-                ? node.storyboard.assets.map((asset) => ({ id: `storyboard:${node.id}:${asset.id}`, source: "storyboard" as const, asset, storyboardNodeTitle: node.title }))
-                : []),
+            ...nodes.flatMap((node) => (isStoryboardNode(node) ? node.storyboard.assets.map((asset) => ({ id: `storyboard:${node.id}:${asset.id}`, source: "storyboard" as const, asset, storyboardNodeTitle: node.title })) : [])),
         ],
         [assets, nodes],
     );
@@ -3478,10 +3641,14 @@ function CanvasWorkspacePage() {
     const nodeIdSet = useMemo(() => new Set(nodes.map((node) => node.id)), [nodes]);
     const rfEdges = useMemo(() => toRFEdges(connections, nodeIdSet, hiddenBatchEdgeNodeIds), [connections, hiddenBatchEdgeNodeIds, nodeIdSet]);
     const videoNodesById = useMemo(() => new Map(nodes.filter((node): node is CanvasVideoNode => isVideoNode(node)).map((node) => [node.id, node])), [nodes]);
-    const onNodesChange = useMemo(() => createNodesChangeHandler(setNodes, (nodeIds) => {
-        cancelVideoCompositionTasksForDeletedNodes(nodeIds);
-        setConnections((currentConnections) => currentConnections.filter((connection) => !nodeIds.has(connection.source.nodeId) && !nodeIds.has(connection.target.nodeId)));
-    }), [cancelVideoCompositionTasksForDeletedNodes]);
+    const onNodesChange = useMemo(
+        () =>
+            createNodesChangeHandler(setNodes, (nodeIds) => {
+                cancelVideoCompositionTasksForDeletedNodes(nodeIds);
+                setConnections((currentConnections) => currentConnections.filter((connection) => !nodeIds.has(connection.source.nodeId) && !nodeIds.has(connection.target.nodeId)));
+            }),
+        [cancelVideoCompositionTasksForDeletedNodes],
+    );
     const onEdgesChange = useMemo(() => createEdgesChangeHandler(setConnections), []);
     const onConnect = useMemo(() => createConnectHandler(setConnections, connectionsRef, nodesRef, (errorMessage) => message.warning(errorMessage)), [message]);
 
@@ -3510,7 +3677,7 @@ function CanvasWorkspacePage() {
             onSplit: (n) => setSplitNodeId(n.id),
             onViewImage: (n) => setPreviewNodeId(n.id),
             onViewVideo: (n) => setPreviewNodeId(n.id),
-            onRetry: (n) => isStoryboardNode(n) ? void handleGenerateStoryboard(n) : void handleRetryNode(n),
+            onRetry: (n) => (isStoryboardNode(n) ? void handleGenerateStoryboard(n) : void handleRetryNode(n)),
             onOpenStoryboard: (node) => setStoryboardWorkspaceNodeId(node.id),
             onStoryboardInstructionChange: handleStoryboardInstructionChange,
             onStoryboardVisualStyleChange: handleStoryboardVisualStyleChange,
@@ -3604,9 +3771,7 @@ function CanvasWorkspacePage() {
     const handleNodeContextMenu = useCallback((event: ReactMouseEvent, nodeId: string) => {
         setEdgeDeletePopover(null);
         const selectedNodeIds = selectedNodeIdsRef.current;
-        setContextMenu(selectedNodeIds.size > 1 && selectedNodeIds.has(nodeId)
-            ? { type: "selection", x: event.clientX, y: event.clientY, nodeIds: [...selectedNodeIds] }
-            : { type: "node", x: event.clientX, y: event.clientY, nodeId });
+        setContextMenu(selectedNodeIds.size > 1 && selectedNodeIds.has(nodeId) ? { type: "selection", x: event.clientX, y: event.clientY, nodeIds: [...selectedNodeIds] } : { type: "node", x: event.clientX, y: event.clientY, nodeId });
     }, []);
     const handleSelectionContextMenu = useCallback((event: ReactMouseEvent, nodeIds: string[]) => {
         if (!nodeIds.length) return;
@@ -3823,7 +3988,9 @@ function CanvasWorkspacePage() {
                             mentionReferences={mentionReferencesByNodeId.get(promptPanelNode.id) || []}
                             onPromptChange={handleNodePromptChange}
                             onConfigChange={handleConfigNodeChange}
-                            onGenerate={(nodeId, mode, prompt, styleIds, styleSnapshots) => { void handleGenerateNode(nodeId, mode, prompt, false, undefined, { ids: styleIds, snapshots: styleSnapshots }); }}
+                            onGenerate={(nodeId, mode, prompt, styleIds, styleSnapshots) => {
+                                void handleGenerateNode(nodeId, mode, prompt, false, undefined, { ids: styleIds, snapshots: styleSnapshots });
+                            }}
                             onGeneratePrompt={handleGenerateNodePrompt}
                             onStop={confirmStopGeneration}
                             onMissingConfig={showMissingAiConfig}
@@ -3855,7 +4022,7 @@ function CanvasWorkspacePage() {
                     onCrop={(node) => setCropNodeId(node.id)}
                     onSplit={(node) => setSplitNodeId(node.id)}
                     onViewImage={(node) => setPreviewNodeId(node.id)}
-                    onRetry={(node) => isStoryboardNode(node) ? void handleGenerateStoryboard(node) : void handleRetryNode(node)}
+                    onRetry={(node) => (isStoryboardNode(node) ? void handleGenerateStoryboard(node) : void handleRetryNode(node))}
                     onGenerateStoryboardVideos={(node) => {
                         if (isStoryboardNode(node)) setStoryboardVideoGenerationNodeId(node.id);
                     }}
@@ -3929,7 +4096,7 @@ function CanvasWorkspacePage() {
                 open={Boolean(openedStoryboardNode)}
                 node={openedStoryboardNode}
                 composing={composingStoryboardNodeId === openedStoryboardNode?.id}
-                composingShotId={composingStoryboardShot?.nodeId === openedStoryboardNode?.id ? composingStoryboardShot?.shotId ?? null : null}
+                composingShotId={composingStoryboardShot?.nodeId === openedStoryboardNode?.id ? (composingStoryboardShot?.shotId ?? null) : null}
                 onClose={() => setStoryboardWorkspaceNodeId(null)}
                 onChangeStoryboard={handleStoryboardDataChange}
                 onComposePrompts={(nodeId, shotIds, model) => void handleComposeStoryboardPrompts(nodeId, shotIds, model)}
@@ -3942,6 +4109,7 @@ function CanvasWorkspacePage() {
                 open={Boolean(openedStoryboardVideoGenerationNode)}
                 node={openedStoryboardVideoGenerationNode}
                 generating={generatingStoryboardVideoNodeId === openedStoryboardVideoGenerationNode?.id}
+                referenceVideos={storyboardReferenceVideos}
                 onClose={() => setStoryboardVideoGenerationNodeId(null)}
                 onGenerate={(nodeId, shotIds, model, settings) => void handleGenerateStoryboardVideos(nodeId, shotIds, model, settings)}
                 onMissingVideoModelConfig={() => showMissingAiConfig("video")}
@@ -3994,6 +4162,16 @@ function CanvasWorkspacePage() {
                                     image: generationStyles.filter((style) => style.generationType === "image").map((style) => style.id),
                                     video: generationStyles.filter((style) => style.generationType === "video").map((style) => style.id),
                                 },
+                                {
+                                    size: config.size || "16:9",
+                                    resolution: config.vquality || "720p",
+                                    quality: String(config.vquality || "720p").includes("1080") ? "high" : String(config.vquality || "720p").includes("480") ? "low" : "medium",
+                                    count: normalizeVideoGenerationCount(config.canvasVideoCount),
+                                    seconds: config.videoSeconds || "5",
+                                    watermark: String(config.videoWatermark).toLowerCase() === "true",
+                                    videoGenerationMode: config.videoGenerationMode,
+                                    videoModel: config.videoModel || undefined,
+                                },
                             );
                         } catch (error) {
                             resetThinkings();
@@ -4014,12 +4192,7 @@ function CanvasWorkspacePage() {
     );
 }
 
-function applyVideoCompositionTaskToNodes(
-    nodes: CanvasDomainNode[],
-    compositionNodeId: string,
-    fallbackResultVideoNodeId: string | undefined,
-    task: VideoCompositionTask,
-): CanvasDomainNode[] {
+function applyVideoCompositionTaskToNodes(nodes: CanvasDomainNode[], compositionNodeId: string, fallbackResultVideoNodeId: string | undefined, task: VideoCompositionTask): CanvasDomainNode[] {
     const compositionNode = nodes.find((node): node is CanvasVideoCompositionNode => node.id === compositionNodeId && isVideoCompositionNode(node));
     if (compositionNode?.execution.taskId !== task.id) return nodes;
     const resultVideoNodeId = compositionNode?.composition.resultVideoNodeId || fallbackResultVideoNodeId;
@@ -4054,13 +4227,7 @@ function applyVideoCompositionTaskToNodes(
     });
 }
 
-function markVideoCompositionTaskFailed(
-    nodes: CanvasDomainNode[],
-    compositionNodeId: string,
-    resultVideoNodeId: string | undefined,
-    errorMessage: string,
-    taskId?: string,
-): CanvasDomainNode[] {
+function markVideoCompositionTaskFailed(nodes: CanvasDomainNode[], compositionNodeId: string, resultVideoNodeId: string | undefined, errorMessage: string, taskId?: string): CanvasDomainNode[] {
     const compositionNode = nodes.find((node): node is CanvasVideoCompositionNode => node.id === compositionNodeId && isVideoCompositionNode(node));
     if (taskId && compositionNode?.execution.taskId !== taskId) return nodes;
     return nodes.map((node) => {
@@ -4117,6 +4284,22 @@ function sameNodeIdSet(first: string[], second: string[]): boolean {
     return first.length === second.length && new Set(first).size === first.length && first.every((nodeId) => second.includes(nodeId));
 }
 
+/** 读取画布连入分镜节点的视频参考，批量应用到分镜视频生成。 */
+function readStoryboardVideoReferences(nodeId: string, nodes: CanvasDomainNode[], connections: CanvasConnection[]): ReferenceVideo[] {
+    return getGenerationResourceNodes(nodeId, nodes, connections)
+        .filter((node): node is CanvasVideoNode => isVideoNode(node) && Boolean(node.content.source))
+        .map((node) => ({
+            id: node.id,
+            name: `${node.title || node.id}.mp4`,
+            type: node.content.mimeType || "video/mp4",
+            url: node.content.source,
+            storageKey: node.content.storageKey,
+            bytes: node.content.bytes,
+            durationMs: node.content.durationMilliseconds,
+            objectStorage: node.content.objectStorage,
+        }));
+}
+
 function imageExtension(dataUrl: string) {
     return dataUrl.match(/^data:image[/]([^;]+)/)?.[1] || dataUrl.match(/image[/]([^;]+)/)?.[1] || "png";
 }
@@ -4158,11 +4341,20 @@ function referenceUrl(image: ReferenceImage) {
     return image.objectStorage?.url || image.storageKey || image.url || (!image.dataUrl.startsWith("data:") ? image.dataUrl : undefined);
 }
 
-function generationReferenceUrls(context: { referenceImages: ReferenceImage[]; referenceVideos: Array<{ storageKey?: string; url?: string }> }) {
-    return [...context.referenceImages.map(referenceUrl).filter((url): url is string => Boolean(url)), ...context.referenceVideos.map((video) => video.storageKey || video.url).filter((url): url is string => Boolean(url))];
+function generationVideoReferenceAttributes(context: { referenceImages: ReferenceImage[]; referenceVideos: ReferenceVideo[] }) {
+    return {
+        references: context.referenceImages.map(referenceUrl).filter((url): url is string => Boolean(url)),
+        referenceObjectStorages: context.referenceImages.map((reference) => reference.objectStorage).filter((file): file is NonNullable<typeof file> => Boolean(file?.url)),
+        videoReferences: context.referenceVideos.map(videoReferenceUrl).filter((url): url is string => Boolean(url)),
+        videoReferenceObjectStorages: context.referenceVideos.map((video) => video.objectStorage).filter((file): file is NonNullable<typeof file> => Boolean(file?.url)),
+    };
 }
 
-async function resolveGenerationReferences(generation: CanvasImageGenerationSettings) {
+function videoReferenceUrl(video: ReferenceVideo) {
+    return video.objectStorage?.url || video.storageKey || video.url;
+}
+
+async function resolveGenerationReferences(generation: CanvasImageGenerationSettings): Promise<ReferenceImage[] | null> {
     if (generation.operation !== "edit") return [];
     if (!generation.references.length) return null;
     const references = await Promise.all(
@@ -4173,6 +4365,65 @@ async function resolveGenerationReferences(generation: CanvasImageGenerationSett
         }),
     );
     return references.every(Boolean) ? (references as ReferenceImage[]) : null;
+}
+
+async function resolveVideoGenerationReferences(generation: CanvasVideoGenerationSettings | null): Promise<{ referenceImages: ReferenceImage[]; referenceVideos: ReferenceVideo[]; incomplete: boolean } | null> {
+    if (!generation) return null;
+    const imageReferences = Array.isArray(generation.references) ? generation.references : [];
+    const imageObjectStorages = Array.isArray(generation.referenceObjectStorages) ? generation.referenceObjectStorages : [];
+    const videoReferences = Array.isArray(generation.videoReferences) ? generation.videoReferences : [];
+    const videoObjectStorages = Array.isArray(generation.videoReferenceObjectStorages) ? generation.videoReferenceObjectStorages : [];
+    const hasPersistedReferenceState = Array.isArray(generation.videoReferences) || Array.isArray(generation.videoReferenceObjectStorages) || imageReferences.length > 0;
+    if (!hasPersistedReferenceState) return null;
+
+    const legacyImageEntries = imageReferences.map((reference) => ({ reference, objectStorage: findGenerationObjectStorage(imageObjectStorages, reference) })).filter(({ reference, objectStorage }) => !isVideoReferenceValue(reference, objectStorage));
+    const legacyVideoEntries = imageReferences.map((reference) => ({ reference, objectStorage: findGenerationObjectStorage(imageObjectStorages, reference) })).filter(({ reference, objectStorage }) => isVideoReferenceValue(reference, objectStorage));
+    const imageEntries: Array<ReferenceImage | null> = await Promise.all(
+        legacyImageEntries.map(async ({ reference, objectStorage }, index): Promise<ReferenceImage | null> => {
+            const dataUrl = objectStorage?.url || (reference.startsWith("http") ? reference : reference.startsWith("image:") ? await resolveImageUrl(reference, "") : "");
+            if (!dataUrl) return null;
+            return {
+                id: `saved-video-image-${index}`,
+                name: `reference-${index + 1}.png`,
+                type: objectStorage?.mimeType || "image/png",
+                dataUrl,
+                ...(reference.startsWith("http") ? { url: reference } : {}),
+                ...(reference.startsWith("image:") ? { storageKey: reference } : {}),
+                ...(objectStorage ? { objectStorage } : {}),
+            };
+        }),
+    );
+    const videoEntries = [...legacyVideoEntries, ...videoReferences.map((reference) => ({ reference, objectStorage: findGenerationObjectStorage(videoObjectStorages, reference) }))];
+    const resolvedVideos: Array<ReferenceVideo | null> = await Promise.all(
+        videoEntries.map(async ({ reference, objectStorage }, index): Promise<ReferenceVideo | null> => {
+            const storageKey = reference.startsWith("video:") ? reference : undefined;
+            const url = objectStorage?.url || (reference.startsWith("http") ? reference : storageKey ? await resolveMediaUrl(storageKey, "") : "");
+            if (!url) return null;
+            return {
+                id: `saved-video-reference-${index}`,
+                name: `reference-${index + 1}.mp4`,
+                type: objectStorage?.mimeType || "video/mp4",
+                url,
+                ...(storageKey ? { storageKey } : {}),
+                ...(objectStorage?.bytes !== undefined ? { bytes: objectStorage.bytes } : {}),
+                ...(objectStorage ? { objectStorage } : {}),
+            };
+        }),
+    );
+    return {
+        referenceImages: imageEntries.filter((reference): reference is ReferenceImage => Boolean(reference)),
+        referenceVideos: resolvedVideos.filter((reference): reference is ReferenceVideo => Boolean(reference)),
+        incomplete: imageEntries.some((reference) => !reference) || resolvedVideos.some((reference) => !reference),
+    };
+}
+
+function findGenerationObjectStorage(files: ObjectStorageFile[], reference: string) {
+    const key = reference.replace(/^(?:image|video):/, "");
+    return files.find((file) => file.url === reference || file.key === key);
+}
+
+function isVideoReferenceValue(reference: string, objectStorage?: { mimeType?: string }) {
+    return objectStorage?.mimeType?.startsWith("video/") || /^(?:video:|.*\.(mp4|webm|mov|m4v)(?:[?#]|$))/i.test(reference);
 }
 
 async function readNodeObjectStorageBlob(node: CanvasDomainNode) {
@@ -4206,22 +4457,24 @@ async function hydrateCanvasImages(nodes: CanvasDomainNode[]) {
             continue;
         }
         if (isStoryboardNode(node)) {
-            const assets = await Promise.all(node.storyboard.assets.map(async (asset) => {
-                const image = asset.image;
-                if (!image) return asset;
-                if (image.storageKey) return { ...asset, image: { ...image, source: await resolveImageUrl(image.storageKey, image.source) } };
-                if (!image.source.startsWith("data:image/")) return asset;
-                const uploaded = await uploadImage(image.source);
-                return {
-                    ...asset,
-                    image: {
-                        source: uploaded.url,
-                        storageKey: uploaded.storageKey,
-                        mimeType: uploaded.mimeType,
-                        objectStorage: uploaded.objectStorage,
-                    },
-                };
-            }));
+            const assets = await Promise.all(
+                node.storyboard.assets.map(async (asset) => {
+                    const image = asset.image;
+                    if (!image) return asset;
+                    if (image.storageKey) return { ...asset, image: { ...image, source: await resolveImageUrl(image.storageKey, image.source) } };
+                    if (!image.source.startsWith("data:image/")) return asset;
+                    const uploaded = await uploadImage(image.source);
+                    return {
+                        ...asset,
+                        image: {
+                            source: uploaded.url,
+                            storageKey: uploaded.storageKey,
+                            mimeType: uploaded.mimeType,
+                            objectStorage: uploaded.objectStorage,
+                        },
+                    };
+                }),
+            );
             hydratedNodes.push(updateStoryboardNodeData(node, { assets }));
             continue;
         }
@@ -4295,6 +4548,7 @@ function buildGenerationConfig(config: AiConfig, node: CanvasDomainNode | undefi
         size: generation?.size || config.size || defaultConfig.size,
         videoSeconds: node && isVideoNode(node) ? node.generation.seconds || config.videoSeconds || defaultConfig.videoSeconds : config.videoSeconds || defaultConfig.videoSeconds,
         vquality: node && isVideoNode(node) ? node.generation.quality || config.vquality || defaultConfig.vquality : config.vquality || defaultConfig.vquality,
+        videoGenerationMode: node && isVideoNode(node) ? node.generation.videoGenerationMode || config.videoGenerationMode : config.videoGenerationMode,
         videoWatermark: node && isVideoNode(node) ? node.generation.watermark || config.videoWatermark || defaultConfig.videoWatermark : config.videoWatermark || defaultConfig.videoWatermark,
         count: String(
             mode === "image"
@@ -4367,9 +4621,7 @@ function canvasGenerationResult(successfulNodeIds: string[], failures: CanvasNod
     const successful = Array.from(new Set(successfulNodeIds));
     return {
         ok: failures.length === 0,
-        message: failures.length
-            ? successful.length ? "部分画布节点生成失败" : "画布节点生成失败"
-            : `画布节点生成完成，共 ${successful.length} 个`,
+        message: failures.length ? (successful.length ? "部分画布节点生成失败" : "画布节点生成失败") : `画布节点生成完成，共 ${successful.length} 个`,
         data: { successfulNodeIds: successful, failures, ...(actualToolArguments ? { actualToolArguments } : {}) },
     };
 }
@@ -4384,17 +4636,10 @@ function canceledCanvasGenerationResult(): CanvasAgentToolResult {
 
 function mergeCanvasGenerationResults(results: CanvasAgentToolResult[]): CanvasAgentToolResult {
     if (results.some((result) => result.data?.canceled === true)) return canceledCanvasGenerationResult();
-    const successfulNodeIds = results.flatMap((result) =>
-        Array.isArray(result.data?.successfulNodeIds)
-            ? result.data.successfulNodeIds.filter((value): value is string => typeof value === "string")
-            : [],
-    );
+    const successfulNodeIds = results.flatMap((result) => (Array.isArray(result.data?.successfulNodeIds) ? result.data.successfulNodeIds.filter((value): value is string => typeof value === "string") : []));
     const failures = results.flatMap((result) =>
         Array.isArray(result.data?.failures)
-            ? result.data.failures.filter((value): value is CanvasNodeGenerationFailure => Boolean(
-                value && typeof value === "object" && typeof (value as CanvasNodeGenerationFailure).nodeId === "string"
-                && (value as CanvasNodeGenerationFailure).error,
-            ))
+            ? result.data.failures.filter((value): value is CanvasNodeGenerationFailure => Boolean(value && typeof value === "object" && typeof (value as CanvasNodeGenerationFailure).nodeId === "string" && (value as CanvasNodeGenerationFailure).error))
             : [],
     );
     const actualToolArguments = results.reduce<Record<string, unknown>>((combined, result) => {
@@ -4402,24 +4647,19 @@ function mergeCanvasGenerationResults(results: CanvasAgentToolResult[]): CanvasA
         if (value && typeof value === "object" && !Array.isArray(value)) Object.assign(combined, value);
         return combined;
     }, {});
-    return canvasGenerationResult(successfulNodeIds, failures,
-        Object.keys(actualToolArguments).length ? actualToolArguments : undefined);
+    return canvasGenerationResult(successfulNodeIds, failures, Object.keys(actualToolArguments).length ? actualToolArguments : undefined);
 }
 
 function withCanvasArgumentSources(result: CanvasAgentToolResult, generationOps: CanvasAgentOp[], stateOps: CanvasAgentOp[]): CanvasAgentToolResult {
     const actualToolArguments = result.data?.actualToolArguments;
     if (!actualToolArguments || typeof actualToolArguments !== "object") return result;
-    const generatedNodeIds = new Set(stateOps.filter((operation) => operation.type === "add_node" && operation.id)
-        .map((operation) => operation.id as string));
+    const generatedNodeIds = new Set(stateOps.filter((operation) => operation.type === "add_node" && operation.id).map((operation) => operation.id as string));
     const targetNodeId = generationOps.find((operation) => operation.nodeId)?.nodeId;
     const createdNode = Boolean(targetNodeId && generatedNodeIds.has(targetNodeId));
     const addOperation = stateOps.find((operation) => operation.type === "add_node" && operation.id === targetNodeId);
     const agentFields = new Set(Object.keys(addOperation?.attributes || {}));
     if (agentFields.has("content")) agentFields.add("prompt");
-    const argumentSources = Object.fromEntries(Object.keys(actualToolArguments).map((name) => [
-        name,
-        createdNode ? agentFields.has(name) ? "Agent生成" : "系统默认" : "用户硬约束",
-    ]));
+    const argumentSources = Object.fromEntries(Object.keys(actualToolArguments).map((name) => [name, createdNode ? (agentFields.has(name) ? "Agent生成" : "系统默认") : "用户硬约束"]));
     return { ...result, data: { ...result.data, argumentSources } };
 }
 
@@ -4437,6 +4677,7 @@ function canvasActualGenerationArguments(mode: CanvasNodeGenerationMode, prompt:
         values.size = config.size;
         values.seconds = config.videoSeconds;
         values.vquality = config.vquality;
+        values.videoGenerationMode = config.videoGenerationMode;
         values.watermark = config.videoWatermark;
     }
     return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined && value !== null && value !== ""));
@@ -4451,16 +4692,11 @@ function bindAbortSignal(signal: AbortSignal | undefined, controller: AbortContr
 }
 
 function isGenerationCanceled(error: unknown) {
-    return error instanceof Error && (error.message === "请求已取消" || error.name === "AbortError")
-        || readAiTaskError(error).category === "canceled";
+    return (error instanceof Error && (error.message === "请求已取消" || error.name === "AbortError")) || readAiTaskError(error).category === "canceled";
 }
 
 /** 在画布节点数组中更新分镜资产批量生成状态。 */
-function updateStoryboardAssetGenerationInNodes(
-    nodes: CanvasDomainNode[],
-    nodeId: string,
-    updater: (state: CanvasStoryboardAssetGenerationState) => CanvasStoryboardAssetGenerationState,
-): CanvasDomainNode[] {
+function updateStoryboardAssetGenerationInNodes(nodes: CanvasDomainNode[], nodeId: string, updater: (state: CanvasStoryboardAssetGenerationState) => CanvasStoryboardAssetGenerationState): CanvasDomainNode[] {
     return nodes.map((node) => {
         if (node.id !== nodeId || !isStoryboardNode(node) || !node.storyboard.assetGeneration) return node;
         return updateStoryboardNodeData(node, { assetGeneration: updater(node.storyboard.assetGeneration) });
@@ -4468,35 +4704,38 @@ function updateStoryboardAssetGenerationInNodes(
 }
 
 /** 刷新后恢复分镜资产图片任务，并把成功结果回写到对应资产。 */
-async function resumeStoryboardAssetGeneration(
-    node: CanvasStoryboardNode,
-    setNodes: (updater: (nodes: CanvasDomainNode[]) => CanvasDomainNode[]) => void,
-): Promise<void> {
+async function resumeStoryboardAssetGeneration(node: CanvasStoryboardNode, setNodes: (updater: (nodes: CanvasDomainNode[]) => CanvasDomainNode[]) => void): Promise<void> {
     const state = node.storyboard.assetGeneration;
     if (!state) return;
-    const taskResults = await Promise.all(state.selectedAssetIds.map(async (assetId) => {
-        const taskId = state.taskIds[assetId];
-        if (!taskId) return { assetId, ok: false, error: "页面刷新时未找到该资产的图片任务" };
-        try {
-            const task = await getAiTaskInfo(taskId);
-            const completed = task.status === "success" ? task : await waitAiTask(taskId, { signal: new AbortController().signal });
-            const image = readStoryboardAssetImage(completed);
-            setNodes((nodes) => nodes.map((current) => current.id === node.id && isStoryboardNode(current) && current.storyboard.assetGeneration
-                ? updateStoryboardNodeData(current, {
-                      assets: current.storyboard.assets.map((asset) => asset.id === assetId ? { ...asset, image } : asset),
-                      assetGeneration: {
-                          ...current.storyboard.assetGeneration,
-                          statuses: { ...current.storyboard.assetGeneration.statuses, [assetId]: "succeeded" },
-                          progress: readStoryboardAssetGenerationProgress({ ...current.storyboard.assetGeneration, statuses: { ...current.storyboard.assetGeneration.statuses, [assetId]: "succeeded" } }),
-                          errors: Object.fromEntries(Object.entries(current.storyboard.assetGeneration.errors).filter(([id]) => id !== assetId)),
-                      },
-                  })
-                : current));
-            return { assetId, ok: true };
-        } catch (error) {
-            return { assetId, ok: false, error: error instanceof Error ? error.message : "资产图片恢复失败" };
-        }
-    }));
+    const taskResults = await Promise.all(
+        state.selectedAssetIds.map(async (assetId) => {
+            const taskId = state.taskIds[assetId];
+            if (!taskId) return { assetId, ok: false, error: "页面刷新时未找到该资产的图片任务" };
+            try {
+                const task = await getAiTaskInfo(taskId);
+                const completed = task.status === "success" ? task : await waitAiTask(taskId, { signal: new AbortController().signal });
+                const image = readStoryboardAssetImage(completed);
+                setNodes((nodes) =>
+                    nodes.map((current) =>
+                        current.id === node.id && isStoryboardNode(current) && current.storyboard.assetGeneration
+                            ? updateStoryboardNodeData(current, {
+                                  assets: current.storyboard.assets.map((asset) => (asset.id === assetId ? { ...asset, image } : asset)),
+                                  assetGeneration: {
+                                      ...current.storyboard.assetGeneration,
+                                      statuses: { ...current.storyboard.assetGeneration.statuses, [assetId]: "succeeded" },
+                                      progress: readStoryboardAssetGenerationProgress({ ...current.storyboard.assetGeneration, statuses: { ...current.storyboard.assetGeneration.statuses, [assetId]: "succeeded" } }),
+                                      errors: Object.fromEntries(Object.entries(current.storyboard.assetGeneration.errors).filter(([id]) => id !== assetId)),
+                                  },
+                              })
+                            : current,
+                    ),
+                );
+                return { assetId, ok: true };
+            } catch (error) {
+                return { assetId, ok: false, error: error instanceof Error ? error.message : "资产图片恢复失败" };
+            }
+        }),
+    );
 
     setNodes((nodes) => {
         const currentNode = nodes.find((current): current is CanvasStoryboardNode => current.id === node.id && isStoryboardNode(current));
@@ -4523,26 +4762,24 @@ async function resumeStoryboardAssetGeneration(
             completedAt: new Date().toISOString(),
             errorMessage: hasFailed ? "页面刷新后部分资产图片生成失败，请重试失败项。" : "",
         };
-        return nodes.map((current) => current.id === node.id && isStoryboardNode(current)
-            ? updateCanvasNodeExecution(updateStoryboardNodeData(current, { assetGeneration: finishedState }), {
-                  phase: hasFailed ? "failed" : "succeeded",
-                  progress: 100,
-                  errorMessage: finishedState.errorMessage,
-                  completedAt: finishedState.completedAt,
-              })
-            : current);
+        return nodes.map((current) =>
+            current.id === node.id && isStoryboardNode(current)
+                ? updateCanvasNodeExecution(updateStoryboardNodeData(current, { assetGeneration: finishedState }), {
+                      phase: hasFailed ? "failed" : "succeeded",
+                      progress: 100,
+                      errorMessage: finishedState.errorMessage,
+                      completedAt: finishedState.completedAt,
+                  })
+                : current,
+        );
     });
 }
 
-type StoryboardScriptSource =
-    | { ok: true; scriptContent: string; node: CanvasTextNode }
-    | { ok: false; error: string };
+type StoryboardScriptSource = { ok: true; scriptContent: string; node: CanvasTextNode } | { ok: false; error: string };
 
 /** 读取分镜节点唯一关联的剧本文本节点。 */
 function findStoryboardScriptSource(storyboardNodeId: string, nodes: CanvasDomainNode[], connections: CanvasConnection[]): StoryboardScriptSource {
-    const sourceNodeIds = Array.from(new Set(
-        connections.filter((connection) => connection.target.nodeId === storyboardNodeId).map((connection) => connection.source.nodeId),
-    ));
+    const sourceNodeIds = Array.from(new Set(connections.filter((connection) => connection.target.nodeId === storyboardNodeId).map((connection) => connection.source.nodeId)));
     if (sourceNodeIds.length !== 1) {
         return { ok: false, error: "分镜脚本必须且只能引用一个文本剧本节点" };
     }
@@ -4601,7 +4838,7 @@ function validateStoryboardComposition(shots: CanvasStoryboardShot[], assets: Ca
     return null;
 }
 
-function sourceNodeReferenceImages(node: CanvasDomainNode | null) {
+function sourceNodeReferenceImages(node: CanvasDomainNode | null): ReferenceImage[] {
     if (!node || !isImageNode(node) || !node.content.source) return [];
     return [
         {

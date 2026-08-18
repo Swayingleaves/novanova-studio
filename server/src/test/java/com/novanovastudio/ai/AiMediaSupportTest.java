@@ -11,6 +11,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
+import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.service.PersistenceService;
 import java.util.Base64;
@@ -190,6 +191,37 @@ class AiMediaSupportTest {
         Assertions.assertEquals("https://cos.example/generated.png", response.url());
         verify(aiHttpClient, never()).downloadRemoteBinary(anyString(), anyString());
         verify(persistenceService, never()).registerRemoteMediaForUser(any(), any(PersistenceDtos.RegisterRemoteMediaRequest.class));
+    }
+
+    /** 参考媒体解析应拒绝任意非HTTP或data协议。 */
+    @Test
+    void shouldRejectUnsafeReferenceUrlProtocol() {
+        AiTaskDtos.AiTaskMediaReference reference = new AiTaskDtos.AiTaskMediaReference(
+                "reference-1", "参考", "image/png", "", " javascript:alert(1) ");
+
+        Assertions.assertThrows(BusinessException.class, () -> service.resolveReferenceUrl(1L, reference).block());
+        verify(persistenceService, never()).getMediaInfoForUser(any(), anyString());
+    }
+
+    /** 参考媒体解析应去除HTTP地址首尾空白。 */
+    @Test
+    void shouldTrimSafeReferenceUrl() {
+        AiTaskDtos.AiTaskMediaReference reference = new AiTaskDtos.AiTaskMediaReference(
+                "reference-1", "参考", "image/png", "", " https://example.com/reference.png ");
+
+        Assertions.assertEquals("https://example.com/reference.png", service.resolveReferenceUrl(1L, reference).block());
+    }
+
+    /** 存储媒体查询为空时，参考解析应返回明确资源错误。 */
+    @Test
+    void shouldRejectMissingStoredReference() {
+        when(persistenceService.getMediaInfoForUser(eq(1L), eq("image:missing"))).thenReturn(Mono.empty());
+        AiTaskDtos.AiTaskMediaReference reference = new AiTaskDtos.AiTaskMediaReference(
+                "reference-1", "参考", "image/png", "image:missing", null);
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.resolveReferenceUrl(1L, reference).block());
+
+        Assertions.assertTrue(exception.getMessage().contains("不存在或不属于当前用户"));
     }
 
     /**

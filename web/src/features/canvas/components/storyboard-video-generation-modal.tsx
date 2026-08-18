@@ -5,28 +5,39 @@ import { App, Button, Checkbox, Modal, Tag } from "antd";
 import { Clapperboard } from "lucide-react";
 
 import { useUserStore } from "@/features/auth/stores/use-user-store";
-import { getModelCreditUnit } from "@/features/generation/constants/credits";
 import { VideoSettingsPanel } from "@/features/generation/components/video-settings-panel";
+import { videoGenerationModeLabel, videoModelSupportsMode } from "@/features/generation/lib/video-billing";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { isAgnesVideoConfig } from "@/features/generation/lib/agnes-video";
 import { useConfigStore, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
-import { readStoryboardShotReferenceImages, readStoryboardVideoCost, readStoryboardVideoReferenceIssue, readStoryboardVideoShotIssue } from "../domain/storyboard";
+import {
+    quoteStoryboardVideo,
+    readStoryboardShotReferenceImages,
+    readStoryboardVideoCost,
+    readStoryboardVideoGenerationModes,
+    readStoryboardVideoReferenceIssue,
+    readStoryboardVideoResolutionOptions,
+    readStoryboardVideoShotIssue,
+} from "../domain/storyboard";
 import type { CanvasStoryboardAsset, CanvasStoryboardNode, CanvasStoryboardShot } from "../types";
+import type { ReferenceVideo } from "@/features/generation/types/media";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
-export type StoryboardVideoGenerationSettings = Pick<AiConfig, "size" | "vquality" | "videoSeconds" | "videoWatermark">;
+export type StoryboardVideoGenerationSettings = Pick<AiConfig, "size" | "vquality" | "videoSeconds" | "videoWatermark" | "videoGenerationMode">;
 
 type StoryboardVideoGenerationModalProps = {
     open: boolean;
     node: CanvasStoryboardNode | null;
     generating: boolean;
+    /** 画布连入分镜节点的视频参考，批量应用到全部选中镜头。 */
+    referenceVideos?: ReferenceVideo[];
     onClose: () => void;
     onGenerate: (nodeId: string, shotIds: string[], model: string, settings: StoryboardVideoGenerationSettings) => void;
     onMissingVideoModelConfig?: () => void;
 };
 
 /** 分镜镜头批量视频生成选择弹窗。 */
-export function StoryboardVideoGenerationModal({ open, node, generating, onClose, onGenerate, onMissingVideoModelConfig }: StoryboardVideoGenerationModalProps) {
+export function StoryboardVideoGenerationModal({ open, node, generating, referenceVideos = [], onClose, onGenerate, onMissingVideoModelConfig }: StoryboardVideoGenerationModalProps) {
     const { message, modal } = App.useApp();
     const theme = useCanvasTheme();
     const effectiveConfig = useEffectiveConfig();
@@ -42,9 +53,9 @@ export function StoryboardVideoGenerationModal({ open, node, generating, onClose
         const assets = node?.storyboard.assets || [];
         return (node?.storyboard.shots || []).map((shot) => {
             const referenceImageCount = readStoryboardShotReferenceImages(shot, assets).length;
-            return { shot, referenceImageCount, issue: readShotIssue(shot, assets, videoModel, videoConfig) };
+            return { shot, referenceImageCount, referenceVideoCount: referenceVideos.length, issue: readShotIssue(shot, assets, videoModel, videoConfig, referenceVideos) };
         });
-    }, [node?.storyboard.assets, node?.storyboard.shots, videoConfig, videoModel]);
+    }, [node?.storyboard.assets, node?.storyboard.shots, referenceVideos, videoConfig, videoModel]);
     const selectableShotIds = useMemo(() => shotStates.filter((item) => !item.issue).map((item) => item.shot.id), [shotStates]);
     const selectableShotIdsKey = selectableShotIds.join("|");
 
@@ -53,7 +64,7 @@ export function StoryboardVideoGenerationModal({ open, node, generating, onClose
         setVideoModel(effectiveConfig.videoModel);
         setVideoSettings(readVideoSettings(effectiveConfig));
         setSelectedShotIds(node.storyboard.shots.filter((shot) => Boolean(shot.finalPrompt.trim()) && Number.isSafeInteger(shot.durationSeconds) && shot.durationSeconds > 0).map((shot) => shot.id));
-    }, [effectiveConfig.size, effectiveConfig.videoModel, effectiveConfig.videoSeconds, effectiveConfig.videoWatermark, effectiveConfig.vquality, node?.id, open]);
+    }, [effectiveConfig.size, effectiveConfig.videoGenerationMode, effectiveConfig.videoModel, effectiveConfig.videoSeconds, effectiveConfig.videoWatermark, effectiveConfig.vquality, node?.id, open]);
 
     useEffect(() => {
         if (!open) return;
@@ -65,13 +76,19 @@ export function StoryboardVideoGenerationModal({ open, node, generating, onClose
         const selectedShotIdSet = new Set(selectedShotIds);
         return shotStates.filter((item) => !item.issue && selectedShotIdSet.has(item.shot.id)).map((item) => item.shot);
     }, [selectedShotIds, shotStates]);
-    const modelCostConfigured = effectiveConfig.modelCosts.some((item) => item.taskType === "video" && item.model === videoModel);
-    const modelReady = Boolean(videoModel && effectiveConfig.videoModels.includes(videoModel) && modelCostConfigured && isAiConfigReady(effectiveConfig, videoModel));
-    const totalCredits = readStoryboardVideoCost(effectiveConfig.modelCosts, videoModel, selectedShots);
-    const balanceInsufficient = typeof creditBalance === "number" && totalCredits > creditBalance;
+    const automaticModes = useMemo(() => readStoryboardVideoGenerationModes(node?.storyboard.shots || [], node?.storyboard.assets || [], referenceVideos), [node?.storyboard.assets, node?.storyboard.shots, referenceVideos]);
+    const storyboardModelOptions = useMemo(() => effectiveConfig.videoModels.filter((model) => automaticModes.every((mode) => videoModelSupportsMode(effectiveConfig, model, mode))), [automaticModes, effectiveConfig]);
+    const storyboardResolutionOptions = useMemo(
+        () => readStoryboardVideoResolutionOptions(effectiveConfig, videoModel, selectedShots.length ? selectedShots : node?.storyboard.shots || [], node?.storyboard.assets || [], referenceVideos),
+        [effectiveConfig, node?.storyboard.assets, node?.storyboard.shots, referenceVideos, selectedShots, videoModel],
+    );
+    const modelReady = Boolean(videoModel && storyboardModelOptions.includes(videoModel) && isAiConfigReady(effectiveConfig, videoModel));
+    const videoQuote = readStoryboardVideoCost(effectiveConfig, videoModel, videoConfig, selectedShots, node?.storyboard.assets || [], referenceVideos);
+    const totalCredits = videoQuote.available ? videoQuote.credits : null;
+    const balanceInsufficient = typeof creditBalance === "number" && totalCredits !== null && totalCredits > creditBalance;
     const allSelected = Boolean(selectableShotIds.length) && selectedShots.length === selectableShotIds.length;
     const partiallySelected = selectedShots.length > 0 && !allSelected;
-    const creditUnit = getModelCreditUnit(effectiveConfig.modelCosts, videoModel, "video");
+    const creditUnit = effectiveConfig.videoModelBillingConfigurations.find((item) => item.model === videoModel)?.videoBillingConfiguration?.billingUnit;
 
     const toggleAll = () => setSelectedShotIds(allSelected ? [] : selectableShotIds);
     const toggleShot = (shotId: string, checked: boolean) => {
@@ -89,6 +106,10 @@ export function StoryboardVideoGenerationModal({ open, node, generating, onClose
         if (!modelReady) {
             onMissingVideoModelConfig?.();
             message.error("请选择可用的视频模型后再生成");
+            return;
+        }
+        if (!videoQuote.available) {
+            message.error(videoQuote.reason);
             return;
         }
         if (balanceInsufficient) {
@@ -123,8 +144,8 @@ export function StoryboardVideoGenerationModal({ open, node, generating, onClose
                 <Button key="cancel" onClick={onClose}>
                     取消
                 </Button>,
-                <Button key="generate" type="primary" icon={<Clapperboard className="size-4" />} loading={generating} disabled={!selectedShots.length || !modelReady || balanceInsufficient} onClick={confirmGenerate}>
-                    生成已选镜头（{selectedShots.length} 个，{totalCredits} 积分）
+                <Button key="generate" type="primary" icon={<Clapperboard className="size-4" />} loading={generating} disabled={!selectedShots.length || !modelReady || !videoQuote.available || balanceInsufficient} onClick={confirmGenerate}>
+                    生成已选镜头（{selectedShots.length} 个，{totalCredits === null ? "不可报价" : `${totalCredits} 积分`}）
                 </Button>,
             ]}
         >
@@ -137,9 +158,10 @@ export function StoryboardVideoGenerationModal({ open, node, generating, onClose
                         <span className="text-xs text-[var(--studio-muted)]">已选择 {selectedShots.length} 个</span>
                     </div>
                     <div className="max-h-[58vh] space-y-2 overflow-y-auto pr-1">
-                        {shotStates.map(({ shot, referenceImageCount, issue }) => {
+                        {shotStates.map(({ shot, referenceImageCount, referenceVideoCount, issue }) => {
                             const selectable = !issue;
-                            const referenceLabel = referenceImageCount === 0 ? "无关联图片" : isAgnesVideo && referenceImageCount >= 2 && referenceImageCount <= 3 ? `${referenceImageCount} 张关键帧` : `${referenceImageCount} 张参考图`;
+                            const referenceLabel =
+                                [referenceImageCount === 0 ? "" : isAgnesVideo && referenceImageCount >= 2 && referenceImageCount <= 3 ? `${referenceImageCount} 张关键帧` : `${referenceImageCount} 张参考图`, referenceVideoCount > 0 ? `${referenceVideoCount} 个视频参考` : ""].filter(Boolean).join("，") || "无参考素材";
                             return (
                                 <div key={shot.id} className="flex min-w-0 items-start gap-3 rounded-md border px-3 py-2.5" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
                                     <Checkbox
@@ -172,20 +194,34 @@ export function StoryboardVideoGenerationModal({ open, node, generating, onClose
                     </div>
                     <div className="space-y-2">
                         <label className="text-xs font-semibold text-[var(--studio-muted)]">视频模型</label>
-                        <ModelPicker config={effectiveConfig} value={videoModel} capability="video" fullWidth onChange={setVideoModel} onMissingConfig={onMissingVideoModelConfig} />
+                        <ModelPicker config={effectiveConfig} value={videoModel} capability="video" modelOptions={storyboardModelOptions} fullWidth onChange={setVideoModel} onMissingConfig={onMissingVideoModelConfig} />
                     </div>
-                    <VideoSettingsPanel config={videoConfig} onConfigChange={handleVideoSettingsChange} theme={theme} showTitle={false} showDuration={false} className="space-y-4" />
+                    <VideoSettingsPanel
+                        config={videoConfig}
+                        onConfigChange={handleVideoSettingsChange}
+                        theme={theme}
+                        showTitle={false}
+                        showGenerationMode={false}
+                        showDuration={false}
+                        resolutionOptions={storyboardResolutionOptions}
+                        className="space-y-4"
+                    />
                     <div className="space-y-2 border-t pt-4 text-sm" style={{ borderColor: theme.node.stroke }}>
                         <div className="flex items-center justify-between gap-3">
+                            <span className="text-[var(--studio-muted)]">自动模式</span>
+                            <span>{automaticModes.map(videoGenerationModeLabel).join(" / ") || "不可生成"}</span>
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
                             <span className="text-[var(--studio-muted)]">计费方式</span>
-                            <span>{creditUnit === "second" ? "按秒计费" : "按次计费"}</span>
+                            <span>{creditUnit === "second" ? "按秒计费" : creditUnit === "generation" ? "按次计费" : "不可报价"}</span>
                         </div>
                         <div className="flex items-center justify-between gap-3 font-semibold">
                             <span>预计消耗</span>
-                            <span>{totalCredits} 积分</span>
+                            <span>{totalCredits === null ? "不可报价" : `${totalCredits} 积分`}</span>
                         </div>
                     </div>
                     {!modelReady ? <p className="text-xs text-red-500">请选择已启用且已配置价格的视频模型</p> : null}
+                    {!videoQuote.available ? <p className="text-xs text-red-500">{videoQuote.reason}</p> : null}
                     {balanceInsufficient ? <p className="text-xs text-red-500">积分不足，当前可用 {creditBalance ?? 0} 积分</p> : null}
                 </aside>
             </div>
@@ -195,6 +231,7 @@ export function StoryboardVideoGenerationModal({ open, node, generating, onClose
 
 function readVideoSettings(config: AiConfig): StoryboardVideoGenerationSettings {
     return {
+        videoGenerationMode: config.videoGenerationMode,
         size: config.size,
         vquality: config.vquality,
         videoSeconds: config.videoSeconds,
@@ -202,9 +239,12 @@ function readVideoSettings(config: AiConfig): StoryboardVideoGenerationSettings 
     };
 }
 
-function readShotIssue(shot: CanvasStoryboardShot, assets: CanvasStoryboardAsset[], videoModel: string, videoConfig: AiConfig): string {
+function readShotIssue(shot: CanvasStoryboardShot, assets: CanvasStoryboardAsset[], videoModel: string, videoConfig: AiConfig, referenceVideos: ReferenceVideo[]): string {
     if (!shot.finalPrompt.trim()) return "请先生成最终提示词";
     if (!Number.isSafeInteger(shot.durationSeconds) || shot.durationSeconds < 1) return "镜头时长无效";
     if (!videoModel) return "";
-    return readStoryboardVideoShotIssue(shot, videoConfig) || readStoryboardVideoReferenceIssue(shot, assets, videoConfig);
+    const issue = readStoryboardVideoShotIssue(shot, videoConfig) || readStoryboardVideoReferenceIssue(shot, assets, videoConfig);
+    if (issue) return issue;
+    const quote = quoteStoryboardVideo(videoConfig, videoModel, videoConfig, shot, assets, referenceVideos);
+    return quote.available ? "" : quote.reason;
 }

@@ -2,6 +2,7 @@ import { nanoid } from "nanoid";
 
 import { getCanvasNodeTemplate } from "../constants";
 import type { CanvasGenerationMode, CanvasPoint } from "../types";
+import type { VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 import type { CanvasAgentOp } from "./canvas-agent-ops";
 
 export type CanvasAgentToolResult = {
@@ -17,20 +18,10 @@ export type CanvasAgentToolExecution = {
 
 type CreateId = () => string;
 
-const RECOVERABLE_GENERATION_TOOLS = new Set([
-    "canvas_generate_text",
-    "canvas_generate_image",
-    "canvas_generate_video",
-    "canvas_create_generation_flow",
-    "canvas_run_generation",
-]);
+const RECOVERABLE_GENERATION_TOOLS = new Set(["canvas_generate_text", "canvas_generate_image", "canvas_generate_video", "canvas_create_generation_flow", "canvas_run_generation"]);
 
 /** 将 Agent 工具参数解析为画布操作和真实的执行结果语义。 */
-export function resolveCanvasAgentTool(
-    name: string,
-    args: Record<string, unknown> | undefined,
-    createId: CreateId = nanoid,
-): CanvasAgentToolExecution | null {
+export function resolveCanvasAgentTool(name: string, args: Record<string, unknown> | undefined, createId: CreateId = nanoid): CanvasAgentToolExecution | null {
     if (!args) return null;
     const recoveryNodeIds = readStringArray(args.recoveryNodeIds);
     if (recoveryNodeIds.length && RECOVERABLE_GENERATION_TOOLS.has(name)) {
@@ -50,11 +41,11 @@ export function resolveCanvasAgentTool(
         }
         case "canvas_run_generation":
             return createRunGenerationExecution(args);
-        case "canvas_create_node":
-            {
-                const nodeType = readOptionalGenerationMode(args.nodeType);
-                if (!nodeType) return failureExecution("节点类型仅支持文本、图片或视频，分镜脚本请通过剧本文本节点创建");
-                return successExecution(name, [{
+        case "canvas_create_node": {
+            const nodeType = readOptionalGenerationMode(args.nodeType);
+            if (!nodeType) return failureExecution("节点类型仅支持文本、图片或视频，分镜脚本请通过剧本文本节点创建");
+            return successExecution(name, [
+                {
                     type: "add_node",
                     nodeType,
                     title: args.title as string,
@@ -63,31 +54,36 @@ export function resolveCanvasAgentTool(
                     width: args.width as number,
                     height: args.height as number,
                     attributes: readNodeAttributes(args),
-                }]);
-            }
+                },
+            ]);
+        }
         case "canvas_create_text_node":
-            return successExecution(name, [{
-                type: "add_node",
-                nodeType: "text",
-                title: (args.title as string) || "文本",
-                x: args.x as number,
-                y: args.y as number,
-                width: args.width as number,
-                height: args.height as number,
-                attributes: { content: args.text as string, status: "success" },
-            }]);
+            return successExecution(name, [
+                {
+                    type: "add_node",
+                    nodeType: "text",
+                    title: (args.title as string) || "文本",
+                    x: args.x as number,
+                    y: args.y as number,
+                    width: args.width as number,
+                    height: args.height as number,
+                    attributes: { content: args.text as string, status: "success" },
+                },
+            ]);
         case "canvas_create_text_nodes":
             return successExecution(name, createTextNodeOps(args));
         case "canvas_create_image_prompt_flow":
-            return successExecution(name, [{
-                type: "add_node",
-                nodeType: "text",
-                title: "提示词",
-                x: args.x as number,
-                y: args.y as number,
-                width: 300,
-                attributes: { content: args.prompt as string, status: "success" },
-            }]);
+            return successExecution(name, [
+                {
+                    type: "add_node",
+                    nodeType: "text",
+                    title: "提示词",
+                    x: args.x as number,
+                    y: args.y as number,
+                    width: 300,
+                    attributes: { content: args.prompt as string, status: "success" },
+                },
+            ]);
         case "canvas_update_node":
             return successExecution(name, [{ type: "update_node", id: args.id as string, patch: readNodePatch(args.patch), attributes: readNodeAttributes(args) }]);
         case "canvas_update_node_text":
@@ -139,12 +135,7 @@ export function positionCanvasAgentAddNodeOps(ops: CanvasAgentOp[], canvasCenter
     return positionedOperations;
 }
 
-function createGenerationExecution(
-    mode: "text" | "image" | "video",
-    args: Record<string, unknown>,
-    autoRun: boolean,
-    createId: CreateId,
-): CanvasAgentToolExecution {
+function createGenerationExecution(mode: "text" | "image" | "video", args: Record<string, unknown>, autoRun: boolean, createId: CreateId): CanvasAgentToolExecution {
     const prompt = readString(args.prompt);
     const generationStyleSnapshots = readStyleSnapshots(args.generationStyleSnapshots);
     if (!prompt) return failureExecution("生成提示词不能为空");
@@ -162,13 +153,16 @@ function createGenerationExecution(
         attributes: generationAttributes(mode, args, prompt),
     };
     const ops = autoRun
-        ? [addNode, {
-            type: "run_generation",
-            nodeId,
-            mode,
-            prompt,
-            ...(generationStyleSnapshots.length ? { generationStyleSnapshots } : {}),
-        } satisfies CanvasAgentOp]
+        ? [
+              addNode,
+              {
+                  type: "run_generation",
+                  nodeId,
+                  mode,
+                  prompt,
+                  ...(generationStyleSnapshots.length ? { generationStyleSnapshots } : {}),
+              } satisfies CanvasAgentOp,
+          ]
         : [addNode];
     return {
         ops,
@@ -184,8 +178,13 @@ function createRunGenerationExecution(args: Record<string, unknown>): CanvasAgen
     const nodeId = readString(args.nodeId);
     if (!nodeId) return failureExecution("生成节点ID不能为空");
     const mode = readOptionalGenerationMode(args.mode);
+    const videoAttributes = mode === "video" ? videoGenerationAttributes(args) : {};
+    const generationStyleSnapshots = readStyleSnapshots(args.generationStyleSnapshots);
     return {
-        ops: [{ type: "run_generation", nodeId, mode, prompt: readString(args.prompt), generationStyleSnapshots: readStyleSnapshots(args.generationStyleSnapshots) }],
+        ops: [
+            ...(Object.keys(videoAttributes).length ? [{ type: "update_node" as const, id: nodeId, attributes: videoAttributes }] : []),
+            { type: "run_generation", nodeId, mode, prompt: readString(args.prompt), ...(generationStyleSnapshots.length ? { generationStyleSnapshots } : {}) },
+        ],
         result: {
             ok: true,
             message: "画布节点生成任务已开始",
@@ -203,20 +202,17 @@ function createApplyOpsExecution(ops: CanvasAgentOp[]): CanvasAgentToolExecution
 function createRecoveryGenerationExecution(name: string, args: Record<string, unknown>, nodeIds: string[]): CanvasAgentToolExecution {
     const prompt = readString(args.prompt);
     const textGeneration = name === "canvas_generate_text" || args.mode === "text";
+    const videoGeneration = name === "canvas_generate_video" || args.mode === "video";
     const attributes: CanvasAgentOp["attributes"] = {
-        ...(prompt ? textGeneration ? { content: prompt } : { prompt } : {}),
+        ...(prompt ? (textGeneration ? { content: prompt } : { prompt }) : {}),
         ...(readString(args.size) ? { size: readString(args.size) } : {}),
         ...(readString(args.quality) ? { quality: readString(args.quality) } : {}),
         ...(readString(args.imageResolution) ? { imageResolution: readString(args.imageResolution) } : {}),
-        ...(readString(args.seconds) ? { seconds: readString(args.seconds) } : {}),
-        ...(readString(args.vquality) ? { vquality: readString(args.vquality) } : {}),
+        ...(videoGeneration ? videoGenerationAttributes(args) : {}),
         ...(readStyleSnapshots(args.generationStyleSnapshots).length ? { generationStyleSnapshots: readStyleSnapshots(args.generationStyleSnapshots) } : {}),
     };
     return {
-        ops: nodeIds.flatMap((nodeId) => [
-            { type: "update_node", id: nodeId, attributes } satisfies CanvasAgentOp,
-            { type: "run_generation", nodeId, prompt, recovery: true } satisfies CanvasAgentOp,
-        ]),
+        ops: nodeIds.flatMap((nodeId) => [{ type: "update_node", id: nodeId, attributes } satisfies CanvasAgentOp, { type: "run_generation", nodeId, prompt, recovery: true } satisfies CanvasAgentOp]),
         result: { ok: true, message: "失败节点正在重新生成", data: { nodeIds, status: "running" } },
     };
 }
@@ -251,9 +247,7 @@ function generationAttributes(mode: "text" | "image" | "video", args: Record<str
         return {
             prompt,
             status: "idle",
-            ...(readString(args.size) ? { size: readString(args.size) } : {}),
-            ...(readString(args.seconds) ? { seconds: readString(args.seconds) } : {}),
-            ...(readString(args.vquality) ? { vquality: readString(args.vquality) } : {}),
+            ...videoGenerationAttributes(args),
             ...(readStyleSnapshots(args.generationStyleSnapshots).length ? { generationStyleSnapshots: readStyleSnapshots(args.generationStyleSnapshots) } : {}),
         };
     }
@@ -269,13 +263,34 @@ function generationAttributes(mode: "text" | "image" | "video", args: Record<str
     };
 }
 
+function videoGenerationAttributes(args: Record<string, unknown>): NonNullable<CanvasAgentOp["attributes"]> {
+    const videoGenerationMode = readOptionalVideoGenerationMode(args.videoGenerationMode);
+    const watermark = typeof args.watermark === "boolean" ? String(args.watermark) : readString(args.watermark);
+    return {
+        ...(readString(args.model) ? { model: readString(args.model) } : {}),
+        ...(readString(args.size) ? { size: readString(args.size) } : {}),
+        ...(readString(args.seconds) ? { seconds: readString(args.seconds) } : {}),
+        ...(readString(args.vquality) ? { vquality: readString(args.vquality) } : {}),
+        ...(videoGenerationMode ? { videoGenerationMode } : {}),
+        ...(watermark ? { watermark } : {}),
+    };
+}
+
 function readStyleSnapshots(value: unknown): import("@/services/api/server").GenerationStyleSnapshot[] {
     if (!Array.isArray(value)) return [];
-    return value.filter((item): item is import("@/services/api/server").GenerationStyleSnapshot => Boolean(item) && typeof item === "object" && typeof (item as { id?: unknown }).id === "number" && typeof (item as { name?: unknown }).name === "string" && typeof (item as { generationType?: unknown }).generationType === "string" && typeof (item as { stylePrompt?: unknown }).stylePrompt === "string");
+    return value.filter(
+        (item): item is import("@/services/api/server").GenerationStyleSnapshot =>
+            Boolean(item) &&
+            typeof item === "object" &&
+            typeof (item as { id?: unknown }).id === "number" &&
+            typeof (item as { name?: unknown }).name === "string" &&
+            typeof (item as { generationType?: unknown }).generationType === "string" &&
+            typeof (item as { stylePrompt?: unknown }).stylePrompt === "string",
+    );
 }
 
 function createTextNodeOps(args: Record<string, unknown>): CanvasAgentOp[] {
-    const items = Array.isArray(args.items) ? args.items as Array<Record<string, unknown>> : [];
+    const items = Array.isArray(args.items) ? (args.items as Array<Record<string, unknown>>) : [];
     const startX = readNumber(args.x);
     const startY = readNumber(args.y);
     const gap = readNumber(args.gap) ?? 36;
@@ -290,7 +305,7 @@ function createTextNodeOps(args: Record<string, unknown>): CanvasAgentOp[] {
 }
 
 function createMoveNodeOps(args: Record<string, unknown>): CanvasAgentOp[] {
-    const items = Array.isArray(args.items) ? args.items as Array<Record<string, unknown>> : [];
+    const items = Array.isArray(args.items) ? (args.items as Array<Record<string, unknown>>) : [];
     return items.map((item) => {
         const position: { x?: number; y?: number } = {};
         const x = readNumber(item.x);
@@ -302,7 +317,7 @@ function createMoveNodeOps(args: Record<string, unknown>): CanvasAgentOp[] {
 }
 
 function createConnectionOps(args: Record<string, unknown>): CanvasAgentOp[] {
-    const connections = Array.isArray(args.connections) ? args.connections as Array<Record<string, unknown>> : [];
+    const connections = Array.isArray(args.connections) ? (args.connections as Array<Record<string, unknown>>) : [];
     return connections.map((connection) => ({
         type: "connect_nodes",
         sourceNodeId: readString(connection.sourceNodeId ?? connection.fromNodeId),
@@ -311,7 +326,7 @@ function createConnectionOps(args: Record<string, unknown>): CanvasAgentOp[] {
 }
 
 function readNodeAttributes(args: Record<string, unknown>) {
-    const patch = args.patch && typeof args.patch === "object" ? args.patch as Record<string, unknown> : undefined;
+    const patch = args.patch && typeof args.patch === "object" ? (args.patch as Record<string, unknown>) : undefined;
     return (args.attributes || args.metadata || patch?.attributes) as CanvasAgentOp["attributes"];
 }
 
@@ -352,6 +367,10 @@ function readString(value: unknown) {
     return typeof value === "string" ? value.trim() : "";
 }
 
+function readOptionalVideoGenerationMode(value: unknown): VideoGenerationMode | undefined {
+    return value === "text-to-video" || value === "image-to-video" || value === "reference-to-video" ? value : undefined;
+}
+
 function readNumber(value: unknown) {
     return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
@@ -362,7 +381,5 @@ function readPositiveInteger(value: unknown) {
 }
 
 function readStringArray(value: unknown): string[] {
-    return Array.isArray(value)
-        ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
-        : [];
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim()) : [];
 }

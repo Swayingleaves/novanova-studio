@@ -1,6 +1,7 @@
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import type { CanvasBackgroundMode } from "@/shared/lib/canvas-theme";
 import type { GenerationStyleSnapshot } from "@/services/api/server";
+import type { VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 
 export interface CanvasViewTransform {
     x: number;
@@ -178,10 +179,17 @@ export interface CanvasVideoGenerationSettings {
     size: string;
     seconds: string;
     quality: string;
+    /** 视频生成模式；历史画布数据缺失时按文生视频处理。 */
+    videoGenerationMode?: VideoGenerationMode;
     watermark: string;
     count: number;
+    /** 新版持久化的参考图片地址；历史数据可能缺失。 */
     references: string[];
     referenceObjectStorages: ObjectStorageFile[];
+    /** 新版持久化的参考视频地址；历史数据可能缺失。 */
+    videoReferences?: string[];
+    /** 新版持久化的参考视频对象存储信息；历史数据可能缺失。 */
+    videoReferenceObjectStorages?: ObjectStorageFile[];
     generationStyleIds: number[];
     generationStyleSnapshots: GenerationStyleSnapshot[];
 }
@@ -207,17 +215,7 @@ export interface CanvasTextNode extends CanvasNodeBase<"text"> {
     };
 }
 
-export type CanvasStoryboardShotSize =
-    | "大特写"
-    | "特写"
-    | "近景"
-    | "头肩景"
-    | "中景"
-    | "中远景"
-    | "全景"
-    | "远景"
-    | "大远景"
-    | "大全景";
+export type CanvasStoryboardShotSize = "大特写" | "特写" | "近景" | "头肩景" | "中景" | "中远景" | "全景" | "远景" | "大远景" | "大全景";
 
 export type CanvasStoryboardAssetKind = "character" | "scene" | "prop";
 
