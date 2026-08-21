@@ -39,15 +39,15 @@ test("视频节点参考图支持放大预览", () => {
 test("图片和视频节点提供AI提示词优化入口", () => {
     assert.ok(promptPanelSource.includes('title="AI优化提示词"'), "提示面板缺少AI提示词优化说明");
     assert.ok(promptPanelSource.includes("<Sparkles"), "提示面板缺少Sparkles图标");
-    assert.ok(promptPanelSource.includes("onGeneratePrompt(node.id, mode, prompt.trim(), updatePrompt)"), "优化结果未回填当前节点输入框");
+    assert.ok(promptPanelSource.includes("onGeneratePrompt(\n                                        node.id") && promptPanelSource.includes("updatePrompt,"), "优化结果未回填当前节点输入框");
 });
 
 test("文本图片和视频节点的发送按钮显示积分消耗", () => {
-    assert.ok(promptPanelSource.includes("const creditCost = requestCreditCost"), "提示面板未根据当前节点配置计算积分消耗");
-    assert.ok(promptPanelSource.includes('count: mode === "image" || mode === "video" ? config.count : 1'), "图片和视频节点积分未关联生成数量");
+    assert.ok(promptPanelSource.includes("const creditCost =") && promptPanelSource.includes("requestCreditCost({"), "提示面板未根据当前节点配置计算积分消耗");
+    assert.ok(promptPanelSource.includes("taskCount: normalizeVideoGenerationCount(config.count)"), "视频节点积分未按实际创建的视频任务数量累计");
     assert.ok(promptPanelSource.includes("normalizeModelOptionValue(generation?.model"), "画布节点模型未规范化为积分配置使用的渠道模型标识");
     assert.ok(canvasPageSource.includes("const model = normalizeModelOptionValue(generation?.model"), "画布实际生成任务未使用与积分计算一致的渠道模型标识");
-    assert.ok(promptPanelSource.includes('<CreditCostDisplay creditCost={creditCost}'), "发送按钮未显示积分图标与数值");
+    assert.ok(promptPanelSource.includes("<CreditCostDisplay creditCost={creditCost}"), "发送按钮未显示积分图标与数值");
     assert.ok(promptPanelSource.includes("!min-w-[88px]"), "发送按钮宽度不足，积分内容可能被压缩隐藏");
 });
 
@@ -74,7 +74,7 @@ test("画布视频设置按比例清晰度时长和限定数量排列", () => {
     assert.ok(videoSettingsPanelSource.includes('<Field label="清晰度"'), "视频设置缺少清晰度配置");
     assert.ok(videoSettingsPanelSource.includes('<Field label="视频时长"'), "视频设置缺少滑块时长配置");
     assert.ok(videoSettingsPanelSource.includes("<Slider"), "视频时长未使用滑块控件");
-    assert.ok(videoSettingsPanelSource.includes("max: 15"), "视频生成最长时长未限制为15秒");
+    assert.ok(videoSettingsPanelSource.includes("max={durationRange.max}"), "视频生成最长时长未使用当前模型支持的最大值");
     assert.ok(videoSettingsPanelSource.includes("onChange={setDurationDraft}"), "拖动视频时长仍会直接更新画布节点");
     assert.ok(videoSettingsPanelSource.includes("onChangeComplete={commitDuration}"), "视频时长拖动结束后未提交节点配置");
     assert.ok(videoSettingsPanelSource.includes("const VIDEO_COUNT_PRESETS = [1, 2, 4]"), "视频生成数量未严格限制为1、2、4");

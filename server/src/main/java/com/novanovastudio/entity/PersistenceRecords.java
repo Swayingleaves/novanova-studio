@@ -216,6 +216,18 @@ public final class PersistenceRecords {
         /** 模型同时执行请求数量 */
         private Integer requestConcurrency;
 
+        /** 模型JSON POST请求的自定义请求体参数JSON */
+        private String customBodyParameters;
+
+        /** 视频模型模式与分辨率分档计费配置JSON */
+        private String videoBillingConfiguration;
+
+        /** 模型展示名称，为空或与真实模型名相同时展示真实模型名，仅影响展示不影响调用 */
+        private String displayName;
+
+        /** 模型展示图标标识，为空时按模型名或渠道自动匹配，仅影响展示不影响调用 */
+        private String modelIcon;
+
         /** 创建时间 */
         private OffsetDateTime createdAt;
 

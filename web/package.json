@@ -8,6 +8,7 @@
         "dev": "next dev --turbo -H 0.0.0.0 -p 5555",
         "build": "next build",
         "start": "node .next/standalone/server.js",
+        "test:node": "node --experimental-strip-types --loader ./scripts/node-test-loader.mjs --test",
         "format": "prettier --write .",
         "format:check": "prettier --check ."
     },

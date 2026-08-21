@@ -8,6 +8,7 @@ export type ImageLastUsedSettings = {
 };
 
 export type VideoLastUsedSettings = {
+    videoGenerationMode: "text-to-video" | "image-to-video" | "reference-to-video";
     vquality: string;
     size: string;
     videoSeconds: string;
@@ -22,6 +23,7 @@ export const DEFAULT_IMAGE_LAST_USED_SETTINGS: ImageLastUsedSettings = {
 };
 
 export const DEFAULT_VIDEO_LAST_USED_SETTINGS: VideoLastUsedSettings = {
+    videoGenerationMode: "text-to-video",
     vquality: "720p",
     size: "16:9",
     videoSeconds: "5",

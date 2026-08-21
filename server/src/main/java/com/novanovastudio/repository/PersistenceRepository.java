@@ -124,7 +124,8 @@ public class PersistenceRepository {
         return databaseClient.sql("""
                 SELECT id, user_id, model_config_id, channel_id, model_name, model_type,
                        capabilities::text AS capabilities, is_default, sort_order, 0 AS credit_cost, 'generation' AS credit_unit,
-                       thinking_enabled, reasoning_effort, 1 AS request_concurrency, created_at, updated_at
+                       thinking_enabled, reasoning_effort, 1 AS request_concurrency, '{}'::jsonb AS custom_body_parameters,
+                       NULL::text AS video_billing_configuration, created_at, updated_at
                 FROM user_ai_model_configs WHERE user_id=:userId ORDER BY model_type, sort_order, id
                 """).bind("userId", userId).map((row, metadata) -> RowMappers.userAiModelConfig(row)).all();
     }
@@ -134,7 +135,8 @@ public class PersistenceRepository {
         return databaseClient.sql("""
                 SELECT id, user_id, model_config_id, channel_id, model_name, model_type,
                        capabilities::text AS capabilities, is_default, sort_order, 0 AS credit_cost, 'generation' AS credit_unit,
-                       thinking_enabled, reasoning_effort, 1 AS request_concurrency, created_at, updated_at
+                       thinking_enabled, reasoning_effort, 1 AS request_concurrency, '{}'::jsonb AS custom_body_parameters,
+                       NULL::text AS video_billing_configuration, created_at, updated_at
                 FROM user_ai_model_configs WHERE user_id=:userId AND model_config_id=:modelConfigId
                 """).bind("userId", userId).bind("modelConfigId", modelConfigId)
                 .map((row, metadata) -> RowMappers.userAiModelConfig(row)).one();
@@ -401,7 +403,8 @@ public class PersistenceRepository {
         return databaseClient.sql("""
                 SELECT id, NULL::BIGINT AS user_id, model_config_id, channel_id, model_name, model_type,
                        capabilities::text AS capabilities, is_default, sort_order, credit_cost, credit_unit,
-                       thinking_enabled, reasoning_effort, request_concurrency, created_at, updated_at
+                       thinking_enabled, reasoning_effort, request_concurrency, custom_body_parameters::text AS custom_body_parameters,
+                       video_billing_configuration::text AS video_billing_configuration, display_name, model_icon, created_at, updated_at
                 FROM platform_ai_model_configs
                 ORDER BY created_at DESC, id DESC
                 """).map((row, metadata) -> RowMappers.userAiModelConfig(row)).all();
@@ -417,7 +420,8 @@ public class PersistenceRepository {
         return databaseClient.sql("""
                 SELECT id, NULL::BIGINT AS user_id, model_config_id, channel_id, model_name, model_type,
                        capabilities::text AS capabilities, is_default, sort_order, credit_cost, credit_unit,
-                       thinking_enabled, reasoning_effort, request_concurrency, created_at, updated_at
+                       thinking_enabled, reasoning_effort, request_concurrency, custom_body_parameters::text AS custom_body_parameters,
+                       video_billing_configuration::text AS video_billing_configuration, display_name, model_icon, created_at, updated_at
                 FROM platform_ai_model_configs
                 WHERE model_config_id = :modelConfigId
                 """).bind("modelConfigId", modelConfigId).map((row, metadata) -> RowMappers.userAiModelConfig(row)).one();
@@ -443,11 +447,13 @@ public class PersistenceRepository {
      * @return Mono<Void> 创建结果
      */
     public Mono<Void> createPlatformAiModelConfig(PersistenceRecords.UserAiModelConfigRecord record) {
-        return databaseClient.sql("""
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
                 INSERT INTO platform_ai_model_configs(model_config_id, channel_id, model_name, model_type, capabilities, is_default, sort_order,
-                                                      credit_cost, credit_unit, thinking_enabled, reasoning_effort, request_concurrency)
+                                                      credit_cost, credit_unit, thinking_enabled, reasoning_effort, request_concurrency, custom_body_parameters,
+                                                      video_billing_configuration, display_name, model_icon)
                 VALUES (:modelConfigId, :channelId, :modelName, :modelType, CAST(:capabilities AS jsonb), :isDefault, :sortOrder,
-                        :creditCost, :creditUnit, :thinkingEnabled, :reasoningEffort, :requestConcurrency)
+                        :creditCost, :creditUnit, :thinkingEnabled, :reasoningEffort, :requestConcurrency, CAST(:customBodyParameters AS jsonb),
+                        CAST(:videoBillingConfiguration AS jsonb), :displayName, :modelIcon)
                 """).bind("modelConfigId", record.getModelConfigId()).bind("channelId", record.getChannelId())
                 .bind("modelName", record.getModelName()).bind("modelType", record.getModelType())
                 .bind("capabilities", record.getCapabilities()).bind("isDefault", Boolean.TRUE.equals(record.getDefaultModel()))
@@ -455,7 +461,13 @@ public class PersistenceRepository {
                 .bind("thinkingEnabled", record.getThinkingEnabled() == null || Boolean.TRUE.equals(record.getThinkingEnabled()))
                 .bind("reasoningEffort", record.getReasoningEffort() == null ? "high" : record.getReasoningEffort())
                 .bind("requestConcurrency", record.getRequestConcurrency() == null ? 1 : record.getRequestConcurrency())
-                .fetch().rowsUpdated().then();
+                .bind("customBodyParameters", record.getCustomBodyParameters() == null ? "{}" : record.getCustomBodyParameters())
+                .bind("videoBillingConfiguration", record.getVideoBillingConfiguration() == null ? "null" : record.getVideoBillingConfiguration());
+        spec = R2dbcBindings.bindNullable(spec, "displayName", record.getDisplayName(), String.class);
+        spec = R2dbcBindings.bindNullable(spec, "modelIcon", record.getModelIcon(), String.class);
+        return spec.fetch()
+                .rowsUpdated()
+                .then();
     }
 
     /**
@@ -465,20 +477,25 @@ public class PersistenceRepository {
      * @return Mono<Long> 更新行数
      */
     public Mono<Long> updatePlatformAiModelConfig(PersistenceRecords.UserAiModelConfigRecord record) {
-        return databaseClient.sql("""
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
                 UPDATE platform_ai_model_configs
                 SET model_type = :modelType, capabilities = CAST(:capabilities AS jsonb), sort_order = :sortOrder, credit_cost = :creditCost,
-                    credit_unit = :creditUnit, request_concurrency = :requestConcurrency,
+                    credit_unit = :creditUnit, request_concurrency = :requestConcurrency, custom_body_parameters = CAST(:customBodyParameters AS jsonb),
+                    video_billing_configuration = CAST(:videoBillingConfiguration AS jsonb), display_name = :displayName, model_icon = :modelIcon,
                     thinking_enabled = :thinkingEnabled, reasoning_effort = :reasoningEffort,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE model_config_id = :modelConfigId
                 """).bind("modelType", record.getModelType()).bind("capabilities", record.getCapabilities())
                 .bind("sortOrder", record.getSortOrder()).bind("creditCost", record.getCreditCost()).bind("creditUnit", record.getCreditUnit())
                 .bind("requestConcurrency", record.getRequestConcurrency() == null ? 1 : record.getRequestConcurrency())
+                .bind("customBodyParameters", record.getCustomBodyParameters() == null ? "{}" : record.getCustomBodyParameters())
+                .bind("videoBillingConfiguration", record.getVideoBillingConfiguration() == null ? "null" : record.getVideoBillingConfiguration())
                 .bind("thinkingEnabled", record.getThinkingEnabled() == null || Boolean.TRUE.equals(record.getThinkingEnabled()))
                 .bind("reasoningEffort", record.getReasoningEffort() == null ? "high" : record.getReasoningEffort())
-                .bind("modelConfigId", record.getModelConfigId())
-                .fetch().rowsUpdated();
+                .bind("modelConfigId", record.getModelConfigId());
+        spec = R2dbcBindings.bindNullable(spec, "displayName", record.getDisplayName(), String.class);
+        spec = R2dbcBindings.bindNullable(spec, "modelIcon", record.getModelIcon(), String.class);
+        return spec.fetch().rowsUpdated();
     }
 
     /**

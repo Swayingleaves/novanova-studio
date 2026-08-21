@@ -87,11 +87,17 @@ public class AiMediaSupport {
      * @return Mono<String> 可访问URL
      */
     public Mono<String> resolveReferenceUrl(Long userId, AiTaskDtos.AiTaskMediaReference reference) {
+        if (reference == null) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考媒体不能为空"));
+        }
         if (StringUtils.hasText(reference.storageKey())) {
-            return persistenceService.getMediaInfoForUser(userId, reference.storageKey()).map(PersistenceDtos.UploadedMediaResponse::url);
+            return persistenceService.getMediaInfoForUser(userId, reference.storageKey().trim())
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "参考媒体不存在或不属于当前用户")))
+                    .map(PersistenceDtos.UploadedMediaResponse::url)
+                    .flatMap(this::validateReferenceUrl);
         }
         if (StringUtils.hasText(reference.url())) {
-            return Mono.just(reference.url().trim());
+            return validateReferenceUrl(reference.url().trim());
         }
         return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考媒体必须提供storageKey或url"));
     }
@@ -110,11 +116,25 @@ public class AiMediaSupport {
             if (isDataUrl(url)) {
                 return Mono.fromSupplier(() -> dataUrlBinary(url, mimeType));
             }
-            if (url.startsWith("http://") || url.startsWith("https://")) {
+            if (isHttpUrl(url)) {
                 return aiHttpClient.downloadRemoteBinary(url, mimeType);
             }
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考媒体URL必须是http、https或data URL"));
         });
+    }
+
+    /**
+     * 校验参考媒体URL协议。
+     *
+     * @param url String 参考媒体地址
+     * @return Mono<String> 规范化地址
+     */
+    private Mono<String> validateReferenceUrl(String url) {
+        String normalized = StringUtils.hasText(url) ? url.trim() : "";
+        if (isHttpUrl(normalized) || isDataUrl(normalized)) {
+            return Mono.just(normalized);
+        }
+        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考媒体URL必须是http、https或data URL"));
     }
 
     /**
@@ -195,7 +215,9 @@ public class AiMediaSupport {
      * @return boolean 是否为HTTP地址
      */
     public boolean isHttpUrl(String url) {
-        return StringUtils.hasText(url) && (url.startsWith("http://") || url.startsWith("https://"));
+        if (!StringUtils.hasText(url)) return false;
+        String normalized = url.trim().toLowerCase(java.util.Locale.ROOT);
+        return normalized.startsWith("http://") || normalized.startsWith("https://");
     }
 
     /**
@@ -215,6 +237,6 @@ public class AiMediaSupport {
      * @return boolean true表示HTTP地址，false表示其他协议或HTTPS地址
      */
     private boolean isInsecureHttpUrl(String url) {
-        return StringUtils.hasText(url) && url.startsWith("http://");
+        return StringUtils.hasText(url) && url.trim().toLowerCase(java.util.Locale.ROOT).startsWith("http://");
     }
 }

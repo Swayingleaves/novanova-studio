@@ -38,7 +38,7 @@ test("画布单类型和混合类型入口均复用同一风格库组件", () =>
     assert.match(agentComposer, /parseGroupedGenerationStyleMessage/);
 });
 
-test("图片、视频和画布入口统一使用风格单选上限", () => {
+test("图片视频和画布生成入口统一由共享组件执行风格单选上限", () => {
     const composer = source("features/generation/components/creation-composer.tsx");
     const imagePage = source("app/(user)/image/page.tsx");
     const videoPage = source("app/(user)/video/page.tsx");
@@ -46,7 +46,11 @@ test("图片、视频和画布入口统一使用风格单选上限", () => {
     const agentComposer = source("features/canvas/components/canvas-agent-composer.tsx");
     const chatPanel = source("features/canvas/components/canvas-chat-panel.tsx");
 
-    [composer, imagePage, videoPage, nodePanel, agentComposer, chatPanel].forEach((content) => {
+    // 共享合成器与画布组件直接执行单选上限
+    [composer, nodePanel, agentComposer, chatPanel].forEach((content) => {
         assert.match(content, /MAX_GENERATION_STYLE_SELECTION_COUNT/);
     });
+    // 图片和视频页面委托共享合成器，不再各自引用上限常量
+    assert.match(imagePage, /CreationComposer/);
+    assert.match(videoPage, /CreationComposer/);
 });

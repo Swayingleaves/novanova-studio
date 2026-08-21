@@ -7,6 +7,7 @@ import { Menu } from "lucide-react";
 import { AppSidebar } from "@/features/app-shell/components/app-sidebar";
 import { AppConfigModal } from "@/features/app-shell/components/app-config-modal";
 import { GitHubLink } from "@/features/app-shell/components/github-link";
+import { UserCreditMenu } from "@/features/app-shell/components/user-credit-menu";
 import { WelcomeModal } from "@/features/app-shell/components/welcome-modal";
 import { AuthModal } from "@/features/auth/components/auth-modal";
 import { MobileNavDrawer } from "@/features/app-shell/components/mobile-nav-drawer";
@@ -42,7 +43,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
 
             {!hideSidebar ? (
-                <GitHubLink className="studio-glass fixed right-3 top-3 z-40 rounded-lg text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]" />
+                <div className="fixed right-3 top-3 z-40 flex items-center gap-2">
+                    <GitHubLink className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]" />
+                    <UserCreditMenu className="shrink-0" />
+                </div>
             ) : null}
 
             {/* Main content */}

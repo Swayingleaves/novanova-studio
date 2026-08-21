@@ -1,26 +1,31 @@
 "use client";
 
-import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Switch, Tabs } from "antd";
+import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Switch, Tabs } from "antd";
 import { nanoid } from "nanoid";
-import { ChevronDown, ChevronUp, CloudUpload, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
+import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { ModelPicker } from "@/features/settings/components/model-picker";
+import { MODEL_ICON_OPTIONS } from "@/features/settings/components/model-icon";
 import {
     configFromModelConfigs,
     createModelChannel,
     createObjectStorageConfig,
     defaultBaseUrlForApiFormat,
     MODEL_CAPABILITY_OPTIONS,
-    modelOptionLabel,
+    modelOptionLabelWithRealName,
     normalizeModelOptionValue,
     useConfigStore,
     type ApiCallFormat,
     type ConfigDialogTabKey,
     type ModelCapability,
     type ModelChannel,
+    type VideoBillingConfiguration,
+    type VideoGenerationMode,
+    type VideoResolution,
 } from "@/features/settings/stores/use-config-store";
+import { VIDEO_GENERATION_MODE_OPTIONS, VIDEO_RESOLUTION_OPTIONS, createVideoBillingConfiguration } from "@/features/generation/lib/video-billing";
 import { isObjectStorageReady, objectStorageReadyMessage, testObjectStorageUpload } from "@/features/storage/services/object-storage";
 import { isOpenAiTextModel, isReasoningEffortDisabled, reasoningEffortOptions } from "@/features/settings/lib/model-thinking-configuration";
 import {
@@ -61,6 +66,16 @@ const capabilityGroups: Array<{ capability: ModelCapability; modelsKey: "textMod
     { capability: "image", modelsKey: "imageModels", label: "图像模型" },
     { capability: "video", modelsKey: "videoModels", label: "视频模型" },
 ];
+
+const modelIconSelectOptions = MODEL_ICON_OPTIONS.map((option) => ({
+    value: option.value,
+    label: (
+        <span className="inline-flex items-center gap-2">
+            {option.path ? <img src={option.path} alt="" className="size-4" /> : option.value === "clapperboard" ? <Clapperboard className="size-4 opacity-70" /> : null}
+            <span>{option.label}</span>
+        </span>
+    ),
+}));
 
 const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
     { label: "OpenAI", value: "openai" },
@@ -147,7 +162,10 @@ export function AppConfigModal() {
     const [draftObjectStorages, setDraftObjectStorages] = useState<ObjectStorageConfig[]>([]);
     const [creditBaseline, setCreditBaseline] = useState(100);
     const [draftInitialCredits, setDraftInitialCredits] = useState(100);
+    const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
+    const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
     const initializedRef = useRef(false);
+    const editingModelIsMedia = Boolean(editingModelConfig && (editingModelConfig.modelType === "image" || editingModelConfig.modelType === "video"));
 
     const resetChannelDraft = useCallback((resetCollapsed = false) => {
         const channels = cloneChannels(useConfigStore.getState().config.channels);
@@ -215,7 +233,7 @@ export function AppConfigModal() {
     }, [isConfigOpen, setConfigDialogOpen, user?.role]);
 
     const draftConfig = useMemo(() => configFromModelConfigs(draftChannels, draftModelConfigs, config), [config, draftChannels, draftModelConfigs]);
-    const modelOptions = useMemo(() => draftConfig.models.map((model) => ({ label: modelOptionLabel(draftConfig, model), value: model })), [draftConfig]);
+    const modelOptions = useMemo(() => draftConfig.models.map((model) => ({ label: modelOptionLabelWithRealName(draftConfig, model), value: model })), [draftConfig]);
     const channelsDirty = !sameValue(draftChannels, channelBaseline);
     const modelConfigsDirty = !sameValue(draftModelConfigs, modelConfigBaseline);
     const objectStoragesDirty = !sameValue(draftObjectStorages, objectStorageBaseline);
@@ -283,10 +301,12 @@ export function AppConfigModal() {
         }
         setSavingTab("channels");
         try {
+            const channelIdMapping = new Map<string, string>();
             for (const channel of draftChannels) {
                 const baseline = baselineById.get(channel.id);
                 if (!baseline) {
-                    await createChannel(channel);
+                    const created = await createChannel(channel);
+                    channelIdMapping.set(channel.id, created.id);
                 } else if (!sameValue(channel, baseline)) {
                     await updateServerChannel(channel);
                 }
@@ -294,6 +314,14 @@ export function AppConfigModal() {
             for (const channel of deletedChannels) await deleteServerChannel(channel.id);
             await refreshChannels();
             resetChannelDraft();
+            if (channelIdMapping.size) {
+                setDraftModelConfigs((configs) =>
+                    configs.map((configItem) => {
+                        const mappedId = channelIdMapping.get(configItem.channelId);
+                        return mappedId ? { ...configItem, channelId: mappedId } : configItem;
+                    }),
+                );
+            }
             message.success("渠道配置已保存");
         } catch (error) {
             await refreshChannels().catch(() => undefined);
@@ -323,36 +351,43 @@ export function AppConfigModal() {
         });
     };
 
-    const updateModelCapabilities = (modelType: ModelCapability, model: string, capability: string, checked: boolean) => {
-        setDraftModelConfigs((configs) =>
-            configs.map((configItem) => {
-                if (configItem.modelType !== modelType || modelConfigValue(configItem) !== model) return configItem;
-                return {
-                    ...configItem,
-                    capabilities: checked ? uniqueModels([...configItem.capabilities, capability]) : configItem.capabilities.filter((value) => value !== capability),
-                };
-            }),
-        );
+    const openModelConfigEditor = (configItem: ServerModelConfig) => {
+        setEditingModelConfig(cloneModelConfig(configItem));
+        setEditingCustomBodyParameters(JSON.stringify(configItem.customBodyParameters || {}, null, 2));
     };
 
-    const updateModelCreditCost = (modelType: ModelCapability, model: string, creditCost: number) => {
-        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType && modelConfigValue(configItem) === model ? { ...configItem, creditCost } : configItem)));
+    const updateEditingModelConfig = (patch: Partial<ServerModelConfig>) => {
+        setEditingModelConfig((configItem) => (configItem ? { ...configItem, ...patch } : configItem));
     };
 
-    const updateModelCreditUnit = (modelType: ModelCapability, model: string, creditUnit: ServerModelConfig["creditUnit"]) => {
-        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType && modelConfigValue(configItem) === model
-            ? { ...configItem, creditUnit: modelType === "video" && creditUnit === "second" ? "second" : "generation" }
-            : configItem)));
+    const saveModelConfigEditor = () => {
+        if (!editingModelConfig) return;
+        let customBodyParameters: Record<string, unknown>;
+        try {
+            const parsed = JSON.parse(editingCustomBodyParameters.trim() || "{}");
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("模型自定义JSON必须是对象");
+            customBodyParameters = parsed as Record<string, unknown>;
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "模型自定义JSON格式不正确");
+            return;
+        }
+        const nextConfig = {
+            ...editingModelConfig,
+            customBodyParameters,
+            displayName: editingModelConfig.displayName === editingModelConfig.modelName ? null : editingModelConfig.displayName,
+        };
+        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.id === nextConfig.id ? nextConfig : configItem)));
+        setEditingModelConfig(null);
     };
 
-    const updateModelRequestConcurrency = (modelType: ModelCapability, model: string, requestConcurrency: number) => {
-        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType && modelConfigValue(configItem) === model
-            ? { ...configItem, requestConcurrency: Math.max(1, Math.floor(requestConcurrency)) }
-            : configItem)));
-    };
-
-    const updateModelThinkingConfiguration = (model: string, patch: Pick<ServerModelConfig, "thinkingEnabled"> | Pick<ServerModelConfig, "reasoningEffort">) => {
-        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === "text" && modelConfigValue(configItem) === model ? { ...configItem, ...patch } : configItem)));
+    const formatEditingCustomBodyParameters = () => {
+        try {
+            const parsed = JSON.parse(editingCustomBodyParameters.trim() || "{}");
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("模型自定义JSON必须是对象");
+            setEditingCustomBodyParameters(JSON.stringify(parsed, null, 2));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "模型自定义JSON格式不正确");
+        }
     };
 
     const toggleModelCapabilityCollapsed = (modelType: ModelCapability) => {
@@ -381,17 +416,22 @@ export function AppConfigModal() {
             const createdConfigIds = new Map<string, string>();
             for (const configItem of draftModelConfigs) {
                 if (baselineById.has(configItem.id)) continue;
+                const normalizedConfig = normalizeModelConfigForSave(configItem);
                 const saved = await createModelConfig({
-                    channelId: configItem.channelId,
-                    modelName: configItem.modelName,
-                    modelType: configItem.modelType,
-                    capabilities: configItem.capabilities,
-                    sortOrder: configItem.sortOrder,
-                    creditCost: configItem.creditCost,
-                    creditUnit: configItem.creditUnit,
-                    thinkingEnabled: configItem.thinkingEnabled,
-                    reasoningEffort: configItem.reasoningEffort,
-                    requestConcurrency: configItem.requestConcurrency,
+                    channelId: normalizedConfig.channelId,
+                    modelName: normalizedConfig.modelName,
+                    modelType: normalizedConfig.modelType,
+                    capabilities: normalizedConfig.capabilities,
+                    sortOrder: normalizedConfig.sortOrder,
+                    creditCost: normalizedConfig.creditCost,
+                    creditUnit: normalizedConfig.creditUnit,
+                    thinkingEnabled: normalizedConfig.thinkingEnabled,
+                    reasoningEffort: normalizedConfig.reasoningEffort,
+                    requestConcurrency: normalizedConfig.requestConcurrency,
+                    customBodyParameters: normalizedConfig.customBodyParameters,
+                    videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
+                    displayName: normalizedConfig.displayName,
+                    modelIcon: normalizedConfig.modelIcon,
                 });
                 createdConfigIds.set(configItem.id, saved.id);
             }
@@ -405,16 +445,21 @@ export function AppConfigModal() {
             for (const configItem of nextDrafts) {
                 const baseline = baselineById.get(configItem.id);
                 if (baseline && !sameModelConfigForUpdate(configItem, baseline)) {
+                    const normalizedConfig = normalizeModelConfigForSave(configItem);
                     await updateModelConfig({
-                        id: configItem.id,
-                        modelType: configItem.modelType,
-                        capabilities: configItem.capabilities,
-                        sortOrder: configItem.sortOrder,
-                        creditCost: configItem.creditCost,
-                        creditUnit: configItem.creditUnit,
-                        thinkingEnabled: configItem.thinkingEnabled,
-                        reasoningEffort: configItem.reasoningEffort,
-                        requestConcurrency: configItem.requestConcurrency,
+                        id: normalizedConfig.id,
+                        modelType: normalizedConfig.modelType,
+                        capabilities: normalizedConfig.capabilities,
+                        sortOrder: normalizedConfig.sortOrder,
+                        creditCost: normalizedConfig.creditCost,
+                        creditUnit: normalizedConfig.creditUnit,
+                        thinkingEnabled: normalizedConfig.thinkingEnabled,
+                        reasoningEffort: normalizedConfig.reasoningEffort,
+                        requestConcurrency: normalizedConfig.requestConcurrency,
+                        customBodyParameters: normalizedConfig.customBodyParameters,
+                        videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
+                        displayName: normalizedConfig.displayName,
+                        modelIcon: normalizedConfig.modelIcon,
                     });
                 }
             }
@@ -673,9 +718,9 @@ export function AppConfigModal() {
                                                             </Button>
                                                             <Button
                                                                 size="small"
-                                                                disabled={isSaving || channel.apiFormat === "minimax" || channel.apiFormat === "evolink"}
+                                                                disabled={isSaving || channel.apiFormat === "minimax"}
                                                                 loading={loadingChannelId === channel.id}
-                                                                title={channel.apiFormat === "minimax" ? "MiniMax 请手动配置 MiniMax-H3" : channel.apiFormat === "evolink" ? "Evolink 暂无模型列表接口，请手动配置模型" : undefined}
+                                                                title={channel.apiFormat === "minimax" ? "MiniMax 请手动配置 MiniMax-H3" : undefined}
                                                                 onClick={() => void refreshChannelModels(channel)}
                                                             >
                                                                 拉取模型
@@ -703,7 +748,7 @@ export function AppConfigModal() {
                                                                     showSearch
                                                                     allowClear
                                                                     maxTagCount="responsive"
-                                                                    placeholder={channel.apiFormat === "minimax" ? "请输入 MiniMax-H3" : channel.apiFormat === "evolink" ? "请输入 Evolink 模型名" : "输入模型名，或点击拉取模型"}
+                                                                    placeholder={channel.apiFormat === "minimax" ? "请输入 MiniMax-H3" : "输入模型名，或点击拉取模型"}
                                                                     value={channel.models}
                                                                     disabled={isSaving}
                                                                     onChange={(models) => updateDraftChannel(channel.id, { models })}
@@ -726,7 +771,7 @@ export function AppConfigModal() {
                                     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
                                         <div>
                                             <div className="text-sm font-semibold">默认模型和可选项</div>
-                                            <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">可选项决定各处下拉框展示哪些模型；同名模型会以括号里的渠道名区分。</div>
+                                            <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">可选项决定各处下拉框展示哪些模型；同名模型会以括号里的展示名或渠道名区分。</div>
                                         </div>
                                         <Button type="primary" disabled={!modelConfigsDirty || isSaving} loading={savingTab === "models"} onClick={() => void saveModelConfigs()}>
                                             保存
@@ -753,14 +798,14 @@ export function AppConfigModal() {
                                         {modelGroups.map((group) => (
                                             <Form.Item key={group.modelKey} label={group.defaultLabel} className="mb-0">
                                                 <div className={isSaving ? "pointer-events-none opacity-60" : ""}>
-                                                    <ModelPicker config={draftConfig} value={draftConfig[group.modelKey]} onChange={(model) => setDefaultDraftModel(group.capability, model)} capability={group.capability} fullWidth />
+                                                    <ModelPicker config={draftConfig} value={draftConfig[group.modelKey]} onChange={(model) => setDefaultDraftModel(group.capability, model)} capability={group.capability} fullWidth showRealName />
                                                 </div>
                                             </Form.Item>
                                         ))}
                                     </div>
                                     <div className="mt-6 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
                                         <div className="text-sm font-semibold">模型能力配置</div>
-                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">为每个模型勾选支持的细能力，用于判断工具调用（如视频编辑降级）。</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">点击模型后的编辑按钮配置展示名称、积分、能力与自定义 JSON 参数。</div>
                                         <div className="mt-3 space-y-4">
                                             {capabilityGroups.map((group) => {
                                                 const models = draftConfig[group.modelsKey];
@@ -777,89 +822,17 @@ export function AppConfigModal() {
                                                         {collapsed ? null : (
                                                             <div className="space-y-2">
                                                                 {models.map((model) => {
-                                                                    const capabilities = draftConfig.modelCapabilities.find((item) => item.model === model)?.capabilities || [];
+                                                                    const modelConfig = draftModelConfigs.find((item) => item.modelType === group.capability && modelConfigValue(item) === model);
+                                                                    if (!modelConfig) return null;
                                                                     return (
-                                                                        <div key={model} className="flex flex-wrap items-center gap-3 rounded border border-[var(--studio-line)] bg-[var(--studio-panel)] px-3 py-2">
-                                                                            {(() => {
-                                                                                const modelConfig = draftModelConfigs.find((item) => item.modelType === group.capability && modelConfigValue(item) === model);
-                                                                                const showThinkingConfiguration = modelConfig && isOpenAiTextModel(modelConfig, draftChannels);
-                                                                                return (
-                                                                                    <>
-                                                                                        <span className="min-w-40 text-sm">{modelOptionLabel(draftConfig, model)}</span>
-                                                                                        <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
-                                                                                            {group.capability === "video" && modelConfig?.creditUnit === "second" ? "每秒积分" : "每次积分"}
-                                                                                            <InputNumber
-                                                                                                min={0}
-                                                                                                precision={0}
-                                                                                                value={modelConfig?.creditCost ?? 0}
-                                                                                                disabled={isSaving}
-                                                                                                className="w-24"
-                                                                                                onChange={(value) => updateModelCreditCost(group.capability, model, Number(value) || 0)}
-                                                                                            />
-                                                                                        </span>
-                                                                                        {group.capability === "video" && modelConfig ? (
-                                                                                            <Select
-                                                                                                size="small"
-                                                                                                value={modelConfig.creditUnit === "second" ? "second" : "generation"}
-                                                                                                disabled={isSaving}
-                                                                                                className="w-24"
-                                                                                                options={[
-                                                                                                    { value: "generation", label: "按次" },
-                                                                                                    { value: "second", label: "按秒" },
-                                                                                                ]}
-                                                                                                onChange={(creditUnit: ServerModelConfig["creditUnit"]) => updateModelCreditUnit(group.capability, model, creditUnit)}
-                                                                                            />
-                                                                                        ) : null}
-                                                                                        {(group.capability === "image" || group.capability === "video") && modelConfig ? (
-                                                                                            <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
-                                                                                                同时并发数
-                                                                                                <InputNumber
-                                                                                                    min={1}
-                                                                                                    precision={0}
-                                                                                                    value={modelConfig.requestConcurrency}
-                                                                                                    disabled={isSaving}
-                                                                                                    className="w-20"
-                                                                                                    onChange={(value) => updateModelRequestConcurrency(group.capability, model, Number(value) || 1)}
-                                                                                                />
-                                                                                            </span>
-                                                                                        ) : null}
-                                                                                        {MODEL_CAPABILITY_OPTIONS[group.capability].map((option) => (
-                                                                                            <Checkbox
-                                                                                                key={option.value}
-                                                                                                checked={capabilities.includes(option.value)}
-                                                                                                disabled={isSaving}
-                                                                                                onChange={(event) => updateModelCapabilities(group.capability, model, option.value, event.target.checked)}
-                                                                                            >
-                                                                                                {option.label}
-                                                                                            </Checkbox>
-                                                                                        ))}
-                                                                                        {showThinkingConfiguration && modelConfig ? (
-                                                                                            <>
-                                                                                                <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
-                                                                                                    开启思考模式
-                                                                                                    <Switch
-                                                                                                        size="small"
-                                                                                                        checked={modelConfig.thinkingEnabled}
-                                                                                                        disabled={isSaving}
-                                                                                                        onChange={(thinkingEnabled) => updateModelThinkingConfiguration(model, { thinkingEnabled })}
-                                                                                                    />
-                                                                                                </span>
-                                                                                                <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
-                                                                                                    思考强度
-                                                                                                    <Select
-                                                                                                        size="small"
-                                                                                                        value={modelConfig.reasoningEffort}
-                                                                                                        disabled={isReasoningEffortDisabled(isSaving, modelConfig.thinkingEnabled)}
-                                                                                                        className="w-20"
-                                                                                                        options={reasoningEffortOptions}
-                                                                                                        onChange={(reasoningEffort: "high" | "max") => updateModelThinkingConfiguration(model, { reasoningEffort })}
-                                                                                                    />
-                                                                                                </span>
-                                                                                            </>
-                                                                                        ) : null}
-                                                                                    </>
-                                                                                );
-                                                                            })()}
+                                                                        <div key={model} className="flex items-center justify-between gap-3 rounded border border-[var(--studio-line)] bg-[var(--studio-panel)] px-3 py-2">
+                                                                            <span className="min-w-0 truncate text-sm">{modelOptionLabelWithRealName(draftConfig, model)}</span>
+                                                                            <div className="flex shrink-0 items-center gap-2">
+                                                                                {modelConfig.defaultModel ? <span className="text-xs text-[var(--studio-muted)]">默认</span> : null}
+                                                                                <Button size="small" icon={<Pencil className="size-3.5" />} disabled={isSaving} onClick={() => openModelConfigEditor(modelConfig)}>
+                                                                                    编辑
+                                                                                </Button>
+                                                                            </div>
                                                                         </div>
                                                                     );
                                                                 })}
@@ -980,14 +953,30 @@ export function AppConfigModal() {
                                                             </Form.Item>
                                                             <Form.Item label={providerFields.regionLabel} className="mb-0">
                                                                 {storage.provider === "qiniuKodo" ? (
-                                                                    <Select value={storage.region || undefined} options={qiniuRegionOptions} placeholder={providerFields.regionPlaceholder} disabled={isSaving} onChange={(region) => updateDraftObjectStorage(storage.id, { region })} />
+                                                                    <Select
+                                                                        value={storage.region || undefined}
+                                                                        options={qiniuRegionOptions}
+                                                                        placeholder={providerFields.regionPlaceholder}
+                                                                        disabled={isSaving}
+                                                                        onChange={(region) => updateDraftObjectStorage(storage.id, { region })}
+                                                                    />
                                                                 ) : (
-                                                                    <Input value={storage.region} placeholder={providerFields.regionPlaceholder} disabled={isSaving} onChange={(event) => updateDraftObjectStorage(storage.id, { region: event.target.value })} />
+                                                                    <Input
+                                                                        value={storage.region}
+                                                                        placeholder={providerFields.regionPlaceholder}
+                                                                        disabled={isSaving}
+                                                                        onChange={(event) => updateDraftObjectStorage(storage.id, { region: event.target.value })}
+                                                                    />
                                                                 )}
                                                             </Form.Item>
                                                             {storage.provider === "aliyunOss" ? (
                                                                 <Form.Item label="Endpoint" extra="必须填写包含 http:// 或 https:// 的 OSS Endpoint。" className="mb-0 md:col-span-2">
-                                                                    <Input value={storage.endpoint} placeholder="https://oss-cn-hangzhou.aliyuncs.com" disabled={isSaving} onChange={(event) => updateDraftObjectStorage(storage.id, { endpoint: event.target.value })} />
+                                                                    <Input
+                                                                        value={storage.endpoint}
+                                                                        placeholder="https://oss-cn-hangzhou.aliyuncs.com"
+                                                                        disabled={isSaving}
+                                                                        onChange={(event) => updateDraftObjectStorage(storage.id, { endpoint: event.target.value })}
+                                                                    />
                                                                 </Form.Item>
                                                             ) : null}
                                                             <Form.Item label="公开访问地址" required={storage.provider === "qiniuKodo"} extra={providerFields.publicBaseUrlExtra} className="mb-0 md:col-span-2">
@@ -1020,6 +1009,295 @@ export function AppConfigModal() {
                     ]}
                 />
             )}
+            <Modal
+                title={
+                    editingModelConfig ? (
+                        <div className="flex items-center gap-3">
+                            {editingModelConfig.modelType === "video" ? (
+                                <span className="flex size-10 items-center justify-center rounded-lg bg-violet-500/15 text-violet-500">
+                                    <Video className="size-5" />
+                                </span>
+                            ) : null}
+                            <div>
+                                <div className="text-lg font-semibold">{modelOptionLabelWithRealName(draftConfig, modelConfigValue(editingModelConfig))} 配置</div>
+                                {editingModelConfig.modelType === "video" ? <div className="mt-0.5 text-xs font-normal text-[var(--studio-muted)]">配置模型的计费方式、分辨率价格及功能支持</div> : null}
+                            </div>
+                        </div>
+                    ) : (
+                        "模型配置"
+                    )
+                }
+                open={Boolean(editingModelConfig)}
+                centered
+                width={editingModelConfig?.modelType === "video" ? 980 : 760}
+                destroyOnHidden
+                okText="确认"
+                cancelText="取消"
+                onCancel={() => setEditingModelConfig(null)}
+                onOk={saveModelConfigEditor}
+            >
+                {editingModelConfig?.modelType === "video" && editingModelIsMedia ? (
+                    <div className="space-y-5">
+                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                            <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                                展示名称 <Info className="size-4 text-[var(--studio-muted)]" />
+                            </div>
+                            <Input
+                                maxLength={255}
+                                placeholder={editingModelConfig.modelName}
+                                value={editingModelConfig.displayName || editingModelConfig.modelName}
+                                onChange={(event) => updateEditingModelConfig({ displayName: event.target.value.trim() || null })}
+                            />
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">展示给用户看的名称，默认与真实模型名一致，仅影响展示不影响调用。</p>
+                        </section>
+
+                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                            <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                                展示图标 <Info className="size-4 text-[var(--studio-muted)]" />
+                            </div>
+                            <Select
+                                value={editingModelConfig.modelIcon || ""}
+                                options={modelIconSelectOptions}
+                                className="w-full"
+                                onChange={(modelIcon: string) => updateEditingModelConfig({ modelIcon: modelIcon || null })}
+                            />
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">展示给用户看的图标；选择「自动匹配」时按模型名或渠道自动识别。</p>
+                        </section>
+
+                        <section className="grid gap-4 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4 md:grid-cols-2">
+                            <div>
+                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                                    计费方式 <Info className="size-4 text-[var(--studio-muted)]" />
+                                </div>
+                                <Select
+                                    value={editingModelConfig.videoBillingConfiguration?.billingUnit || "generation"}
+                                    options={[
+                                        { value: "generation", label: "按次" },
+                                        { value: "second", label: "按秒" },
+                                    ]}
+                                    className="w-full"
+                                    onChange={(billingUnit: ServerModelConfig["creditUnit"]) =>
+                                        updateEditingModelConfig({
+                                            creditUnit: billingUnit,
+                                            videoBillingConfiguration: {
+                                                ...(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration()),
+                                                billingUnit,
+                                            },
+                                        })
+                                    }
+                                />
+                            </div>
+                            <div>
+                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                                    {editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? "每延生成时长（秒）" : "最短生成时长（秒）"} <Info className="size-4 text-[var(--studio-muted)]" />
+                                </div>
+                                <Space.Compact className="w-full">
+                                    <InputNumber
+                                        min={1}
+                                        precision={0}
+                                        value={editingModelConfig.videoBillingConfiguration?.minimumDurationSeconds || 3}
+                                        style={{ width: "100%" }}
+                                        onChange={(value) =>
+                                            updateEditingModelConfig({
+                                                videoBillingConfiguration: {
+                                                    ...(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration()),
+                                                    minimumDurationSeconds: Math.max(1, Math.floor(Number(value) || 1)),
+                                                },
+                                            })
+                                        }
+                                    />
+                                    <Button disabled className="pointer-events-none">秒</Button>
+                                </Space.Compact>
+                            </div>
+                        </section>
+
+                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                    <div className="flex items-center gap-1.5 text-base font-semibold">
+                                        功能类型与分辨率价格 <Info className="size-4 text-[var(--studio-muted)]" />
+                                    </div>
+                                    <p className="mt-1 text-xs text-[var(--studio-muted)]">设置模型支持的功能类型及各分辨率的积分消耗价格</p>
+                                </div>
+                                <span className="rounded-md border border-[var(--studio-line)] px-2.5 py-1 text-xs text-[var(--studio-muted)]">
+                                    价格说明：{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? "积分/秒" : "积分/次"}
+                                </span>
+                            </div>
+                            <div className="space-y-4">
+                                {VIDEO_GENERATION_MODE_OPTIONS.map((mode, index) => {
+                                    const prices = editingModelConfig.videoBillingConfiguration?.modePrices?.[mode.value] || {};
+                                    const modeEnabled = editingModelConfig.capabilities.includes(mode.value);
+                                    const modeIcon = index === 0 ? <TextCursorInput className="size-5" /> : index === 1 ? <Image className="size-5" /> : <Sparkles className="size-5" />;
+                                    const modeColor = index === 0 ? "border-violet-500/50 bg-violet-500/5" : index === 1 ? "border-blue-500/50 bg-blue-500/5" : "border-emerald-500/50 bg-emerald-500/5";
+                                    const iconColor = index === 0 ? "bg-violet-500/15 text-violet-500" : index === 1 ? "bg-blue-500/15 text-blue-500" : "bg-emerald-500/15 text-emerald-500";
+                                    const description = index === 0 ? "根据文本描述生成视频" : index === 1 ? "根据图片生成视频" : "支持文本、图片及多模态参考生成视频";
+                                    return (
+                                        <div key={mode.value} className={`rounded-lg border p-4 transition-colors ${modeEnabled ? modeColor : "border-[var(--studio-line)] opacity-70"}`}>
+                                            <div className="flex items-start justify-between gap-4 border-b border-[var(--studio-line)] pb-3">
+                                                <div className="flex min-w-0 items-center gap-3">
+                                                    <span className={`flex size-10 shrink-0 items-center justify-center rounded-md ${iconColor}`}>{modeIcon}</span>
+                                                    <div>
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <span className="font-semibold">{mode.label}</span>
+                                                            {modeEnabled ? (
+                                                                <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">已启用</span>
+                                                            ) : (
+                                                                <span className="rounded bg-[var(--studio-panel)] px-2 py-0.5 text-xs text-[var(--studio-muted)]">未启用</span>
+                                                            )}
+                                                        </div>
+                                                        <p className="mt-1 text-xs text-[var(--studio-muted)]">{description}</p>
+                                                    </div>
+                                                </div>
+                                                <Switch
+                                                    checked={modeEnabled}
+                                                    onChange={(checked) =>
+                                                        updateEditingModelConfig({
+                                                            capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, mode.value]) : editingModelConfig.capabilities.filter((value) => value !== mode.value),
+                                                            ...(!checked ? { videoBillingConfiguration: clearVideoModePrices(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value) } : {}),
+                                                        })
+                                                    }
+                                                />
+                                            </div>
+                                            <div className="pt-3">
+                                                <div className="mb-2 text-xs font-medium text-[var(--studio-muted)]">分辨率价格（{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? "积分/秒" : "积分/次"}）</div>
+                                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                                                    {VIDEO_RESOLUTION_OPTIONS.filter((resolution) => resolution.value !== "auto").map((resolution) => (
+                                                        <label key={resolution.value} className="flex min-w-0 items-center gap-2 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2.5 py-2">
+                                                            <span
+                                                                className={`flex size-7 shrink-0 items-center justify-center rounded text-[10px] font-semibold ${resolution.value === "480p" ? "bg-violet-500/15 text-violet-500" : resolution.value === "720p" ? "bg-blue-500/15 text-blue-500" : resolution.value === "1080p" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : resolution.value === "2k" ? "bg-rose-500/15 text-rose-500" : resolution.value === "4k" ? "bg-purple-500/15 text-purple-500" : "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400"}`}
+                                                            >
+                                                                <Monitor className="size-3.5" />
+                                                            </span>
+                                                            <span className="min-w-0 flex-1">
+                                                                <span className="block text-xs font-medium">{resolution.label}</span>
+                                                                <InputNumber
+                                                                    min={0}
+                                                                    precision={0}
+                                                                    placeholder="未配置"
+                                                                    value={prices[resolution.value]}
+                                                                    className="mt-0.5 w-full"
+                                                                    disabled={!modeEnabled}
+                                                                    controls={false}
+                                                                    onChange={(value) =>
+                                                                        updateEditingModelConfig({
+                                                                            videoBillingConfiguration: updateVideoResolutionPrice(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value, resolution.value, value),
+                                                                        })
+                                                                    }
+                                                                />
+                                                            </span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </section>
+
+                        <div className="grid gap-5 md:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
+                            <section>
+                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                                    同时并发数 <Info className="size-4 text-[var(--studio-muted)]" />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <InputNumber min={1} precision={0} value={editingModelConfig.requestConcurrency} className="w-52" onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })} />
+                                    <span className="text-sm text-[var(--studio-muted)]">个任务</span>
+                                </div>
+                            </section>
+                            <section>
+                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">模型能力</div>
+                                <div className="flex flex-wrap gap-2">
+                                    {VIDEO_GENERATION_MODE_OPTIONS.filter((option) => editingModelConfig.capabilities.includes(option.value)).map((option) => (
+                                        <span key={option.value} className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
+                                            <CheckCircle2 className="size-3.5" />
+                                            {option.label}
+                                        </span>
+                                    ))}
+                                    {!editingModelConfig.capabilities.length ? <span className="text-xs text-[var(--studio-muted)]">尚未启用视频生成能力</span> : null}
+                                </div>
+                            </section>
+                        </div>
+
+                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex items-center gap-1.5 text-sm font-semibold">
+                                    自定义 JSON（可选） <Info className="size-4 text-[var(--studio-muted)]" />
+                                </div>
+                                <Button size="small" icon={<Braces className="size-3.5" />} onClick={formatEditingCustomBodyParameters}>
+                                    格式化
+                                </Button>
+                            </div>
+                            <Input.TextArea value={editingCustomBodyParameters} autoSize={{ minRows: 5, maxRows: 12 }} spellCheck={false} className="font-mono text-xs" onChange={(event) => setEditingCustomBodyParameters(event.target.value)} />
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">仅在 JSON 格式的 POST 请求中合并；同名字段覆盖系统参数。</p>
+                        </section>
+                    </div>
+                ) : editingModelConfig ? (
+                    <Form layout="vertical" requiredMark={false}>
+                        <Form.Item label="展示名称" extra="展示给用户看的名称，默认与真实模型名一致，仅影响展示不影响调用。">
+                            <Input
+                                maxLength={255}
+                                placeholder={editingModelConfig.modelName}
+                                value={editingModelConfig.displayName || editingModelConfig.modelName}
+                                onChange={(event) => updateEditingModelConfig({ displayName: event.target.value.trim() || null })}
+                            />
+                        </Form.Item>
+                        <Form.Item label="展示图标" extra="展示给用户看的图标；选择「自动匹配」时按模型名或渠道自动识别。">
+                            <Select
+                                value={editingModelConfig.modelIcon || ""}
+                                options={modelIconSelectOptions}
+                                className="w-full"
+                                onChange={(modelIcon: string) => updateEditingModelConfig({ modelIcon: modelIcon || null })}
+                            />
+                        </Form.Item>
+                        {editingModelConfig.modelType !== "video" ? (
+                            <Form.Item label="每次积分">
+                                <InputNumber min={0} precision={0} value={editingModelConfig.creditCost} className="w-full" onChange={(value) => updateEditingModelConfig({ creditCost: Math.max(0, Number(value) || 0) })} />
+                            </Form.Item>
+                        ) : null}
+                        {editingModelConfig.modelType === "image" ? (
+                            <Form.Item label="同时并发数">
+                                <InputNumber min={1} precision={0} value={editingModelConfig.requestConcurrency} className="w-full" onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })} />
+                            </Form.Item>
+                        ) : null}
+                        <Form.Item label="模型能力">
+                            <div className="flex flex-wrap gap-x-4 gap-y-2">
+                                {MODEL_CAPABILITY_OPTIONS[editingModelConfig.modelType].map((option) => (
+                                    <Checkbox
+                                        key={option.value}
+                                        checked={editingModelConfig.capabilities.includes(option.value)}
+                                        onChange={(event) =>
+                                            updateEditingModelConfig({
+                                                capabilities: event.target.checked ? uniqueModels([...editingModelConfig.capabilities, option.value]) : editingModelConfig.capabilities.filter((value) => value !== option.value),
+                                            })
+                                        }
+                                    >
+                                        {option.label}
+                                    </Checkbox>
+                                ))}
+                            </div>
+                        </Form.Item>
+                        {editingModelConfig.modelType === "text" && isOpenAiTextModel(editingModelConfig, draftChannels) ? (
+                            <>
+                                <Form.Item label="开启思考模式">
+                                    <Switch checked={editingModelConfig.thinkingEnabled} onChange={(thinkingEnabled) => updateEditingModelConfig({ thinkingEnabled })} />
+                                </Form.Item>
+                                <Form.Item label="思考强度">
+                                    <Select
+                                        value={editingModelConfig.reasoningEffort}
+                                        disabled={isReasoningEffortDisabled(false, editingModelConfig.thinkingEnabled)}
+                                        options={reasoningEffortOptions}
+                                        onChange={(reasoningEffort: "high" | "max") => updateEditingModelConfig({ reasoningEffort })}
+                                    />
+                                </Form.Item>
+                            </>
+                        ) : null}
+                        <Form.Item label="自定义 JSON" extra="仅在 JSON 格式的 POST 请求中合并；同名字段覆盖系统参数。">
+                            <Input.TextArea value={editingCustomBodyParameters} autoSize={{ minRows: 5, maxRows: 12 }} spellCheck={false} onChange={(event) => setEditingCustomBodyParameters(event.target.value)} />
+                        </Form.Item>
+                    </Form>
+                ) : null}
+            </Modal>
         </Modal>
     );
 }
@@ -1029,7 +1307,34 @@ function cloneChannels(channels: ModelChannel[]) {
 }
 
 function cloneModelConfigs(configs: ServerModelConfig[]) {
-    return configs.map((config) => ({ ...config, capabilities: [...config.capabilities] }));
+    return configs.map(cloneModelConfig);
+}
+
+function cloneModelConfig(config: ServerModelConfig): ServerModelConfig {
+    return {
+        ...config,
+        capabilities: [...config.capabilities],
+        customBodyParameters: { ...(config.customBodyParameters || {}) },
+        videoBillingConfiguration: config.modelType === "video" ? cloneVideoBillingConfiguration(config.videoBillingConfiguration || createVideoBillingConfiguration()) : null,
+    };
+}
+
+function normalizeModelConfigForSave(config: ServerModelConfig): ServerModelConfig {
+    const supportedCapabilities = new Set(MODEL_CAPABILITY_OPTIONS[config.modelType].map((option) => option.value));
+    const capabilities = config.capabilities.filter((capability) => supportedCapabilities.has(capability));
+    const videoBillingConfiguration = config.modelType === "video" && config.videoBillingConfiguration
+        ? {
+              ...config.videoBillingConfiguration,
+              modePrices: Object.fromEntries(
+                  Object.entries(config.videoBillingConfiguration.modePrices || {}).filter(([mode]) => supportedCapabilities.has(mode) && capabilities.includes(mode)),
+              ) as VideoBillingConfiguration["modePrices"],
+          }
+        : config.videoBillingConfiguration;
+    return {
+        ...config,
+        capabilities,
+        videoBillingConfiguration,
+    };
 }
 
 function cloneObjectStorages(storages: ObjectStorageConfig[]) {
@@ -1050,6 +1355,10 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         thinkingEnabled: true,
         reasoningEffort: "high",
         requestConcurrency: 1,
+        customBodyParameters: {},
+        videoBillingConfiguration: modelType === "video" ? createVideoBillingConfiguration() : null,
+        displayName: null,
+        modelIcon: null,
     };
 }
 
@@ -1058,8 +1367,43 @@ function sameValue(first: unknown, second: unknown) {
 }
 
 function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelConfig) {
-    return first.modelType === second.modelType && first.sortOrder === second.sortOrder && first.creditCost === second.creditCost && first.creditUnit === second.creditUnit && first.requestConcurrency === second.requestConcurrency
-        && first.thinkingEnabled === second.thinkingEnabled && first.reasoningEffort === second.reasoningEffort && sameValue(first.capabilities, second.capabilities);
+    return (
+        first.modelType === second.modelType &&
+        first.sortOrder === second.sortOrder &&
+        first.creditCost === second.creditCost &&
+        first.creditUnit === second.creditUnit &&
+        first.requestConcurrency === second.requestConcurrency &&
+        first.thinkingEnabled === second.thinkingEnabled &&
+        first.reasoningEffort === second.reasoningEffort &&
+        (first.displayName || null) === (second.displayName || null) &&
+        (first.modelIcon || null) === (second.modelIcon || null) &&
+        sameValue(first.capabilities, second.capabilities) &&
+        sameValue(first.customBodyParameters, second.customBodyParameters) &&
+        sameValue(first.videoBillingConfiguration, second.videoBillingConfiguration)
+    );
+}
+
+function cloneVideoBillingConfiguration(configuration: VideoBillingConfiguration): VideoBillingConfiguration {
+    return {
+        ...configuration,
+        modePrices: Object.fromEntries(Object.entries(configuration.modePrices || {}).map(([mode, prices]) => [mode, { ...prices }])) as VideoBillingConfiguration["modePrices"],
+    };
+}
+
+function updateVideoResolutionPrice(configuration: VideoBillingConfiguration, mode: VideoGenerationMode, resolution: VideoResolution, value: number | null) {
+    const modePrices = { ...(configuration.modePrices || {}) };
+    const prices = { ...(modePrices[mode] || {}) };
+    if (value === null) delete prices[resolution];
+    else prices[resolution] = Math.max(0, Math.floor(Number(value) || 0));
+    modePrices[mode] = prices;
+    return { ...configuration, modePrices };
+}
+
+function clearVideoModePrices(configuration: VideoBillingConfiguration, mode: VideoGenerationMode): VideoBillingConfiguration {
+    return {
+        ...configuration,
+        modePrices: { ...configuration.modePrices, [mode]: {} },
+    };
 }
 
 function modelConfigValue(config: Pick<ServerModelConfig, "channelId" | "modelName">) {

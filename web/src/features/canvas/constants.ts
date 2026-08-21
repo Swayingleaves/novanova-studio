@@ -1,14 +1,4 @@
-import {
-    type CanvasExecutionState,
-    type CanvasImageNode,
-    type CanvasNodeFrame,
-    type CanvasNodeKind,
-    type CanvasPoint,
-    type CanvasStoryboardNode,
-    type CanvasTextNode,
-    type CanvasVideoCompositionNode,
-    type CanvasVideoNode,
-} from "./types.ts";
+import { type CanvasExecutionState, type CanvasImageNode, type CanvasNodeFrame, type CanvasNodeKind, type CanvasPoint, type CanvasStoryboardNode, type CanvasTextNode, type CanvasVideoCompositionNode, type CanvasVideoNode } from "./types.ts";
 
 export interface CreateCanvasNodeInput {
     id: string;
@@ -143,10 +133,13 @@ export function createVideoNode(input: CreateCanvasNodeInput): CanvasVideoNode {
             size: "",
             seconds: "",
             quality: "",
+            videoGenerationMode: "text-to-video",
             watermark: "",
             count: 1,
             references: [],
             referenceObjectStorages: [],
+            videoReferences: [],
+            videoReferenceObjectStorages: [],
             generationStyleIds: [],
             generationStyleSnapshots: [],
         },

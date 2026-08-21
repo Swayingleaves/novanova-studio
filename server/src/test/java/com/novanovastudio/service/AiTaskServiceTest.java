@@ -16,10 +16,12 @@ import com.novanovastudio.ai.AiErrorDetails;
 import com.novanovastudio.ai.AiProviderException;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.AiTaskSources;
+import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
+import com.novanovastudio.dto.VideoBillingConfiguration;
 import com.novanovastudio.entity.AiGenerationTask;
 import com.novanovastudio.repository.AiTaskRepository;
 import com.novanovastudio.security.CurrentUserProvider;
@@ -28,10 +30,13 @@ import com.novanovastudio.task.AiTaskQueue;
 import com.novanovastudio.task.ModelTaskExecutionDispatcher;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.transaction.reactive.TransactionalOperator;
@@ -44,6 +49,7 @@ import reactor.core.publisher.Mono;
  * @date     2026-07-10 00:00
  */
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class AiTaskServiceTest {
 
     /** AI任务仓储 */
@@ -114,7 +120,12 @@ class AiTaskServiceTest {
         when(persistenceService.getPlatformAiChannels()).thenReturn(Mono.just(List.of(channel)));
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(
                 new PersistenceDtos.ModelConfig("model-config-1", "channel-1", "model-1", AiTaskTypes.IMAGE, List.of(), true, 0, 0, true, "high"),
-                new PersistenceDtos.ModelConfig("model-config-2", "channel-1", "model-1", AiTaskTypes.VIDEO, List.of(), true, 0, 0, true, "high"),
+                new PersistenceDtos.ModelConfig("model-config-2", "channel-1", "model-1", AiTaskTypes.VIDEO,
+                        List.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO, VideoGenerationMode.REFERENCE_TO_VIDEO), true, 0, 0, true, "high", "generation", 1,
+                        new com.alibaba.fastjson2.JSONObject(), new VideoBillingConfiguration("generation", 3,
+                        Map.of(VideoGenerationMode.TEXT_TO_VIDEO, Map.of("720p", 6),
+                                VideoGenerationMode.IMAGE_TO_VIDEO, Map.of("720p", 8),
+                                VideoGenerationMode.REFERENCE_TO_VIDEO, Map.of("720p", 10))), null, null),
                 new PersistenceDtos.ModelConfig("model-config-3", "channel-1", "model-1", AiTaskTypes.TEXT, List.of(), true, 0, 0, true, "high")
         )));
         providerAdapter = mock(AiProviderAdapter.class);
@@ -128,7 +139,7 @@ class AiTaskServiceTest {
             executionOrder.add("create");
             return Mono.empty();
         }));
-        when(creditService.chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), anyString())).thenReturn(Mono.empty());
+        when(creditService.chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class))).thenReturn(Mono.empty());
         org.mockito.Mockito.lenient().when(creditService.refundTask(anyLong(), anyString(), anyString())).thenReturn(Mono.empty());
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any())).thenAnswer(invocation -> invocation.getArgument(0));
         org.mockito.Mockito.lenient().when(repository.updateTaskIfNotTerminal(anyString(), any(), org.mockito.ArgumentMatchers.nullable(String.class))).thenReturn(Mono.just(true));
@@ -170,7 +181,7 @@ class AiTaskServiceTest {
     @Test
     void shouldEnqueueVideoTaskToModelQueue() {
         AiTaskDtos.CreateAiTaskRequest request = new AiTaskDtos.CreateAiTaskRequest(
-                AiTaskTypes.VIDEO, "生成视频", "channel-1::model-1", java.util.Map.of("seconds", 5), List.of(), List.of(), AiTaskSources.VIDEO_PAGE);
+                AiTaskTypes.VIDEO, "生成视频", "channel-1::model-1", java.util.Map.of("seconds", 5, "resolution", "720p"), List.of(), List.of(), AiTaskSources.VIDEO_PAGE);
 
         AiTaskDtos.AiGenerationTaskResponse response = service.createTask(request).block();
 
@@ -259,11 +270,106 @@ class AiTaskServiceTest {
     @Test
     void shouldAllowStoryboardSourceForVideoTask() {
         AiTaskDtos.CreateAiTaskRequest request = new AiTaskDtos.CreateAiTaskRequest(
-                AiTaskTypes.VIDEO, "生成分镜视频", "channel-1::model-1", java.util.Map.of("seconds", 5), List.of(), List.of(), AiTaskSources.STORYBOARD);
+                AiTaskTypes.VIDEO, "生成分镜视频", "channel-1::model-1", java.util.Map.of("seconds", 5, "resolution", "720p"), List.of(), List.of(), AiTaskSources.STORYBOARD);
 
         AiTaskDtos.AiGenerationTaskResponse response = service.createTask(request).block();
 
         Assertions.assertNotNull(response);
+    }
+
+    /**
+     * 非图片媒体不能通过图片参考列表进入视频任务，失败时不得创建任务或扣积分。
+     */
+    @Test
+    void shouldRejectNonImageMimeTypeBeforeCreatingVideoTask() {
+        AiTaskDtos.CreateAiTaskRequest request = new AiTaskDtos.CreateAiTaskRequest(
+                AiTaskTypes.VIDEO, "生成视频", "channel-1::model-1", Map.of("seconds", 5, "resolution", "720p"),
+                List.of(new AiTaskDtos.AiTaskMediaReference("reference-1", "说明文件", "application/pdf", "files/reference-1", "https://example.com/reference-1")),
+                List.of(), AiTaskSources.VIDEO_PAGE, null, null, VideoGenerationMode.IMAGE_TO_VIDEO);
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.createTask(request).block());
+
+        Assertions.assertTrue(exception.getMessage().contains("图片参考列表只能包含图片素材"));
+        verify(repository, never()).createTask(any(AiGenerationTask.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        verify(modelTaskExecutionDispatcher, never()).enqueue(anyString(), anyString());
+    }
+
+    /** storageKey 查询不到媒体时，视频任务不得创建、扣费或入队。 */
+    @Test
+    void shouldRejectMissingVideoReferenceStorageKeyBeforeSideEffects() {
+        when(persistenceService.getMediaInfoForUser(7L, "image:missing")).thenReturn(Mono.empty());
+        AiTaskDtos.CreateAiTaskRequest request = videoRequest(VideoGenerationMode.IMAGE_TO_VIDEO,
+                List.of(new AiTaskDtos.AiTaskMediaReference("missing", "图片", "image/png", " image:missing ", "https://example.com/missing.png")), List.of());
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.createTask(request).block());
+
+        Assertions.assertTrue(exception.getMessage().contains("不存在或不属于当前用户"));
+        verify(repository, never()).createTask(any(AiGenerationTask.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        verify(modelTaskExecutionDispatcher, never()).enqueue(anyString(), anyString());
+    }
+
+    /** 媒体查询抛出资源不存在时，仍需统一返回素材归属错误且不产生副作用。 */
+    @Test
+    void shouldRejectVideoReferenceOwnedByAnotherUserBeforeSideEffects() {
+        when(persistenceService.getMediaInfoForUser(7L, "image:other"))
+                .thenReturn(Mono.error(new BusinessException(com.novanovastudio.common.ErrorCode.RESOURCE_NOT_FOUND, "媒体不存在")));
+        AiTaskDtos.CreateAiTaskRequest request = videoRequest(VideoGenerationMode.IMAGE_TO_VIDEO,
+                List.of(new AiTaskDtos.AiTaskMediaReference("other", "图片", "image/png", "image:other", "https://example.com/other.png")), List.of());
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.createTask(request).block());
+
+        Assertions.assertTrue(exception.getMessage().contains("不存在或不属于当前用户"));
+        verify(repository, never()).createTask(any(AiGenerationTask.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        verify(modelTaskExecutionDispatcher, never()).enqueue(anyString(), anyString());
+    }
+
+    /** 数据库媒体类型与请求声明不一致时，视频任务必须失败。 */
+    @Test
+    void shouldRejectVideoReferenceWhenStoredMimeTypeDoesNotMatchDeclaration() {
+        when(persistenceService.getMediaInfoForUser(7L, "image:stored"))
+                .thenReturn(Mono.just(uploadedMedia("image:stored", "https://example.com/stored.png", "video/mp4")));
+        AiTaskDtos.CreateAiTaskRequest request = videoRequest(VideoGenerationMode.IMAGE_TO_VIDEO,
+                List.of(new AiTaskDtos.AiTaskMediaReference("stored", "图片", "image/png", "image:stored", "https://example.com/stored.png")), List.of());
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.createTask(request).block());
+
+        Assertions.assertTrue(exception.getMessage().contains("素材类型与声明不一致"));
+        verify(repository, never()).createTask(any(AiGenerationTask.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        verify(modelTaskExecutionDispatcher, never()).enqueue(anyString(), anyString());
+    }
+
+    /** 参考素材没有地址或地址协议非法时，视频任务必须失败。 */
+    @Test
+    void shouldRejectVideoReferenceWithoutAccessibleHttpUrl() {
+        when(persistenceService.getMediaInfoForUser(7L, "image:no-url"))
+                .thenReturn(Mono.just(uploadedMedia("image:no-url", "javascript:alert(1)", "image/png")));
+        AiTaskDtos.CreateAiTaskRequest request = videoRequest(VideoGenerationMode.IMAGE_TO_VIDEO,
+                List.of(new AiTaskDtos.AiTaskMediaReference("no-url", "图片", "image/png", "image:no-url", "https://example.com/no-url.png")), List.of());
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.createTask(request).block());
+
+        Assertions.assertTrue(exception.getMessage().contains("没有可访问的http或https地址"));
+        verify(repository, never()).createTask(any(AiGenerationTask.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        verify(modelTaskExecutionDispatcher, never()).enqueue(anyString(), anyString());
+    }
+
+    /** 构造带图片或视频参考的视频请求。 */
+    private AiTaskDtos.CreateAiTaskRequest videoRequest(String mode,
+                                                        List<AiTaskDtos.AiTaskMediaReference> references,
+                                                        List<AiTaskDtos.AiTaskMediaReference> videoReferences) {
+        return new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.VIDEO, "生成视频", "channel-1::model-1",
+                Map.of("seconds", 5, "resolution", "720p"), references, videoReferences,
+                AiTaskSources.VIDEO_PAGE, null, null, mode);
+    }
+
+    /** 构造素材查询响应。 */
+    private PersistenceDtos.UploadedMediaResponse uploadedMedia(String storageKey, String url, String mimeType) {
+        return new PersistenceDtos.UploadedMediaResponse(storageKey, url, 12L, mimeType, null, null, null, null);
     }
 
     /**

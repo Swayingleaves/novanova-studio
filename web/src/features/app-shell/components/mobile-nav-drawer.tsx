@@ -1,7 +1,6 @@
 "use client";
 
-import { Avatar, Drawer } from "antd";
-import { ShoppingCart, Ticket, Zap } from "lucide-react";
+import { Drawer } from "antd";
 import Link from "next/link";
 
 import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
@@ -22,31 +21,6 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
     return (
         <Drawer title="创作导航" placement="left" size={292} open={open} onClose={onClose} className="md:hidden">
             <div className="space-y-5">
-                {user ? (
-                    <div className="border-b border-[var(--studio-line)] pb-5">
-                        <Link href="/profile" onClick={onClose} className="flex items-center gap-3 px-1 text-[var(--studio-ink)]">
-                            <Avatar size={40} src={user.avatarUrl || undefined}>
-                                {(user.displayName || user.email || "?").charAt(0).toUpperCase()}
-                            </Avatar>
-                            <span className="min-w-0">
-                                <span className="block truncate text-sm font-medium">{user.displayName}</span>
-                                <span className="mt-0.5 block truncate text-xs text-[var(--studio-muted)]">个人信息</span>
-                            </span>
-                        </Link>
-                        <Link href="/credits" onClick={onClose} className="mt-4 flex items-center justify-between border-t border-[var(--studio-line)] px-1 pt-4 text-sm text-[var(--studio-text)]">
-                            <span className="inline-flex items-center gap-2"><Zap className="size-4 fill-current text-[var(--studio-primary)]" />积分</span>
-                            <span className="tabular-nums text-[var(--studio-ink)]">{user.creditBalance.toLocaleString("zh-CN")}</span>
-                        </Link>
-                        <div className="mt-3 grid grid-cols-2 gap-2">
-                            <Link href="/credits/purchase" onClick={onClose} className="flex items-center justify-center gap-2 rounded-md border border-[var(--studio-line)] px-3 py-2.5 text-sm text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]">
-                                <ShoppingCart className="size-4" />购买
-                            </Link>
-                            <Link href="/credits/redeem" onClick={onClose} className="flex items-center justify-center gap-2 rounded-md border border-[var(--studio-line)] px-3 py-2.5 text-sm text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]">
-                                <Ticket className="size-4" />兑换
-                            </Link>
-                        </div>
-                    </div>
-                ) : null}
                 {NAV_GROUPS.map((group) => {
                     const tools = visibleNavigationTools.filter((tool) => tool.group === group.key);
                     if (!tools.length) return null;

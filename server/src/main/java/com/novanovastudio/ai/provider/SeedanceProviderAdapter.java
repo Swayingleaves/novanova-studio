@@ -10,6 +10,7 @@ import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.AiTaskParameterReader;
 import com.novanovastudio.ai.AiTaskPollingSupport;
 import com.novanovastudio.ai.AiTaskTypes;
+import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
@@ -146,10 +147,11 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
     private Mono<JSONObject> createSeedanceVideoTask(
             AiTaskExecutionContext context, List<String> imageUrls, List<String> videoUrls) {
         Map<String, Object> payload = buildRequestPayload(
-                context.model(), context.request().prompt(), context.request().parameters(), imageUrls, videoUrls);
+                context.model(), context.request().prompt(), context.request().parameters(), imageUrls, videoUrls,
+                context.request().videoGenerationMode());
         log.info("创建Seedance视频任务: taskId={}, model={}, imageCount={}, videoCount={}",
                 context.task().getId(), context.model(), imageUrls.size(), videoUrls.size());
-        return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_TASK_PATH, payload)
+        return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_TASK_PATH, com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .map(AiJsonUtils::responsePayload)
                 .flatMap(created -> {
                     String providerTaskId = AiTaskParameterReader.firstNonEmpty(created.getString("id"));
@@ -310,9 +312,36 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
     static Map<String, Object> buildRequestPayload(
             String model, String prompt, Map<String, Object> parameters,
             List<String> imageUrls, List<String> videoUrls) {
+        String inferredMode = imageUrls.isEmpty() && videoUrls.isEmpty()
+                ? VideoGenerationMode.TEXT_TO_VIDEO
+                : imageUrls.isEmpty() || !videoUrls.isEmpty()
+                        ? VideoGenerationMode.REFERENCE_TO_VIDEO
+                        : VideoGenerationMode.IMAGE_TO_VIDEO;
+        return buildRequestPayload(model, prompt, parameters, imageUrls, videoUrls, inferredMode);
+    }
+
+    /**
+     * 构建带显式生成模式的 Seedance 请求体。
+     *
+     * @param model String 模型 ID 或推理接入点 ID
+     * @param prompt String 视频提示词
+     * @param parameters Map<String, Object> 通用视频参数
+     * @param imageUrls List<String> 参考图片 URL 列表
+     * @param videoUrls List<String> 参考视频 URL 列表
+     * @param videoGenerationMode String 视频生成模式
+     * @return Map<String, Object> Seedance 请求体
+     * @throws BusinessException 生成模式不受支持时抛出
+     */
+    static Map<String, Object> buildRequestPayload(
+            String model, String prompt, Map<String, Object> parameters,
+            List<String> imageUrls, List<String> videoUrls, String videoGenerationMode) {
+        String mode = VideoGenerationMode.defaultIfBlank(videoGenerationMode);
+        if (!VideoGenerationMode.isSupported(mode)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持");
+        }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", model);
-        payload.put("content", buildContent(prompt, imageUrls, videoUrls));
+        payload.put("content", buildContent(prompt, imageUrls, videoUrls, mode));
         payload.put("ratio", normalizeRatio(AiTaskParameterReader.parameterText(parameters, "size", "adaptive")));
         payload.put("resolution", normalizeResolution(
                 AiTaskParameterReader.parameterText(parameters, "resolution", "720p")));
@@ -333,14 +362,16 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
      * @return List<Map<String, Object>> Seedance内容列表
      */
     private static List<Map<String, Object>> buildContent(
-            String prompt, List<String> imageUrls, List<String> videoUrls) {
+            String prompt, List<String> imageUrls, List<String> videoUrls, String videoGenerationMode) {
         List<Map<String, Object>> content = new ArrayList<>();
         content.add(Map.of("type", "text", "text", referenceAwarePrompt(prompt, imageUrls.size(), videoUrls.size())));
-        for (String imageUrl : imageUrls) {
+        for (int index = 0; index < imageUrls.size(); index++) {
+            String imageUrl = imageUrls.get(index);
             content.add(Map.of(
                     "type", "image_url",
                     "image_url", Map.of("url", imageUrl),
-                    "role", "reference_image"
+                    "role", VideoGenerationMode.IMAGE_TO_VIDEO.equals(videoGenerationMode) && index == 0
+                            ? "first_frame" : "reference_image"
             ));
         }
         for (String videoUrl : videoUrls) {

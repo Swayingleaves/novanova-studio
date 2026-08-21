@@ -104,6 +104,45 @@ class MiniMaxProviderAdapterTest {
     }
 
     /**
+     * 单张图片且没有参考视频时应构建为首帧图生视频请求。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldBuildMiniMaxH3ImageToVideoContent() {
+        JSONObject payload = toJsonObject(MiniMaxProviderAdapter.buildRequestPayload(
+                "MiniMax-H3",
+                "让图片中的人物向镜头走来",
+                Map.of("size", "9:16", "resolution", "768p", "seconds", "5"),
+                List.of("https://example.com/first-frame.png"),
+                List.of()
+        ));
+
+        Assertions.assertEquals("adaptive", payload.getString("ratio"));
+        Assertions.assertEquals("first_frame", payload.getJSONArray("content").getJSONObject(1).getString("role"));
+    }
+
+    /**
+     * 全能参考仅有一张图片时仍必须保留参考素材语义，不能按首帧图生视频处理。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldKeepExplicitReferenceToVideoModeForSingleImage() {
+        JSONObject payload = toJsonObject(MiniMaxProviderAdapter.buildRequestPayload(
+                "MiniMax-H3",
+                "参考图片中的人物走动",
+                Map.of("size", "16:9", "resolution", "768p", "seconds", "5"),
+                List.of("https://example.com/reference.png"),
+                List.of(),
+                "reference-to-video"
+        ));
+
+        Assertions.assertEquals("reference_image", payload.getJSONArray("content").getJSONObject(1).getString("role"));
+        Assertions.assertEquals("16:9", payload.getString("ratio"));
+    }
+
+    /**
      * 非法模型、比例、分辨率、时长或纯文生自适应比例必须明确失败。
      *
      * @return void 无返回值

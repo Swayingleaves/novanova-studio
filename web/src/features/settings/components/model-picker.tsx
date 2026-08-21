@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { Cpu } from "lucide-react";
+import { Clapperboard } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/shared/components/ui/select";
 import { cn } from "@/shared/lib/utils";
-import { modelOptionLabel, modelOptionName, resolveModelRequestConfig, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/features/settings/stores/use-config-store";
+import { modelOptionLabel, modelOptionLabelWithRealName, modelOptionName, resolveModelRequestConfig, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/features/settings/stores/use-config-store";
 
-import { isMonochromeModelIcon, resolveModelIcon } from "./model-icon";
+import { MODEL_ICON_MONOCHROME_KEYS, isMonochromeModelIcon, resolveModelIcon, resolveModelIconByKey } from "./model-icon";
 
 const MODEL_PICKER_OPEN_EVENT = "model-picker-open";
 
@@ -20,13 +20,16 @@ type ModelPickerProps = {
     fullWidth?: boolean;
     placeholder?: string;
     onMissingConfig?: () => void;
+    modelOptions?: string[];
+    showRealName?: boolean;
 };
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, modelOptions, showRealName = false }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const current = value || "";
-    const options = useMemo(() => createModelOptions(config, capability, value), [capability, config, value]);
+    const options = useMemo(() => createModelOptions(config, capability, value, modelOptions), [capability, config, modelOptions, value]);
+    const modelLabel = (model: string) => (showRealName ? modelOptionLabelWithRealName(config, model) : modelOptionLabel(config, model));
 
     useEffect(() => {
         const closeWhenOtherPickerOpens = (event: Event) => {
@@ -58,10 +61,10 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 )}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
-                title={current ? modelOptionLabel(config, current) : placeholder}
+                title={current ? modelLabel(current) : placeholder}
             >
                 <ModelIcon config={config} model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelOptionLabel(config, current) : placeholder}</span>
+                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelLabel(current) : placeholder}</span>
             </SelectTrigger>
             {open ? (
                 <SelectContent
@@ -75,7 +78,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                     onMouseDown={(event) => event.stopPropagation()}
                 >
                     {options.length ? (
-                        options.map((model) => <SelectItem key={model} value={model} textValue={modelOptionLabel(config, model)} label={<ModelLabel config={config} model={model} />} />)
+                        options.map((model) => <SelectItem key={model} value={model} textValue={modelLabel(model)} label={<ModelLabel config={config} model={model} showRealName={showRealName} />} />)
                     ) : (
                         <SelectItem value="__empty__" disabled textValue={emptyModelLabel(config, capability)}>
                             {emptyModelLabel(config, capability)}
@@ -87,9 +90,11 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
     );
 }
 
-function createModelOptions(config: AiConfig, capability: ModelCapability | undefined, value: string | undefined) {
+function createModelOptions(config: AiConfig, capability: ModelCapability | undefined, value: string | undefined, modelOptions?: string[]) {
     const retainedLocalValue = config.channelMode === "local" && !capability ? [value] : [];
-    return Array.from(new Set([...retainedLocalValue, ...selectableModelsByCapability(config, capability)].filter(isFilledText)));
+    const configured = selectableModelsByCapability(config, capability);
+    const filtered = modelOptions ? configured.filter((model) => modelOptions.includes(model)) : configured;
+    return Array.from(new Set([...retainedLocalValue, ...filtered].filter(isFilledText)));
 }
 
 function isFilledText(value: string | undefined): value is string {
@@ -116,11 +121,11 @@ function capabilityLabel(capability?: ModelCapability): string {
     }
 }
 
-function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
+function ModelLabel({ config, model, showRealName }: { config: AiConfig; model: string; showRealName: boolean }) {
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon config={config} model={model} />
-            <span className="truncate">{modelOptionLabel(config, model)}</span>
+            <span className="truncate">{showRealName ? modelOptionLabelWithRealName(config, model) : modelOptionLabel(config, model)}</span>
         </span>
     );
 }
@@ -128,12 +133,13 @@ function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
 function ModelIcon({ config, model }: { config: AiConfig; model: string }) {
     const modelName = model ? modelOptionName(model) : "";
     const apiFormat = model ? resolveModelRequestConfig(config, model).apiFormat : undefined;
-    const icon = model ? resolveModelIcon(modelName, apiFormat) : "";
-    const monochrome = model ? isMonochromeModelIcon(modelName, apiFormat) : false;
+    const configuredKey = model ? config.modelIcons?.[model] : undefined;
+    const icon = configuredKey ? resolveModelIconByKey(configuredKey) : model ? resolveModelIcon(modelName, apiFormat) : "";
+    const monochrome = configuredKey ? MODEL_ICON_MONOCHROME_KEYS.has(configuredKey) : model ? isMonochromeModelIcon(modelName, apiFormat) : false;
 
     return (
         <span className={cn("model-picker-icon flex size-5 shrink-0 items-center justify-center rounded-md", monochrome && "model-picker-icon-monochrome")}>
-            {icon ? <img src={icon} alt="" className="size-4" /> : <Cpu className="size-4 opacity-70" />}
+            {icon ? <img src={icon} alt="" className="size-4" /> : <Clapperboard className="size-4 opacity-70" />}
         </span>
     );
 }

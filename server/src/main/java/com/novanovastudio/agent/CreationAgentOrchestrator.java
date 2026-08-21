@@ -39,6 +39,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 /**
  * 图片、视频和画布入口的配置驱动主Agent编排器。
@@ -164,17 +165,34 @@ public class CreationAgentOrchestrator {
      */
     public Mono<Void> executeClaimedRequest(String requestId) {
         AtomicBoolean cleaned = new AtomicBoolean();
+        Sinks.Empty<Void> stopSignal = Sinks.empty();
         Runnable cleanup = () -> {
             if (cleaned.compareAndSet(false, true)) {
                 claimedRequestSubscriptions.remove(requestId);
                 clearClaimedRequestExecution(requestId);
             }
         };
-        return requestRepository.findById(requestId)
+        Mono<Void> execution = requestRepository.findById(requestId)
                 .flatMap(request -> requestRepository.markRunningIfQueued(requestId)
                         .filter(Boolean::booleanValue)
-                        .flatMap(ignored -> executeRunningRequest(request)))
-                .doOnSubscribe(subscription -> claimedRequestSubscriptions.put(requestId, subscription::cancel))
+                        .flatMap(ignored -> executeRunningRequest(request)));
+        // 通过完成信号终止外层订阅，确保调用方拿到的Disposable也同步进入已释放状态。
+        return Mono.firstWithSignal(execution, stopSignal.asMono())
+                .doOnSubscribe(subscription -> claimedRequestSubscriptions.put(requestId, new Disposable() {
+                    private final AtomicBoolean disposed = new AtomicBoolean();
+
+                    @Override
+                    public void dispose() {
+                        if (disposed.compareAndSet(false, true)) {
+                            stopSignal.tryEmitEmpty();
+                        }
+                    }
+
+                    @Override
+                    public boolean isDisposed() {
+                        return disposed.get();
+                    }
+                }))
                 .doOnSuccess(ignored -> cleanup.run())
                 .doOnError(exception -> cleanup.run())
                 .doFinally(signal -> cleanup.run());
@@ -188,7 +206,16 @@ public class CreationAgentOrchestrator {
      */
     public Mono<Void> stopClaimedExecution(String requestId) {
         ActiveRequestExecution active = activeRequests.get(requestId);
-        if (active == null || !active.cancellationHandled().compareAndSet(false, true)) {
+        if (active == null) {
+            // 请求已被调度器领取但尚未建立执行上下文时，也必须终止订阅，触发调度器释放名额并补位。
+            return Mono.<Void>fromRunnable(() -> {
+                Disposable subscription = claimedRequestSubscriptions.get(requestId);
+                if (subscription != null) {
+                    subscription.dispose();
+                }
+            });
+        }
+        if (!active.cancellationHandled().compareAndSet(false, true)) {
             return Mono.empty();
         }
         AgentExecutionRegistry.AgentCancellation cancellation = executionRegistry.requestCancellation(active.userId(), active.sessionId());
@@ -314,7 +341,7 @@ public class CreationAgentOrchestrator {
                 String nodeId = stringValue(target.get("id"));
                 if (!StringUtils.hasText(nodeId) || tasks.size() >= 8) break;
                 tasks.add(new CreationTask("style-follow-up-" + generationType + "-" + tasks.size(), "canvas", "tool",
-                        prompt, List.of(), "canvas_run_generation", Map.of("nodeId", nodeId)));
+                        prompt, List.of(), "canvas_run_generation", Map.of("nodeId", nodeId, "mode", generationType)));
             }
         }
         if (tasks.isEmpty()) return null;
@@ -446,7 +473,8 @@ public class CreationAgentOrchestrator {
         java.util.Map<String, List<Long>> styleIdsByType = historical.generationStyleSnapshots() != null
                 && !historical.generationStyleSnapshots().isEmpty() ? null : historical.generationStyleIdsByType();
         return new CreationSettings(current.model(), current.size(), current.resolution(), current.quality(),
-                current.count(), current.seconds(), current.watermark(), styleIds, historical.generationStyleSnapshots(), styleIdsByType);
+                current.count(), current.seconds(), current.watermark(), styleIds, historical.generationStyleSnapshots(),
+                styleIdsByType, current.videoGenerationMode(), current.videoModel());
     }
 
     /**

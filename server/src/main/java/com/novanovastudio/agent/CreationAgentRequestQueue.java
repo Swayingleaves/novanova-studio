@@ -207,6 +207,24 @@ public class CreationAgentRequestQueue {
             return requestIds[1]
             """, String.class);
 
+    /** 读取当前活动租约脚本，不区分租约是否过期。 */
+    private static final RedisScript<String> ACTIVE_REQUEST_SCRIPT = RedisScript.of("""
+            local requestIds = redis.call('zrange', KEYS[1], 0, 0)
+            return requestIds[1]
+            """, String.class);
+
+    /** 为已取消但仍持有活动名额的请求原子领取恢复权脚本。 */
+    private static final RedisScript<Long> CLAIM_CANCELED_ACTIVE_RECOVERY_SCRIPT = RedisScript.of("""
+            local activeRequestIds = redis.call('zrange', KEYS[1], 0, 0)
+            if activeRequestIds[1] ~= ARGV[1] then
+                return 0
+            end
+            if redis.call('set', KEYS[2], ARGV[2], 'NX', 'PX', ARGV[3]) then
+                return 1
+            end
+            return 0
+            """, Long.class);
+
     /** Redis模板 */
     private final ReactiveStringRedisTemplate redisTemplate;
 
@@ -315,6 +333,42 @@ public class CreationAgentRequestQueue {
                         .filter(StringUtils::hasText)
                         .flatMap(requestId -> Mono.justOrEmpty(parseExpiredActiveRequest(activeKey, requestId)))
                         .flatMap(this::claimExpiredRecovery));
+    }
+
+    /**
+     * 扫描当前所有活动请求，用于收敛已取消但租约尚未到期的遗留名额。
+     *
+     * @return Flux<ActiveRequest> 当前活动请求流
+     */
+    public Flux<ActiveRequest> listActiveRequests() {
+        ScanOptions options = ScanOptions.scanOptions()
+                .match(QUEUE_KEY_PREFIX + "*" + ACTIVE_KEY_SUFFIX)
+                .count(100)
+                .build();
+        return redisTemplate.scan(options)
+                .distinct()
+                .concatMap(activeKey -> redisTemplate.execute(ACTIVE_REQUEST_SCRIPT, List.of(activeKey), List.of())
+                        .next()
+                        .filter(StringUtils::hasText)
+                        .flatMap(requestId -> Mono.justOrEmpty(parseActiveRequest(activeKey, requestId))));
+    }
+
+    /**
+     * 为已取消但仍持有活动名额的请求领取恢复权。
+     *
+     * @param userId Long 用户ID
+     * @param entrySource String 入口来源
+     * @param requestId String 请求ID
+     * @return Mono<RecoveryClaim> 恢复权；活动名额已变更或已被其他实例领取时为空
+     */
+    public Mono<RecoveryClaim> claimCanceledActiveRecovery(Long userId, String entrySource, String requestId) {
+        RecoveryClaim recoveryClaim = new RecoveryClaim(userId, entrySource, requestId, UUID.randomUUID().toString());
+        return redisTemplate.execute(CLAIM_CANCELED_ACTIVE_RECOVERY_SCRIPT,
+                        List.of(activeRequestKey(userId, entrySource), recoveryKey(userId, entrySource)),
+                        List.of(requestId, recoveryValue(recoveryClaim), recoveryLeaseMilliseconds()))
+                .next()
+                .filter(result -> result != null && result > 0)
+                .map(ignored -> recoveryClaim);
     }
 
     /**
@@ -506,6 +560,19 @@ public class CreationAgentRequestQueue {
      * @return ExpiredActiveRequest 解析结果；键格式不合法时返回null
      */
     private static ExpiredActiveRequest parseExpiredActiveRequest(String activeKey, String requestId) {
+        ActiveRequest activeRequest = parseActiveRequest(activeKey, requestId);
+        return activeRequest == null ? null : new ExpiredActiveRequest(activeRequest.userId(), activeRequest.entrySource(),
+                activeRequest.requestId());
+    }
+
+    /**
+     * 从活动租约键解析用户和入口来源分区。
+     *
+     * @param activeKey String Redis活动租约键
+     * @param requestId String 请求ID
+     * @return ActiveRequest 解析结果；键格式不合法时返回null
+     */
+    private static ActiveRequest parseActiveRequest(String activeKey, String requestId) {
         if (!StringUtils.hasText(activeKey) || !StringUtils.hasText(requestId)
                 || !activeKey.startsWith(QUEUE_KEY_PREFIX) || !activeKey.endsWith(ACTIVE_KEY_SUFFIX)) {
             return null;
@@ -519,7 +586,7 @@ public class CreationAgentRequestQueue {
             return null;
         }
         try {
-            return new ExpiredActiveRequest(Long.parseLong(values[0]), values[1], requestId);
+            return new ActiveRequest(Long.parseLong(values[0]), values[1], requestId);
         } catch (NumberFormatException exception) {
             return null;
         }
@@ -677,6 +744,16 @@ public class CreationAgentRequestQueue {
         public RecoveryClaim recoveryClaim() {
             return new RecoveryClaim(userId, entrySource, requestId, recoveryToken);
         }
+    }
+
+    /**
+     * 当前持有活动名额的主Agent请求。
+     *
+     * @param userId Long 用户ID
+     * @param entrySource String 入口来源
+     * @param requestId String 请求ID
+     */
+    public record ActiveRequest(Long userId, String entrySource, String requestId) {
     }
 
     /**

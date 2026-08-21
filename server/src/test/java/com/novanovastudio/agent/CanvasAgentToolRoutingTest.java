@@ -39,6 +39,29 @@ class CanvasAgentToolRoutingTest {
     }
 
     /**
+     * 画布视频生成工具必须声明页面锁定的视频生成模式等硬约束字段。
+     */
+    @Test
+    void shouldExposeVideoHardConstraintFieldsOnCanvasGenerationTools() {
+        AgentToolRegistry registry = new AgentToolRegistry();
+        List<String> videoToolNames = List.of("canvas_generate_video", "canvas_run_generation", "canvas_create_generation_flow");
+        List<AgentTool> videoTools = registry.allTools().stream()
+                .filter(tool -> videoToolNames.contains(tool.name()))
+                .toList();
+
+        Assertions.assertEquals(videoToolNames.size(), videoTools.size(), "画布视频工具注册不完整");
+        for (AgentTool tool : videoTools) {
+            String schema = tool.parameters().toJSONString();
+            Assertions.assertTrue(schema.contains("\"videoGenerationMode\""), tool.name() + " 缺少视频生成模式字段");
+            Assertions.assertTrue(schema.contains("text-to-video"), tool.name() + " 缺少文生视频枚举值");
+            Assertions.assertTrue(schema.contains("image-to-video"), tool.name() + " 缺少图生视频枚举值");
+            Assertions.assertTrue(schema.contains("reference-to-video"), tool.name() + " 缺少全能参考枚举值");
+            Assertions.assertTrue(schema.contains("必须严格使用用户设置"), tool.name() + " 缺少视频参数硬约束说明");
+            Assertions.assertTrue(schema.contains("\"additionalProperties\":false"), tool.name() + " 未禁止额外参数");
+        }
+    }
+
+    /**
      * 验证前端等待项先于事件发送注册，并完整保留结果数据。
      *
      * @throws Exception 反射调用失败时抛出

@@ -212,6 +212,7 @@ class CreationAgentOrchestratorTest {
         Assertions.assertEquals("canvas_run_generation", plan.tasks().getFirst().toolName());
         Assertions.assertEquals("生成图片：小马在奔跑", plan.tasks().getFirst().prompt());
         Assertions.assertEquals("image-1", plan.tasks().getFirst().toolArguments().get("nodeId"));
+        Assertions.assertEquals("image", plan.tasks().getFirst().toolArguments().get("mode"));
     }
 
     /**
@@ -375,6 +376,23 @@ class CreationAgentOrchestratorTest {
         verify(aiTaskService).cancelTaskForUser(1L, "task-1");
         verify(requestQueue, never()).removeQueuedRequest(anyLong(), anyString(), anyString());
         verify(requestDispatcher, never()).dispatchAvailable(anyLong(), anyString());
+    }
+
+    /**
+     * 请求已领取但尚未建立执行上下文时，停止操作必须取消领取订阅，避免分区名额一直被占用。
+     */
+    @Test
+    void shouldStopClaimedSubscriptionBeforeExecutionContextIsReady() {
+        CreationAgentRequestRepository requestRepository = mock(CreationAgentRequestRepository.class);
+        when(requestRepository.findById("request-running")).thenReturn(Mono.never());
+        CreationAgentOrchestrator orchestrator = queuedOrchestrator(mock(AgentSessionService.class), mock(AgentEventEmitter.class),
+                mock(AgentPlanRepository.class), mock(AiTaskService.class), requestRepository,
+                mock(CreationAgentRequestDispatcher.class), mock(CreationAgentRequestQueue.class));
+
+        reactor.core.Disposable subscription = orchestrator.executeClaimedRequest("request-running").subscribe();
+        orchestrator.stopClaimedExecution("request-running").block();
+
+        Assertions.assertTrue(subscription.isDisposed());
     }
 
     /**

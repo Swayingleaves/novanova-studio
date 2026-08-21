@@ -1,17 +1,10 @@
-import type {
-    CanvasStoryboardAsset,
-    CanvasStoryboardAssetGenerationSettings,
-    CanvasStoryboardAssetGenerationState,
-    CanvasStoryboardAssetKind,
-    CanvasStoryboardNode,
-    CanvasStoryboardShot,
-    CanvasStoryboardShotSize,
-} from "../types";
-import { isPositiveVideoSeconds, requestCreditCost, type ModelCreditCost } from "@/features/generation/constants/credit-calculation";
+import type { CanvasStoryboardAsset, CanvasStoryboardAssetGenerationSettings, CanvasStoryboardAssetGenerationState, CanvasStoryboardAssetKind, CanvasStoryboardNode, CanvasStoryboardShot, CanvasStoryboardShotSize } from "../types";
 import { isAgnesVideoConfig, readAgnesVideoReferenceImageIssue } from "@/features/generation/lib/agnes-video";
 import { isVideoDurationSupported, readVideoDurationRange } from "@/features/generation/lib/video-duration";
+import { availableVideoResolutions, quoteVideoGeneration, type VideoGenerationQuote } from "@/features/generation/lib/video-billing";
 import type { ReferenceImage } from "@/features/generation/types/image";
-import type { AiConfig } from "@/features/settings/stores/use-config-store";
+import type { ReferenceVideo } from "@/features/generation/types/media";
+import type { AiConfig, VideoGenerationMode, VideoResolution } from "@/features/settings/stores/use-config-store";
 
 export const STORYBOARD_SHOT_SIZES: Array<{
     value: CanvasStoryboardShotSize;
@@ -48,18 +41,58 @@ export function readStoryboardAssetImageCost(modelCosts: Array<{ model: string; 
     return Math.max(0, Math.floor(selectedCount)) * Math.max(0, unitCost);
 }
 
-/** 计算已选分镜镜头的视频生成预估积分。 */
-export function readStoryboardVideoCost(modelCosts: ModelCreditCost[], model: string, shots: CanvasStoryboardShot[]): number {
-    return shots.reduce(
-        (total, shot) => total + requestCreditCost({ modelCosts, model, taskType: "video", count: 1, seconds: shot.durationSeconds }),
-        0,
-    );
+/** 分镜批量视频报价结果。 */
+export type StoryboardVideoBatchQuote = { available: true; credits: number } | { available: false; reason: string };
+
+/** 根据镜头实际参考素材自动判定视频生成模式：有视频参考（含与图片混合）判为全能参考，仅有图片判为图生视频，无参考判为文生视频。 */
+export function readStoryboardVideoGenerationMode(shot: CanvasStoryboardShot, assets: CanvasStoryboardAsset[], referenceVideos: ReferenceVideo[] = []): VideoGenerationMode {
+    if (referenceVideos.length) return "reference-to-video";
+    return readStoryboardShotReferenceImages(shot, assets).length ? "image-to-video" : "text-to-video";
+}
+
+/** 读取一批分镜镜头自动推导出的全部视频生成模式。 */
+export function readStoryboardVideoGenerationModes(shots: CanvasStoryboardShot[], assets: CanvasStoryboardAsset[], referenceVideos: ReferenceVideo[] = []): VideoGenerationMode[] {
+    return Array.from(new Set(shots.map((shot) => readStoryboardVideoGenerationMode(shot, assets, referenceVideos))));
+}
+
+/** 读取同时适用于全部选中镜头的可报价分辨率。 */
+export function readStoryboardVideoResolutionOptions(config: AiConfig, model: string, shots: CanvasStoryboardShot[], assets: CanvasStoryboardAsset[], referenceVideos: ReferenceVideo[] = []): VideoResolution[] {
+    const modes = readStoryboardVideoGenerationModes(shots, assets, referenceVideos);
+    if (!model || !modes.length) return [];
+    const [firstMode, ...remainingModes] = modes;
+    return availableVideoResolutions(config, model, firstMode).filter((resolution) => remainingModes.every((mode) => availableVideoResolutions(config, model, mode).includes(resolution)));
+}
+
+/** 计算单个分镜镜头的视频分档报价。 */
+export function quoteStoryboardVideo(config: AiConfig, model: string, videoConfig: AiConfig, shot: CanvasStoryboardShot, assets: CanvasStoryboardAsset[], referenceVideos: ReferenceVideo[] = []): VideoGenerationQuote {
+    const referenceImages = readStoryboardShotReferenceImages(shot, assets);
+    return quoteVideoGeneration({
+        config,
+        model,
+        mode: readStoryboardVideoGenerationMode(shot, assets, referenceVideos),
+        resolution: videoConfig.vquality,
+        seconds: shot.durationSeconds,
+        imageReferenceCount: referenceImages.length,
+        videoReferenceCount: referenceVideos.length,
+    });
+}
+
+/** 计算已选分镜镜头的视频分档报价，任何一个镜头不可报价时整批不可提交。 */
+export function readStoryboardVideoCost(config: AiConfig, model: string, videoConfig: AiConfig, shots: CanvasStoryboardShot[], assets: CanvasStoryboardAsset[], referenceVideos: ReferenceVideo[] = []): StoryboardVideoBatchQuote {
+    let credits = 0;
+    for (const shot of shots) {
+        const quote = quoteStoryboardVideo(config, model, videoConfig, shot, assets, referenceVideos);
+        if (!quote.available) return { available: false, reason: `镜号 ${shot.shotNumber} 无法报价：${quote.reason}` };
+        if (!Number.isSafeInteger(credits + quote.credits)) return { available: false, reason: "分镜视频积分计算超出范围" };
+        credits += quote.credits;
+    }
+    return { available: true, credits };
 }
 
 /** 返回镜头无法生成视频的原因；空字符串表示可以生成。 */
 export function readStoryboardVideoShotIssue(shot: CanvasStoryboardShot, config: AiConfig): string {
     if (!shot.finalPrompt.trim()) return "请先生成最终提示词";
-    if (!isPositiveVideoSeconds(shot.durationSeconds)) return "镜头时长无效";
+    if (!isPositiveDurationSeconds(shot.durationSeconds)) return "镜头时长无效";
     if (isVideoDurationSupported(config, shot.durationSeconds)) return "";
     const range = readVideoDurationRange(config);
     return `当前模型仅支持 ${range.min}-${range.max} 秒视频`;
@@ -96,6 +129,11 @@ export function readStoryboardVideoReferenceIssue(shot: CanvasStoryboardShot, as
     return readAgnesVideoReferenceImageIssue(readStoryboardShotReferenceImages(shot, assets).length);
 }
 
+/** 判断分镜视频时长是否为正整数秒。 */
+function isPositiveDurationSeconds(value: unknown): boolean {
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
 /** 创建可持久化的分镜资产批量生成状态。 */
 export function createStoryboardAssetGenerationState(assetIds: string[], settings: CanvasStoryboardAssetGenerationSettings, startedAt: string): CanvasStoryboardAssetGenerationState {
     return {
@@ -118,10 +156,7 @@ export function readStoryboardAssetGenerationProgress(state: CanvasStoryboardAss
 }
 
 /** 删除资产并同步清理所有镜头中的关联标识。 */
-export function removeStoryboardAssetAndAssociations(
-    storyboard: CanvasStoryboardNode["storyboard"],
-    assetId: string,
-): CanvasStoryboardNode["storyboard"] {
+export function removeStoryboardAssetAndAssociations(storyboard: CanvasStoryboardNode["storyboard"], assetId: string): CanvasStoryboardNode["storyboard"] {
     return {
         ...storyboard,
         assets: storyboard.assets.filter((asset) => asset.id !== assetId),

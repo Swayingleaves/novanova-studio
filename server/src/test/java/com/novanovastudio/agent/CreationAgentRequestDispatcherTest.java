@@ -78,6 +78,7 @@ class CreationAgentRequestDispatcherTest {
         when(requestQueue.enqueue(anyLong(), anyString(), anyString())).thenReturn(Mono.empty());
         when(requestQueue.claimAvailable(anyLong(), anyString())).thenReturn(Flux.empty());
         when(requestQueue.listExpiredActiveRequests()).thenReturn(Flux.empty());
+        when(requestQueue.listActiveRequests()).thenReturn(Flux.empty());
         when(requestQueue.renewRecoveryClaim(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.just(true));
 
         dispatcher = new CreationAgentRequestDispatcher(requestQueue, requestRepository, orchestratorProvider,
@@ -112,6 +113,39 @@ class CreationAgentRequestDispatcherTest {
                 "queue-status".equals(event.type()) && "request-1".equals(event.requestId())));
         verify(eventEmitter).emit(eq(1L), org.mockito.ArgumentMatchers.argThat(event ->
                 "queue-status".equals(event.type()) && "request-2".equals(event.requestId())));
+    }
+
+    /**
+     * 已取消但仍持有有效活动租约的请求，在服务恢复时必须立即释放名额并补位。
+     *
+     * @throws InterruptedException 等待异步调度完成时发生中断
+     */
+    @Test
+    void shouldReleaseCanceledRequestWithActiveLeaseAndDispatchNext() throws InterruptedException {
+        CreationAgentRequest canceled = request("request-canceled", "canceled", "");
+        CreationAgentRequestQueue.ActiveRequest activeRequest = new CreationAgentRequestQueue.ActiveRequest(1L,
+                CreationEntrySource.IMAGE_PAGE, "request-canceled");
+        CountDownLatch dispatched = new CountDownLatch(1);
+        when(requestQueue.listActiveRequests()).thenReturn(Flux.just(activeRequest));
+        when(requestRepository.findById("request-canceled")).thenReturn(Mono.just(canceled));
+        when(requestRepository.taskIds(canceled)).thenReturn(List.of());
+        when(requestQueue.claimCanceledActiveRecovery(1L, CreationEntrySource.IMAGE_PAGE, "request-canceled"))
+                .thenReturn(Mono.just(new CreationAgentRequestQueue.RecoveryClaim(1L,
+                        CreationEntrySource.IMAGE_PAGE, "request-canceled", "recovery-token")));
+        when(requestQueue.markCancelRequested("request-canceled")).thenReturn(Mono.empty());
+        when(requestQueue.releaseRecoveredActiveRequest(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+        when(requestRepository.listRunningRequests()).thenReturn(Flux.empty());
+        when(requestRepository.listQueuedRequests()).thenReturn(Flux.empty());
+        when(requestQueue.claimAvailable(1L, CreationEntrySource.IMAGE_PAGE))
+                .thenReturn(Flux.just("request-next"), Flux.empty());
+        when(requestQueue.isCancelRequested("request-next")).thenReturn(Mono.just(false));
+        when(orchestrator.executeClaimedRequest("request-next")).thenReturn(Mono.fromRunnable(dispatched::countDown));
+
+        dispatcher.recoverRequests().block();
+
+        Assertions.assertTrue(dispatched.await(2, TimeUnit.SECONDS));
+        verify(requestQueue).releaseRecoveredActiveRequest(org.mockito.ArgumentMatchers.any());
+        verify(orchestrator).executeClaimedRequest("request-next");
     }
 
     /**

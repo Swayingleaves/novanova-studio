@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentToolResult.ToolResult;
 import com.novanovastudio.agent.dto.CreationPlan;
+import com.novanovastudio.agent.dto.CreationSettings;
 import com.novanovastudio.agent.dto.CreationTask;
 import com.novanovastudio.agent.dto.RecoveryTaskDecision;
 import com.novanovastudio.ai.AiErrorDetails;
@@ -23,6 +24,7 @@ import io.agentscope.core.model.Model;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -112,6 +114,36 @@ class CreationPlanExecutorTest {
         List<GenerationStyleDtos.GenerationStyleSnapshot> runResult =
                 ((Mono<List<GenerationStyleDtos.GenerationStyleSnapshot>>) method.invoke(executor, settings, runTask)).block();
         Assertions.assertEquals(List.of(imageStyle), runResult);
+    }
+
+    /**
+     * 画布视频工具必须使用页面选定的视频模型和计费参数，不能采用主Agent给出的值。
+     *
+     * @throws Exception 反射调用失败时抛出
+     */
+    @Test
+    void shouldForceCanvasVideoModelAndBillingSettings() throws Exception {
+        Method method = CreationPlanExecutor.class.getDeclaredMethod("applyCanvasVideoSettings",
+                Map.class, CreationSettings.class, CreationTask.class);
+        method.setAccessible(true);
+        Map<String, Object> arguments = new LinkedHashMap<>(Map.of(
+                "model", "agent-selected-model",
+                "size", "1:1",
+                "seconds", "2",
+                "vquality", "480p",
+                "videoGenerationMode", "reference-to-video"));
+        CreationSettings settings = new CreationSettings("agent-model", "16:9", "1080p", "high", 1,
+                "6", false, null, null, Map.of(), "image-to-video", "video-model");
+        CreationTask task = new CreationTask("video-task", "canvas", "generate", "生成视频", List.of(),
+                "canvas_generate_video", Map.of("prompt", "生成视频"));
+
+        method.invoke(executor, arguments, settings, task);
+
+        Assertions.assertEquals("video-model", arguments.get("model"));
+        Assertions.assertEquals("16:9", arguments.get("size"));
+        Assertions.assertEquals("6", arguments.get("seconds"));
+        Assertions.assertEquals("1080p", arguments.get("vquality"));
+        Assertions.assertEquals("image-to-video", arguments.get("videoGenerationMode"));
     }
 
     /**

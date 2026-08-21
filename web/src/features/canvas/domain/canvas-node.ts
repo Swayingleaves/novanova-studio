@@ -18,6 +18,7 @@ import type {
 } from "../types.ts";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import type { GenerationStyleSnapshot } from "@/services/api/server";
+import type { VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 
 export type CanvasNodeAttributeStatus = "idle" | "loading" | "success" | "error";
 
@@ -39,9 +40,12 @@ export type CanvasNodeAttributes = {
     count?: number;
     seconds?: string;
     vquality?: string;
+    videoGenerationMode?: VideoGenerationMode;
     watermark?: string;
     references?: string[];
     referenceObjectStorages?: ObjectStorageFile[];
+    videoReferences?: string[];
+    videoReferenceObjectStorages?: ObjectStorageFile[];
     naturalWidth?: number;
     naturalHeight?: number;
     freeResize?: boolean;
@@ -180,18 +184,19 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
         startedAt: attributes.startedAt,
         completedAt: attributes.completedAt,
     };
-    const executed: CanvasNode = attributes.status === "success"
-        ? {
-              ...node,
-              execution: {
-                  phase: "succeeded",
-                  ...(attributes.startedAt ?? node.execution.startedAt ? { startedAt: attributes.startedAt ?? node.execution.startedAt } : {}),
-                  ...(attributes.completedAt ? { completedAt: attributes.completedAt } : {}),
-              },
-          }
-        : attributes.status === "idle"
-            ? { ...node, execution: { phase: "idle" as const } }
-            : updateCanvasNodeExecution(node, { phase, ...executionPatch });
+    const executed: CanvasNode =
+        attributes.status === "success"
+            ? {
+                  ...node,
+                  execution: {
+                      phase: "succeeded",
+                      ...((attributes.startedAt ?? node.execution.startedAt) ? { startedAt: attributes.startedAt ?? node.execution.startedAt } : {}),
+                      ...(attributes.completedAt ? { completedAt: attributes.completedAt } : {}),
+                  },
+              }
+            : attributes.status === "idle"
+              ? { ...node, execution: { phase: "idle" as const } }
+              : updateCanvasNodeExecution(node, { phase, ...executionPatch });
     const framed = updateCanvasNodeFrame(executed, {
         naturalWidth: attributes.naturalWidth,
         naturalHeight: attributes.naturalHeight,
@@ -264,10 +269,13 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
         size: attributes.size,
         seconds: attributes.seconds,
         quality: attributes.vquality,
+        videoGenerationMode: attributes.videoGenerationMode,
         watermark: attributes.watermark,
         count: attributes.count,
         references: attributes.references,
         referenceObjectStorages: attributes.referenceObjectStorages,
+        videoReferences: attributes.videoReferences,
+        videoReferenceObjectStorages: attributes.videoReferenceObjectStorages,
         generationStyleIds: attributes.generationStyleIds,
         generationStyleSnapshots: attributes.generationStyleSnapshots,
     });

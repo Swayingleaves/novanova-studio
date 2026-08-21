@@ -87,6 +87,25 @@ class SeedanceProviderAdapterTest {
     }
 
     /**
+     * 显式图生视频模式应把首张图片标记为首帧。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldUseFirstFrameRoleForExplicitImageToVideoMode() {
+        JSONObject payload = toJsonObject(SeedanceProviderAdapter.buildRequestPayload(
+                "doubao-seedance-2-0-260128",
+                "让人物转身",
+                Map.of("size", "16:9", "resolution", "720p", "seconds", "5"),
+                List.of("https://example.com/first.png"),
+                List.of(),
+                "image-to-video"
+        ));
+
+        Assertions.assertEquals("first_frame", payload.getJSONArray("content").getJSONObject(1).getString("role"));
+    }
+
+    /**
      * 将请求映射转换为便于断言的Fastjson2对象。
      *
      * @param value Map<String, Object> 请求映射

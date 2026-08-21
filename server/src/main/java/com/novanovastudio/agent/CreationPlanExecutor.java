@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiErrorDetails;
 import com.novanovastudio.ai.AiErrorSupport;
 import com.novanovastudio.ai.AiProviderException;
+import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.agent.dto.CreationPlan;
@@ -799,7 +800,7 @@ public class CreationPlanExecutor {
                                                         SpecialistAgentResult decision, String finalPrompt,
                                                         List<GenerationStyleDtos.GenerationStyleSnapshot> styles,
                                                         List<AgentChatRequest.Attachment> dependencyAttachments) {
-        Map<String, Object> arguments = generationArguments(finalPrompt, plan.creationSettings(), plan.entrySource(), styles);
+        Map<String, Object> arguments = generationArguments(finalPrompt, plan.creationSettings(), plan.entrySource(), styles, task);
         List<AgentChatRequest.Attachment> attachments = new ArrayList<>(request.attachments() == null ? List.of() : request.attachments());
         attachments.addAll(dependencyAttachments);
         String promptStrategy = styles == null || styles.isEmpty() ? decision.promptStrategy() : "OPTIMIZE";
@@ -829,9 +830,12 @@ public class CreationPlanExecutor {
                                                             List<AgentChatRequest.Attachment> attachments,
                                                             int recoveryAttempt) {
         String toolName = toolName(task);
-        emit(userId, AgentEvent.toolExecute(sessionId, task.taskId(), toolName, arguments));
+        Map<String, Object> effectiveArguments = new LinkedHashMap<>(arguments == null ? Map.of() : arguments);
+        applyGenerationSettings(effectiveArguments, plan.creationSettings(), task);
+        effectiveArguments.put("entrySource", plan.entrySource());
+        emit(userId, AgentEvent.toolExecute(sessionId, task.taskId(), toolName, effectiveArguments));
         AgentLoopProfile profile = resolveProfile(task.taskType());
-        return profile.executeTool(userId, toolName, arguments, request.message(), attachments,
+        return profile.executeTool(userId, toolName, effectiveArguments, request.message(), attachments,
                         eventEmitter, sessionId, task.taskId())
                 .flatMap(result -> {
                     if (executionRegistry.isCancelRequested(sessionId)) {
@@ -848,8 +852,41 @@ public class CreationPlanExecutor {
                                     result.data(), "success".equals(status) ? "" : result.message())
                             .then(eventEmitter.persistRoundActivities(userId, sessionId, task.taskId(), status))
                             .thenReturn(new TaskExecutionResult(task.taskId(), status, result.message(), data,
-                                    promptStrategy, actualPrompt, new LinkedHashMap<>(arguments), error, recoveryAttempt));
+                                    promptStrategy, actualPrompt, effectiveArguments, error, recoveryAttempt));
                 });
+    }
+
+    /**
+     * 覆盖生成任务的页面硬约束，恢复Agent只能调整提示词，不能改变模型和视频计费字段。
+     *
+     * @param arguments Map<String, Object> 待执行工具参数
+     * @param settings CreationSettings 页面提交的生成设置
+     * @param task CreationTask 当前计划任务
+     * @return void 无返回值
+     */
+    private void applyGenerationSettings(Map<String, Object> arguments, CreationSettings settings, CreationTask task) {
+        if (settings == null || task == null) {
+            return;
+        }
+        if ("video".equals(task.taskType())) {
+            String model = StringUtils.hasText(settings.videoModel()) ? settings.videoModel() : settings.model();
+            if (StringUtils.hasText(model)) arguments.put("model", model);
+            if (StringUtils.hasText(settings.size())) arguments.put("size", settings.size());
+            if (StringUtils.hasText(settings.resolution())) arguments.put("resolution", settings.resolution());
+            if (StringUtils.hasText(settings.quality())) arguments.put("quality", settings.quality());
+            if (StringUtils.hasText(settings.seconds())) arguments.put("seconds", settings.seconds());
+            if (settings.watermark() != null) arguments.put("watermark", settings.watermark());
+            arguments.put("count", 1);
+            arguments.put("videoGenerationMode", VideoGenerationMode.defaultIfBlank(settings.videoGenerationMode()));
+            return;
+        }
+        if ("image".equals(task.taskType())) {
+            if (StringUtils.hasText(settings.model())) arguments.put("model", settings.model());
+            if (StringUtils.hasText(settings.size())) arguments.put("size", settings.size());
+            if (StringUtils.hasText(settings.resolution())) arguments.put("resolution", settings.resolution());
+            if (StringUtils.hasText(settings.quality())) arguments.put("quality", settings.quality());
+            if (settings.count() != null) arguments.put("count", settings.count());
+        }
     }
 
     /**
@@ -874,6 +911,7 @@ public class CreationPlanExecutor {
         if (!"canvas".equals(task.taskType())) {
             arguments.put("prompt", finalPrompt);
         }
+        applyCanvasVideoSettings(arguments, plan.creationSettings(), task);
         String toolCallId = recoveryAttempt == 0 ? task.taskId() : task.taskId() + ":recovery:" + recoveryAttempt;
         return resolveCanvasStyleSnapshots(plan.creationSettings(), task)
                 .map(styles -> {
@@ -900,6 +938,24 @@ public class CreationPlanExecutor {
                             .thenReturn(new TaskExecutionResult(task.taskId(), status, result.message(), data,
                                     promptStrategy, submittedPrompt, actualArguments, error, recoveryAttempt));
                 });
+    }
+
+    /**
+     * 将页面选择的视频设置覆盖到画布视频工具参数，防止主Agent擅自修改计费相关字段。
+     *
+     * @param arguments Map<String, Object> 待执行的画布工具参数
+     * @param settings CreationSettings 页面提交的视频硬约束
+     * @param task CreationTask 当前画布任务
+     */
+    private void applyCanvasVideoSettings(Map<String, Object> arguments, CreationSettings settings, CreationTask task) {
+        if (settings == null || task == null || !"video".equals(canvasGenerationType(task))) {
+            return;
+        }
+        if (StringUtils.hasText(settings.videoModel())) arguments.put("model", settings.videoModel());
+        if (StringUtils.hasText(settings.size())) arguments.put("size", settings.size());
+        if (StringUtils.hasText(settings.seconds())) arguments.put("seconds", settings.seconds());
+        if (StringUtils.hasText(settings.resolution())) arguments.put("vquality", settings.resolution());
+        arguments.put("videoGenerationMode", VideoGenerationMode.defaultIfBlank(settings.videoGenerationMode()));
     }
 
     /**
@@ -950,6 +1006,8 @@ public class CreationPlanExecutor {
     private String canvasGenerationType(CreationTask task) {
         if (task == null) return null;
         if ("image".equals(task.taskType()) || "video".equals(task.taskType())) return task.taskType();
+        if ("canvas_generate_image".equals(task.toolName())) return "image";
+        if ("canvas_generate_video".equals(task.toolName())) return "video";
         if (task.toolArguments() == null) return null;
         Object mode = task.toolArguments().get("mode");
         return "image".equals(mode) || "video".equals(mode) ? String.valueOf(mode) : null;
@@ -1093,10 +1151,12 @@ public class CreationPlanExecutor {
      * @return Map<String, Object> 工具参数
      */
     private Map<String, Object> generationArguments(String finalPrompt, CreationSettings settings, String entrySource,
-                                                    List<GenerationStyleDtos.GenerationStyleSnapshot> styles) {
+                                                    List<GenerationStyleDtos.GenerationStyleSnapshot> styles, CreationTask task) {
         Map<String, Object> arguments = new LinkedHashMap<>();
         arguments.put("prompt", finalPrompt);
-        arguments.put("model", settings.model());
+        String model = "video".equals(task == null ? null : task.taskType()) && StringUtils.hasText(settings.videoModel())
+                ? settings.videoModel() : settings.model();
+        arguments.put("model", model);
         arguments.put("size", settings.size());
         arguments.put("resolution", settings.resolution());
         arguments.put("quality", settings.quality());
@@ -1104,6 +1164,7 @@ public class CreationPlanExecutor {
         if (settings.count() != null) arguments.put("count", settings.count());
         if (settings.seconds() != null) arguments.put("seconds", settings.seconds());
         if (settings.watermark() != null) arguments.put("watermark", settings.watermark());
+        arguments.put("videoGenerationMode", VideoGenerationMode.defaultIfBlank(settings.videoGenerationMode()));
         if (styles != null && !styles.isEmpty()) arguments.put("generationStyleSnapshots", styles);
         return arguments;
     }

@@ -71,6 +71,10 @@ flowchart TB
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `request_concurrency` | `INTEGER` | 模型同时执行请求数量，最小值为 `1`，默认值为 `1`。 |
+| `custom_body_parameters` | `JSONB` | 模型 JSON POST 请求的自定义请求体参数，顶层必须为 JSON 对象，默认 `{}`。 |
+| `video_billing_configuration` | `JSONB` | 视频模型分档计费配置，包含唯一计费方式、最短生成秒数，以及文生视频、图生视频、全能参考三个模式各自的 `Auto/480p/720p/768p/1080p/2k/4k` 单价；空价格表示该模式和分辨率不可用。 |
+| `display_name` | `VARCHAR(255)` | 模型展示名称，为空或与真实模型名相同时展示真实模型名，仅影响展示不影响调用。 |
+| `model_icon` | `VARCHAR(64)` | 模型展示图标标识，为空时按模型名或渠道自动匹配，仅影响展示不影响调用。 |
 
 ### `ai_generation_tasks`
 
@@ -253,7 +257,7 @@ CREATE INDEX idx_creation_agent_request_session_created
 
 ## 7、部署说明
 
-- 发布时由 Flyway 执行至 `V13__Add_Creation_Agent_Requests.sql`。
+- 发布时由 Flyway 执行至 `V15__Add_Video_Mode_Pricing.sql`。
 - Redis 必须可用；模型队列、视频合成队列和统一主 Agent 队列均使用各自的 Redis 活动租约配置。
 - 服务端镜像已安装 `ffmpeg` 与 `ffprobe`；可通过 `AI_VIDEO_COMPOSITION_FFMPEG_EXECUTABLE`、`AI_VIDEO_COMPOSITION_FFPROBE_EXECUTABLE` 覆盖二进制路径。
 

@@ -95,7 +95,7 @@ public class AnthropicProviderAdapter implements AiProviderAdapter {
                     payload.put("stream", true);
                     // 建立连接前上报进度10%。
                     return context.updateRunningProgress(10)
-                            .thenMany(aiHttpClient.sendAnthropicStreamingRequest(context.channel(), "/v1/messages", payload))
+                            .thenMany(aiHttpClient.sendAnthropicStreamingRequest(context.channel(), "/v1/messages", AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters())))
                             .index()
                             .filter(tuple -> "content_block_delta".equals(tuple.getT2().event()))
                             .concatMap(tuple -> {

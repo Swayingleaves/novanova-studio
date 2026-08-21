@@ -17,6 +17,8 @@ import java.util.Map;
  * @param generationStyleIds List<Long> 普通生成提交的风格ID
  * @param generationStyleSnapshots List<GenerationStyleSnapshot> 历史重生成使用的风格快照
  * @param generationStyleIdsByType Map<String, List<Long>> 画布Agent按图片和视频分组的风格ID
+ * @param videoGenerationMode String 视频生成模式
+ * @param videoModel String 画布Agent固定使用的视频模型
  * @author   zhenglin.cn.cq@gmail.com
  * @date     2026-07-23 00:00
  */
@@ -30,8 +32,55 @@ public record CreationSettings(
         Boolean watermark,
         List<Long> generationStyleIds,
         List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots,
-        Map<String, List<Long>> generationStyleIdsByType
+        Map<String, List<Long>> generationStyleIdsByType,
+        String videoGenerationMode,
+        String videoModel
 ) {
+
+    /**
+     * 保留视频模型扩展前的完整参数构造方式。
+     *
+     * @param model String 模型编码
+     * @param size String 画面尺寸或比例
+     * @param resolution String 清晰度或分辨率
+     * @param quality String 质量等级
+     * @param count Integer 生成数量
+     * @param seconds String 视频时长秒数
+     * @param watermark Boolean 是否添加水印
+     * @param generationStyleIds List<Long> 普通生成风格ID
+     * @param generationStyleSnapshots List<GenerationStyleSnapshot> 历史风格快照
+     * @param generationStyleIdsByType Map<String, List<Long>> 按类型风格ID
+     * @param videoGenerationMode String 视频生成模式
+     */
+    public CreationSettings(String model, String size, String resolution, String quality, Integer count,
+                            String seconds, Boolean watermark, List<Long> generationStyleIds,
+                            List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots,
+                            Map<String, List<Long>> generationStyleIdsByType, String videoGenerationMode) {
+        this(model, size, resolution, quality, count, seconds, watermark, generationStyleIds,
+                generationStyleSnapshots, generationStyleIdsByType, videoGenerationMode, null);
+    }
+
+    /**
+     * 保留既有完整参数构造方式。
+     *
+     * @param model String 模型编码
+     * @param size String 画面尺寸或比例
+     * @param resolution String 清晰度或分辨率
+     * @param quality String 质量等级
+     * @param count Integer 生成数量
+     * @param seconds String 视频时长秒数
+     * @param watermark Boolean 是否添加水印
+     * @param generationStyleIds List<Long> 普通生成风格ID
+     * @param generationStyleSnapshots List<GenerationStyleSnapshot> 历史风格快照
+     * @param generationStyleIdsByType Map<String, List<Long>> 按类型风格ID
+     */
+    public CreationSettings(String model, String size, String resolution, String quality, Integer count,
+                            String seconds, Boolean watermark, List<Long> generationStyleIds,
+                            List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots,
+                            Map<String, List<Long>> generationStyleIdsByType) {
+        this(model, size, resolution, quality, count, seconds, watermark, generationStyleIds,
+                generationStyleSnapshots, generationStyleIdsByType, null, null);
+    }
 
     /**
      * 保留旧版七参数构造方式，画布和既有调用方无需感知风格字段。
@@ -46,7 +95,7 @@ public record CreationSettings(
      */
     public CreationSettings(String model, String size, String resolution, String quality, Integer count,
                             String seconds, Boolean watermark) {
-        this(model, size, resolution, quality, count, seconds, watermark, null, null, null);
+        this(model, size, resolution, quality, count, seconds, watermark, null, null, null, null, null);
     }
 
     /**
@@ -65,6 +114,7 @@ public record CreationSettings(
     public CreationSettings(String model, String size, String resolution, String quality, Integer count,
                             String seconds, Boolean watermark, List<Long> generationStyleIds,
                             List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots) {
-        this(model, size, resolution, quality, count, seconds, watermark, generationStyleIds, generationStyleSnapshots, null);
+        this(model, size, resolution, quality, count, seconds, watermark, generationStyleIds,
+                generationStyleSnapshots, null, null, null);
     }
 }

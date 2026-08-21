@@ -35,24 +35,34 @@ export function buildNodeGenerationReferences(node: CanvasNode): CanvasResourceR
     if (!isImageNode(node) && !isVideoNode(node)) return [];
 
     const countByKind: Record<"image" | "video", number> = { image: 0, video: 0 };
-    return node.generation.references.flatMap((reference, index) => {
-        const objectStorage = node.generation.referenceObjectStorages.find((file) => file.url === reference || file.key === reference.replace(/^image:/, ""));
+    const persistedReferences: Array<{ reference: string; objectStorage?: { url: string; key: string; mimeType: string }; forcedKind?: "video" }> = [
+        ...node.generation.references.map((reference) => ({ reference, objectStorage: findObjectStorage(node.generation.referenceObjectStorages, reference) })),
+        ...(isVideoNode(node) ? (node.generation.videoReferences || []).map((reference) => ({ reference, objectStorage: findObjectStorage(node.generation.videoReferenceObjectStorages || [], reference), forcedKind: "video" as const })) : []),
+    ];
+    return persistedReferences.flatMap(({ reference, objectStorage, forcedKind }, index) => {
         const previewUrl = objectStorage?.url || (reference.startsWith("http") || reference.startsWith("data:") ? reference : "");
         if (!previewUrl) return [];
 
-        const kind = objectStorage?.mimeType.startsWith("video/") || /\.(mp4|webm|mov|m4v)(?:[?#]|$)/i.test(reference) ? "video" : "image";
+        const kind = forcedKind || objectStorage?.mimeType.startsWith("video/") || /^(?:video:|.*\.(mp4|webm|mov|m4v)(?:[?#]|$))/i.test(reference) ? "video" : "image";
         countByKind[kind] += 1;
         const label = kind === "image" ? `参考图${countByKind.image}` : `参考视频${countByKind.video}`;
-        return [{
-            id: `${node.id}-generation-reference-${index}`,
-            nodeId: `${node.id}-generation-reference-${index}`,
-            kind,
-            label,
-            title: label,
-            previewUrl,
-            active: true,
-        }];
+        return [
+            {
+                id: `${node.id}-generation-reference-${index}`,
+                nodeId: `${node.id}-generation-reference-${index}`,
+                kind,
+                label,
+                title: label,
+                previewUrl,
+                active: true,
+            },
+        ];
     });
+}
+
+function findObjectStorage(files: Array<{ url: string; key: string; mimeType: string }>, reference: string) {
+    const key = reference.replace(/^(?:image|video):/, "");
+    return files.find((file) => file.url === reference || file.key === key);
 }
 
 export function getMentionResourceNodes(nodeId: string, nodes: CanvasNode[], connections: CanvasConnection[]): CanvasNode[] {

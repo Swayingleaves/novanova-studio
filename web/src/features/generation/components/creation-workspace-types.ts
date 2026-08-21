@@ -66,6 +66,7 @@ export type CreationComposerAction = {
     label: string;
     icon: ReactNode;
     className?: string;
+    popoverContent?: ReactNode;
     placement?: "toolbar" | "submit";
     iconOnly?: boolean;
     disabled?: boolean;
@@ -92,7 +93,7 @@ export type CreationComposerProps = {
     running: boolean;
     queued?: boolean;
     canSubmit: boolean;
-    creditCost: number;
+    creditCost: number | null;
     compact?: boolean;
     focusWhenValueSet?: boolean;
     stopping?: boolean;

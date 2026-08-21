@@ -2,7 +2,7 @@
 
 import type { ObjectStorageConfig, ObjectStorageFile } from "@/shared/types/object-storage";
 import { getAuthToken, useUserStore, type ServerUserProfile } from "@/features/auth/stores/use-user-store";
-import type { ApiCallFormat, ModelCreditUnit } from "@/features/settings/stores/use-config-store";
+import type { ApiCallFormat, ModelCreditUnit, VideoBillingConfiguration } from "@/features/settings/stores/use-config-store";
 
 type ApiResponse<T> = {
     code: number;
@@ -98,6 +98,7 @@ export type ServerAiTaskCreateInput = {
     generationSource?: ServerGenerationSource;
     generationStyleIds?: number[];
     generationStyleSnapshots?: GenerationStyleSnapshot[];
+    videoGenerationMode?: "text-to-video" | "image-to-video" | "reference-to-video";
 };
 
 export type PromptOptimizationType = "image" | "video";
@@ -138,7 +139,19 @@ export type GenerationStyleOptionListResponse = {
 };
 
 export type ServerAiModelList = {
-    models: Array<{ value: string; label: string; capability: string; provider: string; apiFormat: ApiCallFormat; defaultModel: boolean; creditCost: number; creditUnit: ModelCreditUnit }>;
+    models: Array<{
+        value: string;
+        label: string;
+        capability: string;
+        provider: string;
+        apiFormat: ApiCallFormat;
+        defaultModel: boolean;
+        creditCost: number;
+        creditUnit: ModelCreditUnit;
+        capabilities: string[];
+        videoBillingConfiguration: VideoBillingConfiguration | null;
+        icon: string | null;
+    }>;
     imageModels: string[];
     videoModels: string[];
     textModels: string[];
@@ -204,6 +217,10 @@ export type ServerModelConfig = {
     thinkingEnabled: boolean;
     reasoningEffort: "high" | "max";
     requestConcurrency: number;
+    customBodyParameters: Record<string, unknown>;
+    videoBillingConfiguration: VideoBillingConfiguration | null;
+    displayName: string | null;
+    modelIcon: string | null;
 };
 
 export type CreditSettings = {
@@ -816,7 +833,7 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency">) {
+export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "customBodyParameters" | "videoBillingConfiguration" | "displayName" | "modelIcon">) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 

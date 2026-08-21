@@ -67,6 +67,30 @@ class AiHttpClientTest {
     }
 
     /**
+     * Evolink格式应通过OpenAI兼容的模型列表接口拉取模型。
+     *
+     * @throws IOException 本地测试服务创建失败时抛出
+     */
+    @Test
+    void shouldFetchEvolinkModelsWithBearerAuthentication() throws IOException {
+        AtomicReference<String> authorization = new AtomicReference<>();
+        AtomicReference<String> path = new AtomicReference<>();
+        HttpServer server = startJsonServer(200, "{\"data\":[{\"id\":\"kling-v2.1\"}]}", exchange -> {
+            authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            path.set(exchange.getRequestURI().getPath());
+        });
+        try {
+            List<String> models = new AiHttpClient().fetchChannelModels(baseUrl(server) + "/v1", "evolink-key", "evolink").block();
+
+            Assertions.assertEquals(List.of("kling-v2.1"), models);
+            Assertions.assertEquals("Bearer evolink-key", authorization.get());
+            Assertions.assertEquals("/v1/models", path.get());
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /**
      * Seedance格式应使用方舟模型列表接口，并过滤已下线模型但保留即将退役模型。
      *
      * @throws IOException 本地测试服务创建失败时抛出

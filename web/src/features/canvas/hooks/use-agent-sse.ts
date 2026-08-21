@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef } from "react";
 
-import { agentChat, agentSubscribeEvents, agentSubmitToolResult, cancelAgentChat, type AgentChatHistoryMessage, type AgentEvent } from "@/features/canvas/api/agent";
+import { agentChat, agentSubscribeEvents, agentSubmitToolResult, cancelAgentChat, type AgentChatHistoryMessage, type AgentEvent, type CreationSettings } from "@/features/canvas/api/agent";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { isTerminalAgentRequestStatus, matchesAgentRequest, shouldApplyAgentQueueStatus, type AgentQueueStatus } from "@/features/chat/agent-event-match";
 import { readAiTaskError } from "@/services/api/server";
@@ -311,7 +311,14 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
    * 使用 sendingRef 同步锁防止同一事件循环内重复提交（React setState 异步导致 isRunning 守卫失效）。
    */
   const sendMessage = useCallback(
-    async (message: string, references?: { title: string; text: string }[], model?: string, history?: AgentChatHistoryMessage[], generationStyleIdsByType?: { image?: number[]; video?: number[] }) => {
+    async (
+      message: string,
+      references?: { title: string; text: string }[],
+      model?: string,
+      history?: AgentChatHistoryMessage[],
+      generationStyleIdsByType?: { image?: number[]; video?: number[] },
+      generationSettings?: Omit<CreationSettings, "model" | "generationStyleIdsByType">,
+    ) => {
       if (sendingRef.current || activeRequestRef.current) return;
       sendingRef.current = true;
       activeRequestRef.current = true;
@@ -329,7 +336,9 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
           canvasSnapshot: snapshotRef.current as unknown as Record<string, unknown>,
           references,
           history,
-          creationSettings: model || generationStyleIdsByType ? { model, generationStyleIdsByType } : undefined,
+          creationSettings: model || generationStyleIdsByType || generationSettings
+            ? { model, generationStyleIdsByType, ...generationSettings }
+            : undefined,
         });
         sessionIdRef.current = sessionId;
         requestIdRef.current = requestId;

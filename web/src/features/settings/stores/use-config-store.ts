@@ -14,6 +14,18 @@ import { refreshModelConfigurationSnapshot } from "../lib/model-configuration-re
 export type ApiCallFormat = "openai" | "newapi" | "evolink" | "gemini" | "agnes" | "anthropic" | "seedance" | "minimax";
 export type ModelCapability = "image" | "video" | "text";
 export type ModelCreditUnit = "generation" | "second";
+export type VideoGenerationMode = "text-to-video" | "image-to-video" | "reference-to-video";
+export type VideoResolution = "auto" | "480p" | "720p" | "768p" | "1080p" | "2k" | "4k";
+export type VideoBillingConfiguration = {
+    billingUnit: ModelCreditUnit;
+    minimumDurationSeconds: number;
+    modePrices: Partial<Record<VideoGenerationMode, Partial<Record<VideoResolution, number>>>>;
+};
+export type VideoModelBillingConfiguration = {
+    model: string;
+    capabilities: string[];
+    videoBillingConfiguration: VideoBillingConfiguration | null;
+};
 export type ModelCapabilityConfig = { model: string; capabilities: string[] };
 
 export const MODEL_CAPABILITY_OPTIONS: Record<ModelCapability, Array<{ value: string; label: string }>> = {
@@ -28,7 +40,7 @@ export const MODEL_CAPABILITY_OPTIONS: Record<ModelCapability, Array<{ value: st
     video: [
         { value: "text-to-video", label: "文生视频" },
         { value: "image-to-video", label: "图生视频" },
-        { value: "video-to-video", label: "视频生视频" },
+        { value: "reference-to-video", label: "全能参考" },
     ],
 };
 
@@ -57,6 +69,7 @@ export type AiConfig = {
     videoSeconds: string;
     vquality: string;
     videoWatermark: string;
+    videoGenerationMode: VideoGenerationMode;
     systemPrompt: string;
     models: string[];
     modelCosts: Array<{ model: string; taskType: ModelCapability; credits: number; unit: ModelCreditUnit }>;
@@ -64,6 +77,9 @@ export type AiConfig = {
     videoModels: string[];
     textModels: string[];
     modelCapabilities: ModelCapabilityConfig[];
+    videoModelBillingConfigurations: VideoModelBillingConfiguration[];
+    modelDisplayNames: Record<string, string>;
+    modelIcons: Record<string, string>;
     quality: string;
     imageResolution: string;
     size: string;
@@ -124,6 +140,7 @@ export const defaultConfig: AiConfig = {
     videoSeconds: "5",
     vquality: "720p",
     videoWatermark: "false",
+    videoGenerationMode: "text-to-video",
     systemPrompt: "",
     models: [],
     modelCosts: [],
@@ -131,6 +148,9 @@ export const defaultConfig: AiConfig = {
     videoModels: [],
     textModels: [],
     modelCapabilities: [],
+    videoModelBillingConfigurations: [],
+    modelDisplayNames: {},
+    modelIcons: {},
     quality: "medium",
     imageResolution: "2K",
     size: "1:1",
@@ -336,8 +356,23 @@ export function modelOptionLabel(config: AiConfig, model: string) {
     const value = model.trim();
     const parsed = parseModelOption(value);
     if (!parsed) return value;
+    const displayName = config.modelDisplayNames?.[value] || parsed.model;
     const channel = config.channels.find((item) => item.id === parsed.channelId);
-    return channel?.name ? `${parsed.model}（${channel.name}）` : parsed.model;
+    return channel?.name ? `${displayName}（${channel.name}）` : displayName;
+}
+
+/** 管理端「我的模型」页签专用：同时展示展示名与真实模型名，如「（dsf-v4）deepseek-v4-flash（渠道名）」。 */
+export function modelOptionLabelWithRealName(config: AiConfig, model: string) {
+    const value = model.trim();
+    const parsed = parseModelOption(value);
+    if (!parsed) return value;
+    const realName = parsed.model;
+    const displayName = config.modelDisplayNames?.[value];
+    const channel = config.channels.find((item) => item.id === parsed.channelId);
+    const channelName = channel?.name;
+    const displayPrefix = displayName ? `（${displayName}）` : "";
+    const channelSuffix = channelName ? `（${channelName}）` : "";
+    return `${displayPrefix}${realName}${channelSuffix}`;
 }
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {
@@ -385,6 +420,8 @@ function normalizeConfig(config: Partial<AiConfig> = {}): AiConfig {
     next.apiKey = next.apiKey || channels[0]?.apiKey || "";
     next.apiFormat = normalizeApiFormat(next.apiFormat || channels[0]?.apiFormat);
     next.channelMode = next.channelMode === "local" ? "local" : "remote";
+    next.videoGenerationMode = ["text-to-video", "image-to-video", "reference-to-video"].includes(next.videoGenerationMode)
+        ? next.videoGenerationMode : "text-to-video";
     return next;
 }
 
@@ -407,6 +444,23 @@ export function configFromModelConfigs(channels: ModelChannel[], modelConfigs: S
             model: `${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`,
             capabilities: item.capabilities,
         })),
+        videoModelBillingConfigurations: modelConfigs
+            .filter((item) => item.modelType === "video")
+            .map((item) => ({
+                model: `${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`,
+                capabilities: item.capabilities,
+                videoBillingConfiguration: item.videoBillingConfiguration || null,
+            })),
+        modelDisplayNames: Object.fromEntries(
+            modelConfigs
+                .filter((item) => item.displayName && item.displayName !== item.modelName)
+                .map((item) => [`${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`, item.displayName!]),
+        ),
+        modelIcons: Object.fromEntries(
+            modelConfigs
+                .filter((item) => item.modelIcon)
+                .map((item) => [`${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`, item.modelIcon!]),
+        ),
         modelCosts: modelConfigs.map((item) => ({
             model: `${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`,
             taskType: item.modelType,
@@ -450,6 +504,24 @@ function configFromServerModels(modelList: ServerAiModelList | null) {
             credits: model.creditCost,
             unit: normalizeModelCreditUnit(model.creditUnit, model.capability as ModelCapability),
         })),
+        modelCapabilities: models.map((model) => ({ model: model.value, capabilities: model.capabilities || [] })),
+        videoModelBillingConfigurations: models
+            .filter((model) => model.capability === "video")
+            .map((model) => ({
+                model: model.value,
+                capabilities: model.capabilities || [],
+                videoBillingConfiguration: model.videoBillingConfiguration || null,
+            })),
+        modelDisplayNames: Object.fromEntries(
+            models
+                .filter((model) => model.label && model.label !== modelOptionName(model.value))
+                .map((model) => [model.value, model.label]),
+        ),
+        modelIcons: Object.fromEntries(
+            models
+                .filter((model) => model.icon)
+                .map((model) => [model.value, model.icon!]),
+        ),
     });
 }
 
@@ -529,9 +601,16 @@ export function normalizeModelCreditUnit(value: unknown, modelType: ModelCapabil
 export function normalizeServerModelConfig(config: ServerModelConfig): ServerModelConfig {
     return {
         ...config,
+        displayName: config.displayName || null,
+        modelIcon: config.modelIcon || null,
+        customBodyParameters: isJsonObject(config.customBodyParameters) ? { ...config.customBodyParameters } : {},
         creditUnit: normalizeModelCreditUnit(config.creditUnit, config.modelType),
         requestConcurrency: normalizeModelRequestConcurrency(config.requestConcurrency),
     };
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 /** 归一化模型同时并发数，缺省时使用默认值1。 */

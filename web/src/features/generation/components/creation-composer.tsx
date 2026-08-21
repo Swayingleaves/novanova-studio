@@ -1,6 +1,6 @@
 "use client";
 
-import { App, Button, Input, Tooltip } from "antd";
+import { App, Button, Input, Popover, Tooltip } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, Bot, Square, X } from "lucide-react";
@@ -135,8 +135,8 @@ export function CreationComposer({
         return true;
     };
 
-    const renderAction = (action: CreationComposerProps["actions"][number]) => (
-        <Tooltip key={action.key} title={action.label}>
+    const renderAction = (action: CreationComposerProps["actions"][number]) => {
+        const button = (
             <Button
                 size="small"
                 className={["creation-composer-action", action.iconOnly ? "creation-composer-action-icon" : "", action.className].filter(Boolean).join(" ")}
@@ -148,8 +148,16 @@ export function CreationComposer({
             >
                 {action.iconOnly ? null : <span className="creation-composer-action-label">{action.label}</span>}
             </Button>
-        </Tooltip>
-    );
+        );
+        if (action.popoverContent) {
+            return (
+                <Popover key={action.key} content={action.popoverContent} trigger="hover" placement="topLeft" mouseEnterDelay={0.1} mouseLeaveDelay={0.15}>
+                    {button}
+                </Popover>
+            );
+        }
+        return <Tooltip key={action.key} title={action.label}>{button}</Tooltip>;
+    };
 
     return (
         <div className="creation-composer-band">
@@ -286,13 +294,13 @@ export function CreationComposer({
                                     className="creation-composer-submit-trigger creation-composer-submit-trigger-cost"
                                     disabled={!canSubmit || requestActive}
                                     onClick={onSubmit}
-                                    aria-label={queued ? "排队中" : running ? "生成中" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
+                                    aria-label={queued ? "排队中" : running ? "生成中" : creditCost === null ? "当前配置无法报价" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
                                 >
                                     {queued || running ? (
                                         queued ? "排队中" : "生成中"
                                     ) : (
                                         <>
-                                            <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />
+                                            {creditCost === null ? <span className="text-xs font-medium">不可报价</span> : <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />}
                                             <ArrowUp className="size-[18px] shrink-0" strokeWidth={2.1} />
                                         </>
                                     )}

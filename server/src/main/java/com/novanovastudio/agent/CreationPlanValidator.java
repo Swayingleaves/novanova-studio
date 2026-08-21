@@ -7,6 +7,7 @@ import com.novanovastudio.agent.dto.CreationPlan;
 import com.novanovastudio.agent.dto.CreationSettings;
 import com.novanovastudio.agent.dto.CreationTask;
 import com.novanovastudio.agent.dto.AgentTool;
+import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.GenerationStyleDtos;
@@ -213,11 +214,19 @@ public class CreationPlanValidator {
      */
     private String missingSettingsQuestion(String entrySource, List<CreationTask> tasks, CreationSettings settings) {
         boolean hasImageTask = tasks.stream().anyMatch(task -> "image".equals(task.taskType()));
-        boolean hasVideoTask = tasks.stream().anyMatch(task -> "video".equals(task.taskType()));
+        boolean hasVideoTask = tasks.stream().anyMatch(this::isVideoGenerationTask);
         if ((hasImageTask || hasVideoTask) && (settings == null || !StringUtils.hasText(settings.model()))) {
             return "请选择生成模型后再继续。";
         }
+        if (hasVideoTask && settings != null && settings.videoGenerationMode() != null
+                && !settings.videoGenerationMode().isBlank()
+                && !VideoGenerationMode.isSupported(settings.videoGenerationMode())) {
+            throw invalid("视频生成模式不受支持");
+        }
         if (CreationEntrySource.CANVAS.equals(entrySource)) {
+            if (hasVideoTask && (settings == null || !StringUtils.hasText(settings.videoModel()))) {
+                return "请选择视频生成模型后再继续。";
+            }
             return "";
         }
         if (hasImageTask) {
@@ -237,6 +246,19 @@ public class CreationPlanValidator {
             }
         }
         return "";
+    }
+
+    /**
+     * 判断任务是否会实际创建视频生成任务。
+     *
+     * @param task CreationTask 待校验任务
+     * @return boolean 是否为视频生成任务
+     */
+    private boolean isVideoGenerationTask(CreationTask task) {
+        if (task == null) return false;
+        if ("video".equals(task.taskType()) || "canvas_generate_video".equals(task.toolName())) return true;
+        Object mode = task.toolArguments() == null ? null : task.toolArguments().get("mode");
+        return "video".equals(mode);
     }
 
     /**
