@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { Cpu } from "lucide-react";
+import { Clapperboard } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/shared/components/ui/select";
 import { cn } from "@/shared/lib/utils";
 import { modelOptionLabel, modelOptionLabelWithRealName, modelOptionName, resolveModelRequestConfig, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/features/settings/stores/use-config-store";
 
-import { isMonochromeModelIcon, resolveModelIcon } from "./model-icon";
+import { MODEL_ICON_MONOCHROME_KEYS, isMonochromeModelIcon, resolveModelIcon, resolveModelIconByKey } from "./model-icon";
 
 const MODEL_PICKER_OPEN_EVENT = "model-picker-open";
 
@@ -133,12 +133,13 @@ function ModelLabel({ config, model, showRealName }: { config: AiConfig; model: 
 function ModelIcon({ config, model }: { config: AiConfig; model: string }) {
     const modelName = model ? modelOptionName(model) : "";
     const apiFormat = model ? resolveModelRequestConfig(config, model).apiFormat : undefined;
-    const icon = model ? resolveModelIcon(modelName, apiFormat) : "";
-    const monochrome = model ? isMonochromeModelIcon(modelName, apiFormat) : false;
+    const configuredKey = model ? config.modelIcons?.[model] : undefined;
+    const icon = configuredKey ? resolveModelIconByKey(configuredKey) : model ? resolveModelIcon(modelName, apiFormat) : "";
+    const monochrome = configuredKey ? MODEL_ICON_MONOCHROME_KEYS.has(configuredKey) : model ? isMonochromeModelIcon(modelName, apiFormat) : false;
 
     return (
         <span className={cn("model-picker-icon flex size-5 shrink-0 items-center justify-center rounded-md", monochrome && "model-picker-icon-monochrome")}>
-            {icon ? <img src={icon} alt="" className="size-4" /> : <Cpu className="size-4 opacity-70" />}
+            {icon ? <img src={icon} alt="" className="size-4" /> : <Clapperboard className="size-4 opacity-70" />}
         </span>
     );
 }

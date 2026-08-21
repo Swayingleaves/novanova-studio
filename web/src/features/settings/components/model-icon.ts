@@ -23,3 +23,31 @@ export function isMonochromeModelIcon(model: string, apiFormat?: ApiCallFormat):
     const name = model.toLowerCase();
     return name.includes("gpt") || name.includes("openai") || name.includes("grok") || name.includes("seedance") || name.includes("minimax");
 }
+
+/**
+ * 模型展示图标可选项：空串表示自动匹配（按模型名/渠道解析），clapperboard 表示默认图标。
+ * 供管理端「模型能力配置」编辑弹窗选择使用。
+ */
+export const MODEL_ICON_OPTIONS: Array<{ value: string; label: string; path: string }> = [
+    { value: "", label: "自动匹配", path: "" },
+    { value: "clapperboard", label: "默认（Clapperboard）", path: "" },
+    { value: "agnes", label: "Agnes", path: "/icons/agnes.svg" },
+    { value: "seedance", label: "Seedance（字节跳动）", path: "/icons/bytedance.svg" },
+    { value: "claude", label: "Claude", path: "/icons/claude.svg" },
+    { value: "openai", label: "OpenAI", path: "/icons/openai.svg" },
+    { value: "gemini", label: "Gemini", path: "/icons/gemini.svg" },
+    { value: "deepseek", label: "DeepSeek", path: "/icons/deepseek.svg" },
+    { value: "glm", label: "GLM", path: "/icons/glm.svg" },
+    { value: "grok", label: "Grok", path: "/icons/grok.svg" },
+    { value: "minimax", label: "MiniMax", path: "/icons/minimax.svg" },
+];
+
+/** 按配置的图标标识解析 SVG 路径，自动匹配/默认图标返回空串。 */
+export function resolveModelIconByKey(key: string | null | undefined): string {
+    if (!key || key === "clapperboard") return "";
+    const found = MODEL_ICON_OPTIONS.find((option) => option.value === key);
+    return found?.path || "";
+}
+
+/** 需要暗色反色处理的品牌图标标识集合。 */
+export const MODEL_ICON_MONOCHROME_KEYS = new Set(["agnes", "seedance", "minimax", "openai", "grok"]);

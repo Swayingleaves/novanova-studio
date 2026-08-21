@@ -141,6 +141,7 @@ public final class RowMappers {
         record.setCustomBodyParameters(row.get("custom_body_parameters", String.class));
         record.setVideoBillingConfiguration(row.get("video_billing_configuration", String.class));
         record.setDisplayName(row.get("display_name", String.class));
+        record.setModelIcon(row.get("model_icon", String.class));
         record.setCreatedAt(row.get("created_at", OffsetDateTime.class));
         record.setUpdatedAt(row.get("updated_at", OffsetDateTime.class));
         return record;

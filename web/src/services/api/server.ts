@@ -150,6 +150,7 @@ export type ServerAiModelList = {
         creditUnit: ModelCreditUnit;
         capabilities: string[];
         videoBillingConfiguration: VideoBillingConfiguration | null;
+        icon: string | null;
     }>;
     imageModels: string[];
     videoModels: string[];
@@ -219,6 +220,7 @@ export type ServerModelConfig = {
     customBodyParameters: Record<string, unknown>;
     videoBillingConfiguration: VideoBillingConfiguration | null;
     displayName: string | null;
+    modelIcon: string | null;
 };
 
 export type CreditSettings = {
@@ -831,7 +833,7 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "customBodyParameters" | "videoBillingConfiguration" | "displayName">) {
+export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "customBodyParameters" | "videoBillingConfiguration" | "displayName" | "modelIcon">) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 

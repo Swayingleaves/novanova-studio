@@ -211,6 +211,7 @@ public class PersistenceService {
                     record.setCustomBodyParameters(JSON.toJSONString(customBodyParameters));
                     record.setVideoBillingConfiguration(videoBillingConfiguration == null ? null : JSON.toJSONString(videoBillingConfiguration));
                     record.setDisplayName(normalizeDisplayName(request.displayName(), request.modelName()));
+                    record.setModelIcon(normalizeModelIcon(request.modelIcon()));
                     return repository.createPlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
                 });
     }
@@ -246,6 +247,7 @@ public class PersistenceService {
                     record.setCustomBodyParameters(JSON.toJSONString(customBodyParameters));
                     record.setVideoBillingConfiguration(videoBillingConfiguration == null ? null : JSON.toJSONString(videoBillingConfiguration));
                     record.setDisplayName(normalizeDisplayName(request.displayName(), record.getModelName()));
+                    record.setModelIcon(normalizeModelIcon(request.modelIcon()));
                     PersistenceDtos.ModelConfig modelConfig = modelConfigDto(record);
                     return repository.updatePlatformAiModelConfig(record)
                             .then(isModelQueueType(modelConfig.modelType())
@@ -302,7 +304,8 @@ public class PersistenceService {
                 normalizeCreditUnit(record.getModelType(), record.getCreditUnit()), normalizeRequestConcurrency(record.getRequestConcurrency()),
                 normalizeCustomBodyParameters(record.getCustomBodyParameters()),
                 parseVideoBillingConfiguration(record.getVideoBillingConfiguration()),
-                record.getDisplayName());
+                record.getDisplayName(),
+                record.getModelIcon());
     }
 
     /**
@@ -318,6 +321,19 @@ public class PersistenceService {
         }
         String trimmed = displayName.trim();
         return trimmed.equals(modelName) ? null : trimmed;
+    }
+
+    /**
+     * 规范化模型展示图标标识，空白返回null，展示时回退自动匹配。
+     *
+     * @param modelIcon String 请求展示图标标识
+     * @return String 规范化展示图标标识，可为null
+     */
+    private String normalizeModelIcon(String modelIcon) {
+        if (modelIcon == null || modelIcon.isBlank()) {
+            return null;
+        }
+        return modelIcon.trim();
     }
 
     /**

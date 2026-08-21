@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isMonochromeModelIcon, resolveModelIcon } from "./model-icon.ts";
+import { isMonochromeModelIcon, resolveModelIcon, resolveModelIconByKey } from "./model-icon.ts";
 
 test("resolveModelIcon 根据 Agnes 渠道格式显示渠道图标", () => {
     assert.equal(resolveModelIcon("custom-video-model", "agnes"), "/icons/agnes.svg");
@@ -24,4 +24,17 @@ test("isMonochromeModelIcon 标记需要暗色反色处理的图标", () => {
     assert.equal(isMonochromeModelIcon("doubao-seedance-1.5-pro"), true);
     assert.equal(isMonochromeModelIcon("MiniMax-H3"), true);
     assert.equal(isMonochromeModelIcon("gemini-2.5-flash"), false);
+});
+
+test("resolveModelIconByKey 按配置标识解析品牌图标", () => {
+    assert.equal(resolveModelIconByKey("claude"), "/icons/claude.svg");
+    assert.equal(resolveModelIconByKey("seedance"), "/icons/bytedance.svg");
+    assert.equal(resolveModelIconByKey("openai"), "/icons/openai.svg");
+});
+
+test("resolveModelIconByKey 自动匹配与默认图标返回空串", () => {
+    assert.equal(resolveModelIconByKey(""), "");
+    assert.equal(resolveModelIconByKey("clapperboard"), "");
+    assert.equal(resolveModelIconByKey(null), "");
+    assert.equal(resolveModelIconByKey("unknown-key"), "");
 });

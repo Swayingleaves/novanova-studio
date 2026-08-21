@@ -162,20 +162,21 @@ public final class AiTaskDtos {
      * @param creditUnit String 非视频模型积分计费单位
      * @param capabilities List<String> 模型细能力列表
      * @param videoBillingConfiguration VideoBillingConfiguration 视频分档计费配置
+     * @param icon String 模型展示图标标识，可为null
      */
     public record AiModelOption(String value, String label, String capability, String provider, String apiFormat,
                                 Boolean defaultModel, Integer creditCost, String creditUnit, List<String> capabilities,
-                                VideoBillingConfiguration videoBillingConfiguration) {
+                                VideoBillingConfiguration videoBillingConfiguration, String icon) {
         /** 保持既有调用方不返回视频分档计费配置。 */
         public AiModelOption(String value, String label, String capability, String provider, String apiFormat,
                              Boolean defaultModel, Integer creditCost, String creditUnit) {
-            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, creditUnit, List.of(), null);
+            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, creditUnit, List.of(), null, null);
         }
 
         /** 保持旧调用方按次计费。 */
         public AiModelOption(String value, String label, String capability, String provider, String apiFormat,
                              Boolean defaultModel, Integer creditCost) {
-            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, "generation", List.of(), null);
+            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, "generation", List.of(), null, null);
         }
     }
 

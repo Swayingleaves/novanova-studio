@@ -2,11 +2,12 @@
 
 import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Switch, Tabs } from "antd";
 import { nanoid } from "nanoid";
-import { Braces, CheckCircle2, ChevronDown, ChevronUp, CloudUpload, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
+import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { ModelPicker } from "@/features/settings/components/model-picker";
+import { MODEL_ICON_OPTIONS } from "@/features/settings/components/model-icon";
 import {
     configFromModelConfigs,
     createModelChannel,
@@ -65,6 +66,16 @@ const capabilityGroups: Array<{ capability: ModelCapability; modelsKey: "textMod
     { capability: "image", modelsKey: "imageModels", label: "图像模型" },
     { capability: "video", modelsKey: "videoModels", label: "视频模型" },
 ];
+
+const modelIconSelectOptions = MODEL_ICON_OPTIONS.map((option) => ({
+    value: option.value,
+    label: (
+        <span className="inline-flex items-center gap-2">
+            {option.path ? <img src={option.path} alt="" className="size-4" /> : option.value === "clapperboard" ? <Clapperboard className="size-4 opacity-70" /> : null}
+            <span>{option.label}</span>
+        </span>
+    ),
+}));
 
 const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
     { label: "OpenAI", value: "openai" },
@@ -420,6 +431,7 @@ export function AppConfigModal() {
                     customBodyParameters: normalizedConfig.customBodyParameters,
                     videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
                     displayName: normalizedConfig.displayName,
+                    modelIcon: normalizedConfig.modelIcon,
                 });
                 createdConfigIds.set(configItem.id, saved.id);
             }
@@ -447,6 +459,7 @@ export function AppConfigModal() {
                         customBodyParameters: normalizedConfig.customBodyParameters,
                         videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
                         displayName: normalizedConfig.displayName,
+                        modelIcon: normalizedConfig.modelIcon,
                     });
                 }
             }
@@ -1038,6 +1051,19 @@ export function AppConfigModal() {
                             <p className="mt-2 text-xs text-[var(--studio-muted)]">展示给用户看的名称，默认与真实模型名一致，仅影响展示不影响调用。</p>
                         </section>
 
+                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                            <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                                展示图标 <Info className="size-4 text-[var(--studio-muted)]" />
+                            </div>
+                            <Select
+                                value={editingModelConfig.modelIcon || ""}
+                                options={modelIconSelectOptions}
+                                className="w-full"
+                                onChange={(modelIcon: string) => updateEditingModelConfig({ modelIcon: modelIcon || null })}
+                            />
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">展示给用户看的图标；选择「自动匹配」时按模型名或渠道自动识别。</p>
+                        </section>
+
                         <section className="grid gap-4 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4 md:grid-cols-2">
                             <div>
                                 <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
@@ -1216,6 +1242,14 @@ export function AppConfigModal() {
                                 onChange={(event) => updateEditingModelConfig({ displayName: event.target.value.trim() || null })}
                             />
                         </Form.Item>
+                        <Form.Item label="展示图标" extra="展示给用户看的图标；选择「自动匹配」时按模型名或渠道自动识别。">
+                            <Select
+                                value={editingModelConfig.modelIcon || ""}
+                                options={modelIconSelectOptions}
+                                className="w-full"
+                                onChange={(modelIcon: string) => updateEditingModelConfig({ modelIcon: modelIcon || null })}
+                            />
+                        </Form.Item>
                         {editingModelConfig.modelType !== "video" ? (
                             <Form.Item label="每次积分">
                                 <InputNumber min={0} precision={0} value={editingModelConfig.creditCost} className="w-full" onChange={(value) => updateEditingModelConfig({ creditCost: Math.max(0, Number(value) || 0) })} />
@@ -1324,6 +1358,7 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         customBodyParameters: {},
         videoBillingConfiguration: modelType === "video" ? createVideoBillingConfiguration() : null,
         displayName: null,
+        modelIcon: null,
     };
 }
 
@@ -1341,6 +1376,7 @@ function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelC
         first.thinkingEnabled === second.thinkingEnabled &&
         first.reasoningEffort === second.reasoningEffort &&
         (first.displayName || null) === (second.displayName || null) &&
+        (first.modelIcon || null) === (second.modelIcon || null) &&
         sameValue(first.capabilities, second.capabilities) &&
         sameValue(first.customBodyParameters, second.customBodyParameters) &&
         sameValue(first.videoBillingConfiguration, second.videoBillingConfiguration)
