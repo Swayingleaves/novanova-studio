@@ -218,6 +218,7 @@ export type ServerModelConfig = {
     requestConcurrency: number;
     customBodyParameters: Record<string, unknown>;
     videoBillingConfiguration: VideoBillingConfiguration | null;
+    displayName: string | null;
 };
 
 export type CreditSettings = {
@@ -830,7 +831,7 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "customBodyParameters" | "videoBillingConfiguration">) {
+export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "customBodyParameters" | "videoBillingConfiguration" | "displayName">) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 
