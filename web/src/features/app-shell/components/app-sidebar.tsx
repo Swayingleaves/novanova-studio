@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { MenuProps } from "antd";
-import { Bell, LogOut, Cog, ShoppingCart, Ticket, UserCircle, Users, Zap } from "lucide-react";
+import { Bell, Cog } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { App, Dropdown, Popover, Tooltip } from "antd";
+import { usePathname } from "next/navigation";
+import { Popover, Tooltip } from "antd";
 
 import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
 import { navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
@@ -14,16 +13,10 @@ import { cn } from "@/shared/lib/utils";
 import { useConfigStore } from "@/features/settings/stores/use-config-store";
 import { useNotificationStore } from "@/features/notification/stores/use-notification-store";
 import { NotificationDetailModal } from "@/features/notification/components/notification-detail-modal";
-import { logoutCurrentUser } from "@/services/api/server";
-
-const creditNumberFormatter = new Intl.NumberFormat("zh-CN");
 
 export function AppSidebar() {
     const pathname = usePathname();
-    const router = useRouter();
-    const { message } = App.useApp();
     const user = useUserStore((state) => state.user);
-    const clearSession = useUserStore((state) => state.clearSession);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const { notifications, unreadCount, loadNotifications } = useNotificationStore();
     const [detailNotification, setDetailNotification] = useState<(typeof notifications)[number] | null>(null);
@@ -37,63 +30,6 @@ export function AppSidebar() {
 
     const visibleTools = navigationTools.filter((tool) => !tool.adminOnly || user?.role === "admin");
     const activeSlug = navigationTools.some((tool) => tool.slug === slug) ? (slug as NavigationToolSlug) : undefined;
-    const creditBalance = user && Number.isInteger(user.creditBalance) ? user.creditBalance : null;
-    const creditMenuContent = (
-        <div className="flex min-w-28 flex-col gap-1 p-0.5">
-            <Link href="/credits/purchase" className={cn("flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]", pathname === "/credits/purchase" && "bg-[var(--studio-primary-soft)] text-[var(--studio-ink)]")}>
-                <ShoppingCart className="size-4" />
-                <span>购买</span>
-            </Link>
-            <Link href="/credits/redeem" className={cn("flex items-center gap-2 rounded-md px-2.5 py-2 text-sm text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]", pathname === "/credits/redeem" && "bg-[var(--studio-primary-soft)] text-[var(--studio-ink)]")}>
-                <Ticket className="size-4" />
-                <span>兑换</span>
-            </Link>
-        </div>
-    );
-
-    const handleLogoutCurrentUser = async () => {
-        try {
-            await logoutCurrentUser();
-        } catch {
-            // 后端使用无状态 Token，退出登录以清理本地会话为准。
-        }
-        clearSession();
-        message.success("已退出登录");
-        router.replace("/");
-    };
-
-    const userMenuItems: MenuProps["items"] = user
-        ? [
-              {
-                  key: "profile",
-                  disabled: true,
-                  label: (
-                      <div className="max-w-56 py-1">
-                          <div className="truncate text-sm font-medium text-[var(--studio-ink)]">{user.displayName}</div>
-                          <div className="mt-1 truncate text-xs text-[var(--studio-muted)]">{user.email}</div>
-                      </div>
-                  ),
-              },
-              ...(user.role === "admin"
-                  ? [
-                        {
-                            key: "adminSystem",
-                            icon: <Users className="size-4" />,
-                            label: <Link href="/admin/system">系统管理</Link>,
-                        },
-                    ]
-                  : []),
-              {
-                  type: "divider" as const,
-              },
-              {
-                  key: "logout",
-                  icon: <LogOut className="size-4" />,
-                  label: "退出登录",
-                  onClick: () => void handleLogoutCurrentUser(),
-              },
-          ]
-        : [];
 
     const renderNavItem = (tool: (typeof navigationTools)[number]) => {
         const Icon = tool.icon;
@@ -152,29 +88,6 @@ export function AppSidebar() {
                 <nav className="hide-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto px-2 pb-3">{visibleTools.map(renderNavItem)}</nav>
 
                 <div className="flex flex-col items-center gap-2 border-t border-[var(--studio-line)] px-2 py-2">
-                    {creditBalance !== null ? (
-                        <Popover placement="right" trigger="hover" arrow={false} content={creditMenuContent}>
-                            <Link href="/credits" className={cn("sidebar-credit-balance", pathname.startsWith("/credits") && "sidebar-rail-item-active")} aria-current={pathname.startsWith("/credits") ? "page" : undefined} aria-label={`查看积分，当前可用 ${creditNumberFormatter.format(creditBalance)}`}>
-                                <Zap className="size-3.5 fill-current" strokeWidth={2.4} />
-                                <span className="max-w-[52px] truncate">{creditNumberFormatter.format(creditBalance)}</span>
-                            </Link>
-                        </Popover>
-                    ) : null}
-                    {user ? (
-                        <Dropdown placement="topLeft" trigger={["hover"]} menu={{ items: userMenuItems }}>
-                            <Link href="/profile" className="sidebar-user-dot sidebar-user-dot-emphasis" aria-label="个人信息" title={user.displayName || user.email}>
-                                <span className="flex size-full items-center justify-center">
-                                    {user.avatarUrl ? <img src={user.avatarUrl} alt="" className="block size-full rounded-[inherit] object-cover" /> : <UserCircle className="size-5" aria-hidden />}
-                                </span>
-                            </Link>
-                        </Dropdown>
-                    ) : (
-                        <Tooltip title="登录" placement="right">
-                            <button type="button" className="sidebar-rail-action" onClick={() => useUserStore.getState().openAuthModal()} aria-label="登录">
-                                <UserCircle className="size-4.5" />
-                            </button>
-                        </Tooltip>
-                    )}
                     <Tooltip title="系统公告" placement="right">
                         {user ? (
                             <Popover
