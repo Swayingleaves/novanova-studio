@@ -13,7 +13,7 @@ import {
     createObjectStorageConfig,
     defaultBaseUrlForApiFormat,
     MODEL_CAPABILITY_OPTIONS,
-    modelOptionLabel,
+    modelOptionLabelWithRealName,
     normalizeModelOptionValue,
     useConfigStore,
     type ApiCallFormat,
@@ -222,7 +222,7 @@ export function AppConfigModal() {
     }, [isConfigOpen, setConfigDialogOpen, user?.role]);
 
     const draftConfig = useMemo(() => configFromModelConfigs(draftChannels, draftModelConfigs, config), [config, draftChannels, draftModelConfigs]);
-    const modelOptions = useMemo(() => draftConfig.models.map((model) => ({ label: modelOptionLabel(draftConfig, model), value: model })), [draftConfig]);
+    const modelOptions = useMemo(() => draftConfig.models.map((model) => ({ label: modelOptionLabelWithRealName(draftConfig, model), value: model })), [draftConfig]);
     const channelsDirty = !sameValue(draftChannels, channelBaseline);
     const modelConfigsDirty = !sameValue(draftModelConfigs, modelConfigBaseline);
     const objectStoragesDirty = !sameValue(draftObjectStorages, objectStorageBaseline);
@@ -360,7 +360,11 @@ export function AppConfigModal() {
             message.error(error instanceof Error ? error.message : "模型自定义JSON格式不正确");
             return;
         }
-        const nextConfig = { ...editingModelConfig, customBodyParameters };
+        const nextConfig = {
+            ...editingModelConfig,
+            customBodyParameters,
+            displayName: editingModelConfig.displayName === editingModelConfig.modelName ? null : editingModelConfig.displayName,
+        };
         setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.id === nextConfig.id ? nextConfig : configItem)));
         setEditingModelConfig(null);
     };
@@ -415,6 +419,7 @@ export function AppConfigModal() {
                     requestConcurrency: normalizedConfig.requestConcurrency,
                     customBodyParameters: normalizedConfig.customBodyParameters,
                     videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
+                    displayName: normalizedConfig.displayName,
                 });
                 createdConfigIds.set(configItem.id, saved.id);
             }
@@ -441,6 +446,7 @@ export function AppConfigModal() {
                         requestConcurrency: normalizedConfig.requestConcurrency,
                         customBodyParameters: normalizedConfig.customBodyParameters,
                         videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
+                        displayName: normalizedConfig.displayName,
                     });
                 }
             }
@@ -752,7 +758,7 @@ export function AppConfigModal() {
                                     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
                                         <div>
                                             <div className="text-sm font-semibold">默认模型和可选项</div>
-                                            <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">可选项决定各处下拉框展示哪些模型；同名模型会以括号里的渠道名区分。</div>
+                                            <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">可选项决定各处下拉框展示哪些模型；同名模型会以括号里的展示名或渠道名区分。</div>
                                         </div>
                                         <Button type="primary" disabled={!modelConfigsDirty || isSaving} loading={savingTab === "models"} onClick={() => void saveModelConfigs()}>
                                             保存
@@ -779,14 +785,14 @@ export function AppConfigModal() {
                                         {modelGroups.map((group) => (
                                             <Form.Item key={group.modelKey} label={group.defaultLabel} className="mb-0">
                                                 <div className={isSaving ? "pointer-events-none opacity-60" : ""}>
-                                                    <ModelPicker config={draftConfig} value={draftConfig[group.modelKey]} onChange={(model) => setDefaultDraftModel(group.capability, model)} capability={group.capability} fullWidth />
+                                                    <ModelPicker config={draftConfig} value={draftConfig[group.modelKey]} onChange={(model) => setDefaultDraftModel(group.capability, model)} capability={group.capability} fullWidth showRealName />
                                                 </div>
                                             </Form.Item>
                                         ))}
                                     </div>
                                     <div className="mt-6 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
                                         <div className="text-sm font-semibold">模型能力配置</div>
-                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">点击模型后的编辑按钮配置积分、能力与自定义 JSON 参数。</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">点击模型后的编辑按钮配置展示名称、积分、能力与自定义 JSON 参数。</div>
                                         <div className="mt-3 space-y-4">
                                             {capabilityGroups.map((group) => {
                                                 const models = draftConfig[group.modelsKey];
@@ -807,7 +813,7 @@ export function AppConfigModal() {
                                                                     if (!modelConfig) return null;
                                                                     return (
                                                                         <div key={model} className="flex items-center justify-between gap-3 rounded border border-[var(--studio-line)] bg-[var(--studio-panel)] px-3 py-2">
-                                                                            <span className="min-w-0 truncate text-sm">{modelOptionLabel(draftConfig, model)}</span>
+                                                                            <span className="min-w-0 truncate text-sm">{modelOptionLabelWithRealName(draftConfig, model)}</span>
                                                                             <div className="flex shrink-0 items-center gap-2">
                                                                                 {modelConfig.defaultModel ? <span className="text-xs text-[var(--studio-muted)]">默认</span> : null}
                                                                                 <Button size="small" icon={<Pencil className="size-3.5" />} disabled={isSaving} onClick={() => openModelConfigEditor(modelConfig)}>
@@ -1000,7 +1006,7 @@ export function AppConfigModal() {
                                 </span>
                             ) : null}
                             <div>
-                                <div className="text-lg font-semibold">{modelOptionLabel(draftConfig, modelConfigValue(editingModelConfig))} 配置</div>
+                                <div className="text-lg font-semibold">{modelOptionLabelWithRealName(draftConfig, modelConfigValue(editingModelConfig))} 配置</div>
                                 {editingModelConfig.modelType === "video" ? <div className="mt-0.5 text-xs font-normal text-[var(--studio-muted)]">配置模型的计费方式、分辨率价格及功能支持</div> : null}
                             </div>
                         </div>
@@ -1019,6 +1025,19 @@ export function AppConfigModal() {
             >
                 {editingModelConfig?.modelType === "video" && editingModelIsMedia ? (
                     <div className="space-y-5">
+                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                            <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                                展示名称 <Info className="size-4 text-[var(--studio-muted)]" />
+                            </div>
+                            <Input
+                                maxLength={255}
+                                placeholder={editingModelConfig.modelName}
+                                value={editingModelConfig.displayName || editingModelConfig.modelName}
+                                onChange={(event) => updateEditingModelConfig({ displayName: event.target.value.trim() || null })}
+                            />
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">展示给用户看的名称，默认与真实模型名一致，仅影响展示不影响调用。</p>
+                        </section>
+
                         <section className="grid gap-4 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4 md:grid-cols-2">
                             <div>
                                 <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
@@ -1189,6 +1208,14 @@ export function AppConfigModal() {
                     </div>
                 ) : editingModelConfig ? (
                     <Form layout="vertical" requiredMark={false}>
+                        <Form.Item label="展示名称" extra="展示给用户看的名称，默认与真实模型名一致，仅影响展示不影响调用。">
+                            <Input
+                                maxLength={255}
+                                placeholder={editingModelConfig.modelName}
+                                value={editingModelConfig.displayName || editingModelConfig.modelName}
+                                onChange={(event) => updateEditingModelConfig({ displayName: event.target.value.trim() || null })}
+                            />
+                        </Form.Item>
                         {editingModelConfig.modelType !== "video" ? (
                             <Form.Item label="每次积分">
                                 <InputNumber min={0} precision={0} value={editingModelConfig.creditCost} className="w-full" onChange={(value) => updateEditingModelConfig({ creditCost: Math.max(0, Number(value) || 0) })} />
@@ -1296,6 +1323,7 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         requestConcurrency: 1,
         customBodyParameters: {},
         videoBillingConfiguration: modelType === "video" ? createVideoBillingConfiguration() : null,
+        displayName: null,
     };
 }
 
@@ -1312,6 +1340,7 @@ function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelC
         first.requestConcurrency === second.requestConcurrency &&
         first.thinkingEnabled === second.thinkingEnabled &&
         first.reasoningEffort === second.reasoningEffort &&
+        (first.displayName || null) === (second.displayName || null) &&
         sameValue(first.capabilities, second.capabilities) &&
         sameValue(first.customBodyParameters, second.customBodyParameters) &&
         sameValue(first.videoBillingConfiguration, second.videoBillingConfiguration)

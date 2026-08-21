@@ -48,14 +48,14 @@ public final class PersistenceDtos {
     public record ModelConfig(String id, String channelId, String modelName, String modelType,
                               List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
                               Boolean thinkingEnabled, String reasoningEffort, String creditUnit, Integer requestConcurrency,
-                              JSONObject customBodyParameters, VideoBillingConfiguration videoBillingConfiguration) {
+                              JSONObject customBodyParameters, VideoBillingConfiguration videoBillingConfiguration, String displayName) {
         /** 保持旧调用方使用空视频分档计费配置。 */
         public ModelConfig(String id, String channelId, String modelName, String modelType,
                            List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
                            Boolean thinkingEnabled, String reasoningEffort, String creditUnit, Integer requestConcurrency,
                            JSONObject customBodyParameters) {
             this(id, channelId, modelName, modelType, capabilities, defaultModel, sortOrder, creditCost,
-                    thinkingEnabled, reasoningEffort, creditUnit, requestConcurrency, customBodyParameters, null);
+                    thinkingEnabled, reasoningEffort, creditUnit, requestConcurrency, customBodyParameters, null, null);
         }
 
         /** 保持旧调用方使用空自定义请求体参数。 */
@@ -63,7 +63,7 @@ public final class PersistenceDtos {
                            List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
                            Boolean thinkingEnabled, String reasoningEffort, String creditUnit, Integer requestConcurrency) {
             this(id, channelId, modelName, modelType, capabilities, defaultModel, sortOrder, creditCost,
-                    thinkingEnabled, reasoningEffort, creditUnit, requestConcurrency, new JSONObject(), null);
+                    thinkingEnabled, reasoningEffort, creditUnit, requestConcurrency, new JSONObject(), null, null);
         }
 
         /** 保持旧调用方使用默认并发数。 */
@@ -71,7 +71,7 @@ public final class PersistenceDtos {
                            List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
                            Boolean thinkingEnabled, String reasoningEffort, String creditUnit) {
             this(id, channelId, modelName, modelType, capabilities, defaultModel, sortOrder, creditCost,
-                    thinkingEnabled, reasoningEffort, creditUnit, 1, new JSONObject(), null);
+                    thinkingEnabled, reasoningEffort, creditUnit, 1, new JSONObject(), null, null);
         }
 
         /** 保持旧调用方按次计费。 */
@@ -79,7 +79,7 @@ public final class PersistenceDtos {
                            List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
                            Boolean thinkingEnabled, String reasoningEffort) {
             this(id, channelId, modelName, modelType, capabilities, defaultModel, sortOrder, creditCost,
-                    thinkingEnabled, reasoningEffort, "generation", 1, new JSONObject(), null);
+                    thinkingEnabled, reasoningEffort, "generation", 1, new JSONObject(), null, null);
         }
     }
 
@@ -98,13 +98,14 @@ public final class PersistenceDtos {
                                            @Pattern(regexp = "generation|second", message = "积分计费单位只支持generation、second") String creditUnit,
                                            @Min(value = 1, message = "模型同时并发数不能小于1") Integer requestConcurrency,
                                            JSONObject customBodyParameters,
-                                           VideoBillingConfiguration videoBillingConfiguration) {
+                                           VideoBillingConfiguration videoBillingConfiguration,
+                                           String displayName) {
         /** 保持旧调用方使用空视频分档计费配置。 */
         public CreateModelConfigRequest(String channelId, String modelName, String modelType, List<String> capabilities,
                                         Integer sortOrder, Integer creditCost, Boolean thinkingEnabled, String reasoningEffort,
                                         String creditUnit, Integer requestConcurrency, JSONObject customBodyParameters) {
             this(channelId, modelName, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort,
-                    creditUnit, requestConcurrency, customBodyParameters, null);
+                    creditUnit, requestConcurrency, customBodyParameters, null, null);
         }
 
         /** 保持旧调用方使用空自定义请求体参数。 */
@@ -112,7 +113,7 @@ public final class PersistenceDtos {
                                         Integer sortOrder, Integer creditCost, Boolean thinkingEnabled, String reasoningEffort,
                                         String creditUnit, Integer requestConcurrency) {
             this(channelId, modelName, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort,
-                    creditUnit, requestConcurrency, new JSONObject(), null);
+                    creditUnit, requestConcurrency, new JSONObject(), null, null);
         }
 
         /** 保持旧调用方使用默认并发数。 */
@@ -120,14 +121,14 @@ public final class PersistenceDtos {
                                         Integer sortOrder, Integer creditCost, Boolean thinkingEnabled, String reasoningEffort,
                                         String creditUnit) {
             this(channelId, modelName, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort,
-                    creditUnit, 1, new JSONObject(), null);
+                    creditUnit, 1, new JSONObject(), null, null);
         }
 
         /** 保持旧调用方按次计费。 */
         public CreateModelConfigRequest(String channelId, String modelName, String modelType, List<String> capabilities,
                                         Integer sortOrder, Integer creditCost, Boolean thinkingEnabled, String reasoningEffort) {
             this(channelId, modelName, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort,
-                    "generation", 1, new JSONObject(), null);
+                    "generation", 1, new JSONObject(), null, null);
         }
     }
 
@@ -141,13 +142,14 @@ public final class PersistenceDtos {
                                            @Pattern(regexp = "generation|second", message = "积分计费单位只支持generation、second") String creditUnit,
                                            @Min(value = 1, message = "模型同时并发数不能小于1") Integer requestConcurrency,
                                            JSONObject customBodyParameters,
-                                           VideoBillingConfiguration videoBillingConfiguration) {
+                                           VideoBillingConfiguration videoBillingConfiguration,
+                                           String displayName) {
         /** 保持旧调用方使用空视频分档计费配置。 */
         public UpdateModelConfigRequest(String id, String modelType, List<String> capabilities, Integer sortOrder,
                                         Integer creditCost, Boolean thinkingEnabled, String reasoningEffort, String creditUnit,
                                         Integer requestConcurrency, JSONObject customBodyParameters) {
             this(id, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort, creditUnit,
-                    requestConcurrency, customBodyParameters, null);
+                    requestConcurrency, customBodyParameters, null, null);
         }
 
         /** 保持旧调用方使用空自定义请求体参数。 */
@@ -155,21 +157,21 @@ public final class PersistenceDtos {
                                         Integer creditCost, Boolean thinkingEnabled, String reasoningEffort, String creditUnit,
                                         Integer requestConcurrency) {
             this(id, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort, creditUnit,
-                    requestConcurrency, new JSONObject(), null);
+                    requestConcurrency, new JSONObject(), null, null);
         }
 
         /** 保持旧调用方省略并发数时沿用原配置。 */
         public UpdateModelConfigRequest(String id, String modelType, List<String> capabilities, Integer sortOrder,
                                         Integer creditCost, Boolean thinkingEnabled, String reasoningEffort, String creditUnit) {
             this(id, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort, creditUnit,
-                    null, new JSONObject(), null);
+                    null, new JSONObject(), null, null);
         }
 
         /** 保持旧调用方按次计费。 */
         public UpdateModelConfigRequest(String id, String modelType, List<String> capabilities, Integer sortOrder,
                                         Integer creditCost, Boolean thinkingEnabled, String reasoningEffort) {
             this(id, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort,
-                    "generation", null, new JSONObject(), null);
+                    "generation", null, new JSONObject(), null, null);
         }
     }
 

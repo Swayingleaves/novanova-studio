@@ -188,6 +188,16 @@ export default function VideoPage() {
         updateVideoSettings(key, value);
     };
 
+    // 文生视频模式下上传参考素材时，按素材类型自动切换生成模式：仅图片 → 图生视频；含视频 → 全能参考。
+    const autoSwitchModeForReferences = (addedImages: number, addedVideos: number) => {
+        if (config.videoGenerationMode !== "text-to-video") return;
+        if (videoReferences.length + addedVideos > 0) {
+            handleVideoSettingsChange("videoGenerationMode", "reference-to-video");
+        } else if (references.length + addedImages > 0) {
+            handleVideoSettingsChange("videoGenerationMode", "image-to-video");
+        }
+    };
+
     // Agent chat state
     const [chatMessages, setChatMessages] = useState<ChatMessageItem[]>([]);
     const { completedThinkings, activeThinking, onThoughtDelta, onThoughtComplete, resetThinkings } = useAgentThinking();
@@ -523,6 +533,7 @@ export default function VideoPage() {
             }
             setReferences((current) => [...current, ...imagePlaceholders].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
             setVideoReferences((current) => [...current, ...videoPlaceholders].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
+            autoSwitchModeForReferences(imageFiles.length, videoFiles.length);
             setUploadingReferenceIds((current) => [...current, ...placeholders.map((placeholder) => placeholder.id)]);
 
             await Promise.all([
@@ -865,6 +876,7 @@ export default function VideoPage() {
                         },
                     ].slice(0, SEEDANCE_REFERENCE_LIMITS.images),
                 );
+                autoSwitchModeForReferences(1, 0);
             }
         } else if (payload.kind === "video") {
             if (!hasPlayableVideoUrl(payload.url)) {
@@ -886,6 +898,7 @@ export default function VideoPage() {
                     },
                 ].slice(0, SEEDANCE_REFERENCE_LIMITS.videos),
             );
+            autoSwitchModeForReferences(0, 1);
         }
         setAssetPickerOpen(false);
     };
@@ -974,6 +987,7 @@ export default function VideoPage() {
             if (current.some((reference) => reference.dataUrl === url)) return current;
             return [...current, { id: nanoid(), name: "最近上传的参考图", type: "image/*", dataUrl: url }];
         });
+        autoSwitchModeForReferences(1, 0);
     };
     const composerActions: CreationComposerAction[] = [
         {

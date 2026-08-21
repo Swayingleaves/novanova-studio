@@ -5,7 +5,7 @@ import { Cpu } from "lucide-react";
 
 import { Select, SelectContent, SelectItem, SelectTrigger } from "@/shared/components/ui/select";
 import { cn } from "@/shared/lib/utils";
-import { modelOptionLabel, modelOptionName, resolveModelRequestConfig, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/features/settings/stores/use-config-store";
+import { modelOptionLabel, modelOptionLabelWithRealName, modelOptionName, resolveModelRequestConfig, selectableModelsByCapability, type AiConfig, type ModelCapability } from "@/features/settings/stores/use-config-store";
 
 import { isMonochromeModelIcon, resolveModelIcon } from "./model-icon";
 
@@ -21,13 +21,15 @@ type ModelPickerProps = {
     placeholder?: string;
     onMissingConfig?: () => void;
     modelOptions?: string[];
+    showRealName?: boolean;
 };
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, modelOptions }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, modelOptions, showRealName = false }: ModelPickerProps) {
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const current = value || "";
     const options = useMemo(() => createModelOptions(config, capability, value, modelOptions), [capability, config, modelOptions, value]);
+    const modelLabel = (model: string) => (showRealName ? modelOptionLabelWithRealName(config, model) : modelOptionLabel(config, model));
 
     useEffect(() => {
         const closeWhenOtherPickerOpens = (event: Event) => {
@@ -59,10 +61,10 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                 )}
                 onMouseDown={(event) => event.stopPropagation()}
                 onPointerDown={(event) => event.stopPropagation()}
-                title={current ? modelOptionLabel(config, current) : placeholder}
+                title={current ? modelLabel(current) : placeholder}
             >
                 <ModelIcon config={config} model={current} />
-                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelOptionLabel(config, current) : placeholder}</span>
+                <span className="canvas-model-picker-text min-w-0 flex-1 truncate text-left">{current ? modelLabel(current) : placeholder}</span>
             </SelectTrigger>
             {open ? (
                 <SelectContent
@@ -76,7 +78,7 @@ export function ModelPicker({ config, value, onChange, capability, className, fu
                     onMouseDown={(event) => event.stopPropagation()}
                 >
                     {options.length ? (
-                        options.map((model) => <SelectItem key={model} value={model} textValue={modelOptionLabel(config, model)} label={<ModelLabel config={config} model={model} />} />)
+                        options.map((model) => <SelectItem key={model} value={model} textValue={modelLabel(model)} label={<ModelLabel config={config} model={model} showRealName={showRealName} />} />)
                     ) : (
                         <SelectItem value="__empty__" disabled textValue={emptyModelLabel(config, capability)}>
                             {emptyModelLabel(config, capability)}
@@ -119,11 +121,11 @@ function capabilityLabel(capability?: ModelCapability): string {
     }
 }
 
-function ModelLabel({ config, model }: { config: AiConfig; model: string }) {
+function ModelLabel({ config, model, showRealName }: { config: AiConfig; model: string; showRealName: boolean }) {
     return (
         <span className="flex min-w-0 items-center gap-2">
             <ModelIcon config={config} model={model} />
-            <span className="truncate">{modelOptionLabel(config, model)}</span>
+            <span className="truncate">{showRealName ? modelOptionLabelWithRealName(config, model) : modelOptionLabel(config, model)}</span>
         </span>
     );
 }

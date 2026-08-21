@@ -210,6 +210,7 @@ public class PersistenceService {
                             : normalizeCustomBodyParameters(request.customBodyParameters());
                     record.setCustomBodyParameters(JSON.toJSONString(customBodyParameters));
                     record.setVideoBillingConfiguration(videoBillingConfiguration == null ? null : JSON.toJSONString(videoBillingConfiguration));
+                    record.setDisplayName(normalizeDisplayName(request.displayName(), request.modelName()));
                     return repository.createPlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
                 });
     }
@@ -244,6 +245,7 @@ public class PersistenceService {
                             : normalizeCustomBodyParameters(request.customBodyParameters());
                     record.setCustomBodyParameters(JSON.toJSONString(customBodyParameters));
                     record.setVideoBillingConfiguration(videoBillingConfiguration == null ? null : JSON.toJSONString(videoBillingConfiguration));
+                    record.setDisplayName(normalizeDisplayName(request.displayName(), record.getModelName()));
                     PersistenceDtos.ModelConfig modelConfig = modelConfigDto(record);
                     return repository.updatePlatformAiModelConfig(record)
                             .then(isModelQueueType(modelConfig.modelType())
@@ -299,7 +301,23 @@ public class PersistenceService {
                 thinkingEnabled(record.getThinkingEnabled()), reasoningEffort(record.getReasoningEffort()),
                 normalizeCreditUnit(record.getModelType(), record.getCreditUnit()), normalizeRequestConcurrency(record.getRequestConcurrency()),
                 normalizeCustomBodyParameters(record.getCustomBodyParameters()),
-                parseVideoBillingConfiguration(record.getVideoBillingConfiguration()));
+                parseVideoBillingConfiguration(record.getVideoBillingConfiguration()),
+                record.getDisplayName());
+    }
+
+    /**
+     * 规范化模型展示名称，空白或与真实模型名相同时返回null，展示时回退真实模型名。
+     *
+     * @param displayName String 请求展示名称
+     * @param modelName String 真实模型名称
+     * @return String 规范化展示名称，可为null
+     */
+    private String normalizeDisplayName(String displayName, String modelName) {
+        if (displayName == null || displayName.isBlank()) {
+            return null;
+        }
+        String trimmed = displayName.trim();
+        return trimmed.equals(modelName) ? null : trimmed;
     }
 
     /**

@@ -78,6 +78,7 @@ export type AiConfig = {
     textModels: string[];
     modelCapabilities: ModelCapabilityConfig[];
     videoModelBillingConfigurations: VideoModelBillingConfiguration[];
+    modelDisplayNames: Record<string, string>;
     quality: string;
     imageResolution: string;
     size: string;
@@ -147,6 +148,7 @@ export const defaultConfig: AiConfig = {
     textModels: [],
     modelCapabilities: [],
     videoModelBillingConfigurations: [],
+    modelDisplayNames: {},
     quality: "medium",
     imageResolution: "2K",
     size: "1:1",
@@ -352,8 +354,23 @@ export function modelOptionLabel(config: AiConfig, model: string) {
     const value = model.trim();
     const parsed = parseModelOption(value);
     if (!parsed) return value;
+    const displayName = config.modelDisplayNames?.[value] || parsed.model;
     const channel = config.channels.find((item) => item.id === parsed.channelId);
-    return channel?.name ? `${parsed.model}（${channel.name}）` : parsed.model;
+    return channel?.name ? `${displayName}（${channel.name}）` : displayName;
+}
+
+/** 管理端「我的模型」页签专用：同时展示展示名与真实模型名，如「（dsf-v4）deepseek-v4-flash（渠道名）」。 */
+export function modelOptionLabelWithRealName(config: AiConfig, model: string) {
+    const value = model.trim();
+    const parsed = parseModelOption(value);
+    if (!parsed) return value;
+    const realName = parsed.model;
+    const displayName = config.modelDisplayNames?.[value];
+    const channel = config.channels.find((item) => item.id === parsed.channelId);
+    const channelName = channel?.name;
+    const displayPrefix = displayName ? `（${displayName}）` : "";
+    const channelSuffix = channelName ? `（${channelName}）` : "";
+    return `${displayPrefix}${realName}${channelSuffix}`;
 }
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {
@@ -432,6 +449,11 @@ export function configFromModelConfigs(channels: ModelChannel[], modelConfigs: S
                 capabilities: item.capabilities,
                 videoBillingConfiguration: item.videoBillingConfiguration || null,
             })),
+        modelDisplayNames: Object.fromEntries(
+            modelConfigs
+                .filter((item) => item.displayName && item.displayName !== item.modelName)
+                .map((item) => [`${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`, item.displayName!]),
+        ),
         modelCosts: modelConfigs.map((item) => ({
             model: `${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`,
             taskType: item.modelType,
@@ -483,6 +505,11 @@ function configFromServerModels(modelList: ServerAiModelList | null) {
                 capabilities: model.capabilities || [],
                 videoBillingConfiguration: model.videoBillingConfiguration || null,
             })),
+        modelDisplayNames: Object.fromEntries(
+            models
+                .filter((model) => model.label && model.label !== modelOptionName(model.value))
+                .map((model) => [model.value, model.label]),
+        ),
     });
 }
 
@@ -562,6 +589,7 @@ export function normalizeModelCreditUnit(value: unknown, modelType: ModelCapabil
 export function normalizeServerModelConfig(config: ServerModelConfig): ServerModelConfig {
     return {
         ...config,
+        displayName: config.displayName || null,
         customBodyParameters: isJsonObject(config.customBodyParameters) ? { ...config.customBodyParameters } : {},
         creditUnit: normalizeModelCreditUnit(config.creditUnit, config.modelType),
         requestConcurrency: normalizeModelRequestConcurrency(config.requestConcurrency),

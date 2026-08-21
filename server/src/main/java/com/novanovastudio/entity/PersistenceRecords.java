@@ -222,6 +222,9 @@ public final class PersistenceRecords {
         /** 视频模型模式与分辨率分档计费配置JSON */
         private String videoBillingConfiguration;
 
+        /** 模型展示名称，为空或与真实模型名相同时展示真实模型名，仅影响展示不影响调用 */
+        private String displayName;
+
         /** 创建时间 */
         private OffsetDateTime createdAt;
 

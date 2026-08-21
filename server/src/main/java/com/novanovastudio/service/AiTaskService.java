@@ -443,7 +443,7 @@ public class AiTaskService {
                                     .findFirst()
                                     .map(channel -> new AiTaskDtos.AiModelOption(
                                             config.channelId() + CHANNEL_MODEL_SEPARATOR + config.modelName(),
-                                            config.modelName(), config.modelType(), channel.name(), channel.apiFormat(), config.defaultModel(),
+                                            StringUtils.hasText(config.displayName()) ? config.displayName() : config.modelName(), config.modelType(), channel.name(), channel.apiFormat(), config.defaultModel(),
                                             config.creditCost(), config.creditUnit(), config.capabilities(), config.videoBillingConfiguration()))
                                     .orElse(null))
                             .filter(java.util.Objects::nonNull)
