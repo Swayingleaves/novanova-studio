@@ -44,7 +44,7 @@ import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-op
 import { useRecentReferenceImages } from "@/features/generation/hooks/use-recent-reference-images";
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
-import { availableVideoModelsForMode, quoteVideoGeneration } from "@/features/generation/lib/video-billing";
+import { availableVideoModelsForMode, quoteVideoGeneration, videoGenerationReferenceIssue } from "@/features/generation/lib/video-billing";
 import { deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
 import { findLatestPlayableVideo, hasPlayableVideoUrl } from "./video-display";
 
@@ -429,6 +429,7 @@ export default function VideoPage() {
         },
     });
 
+    // 预览报价只关心计费档位，不受参考素材是否上传影响（素材缺失仅阻断真实生成）。
     const videoQuote = quoteVideoGeneration({
         config: effectiveConfig,
         model,
@@ -437,7 +438,10 @@ export default function VideoPage() {
         seconds: config.videoSeconds,
         imageReferenceCount: references.length,
         videoReferenceCount: videoReferences.length,
+        requireReferences: false,
     });
+    // 素材要求单独校验，用于「可生成」判定与提示，不阻断价格预览。
+    const referenceIssue = videoGenerationReferenceIssue(config.videoGenerationMode, references.length, videoReferences.length);
     const creditCost = videoQuote.available ? videoQuote.credits : null;
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
     const latestRound = activeConversation?.rounds.at(-1);
@@ -445,7 +449,7 @@ export default function VideoPage() {
     const historySettingsSummary = !videoDraftSettingsModified && activeId && latestRound?.config ? buildVideoSettingsSummary(latestRound.config, effectiveConfig, latestRound.config.videoModel || latestRound.config.model || "") : "";
     const settingsSummary = draftSettingsSummary || historySettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingVideoConversation(activeConversation) : false;
-    const canGenerate = Boolean(prompt.trim()) && videoQuote.available && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
+    const canGenerate = Boolean(prompt.trim()) && videoQuote.available && !referenceIssue && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
 
     useEffect(() => {
@@ -1126,10 +1130,10 @@ export default function VideoPage() {
                     content: (
                         <div className="space-y-4">
                             <VideoSettingsPanel config={config} onConfigChange={handleVideoSettingsChange} theme={theme} showTitle={false} className="space-y-4 px-0 py-0" />
-                            {!videoQuote.available ? (
+                            {(!videoQuote.available || referenceIssue) ? (
                                 <div className="flex items-start gap-1.5 text-xs leading-relaxed" style={{ color: theme.node.muted }}>
                                     <HelpCircle className="mt-px size-3.5 shrink-0" />
-                                    <span>{videoQuote.reason}</span>
+                                    <span>{videoQuote.reason || referenceIssue}</span>
                                 </div>
                             ) : null}
                             <div>

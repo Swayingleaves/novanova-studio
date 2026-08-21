@@ -41,6 +41,8 @@ type VideoGenerationQuoteInput = {
     imageReferenceCount?: number;
     videoReferenceCount?: number;
     taskCount?: number;
+    /** 是否把参考素材缺失视为不可报价。预览报价传 false，纯计费预览不受素材影响；真实生成触发默认 true。 */
+    requireReferences?: boolean;
 };
 
 export function readVideoModelBillingConfiguration(config: AiConfig, model: string) {
@@ -72,7 +74,7 @@ export function quoteVideoGeneration(input: VideoGenerationQuoteInput): VideoGen
         return { available: false, reason: "当前模型视频计费方式配置无效" };
     }
     const materialIssue = videoGenerationReferenceIssue(input.mode, input.imageReferenceCount || 0, input.videoReferenceCount || 0);
-    if (materialIssue) return { available: false, reason: materialIssue };
+    if (input.requireReferences !== false && materialIssue) return { available: false, reason: materialIssue };
     const resolution = input.resolution.trim().toLowerCase() as VideoResolution;
     if (!VIDEO_RESOLUTION_OPTIONS.some((option) => option.value === resolution)) {
         return { available: false, reason: "所选视频分辨率不受支持" };
