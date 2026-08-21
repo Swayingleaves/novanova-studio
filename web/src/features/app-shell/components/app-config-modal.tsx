@@ -1,8 +1,8 @@
 "use client";
 
-import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Switch, Tabs } from "antd";
+import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Switch, Tabs } from "antd";
 import { nanoid } from "nanoid";
-import { ChevronDown, ChevronUp, CloudUpload, Pencil, Plus, RefreshCw, Trash2, Wifi } from "lucide-react";
+import { Braces, CheckCircle2, ChevronDown, ChevronUp, CloudUpload, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -154,6 +154,7 @@ export function AppConfigModal() {
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
     const initializedRef = useRef(false);
+    const editingModelIsMedia = Boolean(editingModelConfig && (editingModelConfig.modelType === "image" || editingModelConfig.modelType === "video"));
 
     const resetChannelDraft = useCallback((resetCollapsed = false) => {
         const channels = cloneChannels(useConfigStore.getState().config.channels);
@@ -289,10 +290,12 @@ export function AppConfigModal() {
         }
         setSavingTab("channels");
         try {
+            const channelIdMapping = new Map<string, string>();
             for (const channel of draftChannels) {
                 const baseline = baselineById.get(channel.id);
                 if (!baseline) {
-                    await createChannel(channel);
+                    const created = await createChannel(channel);
+                    channelIdMapping.set(channel.id, created.id);
                 } else if (!sameValue(channel, baseline)) {
                     await updateServerChannel(channel);
                 }
@@ -300,6 +303,14 @@ export function AppConfigModal() {
             for (const channel of deletedChannels) await deleteServerChannel(channel.id);
             await refreshChannels();
             resetChannelDraft();
+            if (channelIdMapping.size) {
+                setDraftModelConfigs((configs) =>
+                    configs.map((configItem) => {
+                        const mappedId = channelIdMapping.get(configItem.channelId);
+                        return mappedId ? { ...configItem, channelId: mappedId } : configItem;
+                    }),
+                );
+            }
             message.success("渠道配置已保存");
         } catch (error) {
             await refreshChannels().catch(() => undefined);
@@ -354,6 +365,16 @@ export function AppConfigModal() {
         setEditingModelConfig(null);
     };
 
+    const formatEditingCustomBodyParameters = () => {
+        try {
+            const parsed = JSON.parse(editingCustomBodyParameters.trim() || "{}");
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("模型自定义JSON必须是对象");
+            setEditingCustomBodyParameters(JSON.stringify(parsed, null, 2));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "模型自定义JSON格式不正确");
+        }
+    };
+
     const toggleModelCapabilityCollapsed = (modelType: ModelCapability) => {
         setCollapsedModelCapabilityTypes((types) => (types.includes(modelType) ? types.filter((type) => type !== modelType) : [...types, modelType]));
     };
@@ -380,19 +401,20 @@ export function AppConfigModal() {
             const createdConfigIds = new Map<string, string>();
             for (const configItem of draftModelConfigs) {
                 if (baselineById.has(configItem.id)) continue;
+                const normalizedConfig = normalizeModelConfigForSave(configItem);
                 const saved = await createModelConfig({
-                    channelId: configItem.channelId,
-                    modelName: configItem.modelName,
-                    modelType: configItem.modelType,
-                    capabilities: configItem.capabilities,
-                    sortOrder: configItem.sortOrder,
-                    creditCost: configItem.creditCost,
-                    creditUnit: configItem.creditUnit,
-                    thinkingEnabled: configItem.thinkingEnabled,
-                    reasoningEffort: configItem.reasoningEffort,
-                    requestConcurrency: configItem.requestConcurrency,
-                    customBodyParameters: configItem.customBodyParameters,
-                    videoBillingConfiguration: configItem.videoBillingConfiguration,
+                    channelId: normalizedConfig.channelId,
+                    modelName: normalizedConfig.modelName,
+                    modelType: normalizedConfig.modelType,
+                    capabilities: normalizedConfig.capabilities,
+                    sortOrder: normalizedConfig.sortOrder,
+                    creditCost: normalizedConfig.creditCost,
+                    creditUnit: normalizedConfig.creditUnit,
+                    thinkingEnabled: normalizedConfig.thinkingEnabled,
+                    reasoningEffort: normalizedConfig.reasoningEffort,
+                    requestConcurrency: normalizedConfig.requestConcurrency,
+                    customBodyParameters: normalizedConfig.customBodyParameters,
+                    videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
                 });
                 createdConfigIds.set(configItem.id, saved.id);
             }
@@ -406,18 +428,19 @@ export function AppConfigModal() {
             for (const configItem of nextDrafts) {
                 const baseline = baselineById.get(configItem.id);
                 if (baseline && !sameModelConfigForUpdate(configItem, baseline)) {
+                    const normalizedConfig = normalizeModelConfigForSave(configItem);
                     await updateModelConfig({
-                        id: configItem.id,
-                        modelType: configItem.modelType,
-                        capabilities: configItem.capabilities,
-                        sortOrder: configItem.sortOrder,
-                        creditCost: configItem.creditCost,
-                        creditUnit: configItem.creditUnit,
-                        thinkingEnabled: configItem.thinkingEnabled,
-                        reasoningEffort: configItem.reasoningEffort,
-                        requestConcurrency: configItem.requestConcurrency,
-                        customBodyParameters: configItem.customBodyParameters,
-                        videoBillingConfiguration: configItem.videoBillingConfiguration,
+                        id: normalizedConfig.id,
+                        modelType: normalizedConfig.modelType,
+                        capabilities: normalizedConfig.capabilities,
+                        sortOrder: normalizedConfig.sortOrder,
+                        creditCost: normalizedConfig.creditCost,
+                        creditUnit: normalizedConfig.creditUnit,
+                        thinkingEnabled: normalizedConfig.thinkingEnabled,
+                        reasoningEffort: normalizedConfig.reasoningEffort,
+                        requestConcurrency: normalizedConfig.requestConcurrency,
+                        customBodyParameters: normalizedConfig.customBodyParameters,
+                        videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
                     });
                 }
             }
@@ -968,49 +991,67 @@ export function AppConfigModal() {
                 />
             )}
             <Modal
-                title={editingModelConfig ? `${modelOptionLabel(draftConfig, modelConfigValue(editingModelConfig))} 配置` : "模型配置"}
+                title={
+                    editingModelConfig ? (
+                        <div className="flex items-center gap-3">
+                            {editingModelConfig.modelType === "video" ? (
+                                <span className="flex size-10 items-center justify-center rounded-lg bg-violet-500/15 text-violet-500">
+                                    <Video className="size-5" />
+                                </span>
+                            ) : null}
+                            <div>
+                                <div className="text-lg font-semibold">{modelOptionLabel(draftConfig, modelConfigValue(editingModelConfig))} 配置</div>
+                                {editingModelConfig.modelType === "video" ? <div className="mt-0.5 text-xs font-normal text-[var(--studio-muted)]">配置模型的计费方式、分辨率价格及功能支持</div> : null}
+                            </div>
+                        </div>
+                    ) : (
+                        "模型配置"
+                    )
+                }
                 open={Boolean(editingModelConfig)}
                 centered
-                width={760}
+                width={editingModelConfig?.modelType === "video" ? 980 : 760}
                 destroyOnHidden
                 okText="确认"
                 cancelText="取消"
                 onCancel={() => setEditingModelConfig(null)}
                 onOk={saveModelConfigEditor}
             >
-                {editingModelConfig ? (
-                    <Form layout="vertical" requiredMark={false}>
-                        {editingModelConfig.modelType !== "video" ? (
-                            <Form.Item label="每次积分">
-                                <InputNumber min={0} precision={0} value={editingModelConfig.creditCost} className="w-full" onChange={(value) => updateEditingModelConfig({ creditCost: Math.max(0, Number(value) || 0) })} />
-                            </Form.Item>
-                        ) : null}
-                        {editingModelConfig.modelType === "video" ? (
-                            <>
-                                <Form.Item label="计费方式">
-                                    <Select
-                                        value={editingModelConfig.videoBillingConfiguration?.billingUnit || "generation"}
-                                        options={[
-                                            { value: "generation", label: "按次" },
-                                            { value: "second", label: "按秒" },
-                                        ]}
-                                        onChange={(billingUnit: ServerModelConfig["creditUnit"]) =>
-                                            updateEditingModelConfig({
-                                                creditUnit: billingUnit,
-                                                videoBillingConfiguration: {
-                                                    ...(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration()),
-                                                    billingUnit,
-                                                },
-                                            })
-                                        }
-                                    />
-                                </Form.Item>
-                                <Form.Item label="最短生成时长（秒）">
+                {editingModelConfig?.modelType === "video" && editingModelIsMedia ? (
+                    <div className="space-y-5">
+                        <section className="grid gap-4 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4 md:grid-cols-2">
+                            <div>
+                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                                    计费方式 <Info className="size-4 text-[var(--studio-muted)]" />
+                                </div>
+                                <Select
+                                    value={editingModelConfig.videoBillingConfiguration?.billingUnit || "generation"}
+                                    options={[
+                                        { value: "generation", label: "按次" },
+                                        { value: "second", label: "按秒" },
+                                    ]}
+                                    className="w-full"
+                                    onChange={(billingUnit: ServerModelConfig["creditUnit"]) =>
+                                        updateEditingModelConfig({
+                                            creditUnit: billingUnit,
+                                            videoBillingConfiguration: {
+                                                ...(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration()),
+                                                billingUnit,
+                                            },
+                                        })
+                                    }
+                                />
+                            </div>
+                            <div>
+                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                                    {editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? "每延生成时长（秒）" : "最短生成时长（秒）"} <Info className="size-4 text-[var(--studio-muted)]" />
+                                </div>
+                                <Space.Compact className="w-full">
                                     <InputNumber
                                         min={1}
                                         precision={0}
                                         value={editingModelConfig.videoBillingConfiguration?.minimumDurationSeconds || 3}
-                                        className="w-full"
+                                        style={{ width: "100%" }}
                                         onChange={(value) =>
                                             updateEditingModelConfig({
                                                 videoBillingConfiguration: {
@@ -1020,43 +1061,140 @@ export function AppConfigModal() {
                                             })
                                         }
                                     />
-                                </Form.Item>
-                                <Form.Item label="模式与分辨率价格">
-                                    <div className="space-y-4">
-                                        {VIDEO_GENERATION_MODE_OPTIONS.map((mode) => {
-                                            const prices = editingModelConfig.videoBillingConfiguration?.modePrices?.[mode.value] || {};
-                                            const modeEnabled = editingModelConfig.capabilities.includes(mode.value);
-                                            return (
-                                                <div key={mode.value} className="border-t pt-3 first:border-t-0 first:pt-0">
-                                                    <div className="mb-2 text-sm font-medium">{mode.label}</div>
-                                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                                                        {VIDEO_RESOLUTION_OPTIONS.map((resolution) => (
-                                                            <label key={resolution.value} className="space-y-1 text-xs text-[var(--studio-muted)]">
-                                                                <span>{resolution.label}</span>
+                                    <Button disabled className="pointer-events-none">秒</Button>
+                                </Space.Compact>
+                            </div>
+                        </section>
+
+                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                    <div className="flex items-center gap-1.5 text-base font-semibold">
+                                        功能类型与分辨率价格 <Info className="size-4 text-[var(--studio-muted)]" />
+                                    </div>
+                                    <p className="mt-1 text-xs text-[var(--studio-muted)]">设置模型支持的功能类型及各分辨率的积分消耗价格</p>
+                                </div>
+                                <span className="rounded-md border border-[var(--studio-line)] px-2.5 py-1 text-xs text-[var(--studio-muted)]">
+                                    价格说明：{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? "积分/秒" : "积分/次"}
+                                </span>
+                            </div>
+                            <div className="space-y-4">
+                                {VIDEO_GENERATION_MODE_OPTIONS.map((mode, index) => {
+                                    const prices = editingModelConfig.videoBillingConfiguration?.modePrices?.[mode.value] || {};
+                                    const modeEnabled = editingModelConfig.capabilities.includes(mode.value);
+                                    const modeIcon = index === 0 ? <TextCursorInput className="size-5" /> : index === 1 ? <Image className="size-5" /> : <Sparkles className="size-5" />;
+                                    const modeColor = index === 0 ? "border-violet-500/50 bg-violet-500/5" : index === 1 ? "border-blue-500/50 bg-blue-500/5" : "border-emerald-500/50 bg-emerald-500/5";
+                                    const iconColor = index === 0 ? "bg-violet-500/15 text-violet-500" : index === 1 ? "bg-blue-500/15 text-blue-500" : "bg-emerald-500/15 text-emerald-500";
+                                    const description = index === 0 ? "根据文本描述生成视频" : index === 1 ? "根据图片生成视频" : "支持文本、图片及多模态参考生成视频";
+                                    return (
+                                        <div key={mode.value} className={`rounded-lg border p-4 transition-colors ${modeEnabled ? modeColor : "border-[var(--studio-line)] opacity-70"}`}>
+                                            <div className="flex items-start justify-between gap-4 border-b border-[var(--studio-line)] pb-3">
+                                                <div className="flex min-w-0 items-center gap-3">
+                                                    <span className={`flex size-10 shrink-0 items-center justify-center rounded-md ${iconColor}`}>{modeIcon}</span>
+                                                    <div>
+                                                        <div className="flex flex-wrap items-center gap-2">
+                                                            <span className="font-semibold">{mode.label}</span>
+                                                            {modeEnabled ? (
+                                                                <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">已启用</span>
+                                                            ) : (
+                                                                <span className="rounded bg-[var(--studio-panel)] px-2 py-0.5 text-xs text-[var(--studio-muted)]">未启用</span>
+                                                            )}
+                                                        </div>
+                                                        <p className="mt-1 text-xs text-[var(--studio-muted)]">{description}</p>
+                                                    </div>
+                                                </div>
+                                                <Switch
+                                                    checked={modeEnabled}
+                                                    onChange={(checked) =>
+                                                        updateEditingModelConfig({
+                                                            capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, mode.value]) : editingModelConfig.capabilities.filter((value) => value !== mode.value),
+                                                            ...(!checked ? { videoBillingConfiguration: clearVideoModePrices(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value) } : {}),
+                                                        })
+                                                    }
+                                                />
+                                            </div>
+                                            <div className="pt-3">
+                                                <div className="mb-2 text-xs font-medium text-[var(--studio-muted)]">分辨率价格（{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? "积分/秒" : "积分/次"}）</div>
+                                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                                                    {VIDEO_RESOLUTION_OPTIONS.filter((resolution) => resolution.value !== "auto").map((resolution) => (
+                                                        <label key={resolution.value} className="flex min-w-0 items-center gap-2 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2.5 py-2">
+                                                            <span
+                                                                className={`flex size-7 shrink-0 items-center justify-center rounded text-[10px] font-semibold ${resolution.value === "480p" ? "bg-violet-500/15 text-violet-500" : resolution.value === "720p" ? "bg-blue-500/15 text-blue-500" : resolution.value === "1080p" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : resolution.value === "2k" ? "bg-rose-500/15 text-rose-500" : resolution.value === "4k" ? "bg-purple-500/15 text-purple-500" : "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400"}`}
+                                                            >
+                                                                <Monitor className="size-3.5" />
+                                                            </span>
+                                                            <span className="min-w-0 flex-1">
+                                                                <span className="block text-xs font-medium">{resolution.label}</span>
                                                                 <InputNumber
                                                                     min={0}
                                                                     precision={0}
                                                                     placeholder="未配置"
                                                                     value={prices[resolution.value]}
-                                                                    className="w-full"
+                                                                    className="mt-0.5 w-full"
                                                                     disabled={!modeEnabled}
+                                                                    controls={false}
                                                                     onChange={(value) =>
                                                                         updateEditingModelConfig({
                                                                             videoBillingConfiguration: updateVideoResolutionPrice(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value, resolution.value, value),
                                                                         })
                                                                     }
                                                                 />
-                                                            </label>
-                                                        ))}
-                                                    </div>
+                                                            </span>
+                                                        </label>
+                                                    ))}
                                                 </div>
-                                            );
-                                        })}
-                                    </div>
-                                </Form.Item>
-                            </>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </section>
+
+                        <div className="grid gap-5 md:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
+                            <section>
+                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
+                                    同时并发数 <Info className="size-4 text-[var(--studio-muted)]" />
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <InputNumber min={1} precision={0} value={editingModelConfig.requestConcurrency} className="w-52" onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })} />
+                                    <span className="text-sm text-[var(--studio-muted)]">个任务</span>
+                                </div>
+                            </section>
+                            <section>
+                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">模型能力</div>
+                                <div className="flex flex-wrap gap-2">
+                                    {VIDEO_GENERATION_MODE_OPTIONS.filter((option) => editingModelConfig.capabilities.includes(option.value)).map((option) => (
+                                        <span key={option.value} className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
+                                            <CheckCircle2 className="size-3.5" />
+                                            {option.label}
+                                        </span>
+                                    ))}
+                                    {!editingModelConfig.capabilities.length ? <span className="text-xs text-[var(--studio-muted)]">尚未启用视频生成能力</span> : null}
+                                </div>
+                            </section>
+                        </div>
+
+                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                            <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex items-center gap-1.5 text-sm font-semibold">
+                                    自定义 JSON（可选） <Info className="size-4 text-[var(--studio-muted)]" />
+                                </div>
+                                <Button size="small" icon={<Braces className="size-3.5" />} onClick={formatEditingCustomBodyParameters}>
+                                    格式化
+                                </Button>
+                            </div>
+                            <Input.TextArea value={editingCustomBodyParameters} autoSize={{ minRows: 5, maxRows: 12 }} spellCheck={false} className="font-mono text-xs" onChange={(event) => setEditingCustomBodyParameters(event.target.value)} />
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">仅在 JSON 格式的 POST 请求中合并；同名字段覆盖系统参数。</p>
+                        </section>
+                    </div>
+                ) : editingModelConfig ? (
+                    <Form layout="vertical" requiredMark={false}>
+                        {editingModelConfig.modelType !== "video" ? (
+                            <Form.Item label="每次积分">
+                                <InputNumber min={0} precision={0} value={editingModelConfig.creditCost} className="w-full" onChange={(value) => updateEditingModelConfig({ creditCost: Math.max(0, Number(value) || 0) })} />
+                            </Form.Item>
                         ) : null}
-                        {editingModelConfig.modelType === "image" || editingModelConfig.modelType === "video" ? (
+                        {editingModelConfig.modelType === "image" ? (
                             <Form.Item label="同时并发数">
                                 <InputNumber min={1} precision={0} value={editingModelConfig.requestConcurrency} className="w-full" onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })} />
                             </Form.Item>
@@ -1070,11 +1208,6 @@ export function AppConfigModal() {
                                         onChange={(event) =>
                                             updateEditingModelConfig({
                                                 capabilities: event.target.checked ? uniqueModels([...editingModelConfig.capabilities, option.value]) : editingModelConfig.capabilities.filter((value) => value !== option.value),
-                                                ...(editingModelConfig.modelType === "video" && !event.target.checked
-                                                    ? {
-                                                          videoBillingConfiguration: clearVideoModePrices(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), option.value as VideoGenerationMode),
-                                                      }
-                                                    : {}),
                                             })
                                         }
                                     >
@@ -1122,6 +1255,24 @@ function cloneModelConfig(config: ServerModelConfig): ServerModelConfig {
         capabilities: [...config.capabilities],
         customBodyParameters: { ...(config.customBodyParameters || {}) },
         videoBillingConfiguration: config.modelType === "video" ? cloneVideoBillingConfiguration(config.videoBillingConfiguration || createVideoBillingConfiguration()) : null,
+    };
+}
+
+function normalizeModelConfigForSave(config: ServerModelConfig): ServerModelConfig {
+    const supportedCapabilities = new Set(MODEL_CAPABILITY_OPTIONS[config.modelType].map((option) => option.value));
+    const capabilities = config.capabilities.filter((capability) => supportedCapabilities.has(capability));
+    const videoBillingConfiguration = config.modelType === "video" && config.videoBillingConfiguration
+        ? {
+              ...config.videoBillingConfiguration,
+              modePrices: Object.fromEntries(
+                  Object.entries(config.videoBillingConfiguration.modePrices || {}).filter(([mode]) => supportedCapabilities.has(mode) && capabilities.includes(mode)),
+              ) as VideoBillingConfiguration["modePrices"],
+          }
+        : config.videoBillingConfiguration;
+    return {
+        ...config,
+        capabilities,
+        videoBillingConfiguration,
     };
 }
 

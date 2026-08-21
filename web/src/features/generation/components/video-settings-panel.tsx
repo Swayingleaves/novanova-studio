@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Segmented, Slider } from "antd";
 
 import { ImageSettingsTheme } from "@/features/generation/components/image-settings-panel";
@@ -91,6 +91,22 @@ export function VideoSettingsPanel({
     const count = normalizeVideoGenerationCount(config.canvasVideoCount);
 
     useEffect(() => setDurationDraft(seconds), [seconds]);
+
+    // 切换视频模型或生成模式后，当前分辨率可能不在新模型/模式的计费档位内，
+    // 此时自动回退到首个可用分辨率，避免残留旧分辨率触发“当前模式未配置所选分辨率价格”。
+    const previousModelMode = useRef<{ model: string; mode: VideoGenerationMode } | null>(null);
+    useEffect(() => {
+        const currentModel = config.videoModel || config.model;
+        const currentMode = config.videoGenerationMode;
+        const previous = previousModelMode.current;
+        previousModelMode.current = { model: currentModel, mode: currentMode };
+        if (!previous) return;
+        if (previous.model === currentModel && previous.mode === currentMode) return;
+        if (pricedResolutions.length === 0) return;
+        if (!pricedResolutions.includes(resolution as VideoResolution)) {
+            onConfigChange("vquality", pricedResolutions[0]);
+        }
+    }, [config.videoModel, config.videoGenerationMode, config.model, pricedResolutions, resolution, onConfigChange]);
 
     const commitDuration = (value: number) => {
         const normalized = String(normalizeDurationDraft(String(value), durationRange));

@@ -34,11 +34,6 @@ import reactor.core.publisher.Mono;
 public class AgnesProviderAdapter implements AiProviderAdapter {
 
     /**
-     * Agnes视频模型
-     */
-    private static final String AGNES_VIDEO_MODEL = "Agnes-Video-V2.0";
-
-    /**
      * Agnes 视频关键帧允许的最大参考图片数量
      */
     private static final int AGNES_VIDEO_KEYFRAME_MAX_REFERENCE_IMAGE_COUNT = 3;
@@ -250,9 +245,6 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
      * @return Mono<JSONObject> 视频结果
      */
     private Mono<JSONObject> executeVideoTask(AiTaskExecutionContext context) {
-        if (!AGNES_VIDEO_MODEL.equalsIgnoreCase(context.model())) {
-            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "Agnes 视频调用格式当前仅支持 " + AGNES_VIDEO_MODEL));
-        }
         if (!AiTaskParameterReader.safeReferences(context.request().videoReferences()).isEmpty()) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "Agnes 调用格式暂不支持参考视频，请移除参考素材"));
         }
@@ -264,17 +256,24 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                 .concatMap(reference -> mediaSupport.resolveReferenceUrl(context.task().getUserId(), reference))
                 .collectList()
                 .flatMap(referenceUrls -> {
-                    AgnesVideoDimensions dimensions = agnesVideoDimensions(AiTaskParameterReader.parameterText(context.request().parameters(), "size", "16:9"), AiTaskParameterReader.parameterText(context.request().parameters(), "resolution", "720p"));
+                    String sizeParam = AiTaskParameterReader.parameterText(context.request().parameters(), "size", "16:9");
+                    AgnesVideoDimensions dimensions = agnesVideoDimensions(sizeParam, AiTaskParameterReader.parameterText(context.request().parameters(), "resolution", "720p"));
                     AgnesVideoTiming timing = agnesVideoTiming(AiTaskParameterReader.parameterText(context.request().parameters(), "seconds", "5"), dimensions.resolution());
+                    boolean hasImageReferences = !referenceUrls.isEmpty();
                     Map<String, Object> payload = new java.util.LinkedHashMap<>();
                     payload.put("model", context.model());
                     payload.put("prompt", context.request().prompt());
-                    payload.put("width", dimensions.width());
-                    payload.put("height", dimensions.height());
-                    payload.put("num_frames", timing.numFrames());
-                    payload.put("frame_rate", timing.frameRate());
+                    // Agnes Video 2.5 必填 mode：纯文生用 text，含参考图用 reference
+                    payload.put("mode", hasImageReferences ? "reference" : "text");
+                    // 时长以字符串传入，文档限定 "4"-"12"
+                    payload.put("seconds", String.valueOf(timing.seconds()));
+                    // size 由前端通过 resolution 参数控制（默认 720p），画幅用 aspect_ratio 表达，禁止直接传 width/height
+                    payload.put("size", dimensions.resolution().toUpperCase());
+                    payload.put("aspect_ratio", normalizeAgnesVideoRatio(sizeParam));
                     applyAgnesVideoReferenceImages(payload, referenceUrls);
-                    log.info("创建Agnes视频任务: taskId={}, width={}, height={}, frames={}, frameRate={}", context.task().getId(), dimensions.width(), dimensions.height(), timing.numFrames(), timing.frameRate());
+                    log.info("创建Agnes视频任务: taskId={}, mode={}, seconds={}, aspectRatio={}, resolution={}",
+                            context.task().getId(), hasImageReferences ? "reference" : "text",
+                            timing.seconds(), normalizeAgnesVideoRatio(sizeParam), dimensions.resolution());
                     return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/videos", com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()));
                 })
                 .flatMap(created -> {
@@ -318,16 +317,11 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
         if (referenceUrls.size() > AGNES_VIDEO_KEYFRAME_MAX_REFERENCE_IMAGE_COUNT) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, AGNES_VIDEO_REFERENCE_IMAGE_LIMIT_MESSAGE);
         }
-        if (referenceUrls.size() == 1) {
-            payload.put("image", referenceUrls.get(0));
+        if (referenceUrls.isEmpty()) {
             return;
         }
-        if (referenceUrls.size() > 1) {
-            Map<String, Object> extraBody = new java.util.LinkedHashMap<>();
-            extraBody.put("mode", "keyframes");
-            extraBody.put("image", referenceUrls);
-            payload.put("extra_body", extraBody);
-        }
+        // 文档：reference 模式使用 images 数组作为参考图片
+        payload.put("images", referenceUrls);
     }
 
     /**

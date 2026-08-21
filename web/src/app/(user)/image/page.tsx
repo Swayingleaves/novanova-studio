@@ -782,9 +782,17 @@ export default function ImagePage() {
             label: uploading ? `${imageReferenceLabel(index)} 上传中` : imageReferenceLabel(index),
             preview: (
                 <div className="relative size-11">
-                    <img src={reference.dataUrl} alt={reference.name} className="size-11 rounded-xl object-cover" />
+                    <Image
+                        src={reference.dataUrl}
+                        alt={reference.name}
+                        width={44}
+                        height={44}
+                        style={{ objectFit: "cover" }}
+                        className="rounded-xl"
+                        preview={uploading ? false : { mask: "预览" }}
+                    />
                     {uploading ? (
-                        <span className="absolute inset-0 grid place-items-center rounded-xl bg-black/35 text-white">
+                        <span className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/35 text-white">
                             <LoaderCircle className="size-4 animate-spin" />
                         </span>
                     ) : null}

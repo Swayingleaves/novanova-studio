@@ -27,21 +27,17 @@ class AgnesVideoReferenceTest {
     void shouldBuildAgnesVideoReferencePayloadByImageCount() throws ReflectiveOperationException {
         Map<String, Object> noImagePayload = applyReferenceImages(List.of());
         Map<String, Object> singleImagePayload = applyReferenceImages(List.of("https://example.com/one.png"));
-        Map<String, Object> twoKeyframePayload = applyReferenceImages(List.of("https://example.com/first.png", "https://example.com/second.png"));
-        Map<String, Object> keyframePayload = applyReferenceImages(List.of("https://example.com/first.png", "https://example.com/second.png", "https://example.com/third.png"));
+        Map<String, Object> twoImagePayload = applyReferenceImages(List.of("https://example.com/first.png", "https://example.com/second.png"));
+        Map<String, Object> threeImagePayload = applyReferenceImages(List.of("https://example.com/first.png", "https://example.com/second.png", "https://example.com/third.png"));
 
-        Assertions.assertFalse(noImagePayload.containsKey("image"));
+        Assertions.assertFalse(noImagePayload.containsKey("images"));
         Assertions.assertFalse(noImagePayload.containsKey("extra_body"));
-        Assertions.assertEquals("https://example.com/one.png", singleImagePayload.get("image"));
+        Assertions.assertEquals(List.of("https://example.com/one.png"), singleImagePayload.get("images"));
         Assertions.assertFalse(singleImagePayload.containsKey("extra_body"));
-        @SuppressWarnings("unchecked")
-        Map<String, Object> twoImageExtraBody = (Map<String, Object>) twoKeyframePayload.get("extra_body");
-        Assertions.assertEquals("keyframes", twoImageExtraBody.get("mode"));
-        Assertions.assertEquals(List.of("https://example.com/first.png", "https://example.com/second.png"), twoImageExtraBody.get("image"));
-        @SuppressWarnings("unchecked")
-        Map<String, Object> extraBody = (Map<String, Object>) keyframePayload.get("extra_body");
-        Assertions.assertEquals("keyframes", extraBody.get("mode"));
-        Assertions.assertEquals(List.of("https://example.com/first.png", "https://example.com/second.png", "https://example.com/third.png"), extraBody.get("image"));
+        Assertions.assertEquals(List.of("https://example.com/first.png", "https://example.com/second.png"), twoImagePayload.get("images"));
+        Assertions.assertFalse(twoImagePayload.containsKey("extra_body"));
+        Assertions.assertEquals(List.of("https://example.com/first.png", "https://example.com/second.png", "https://example.com/third.png"), threeImagePayload.get("images"));
+        Assertions.assertFalse(threeImagePayload.containsKey("extra_body"));
     }
 
     /**

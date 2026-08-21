@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, CloudUpload, Download, FolderPlus, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, Upload, VideoIcon } from "lucide-react";
+import { BookOpen, CloudUpload, Download, FolderPlus, Cog, HelpCircle, LoaderCircle, Palette, RefreshCw, Sparkles, Upload, VideoIcon } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -910,6 +910,7 @@ export default function VideoPage() {
     };
 
     const conversationItems = buildVideoConversationItems(conversations, activeId, selectedIds);
+    const [videoPreviewUrl, setVideoPreviewUrl] = useState<string | null>(null);
     const referenceChips: CreationReferenceChip[] = [
         ...references.map((reference, index) => {
             const uploading = uploadingReferenceIds.includes(reference.id);
@@ -918,7 +919,7 @@ export default function VideoPage() {
                 label: uploading ? `${seedanceReferenceLabel("image", index)} 上传中` : seedanceReferenceLabel("image", index),
                 preview: (
                     <div className="relative size-11">
-                        <Image src={reference.dataUrl} alt={reference.name} width={44} height={44} style={{ objectFit: "cover" }} className="rounded-xl" preview={{ mask: "预览" }} />
+                        <Image src={reference.dataUrl} alt={reference.name} width={44} height={44} style={{ objectFit: "cover" }} className="rounded-xl" preview={uploading ? false : { mask: "预览" }} />
                         {uploading ? (
                             <span className="absolute inset-0 grid place-items-center rounded-xl bg-black/35 text-white">
                                 <LoaderCircle className="size-4 animate-spin" />
@@ -937,8 +938,18 @@ export default function VideoPage() {
                     id: reference.id,
                     label: uploading ? `${seedanceReferenceLabel("video", index)} 上传中` : seedanceReferenceLabel("video", index),
                     preview: (
-                        <div className="relative size-11">
+                        <div
+                            className={`group relative size-11 ${uploading ? "" : "cursor-pointer"}`}
+                            onClick={() => {
+                                if (!uploading) setVideoPreviewUrl(reference.url);
+                            }}
+                        >
                             <video src={reference.url} className="size-11 rounded-xl object-cover" muted />
+                            {uploading ? null : (
+                                <span className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/0 text-white opacity-0 transition-opacity group-hover:bg-black/35 group-hover:opacity-100">
+                                    <VideoIcon className="size-5" />
+                                </span>
+                            )}
                             {uploading ? (
                                 <span className="absolute inset-0 grid place-items-center rounded-xl bg-black/35 text-white">
                                     <LoaderCircle className="size-4 animate-spin" />
@@ -1115,7 +1126,12 @@ export default function VideoPage() {
                     content: (
                         <div className="space-y-4">
                             <VideoSettingsPanel config={config} onConfigChange={handleVideoSettingsChange} theme={theme} showTitle={false} className="space-y-4 px-0 py-0" />
-                            {!videoQuote.available ? <div className="text-xs text-red-500">{videoQuote.reason}</div> : null}
+                            {!videoQuote.available ? (
+                                <div className="flex items-start gap-1.5 text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                                    <HelpCircle className="mt-px size-3.5 shrink-0" />
+                                    <span>{videoQuote.reason}</span>
+                                </div>
+                            ) : null}
                             <div>
                                 <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">模型</label>
                                 <ModelPicker
@@ -1142,6 +1158,19 @@ export default function VideoPage() {
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title="删除对话" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelected} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除选中的 {selectedIds.length} 条对话吗？
+            </Modal>
+            <Modal
+                open={Boolean(videoPreviewUrl)}
+                title="参考视频预览"
+                footer={null}
+                onCancel={() => setVideoPreviewUrl(null)}
+                width={720}
+                centered
+                destroyOnHidden
+            >
+                {videoPreviewUrl ? (
+                    <video src={videoPreviewUrl} controls autoPlay className="max-h-[70vh] w-full rounded-xl bg-black" />
+                ) : null}
             </Modal>
         </>
     );
