@@ -447,7 +447,7 @@ public class PersistenceRepository {
      * @return Mono<Void> 创建结果
      */
     public Mono<Void> createPlatformAiModelConfig(PersistenceRecords.UserAiModelConfigRecord record) {
-        return databaseClient.sql("""
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
                 INSERT INTO platform_ai_model_configs(model_config_id, channel_id, model_name, model_type, capabilities, is_default, sort_order,
                                                       credit_cost, credit_unit, thinking_enabled, reasoning_effort, request_concurrency, custom_body_parameters,
                                                       video_billing_configuration, display_name, model_icon)
@@ -462,10 +462,12 @@ public class PersistenceRepository {
                 .bind("reasoningEffort", record.getReasoningEffort() == null ? "high" : record.getReasoningEffort())
                 .bind("requestConcurrency", record.getRequestConcurrency() == null ? 1 : record.getRequestConcurrency())
                 .bind("customBodyParameters", record.getCustomBodyParameters() == null ? "{}" : record.getCustomBodyParameters())
-                .bind("videoBillingConfiguration", record.getVideoBillingConfiguration() == null ? "null" : record.getVideoBillingConfiguration())
-                .bind("displayName", record.getDisplayName())
-                .bind("modelIcon", record.getModelIcon())
-                .fetch().rowsUpdated().then();
+                .bind("videoBillingConfiguration", record.getVideoBillingConfiguration() == null ? "null" : record.getVideoBillingConfiguration());
+        spec = R2dbcBindings.bindNullable(spec, "displayName", record.getDisplayName(), String.class);
+        spec = R2dbcBindings.bindNullable(spec, "modelIcon", record.getModelIcon(), String.class);
+        return spec.fetch()
+                .rowsUpdated()
+                .then();
     }
 
     /**
@@ -475,7 +477,7 @@ public class PersistenceRepository {
      * @return Mono<Long> 更新行数
      */
     public Mono<Long> updatePlatformAiModelConfig(PersistenceRecords.UserAiModelConfigRecord record) {
-        return databaseClient.sql("""
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
                 UPDATE platform_ai_model_configs
                 SET model_type = :modelType, capabilities = CAST(:capabilities AS jsonb), sort_order = :sortOrder, credit_cost = :creditCost,
                     credit_unit = :creditUnit, request_concurrency = :requestConcurrency, custom_body_parameters = CAST(:customBodyParameters AS jsonb),
@@ -488,12 +490,12 @@ public class PersistenceRepository {
                 .bind("requestConcurrency", record.getRequestConcurrency() == null ? 1 : record.getRequestConcurrency())
                 .bind("customBodyParameters", record.getCustomBodyParameters() == null ? "{}" : record.getCustomBodyParameters())
                 .bind("videoBillingConfiguration", record.getVideoBillingConfiguration() == null ? "null" : record.getVideoBillingConfiguration())
-                .bind("displayName", record.getDisplayName())
-                .bind("modelIcon", record.getModelIcon())
                 .bind("thinkingEnabled", record.getThinkingEnabled() == null || Boolean.TRUE.equals(record.getThinkingEnabled()))
                 .bind("reasoningEffort", record.getReasoningEffort() == null ? "high" : record.getReasoningEffort())
-                .bind("modelConfigId", record.getModelConfigId())
-                .fetch().rowsUpdated();
+                .bind("modelConfigId", record.getModelConfigId());
+        spec = R2dbcBindings.bindNullable(spec, "displayName", record.getDisplayName(), String.class);
+        spec = R2dbcBindings.bindNullable(spec, "modelIcon", record.getModelIcon(), String.class);
+        return spec.fetch().rowsUpdated();
     }
 
     /**

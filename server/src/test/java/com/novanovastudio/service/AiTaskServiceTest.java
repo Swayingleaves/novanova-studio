@@ -125,7 +125,7 @@ class AiTaskServiceTest {
                         new com.alibaba.fastjson2.JSONObject(), new VideoBillingConfiguration("generation", 3,
                         Map.of(VideoGenerationMode.TEXT_TO_VIDEO, Map.of("720p", 6),
                                 VideoGenerationMode.IMAGE_TO_VIDEO, Map.of("720p", 8),
-                                VideoGenerationMode.REFERENCE_TO_VIDEO, Map.of("720p", 10)))),
+                                VideoGenerationMode.REFERENCE_TO_VIDEO, Map.of("720p", 10))), null, null),
                 new PersistenceDtos.ModelConfig("model-config-3", "channel-1", "model-1", AiTaskTypes.TEXT, List.of(), true, 0, 0, true, "high")
         )));
         providerAdapter = mock(AiProviderAdapter.class);
