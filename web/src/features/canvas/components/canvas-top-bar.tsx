@@ -5,6 +5,7 @@ import { ArrowLeft, Bot, Keyboard, PanelLeftOpen } from "lucide-react";
 import { Button, Modal, Tooltip } from "antd";
 
 import { UserStatusActions } from "@/features/app-shell/components/user-status-actions";
+import { UserCreditMenu } from "@/features/app-shell/components/user-credit-menu";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
 type CanvasTopBarProps = {
@@ -106,6 +107,7 @@ export function CanvasTopBar(props: CanvasTopBarProps) {
                         </Tooltip>
                     ) : null}
                     <UserStatusActions variant="canvas" onOpenShortcuts={() => setShortcutsOpen(true)} />
+                    <UserCreditMenu />
                     <Button
                         type="text"
                         className="!px-2"
