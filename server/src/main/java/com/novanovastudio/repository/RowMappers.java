@@ -1,6 +1,7 @@
 package com.novanovastudio.repository;
 
 import com.novanovastudio.entity.AiGenerationTask;
+import com.novanovastudio.entity.ApiAccessLog;
 import com.novanovastudio.entity.EmailVerificationCode;
 import com.novanovastudio.entity.PersistenceRecords;
 import com.novanovastudio.entity.User;
@@ -316,5 +317,29 @@ public final class RowMappers {
             return json.asString();
         }
         return value.toString();
+    }
+
+    /**
+     * 映射接口访问日志行。
+     *
+     * @param row Row 数据库行
+     * @return ApiAccessLog 接口访问日志实体
+     */
+    public static ApiAccessLog apiAccessLog(Row row) {
+        // 将api_logs表字段转换为接口访问日志实体。
+        ApiAccessLog log = new ApiAccessLog();
+        log.setId(row.get("id", Long.class));
+        log.setHttpMethod(row.get("http_method", String.class));
+        log.setRequestPath(row.get("request_path", String.class));
+        log.setClientIp(row.get("client_ip", String.class));
+        log.setUserId(row.get("user_id", Long.class));
+        log.setStatusCode(row.get("status_code", Integer.class));
+        log.setSuccess(row.get("success", Boolean.class));
+        log.setHasError(row.get("has_error", Boolean.class));
+        log.setErrorContent(row.get("error_content", String.class));
+        log.setRequestBody(row.get("request_body", String.class));
+        log.setDurationMs(row.get("duration_ms", Integer.class));
+        log.setCreatedAt(row.get("created_at", OffsetDateTime.class));
+        return log;
     }
 }

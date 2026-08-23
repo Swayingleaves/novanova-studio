@@ -230,6 +230,49 @@ CREATE INDEX idx_creation_agent_request_session_created
     ON creation_agent_request(session_id, created_at DESC);
 ```
 
+### `api_logs`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | `BIGSERIAL` | 主键，自增。 |
+| `http_method` | `VARCHAR(10)` | HTTP 方法（GET/POST 等，大写）。 |
+| `request_path` | `TEXT` | 请求地址（路径+查询参数已脱敏）。 |
+| `client_ip` | `VARCHAR(64)` | 访问者客户端 IP（含 X-Forwarded-For 解析）。 |
+| `user_id` | `BIGINT` | 访问用户 ID，未登录为 NULL；用户删除时置空。 |
+| `status_code` | `INTEGER` | HTTP 响应状态码。 |
+| `success` | `BOOLEAN` | 是否成功（status_code < 400）。 |
+| `has_error` | `BOOLEAN` | 是否有错误（status_code >= 400，等价于 NOT success）。 |
+| `error_content` | `TEXT` | 失败响应正文（截断，最长 20000 字符）；成功为 NULL。 |
+| `request_body` | `TEXT` | 请求体/参数（脱敏并截断，最长 20000 字符；multipart 为摘要）。 |
+| `duration_ms` | `INTEGER` | 请求耗时（毫秒）。 |
+| `created_at` | `TIMESTAMPTZ` | 创建时间，用于保留期清理与默认倒序。 |
+
+- 由 `ApiAccessLogWebFilter` 在每次 `/api/**` 请求响应完成后异步落库，仅记录元数据；失败响应（>=400）才会缓冲并存储响应正文。
+- SSE 长连接与文件上传仅记录元数据，不缓冲响应体。
+- 保留期：由 `ApiLogRetentionScheduler` 每日 03:00 清理 30 天前的记录。
+
+```sql
+CREATE TABLE api_logs (
+    id BIGSERIAL PRIMARY KEY,
+    http_method VARCHAR(10) NOT NULL,
+    request_path TEXT NOT NULL,
+    client_ip VARCHAR(64) NOT NULL,
+    user_id BIGINT NULL,
+    status_code INTEGER NOT NULL,
+    success BOOLEAN NOT NULL,
+    has_error BOOLEAN NOT NULL,
+    error_content TEXT NULL,
+    request_body TEXT NULL,
+    duration_ms INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_api_logs_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_api_logs_created_at ON api_logs (created_at DESC);
+CREATE INDEX idx_api_logs_user_id ON api_logs (user_id);
+CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
+```
+
 ## 5、接口设计
 
 - 复用既有模型配置接口：`/config/model/listModelConfigs`、`/config/model/createModelConfig`、`/config/model/updateModelConfig`。
@@ -257,7 +300,8 @@ CREATE INDEX idx_creation_agent_request_session_created
 
 ## 7、部署说明
 
-- 发布时由 Flyway 执行至 `V15__Add_Video_Mode_Pricing.sql`。
+- 发布时由 Flyway 执行至 `V18__Add_Api_Logs.sql`。
+- 服务新增每日 03:00 清理 30 天前 `api_logs` 记录的定时任务（依赖 `@EnableScheduling`）。
 - Redis 必须可用；模型队列、视频合成队列和统一主 Agent 队列均使用各自的 Redis 活动租约配置。
 - 服务端镜像已安装 `ffmpeg` 与 `ffprobe`；可通过 `AI_VIDEO_COMPOSITION_FFMPEG_EXECUTABLE`、`AI_VIDEO_COMPOSITION_FFPROBE_EXECUTABLE` 覆盖二进制路径。
 

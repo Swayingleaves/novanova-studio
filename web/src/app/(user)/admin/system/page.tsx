@@ -47,6 +47,7 @@ import { useUserStore, type ServerUserProfile, type ServerUserRole } from "@/fea
 import { getHomepageTargetPath } from "@/features/homepage/api/homepage-showcases";
 import { adminCreditFilterKey, adminCreditUserLabel } from "./admin-credit-utils";
 import { CreditCardManagement } from "./components/credit-card-management";
+import { ApiLogsManagement } from "./components/api-logs-management";
 import { GenerationStyleCover } from "@/features/generation/components/generation-style-picker";
 import { uploadImage } from "@/features/storage/services/image-storage";
 import { CREDIT_TRANSACTION_PAGE_SIZE, formatCredits, formatCreditTime, generationSourceLabel, generationTypeLabel, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
@@ -94,6 +95,7 @@ export default function AdminSystemPage() {
                         { key: "prompts", label: "提示词库", children: <PromptManagement /> },
                         { key: "styles", label: "风格管理", children: <GenerationStyleManagement /> },
                         { key: "homepage", label: "首页展示", children: <HomepageShowcaseManagement /> },
+                        { key: "apiLogs", label: "接口记录", children: <ApiLogsManagement /> },
                     ]}
                 />
             </div>

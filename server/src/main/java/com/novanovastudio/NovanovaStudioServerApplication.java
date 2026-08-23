@@ -3,6 +3,7 @@ package com.novanovastudio;
 import com.novanovastudio.config.DatabaseBootstrapInitializer;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * @title        NovanovaStudioServerApplication.java
@@ -11,6 +12,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * @createTime   2026-06-24 10:36:00
  */
 @SpringBootApplication
+@EnableScheduling
 public class NovanovaStudioServerApplication {
 
     /**
