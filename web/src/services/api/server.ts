@@ -413,6 +413,32 @@ export function adminCreateUser(input: { email: string; password: string; nickna
     return serverPost("/admin/user/createUser", input);
 }
 
+/** 单条接口访问日志 */
+export type ServerApiLog = {
+    id: number;
+    httpMethod: string;
+    requestPath: string;
+    clientIp: string;
+    userId: number | null;
+    statusCode: number;
+    success: boolean;
+    hasError: boolean;
+    errorContent: string | null;
+    requestBody: string | null;
+    durationMs: number;
+    createdAt: string;
+};
+
+/** 接口访问日志列表 */
+export type ServerApiLogList = { logs: ServerApiLog[]; total: number };
+
+export function listAdminApiLogs(params: { page: number; pageSize: number; keyword?: string; result?: "success" | "error" }) {
+    const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
+    if (params.keyword?.trim()) query.set("keyword", params.keyword.trim());
+    if (params.result) query.set("result", params.result);
+    return serverGet<ServerApiLogList>(`/admin/apiLog/listApiLogs?${query}`);
+}
+
 export function adjustServerUserCredits(input: { userId: number; changeAmount: number; reason: string }) {
     return serverPost<CreditBalance>("/admin/user/adjustUserCredits", input);
 }

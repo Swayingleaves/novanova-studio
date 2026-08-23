@@ -74,6 +74,24 @@ if (!(Test-Path -LiteralPath .env)) {
 | `REDIS_PASSWORD` / `REDIS_DATABASE` | Redis 密码和逻辑数据库编号。 |
 | `AI_TASK_POLLING_INTERVAL_SECONDS` | 所有 AI 异步任务状态轮询间隔（服务端渠道、内部等待、视频合成恢复和前端状态查询），单位为秒，必须大于 0，默认 `3`。 |
 
+### 生成 `APP_SECRET_KEY`
+
+`APP_SECRET_KEY` 必须为至少 32 字节的高强度随机值。在 Windows PowerShell 中执行以下命令生成：
+
+```powershell
+$bytes = New-Object byte[] 32
+[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+($bytes | ForEach-Object { $_.ToString("x2") }) -join ''
+```
+
+如果已安装 OpenSSL，也可以使用更简洁的命令：
+
+```powershell
+openssl rand -hex 32
+```
+
+将输出的 64 位十六进制字符串填入 `.env` 的 `APP_SECRET_KEY`。该密钥用于签名和加密，生产环境务必妥善保管，不要提交到代码仓库。
+
 ## 3. 创建前端本地环境变量
 
 Next.js 从 `web/` 目录启动时不会读取项目根目录的 `.env`。前端启动前必须将 `web/.env.example` 复制为 `web/.env.local`。已有 `web/.env.local` 时不要覆盖。
