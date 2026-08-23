@@ -2,7 +2,6 @@ package com.novanovastudio.security;
 
 import com.novanovastudio.config.NovanovaProperties;
 import java.net.InetSocketAddress;
-import java.util.Arrays;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
@@ -32,7 +31,7 @@ public class ClientAddressResolver {
             return "unknown";
         }
         String directAddress = remoteAddress.getAddress().getHostAddress();
-        if (!isTrustedProxyAddress(directAddress)) {
+        if (!TrustedProxyMatcher.isTrustedProxyAddress(properties.getApp().getTrustedProxyAddresses(), directAddress)) {
             return directAddress;
         }
         String forwardedFor = request.getHeaders().getFirst("X-Forwarded-For");
@@ -42,36 +41,13 @@ public class ClientAddressResolver {
         String[] addresses = forwardedFor.split(",");
         for (int index = addresses.length - 1; index >= 0; index--) {
             String address = addresses[index].trim();
-            if (!isLiteralIpAddress(address)) {
+            if (!TrustedProxyMatcher.isLiteralIpAddress(address)) {
                 return directAddress;
             }
-            if (!isTrustedProxyAddress(address)) {
+            if (!TrustedProxyMatcher.isTrustedProxyAddress(properties.getApp().getTrustedProxyAddresses(), address)) {
                 return address;
             }
         }
         return directAddress;
-    }
-
-    /**
-     * 判断地址是否属于已配置的可信反向代理。
-     *
-     * @param address String 待判断地址
-     * @return boolean 是否可信反向代理地址
-     */
-    private boolean isTrustedProxyAddress(String address) {
-        return Arrays.stream(properties.getApp().getTrustedProxyAddresses().split(","))
-                .map(String::trim)
-                .filter(StringUtils::hasText)
-                .anyMatch(address::equals);
-    }
-
-    /**
-     * 判断请求头地址是否为 IPv4 或 IPv6 字面量。
-     *
-     * @param address String 待判断地址
-     * @return boolean 是否为合法 IP 字面量
-     */
-    private boolean isLiteralIpAddress(String address) {
-        return address.matches("[0-9a-fA-F:.]+");
     }
 }

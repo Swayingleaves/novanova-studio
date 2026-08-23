@@ -44,6 +44,7 @@ openssl rand -base64 48
 | `REDIS_PASSWORD` | Redis 密码，公网环境建议设置。 |
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | 改为实际的域名，例如 `https://www.yourdomain.com`。 |
 | `TZ` | 容器和 Java 日志时区，默认是 `Asia/Shanghai`。 |
+| `TRUSTED_PROXY_ADDRESSES` | 可选，Nginx 反代场景**建议配置**。本 Compose 中 Nginx 为 `network_mode: host`、经 `127.0.0.1` 访问后端，因此设为 `127.0.0.1` 即可让"接口记录"与登录限流解析出真实客户端 IP；支持逗号分隔的多个 IP 或 CIDR（如 `127.0.0.1,10.0.0.0/8`）。不配置时后端记录到的 IP 是代理地址（本拓扑下为 `127.0.0.1`）。 |
 | `NEXT_PUBLIC_CREDIT_STORE_URL` | 可选，发卡网站地址；未配置时购买积分页面显示“没有配置发卡网站”。 |
 | `AI_TASK_POLLING_INTERVAL_SECONDS` | 所有 AI 异步任务状态轮询间隔（服务端渠道、内部等待、视频合成恢复和前端状态查询），单位为秒，必须大于 0，默认 `3`。 |
 
