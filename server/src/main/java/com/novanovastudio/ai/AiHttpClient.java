@@ -424,6 +424,10 @@ public class AiHttpClient {
                 return Mono.<List<String>>error(new BusinessException(ErrorCode.PARAM_INVALID,
                         "MiniMax 渠道不支持自动拉取模型，请手动配置 MiniMax-H3"));
             }
+            if ("custom".equals(normalizedFormat)) {
+                return Mono.<List<String>>error(new BusinessException(ErrorCode.PARAM_INVALID,
+                        "自定义格式渠道不支持自动拉取模型，请手动配置模型列表"));
+            }
             return callBlocking(() -> {
                 URI uri = buildModelListUri(baseUrl, normalizedFormat);
                 if (!StringUtils.hasText(apiKey)) {
@@ -620,7 +624,7 @@ public class AiHttpClient {
             throw new BusinessException(ErrorCode.PARAM_MISSING, "接口格式不能为空");
         }
         String normalizedFormat = apiFormat.trim().toLowerCase(Locale.ROOT);
-        Set<String> supportedFormats = Set.of("openai", "newapi", "evolink", "gemini", "anthropic", "agnes", "seedance", "minimax");
+        Set<String> supportedFormats = Set.of("openai", "newapi", "evolink", "gemini", "anthropic", "agnes", "seedance", "minimax", "custom");
         if (!supportedFormats.contains(normalizedFormat)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "不支持的接口格式: " + normalizedFormat);
         }
@@ -846,7 +850,7 @@ public class AiHttpClient {
      * @param path String 接口路径
      * @return String 完整地址
      */
-    static String buildAiUrl(String baseUrl, String path) {
+    public static String buildAiUrl(String baseUrl, String path) {
         String normalized = baseUrl == null ? "" : baseUrl.trim().replaceAll("/+$", "");
         return normalized + path;
     }

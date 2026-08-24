@@ -404,7 +404,8 @@ public class PersistenceRepository {
                 SELECT id, NULL::BIGINT AS user_id, model_config_id, channel_id, model_name, model_type,
                        capabilities::text AS capabilities, is_default, sort_order, credit_cost, credit_unit,
                        thinking_enabled, reasoning_effort, request_concurrency, custom_body_parameters::text AS custom_body_parameters,
-                       video_billing_configuration::text AS video_billing_configuration, display_name, model_icon, created_at, updated_at
+                       video_billing_configuration::text AS video_billing_configuration, display_name, model_icon,
+                       is_custom_model, custom_model_config::text AS custom_model_config, created_at, updated_at
                 FROM platform_ai_model_configs
                 ORDER BY created_at DESC, id DESC
                 """).map((row, metadata) -> RowMappers.userAiModelConfig(row)).all();
@@ -421,7 +422,8 @@ public class PersistenceRepository {
                 SELECT id, NULL::BIGINT AS user_id, model_config_id, channel_id, model_name, model_type,
                        capabilities::text AS capabilities, is_default, sort_order, credit_cost, credit_unit,
                        thinking_enabled, reasoning_effort, request_concurrency, custom_body_parameters::text AS custom_body_parameters,
-                       video_billing_configuration::text AS video_billing_configuration, display_name, model_icon, created_at, updated_at
+                       video_billing_configuration::text AS video_billing_configuration, display_name, model_icon,
+                       is_custom_model, custom_model_config::text AS custom_model_config, created_at, updated_at
                 FROM platform_ai_model_configs
                 WHERE model_config_id = :modelConfigId
                 """).bind("modelConfigId", modelConfigId).map((row, metadata) -> RowMappers.userAiModelConfig(row)).one();
@@ -450,10 +452,10 @@ public class PersistenceRepository {
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
                 INSERT INTO platform_ai_model_configs(model_config_id, channel_id, model_name, model_type, capabilities, is_default, sort_order,
                                                       credit_cost, credit_unit, thinking_enabled, reasoning_effort, request_concurrency, custom_body_parameters,
-                                                      video_billing_configuration, display_name, model_icon)
+                                                      video_billing_configuration, display_name, model_icon, is_custom_model, custom_model_config)
                 VALUES (:modelConfigId, :channelId, :modelName, :modelType, CAST(:capabilities AS jsonb), :isDefault, :sortOrder,
                         :creditCost, :creditUnit, :thinkingEnabled, :reasoningEffort, :requestConcurrency, CAST(:customBodyParameters AS jsonb),
-                        CAST(:videoBillingConfiguration AS jsonb), :displayName, :modelIcon)
+                        CAST(:videoBillingConfiguration AS jsonb), :displayName, :modelIcon, :isCustomModel, CAST(:customModelConfig AS jsonb))
                 """).bind("modelConfigId", record.getModelConfigId()).bind("channelId", record.getChannelId())
                 .bind("modelName", record.getModelName()).bind("modelType", record.getModelType())
                 .bind("capabilities", record.getCapabilities()).bind("isDefault", Boolean.TRUE.equals(record.getDefaultModel()))
@@ -462,7 +464,9 @@ public class PersistenceRepository {
                 .bind("reasoningEffort", record.getReasoningEffort() == null ? "high" : record.getReasoningEffort())
                 .bind("requestConcurrency", record.getRequestConcurrency() == null ? 1 : record.getRequestConcurrency())
                 .bind("customBodyParameters", record.getCustomBodyParameters() == null ? "{}" : record.getCustomBodyParameters())
-                .bind("videoBillingConfiguration", record.getVideoBillingConfiguration() == null ? "null" : record.getVideoBillingConfiguration());
+                .bind("videoBillingConfiguration", record.getVideoBillingConfiguration() == null ? "null" : record.getVideoBillingConfiguration())
+                .bind("isCustomModel", Boolean.TRUE.equals(record.getIsCustomModel()))
+                .bind("customModelConfig", record.getCustomModelConfig() == null ? "null" : record.getCustomModelConfig());
         spec = R2dbcBindings.bindNullable(spec, "displayName", record.getDisplayName(), String.class);
         spec = R2dbcBindings.bindNullable(spec, "modelIcon", record.getModelIcon(), String.class);
         return spec.fetch()
@@ -483,6 +487,7 @@ public class PersistenceRepository {
                     credit_unit = :creditUnit, request_concurrency = :requestConcurrency, custom_body_parameters = CAST(:customBodyParameters AS jsonb),
                     video_billing_configuration = CAST(:videoBillingConfiguration AS jsonb), display_name = :displayName, model_icon = :modelIcon,
                     thinking_enabled = :thinkingEnabled, reasoning_effort = :reasoningEffort,
+                    is_custom_model = :isCustomModel, custom_model_config = CAST(:customModelConfig AS jsonb),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE model_config_id = :modelConfigId
                 """).bind("modelType", record.getModelType()).bind("capabilities", record.getCapabilities())
@@ -492,6 +497,8 @@ public class PersistenceRepository {
                 .bind("videoBillingConfiguration", record.getVideoBillingConfiguration() == null ? "null" : record.getVideoBillingConfiguration())
                 .bind("thinkingEnabled", record.getThinkingEnabled() == null || Boolean.TRUE.equals(record.getThinkingEnabled()))
                 .bind("reasoningEffort", record.getReasoningEffort() == null ? "high" : record.getReasoningEffort())
+                .bind("isCustomModel", Boolean.TRUE.equals(record.getIsCustomModel()))
+                .bind("customModelConfig", record.getCustomModelConfig() == null ? "null" : record.getCustomModelConfig())
                 .bind("modelConfigId", record.getModelConfigId());
         spec = R2dbcBindings.bindNullable(spec, "displayName", record.getDisplayName(), String.class);
         spec = R2dbcBindings.bindNullable(spec, "modelIcon", record.getModelIcon(), String.class);

@@ -12,6 +12,7 @@ import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.ai.VideoResolution;
+import com.novanovastudio.ai.provider.CustomProviderAdapter;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
@@ -123,6 +124,9 @@ public class AiTaskService {
 
     /** AI渠道适配器注册表 */
     private final AiProviderAdapterRegistry adapterRegistry;
+
+    /** 自定义模型渠道适配器，自定义模型任务直接使用，不经过适配器注册表 */
+    private final CustomProviderAdapter customProviderAdapter;
 
     /** 积分服务 */
     private final CreditService creditService;
@@ -487,7 +491,10 @@ public class AiTaskService {
                                             AiTaskDtos.CreateAiTaskRequest request = JSON.parseObject(task.getRequestData(), AiTaskDtos.CreateAiTaskRequest.class);
                                             return resolveTaskModel(task, request)
                                                     .flatMap(resolvedModel -> {
-                                                        AiProviderAdapter adapter = adapterRegistry.resolve(resolvedModel.channel(), task.getTaskType());
+                                                        // 自定义模型任务直接使用自定义适配器，不经过适配器注册表。
+                                                        AiProviderAdapter adapter = resolvedModel.isCustomModel()
+                                                                ? customProviderAdapter
+                                                                : adapterRegistry.resolve(resolvedModel.channel(), task.getTaskType());
                                                         AiTaskExecutionContext context = new AiTaskExecutionContext(
                                                                 task,
                                                                 resolvedModel.channel(),
@@ -498,7 +505,9 @@ public class AiTaskService {
                                                                 request,
                                                                 () -> eventPublisher.isCancelRequested(taskId),
                                                                 progress -> updateTaskState(taskId, STATUS_RUNNING, progress, "", null),
-                                                                delta -> publishTextDelta(task, delta)
+                                                                delta -> publishTextDelta(task, delta),
+                                                                resolvedModel.isCustomModel(),
+                                                                resolvedModel.customModelConfig()
                                                         );
                                                         return adapter.execute(context);
                                                     })
@@ -679,7 +688,8 @@ public class AiTaskService {
                     ResolvedModel resolvedModel = resolveModel(capability, selectedConfig.channelId() + "::" + selectedConfig.modelName(), tuple.getT1());
                     return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.id(), selectedConfig.creditCost(), selectedConfig.creditUnit(),
                             selectedConfig.capabilities(), selectedConfig.videoBillingConfiguration(), thinkingEnabled(selectedConfig.thinkingEnabled()),
-                            reasoningEffort(selectedConfig.reasoningEffort()), selectedConfig.customBodyParameters());
+                            reasoningEffort(selectedConfig.reasoningEffort()), selectedConfig.customBodyParameters(),
+                            Boolean.TRUE.equals(selectedConfig.isCustomModel()), selectedConfig.customModelConfig());
                 });
     }
 
@@ -715,7 +725,8 @@ public class AiTaskService {
                     ResolvedModel channelModel = resolveModel(task.getTaskType(), modelConfig.channelId() + CHANNEL_MODEL_SEPARATOR + modelConfig.modelName(), tuple.getT1());
                     return new ResolvedModel(channelModel.channel(), channelModel.model(), modelConfig.id(), modelConfig.creditCost(),
                             modelConfig.creditUnit(), modelConfig.capabilities(), modelConfig.videoBillingConfiguration(),
-                            thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort()), modelConfig.customBodyParameters());
+                            thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort()), modelConfig.customBodyParameters(),
+                            Boolean.TRUE.equals(modelConfig.isCustomModel()), modelConfig.customModelConfig());
                 });
     }
 
@@ -776,7 +787,8 @@ public class AiTaskService {
         }
         validateChannelSupport(channel, capability);
         validateUserChannelAccess(channel);
-        return new ResolvedModel(channel, model, "", 0, CREDIT_UNIT_GENERATION, List.of(), null, true, "high", new JSONObject());
+        return new ResolvedModel(channel, model, "", 0, CREDIT_UNIT_GENERATION, List.of(), null, true, "high", new JSONObject(),
+                false, null);
     }
 
 
@@ -1364,7 +1376,8 @@ public class AiTaskService {
      */
     private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, String modelConfigId, Integer creditCost,
                                  String creditUnit, List<String> capabilities, VideoBillingConfiguration videoBillingConfiguration,
-                                 boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters) {
+                                 boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters,
+                                 boolean isCustomModel, Map<String, PersistenceDtos.CustomModelGroupConfig> customModelConfig) {
     }
 
     /**

@@ -45,7 +45,7 @@ import { useRecentReferenceImages } from "@/features/generation/hooks/use-recent
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { availableVideoModelsForMode, quoteVideoGeneration, videoGenerationReferenceIssue } from "@/features/generation/lib/video-billing";
-import { deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
+import { cancelAiTask, deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
 import { findLatestPlayableVideo, hasPlayableVideoUrl } from "./video-display";
 
 type GeneratedVideo = {
@@ -62,6 +62,7 @@ type GeneratedVideo = {
 
 type GenerationResult = {
     id: string;
+    taskId?: string;
     status: "pending" | "success" | "failed" | "canceled";
     progress?: number;
     video?: GeneratedVideo;
@@ -131,6 +132,7 @@ export default function VideoPage() {
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [uploadingObjectStorageId, setUploadingObjectStorageId] = useState("");
     const [managementMode, setManagementMode] = useState(false);
+    const [pendingStopping, setPendingStopping] = useState(false);
     const initialPromptAppliedRef = useRef(false);
     const [focusInitialPrompt, setFocusInitialPrompt] = useState(false);
 
@@ -461,6 +463,26 @@ export default function VideoPage() {
     const activeConversationPending = activeConversation ? hasPendingVideoConversation(activeConversation) : false;
     const canGenerate = Boolean(prompt.trim()) && videoQuote.available && !referenceIssue && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
+
+    // SSE 请求状态丢失（刷新页面、连接中断或服务重启）但记录轮次仍在生成时，直接取消底层AI任务实现停止。
+    const stopPendingGeneration = async () => {
+        const conversation = conversationsRef.current.find((item) => item.id === activeIdRef.current);
+        if (!conversation) return;
+        const taskIds = conversation.rounds
+            .filter((round) => round.result?.status === "pending" && round.result.taskId)
+            .map((round) => round.result.taskId as string);
+        if (!taskIds.length) {
+            message.warning("没有可停止的生成任务");
+            return;
+        }
+        setPendingStopping(true);
+        try {
+            await Promise.all(taskIds.map((taskId) => cancelAiTask(taskId).catch((error) => console.error("停止生成任务失败", error))));
+            await refreshConversations();
+        } finally {
+            setPendingStopping(false);
+        }
+    };
 
     useEffect(() => {
         if (!sessionId || sessionId === activeIdRef.current) return;
@@ -1127,7 +1149,7 @@ export default function VideoPage() {
                     running: isStreaming || activeConversationPending,
                     queued: isQueued,
                     canSubmit: canGenerate,
-                    stopping: isStopping,
+                    stopping: isStopping || pendingStopping,
                     focusWhenValueSet: focusInitialPrompt,
                     creditCost,
                     onChange: setPrompt,
@@ -1135,7 +1157,7 @@ export default function VideoPage() {
                     onStyleRemove: (styleId) => setSelectedStyles((current) => current.filter((style) => style.id !== styleId)),
                     onPasteImages: (files) => void addReferences(files),
                     onSubmit: () => void generate(),
-                    onStop: isStreaming || isQueued ? () => void cancelMessage() : undefined,
+                    onStop: isStreaming || isQueued ? () => void cancelMessage() : activeConversationPending ? () => void stopPendingGeneration() : undefined,
                 }}
                 settings={{
                     open: settingsOpen,

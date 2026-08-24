@@ -93,15 +93,47 @@ public class AiTaskQueue {
      */
     static boolean isConsumerGroupExistsException(Throwable exception) {
         // Lettuce原始BUSYGROUP异常会被Spring包装，需要沿cause链递归识别。
+        return hasCauseMessage(exception, "BUSYGROUP");
+    }
+
+    /**
+     * 判断异常是否为消费组或Stream丢失（NOGROUP）。
+     *
+     * @param exception Throwable 异常
+     * @return boolean 是否为NOGROUP
+     */
+    static boolean isNoGroupException(Throwable exception) {
+        return hasCauseMessage(exception, "NOGROUP");
+    }
+
+    /**
+     * 沿cause链匹配异常消息关键字。
+     *
+     * @param exception Throwable 异常
+     * @param keyword String 关键字
+     * @return boolean 是否命中
+     */
+    private static boolean hasCauseMessage(Throwable exception, String keyword) {
         Throwable current = exception;
         while (current != null) {
             String message = current.getMessage();
-            if (message != null && message.contains("BUSYGROUP")) {
+            if (message != null && message.contains(keyword)) {
                 return true;
             }
             current = current.getCause();
         }
         return false;
+    }
+
+    /**
+     * 消费组或Stream丢失（Redis重启/清库）后重建，供读取流程自愈。
+     *
+     * @return Mono<Void> 重建完成信号
+     */
+    private Mono<Void> recreateConsumerGroup() {
+        log.warn("AI任务消费组丢失，尝试重建: streamKey={}, group={}", streamKey(), consumerGroup());
+        consumerGroupReady.set(false);
+        return ensureConsumerGroup();
     }
 
     /**
@@ -118,7 +150,11 @@ public class AiTaskQueue {
         return redisTemplate.opsForStream()
                 .read(Consumer.from(consumerGroup(), consumerName), options, StreamOffset.create(streamKey(), ReadOffset.lastConsumed()))
                 .map(this::toMessage)
-                .filter(message -> message.taskId() != null && !message.taskId().isBlank());
+                .filter(message -> message.taskId() != null && !message.taskId().isBlank())
+                // Stream或消费组丢失时重建后交由外层repeat重读，避免无限NOGROUP
+                .onErrorResume(exception -> isNoGroupException(exception)
+                        ? recreateConsumerGroup().then(Mono.delay(Duration.ofSeconds(1))).thenMany(Flux.empty())
+                        : Flux.error(exception));
     }
 
     /**
@@ -144,7 +180,11 @@ public class AiTaskQueue {
                             .claim(streamKey(), consumerGroup(), consumerName, idleTime, recordIds.toArray(RecordId[]::new))
                             .map(this::toMessage)
                             .filter(message -> message.taskId() != null && !message.taskId().isBlank());
-                });
+                })
+                // 消费组丢失时重建，pending明细已随之丢失，本轮直接跳过
+                .onErrorResume(exception -> isNoGroupException(exception)
+                        ? recreateConsumerGroup().thenMany(Flux.empty())
+                        : Flux.error(exception));
     }
 
     /**

@@ -228,6 +228,12 @@ public final class PersistenceRecords {
         /** 模型展示图标标识，为空时按模型名或渠道自动匹配，仅影响展示不影响调用 */
         private String modelIcon;
 
+        /** 是否启用自定义模型调用，独立于渠道格式，仅图片/视频模型支持 */
+        private Boolean isCustomModel;
+
+        /** 自定义模型配置JSON，按图片能力或视频模式分组的请求/响应模板集合 */
+        private String customModelConfig;
+
         /** 创建时间 */
         private OffsetDateTime createdAt;
 

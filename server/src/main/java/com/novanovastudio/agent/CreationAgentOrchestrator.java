@@ -905,7 +905,8 @@ public class CreationAgentOrchestrator {
         return switch (request.getStatus()) {
             case "queued" -> cancelQueuedRequest(userId, request);
             case "running" -> cancelRunningRequest(userId, request);
-            default -> Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求已结束"));
+            // 请求已进入终态，无需再取消；幂等返回成功，避免前端因竞态停在「生成中」无法解锁。
+            default -> Mono.empty();
         };
     }
 
@@ -946,7 +947,7 @@ public class CreationAgentOrchestrator {
     private Mono<Void> cancelRunningRequest(Long userId, CreationAgentRequest request) {
         return requestRepository.cancelRunningIfRunning(userId, request.getId(), "已停止生成")
                 .filter(Boolean::booleanValue)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求已结束")))
+                .switchIfEmpty(Mono.empty())
                 .then(requestQueue.markCancelRequested(request.getId()))
                 .then(stopClaimedExecution(request.getId()))
                 .then(requestRepository.findByIdForUser(userId, request.getId()))

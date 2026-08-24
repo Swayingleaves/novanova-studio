@@ -2,7 +2,9 @@ package com.novanovastudio.ai;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.dto.AiTaskDtos;
+import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.entity.AiGenerationTask;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.function.Supplier;
@@ -23,6 +25,8 @@ import reactor.core.publisher.Mono;
  * @param cancelChecker Supplier<Mono<Boolean>> 取消状态检查器
  * @param progressReporter IntFunction<Mono<Void>> 进度上报器
  * @param deltaEmitter Function<String, Mono<Void>> 流式文本片段推送器，输入增量文本，返回推送结果
+ * @param isCustomModel boolean 是否启用自定义模型调用
+ * @param customModelConfig Map<String, PersistenceDtos.CustomModelGroupConfig> 自定义模型按能力或模式分组的请求/响应模板配置
  */
 public record AiTaskExecutionContext(AiGenerationTask task,
                                      AiTaskDtos.AiChannelConfig channel,
@@ -33,14 +37,17 @@ public record AiTaskExecutionContext(AiGenerationTask task,
                                      AiTaskDtos.CreateAiTaskRequest request,
                                      Supplier<Mono<Boolean>> cancelChecker,
                                      IntFunction<Mono<Void>> progressReporter,
-                                     Function<String, Mono<Void>> deltaEmitter) {
+                                     Function<String, Mono<Void>> deltaEmitter,
+                                     boolean isCustomModel,
+                                     Map<String, PersistenceDtos.CustomModelGroupConfig> customModelConfig) {
 
     /** 保持旧调用方使用空自定义请求体参数。 */
     public AiTaskExecutionContext(AiGenerationTask task, AiTaskDtos.AiChannelConfig channel, String model,
                                   boolean thinkingEnabled, String reasoningEffort, AiTaskDtos.CreateAiTaskRequest request,
                                   Supplier<Mono<Boolean>> cancelChecker, IntFunction<Mono<Void>> progressReporter,
                                   Function<String, Mono<Void>> deltaEmitter) {
-        this(task, channel, model, thinkingEnabled, reasoningEffort, new JSONObject(), request, cancelChecker, progressReporter, deltaEmitter);
+        this(task, channel, model, thinkingEnabled, reasoningEffort, new JSONObject(), request, cancelChecker, progressReporter, deltaEmitter,
+                false, null);
     }
 
     /**

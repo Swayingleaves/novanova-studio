@@ -281,6 +281,10 @@ novanova:
       read-block-seconds: ${AI_TASK_READ_BLOCK_SECONDS:5}
       # 异步AI任务状态轮询间隔，供应商、内部等待、视频合成恢复和前端状态查询共享，单位为秒，必须大于0
       polling-interval-seconds: ${AI_TASK_POLLING_INTERVAL_SECONDS:3}
+      # 生成任务等待超时（秒），图片等常规任务等待生成完成的最多时长，超时后前端标记生成失败
+      wait-timeout-seconds: ${AI_TASK_WAIT_TIMEOUT_SECONDS:300}
+      # 视频生成任务等待超时（秒），需覆盖自定义模型异步轮询上限（约10分钟）并留余量
+      video-wait-timeout-seconds: ${AI_TASK_VIDEO_WAIT_TIMEOUT_SECONDS:900}
       # 任务分布式锁过期时间（秒），通过 SET NX PX 设置；超时未完成任务锁自动释放
       lock-ttl-seconds: ${AI_TASK_LOCK_TTL_SECONDS:300}
       # 任务执行期间锁自动续期间隔（秒），续期前校验锁值防止误续他人锁

@@ -11,7 +11,7 @@ import type { ObjectStorageConfig } from "@/shared/types/object-storage";
 import { normalizeChannelName } from "../lib/channel-name";
 import { refreshModelConfigurationSnapshot } from "../lib/model-configuration-refresh";
 
-export type ApiCallFormat = "openai" | "newapi" | "evolink" | "gemini" | "agnes" | "anthropic" | "seedance" | "minimax";
+export type ApiCallFormat = "openai" | "newapi" | "evolink" | "gemini" | "agnes" | "anthropic" | "seedance" | "minimax" | "custom";
 export type ModelCapability = "image" | "video" | "text";
 export type ModelCreditUnit = "generation" | "second";
 export type VideoGenerationMode = "text-to-video" | "image-to-video" | "reference-to-video";
@@ -20,6 +20,22 @@ export type VideoBillingConfiguration = {
     billingUnit: ModelCreditUnit;
     minimumDurationSeconds: number;
     modePrices: Partial<Record<VideoGenerationMode, Partial<Record<VideoResolution, number>>>>;
+};
+/** 自定义模型单能力/模式分组配置。 */
+export type CustomModelGroupConfig = {
+    requestPath: string;
+    requestMethod: "GET" | "POST";
+    requestModelName: string;
+    requestTemplate: string;
+    aiRequestPrompt: string;
+    responseExample: string;
+    resultPath: string;
+    queryPath: string;
+    queryMethod: "GET" | "POST";
+    queryRequestTemplate: string;
+    aiQueryPrompt: string;
+    queryResponseExample: string;
+    queryResultPath: string;
 };
 export type VideoModelBillingConfiguration = {
     model: string;
@@ -323,6 +339,7 @@ export function defaultBaseUrlForApiFormat(apiFormat: ApiCallFormat) {
     if (apiFormat === "seedance") return "https://ark.cn-beijing.volces.com/api/v3";
     if (apiFormat === "minimax") return "https://api.minimaxi.com";
     if (apiFormat === "agnes") return "";
+    if (apiFormat === "custom") return "";
     return "https://api.openai.com/v1";
 }
 
@@ -588,7 +605,7 @@ function parseModelOption(value: string) {
 }
 
 function normalizeApiFormat(value: unknown): ApiCallFormat {
-    if (value === "newapi" || value === "evolink" || value === "gemini" || value === "agnes" || value === "anthropic" || value === "seedance" || value === "minimax") return value;
+    if (value === "newapi" || value === "evolink" || value === "gemini" || value === "agnes" || value === "anthropic" || value === "seedance" || value === "minimax" || value === "custom") return value;
     return "openai";
 }
 
@@ -604,6 +621,8 @@ export function normalizeServerModelConfig(config: ServerModelConfig): ServerMod
         displayName: config.displayName || null,
         modelIcon: config.modelIcon || null,
         customBodyParameters: isJsonObject(config.customBodyParameters) ? { ...config.customBodyParameters } : {},
+        isCustomModel: Boolean(config.isCustomModel),
+        customModelConfig: config.customModelConfig || {},
         creditUnit: normalizeModelCreditUnit(config.creditUnit, config.modelType),
         requestConcurrency: normalizeModelRequestConcurrency(config.requestConcurrency),
     };
