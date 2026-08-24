@@ -5,6 +5,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.novanovastudio.agent.AgentTaskOrchestrator;
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
+import com.novanovastudio.ai.provider.CustomProviderAdapter;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
@@ -43,6 +44,7 @@ class AiTaskModelAccessTest {
                 mock(ModelTaskExecutionDispatcher.class),
                 mock(AgentTaskOrchestrator.class),
                 mock(AiProviderAdapterRegistry.class),
+                mock(CustomProviderAdapter.class),
                 mock(CreditService.class),
                 mock(TransactionalOperator.class));
 

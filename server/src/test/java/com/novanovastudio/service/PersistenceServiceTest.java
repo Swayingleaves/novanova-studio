@@ -618,7 +618,7 @@ class PersistenceServiceTest {
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
                 "channel-1", "video-model", "video", List.of(VideoGenerationMode.TEXT_TO_VIDEO), 0, 0, true, "high",
                 "generation", 1, new JSONObject(), new VideoBillingConfiguration("generation", 3,
-                java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", 6))), null, null)).block();
+                java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", 6))), null, null, false, null)).block();
 
         Assertions.assertNotNull(created);
         ArgumentCaptor<PersistenceRecords.UserAiModelConfigRecord> captor = ArgumentCaptor.forClass(PersistenceRecords.UserAiModelConfigRecord.class);
@@ -628,7 +628,7 @@ class PersistenceServiceTest {
         when(repository.updatePlatformAiModelConfig(record)).thenReturn(Mono.just(1L));
 
         PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
-                created.id(), "image", List.of(), 0, 4, true, "high", "generation", 1, new JSONObject(), null, null, null)).block();
+                created.id(), "image", List.of(), 0, 4, true, "high", "generation", 1, new JSONObject(), null, null, null, null, null)).block();
 
         Assertions.assertNotNull(updated);
         Assertions.assertNull(updated.videoBillingConfiguration());
@@ -649,7 +649,7 @@ class PersistenceServiceTest {
 
         Assertions.assertThrows(BusinessException.class, () -> service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
                 "model-1", "image", List.of(), 0, 0, true, "high", "generation", 1,
-                new JSONObject(), configuration, null, null)).block());
+                new JSONObject(), configuration, null, null, null, null)).block());
         verify(repository, times(0)).updatePlatformAiModelConfig(record);
     }
 
@@ -665,7 +665,7 @@ class PersistenceServiceTest {
 
         Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
                 "channel-1", "video-model", "video", List.of(VideoGenerationMode.TEXT_TO_VIDEO), 0, 0,
-                true, "high", "generation", 1, new JSONObject(), configuration, null, null)).block());
+                true, "high", "generation", 1, new JSONObject(), configuration, null, null, false, null)).block());
         verify(repository, times(0)).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
     }
 
