@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, CloudUpload, Download, FolderPlus, Cog, HelpCircle, LoaderCircle, Palette, RefreshCw, Sparkles, Upload, VideoIcon } from "lucide-react";
+import { BookOpen, CloudUpload, Download, FolderPlus, Cog, HelpCircle, LoaderCircle, Palette, RefreshCw, Sparkles, TriangleAlert, Upload, VideoIcon } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -1526,6 +1526,10 @@ function ResultCard({
                         </Tooltip>
                     ) : null}
                 </div>
+            </div>
+            <div className="flex items-center gap-1 border-t border-[var(--studio-line)] px-3 py-2 text-xs text-amber-500">
+                <TriangleAlert className="size-3.5 shrink-0" />
+                <span>请尽快下载生成结果，超时将无法下载</span>
             </div>
         </div>
     );

@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, CloudUpload, Download, FolderPlus, ImagePlus, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, Upload } from "lucide-react";
+import { BookOpen, CloudUpload, Download, FolderPlus, ImagePlus, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, TriangleAlert, Upload } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -1365,6 +1365,10 @@ function ResultCard({
                             云储存
                         </Tag>
                     ) : null}
+                </div>
+                <div className="flex items-center gap-1 text-xs text-amber-500">
+                    <TriangleAlert className="size-3.5 shrink-0" />
+                    <span>请尽快下载生成结果，超时将无法下载</span>
                 </div>
                 <div className="flex gap-1">
                     <Tooltip title={image.objectStorage?.url ? "复制云储存地址" : "上传到云储存"}>

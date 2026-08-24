@@ -5,7 +5,7 @@ import { NodeResizer, type NodeProps, type Node } from "@xyflow/react";
 import { Play, Video } from "lucide-react";
 import type { CanvasVideoNode } from "../types";
 import { useNodeActions } from "./node-action-context";
-import { CanvasConnectionHandles, NodeError, NodeHoverSurface, NodeLoading } from "./shared";
+import { CanvasConnectionHandles, MediaDownloadHint, NodeError, NodeHoverSurface, NodeLoading } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 
 export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<Node<CanvasVideoNode>>) {
@@ -40,6 +40,7 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
       ) : hasContent ? (
         <div className="relative h-full min-h-0 w-full min-w-0 overflow-hidden rounded-[inherit]">
           <video src={data.content.source} className="pointer-events-none block h-full w-full object-contain" data-canvas-no-zoom muted preload="metadata" />
+          <MediaDownloadHint />
           {hovered ? (
             <div className="pointer-events-auto absolute inset-0 flex items-center justify-center" style={{ background: "rgba(2,6,23,0.22)" }}>
               <button type="button" className="flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition hover:scale-105" style={{ background: theme.node.panel, color: theme.node.text }} onClick={() => actions.onViewVideo(data)} aria-label="放大播放视频">
