@@ -149,8 +149,8 @@ import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceVideo } from "@/features/generation/types/media";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 
-const VIDEO_NODE_MAX_WIDTH = 420;
-const VIDEO_NODE_MAX_HEIGHT = 420;
+const VIDEO_NODE_MAX_WIDTH = 630;
+const VIDEO_NODE_MAX_HEIGHT = 630;
 const CONNECTION_HANDLE_HIT_RADIUS = 40;
 
 type CanvasNodeGenerationFailure = {
@@ -167,8 +167,8 @@ const CONNECTION_NODE_HIT_PADDING = 32;
 const PROMPT_PANEL_WIDTH = 580;
 const PROMPT_PANEL_HEIGHT = 196;
 const PROMPT_PANEL_GAP = 16;
-const IMAGE_GENERATION_NODE_WIDTH = 320;
-const IMAGE_GENERATION_NODE_HEIGHT = 220;
+const IMAGE_GENERATION_NODE_WIDTH = 480;
+const IMAGE_GENERATION_NODE_HEIGHT = 330;
 const PROMPT_PANEL_INTERACTION_IGNORE_SELECTOR = '[data-canvas-prompt-panel],[data-canvas-settings-popover],[data-slot="select-content"],.react-flow__node,.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown';
 const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
@@ -2090,8 +2090,8 @@ function CanvasWorkspacePage() {
                     },
                     {
                         position: {
-                            x: currentNode.frame.position.x + currentNode.frame.width + 96 + column * (videoTemplate.width + 36),
-                            y: currentNode.frame.position.y + row * (videoTemplate.height + 36),
+                            x: currentNode.frame.position.x + currentNode.frame.width + 144 + column * (videoTemplate.width + 54),
+                            y: currentNode.frame.position.y + row * (videoTemplate.height + 54),
                         },
                         width: videoTemplate.width,
                         height: videoTemplate.height,
@@ -2875,8 +2875,8 @@ function CanvasWorkspacePage() {
                     const parentConfig = getCanvasNodeTemplate(sourceIsImage ? "image" : "text");
                     const imageConfig = getCanvasNodeTemplate("image");
                     const parentPosition = sourceNode?.frame.position || { x: 0, y: 0 };
-                    const gap = 96;
-                    const rowGap = 36;
+                    const gap = 144;
+                    const rowGap = 54;
                     const rootId = isEmptyImageNode ? nodeId : `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                     const childIds = count > 1 ? Array.from({ length: count }, () => `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`) : [];
                     const targetIds = count > 1 ? childIds : [rootId];
@@ -2922,7 +2922,7 @@ function CanvasWorkspacePage() {
                             },
                             {
                                 position: {
-                                    x: rootNode.frame.position.x + rootNode.frame.width + 120 + col * (imageConfig.width + 36),
+                                    x: rootNode.frame.position.x + rootNode.frame.width + 180 + col * (imageConfig.width + 54),
                                     y: rootNode.frame.position.y + row * (imageConfig.height + rowGap),
                                 },
                                 width: imageConfig.width,
@@ -3042,8 +3042,8 @@ function CanvasWorkspacePage() {
                             isEmptyVideoNode && index === 0 && sourceNode
                                 ? sourceNode.frame.position
                                 : {
-                                      x: parent.x + (sourceNode?.frame.width || spec.width) + 96 + column * (spec.width + 36),
-                                      y: parent.y + row * (spec.height + 36),
+                                      x: parent.x + (sourceNode?.frame.width || spec.width) + 144 + column * (spec.width + 54),
+                                      y: parent.y + row * (spec.height + 54),
                                   };
                         const videoSize = isEmptyVideoNode && index === 0 && sourceNode ? { width: sourceNode.frame.width, height: sourceNode.frame.height } : spec;
                         return updateCanvasNodeFrame(
@@ -3584,7 +3584,7 @@ function CanvasWorkspacePage() {
                 const resultId = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                 const resultTemplate = getCanvasNodeTemplate("video");
                 const resultCenter = {
-                    x: latestNode.frame.position.x + latestNode.frame.width + 96 + resultTemplate.width / 2,
+                    x: latestNode.frame.position.x + latestNode.frame.width + 144 + resultTemplate.width / 2,
                     y: latestNode.frame.position.y + latestNode.frame.height / 2,
                 };
                 const resultNode = {
