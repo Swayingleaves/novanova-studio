@@ -3,6 +3,7 @@ package com.novanovastudio.service;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.CreditDtos;
+import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.repository.CreditRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import java.time.LocalDate;
@@ -50,6 +51,9 @@ public class CreditService {
 
     /** 积分仓储 */
     private final CreditRepository creditRepository;
+
+    /** 模型配置服务，用于解析用户可见的模型展示名称 */
+    private final PersistenceService persistenceService;
 
     /** 当前用户提供器 */
     private final CurrentUserProvider currentUserProvider;
@@ -208,7 +212,9 @@ public class CreditService {
      * @return Mono<CreditOverviewResponse> 积分消耗概览
      */
     public Mono<CreditDtos.CreditOverviewResponse> getCreditOverview(LocalDate startDate, LocalDate endDate, String generationType, String trendUnit) {
-        return currentUserProvider.currentUserId().flatMap(userId -> queryCreditOverview(userId, startDate, endDate, generationType, trendUnit));
+        return currentUserProvider.currentUserId().flatMap(userId -> persistenceService.getPlatformModelConfigs()
+                .map(CreditService::displayNameIndex)
+                .zipWith(queryCreditOverview(userId, startDate, endDate, generationType, trendUnit), CreditService::applyDisplayNames));
     }
 
     /**
@@ -242,9 +248,17 @@ public class CreditService {
         return currentUserProvider.currentUserId().flatMap(userId -> {
             CreditRepository.CreditConsumptionQuery query = createConsumptionQuery(userId, startDate, endDate, generationType);
             return Mono.zip(
+                            persistenceService.getPlatformModelConfigs().map(CreditService::displayNameIndex),
                             creditRepository.listCreditTransactions(query, page, pageSize).collectList(),
                             creditRepository.countCreditTransactions(query))
-                    .map(result -> new CreditDtos.CreditTransactionListResponse(result.getT1(), result.getT2()));
+                    .map(result -> {
+                        List<CreditDtos.CreditTransactionItem> transactions = result.getT2().stream()
+                                .map(item -> new CreditDtos.CreditTransactionItem(item.id(), item.generationType(),
+                                        resolveModelDisplayName(result.getT1(), item.generationType(), item.model()),
+                                        item.generationSource(), item.consumedCredits(), item.createdAt()))
+                                .toList();
+                        return new CreditDtos.CreditTransactionListResponse(transactions, result.getT3());
+                    });
         });
     }
 
@@ -353,6 +367,55 @@ public class CreditService {
             currentDate = TREND_UNIT_DAY.equals(trendUnit) ? currentDate.plusDays(1) : currentDate.plusMonths(1);
         }
         return completedTrend;
+    }
+
+    /**
+     * 构建模型展示名称索引。
+     * <p>
+     * 管理员可为模型配置与真实模型名不同的展示名称，用户侧积分记录应展示用户勾选时看到的名称。
+     *
+     * @param modelConfigs List<PersistenceDtos.ModelConfig> 全站模型配置
+     * @return Map<String, String> 展示名称索引，键为“模型类型|真实模型名”及“真实模型名”
+     */
+    private static Map<String, String> displayNameIndex(List<PersistenceDtos.ModelConfig> modelConfigs) {
+        Map<String, String> displayNames = new HashMap<>();
+        for (PersistenceDtos.ModelConfig config : modelConfigs) {
+            String displayName = config.displayName();
+            if (displayName == null || displayName.isBlank() || displayName.equals(config.modelName())) {
+                continue;
+            }
+            String normalizedDisplayName = displayName.trim();
+            displayNames.putIfAbsent(config.modelType() + "|" + config.modelName(), normalizedDisplayName);
+            displayNames.putIfAbsent(config.modelName(), normalizedDisplayName);
+        }
+        return displayNames;
+    }
+
+    /**
+     * 解析用户可见的模型展示名称。
+     *
+     * @param displayNames Map<String, String> 展示名称索引
+     * @param modelType String 任务类型，可为空
+     * @param model String 真实模型名
+     * @return String 展示名称，未配置时回退真实模型名
+     */
+    private static String resolveModelDisplayName(Map<String, String> displayNames, String modelType, String model) {
+        String typedDisplayName = modelType == null ? null : displayNames.get(modelType + "|" + model);
+        return typedDisplayName != null ? typedDisplayName : displayNames.getOrDefault(model, model);
+    }
+
+    /**
+     * 将积分消耗概览中的模型分布名称替换为用户可见的展示名称。
+     *
+     * @param overview CreditOverviewResponse 原始积分消耗概览
+     * @param displayNames Map<String, String> 展示名称索引
+     * @return CreditOverviewResponse 模型分布已使用展示名称的概览
+     */
+    private static CreditDtos.CreditOverviewResponse applyDisplayNames(CreditDtos.CreditOverviewResponse overview, Map<String, String> displayNames) {
+        List<CreditDtos.CreditDistributionItem> modelDistribution = overview.modelDistribution().stream()
+                .map(item -> new CreditDtos.CreditDistributionItem(resolveModelDisplayName(displayNames, null, item.name()), item.consumedCredits()))
+                .toList();
+        return new CreditDtos.CreditOverviewResponse(overview.generationTypeDistribution(), modelDistribution, overview.trend());
     }
 
     /**

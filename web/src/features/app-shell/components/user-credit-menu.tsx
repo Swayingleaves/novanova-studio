@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { MenuProps } from "antd";
-import { LogOut, ShoppingCart, Ticket, UserCircle, Users, Zap } from "lucide-react";
+import { History, LogOut, ShoppingCart, Ticket, UserCircle, Users, Zap } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { App, Dropdown } from "antd";
@@ -100,6 +100,19 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
                     className={cn("text-sm", pathname === "/credits/redeem" && "text-[var(--studio-ink)]")}
                 >
                     兑换
+                </Link>
+            ),
+        },
+        {
+            key: "transactions",
+            icon: <History className="size-4" />,
+            label: (
+                <Link
+                    href="/credits"
+                    onClick={() => setMenuOpen(false)}
+                    className={cn("text-sm", pathname === "/credits" && "text-[var(--studio-ink)]")}
+                >
+                    积分记录
                 </Link>
             ),
         },
