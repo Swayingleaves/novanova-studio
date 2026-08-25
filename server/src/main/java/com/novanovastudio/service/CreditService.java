@@ -407,11 +407,11 @@ public class CreditService {
     /**
      * 将积分消耗概览中的模型分布名称替换为用户可见的展示名称。
      *
-     * @param overview CreditOverviewResponse 原始积分消耗概览
      * @param displayNames Map<String, String> 展示名称索引
+     * @param overview CreditOverviewResponse 原始积分消耗概览
      * @return CreditOverviewResponse 模型分布已使用展示名称的概览
      */
-    private static CreditDtos.CreditOverviewResponse applyDisplayNames(CreditDtos.CreditOverviewResponse overview, Map<String, String> displayNames) {
+    private static CreditDtos.CreditOverviewResponse applyDisplayNames(Map<String, String> displayNames, CreditDtos.CreditOverviewResponse overview) {
         List<CreditDtos.CreditDistributionItem> modelDistribution = overview.modelDistribution().stream()
                 .map(item -> new CreditDtos.CreditDistributionItem(resolveModelDisplayName(displayNames, null, item.name()), item.consumedCredits()))
                 .toList();
