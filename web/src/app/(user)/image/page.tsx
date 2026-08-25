@@ -19,6 +19,7 @@ import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
+import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, mergePlanTaskActivityMessage, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { findLatestPendingConversation, hasPendingImageConversation } from "@/features/generation/lib/generation-conversation-recovery";
 import { reconcileGenerationLogTasks } from "@/features/generation/lib/generation-log-task-reconciliation";
@@ -127,6 +128,7 @@ export default function ImagePage() {
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [resultDetail, setResultDetail] = useState<ResultDetail | null>(null);
     const [uploadingObjectStorageId, setUploadingObjectStorageId] = useState("");
     const [managementMode, setManagementMode] = useState(false);
     const initialPromptAppliedRef = useRef(false);
@@ -643,6 +645,16 @@ export default function ImagePage() {
         }
     };
 
+    const openImageResultDetail = (image: GeneratedImage, index: number, round: Round) => {
+        setResultDetail({
+            media: { kind: "image", url: image.dataUrl, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
+            prompt: round.prompt,
+            generationPrompt: round.generationPrompt,
+            references: round.references,
+            onDownload: () => void downloadImage(image, index),
+        });
+    };
+
     const addResultToReferences = async (image: GeneratedImage, index: number) => {
         try {
             const stored = await reuseOrUploadImage(image);
@@ -860,6 +872,7 @@ export default function ImagePage() {
               onDownload: downloadImage,
               onSaveAsset: saveResultToAssets,
               onUploadObjectStorage: uploadResultToObjectStorage,
+              onOpenDetail: openImageResultDetail,
               onRegenerate: regenerateRound,
           })
         : [];
@@ -877,6 +890,13 @@ export default function ImagePage() {
                 onDownload: downloadImage,
                 onSaveAsset: saveResultToAssets,
                 onUploadObjectStorage: uploadResultToObjectStorage,
+                onOpenDetail: (image, index) =>
+                    setResultDetail({
+                        media: { kind: "image", url: image.dataUrl, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
+                        prompt,
+                        references,
+                        onDownload: () => void downloadImage(image, index),
+                    }),
             }),
         renderPendingImageToolCall,
     );
@@ -997,6 +1017,7 @@ export default function ImagePage() {
             <Modal title="删除对话" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelected} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除选中的 {selectedIds.length} 条对话吗？
             </Modal>
+            <ResultDetailDialog detail={resultDetail} onClose={() => setResultDetail(null)} />
         </>
     );
 }
@@ -1010,6 +1031,7 @@ function renderResultImages(
         onDownload: (image: GeneratedImage, index: number) => void;
         onSaveAsset: (image: GeneratedImage, index: number) => void;
         onUploadObjectStorage: (image: GeneratedImage, index: number) => void;
+        onOpenDetail?: (image: GeneratedImage, index: number) => void;
     },
 ): React.ReactNode {
     const images = extractGeneratedImages(data);
@@ -1026,6 +1048,7 @@ function renderResultImages(
                     onDownload={handlers.onDownload}
                     onSaveAsset={handlers.onSaveAsset}
                     onUploadObjectStorage={handlers.onUploadObjectStorage}
+                    onOpenDetail={handlers.onOpenDetail}
                 />
             ))}
         </div>
@@ -1128,6 +1151,7 @@ function buildImageThreadSections(
         onDownload: (image: GeneratedImage, index: number) => void;
         onSaveAsset: (image: GeneratedImage, index: number) => void;
         onUploadObjectStorage: (image: GeneratedImage, index: number) => void;
+        onOpenDetail: (image: GeneratedImage, index: number, round: Round) => void;
         onRegenerate: (round: Round) => Promise<void>;
     },
 ): CreationThreadSection[] {
@@ -1164,6 +1188,7 @@ function buildImageThreadSections(
                                 onDownload={handlers.onDownload}
                                 onSaveAsset={handlers.onSaveAsset}
                                 onUploadObjectStorage={handlers.onUploadObjectStorage}
+                                onOpenDetail={(image, index) => handlers.onOpenDetail(image, index, round)}
                                 onRegenerate={() => void handlers.onRegenerate(round)}
                             />
                         ) : result.status === "failed" || result.status === "canceled" ? (
@@ -1286,6 +1311,7 @@ function ResultCard({
     onDownload,
     onSaveAsset,
     onUploadObjectStorage,
+    onOpenDetail,
     onRegenerate,
 }: {
     image: GeneratedImage;
@@ -1295,6 +1321,7 @@ function ResultCard({
     onDownload: (image: GeneratedImage, index: number) => void;
     onSaveAsset: (image: GeneratedImage, index: number) => void;
     onUploadObjectStorage: (image: GeneratedImage, index: number) => void;
+    onOpenDetail?: (image: GeneratedImage, index: number) => void;
     onRegenerate?: () => void;
 }) {
     const [loadedMeta, setLoadedMeta] = useState<{ width: number; height: number; bytes: number }>({ width: image.width, height: image.height, bytes: image.bytes });
@@ -1349,7 +1376,11 @@ function ResultCard({
             style={{ width: `min(100%, ${previewWidth}px)` }}
         >
             <div className="relative overflow-hidden bg-[var(--studio-media)]" style={{ aspectRatio: previewAspectRatio }}>
-                <Image src={image.dataUrl} alt={`结果 ${index + 1}`} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
+                {onOpenDetail ? (
+                    <img src={image.dataUrl} alt={`结果 ${index + 1}`} className="block size-full cursor-zoom-in object-contain" onClick={() => onOpenDetail(image, index)} />
+                ) : (
+                    <Image src={image.dataUrl} alt={`结果 ${index + 1}`} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
+                )}
                 <div className="absolute left-2 top-2 rounded-full bg-black/60 px-2.5 py-0.5 text-xs font-medium text-white">#{index + 1}</div>
             </div>
             <div className="space-y-2.5 border-t border-[var(--studio-line)] px-3 py-2.5">

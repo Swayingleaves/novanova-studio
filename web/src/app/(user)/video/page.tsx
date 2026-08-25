@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, CloudUpload, Download, FolderPlus, Cog, HelpCircle, LoaderCircle, Palette, RefreshCw, Sparkles, TriangleAlert, Upload, VideoIcon } from "lucide-react";
+import { BookOpen, CloudUpload, Download, FolderPlus, Cog, HelpCircle, LoaderCircle, Palette, Play, RefreshCw, Sparkles, TriangleAlert, Upload, VideoIcon } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -34,6 +34,7 @@ import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
+import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, mergePlanTaskActivityMessage, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { hasPendingVideoConversation } from "@/features/generation/lib/generation-conversation-recovery";
 import { reconcileGenerationLogTasks } from "@/features/generation/lib/generation-log-task-reconciliation";
@@ -130,6 +131,7 @@ export default function VideoPage() {
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [resultDetail, setResultDetail] = useState<ResultDetail | null>(null);
     const [uploadingObjectStorageId, setUploadingObjectStorageId] = useState("");
     const [managementMode, setManagementMode] = useState(false);
     const [pendingStopping, setPendingStopping] = useState(false);
@@ -809,6 +811,17 @@ export default function VideoPage() {
         }
     };
 
+    const openVideoResultDetail = (video: GeneratedVideo, round: Round) => {
+        setResultDetail({
+            media: { kind: "video", url: video.url, width: video.width, height: video.height, bytes: video.bytes, durationMs: video.durationMs, mimeType: video.mimeType },
+            prompt: round.prompt,
+            generationPrompt: round.generationPrompt,
+            references: round.references,
+            videoReferences: round.videoReferences,
+            onDownload: () => void downloadVideo(video),
+        });
+    };
+
     const saveResultToAssets = (video: GeneratedVideo) => {
         addAsset({
             kind: "video",
@@ -1062,7 +1075,20 @@ export default function VideoPage() {
         activeThinking,
         streamingText,
         toolCalls,
-        (data) => renderResultVideos(data, { onDownload: downloadVideo, onSaveAsset: saveResultToAssets, onUploadObjectStorage: uploadResultToObjectStorage }),
+        (data) =>
+            renderResultVideos(data, {
+                onDownload: downloadVideo,
+                onSaveAsset: saveResultToAssets,
+                onUploadObjectStorage: uploadResultToObjectStorage,
+                onOpenDetail: (video) =>
+                    setResultDetail({
+                        media: { kind: "video", url: video.url, width: video.width, height: video.height, bytes: video.bytes, durationMs: video.durationMs, mimeType: video.mimeType },
+                        prompt,
+                        references,
+                        videoReferences,
+                        onDownload: () => void downloadVideo(video),
+                    }),
+            }),
         renderPendingVideoToolCall,
     );
     const livePendingRoundIds = new Set(toolCalls.filter((call) => call.status === "executing").map((call) => call.callId));
@@ -1072,6 +1098,7 @@ export default function VideoPage() {
               onDownload: downloadVideo,
               onSaveAsset: saveResultToAssets,
               onUploadObjectStorage: uploadResultToObjectStorage,
+              onOpenDetail: openVideoResultDetail,
               onRegenerate: regenerateRound,
           })
         : [];
@@ -1212,6 +1239,7 @@ export default function VideoPage() {
                     <video src={videoPreviewUrl} controls autoPlay className="max-h-[70vh] w-full rounded-xl bg-black" />
                 ) : null}
             </Modal>
+            <ResultDetailDialog detail={resultDetail} onClose={() => setResultDetail(null)} />
         </>
     );
 }
@@ -1222,6 +1250,7 @@ function renderResultVideos(
         onDownload: (video: GeneratedVideo) => void;
         onSaveAsset: (video: GeneratedVideo) => void;
         onUploadObjectStorage: (video: GeneratedVideo) => Promise<void>;
+        onOpenDetail: (video: GeneratedVideo) => void;
     },
 ): React.ReactNode {
     // 从 items 数组提取视频数据，转换为 GeneratedVideo 复用 ResultCard
@@ -1251,6 +1280,7 @@ function renderResultVideos(
                     onDownload: callbacks.onDownload,
                     onSaveAsset: callbacks.onSaveAsset,
                     onUploadObjectStorage: callbacks.onUploadObjectStorage,
+                    onOpenDetail: callbacks.onOpenDetail,
                 });
             })
             .filter(Boolean),
@@ -1305,6 +1335,7 @@ function buildVideoThreadSections(
         onDownload: (video: GeneratedVideo) => void;
         onSaveAsset: (video: GeneratedVideo) => void;
         onUploadObjectStorage: (video: GeneratedVideo) => void;
+        onOpenDetail: (video: GeneratedVideo, round: Round) => void;
         onRegenerate: (round: Round) => Promise<void>;
     },
 ): CreationThreadSection[] {
@@ -1342,6 +1373,7 @@ function buildVideoThreadSections(
                                 onDownload={handlers.onDownload}
                                 onSaveAsset={handlers.onSaveAsset}
                                 onUploadObjectStorage={handlers.onUploadObjectStorage}
+                                onOpenDetail={(video) => handlers.onOpenDetail(video, round)}
                                 onRegenerate={() => void handlers.onRegenerate(round)}
                             />
                         ) : result.status === "failed" || result.status === "canceled" ? (
@@ -1462,6 +1494,7 @@ function ResultCard({
     onDownload,
     onSaveAsset,
     onUploadObjectStorage,
+    onOpenDetail,
     onRegenerate,
 }: {
     video: GeneratedVideo;
@@ -1469,6 +1502,7 @@ function ResultCard({
     onDownload: (video: GeneratedVideo) => void;
     onSaveAsset: (video: GeneratedVideo) => void;
     onUploadObjectStorage: (video: GeneratedVideo) => void;
+    onOpenDetail: (video: GeneratedVideo) => void;
     onRegenerate?: () => void;
 }) {
     const [isDownloading, setIsDownloading] = useState(false);
@@ -1492,8 +1526,13 @@ function ResultCard({
 
     return (
         <div className="group overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] transition hover:-translate-y-0.5 hover:border-[var(--studio-primary-line)]">
-            <div className="relative bg-black">
-                <video src={video.url} controls className="w-full max-h-96 object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} />
+            <div className="relative cursor-pointer bg-black" onClick={() => onOpenDetail(video)}>
+                <video src={video.url} muted preload="metadata" playsInline className="pointer-events-none max-h-96 w-full object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} />
+                <div className="absolute inset-0 grid place-items-center">
+                    <div className="grid size-12 place-items-center rounded-full bg-black/50 text-white backdrop-blur-sm transition group-hover:scale-110">
+                        <Play className="size-5" />
+                    </div>
+                </div>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--studio-line)] px-3 py-2.5">
                 <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-[var(--studio-muted)]">
