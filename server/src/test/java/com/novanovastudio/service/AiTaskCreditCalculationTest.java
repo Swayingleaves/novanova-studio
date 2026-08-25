@@ -99,7 +99,7 @@ class AiTaskCreditCalculationTest {
                     new com.alibaba.fastjson2.JSONObject());
             Method method = AiTaskService.class.getDeclaredMethod("calculateTaskCredits", AiTaskDtos.CreateAiTaskRequest.class, resolvedModelType);
             method.setAccessible(true);
-            return (Integer) method.invoke(new AiTaskService(null, null, null, null, null, null, null, null, null, null, null), request, resolvedModel);
+            return (Integer) method.invoke(new AiTaskService(null, null, null, null, null, null, null, null, null, null, null, null), request, resolvedModel);
         } catch (InvocationTargetException exception) {
             if (exception.getCause() instanceof RuntimeException runtimeException) throw runtimeException;
             throw new IllegalStateException(exception.getCause());

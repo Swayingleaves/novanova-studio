@@ -1,6 +1,7 @@
 "use client";
 
 import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Switch, Tabs } from "antd";
+import type { TextAreaRef } from "antd/es/input/TextArea";
 import { nanoid } from "nanoid";
 import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,6 +20,7 @@ import {
     useConfigStore,
     type ApiCallFormat,
     type ConfigDialogTabKey,
+    type CustomModelGroupConfig,
     type ModelCapability,
     type ModelChannel,
     type VideoBillingConfiguration,
@@ -86,6 +88,7 @@ const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
     { label: "Anthropic", value: "anthropic" },
     { label: "Seedance", value: "seedance" },
     { label: "MiniMax", value: "minimax" },
+    { label: "自定义", value: "custom" },
 ];
 
 const objectStorageProviderOptions: Array<{ label: string; value: ObjectStorageProvider }> = [
@@ -432,6 +435,8 @@ export function AppConfigModal() {
                     videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
                     displayName: normalizedConfig.displayName,
                     modelIcon: normalizedConfig.modelIcon,
+                    isCustomModel: normalizedConfig.isCustomModel,
+                    customModelConfig: normalizedConfig.customModelConfig,
                 });
                 createdConfigIds.set(configItem.id, saved.id);
             }
@@ -460,6 +465,8 @@ export function AppConfigModal() {
                         videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
                         displayName: normalizedConfig.displayName,
                         modelIcon: normalizedConfig.modelIcon,
+                        isCustomModel: normalizedConfig.isCustomModel,
+                        customModelConfig: normalizedConfig.customModelConfig,
                     });
                 }
             }
@@ -718,9 +725,9 @@ export function AppConfigModal() {
                                                             </Button>
                                                             <Button
                                                                 size="small"
-                                                                disabled={isSaving || channel.apiFormat === "minimax"}
+                                                                disabled={isSaving || channel.apiFormat === "minimax" || channel.apiFormat === "custom"}
                                                                 loading={loadingChannelId === channel.id}
-                                                                title={channel.apiFormat === "minimax" ? "MiniMax 请手动配置 MiniMax-H3" : undefined}
+                                                                title={channel.apiFormat === "minimax" ? "MiniMax 请手动配置 MiniMax-H3" : channel.apiFormat === "custom" ? "自定义格式请手动配置模型列表" : undefined}
                                                                 onClick={() => void refreshChannelModels(channel)}
                                                             >
                                                                 拉取模型
@@ -748,7 +755,7 @@ export function AppConfigModal() {
                                                                     showSearch
                                                                     allowClear
                                                                     maxTagCount="responsive"
-                                                                    placeholder={channel.apiFormat === "minimax" ? "请输入 MiniMax-H3" : "输入模型名，或点击拉取模型"}
+                                                                    placeholder={channel.apiFormat === "minimax" ? "请输入 MiniMax-H3" : channel.apiFormat === "custom" ? "请输入模型名（自定义格式不支持自动拉取）" : "输入模型名，或点击拉取模型"}
                                                                     value={channel.models}
                                                                     disabled={isSaving}
                                                                     onChange={(models) => updateDraftChannel(channel.id, { models })}
@@ -1039,6 +1046,18 @@ export function AppConfigModal() {
                 {editingModelConfig?.modelType === "video" && editingModelIsMedia ? (
                     <div className="space-y-5">
                         <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <div className="flex items-center gap-1.5 text-sm font-semibold">
+                                        自定义模型 <Info className="size-4 text-[var(--studio-muted)]" />
+                                    </div>
+                                    <p className="mt-1 text-xs text-[var(--studio-muted)]">启用后按下方各模式配置的请求/响应示例调用任意 API，替换默认渠道调用。</p>
+                                </div>
+                                <Switch checked={Boolean(editingModelConfig.isCustomModel)} onChange={(checked) => updateEditingModelConfig({ isCustomModel: checked })} />
+                            </div>
+                        </section>
+
+                        <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
                             <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
                                 展示名称 <Info className="size-4 text-[var(--studio-muted)]" />
                             </div>
@@ -1189,6 +1208,18 @@ export function AppConfigModal() {
                                                     ))}
                                                 </div>
                                             </div>
+                                            {editingModelConfig.isCustomModel ? (
+                                                <CustomModelGroupEditor
+                                                    label={mode.label}
+                                                    group={editingModelConfig.customModelConfig?.[mode.value]}
+                                                    isVideo
+                                                    onChange={(group) =>
+                                                        updateEditingModelConfig({
+                                                            customModelConfig: { ...(editingModelConfig.customModelConfig || {}), [mode.value]: group },
+                                                        })
+                                                    }
+                                                />
+                                            ) : null}
                                         </div>
                                     );
                                 })}
@@ -1234,6 +1265,11 @@ export function AppConfigModal() {
                     </div>
                 ) : editingModelConfig ? (
                     <Form layout="vertical" requiredMark={false}>
+                        {editingModelConfig.modelType !== "text" ? (
+                            <Form.Item label="自定义模型" extra="启用后按下方各能力配置的请求/响应示例调用任意 API，替换默认渠道调用。">
+                                <Switch checked={Boolean(editingModelConfig.isCustomModel)} onChange={(checked) => updateEditingModelConfig({ isCustomModel: checked })} />
+                            </Form.Item>
+                        ) : null}
                         <Form.Item label="展示名称" extra="展示给用户看的名称，默认与真实模型名一致，仅影响展示不影响调用。">
                             <Input
                                 maxLength={255}
@@ -1261,21 +1297,52 @@ export function AppConfigModal() {
                             </Form.Item>
                         ) : null}
                         <Form.Item label="模型能力">
-                            <div className="flex flex-wrap gap-x-4 gap-y-2">
-                                {MODEL_CAPABILITY_OPTIONS[editingModelConfig.modelType].map((option) => (
-                                    <Checkbox
-                                        key={option.value}
-                                        checked={editingModelConfig.capabilities.includes(option.value)}
-                                        onChange={(event) =>
-                                            updateEditingModelConfig({
-                                                capabilities: event.target.checked ? uniqueModels([...editingModelConfig.capabilities, option.value]) : editingModelConfig.capabilities.filter((value) => value !== option.value),
-                                            })
-                                        }
-                                    >
-                                        {option.label}
-                                    </Checkbox>
-                                ))}
-                            </div>
+                            {editingModelConfig.modelType === "image" && editingModelConfig.isCustomModel ? (
+                                <div className="space-y-3">
+                                    {MODEL_CAPABILITY_OPTIONS.image.map((option) => (
+                                        <div key={option.value} className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
+                                            <Checkbox
+                                                checked={editingModelConfig.capabilities.includes(option.value)}
+                                                onChange={(event) =>
+                                                    updateEditingModelConfig({
+                                                        capabilities: event.target.checked ? uniqueModels([...editingModelConfig.capabilities, option.value]) : editingModelConfig.capabilities.filter((value) => value !== option.value),
+                                                    })
+                                                }
+                                            >
+                                                {option.label}
+                                            </Checkbox>
+                                            {editingModelConfig.capabilities.includes(option.value) ? (
+                                                <CustomModelGroupEditor
+                                                    label={option.label}
+                                                    group={editingModelConfig.customModelConfig?.[option.value]}
+                                                    isVideo={false}
+                                                    onChange={(group) =>
+                                                        updateEditingModelConfig({
+                                                            customModelConfig: { ...(editingModelConfig.customModelConfig || {}), [option.value]: group },
+                                                        })
+                                                    }
+                                                />
+                                            ) : null}
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="flex flex-wrap gap-x-4 gap-y-2">
+                                    {MODEL_CAPABILITY_OPTIONS[editingModelConfig.modelType].map((option) => (
+                                        <Checkbox
+                                            key={option.value}
+                                            checked={editingModelConfig.capabilities.includes(option.value)}
+                                            onChange={(event) =>
+                                                updateEditingModelConfig({
+                                                    capabilities: event.target.checked ? uniqueModels([...editingModelConfig.capabilities, option.value]) : editingModelConfig.capabilities.filter((value) => value !== option.value),
+                                                })
+                                            }
+                                        >
+                                            {option.label}
+                                        </Checkbox>
+                                    ))}
+                                </div>
+                            )}
                         </Form.Item>
                         {editingModelConfig.modelType === "text" && isOpenAiTextModel(editingModelConfig, draftChannels) ? (
                             <>
@@ -1315,8 +1382,13 @@ function cloneModelConfig(config: ServerModelConfig): ServerModelConfig {
         ...config,
         capabilities: [...config.capabilities],
         customBodyParameters: { ...(config.customBodyParameters || {}) },
+        customModelConfig: cloneCustomModelConfig(config.customModelConfig),
         videoBillingConfiguration: config.modelType === "video" ? cloneVideoBillingConfiguration(config.videoBillingConfiguration || createVideoBillingConfiguration()) : null,
     };
+}
+
+function cloneCustomModelConfig(config: ServerModelConfig["customModelConfig"] | null | undefined): ServerModelConfig["customModelConfig"] {
+    return Object.fromEntries(Object.entries(config || {}).map(([key, group]) => [key, { ...group }]));
 }
 
 function normalizeModelConfigForSave(config: ServerModelConfig): ServerModelConfig {
@@ -1330,10 +1402,16 @@ function normalizeModelConfigForSave(config: ServerModelConfig): ServerModelConf
               ) as VideoBillingConfiguration["modePrices"],
           }
         : config.videoBillingConfiguration;
+    // 自定义模型配置只保留已勾选能力的键，避免残留未启用能力的模板。
+    const customModelConfig = config.isCustomModel
+        ? Object.fromEntries(Object.entries(config.customModelConfig || {}).filter(([mode]) => supportedCapabilities.has(mode) && capabilities.includes(mode)))
+        : {};
     return {
         ...config,
         capabilities,
         videoBillingConfiguration,
+        isCustomModel: config.isCustomModel && config.modelType !== "text",
+        customModelConfig,
     };
 }
 
@@ -1359,6 +1437,8 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         videoBillingConfiguration: modelType === "video" ? createVideoBillingConfiguration() : null,
         displayName: null,
         modelIcon: null,
+        isCustomModel: false,
+        customModelConfig: {},
     };
 }
 
@@ -1377,8 +1457,10 @@ function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelC
         first.reasoningEffort === second.reasoningEffort &&
         (first.displayName || null) === (second.displayName || null) &&
         (first.modelIcon || null) === (second.modelIcon || null) &&
+        first.isCustomModel === second.isCustomModel &&
         sameValue(first.capabilities, second.capabilities) &&
         sameValue(first.customBodyParameters, second.customBodyParameters) &&
+        sameValue(first.customModelConfig, second.customModelConfig) &&
         sameValue(first.videoBillingConfiguration, second.videoBillingConfiguration)
     );
 }
@@ -1414,6 +1496,209 @@ function uniqueModels(models: string[]) {
     return Array.from(new Set(models.map((model) => model.trim()).filter(Boolean)));
 }
 
+/** 空的自定义模型分组配置。 */
+function emptyCustomModelGroup(): CustomModelGroupConfig {
+    return {
+        requestPath: "",
+        requestMethod: "POST",
+        requestModelName: "",
+        requestTemplate: "",
+        aiRequestPrompt: "",
+        responseExample: "",
+        resultPath: "",
+        queryPath: "",
+        queryMethod: "POST",
+        queryRequestTemplate: "",
+        aiQueryPrompt: "",
+        queryResponseExample: "",
+        queryResultPath: "",
+    };
+}
+
+const customRequestMethodOptions = [
+    { value: "POST", label: "POST" },
+    { value: "GET", label: "GET" },
+];
+
+/** 自定义模型请求模板可插入的系统占位符。 */
+const customTemplatePlaceholderOptions = [
+    { label: "{{prompt}}", value: "{{prompt}}" },
+    { label: "{{model}}", value: "{{model}}" },
+    { label: "{{references}}", value: "{{references}}" },
+    { label: "{{videoReferences}}", value: "{{videoReferences}}" },
+    { label: "{{size}}", value: "{{size}}" },
+    { label: "{{resolution}}", value: "{{resolution}}" },
+    { label: "{{seconds}}", value: "{{seconds}}" },
+    { label: "{{count}}", value: "{{count}}" },
+    { label: "{{taskId}}", value: "{{taskId}}" },
+];
+
+/** 自定义模型单个能力/模式分组的调用配置编辑器。 */
+function CustomModelGroupEditor({
+    label,
+    group,
+    isVideo,
+    onChange,
+}: {
+    label: string;
+    group: CustomModelGroupConfig | undefined;
+    isVideo: boolean;
+    onChange: (group: CustomModelGroupConfig) => void;
+}) {
+    const requestTemplateRef = useRef<TextAreaRef | null>(null);
+    const queryRequestTemplateRef = useRef<TextAreaRef | null>(null);
+    const current = { ...emptyCustomModelGroup(), ...(group || {}) };
+    const update = (patch: Partial<CustomModelGroupConfig>) => onChange({ ...current, ...patch });
+    const requestIsPost = current.requestMethod !== "GET";
+    const queryIsPost = current.queryMethod !== "GET";
+    const insertPlaceholder = (placeholder: string, ref: React.RefObject<TextAreaRef | null>, field: "requestTemplate" | "queryRequestTemplate") => {
+        const textArea = ref.current?.resizableTextArea?.textArea;
+        const latest = textArea?.value ?? current[field];
+        const start = textArea?.selectionStart ?? latest.length;
+        const end = textArea?.selectionEnd ?? latest.length;
+        const next = latest.slice(0, start) + placeholder + latest.slice(end);
+        update({ [field]: next } as Partial<CustomModelGroupConfig>);
+        requestAnimationFrame(() => {
+            textArea?.setSelectionRange(start + placeholder.length, start + placeholder.length);
+            textArea?.focus();
+        });
+    };
+    return (
+        <div className="mt-3 space-y-3 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
+            <div className="text-xs font-semibold text-[var(--studio-muted)]">自定义调用配置（{label}）</div>
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_112px]">
+                <div>
+                    <div className="mb-1 text-xs text-[var(--studio-muted)]">请求路径</div>
+                    <Input value={current.requestPath} placeholder="/api/v1/... 必填，与 Base URL 拼接" onChange={(event) => update({ requestPath: event.target.value })} />
+                </div>
+                <div>
+                    <div className="mb-1 text-xs text-[var(--studio-muted)]">请求方法</div>
+                    <Select value={current.requestMethod} options={customRequestMethodOptions} className="w-full" onChange={(value: "GET" | "POST") => update({ requestMethod: value })} />
+                </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                    <div className="mb-1 text-xs text-[var(--studio-muted)]">请求模型名称</div>
+                    <Input value={current.requestModelName} placeholder="填入请求体{{model}}占位符使用的模型名" onChange={(event) => update({ requestModelName: event.target.value })} />
+                </div>
+                <div>
+                    <div className="mb-1 text-xs text-[var(--studio-muted)]">结果路径</div>
+                    <Input value={current.resultPath} placeholder="如 data.image.url" onChange={(event) => update({ resultPath: event.target.value })} />
+                </div>
+            </div>
+            {requestIsPost ? (
+                <div className="space-y-2">
+                    <div className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-2.5">
+                        <div className="mb-1 text-xs text-[var(--studio-muted)]">AI 构造提示词（可选，配置后由 AI 生成请求体）</div>
+                        <Input.TextArea
+                            value={current.aiRequestPrompt}
+                            autoSize={{ minRows: 2, maxRows: 5 }}
+                            placeholder="如：根据提示词、分辨率和时长构造 comfyui workflow 请求体，包含 prompt、duration、resolution 字段"
+                            onChange={(event) => update({ aiRequestPrompt: event.target.value })}
+                        />
+                        <p className="mt-1 text-xs text-[var(--studio-muted)]">填写后每次请求由 AI 按提示词和本次实际参数生成请求体（替代模板拼接）；留空则使用下方模板。</p>
+                    </div>
+                    <div>
+                        <div className="mb-1 text-xs text-[var(--studio-muted)]">请求示例（JSON 模板，未填 AI 构造提示词时必填）</div>
+                        <div className="mb-1 flex flex-wrap items-center gap-1">
+                            <span className="text-xs text-[var(--studio-muted)]">插入占位符：</span>
+                            {customTemplatePlaceholderOptions.map((option) => (
+                                <Button key={option.value} size="small" className="!px-1.5 font-mono text-[11px]" onClick={() => insertPlaceholder(option.value, requestTemplateRef, "requestTemplate")}>
+                                    {option.label}
+                                </Button>
+                            ))}
+                        </div>
+                        <p className="mb-1 text-xs text-[var(--studio-muted)]">请用占位符引用实际参数（如{"{{prompt}}"}），未引用占位符的字段将原样发送，可能导致接口报错。</p>
+                        <Input.TextArea
+                            ref={requestTemplateRef}
+                            value={current.requestTemplate}
+                            autoSize={{ minRows: 3, maxRows: 8 }}
+                            spellCheck={false}
+                            className="font-mono text-xs"
+                            placeholder='{"model":"{{model}}","prompt":"{{prompt}}","image":{{references}}}'
+                            onChange={(event) => update({ requestTemplate: event.target.value })}
+                        />
+                    </div>
+                </div>
+            ) : null}
+            <div>
+                <div className="mb-1 text-xs text-[var(--studio-muted)]">响应示例（JSON，展示接口返回结构）</div>
+                <Input.TextArea
+                    value={current.responseExample}
+                    autoSize={{ minRows: 2, maxRows: 6 }}
+                    spellCheck={false}
+                    className="font-mono text-xs"
+                    placeholder='{"data":{"image":{"url":"https://..."}}}'
+                    onChange={(event) => update({ responseExample: event.target.value })}
+                />
+            </div>
+            {isVideo ? (
+                <>
+                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_112px]">
+                        <div>
+                            <div className="mb-1 text-xs text-[var(--studio-muted)]">查询路径（异步轮询，支持{"{{taskId}}"}占位符）</div>
+                            <Input value={current.queryPath} placeholder="/api/v1/.../result/{{taskId}}" onChange={(event) => update({ queryPath: event.target.value })} />
+                        </div>
+                        <div>
+                            <div className="mb-1 text-xs text-[var(--studio-muted)]">查询方法</div>
+                            <Select value={current.queryMethod} options={customRequestMethodOptions} className="w-full" onChange={(value: "GET" | "POST") => update({ queryMethod: value })} />
+                        </div>
+                    </div>
+                    {queryIsPost ? (
+                        <div className="space-y-2">
+                            <div className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-2.5">
+                                <div className="mb-1 text-xs text-[var(--studio-muted)]">AI 构造提示词（可选，配置后由 AI 生成查询请求体）</div>
+                                <Input.TextArea
+                                    value={current.aiQueryPrompt}
+                                    autoSize={{ minRows: 2, maxRows: 4 }}
+                                    placeholder="如：根据任务 ID 构造查询请求体，包含 task_id 字段"
+                                    onChange={(event) => update({ aiQueryPrompt: event.target.value })}
+                                />
+                                <p className="mt-1 text-xs text-[var(--studio-muted)]">填写后由 AI 按提示词和本次任务 ID 生成查询请求体；留空则使用下方模板。</p>
+                            </div>
+                            <div>
+                                <div className="mb-1 text-xs text-[var(--studio-muted)]">查询请求示例（JSON 模板，未填 AI 构造提示词时必填）</div>
+                                <div className="mb-1 flex flex-wrap items-center gap-1">
+                                    <span className="text-xs text-[var(--studio-muted)]">插入占位符：</span>
+                                    {customTemplatePlaceholderOptions.map((option) => (
+                                        <Button key={option.value} size="small" className="!px-1.5 font-mono text-[11px]" onClick={() => insertPlaceholder(option.value, queryRequestTemplateRef, "queryRequestTemplate")}>
+                                            {option.label}
+                                        </Button>
+                                    ))}
+                                </div>
+                                <p className="mb-1 text-xs text-[var(--studio-muted)]">用{"{{taskId}}"}引用轮询任务 ID，未引用占位符的字段将原样发送。</p>
+                                <Input.TextArea
+                                    ref={queryRequestTemplateRef}
+                                    value={current.queryRequestTemplate}
+                                    autoSize={{ minRows: 2, maxRows: 6 }}
+                                    spellCheck={false}
+                                    className="font-mono text-xs"
+                                    placeholder='{"task_id":"{{taskId}}"}'
+                                    onChange={(event) => update({ queryRequestTemplate: event.target.value })}
+                                />
+                            </div>
+                        </div>
+                    ) : null}
+                    <div>
+                        <div className="mb-1 text-xs text-[var(--studio-muted)]">查询响应示例（JSON）</div>
+                        <Input.TextArea
+                            value={current.queryResponseExample}
+                            autoSize={{ minRows: 2, maxRows: 6 }}
+                            spellCheck={false}
+                            className="font-mono text-xs"
+                            onChange={(event) => update({ queryResponseExample: event.target.value })}
+                        />
+                    </div>
+                    <div>
+                        <div className="mb-1 text-xs text-[var(--studio-muted)]">查询结果路径（配置查询路径后必填）</div>
+                        <Input value={current.queryResultPath} placeholder="如 data.video.url" onChange={(event) => update({ queryResultPath: event.target.value })} />
+                    </div>
+                </>
+            ) : null}
+        </div>
+    );
+}
+
 function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "newapi") return "New API";
     if (apiFormat === "evolink") return "Evolink";
@@ -1422,6 +1707,7 @@ function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "anthropic") return "Anthropic";
     if (apiFormat === "seedance") return "Seedance";
     if (apiFormat === "minimax") return "MiniMax";
+    if (apiFormat === "custom") return "自定义";
     return "OpenAI";
 }
 

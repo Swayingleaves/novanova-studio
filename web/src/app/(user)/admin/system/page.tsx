@@ -924,6 +924,40 @@ function PromptManagement() {
     const [editOpen, setEditOpen] = useState(false);
     const [editingPrompt, setEditingPrompt] = useState<ServerPrompt | null>(null);
     const [categoryOptions, setCategoryOptions] = useState<string[]>([]);
+    const [coverMode, setCoverMode] = useState<"upload" | "url">("upload");
+    const [coverFile, setCoverFile] = useState<File | null>(null);
+    const [coverPreview, setCoverPreview] = useState("");
+    const [saving, setSaving] = useState(false);
+    const coverInputRef = useRef<HTMLInputElement>(null);
+
+    const selectCoverFile = (file: File | undefined) => {
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            message.error("请选择图片文件");
+            return;
+        }
+        if (coverPreview.startsWith("blob:")) URL.revokeObjectURL(coverPreview);
+        setCoverFile(file);
+        setCoverPreview(URL.createObjectURL(file));
+    };
+
+    const previewCoverUrl = () => {
+        const url = String(form.getFieldValue("coverUrl") || "").trim();
+        if (!/^https?:\/\//i.test(url)) {
+            message.error("请输入有效的图片 URL");
+            return;
+        }
+        if (coverPreview.startsWith("blob:")) URL.revokeObjectURL(coverPreview);
+        setCoverFile(null);
+        setCoverPreview(url);
+    };
+
+    const closeEdit = () => {
+        if (coverPreview.startsWith("blob:")) URL.revokeObjectURL(coverPreview);
+        setCoverPreview("");
+        setCoverFile(null);
+        setEditOpen(false);
+    };
 
     const loadPrompts = useCallback(
         async (nextPage = page) => {
@@ -954,12 +988,18 @@ function PromptManagement() {
 
     const openCreate = () => {
         setEditingPrompt(null);
+        setCoverMode("upload");
+        setCoverFile(null);
+        setCoverPreview("");
         form.setFieldsValue({ status: 1, sortOrder: 1000, title: "", prompt: "", category: "", tagsText: "", coverUrl: "", preview: "", githubUrl: "" });
         setEditOpen(true);
     };
 
     const openEdit = (prompt: ServerPrompt) => {
         setEditingPrompt(prompt);
+        setCoverMode(prompt.coverUrl ? "url" : "upload");
+        setCoverFile(null);
+        setCoverPreview(prompt.coverUrl || "");
         form.setFieldsValue({
             title: prompt.title,
             prompt: prompt.prompt,
@@ -975,14 +1015,25 @@ function PromptManagement() {
     };
 
     const savePrompt = async () => {
+        let values: PromptFormValues;
         try {
-            const values = await form.validateFields();
+            values = await form.validateFields();
+        } catch {
+            return;
+        }
+        setSaving(true);
+        try {
+            let coverUrlValue = values.coverUrl?.trim() || "";
+            if (coverFile) {
+                const uploaded = await uploadImage(coverFile);
+                coverUrlValue = uploaded.url;
+            }
             const input = {
                 title: values.title.trim(),
                 prompt: values.prompt.trim(),
                 category: values.category.trim(),
                 tags: splitTags(values.tagsText),
-                coverUrl: values.coverUrl?.trim() || "",
+                coverUrl: coverUrlValue,
                 preview: values.preview?.trim() || "",
                 sourceUrl: values.githubUrl?.trim() || "",
                 status: values.status ?? 1,
@@ -995,11 +1046,13 @@ function PromptManagement() {
                 await createAdminPrompt(input);
                 message.success("提示词已创建");
             }
-            setEditOpen(false);
+            closeEdit();
             await loadPrompts(editingPrompt ? page : 1);
             if (!editingPrompt) setPage(1);
         } catch (error) {
-            if (error instanceof Error) message.error(error.message);
+            message.error(error instanceof Error ? error.message : "保存提示词失败");
+        } finally {
+            setSaving(false);
         }
     };
 
@@ -1177,48 +1230,92 @@ function PromptManagement() {
                 <Pagination current={page} pageSize={PAGE_SIZE} total={total} showSizeChanger={false} onChange={setPage} />
             </div>
 
-            <Modal title={editingPrompt ? "编辑提示词" : "新增提示词"} open={editOpen} onOk={savePrompt} onCancel={() => setEditOpen(false)} okText="保存" cancelText="取消" width={760}>
+            <Modal title={editingPrompt ? "编辑提示词" : "新增提示词"} open={editOpen} onOk={savePrompt} onCancel={closeEdit} okText="保存" cancelText="取消" confirmLoading={saving} width={880}>
                 <Form form={form} layout="vertical" className="mt-2">
-                    <Form.Item name="title" label="标题" rules={[{ required: true, message: "请输入标题" }]}>
-                        <Input placeholder="请输入提示词标题" />
-                    </Form.Item>
-                    <Form.Item name="prompt" label="提示词内容" rules={[{ required: true, message: "请输入提示词内容" }]}>
-                        <Input.TextArea rows={6} placeholder="请输入提示词内容" />
-                    </Form.Item>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                        <Form.Item name="category" label="分类" rules={[{ required: true, message: "请输入分类" }]}>
-                            <Input placeholder="例如：摄影、海报、角色" />
-                        </Form.Item>
-                        <Form.Item name="tagsText" label="标签">
-                            <Input placeholder="多个标签用逗号分隔" />
-                        </Form.Item>
-                    </div>
-                    <Form.Item name="coverUrl" label="封面 URL">
-                        <Space.Compact block>
-                            <Input placeholder="https://..." />
-                            <Button disabled icon={<Upload className="size-3.5" />}>
-                                上传后续支持
-                            </Button>
-                        </Space.Compact>
-                    </Form.Item>
-                    <Form.Item name="preview" label="预览内容">
-                        <Input.TextArea rows={3} placeholder="可填写 Markdown 图片预览内容" />
-                    </Form.Item>
-                    <Form.Item name="githubUrl" label="来源 URL">
-                        <Input placeholder="https://..." />
-                    </Form.Item>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                        <Form.Item name="sortOrder" label="排序">
-                            <InputNumber className="w-full" min={0} precision={0} />
-                        </Form.Item>
-                        <Form.Item name="status" label="状态">
-                            <Select<number>
+                    <div className="flex h-[560px] gap-5">
+                        <div className="flex w-60 shrink-0 flex-col gap-3">
+                            <div className="studio-empty flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg border border-[var(--studio-line)] bg-[var(--studio-media)]">
+                                {coverPreview ? (
+                                    <img src={coverPreview} alt="封面预览" className="h-full w-full object-contain" />
+                                ) : (
+                                    <span className="text-xs">暂无封面</span>
+                                )}
+                            </div>
+                            <Segmented
+                                block
+                                value={coverMode}
+                                onChange={(value) => setCoverMode(value as "upload" | "url")}
                                 options={[
-                                    { label: "启用", value: 1 },
-                                    { label: "停用", value: 0 },
+                                    { label: "上传图片", value: "upload" },
+                                    { label: "上传 URL", value: "url" },
                                 ]}
                             />
-                        </Form.Item>
+                            <input
+                                ref={coverInputRef}
+                                type="file"
+                                accept="image/*"
+                                hidden
+                                onChange={(event) => {
+                                    selectCoverFile(event.target.files?.[0]);
+                                    event.target.value = "";
+                                }}
+                            />
+                            {coverMode === "upload" ? (
+                                <>
+                                    <Form.Item name="coverUrl" hidden className="mb-0">
+                                        <Input />
+                                    </Form.Item>
+                                    <Button icon={<Upload className="size-3.5" />} onClick={() => coverInputRef.current?.click()}>
+                                        选择图片并预览
+                                    </Button>
+                                    {coverFile ? <div className="studio-caption truncate text-xs">{coverFile.name}</div> : null}
+                                </>
+                            ) : (
+                                <>
+                                    <Form.Item name="coverUrl" className="mb-0">
+                                        <Input placeholder="https://..." allowClear onPressEnter={previewCoverUrl} />
+                                    </Form.Item>
+                                    <Button icon={<Upload className="size-3.5" />} onClick={previewCoverUrl}>
+                                        上传并预览
+                                    </Button>
+                                </>
+                            )}
+                        </div>
+                        <div className="min-w-0 flex-1 overflow-y-auto pr-1">
+                            <Form.Item name="title" label="标题" rules={[{ required: true, message: "请输入标题" }]}>
+                                <Input placeholder="请输入提示词标题" />
+                            </Form.Item>
+                            <Form.Item name="prompt" label="提示词内容" rules={[{ required: true, message: "请输入提示词内容" }]}>
+                                <Input.TextArea rows={6} placeholder="请输入提示词内容" />
+                            </Form.Item>
+                            <div className="grid gap-4 sm:grid-cols-2">
+                                <Form.Item name="category" label="分类" rules={[{ required: true, message: "请输入分类" }]}>
+                                    <Input placeholder="例如：摄影、海报、角色" />
+                                </Form.Item>
+                                <Form.Item name="tagsText" label="标签">
+                                    <Input placeholder="多个标签用逗号分隔" />
+                                </Form.Item>
+                            </div>
+                            <Form.Item name="preview" label="预览内容">
+                                <Input.TextArea rows={3} placeholder="可填写 Markdown 图片预览内容" />
+                            </Form.Item>
+                            <Form.Item name="githubUrl" label="来源 URL">
+                                <Input placeholder="https://..." />
+                            </Form.Item>
+                            <div className="grid gap-4 sm:grid-cols-2">
+                                <Form.Item name="sortOrder" label="排序">
+                                    <InputNumber className="w-full" min={0} precision={0} />
+                                </Form.Item>
+                                <Form.Item name="status" label="状态">
+                                    <Select<number>
+                                        options={[
+                                            { label: "启用", value: 1 },
+                                            { label: "停用", value: 0 },
+                                        ]}
+                                    />
+                                </Form.Item>
+                            </div>
+                        </div>
                     </div>
                 </Form>
             </Modal>

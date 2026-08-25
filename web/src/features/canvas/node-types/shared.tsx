@@ -1,7 +1,7 @@
 "use client";
 
 import { Handle, Position } from "@xyflow/react";
-import { LoaderCircle, AlertTriangle } from "lucide-react";
+import { LoaderCircle, AlertTriangle, TriangleAlert } from "lucide-react";
 import { forwardRef, type CSSProperties, type MouseEventHandler, type ReactNode } from "react";
 import { CANVAS_CONNECTION_HANDLE_SIZE } from "../constants";
 import type { CanvasNode } from "../types";
@@ -41,6 +41,19 @@ export function NodeError({
           重试
         </button>
       ) : null}
+    </div>
+  );
+}
+
+/** 媒体节点下载提示：生成结果有时效，超时将无法下载 */
+export function MediaDownloadHint() {
+  return (
+    <div
+      className="pointer-events-none absolute bottom-2 left-2 z-10 flex max-w-[calc(100%-1rem)] items-center gap-1 rounded-full px-2.5 py-1 text-[11px]"
+      style={{ background: "rgba(0,0,0,0.55)", color: "#fbbf24" }}
+    >
+      <TriangleAlert className="size-3 shrink-0" />
+      <span className="truncate">请尽快下载生成结果，超时将无法下载</span>
     </div>
   );
 }

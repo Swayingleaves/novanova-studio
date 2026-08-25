@@ -16,8 +16,8 @@ export const CANVAS_CONNECTION_HANDLE_SIZE = 16;
 
 const IMAGE_NODE_TEMPLATE: CanvasNodeTemplate = {
     title: "图像",
-    width: 340,
-    height: 240,
+    width: 510,
+    height: 360,
 };
 
 const TEXT_NODE_TEMPLATE: CanvasNodeTemplate = {
@@ -28,8 +28,8 @@ const TEXT_NODE_TEMPLATE: CanvasNodeTemplate = {
 
 const VIDEO_NODE_TEMPLATE: CanvasNodeTemplate = {
     title: "视频",
-    width: 420,
-    height: 236,
+    width: 630,
+    height: 354,
 };
 
 const VIDEO_COMPOSITION_NODE_TEMPLATE: CanvasNodeTemplate = {

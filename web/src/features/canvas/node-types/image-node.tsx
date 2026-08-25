@@ -5,7 +5,7 @@ import { NodeResizer, useUpdateNodeInternals, type NodeProps, type Node } from "
 import { AlertTriangle, ChevronRight, Image as ImageIcon, Images, LoaderCircle, Sparkles } from "lucide-react";
 import type { CanvasImageNode } from "../types";
 import { type BatchImagePreview, useNodeActions } from "./node-action-context";
-import { CanvasConnectionHandles, NodeHoverSurface } from "./shared";
+import { CanvasConnectionHandles, MediaDownloadHint, NodeHoverSurface } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 
 const BATCH_COLLAPSE_TRANSITION_MS = 260;
@@ -197,12 +197,15 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                 <span className="text-xs text-red-400">{data.execution.errorMessage || "生成失败"}</span>
               </div>
             ) : hasContent ? (
-              <img
-                src={data.content.source}
-                alt={data.title || ""}
-                className="h-full w-full object-cover"
-                draggable={false}
-              />
+              <div className="relative h-full w-full">
+                <img
+                  src={data.content.source}
+                  alt={data.title || ""}
+                  className="h-full w-full object-cover"
+                  draggable={false}
+                />
+                <MediaDownloadHint />
+              </div>
             ) : (
               <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-sm" style={{ color: theme.node.placeholder }}>
                 <ImageIcon className="size-7 opacity-35" />

@@ -108,6 +108,11 @@
                     <groupId>org.slf4j</groupId>
                     <artifactId>slf4j-log4j12</artifactId>
                 </exclusion>
+                <!-- 排除 commons-logging，避免与 spring-jcl 冲突，JCL 由 spring-jcl 桥接到 SLF4J/Logback -->
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
         <!-- 阿里云OSS对象存储SDK -->
@@ -115,6 +120,13 @@
             <groupId>com.aliyun.oss</groupId>
             <artifactId>aliyun-sdk-oss</artifactId>
             <version>3.18.4</version>
+            <exclusions>
+                <!-- 排除 commons-logging，避免与 spring-jcl 冲突，JCL 由 spring-jcl 桥接到 SLF4J/Logback -->
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <!-- OSS Java SDK在JDK 9及以上运行时需要的JAXB依赖 -->
         <dependency>

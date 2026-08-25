@@ -75,6 +75,8 @@ flowchart TB
 | `video_billing_configuration` | `JSONB` | 视频模型分档计费配置，包含唯一计费方式、最短生成秒数，以及文生视频、图生视频、全能参考三个模式各自的 `Auto/480p/720p/768p/1080p/2k/4k` 单价；空价格表示该模式和分辨率不可用。 |
 | `display_name` | `VARCHAR(255)` | 模型展示名称，为空或与真实模型名相同时展示真实模型名，仅影响展示不影响调用。 |
 | `model_icon` | `VARCHAR(64)` | 模型展示图标标识，为空时按模型名或渠道自动匹配，仅影响展示不影响调用。 |
+| `is_custom_model` | `BOOLEAN` | 是否启用自定义模型调用，独立于渠道调用格式，仅图片/视频模型支持，默认 `false`。 |
+| `custom_model_config` | `JSONB` | 自定义模型配置，按图片能力（`text-to-image`、`image-to-image`）或视频模式（`text-to-video`、`image-to-video`、`reference-to-video`）分组；每组含请求路径（以 `/` 开头，与渠道 Base URL 拼接，支持 `{{taskId}}` 占位符）、请求方法（`GET`/`POST`，默认 POST）、请求模型名称、请求示例 JSON 模板（支持 `{{prompt}}`、`{{model}}`、`{{references}}`、`{{size}}` 等占位符）、AI 构造请求体提示词（可选，配置后由 Agent 按提示词与本次参数生成请求体，替代模板拼接）、响应示例、结果路径（如 `data.image.url`）；视频模式额外含查询路径（支持 `{{taskId}}`）、查询方法、查询请求示例、AI 构造查询请求体提示词、查询响应示例、查询结果路径，用于异步任务轮询，轮询间隔统一使用 `AI_TASK_POLLING_INTERVAL_SECONDS` 配置。 |
 
 ### `ai_generation_tasks`
 

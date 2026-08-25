@@ -210,6 +210,9 @@ public class PersistenceService {
                             : normalizeCustomBodyParameters(request.customBodyParameters());
                     record.setCustomBodyParameters(JSON.toJSONString(customBodyParameters));
                     record.setVideoBillingConfiguration(videoBillingConfiguration == null ? null : JSON.toJSONString(videoBillingConfiguration));
+                    boolean isCustomModel = Boolean.TRUE.equals(request.isCustomModel());
+                    record.setIsCustomModel(isCustomModel);
+                    record.setCustomModelConfig(JSON.toJSONString(normalizeCustomModelConfig(request.modelType(), isCustomModel, capabilities, request.customModelConfig())));
                     record.setDisplayName(normalizeDisplayName(request.displayName(), request.modelName()));
                     record.setModelIcon(normalizeModelIcon(request.modelIcon()));
                     return repository.createPlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
@@ -246,6 +249,9 @@ public class PersistenceService {
                             : normalizeCustomBodyParameters(request.customBodyParameters());
                     record.setCustomBodyParameters(JSON.toJSONString(customBodyParameters));
                     record.setVideoBillingConfiguration(videoBillingConfiguration == null ? null : JSON.toJSONString(videoBillingConfiguration));
+                    boolean isCustomModel = Boolean.TRUE.equals(request.isCustomModel());
+                    record.setIsCustomModel(isCustomModel);
+                    record.setCustomModelConfig(JSON.toJSONString(normalizeCustomModelConfig(request.modelType(), isCustomModel, capabilities, request.customModelConfig())));
                     record.setDisplayName(normalizeDisplayName(request.displayName(), record.getModelName()));
                     record.setModelIcon(normalizeModelIcon(request.modelIcon()));
                     PersistenceDtos.ModelConfig modelConfig = modelConfigDto(record);
@@ -305,7 +311,9 @@ public class PersistenceService {
                 normalizeCustomBodyParameters(record.getCustomBodyParameters()),
                 parseVideoBillingConfiguration(record.getVideoBillingConfiguration()),
                 record.getDisplayName(),
-                record.getModelIcon());
+                record.getModelIcon(),
+                Boolean.TRUE.equals(record.getIsCustomModel()),
+                parseCustomModelConfig(record.getCustomModelConfig()));
     }
 
     /**
@@ -429,9 +437,132 @@ public class PersistenceService {
         }
     }
 
+    /**
+     * 解析数据库保存的自定义模型配置。
+     *
+     * @param value String JSON配置文本
+     * @return Map<String, CustomModelGroupConfig> 按能力或模式分组配置，未配置时返回空表
+     */
+    private Map<String, PersistenceDtos.CustomModelGroupConfig> parseCustomModelConfig(String value) {
+        if (!StringUtils.hasText(value) || "null".equals(value.trim())) return Map.of();
+        JSONObject json = parseJson(value);
+        if (json == null || json.isEmpty()) return Map.of();
+        Map<String, PersistenceDtos.CustomModelGroupConfig> result = new LinkedHashMap<>();
+        for (String key : json.keySet()) {
+            JSONObject group = json.getJSONObject(key);
+            if (group == null) continue;
+            result.put(key, new PersistenceDtos.CustomModelGroupConfig(
+                    group.getString("requestPath"),
+                    group.getString("requestMethod"),
+                    group.getString("requestModelName"),
+                    group.getString("requestTemplate"),
+                    group.getString("aiRequestPrompt"),
+                    group.getString("responseExample"),
+                    group.getString("resultPath"),
+                    group.getString("queryPath"),
+                    group.getString("queryMethod"),
+                    group.getString("queryRequestTemplate"),
+                    group.getString("aiQueryPrompt"),
+                    group.getString("queryResponseExample"),
+                    group.getString("queryResultPath")));
+        }
+        return Map.copyOf(result);
+    }
+
+    /**
+     * 规范化自定义模型配置，并按模型类型校验能力键与必填字段。
+     *
+     * @param modelType String 模型类型
+     * @param isCustomModel boolean 是否启用自定义模型
+     * @param capabilities List<String> 已配置模型能力
+     * @param config Map<String, CustomModelGroupConfig> 请求中的自定义模型配置
+     * @return Map<String, CustomModelGroupConfig> 规范化后的配置
+     */
+    private Map<String, PersistenceDtos.CustomModelGroupConfig> normalizeCustomModelConfig(String modelType, boolean isCustomModel,
+                                                                                            List<String> capabilities,
+                                                                                            Map<String, PersistenceDtos.CustomModelGroupConfig> config) {
+        Map<String, PersistenceDtos.CustomModelGroupConfig> input = config == null ? Map.of() : config;
+        if ("text".equals(modelType)) {
+            if (isCustomModel || !input.isEmpty()) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "文本模型不支持自定义模型");
+            }
+            return Map.of();
+        }
+        if (!isCustomModel) {
+            if (!input.isEmpty()) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "未启用自定义模型时不能配置自定义请求模板");
+            }
+            return Map.of();
+        }
+        Set<String> allowedKeys = "video".equals(modelType)
+                ? Set.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO, VideoGenerationMode.REFERENCE_TO_VIDEO)
+                : Set.of("text-to-image", "image-to-image");
+        Map<String, PersistenceDtos.CustomModelGroupConfig> normalized = new LinkedHashMap<>();
+        for (Map.Entry<String, PersistenceDtos.CustomModelGroupConfig> entry : input.entrySet()) {
+            String key = entry.getKey() == null ? "" : entry.getKey().trim();
+            if (!allowedKeys.contains(key)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "自定义模型配置包含不支持的能力或模式: " + entry.getKey());
+            }
+            if (!capabilities.contains(key)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "自定义模型配置只能包含已勾选的能力或模式: " + key);
+            }
+            PersistenceDtos.CustomModelGroupConfig group = entry.getValue();
+            if (group == null) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]的自定义模型配置不能为空");
+            }
+            String requestPath = group.requestPath() == null ? "" : group.requestPath().trim();
+            if (!StringUtils.hasText(requestPath) || !requestPath.startsWith("/")) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]的请求路径不能为空，且需以 / 开头");
+            }
+            String requestMethod = normalizeCustomRequestMethod(group.requestMethod());
+            if (!"GET".equals(requestMethod) && !StringUtils.hasText(group.requestTemplate()) && !StringUtils.hasText(group.aiRequestPrompt())) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]使用POST请求时必须配置请求示例或AI构造提示词");
+            }
+            if (!StringUtils.hasText(group.resultPath())) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]的结果路径不能为空");
+            }
+            boolean queryEnabled = StringUtils.hasText(group.queryPath())
+                    || StringUtils.hasText(group.queryRequestTemplate()) || StringUtils.hasText(group.aiQueryPrompt());
+            if (queryEnabled) {
+                if (!StringUtils.hasText(group.queryPath())) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]配置了异步查询时必须配置查询路径");
+                }
+                if (!StringUtils.hasText(group.queryResultPath())) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]配置了异步查询时必须配置查询结果路径");
+                }
+            }
+            String queryMethod = normalizeCustomRequestMethod(group.queryMethod());
+            if (queryEnabled && !"GET".equals(queryMethod) && !StringUtils.hasText(group.queryRequestTemplate())
+                    && !StringUtils.hasText(group.aiQueryPrompt())) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]使用POST查询时必须配置查询请求示例或AI构造提示词");
+            }
+            normalized.put(key, new PersistenceDtos.CustomModelGroupConfig(
+                    requestPath, requestMethod, group.requestModelName(), group.requestTemplate(), group.aiRequestPrompt(),
+                    group.responseExample(), group.resultPath(),
+                    group.queryPath() == null ? null : group.queryPath().trim(), queryMethod,
+                    group.queryRequestTemplate(), group.aiQueryPrompt(),
+                    group.queryResponseExample(), group.queryResultPath()));
+        }
+        return Map.copyOf(normalized);
+    }
+
     /** 规范化模型自定义JSON请求体参数。 */
     private JSONObject normalizeCustomBodyParameters(JSONObject parameters) {
         return parameters == null ? new JSONObject() : JSON.parseObject(JSON.toJSONString(parameters));
+    }
+
+    /**
+     * 规范化自定义模型请求方法，空值默认POST。
+     *
+     * @param method String 原始请求方法
+     * @return String GET或POST
+     */
+    private String normalizeCustomRequestMethod(String method) {
+        String normalized = StringUtils.hasText(method) ? method.trim().toUpperCase() : "POST";
+        if (!Set.of("GET", "POST").contains(normalized)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "自定义模型请求方法只支持GET或POST");
+        }
+        return normalized;
     }
 
     /** 规范化模型自定义JSON请求体参数字符串。 */

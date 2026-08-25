@@ -49,7 +49,6 @@ import reactor.core.publisher.Mono;
 @Slf4j
 public abstract class AbstractTaskProfile implements AgentLoopProfile {
 
-    private static final Duration TIMEOUT = Duration.ofSeconds(300);
     /** 仅供生成轮次快照使用的内部参数键，不能进入渠道请求。 */
     private static final String INTERNAL_STYLE_SNAPSHOTS = "generationStyleSnapshots";
 
@@ -487,8 +486,12 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
             AtomicReference<TaskProgressSnapshot> previousSnapshot = new AtomicReference<>(
                     new TaskProgressSnapshot(initialTask.status(), initialProgress));
             Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
+            // 视频生成常超5分钟（自定义模型异步轮询最长约10分钟），按任务类型读取可配置的等待超时
+            Duration timeout = AiTaskTypes.VIDEO.equals(taskType())
+                    ? Duration.ofSeconds(properties.getAi().getTask().getVideoWaitTimeoutSeconds())
+                    : Duration.ofSeconds(properties.getAi().getTask().getWaitTimeoutSeconds());
             return Flux.interval(Duration.ZERO, pollingInterval)
-            .take(TIMEOUT)
+            .take(timeout)
             .concatMap(i -> aiTaskService.getTaskForUser(userId, taskId))
             .concatMap(task -> {
                 // 先更新后端活动快照，再保存轮次，确保数据库中的执行过程与当前进度一致。

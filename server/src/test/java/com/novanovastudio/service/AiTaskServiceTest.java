@@ -17,6 +17,7 @@ import com.novanovastudio.ai.AiProviderException;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.ai.VideoGenerationMode;
+import com.novanovastudio.ai.provider.CustomProviderAdapter;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.dto.AiTaskDtos;
@@ -88,6 +89,10 @@ class AiTaskServiceTest {
     @Mock
     private AiProviderAdapterRegistry adapterRegistry;
 
+    /** 自定义模型供应商适配器 */
+    @Mock
+    private CustomProviderAdapter customProviderAdapter;
+
     /** 图片供应商适配器 */
     private AiProviderAdapter providerAdapter;
 
@@ -112,7 +117,7 @@ class AiTaskServiceTest {
     void setUp() {
         executionOrder = new ArrayList<>();
         service = new AiTaskService(repository, currentUserProvider, properties, persistenceService,
-                eventPublisher, taskQueue, modelTaskExecutionDispatcher, orchestrator, adapterRegistry, creditService, transactionalOperator);
+                eventPublisher, taskQueue, modelTaskExecutionDispatcher, orchestrator, adapterRegistry, customProviderAdapter, creditService, transactionalOperator);
 
         AiTaskDtos.AiChannelConfig channel = new AiTaskDtos.AiChannelConfig(
                 "channel-1", "图片渠道", "https://example.com", "key", "openai", List.of("model-1"));
@@ -125,7 +130,7 @@ class AiTaskServiceTest {
                         new com.alibaba.fastjson2.JSONObject(), new VideoBillingConfiguration("generation", 3,
                         Map.of(VideoGenerationMode.TEXT_TO_VIDEO, Map.of("720p", 6),
                                 VideoGenerationMode.IMAGE_TO_VIDEO, Map.of("720p", 8),
-                                VideoGenerationMode.REFERENCE_TO_VIDEO, Map.of("720p", 10))), null, null),
+                                VideoGenerationMode.REFERENCE_TO_VIDEO, Map.of("720p", 10))), null, null, false, null),
                 new PersistenceDtos.ModelConfig("model-config-3", "channel-1", "model-1", AiTaskTypes.TEXT, List.of(), true, 0, 0, true, "high")
         )));
         providerAdapter = mock(AiProviderAdapter.class);

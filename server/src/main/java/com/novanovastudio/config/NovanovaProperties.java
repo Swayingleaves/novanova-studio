@@ -869,6 +869,12 @@ public class NovanovaProperties {
             /** 异步AI任务状态轮询间隔秒数，包括供应商、内部等待和视频合成恢复 */
             private int pollingIntervalSeconds = 3;
 
+            /** 生成任务等待超时秒数（图片等常规任务） */
+            private int waitTimeoutSeconds = 300;
+
+            /** 视频生成任务等待超时秒数，需覆盖自定义模型异步轮询上限（约10分钟）并留余量 */
+            private int videoWaitTimeoutSeconds = 900;
+
             /** 任务锁TTL秒数 */
             private int lockTtlSeconds = 300;
 
@@ -978,6 +984,42 @@ public class NovanovaProperties {
              */
             public int getPollingIntervalSeconds() {
                 return pollingIntervalSeconds;
+            }
+
+            /**
+             * 获取生成任务等待超时秒数。
+             *
+             * @return int 生成任务等待超时秒数
+             */
+            public int getWaitTimeoutSeconds() {
+                return waitTimeoutSeconds;
+            }
+
+            /**
+             * 设置生成任务等待超时秒数。
+             *
+             * @param waitTimeoutSeconds int 生成任务等待超时秒数
+             */
+            public void setWaitTimeoutSeconds(int waitTimeoutSeconds) {
+                this.waitTimeoutSeconds = waitTimeoutSeconds;
+            }
+
+            /**
+             * 获取视频生成任务等待超时秒数。
+             *
+             * @return int 视频生成任务等待超时秒数
+             */
+            public int getVideoWaitTimeoutSeconds() {
+                return videoWaitTimeoutSeconds;
+            }
+
+            /**
+             * 设置视频生成任务等待超时秒数。
+             *
+             * @param videoWaitTimeoutSeconds int 视频生成任务等待超时秒数
+             */
+            public void setVideoWaitTimeoutSeconds(int videoWaitTimeoutSeconds) {
+                this.videoWaitTimeoutSeconds = videoWaitTimeoutSeconds;
             }
 
             /**
