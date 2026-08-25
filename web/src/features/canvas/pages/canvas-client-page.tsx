@@ -2799,6 +2799,17 @@ function CanvasWorkspacePage() {
                 return failedCanvasGenerationResult(nodeId, readAiTaskError(error));
             }
             if (externalSignal?.aborted) return canceledCanvasGenerationResult();
+            // 合并视频节点上手动上传/上次生成持久化的参考素材（与连线引用按地址去重）
+            if (mode === "video" && sourceNode && isVideoNode(sourceNode)) {
+                const savedReferences = await resolveVideoGenerationReferences(sourceNode.generation);
+                if (savedReferences && !savedReferences.incomplete) {
+                    generationContext = {
+                        ...generationContext,
+                        referenceImages: mergeUniqueReferences(generationContext.referenceImages, savedReferences.referenceImages),
+                        referenceVideos: mergeUniqueReferences(generationContext.referenceVideos, savedReferences.referenceVideos),
+                    };
+                }
+            }
             if (mode === "video") {
                 const videoQuote = quoteVideoGeneration({
                     config: generationConfig,
@@ -4348,6 +4359,18 @@ function generationVideoReferenceAttributes(context: { referenceImages: Referenc
         videoReferences: context.referenceVideos.map(videoReferenceUrl).filter((url): url is string => Boolean(url)),
         videoReferenceObjectStorages: context.referenceVideos.map((video) => video.objectStorage).filter((file): file is NonNullable<typeof file> => Boolean(file?.url)),
     };
+}
+
+type PersistableReference = { objectStorage?: ObjectStorageFile; url?: string; storageKey?: string; dataUrl?: string };
+
+function referenceIdentityKey(reference: PersistableReference) {
+    return reference.objectStorage?.url || reference.url || reference.storageKey || reference.dataUrl || "";
+}
+
+/** 合并两组参考素材，按对象存储地址/URL 去重，连线引用优先。 */
+function mergeUniqueReferences<T extends PersistableReference>(primary: T[], extra: T[]): T[] {
+    const seen = new Set(primary.map(referenceIdentityKey));
+    return [...primary, ...extra.filter((reference) => !seen.has(referenceIdentityKey(reference)))];
 }
 
 function videoReferenceUrl(video: ReferenceVideo) {

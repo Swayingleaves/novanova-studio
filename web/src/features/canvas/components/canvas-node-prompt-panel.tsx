@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Sparkles, Square, Video } from "lucide-react";
+import { ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Sparkles, Square, Video, X } from "lucide-react";
 import { App, Button, Modal, Tooltip } from "antd";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
@@ -10,6 +10,9 @@ import { normalizeImageGenerationCount } from "@/features/generation/components/
 import { normalizeVideoGenerationCount } from "@/features/generation/components/video-settings-panel";
 import { CreditCostDisplay, requestCreditCost } from "@/features/generation/constants/credits";
 import { availableVideoModelsForMode, quoteVideoGeneration } from "@/features/generation/lib/video-billing";
+import { uploadImage } from "@/features/storage/services/image-storage";
+import { uploadMediaFile } from "@/features/storage/services/file-storage";
+import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptPicker } from "./canvas-prompt-picker";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
@@ -71,6 +74,8 @@ export function CanvasNodePromptPanel({
     const [styleCommand, setStyleCommand] = useState<{ start: number; end: number } | null>(null);
     const [highlightedStyleIndex, setHighlightedStyleIndex] = useState(0);
     const [referencePreview, setReferencePreview] = useState<CanvasResourceReference | null>(null);
+    const referenceInputRef = useRef<HTMLInputElement>(null);
+    const [uploadingReference, setUploadingReference] = useState(false);
     const promptEditorRef = useRef<PromptEditorHandle>(null);
     const libraryPromptRef = useRef<string | null>(null);
     const config = buildNodeConfig(globalConfig, node, mode);
@@ -250,6 +255,50 @@ export function CanvasNodePromptPanel({
         setSelectedStyles([]);
     };
 
+    const addReferenceFiles = async (files: FileList | null) => {
+        if (!files?.length || !isVideoNode(node)) return;
+        setUploadingReference(true);
+        try {
+            const generation = node.generation;
+            const imageReferences = [...generation.references];
+            const imageStorages = [...generation.referenceObjectStorages];
+            const videoReferences = [...(generation.videoReferences || [])];
+            const videoStorages = [...(generation.videoReferenceObjectStorages || [])];
+            for (const file of Array.from(files)) {
+                if (file.type.startsWith("video/")) {
+                    const uploaded = await uploadMediaFile(file, "video");
+                    videoReferences.push(persistedReferenceValue(uploaded.objectStorage?.url, uploaded.url, uploaded.storageKey));
+                    if (uploaded.objectStorage) videoStorages.push(uploaded.objectStorage);
+                } else {
+                    const uploaded = await uploadImage(file);
+                    imageReferences.push(persistedReferenceValue(uploaded.objectStorage?.url, uploaded.url, uploaded.storageKey));
+                    if (uploaded.objectStorage) imageStorages.push(uploaded.objectStorage);
+                }
+            }
+            onConfigChange(node.id, { references: imageReferences, referenceObjectStorages: imageStorages, videoReferences, videoReferenceObjectStorages: videoStorages });
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "参考素材上传失败");
+        } finally {
+            setUploadingReference(false);
+        }
+    };
+
+    const removePersistedReference = (reference: CanvasResourceReference) => {
+        if (!isVideoNode(node)) return;
+        const url = reference.previewUrl;
+        if (!url) return;
+        const generation = node.generation;
+        const imageStorages = generation.referenceObjectStorages || [];
+        const videoStorages = generation.videoReferenceObjectStorages || [];
+        const entryUrl = (entry: string, files: ObjectStorageFile[]) => files.find((file) => file.url === entry || file.key === entry.replace(/^(?:image|video):/, ""))?.url || entry;
+        onConfigChange(node.id, {
+            references: generation.references.filter((entry) => entryUrl(entry, imageStorages) !== url),
+            referenceObjectStorages: imageStorages.filter((file) => file.url !== url),
+            videoReferences: (generation.videoReferences || []).filter((entry) => entryUrl(entry, videoStorages) !== url),
+            videoReferenceObjectStorages: videoStorages.filter((file) => file.url !== url),
+        });
+    };
+
     return (
         <div
             data-canvas-no-zoom
@@ -260,6 +309,17 @@ export function CanvasNodePromptPanel({
             onWheelCapture={(event) => event.stopPropagation()}
             onWheel={(event) => event.stopPropagation()}
         >
+            <input
+                ref={referenceInputRef}
+                type="file"
+                accept="image/*,video/*"
+                multiple
+                className="hidden"
+                onChange={(event) => {
+                    void addReferenceFiles(event.target.files);
+                    event.target.value = "";
+                }}
+            />
             <PromptEditor
                 ref={promptEditorRef}
                 prompt={prompt}
@@ -356,9 +416,8 @@ export function CanvasNodePromptPanel({
                         const canPreview = mode === "video" && reference.kind === "image" && Boolean(reference.previewUrl);
                         const style = { background: `${theme.node.activeStroke}1a`, color: theme.node.activeStroke, border: `1px solid ${theme.node.activeStroke}38` };
                         if (!canInsert) {
-                            return canPreview ? (
+                            const chip = canPreview ? (
                                 <button
-                                    key={reference.nodeId}
                                     type="button"
                                     title="放大查看参考图"
                                     aria-label={`放大查看${reference.label}`}
@@ -374,10 +433,30 @@ export function CanvasNodePromptPanel({
                                     {reference.label}
                                 </button>
                             ) : (
-                                <span key={reference.nodeId} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium" style={style}>
+                                <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium" style={style}>
                                     <ReferenceChipThumb reference={reference} />
                                     {reference.label}
                                 </span>
+                            );
+                            return mode === "video" ? (
+                                <span key={reference.nodeId} className="inline-flex items-center">
+                                    {chip}
+                                    <button
+                                        type="button"
+                                        title="移除参考素材"
+                                        aria-label={`移除${reference.label}`}
+                                        className="ml-0.5 grid size-4 place-items-center rounded-full opacity-60 transition hover:bg-red-500/15 hover:text-red-500 hover:opacity-100"
+                                        onClick={(event) => {
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            removePersistedReference(reference);
+                                        }}
+                                    >
+                                        <X className="size-3" />
+                                    </button>
+                                </span>
+                            ) : (
+                                <span key={reference.nodeId}>{chip}</span>
                             );
                         }
                         return (
@@ -415,11 +494,29 @@ export function CanvasNodePromptPanel({
                     })}
                 </div>
             ) : null}
-            {mode === "video" && videoQuote && !videoQuote.available ? <p className="mt-2 text-xs text-red-500">{videoQuote.reason}</p> : null}
+            {mode === "video" && videoQuote && !videoQuote.available ? (
+                <p className="mt-2 text-xs text-red-500">
+                    {videoQuote.reason}
+                    {videoQuote.reason.includes("至少需要") ? "，可点击下方回形针按钮上传参考素材，或在画布中连接图片/视频节点" : ""}
+                </p>
+            ) : null}
 
             <div className="mt-2 flex min-w-0 items-center gap-2">
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                     <CanvasPromptPicker onChoose={applyPromptFromLibrary} />
+                    {mode === "video" && (config.videoGenerationMode === "image-to-video" || config.videoGenerationMode === "reference-to-video") ? (
+                        <Tooltip title="上传参考素材">
+                            <Button
+                                type="text"
+                                className="!size-10 shrink-0 !rounded-full !p-0"
+                                loading={uploadingReference}
+                                disabled={uploadingReference}
+                                icon={<Paperclip className="size-3.5" />}
+                                onClick={() => referenceInputRef.current?.click()}
+                                aria-label="上传参考素材"
+                            />
+                        </Tooltip>
+                    ) : null}
                     {mode === "image" ? (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" className="!h-10 !min-w-0 flex-1" onMissingConfig={() => onMissingConfig("image")} />
@@ -579,6 +676,11 @@ function buildInitialPrompt(references: CanvasResourceReference[]) {
 
 function escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** 参考素材持久化取值：优先对象存储地址，其次可直连的 http 地址，最后回退存储键（可经服务端解析）。 */
+function persistedReferenceValue(objectStorageUrl?: string, url?: string, storageKey?: string) {
+    return objectStorageUrl || (url && /^https?:\/\//i.test(url) ? url : storageKey) || "";
 }
 
 /**
