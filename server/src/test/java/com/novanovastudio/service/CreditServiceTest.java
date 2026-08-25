@@ -46,10 +46,12 @@ class CreditServiceTest {
     void setUp() {
         creditRepository = mock(CreditRepository.class);
         currentUserProvider = mock(CurrentUserProvider.class);
+        PersistenceService persistenceService = mock(PersistenceService.class);
+        when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of()));
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        creditService = new CreditService(creditRepository, currentUserProvider, transactionalOperator);
+        creditService = new CreditService(creditRepository, persistenceService, currentUserProvider, transactionalOperator);
     }
 
     /**
