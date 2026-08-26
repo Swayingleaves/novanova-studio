@@ -12,10 +12,14 @@ import com.novanovastudio.agent.CreationEntrySource;
 import com.novanovastudio.agent.AgentToolResultRelay;
 import com.novanovastudio.agent.dto.AgentCancelRequest;
 import com.novanovastudio.agent.dto.AgentChatRequest;
+import com.novanovastudio.agent.dto.AgentRequestStatusResponse;
 import com.novanovastudio.agent.dto.CreationAgentChatResponse;
 import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.agent.dto.AgentToolResult;
 import com.novanovastudio.common.ApiResponse;
+import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.repository.CreationAgentRequestRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +30,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -42,6 +47,7 @@ public class AgentController {
     private final CreationAgentOrchestrator creationAgentOrchestrator;
     private final AgentEventEmitter eventEmitter;
     private final AgentToolResultRelay toolResultRelay;
+    private final CreationAgentRequestRepository creationAgentRequestRepository;
     private final CurrentUserProvider currentUserProvider;
 
     /**
@@ -74,6 +80,21 @@ public class AgentController {
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> creationAgentOrchestrator.cancelChat(userId, request.requestId()))
                 .thenReturn(ApiResponse.ok(null));
+    }
+
+    /**
+     * 按请求ID查询当前用户的主Agent请求状态，供前端在SSE事件丢失时对账终态。
+     *
+     * @param requestId String 主Agent请求ID
+     * @return Mono<ApiResponse<AgentRequestStatusResponse>> 请求状态和终态说明
+     */
+    @GetMapping("/requestStatus")
+    public Mono<ApiResponse<AgentRequestStatusResponse>> requestStatus(@RequestParam String requestId) {
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> creationAgentRequestRepository.findByIdForUser(userId, requestId))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求不存在")))
+                .map(request -> ApiResponse.ok(new AgentRequestStatusResponse(
+                        request.getStatus(), request.getErrorMessage() == null ? "" : request.getErrorMessage())));
     }
 
     /**

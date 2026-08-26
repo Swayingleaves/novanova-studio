@@ -353,14 +353,8 @@ export default function VideoPage() {
             setStreamingText(null);
             streamingTextRef.current = null;
             resetThinkings();
-            void refreshConversations().then((nextConversations) => {
-                const completedConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
-                if (!completedConversation || action) return;
-                setChatMessages([]);
-                chatMessagesRef.current = [];
-                setToolCalls([]);
-                toolCallsRef.current = [];
-            });
+            // 刷新侧栏（后端已保存生成记录）。聊天区保留完整对话历史；已实时渲染的轮次由历史区按 liveRoundIds 过滤去重。
+            void refreshConversations();
         },
         onCanceled: (stoppedMessage) => {
             resetThinkings();
@@ -384,14 +378,7 @@ export default function VideoPage() {
             }
             chatMessagesRef.current = canceledMessages;
             setChatMessages(canceledMessages);
-            void refreshConversations().then((nextConversations) => {
-                const canceledConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
-                if (!canceledConversation) return;
-                setChatMessages([]);
-                chatMessagesRef.current = [];
-                setToolCalls([]);
-                toolCallsRef.current = [];
-            });
+            void refreshConversations();
         },
         onNotice: (message) => {
             setChatMessages((prev) => {
@@ -1091,9 +1078,10 @@ export default function VideoPage() {
             }),
         renderPendingVideoToolCall,
     );
-    const livePendingRoundIds = new Set(toolCalls.filter((call) => call.status === "executing").map((call) => call.callId));
+    // 聊天区已实时渲染的生成轮次不再进入历史区，避免同一轮重复展示；纯文本对话保留在聊天区。
+    const liveRoundIds = new Set(chatMessages.filter((item) => item.role === "tool").map((item) => item.id));
     const threadSections = activeConversation
-        ? buildVideoThreadSections(activeConversation, livePendingRoundIds, {
+        ? buildVideoThreadSections(activeConversation, liveRoundIds, {
               uploadingObjectStorageId,
               onDownload: downloadVideo,
               onSaveAsset: saveResultToAssets,
@@ -1329,7 +1317,7 @@ function buildVideoConversationItems(conversations: Conversation[], activeId: st
 
 function buildVideoThreadSections(
     activeConversation: Conversation,
-    livePendingRoundIds: ReadonlySet<string>,
+    liveRoundIds: ReadonlySet<string>,
     handlers: {
         uploadingObjectStorageId: string;
         onDownload: (video: GeneratedVideo) => void;
@@ -1342,7 +1330,7 @@ function buildVideoThreadSections(
     const sectionMap = new Map<string, CreationThreadSection["rounds"]>();
 
     for (const round of activeConversation.rounds) {
-        if (round.result.status === "pending" && livePendingRoundIds.has(round.id)) {
+        if (liveRoundIds.has(round.id)) {
             continue;
         }
         const label = formatThreadSectionLabel(round.createdAt);
