@@ -131,6 +131,21 @@ export async function cancelAgentChat(sessionId: string, requestId: string): Pro
 }
 
 /**
+ * 按请求ID查询主Agent请求状态，用于SSE终态事件丢失时对账。
+ */
+export async function agentRequestStatus(requestId: string): Promise<{ status: AgentRequestStatus; message: string }> {
+    const token = getAuthToken();
+    const res = await fetch(`${serverBaseUrl()}/ai/agent/requestStatus?requestId=${encodeURIComponent(requestId)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        cache: "no-store",
+    });
+    const payload = (await res.json().catch(() => null)) as ApiResponse<{ status: AgentRequestStatus; message: string }> | null;
+    if (!res.ok || !payload) throw new Error(payload?.msg || `Agent 请求状态查询失败: ${res.status}`);
+    if (payload.code !== 0) throw new Error(payload.msg || "Agent 请求状态查询失败");
+    return payload.data;
+}
+
+/**
  * 订阅 SSE 事件流。EventSource 无法设置自定义头，通过 query token 传递鉴权令牌。
  */
 export function agentSubscribeEvents(): EventSource {

@@ -297,7 +297,8 @@ public class CreationAgentOrchestrator {
                                         : null;
                                 return completeWithMessage(userId, session.id(), validated.clarificationQuestion(), action);
                             }
-                            CreationPlan plan = withServerPlanId(validated, session, request.message());
+                            CreationPlan plan = composeFollowUpPrompts(withServerPlanId(validated, session, request.message()),
+                                    session, request.message());
                             active.planId().set(plan.planId());
                             return planRepository.create(userId, session.id(), plan)
                                     .then(requestRepository.updatePlanId(active.requestId(), plan.planId()))
@@ -692,6 +693,59 @@ public class CreationAgentOrchestrator {
         String messageId = UUID.randomUUID().toString();
         return sessionService.appendAssistantMessage(sessionId, messageId, text)
                 .doOnSuccess(ignored -> eventEmitter.emit(userId, AgentEvent.taskComplete(sessionId, messageId, text, action)));
+    }
+
+    /**
+     * 将本轮修改指令合并到引用历史原文的图片或视频任务提示词。
+     * <p>
+     * 图片页和视频页的后续消息常是“改为男性”“换成夜景”等修改或补充指令，主Agent按规则引用历史原文，
+     * 该指令本身不会进入任务提示词；服务端在此把本轮指令合并到最终提示词，避免修改要求丢失。
+     * 编辑任务直接使用本轮指令作为提示词（服务端自动挂载最近一张历史图片作参考图），长原文合并反而会稀释指令；
+     * 生成任务的修改指令前置到提示词开头并强调优先级，避免被长原文末尾淹没而被生成模型忽略。
+     * 纯重试指令不参与合并；画布工具任务沿用画布自身语义，不在此处理。
+     *
+     * @param plan CreationPlan 已回填用户原文并校验的计划
+     * @param session AgentSession 当前会话
+     * @param currentMessage String 当前用户消息
+     * @return CreationPlan 合并本轮指令后的计划
+     */
+    CreationPlan composeFollowUpPrompts(CreationPlan plan, AgentSession session, String currentMessage) {
+        if (plan == null || plan.tasks() == null || plan.tasks().isEmpty()
+                || !StringUtils.hasText(currentMessage) || isRetryMessage(currentMessage)) {
+            return plan;
+        }
+        Set<String> historyPrompts = new LinkedHashSet<>();
+        session.messages().forEach(message -> {
+            if ("user".equals(message.role()) && StringUtils.hasText(message.text())
+                    && !currentMessage.equals(message.text())) {
+                historyPrompts.add(message.text());
+            }
+        });
+        if (historyPrompts.isEmpty()) {
+            return plan;
+        }
+        List<CreationTask> tasks = plan.tasks().stream().map(task -> {
+            if (task == null || StringUtils.hasText(task.toolName())) {
+                return task;
+            }
+            // 编辑任务以本轮指令为提示词，参考图由服务端自动注入，且当前指令本身是用户逐字原文。
+            if ("edit".equals(task.action())) {
+                return new CreationTask(task.taskId(), task.taskType(), task.action(),
+                        currentMessage, task.sourcePromptId(), task.dependsOn(),
+                        task.toolName(), task.toolArguments());
+            }
+            if (!historyPrompts.contains(task.prompt())) {
+                return task;
+            }
+            // 修改指令放在提示词最前面并强调优先级，避免被长原文末尾淹没而被生成模型忽略。
+            String mergedPrompt = "请优先应用以下修改要求，修改要求与原文冲突时以修改要求为准：\n"
+                    + currentMessage + "\n\n原文：\n" + task.prompt();
+            return new CreationTask(task.taskId(), task.taskType(), task.action(),
+                    mergedPrompt, task.sourcePromptId(), task.dependsOn(),
+                    task.toolName(), task.toolArguments());
+        }).toList();
+        return new CreationPlan(plan.planId(), plan.intent(), plan.entrySource(), plan.summary(),
+                plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(), tasks);
     }
 
     /**

@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentAction, AgentAttachment, AgentEvent, CreationSettings } from "@/features/canvas/api/agent";
-import { agentChat, agentSubscribeEvents, cancelAgentChat } from "@/features/canvas/api/agent";
+import { agentChat, agentRequestStatus, agentSubscribeEvents, cancelAgentChat } from "@/features/canvas/api/agent";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
+import { getAiTaskPollingIntervalMilliseconds } from "@/services/api/server";
 import { isTerminalAgentRequestStatus, matchesAgentRequest, shouldApplyAgentQueueStatus, type AgentQueueStatus } from "./agent-event-match";
 import type { ToolCallState } from "./types";
 
@@ -449,6 +450,47 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
       eventSourceRef.current?.close();
     };
   }, [token, clearReconnectTimer, connectSSE]);
+
+  // 终态对账兜底：SSE连接闪断重连会丢失task-complete等终态事件，导致前端永久loading；
+  // 请求进行中间歇查询服务端请求状态，发现已终态时按终态收敛本地状态。
+  useEffect(() => {
+    if ((!isStreaming && !isQueued) || !requestId) return;
+    let cancelled = false;
+    let reconcileTimer: number | undefined;
+    const reconcile = async () => {
+      if (cancelRequestedRef.current || !activeRequestRef.current) return;
+      try {
+        const result = await agentRequestStatus(requestId);
+        if (cancelled || !activeRequestRef.current || !isTerminalAgentRequestStatus(result.status)) return;
+        markRequestTerminal(requestId);
+        activeRequestRef.current = false;
+        queueStatusRef.current = null;
+        cancelRequestedRef.current = false;
+        setIsStreaming(false);
+        setIsQueued(false);
+        setIsStopping(false);
+        if (result.status === "failed") {
+          callbacksRef.current.onError?.(result.message || "生成失败");
+        } else if (result.status === "canceled" || result.status === "interrupted") {
+          callbacksRef.current.onCanceled?.(result.message || "已停止生成");
+        } else {
+          callbacksRef.current.onTaskComplete?.("", "", undefined);
+        }
+      } catch {
+        // 查询失败时等待下一轮对账，不中断当前请求。
+      }
+    };
+    void getAiTaskPollingIntervalMilliseconds()
+      .then((intervalMilliseconds) => {
+        if (cancelled) return;
+        reconcileTimer = window.setInterval(() => void reconcile(), intervalMilliseconds);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      if (reconcileTimer !== undefined) window.clearInterval(reconcileTimer);
+    };
+  }, [isStreaming, isQueued, requestId, markRequestTerminal]);
 
   return { sessionId, requestId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, canChangeSession, resetSession, restoreSession };
 }

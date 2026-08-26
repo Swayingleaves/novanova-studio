@@ -337,15 +337,8 @@ export default function ImagePage() {
             setStreamingText(null);
             streamingTextRef.current = null;
             resetThinkings();
-            // 刷新侧栏（后端已保存生成记录）。历史会话追加生成完成后，交回历史视图展示，避免同一轮重复渲染。
-            void refreshConversations().then((nextConversations) => {
-                const completedConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
-                if (!completedConversation || action) return;
-                setChatMessages([]);
-                chatMessagesRef.current = [];
-                setToolCalls([]);
-                toolCallsRef.current = [];
-            });
+            // 刷新侧栏（后端已保存生成记录）。聊天区保留完整对话历史；已实时渲染的轮次由历史区按 liveRoundIds 过滤去重。
+            void refreshConversations();
         },
         onCanceled: (stoppedMessage) => {
             resetThinkings();
@@ -369,14 +362,7 @@ export default function ImagePage() {
             }
             chatMessagesRef.current = canceledMessages;
             setChatMessages(canceledMessages);
-            void refreshConversations().then((nextConversations) => {
-                const canceledConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
-                if (!canceledConversation) return;
-                setChatMessages([]);
-                chatMessagesRef.current = [];
-                setToolCalls([]);
-                toolCallsRef.current = [];
-            });
+            void refreshConversations();
         },
         onPlanCreated: (planId, summary, taskCount) => {
             setChatMessages((prev) => {
@@ -857,14 +843,11 @@ export default function ImagePage() {
             onClick: () => setSettingsOpen(true),
         },
     ];
-    const displayedConversation =
-        activeConversation && isStreaming && activeConversationPending
-            ? // 当前轮次已落库但仍在流式生成时，聊天区保留乐观状态，历史区只展示已完成轮次。
-              {
-                  ...activeConversation,
-                  rounds: activeConversation.rounds.filter((round) => !round.results.some((result) => result.status === "pending")),
-              }
-            : activeConversation;
+    // 聊天区已实时渲染的生成轮次不再进入历史区，避免同一轮重复展示；纯文本对话保留在聊天区。
+    const liveRoundIds = new Set(chatMessages.filter((item) => item.role === "tool").map((item) => item.id));
+    const displayedConversation = activeConversation && liveRoundIds.size
+        ? { ...activeConversation, rounds: activeConversation.rounds.filter((round) => !liveRoundIds.has(round.id)) }
+        : activeConversation;
     const threadSections = displayedConversation
         ? buildImageThreadSections(displayedConversation, {
               uploadingObjectStorageId,
