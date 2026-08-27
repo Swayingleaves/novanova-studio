@@ -264,6 +264,30 @@ export type ServerCreditTransactionList = {
     total: number;
 };
 
+export type ServerCreditTransactionType = "task_charge" | "task_refund" | "admin_adjustment" | "card_redeem" | "initial_grant";
+
+export type ServerCreditDirection = "add" | "spend";
+
+export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redeem" | "admin_adjustment" | "initial_grant";
+
+export type ServerUserCreditTransaction = {
+    id: number;
+    transactionType: ServerCreditTransactionType;
+    direction: ServerCreditDirection;
+    generationType: Exclude<ServerAiTaskType, "text"> | null;
+    model: string | null;
+    generationSource: ServerGenerationSource | null;
+    changeAmount: number;
+    reason: string;
+    balanceAfter: number;
+    createdAt: string;
+};
+
+export type ServerUserCreditTransactionList = {
+    transactions: ServerUserCreditTransaction[];
+    total: number;
+};
+
 export type ServerAdminCreditTransaction = ServerCreditTransaction & {
     userId: number;
     username: string;
@@ -879,15 +903,16 @@ export function getCreditOverview(params: { startDate: string; endDate: string; 
     return serverGet<ServerCreditOverview>(`/credit/getCreditOverview?${query}`);
 }
 
-export function listCreditTransactions(params: { startDate: string; endDate: string; generationType?: "image" | "video"; page: number; pageSize: number }) {
+export function listCreditTransactions(params: { startDate: string; endDate: string; direction?: ServerCreditDirection; source?: ServerCreditSource; page: number; pageSize: number }) {
     const query = new URLSearchParams({
         startDate: params.startDate,
         endDate: params.endDate,
         page: String(params.page),
         pageSize: String(params.pageSize),
     });
-    if (params.generationType) query.set("generationType", params.generationType);
-    return serverGet<ServerCreditTransactionList>(`/credit/listCreditTransactions?${query}`);
+    if (params.direction) query.set("direction", params.direction);
+    if (params.source) query.set("source", params.source);
+    return serverGet<ServerUserCreditTransactionList>(`/credit/listCreditTransactions?${query}`);
 }
 
 export function redeemCredits(cardCode: string) {
