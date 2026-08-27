@@ -1,6 +1,24 @@
-import type { ServerCreditDistributionItem, ServerGenerationSource } from "@/services/api/server";
+import type { ServerCreditDirection, ServerCreditDistributionItem, ServerCreditSource, ServerCreditTransactionType, ServerGenerationSource } from "@/services/api/server";
 
 export const CREDIT_TRANSACTION_PAGE_SIZE = 20;
+
+/** 积分明细方向筛选选项。 */
+export const CREDIT_DIRECTION_OPTIONS: { label: string; value: "all" | ServerCreditDirection }[] = [
+    { label: "全部", value: "all" },
+    { label: "增加", value: "add" },
+    { label: "消耗", value: "spend" },
+];
+
+/** 积分明细来源筛选选项。 */
+export const CREDIT_SOURCE_OPTIONS: { label: string; value: "all" | ServerCreditSource }[] = [
+    { label: "全部来源", value: "all" },
+    { label: "图片生成", value: "image" },
+    { label: "视频生成", value: "video" },
+    { label: "卡密兑换", value: "card_redeem" },
+    { label: "管理员调整", value: "admin_adjustment" },
+    { label: "任务退款", value: "task_refund" },
+    { label: "初始发放", value: "initial_grant" },
+];
 
 type ChartDataItem = {
     name: string;
@@ -15,6 +33,49 @@ type ChartDataItem = {
  */
 export function generationTypeLabel(generationType: "image" | "video") {
     return generationType === "video" ? "视频生成" : "图片生成";
+}
+
+/**
+ * 将积分流水类型转换为中文文案。
+ *
+ * @param transactionType 积分流水类型
+ * @return 中文流水类型文案
+ */
+export function creditTransactionTypeLabel(transactionType: ServerCreditTransactionType | null | undefined) {
+    if (transactionType === "task_charge") return "任务扣费";
+    if (transactionType === "task_refund") return "任务退款";
+    if (transactionType === "admin_adjustment") return "管理员调整";
+    if (transactionType === "card_redeem") return "卡密兑换";
+    if (transactionType === "initial_grant") return "初始发放";
+    return "未知类型";
+}
+
+/**
+ * 格式化带符号的积分变动。
+ *
+ * @param changeAmount 有符号积分变动，正数增加、负数消耗，可为空
+ * @return 带符号千分位文本，如 +1,000 / -500
+ */
+export function formatCreditChange(changeAmount: number | null | undefined) {
+    const amount = changeAmount ?? 0;
+    return (amount > 0 ? "+" : "") + formatCredits(amount);
+}
+
+/**
+ * 组装积分明细详情文案：任务流水显示生成类型与模型，其余显示变动原因。
+ *
+ * @param transactionType 积分流水类型
+ * @param generationType 生成任务类型，非任务流水为 null
+ * @param model 模型展示名，非任务流水为 null
+ * @param reason 变动原因
+ * @return 详情文案
+ */
+export function creditTransactionDetail(transactionType: ServerCreditTransactionType, generationType: "image" | "video" | null, model: string | null, reason: string | null | undefined) {
+    if (transactionType === "task_charge" || transactionType === "task_refund") {
+        const typeLabel = generationType ? generationTypeLabel(generationType) : "";
+        return model ? `${typeLabel} · ${model}` : typeLabel;
+    }
+    return reason ?? "";
 }
 
 /**
@@ -61,8 +122,8 @@ export function normalizeModelDistribution(items: ServerCreditDistributionItem[]
  * @param credits 积分数量
  * @return 带千分位的积分文本
  */
-export function formatCredits(credits: number) {
-    return credits.toLocaleString("zh-CN");
+export function formatCredits(credits: number | null | undefined) {
+    return (credits ?? 0).toLocaleString("zh-CN");
 }
 
 /**

@@ -65,4 +65,83 @@ class CreditRepositoryTest {
         Assertions.assertTrue(sql.contains("cards.code_hash = :codeHash"));
         Assertions.assertTrue(sql.contains(":redeemedUserKeyword"));
     }
+
+    /**
+     * 增加方向筛选应限定正数积分变动。
+     */
+    @Test
+    void shouldFilterAddDirectionByPositiveChangeAmount() {
+        CreditRepository.UserCreditQuery query = new CreditRepository.UserCreditQuery(
+                1L,
+                LocalDate.of(2026, 7, 1),
+                LocalDate.of(2026, 7, 1),
+                OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                OffsetDateTime.of(2026, 7, 2, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                "add",
+                null);
+
+        String sql = CreditRepository.userTransactionQuery(query);
+
+        Assertions.assertTrue(sql.contains("credit_transactions.change_amount > 0"));
+    }
+
+    /**
+     * 消耗方向筛选应排除已退款的扣费流水。
+     */
+    @Test
+    void shouldExcludeRefundedTaskChargeForSpendDirection() {
+        CreditRepository.UserCreditQuery query = new CreditRepository.UserCreditQuery(
+                1L,
+                LocalDate.of(2026, 7, 1),
+                LocalDate.of(2026, 7, 1),
+                OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                OffsetDateTime.of(2026, 7, 2, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                "spend",
+                null);
+
+        String sql = CreditRepository.userTransactionQuery(query);
+
+        Assertions.assertTrue(sql.contains("credit_transactions.change_amount < 0"));
+        Assertions.assertTrue(sql.contains("transaction_type = 'task_refund'"));
+    }
+
+    /**
+     * 来源筛选为卡密兑换时限定流水类型。
+     */
+    @Test
+    void shouldFilterSourceByTransactionType() {
+        CreditRepository.UserCreditQuery query = new CreditRepository.UserCreditQuery(
+                1L,
+                LocalDate.of(2026, 7, 1),
+                LocalDate.of(2026, 7, 1),
+                OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                OffsetDateTime.of(2026, 7, 2, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                null,
+                "card_redeem");
+
+        String sql = CreditRepository.userTransactionQuery(query);
+
+        Assertions.assertTrue(sql.contains("credit_transactions.transaction_type = :source"));
+        Assertions.assertFalse(sql.contains("tasks.task_type"));
+    }
+
+    /**
+     * 来源筛选为图片生成时限定任务类型。
+     */
+    @Test
+    void shouldFilterSourceByGenerationTaskType() {
+        CreditRepository.UserCreditQuery query = new CreditRepository.UserCreditQuery(
+                1L,
+                LocalDate.of(2026, 7, 1),
+                LocalDate.of(2026, 7, 1),
+                OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                OffsetDateTime.of(2026, 7, 2, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                null,
+                "image");
+
+        String sql = CreditRepository.userTransactionQuery(query);
+
+        Assertions.assertTrue(sql.contains("tasks.task_type = :source"));
+        Assertions.assertFalse(sql.contains("credit_transactions.transaction_type = :source"));
+    }
 }

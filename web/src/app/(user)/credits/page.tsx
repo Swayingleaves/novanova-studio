@@ -4,22 +4,27 @@ import { useMemo, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, DatePicker, Empty, Pagination, Segmented, Skeleton, Table, type TableProps } from "antd";
-import { ImageIcon, Video, Zap } from "lucide-react";
+import { Alert, Button, DatePicker, Empty, Pagination, Segmented, Select, Skeleton, Table, type TableProps } from "antd";
+import { Coins, Gift, ImageIcon, RotateCcw, UserCog, Video, Zap } from "lucide-react";
 
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import {
     getCreditOverview,
     listCreditTransactions,
-    type ServerCreditTransaction,
+    type ServerCreditDirection,
+    type ServerCreditSource,
+    type ServerUserCreditTransaction,
 } from "@/services/api/server";
 
 import {
+    CREDIT_DIRECTION_OPTIONS,
+    CREDIT_SOURCE_OPTIONS,
     CREDIT_TRANSACTION_PAGE_SIZE,
+    creditTransactionDetail,
+    creditTransactionTypeLabel,
+    formatCreditChange,
     formatCredits,
     formatCreditTime,
-    generationSourceLabel,
-    generationTypeLabel,
     normalizeGenerationDistribution,
     normalizeModelDistribution,
 } from "./credit-page-utils";
@@ -32,34 +37,49 @@ const CreditChart = dynamic(() => import("./components/credit-chart").then((modu
 type GenerationTypeFilter = "all" | "image" | "video";
 type TrendUnit = "day" | "month";
 
-const CREDIT_TRANSACTION_COLUMNS: TableProps<ServerCreditTransaction>["columns"] = [
+/**
+ * 根据积分流水类型返回展示图标。
+ *
+ * @param transaction 积分流水
+ * @return lucide 图标组件
+ */
+function transactionTypeIcon(transaction: ServerUserCreditTransaction) {
+    if (transaction.transactionType === "task_charge") return transaction.generationType === "video" ? Video : ImageIcon;
+    if (transaction.transactionType === "task_refund") return RotateCcw;
+    if (transaction.transactionType === "card_redeem") return Coins;
+    if (transaction.transactionType === "admin_adjustment") return UserCog;
+    return Gift;
+}
+
+const CREDIT_TRANSACTION_COLUMNS: TableProps<ServerUserCreditTransaction>["columns"] = [
     {
-        title: "生成类型",
-        dataIndex: "generationType",
+        title: "类型",
+        dataIndex: "transactionType",
         width: 132,
-        render: (generationType: ServerCreditTransaction["generationType"]) => {
-            const Icon = generationType === "video" ? Video : ImageIcon;
-            return <span className="inline-flex items-center gap-2 text-[var(--studio-text)]"><Icon className="size-4 text-[var(--studio-primary)]" />{generationTypeLabel(generationType)}</span>;
+        render: (transactionType: ServerUserCreditTransaction["transactionType"], record) => {
+            const Icon = transactionTypeIcon(record);
+            return <span className="inline-flex items-center gap-2 text-[var(--studio-text)]"><Icon className="size-4 text-[var(--studio-primary)]" />{creditTransactionTypeLabel(transactionType)}</span>;
         },
     },
     {
-        title: "模型",
-        dataIndex: "model",
+        title: "详情",
+        dataIndex: "reason",
         ellipsis: true,
-        render: (model: string) => <span className="font-mono text-xs text-[var(--studio-text)]">{model}</span>,
+        render: (_, record) => <span className="text-[var(--studio-muted)]">{creditTransactionDetail(record.transactionType, record.generationType, record.model, record.reason)}</span>,
     },
     {
-        title: "来源",
-        dataIndex: "generationSource",
-        width: 128,
-        render: (generationSource: ServerCreditTransaction["generationSource"]) => <span className="text-[var(--studio-muted)]">{generationSourceLabel(generationSource)}</span>,
-    },
-    {
-        title: "消耗积分",
-        dataIndex: "consumedCredits",
+        title: "积分变动",
+        dataIndex: "changeAmount",
         width: 128,
         align: "right",
-        render: (consumedCredits: number) => <span className="font-medium tabular-nums text-[var(--studio-ink)]">-{formatCredits(consumedCredits)}</span>,
+        render: (changeAmount: number) => <span className={`font-medium tabular-nums ${changeAmount > 0 ? "text-[var(--studio-primary)]" : "text-[var(--studio-ink)]"}`}>{formatCreditChange(changeAmount)}</span>,
+    },
+    {
+        title: "余额快照",
+        dataIndex: "balanceAfter",
+        width: 128,
+        align: "right",
+        render: (balanceAfter: number) => <span className="tabular-nums text-[var(--studio-muted)]">{formatCredits(balanceAfter)}</span>,
     },
     {
         title: "时间",
@@ -79,6 +99,9 @@ export default function CreditsPage() {
     const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")]);
     const [generationType, setGenerationType] = useState<GenerationTypeFilter>("all");
     const [trendUnit, setTrendUnit] = useState<TrendUnit>("day");
+    const [detailDateRange, setDetailDateRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")]);
+    const [detailDirection, setDetailDirection] = useState<"all" | ServerCreditDirection>("all");
+    const [detailSource, setDetailSource] = useState<"all" | ServerCreditSource>("all");
     const [page, setPage] = useState(1);
 
     const filters = useMemo(() => ({
@@ -87,13 +110,20 @@ export default function CreditsPage() {
         generationType: generationType === "all" ? undefined : generationType,
     }), [dateRange, generationType]);
 
+    const detailFilters = useMemo(() => ({
+        startDate: detailDateRange[0].format("YYYY-MM-DD"),
+        endDate: detailDateRange[1].format("YYYY-MM-DD"),
+        direction: detailDirection === "all" ? undefined : detailDirection,
+        source: detailSource === "all" ? undefined : detailSource,
+    }), [detailDateRange, detailDirection, detailSource]);
+
     const overviewQuery = useQuery({
         queryKey: ["credit-overview", filters.startDate, filters.endDate, filters.generationType, trendUnit],
         queryFn: () => getCreditOverview({ ...filters, trendUnit }),
     });
     const transactionsQuery = useQuery({
-        queryKey: ["credit-transactions", filters.startDate, filters.endDate, filters.generationType, page],
-        queryFn: () => listCreditTransactions({ ...filters, page, pageSize: CREDIT_TRANSACTION_PAGE_SIZE }),
+        queryKey: ["credit-transactions", detailFilters.startDate, detailFilters.endDate, detailFilters.direction, detailFilters.source, page],
+        queryFn: () => listCreditTransactions({ ...detailFilters, page, pageSize: CREDIT_TRANSACTION_PAGE_SIZE }),
     });
 
     const overview = overviewQuery.data;
@@ -186,36 +216,66 @@ export default function CreditsPage() {
             <section className="mt-8 border-t border-[var(--studio-line)] pt-6" aria-labelledby="credit-transactions-title">
                 <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                     <div>
-                        <h2 id="credit-transactions-title" className="text-base font-semibold text-[var(--studio-ink)]">积分消耗明细</h2>
-                        <p className="mt-1 text-sm text-[var(--studio-muted)]">最近使用的积分记录</p>
+                        <h2 id="credit-transactions-title" className="text-base font-semibold text-[var(--studio-ink)]">积分明细</h2>
+                        <p className="mt-1 text-sm text-[var(--studio-muted)]">包含积分增加与消耗记录，明细筛选独立于上方消耗统计</p>
                     </div>
                     <span className="text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} 条记录</span>
                 </div>
 
+                <div className="mb-4 flex flex-wrap items-center gap-3">
+                    <DatePicker.RangePicker
+                        value={detailDateRange}
+                        allowClear={false}
+                        disabledDate={(date) => date.isAfter(dayjs(), "day")}
+                        onChange={(nextDateRange) => {
+                            if (!nextDateRange?.[0] || !nextDateRange[1]) return;
+                            setDetailDateRange([nextDateRange[0], nextDateRange[1]]);
+                            setPage(1);
+                        }}
+                    />
+                    <Segmented
+                        value={detailDirection}
+                        options={CREDIT_DIRECTION_OPTIONS}
+                        onChange={(value) => {
+                            setDetailDirection(value as "all" | ServerCreditDirection);
+                            setPage(1);
+                        }}
+                    />
+                    <Select
+                        value={detailSource}
+                        options={CREDIT_SOURCE_OPTIONS}
+                        className="w-40"
+                        onChange={(value) => {
+                            setDetailSource(value as "all" | ServerCreditSource);
+                            setPage(1);
+                        }}
+                    />
+                </div>
+
                 <div className="hidden md:block">
-                    <Table<ServerCreditTransaction>
+                    <Table<ServerUserCreditTransaction>
                         rowKey="id"
                         columns={CREDIT_TRANSACTION_COLUMNS}
                         dataSource={transactions?.transactions || []}
                         loading={transactionsQuery.isLoading}
                         pagination={false}
-                        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="所选范围没有积分消耗记录" /> }}
+                        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="所选范围没有积分记录" /> }}
                     />
                 </div>
                 <div className="md:hidden">
                     {transactionsQuery.isLoading ? <Skeleton active paragraph={{ rows: 8 }} /> : null}
-                    {!transactionsQuery.isLoading && !transactions?.transactions.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="所选范围没有积分消耗记录" /> : null}
+                    {!transactionsQuery.isLoading && !transactions?.transactions.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="所选范围没有积分记录" /> : null}
                     {transactions?.transactions.map((transaction) => {
-                        const Icon = transaction.generationType === "video" ? Video : ImageIcon;
+                        const Icon = transactionTypeIcon(transaction);
                         return (
                             <article key={transaction.id} className="border-b border-[var(--studio-line)] py-4">
                                 <div className="flex items-start justify-between gap-3">
-                                    <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-[var(--studio-ink)]"><Icon className="size-4 shrink-0 text-[var(--studio-primary)]" />{generationTypeLabel(transaction.generationType)}</span>
-                                    <span className="shrink-0 text-sm font-semibold tabular-nums text-[var(--studio-ink)]">-{formatCredits(transaction.consumedCredits)}</span>
+                                    <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-[var(--studio-ink)]"><Icon className="size-4 shrink-0 text-[var(--studio-primary)]" />{creditTransactionTypeLabel(transaction.transactionType)}</span>
+                                    <span className={`shrink-0 text-sm font-semibold tabular-nums ${transaction.changeAmount > 0 ? "text-[var(--studio-primary)]" : "text-[var(--studio-ink)]"}`}>{formatCreditChange(transaction.changeAmount)}</span>
                                 </div>
                                 <div className="mt-2 grid gap-1 text-xs text-[var(--studio-muted)]">
-                                    <span className="truncate font-mono">{transaction.model}</span>
-                                    <span>{generationSourceLabel(transaction.generationSource)} · {formatCreditTime(transaction.createdAt)}</span>
+                                    <span className="truncate">{creditTransactionDetail(transaction.transactionType, transaction.generationType, transaction.model, transaction.reason)}</span>
+                                    <span className="tabular-nums">余额 {formatCredits(transaction.balanceAfter)} · {formatCreditTime(transaction.createdAt)}</span>
                                 </div>
                             </article>
                         );

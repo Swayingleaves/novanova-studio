@@ -148,4 +148,39 @@ public final class CreditDtos {
      */
     public record AdminCreditTransactionListResponse(List<AdminCreditTransactionItem> transactions, Long total) {
     }
+
+    /**
+     * 用户统一积分流水明细项（含增加与消耗）。
+     *
+     * @param id Long 流水ID
+     * @param transactionType String 流水类型：task_charge/task_refund/admin_adjustment/card_redeem/initial_grant
+     * @param direction String 变动方向：add 增加 / spend 消耗，服务端按 change_amount 符号派生
+     * @param generationType String 生成任务类型：image/video，非任务流水为 null
+     * @param model String 生成任务模型展示名，非任务流水为 null
+     * @param generationSource String 生成来源，可为 null
+     * @param changeAmount Long 有符号积分变动：正数增加、负数消耗
+     * @param reason String 变动原因
+     * @param balanceAfter Long 变动后余额快照
+     * @param createdAt String 变动时间
+     */
+    public record UserCreditTransactionItem(Long id,
+                                            String transactionType,
+                                            String direction,
+                                            String generationType,
+                                            String model,
+                                            String generationSource,
+                                            Long changeAmount,
+                                            String reason,
+                                            Long balanceAfter,
+                                            String createdAt) {
+    }
+
+    /**
+     * 用户统一积分流水明细列表响应。
+     *
+     * @param transactions List<UserCreditTransactionItem> 当前页明细
+     * @param total Long 符合筛选条件的总数
+     */
+    public record UserCreditTransactionListResponse(List<UserCreditTransactionItem> transactions, Long total) {
+    }
 }

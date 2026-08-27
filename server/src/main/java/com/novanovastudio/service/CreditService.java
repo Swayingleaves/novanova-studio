@@ -232,32 +232,34 @@ public class CreditService {
     }
 
     /**
-     * 分页查询当前用户的积分消耗明细。
+     * 分页查询当前用户的积分明细（含增加与消耗）。
      *
      * @param startDate LocalDate 筛选起始日期
      * @param endDate LocalDate 筛选结束日期
-     * @param generationType String 图片或视频任务类型，可为空
+     * @param direction String 变动方向：all 全部 / add 增加 / spend 消耗，可为空默认全部
+     * @param source String 来源筛选：image/video/task_refund/card_redeem/admin_adjustment/initial_grant，可为空
      * @param page int 页码
      * @param pageSize int 每页数量
-     * @return Mono<CreditTransactionListResponse> 积分消耗明细
+     * @return Mono<UserCreditTransactionListResponse> 积分明细
      */
-    public Mono<CreditDtos.CreditTransactionListResponse> listCreditTransactions(LocalDate startDate, LocalDate endDate, String generationType, int page, int pageSize) {
+    public Mono<CreditDtos.UserCreditTransactionListResponse> listCreditTransactions(LocalDate startDate, LocalDate endDate, String direction, String source, int page, int pageSize) {
         if (page < 1 || pageSize < 1 || pageSize > 100) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "分页参数不合法"));
         }
         return currentUserProvider.currentUserId().flatMap(userId -> {
-            CreditRepository.CreditConsumptionQuery query = createConsumptionQuery(userId, startDate, endDate, generationType);
+            CreditRepository.UserCreditQuery query = createUserCreditQuery(userId, startDate, endDate, direction, source);
             return Mono.zip(
                             persistenceService.getPlatformModelConfigs().map(CreditService::displayNameIndex),
-                            creditRepository.listCreditTransactions(query, page, pageSize).collectList(),
-                            creditRepository.countCreditTransactions(query))
+                            creditRepository.listUserTransactions(query, page, pageSize).collectList(),
+                            creditRepository.countUserTransactions(query))
                     .map(result -> {
-                        List<CreditDtos.CreditTransactionItem> transactions = result.getT2().stream()
-                                .map(item -> new CreditDtos.CreditTransactionItem(item.id(), item.generationType(),
+                        List<CreditDtos.UserCreditTransactionItem> transactions = result.getT2().stream()
+                                .map(item -> new CreditDtos.UserCreditTransactionItem(item.id(), item.transactionType(), item.direction(),
+                                        item.generationType(),
                                         resolveModelDisplayName(result.getT1(), item.generationType(), item.model()),
-                                        item.generationSource(), item.consumedCredits(), item.createdAt()))
+                                        item.generationSource(), item.changeAmount(), item.reason(), item.balanceAfter(), item.createdAt()))
                                 .toList();
-                        return new CreditDtos.CreditTransactionListResponse(transactions, result.getT3());
+                        return new CreditDtos.UserCreditTransactionListResponse(transactions, result.getT3());
                     });
         });
     }
@@ -328,6 +330,31 @@ public class CreditService {
         OffsetDateTime startAt = startDate.atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime();
         OffsetDateTime endAt = endDate.plusDays(1).atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime();
         return new CreditRepository.CreditConsumptionQuery(userId, startDate, endDate, startAt, endAt, generationType);
+    }
+
+    /**
+     * 构建并校验用户统一积分明细查询条件。
+     *
+     * @param userId Long 用户ID
+     * @param startDate LocalDate 筛选起始日期
+     * @param endDate LocalDate 筛选结束日期
+     * @param direction String 变动方向：all/add/spend
+     * @param source String 来源筛选：image/video/task_refund/card_redeem/admin_adjustment/initial_grant
+     * @return UserCreditQuery 已校验的查询条件
+     */
+    private CreditRepository.UserCreditQuery createUserCreditQuery(Long userId, LocalDate startDate, LocalDate endDate, String direction, String source) {
+        if (startDate == null || endDate == null || startDate.isAfter(endDate)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "积分筛选日期不合法");
+        }
+        if (direction != null && !List.of("all", "add", "spend").contains(direction)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "积分方向仅支持all、add或spend");
+        }
+        if (source != null && !List.of("image", "video", "task_refund", "card_redeem", "admin_adjustment", "initial_grant").contains(source)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "积分来源筛选不合法");
+        }
+        OffsetDateTime startAt = startDate.atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime();
+        OffsetDateTime endAt = endDate.plusDays(1).atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime();
+        return new CreditRepository.UserCreditQuery(userId, startDate, endDate, startAt, endAt, direction, source);
     }
 
     /**

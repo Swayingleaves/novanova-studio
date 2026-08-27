@@ -53,23 +53,25 @@ public class CreditController {
     }
 
     /**
-     * 分页查询当前用户的积分消耗明细。
+     * 分页查询当前用户的积分明细（含增加与消耗）。
      *
      * @param startDate LocalDate 筛选起始日期
      * @param endDate LocalDate 筛选结束日期
-     * @param generationType String 图片或视频任务类型，可为空
+     * @param direction String 变动方向：all/add/spend，可为空
+     * @param source String 来源筛选：image/video/task_refund/card_redeem/admin_adjustment/initial_grant，可为空
      * @param page int 页码
      * @param pageSize int 每页数量
-     * @return Mono<ApiResponse<CreditTransactionListResponse>> 积分消耗明细
+     * @return Mono<ApiResponse<UserCreditTransactionListResponse>> 积分明细
      */
     @GetMapping("/listCreditTransactions")
-    public Mono<ApiResponse<CreditDtos.CreditTransactionListResponse>> listCreditTransactions(
+    public Mono<ApiResponse<CreditDtos.UserCreditTransactionListResponse>> listCreditTransactions(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
-            @RequestParam(required = false) String generationType,
+            @RequestParam(required = false) String direction,
+            @RequestParam(required = false) String source,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize) {
-        return creditService.listCreditTransactions(startDate, endDate, generationType, page, pageSize).map(ApiResponse::ok);
+        return creditService.listCreditTransactions(startDate, endDate, direction, source, page, pageSize).map(ApiResponse::ok);
     }
 
     /**

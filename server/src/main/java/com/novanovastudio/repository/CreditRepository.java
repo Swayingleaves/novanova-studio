@@ -469,4 +469,121 @@ public class CreditRepository {
                                          OffsetDateTime endAt,
                                          String generationType) {
     }
+
+    /** 用户统一积分明细查询条件。 */
+    public record UserCreditQuery(Long userId,
+                                  LocalDate startDate,
+                                  LocalDate endDate,
+                                  OffsetDateTime startAt,
+                                  OffsetDateTime endAt,
+                                  String direction,
+                                  String source) {
+    }
+
+    /** 用户统一积分明细基础查询条件。 */
+    private static final String USER_TRANSACTION_QUERY = """
+            FROM user_credit_transactions credit_transactions
+            LEFT JOIN ai_generation_tasks tasks ON tasks.id = credit_transactions.task_id
+            WHERE credit_transactions.user_id = :userId
+              AND credit_transactions.created_at >= :startAt
+              AND credit_transactions.created_at < :endAt
+            """;
+
+    /**
+     * 生成用户统一积分明细查询SQL。
+     *
+     * @param query UserCreditQuery 查询条件
+     * @return String 固定字段与受控筛选组成的SQL
+     */
+    static String userTransactionQuery(UserCreditQuery query) {
+        StringBuilder sql = new StringBuilder(USER_TRANSACTION_QUERY);
+        if ("add".equals(query.direction())) {
+            sql.append(" AND credit_transactions.change_amount > 0\n");
+        } else if ("spend".equals(query.direction())) {
+            sql.append(" AND credit_transactions.change_amount < 0")
+                    .append(" AND NOT (credit_transactions.transaction_type = 'task_charge' AND EXISTS (")
+                    .append("SELECT 1 FROM user_credit_transactions refunded_transactions ")
+                    .append("WHERE refunded_transactions.task_id = credit_transactions.task_id ")
+                    .append("AND refunded_transactions.transaction_type = 'task_refund'))\n");
+        }
+        if (query.source() != null) {
+            if ("image".equals(query.source()) || "video".equals(query.source())) {
+                sql.append(" AND tasks.task_type = :source\n");
+            } else {
+                sql.append(" AND credit_transactions.transaction_type = :source\n");
+            }
+        }
+        return sql.toString();
+    }
+
+    /**
+     * 绑定用户统一积分明细查询参数。
+     *
+     * @param spec GenericExecuteSpec 待绑定的SQL执行器
+     * @param query UserCreditQuery 查询条件
+     * @return GenericExecuteSpec 已绑定参数的SQL执行器
+     */
+    private DatabaseClient.GenericExecuteSpec bindUserTransactionQuery(DatabaseClient.GenericExecuteSpec spec, UserCreditQuery query) {
+        DatabaseClient.GenericExecuteSpec boundSpec = spec
+                .bind("userId", query.userId())
+                .bind("startAt", query.startAt())
+                .bind("endAt", query.endAt());
+        return query.source() == null ? boundSpec : boundSpec.bind("source", query.source());
+    }
+
+    /**
+     * 分页查询用户统一积分流水明细（含增加与消耗）。
+     *
+     * @param query UserCreditQuery 查询条件
+     * @param page int 页码
+     * @param pageSize int 每页数量
+     * @return Flux<UserCreditTransactionItem> 当前页明细
+     */
+    public Flux<CreditDtos.UserCreditTransactionItem> listUserTransactions(UserCreditQuery query, int page, int pageSize) {
+        String sql = """
+                SELECT credit_transactions.id,
+                       credit_transactions.transaction_type,
+                       credit_transactions.generation_source,
+                       credit_transactions.change_amount,
+                       credit_transactions.balance_after,
+                       credit_transactions.reason,
+                       credit_transactions.created_at,
+                       tasks.task_type AS generation_type,
+                       tasks.model AS model
+                """ + userTransactionQuery(query) + """
+                ORDER BY credit_transactions.created_at DESC, credit_transactions.id DESC
+                LIMIT :limit OFFSET :offset
+                """;
+        return bindUserTransactionQuery(databaseClient.sql(sql), query)
+                .bind("limit", pageSize)
+                .bind("offset", (page - 1) * pageSize)
+                .map((row, metadata) -> {
+                    int changeAmount = row.get("change_amount", Integer.class);
+                    return new CreditDtos.UserCreditTransactionItem(
+                            row.get("id", Long.class),
+                            row.get("transaction_type", String.class),
+                            changeAmount > 0 ? "add" : "spend",
+                            row.get("generation_type", String.class),
+                            row.get("model", String.class),
+                            row.get("generation_source", String.class),
+                            (long) changeAmount,
+                            row.get("reason", String.class),
+                            (long) row.get("balance_after", Integer.class),
+                            row.get("created_at", OffsetDateTime.class).toString());
+                })
+                .all();
+    }
+
+    /**
+     * 查询用户统一积分流水明细总数。
+     *
+     * @param query UserCreditQuery 查询条件
+     * @return Mono<Long> 符合条件的明细总数
+     */
+    public Mono<Long> countUserTransactions(UserCreditQuery query) {
+        String sql = "SELECT COUNT(*) AS total " + userTransactionQuery(query);
+        return bindUserTransactionQuery(databaseClient.sql(sql), query)
+                .map((row, metadata) -> row.get("total", Long.class))
+                .one();
+    }
 }
