@@ -1,9 +1,9 @@
 "use client";
 
-import { Button, Tooltip } from "antd";
-import { ArrowRight, Copy } from "lucide-react";
+import { Button, Input, Modal, Tooltip } from "antd";
+import { ArrowRight, Copy, PenLine } from "lucide-react";
 import ReactMarkdown from "react-markdown";
-import { useLayoutEffect, useRef, type CSSProperties } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 
 import { AgentActivityTimeline } from "@/features/generation/components/agent-activity-timeline";
@@ -12,9 +12,11 @@ import { ThinkingBlock } from "@/features/chat";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import { storeInitialPromptForNavigation } from "@/shared/lib/initial-prompt";
 
-const AT_BOTTOM_THRESHOLD = 48;
+// 底部判定阈值需覆盖输入框紧凑/展开的高度差：输入框展开时滚动视口变矮，
+// 若阈值太小，滚到底展开输入框后会因差值超限被误判为“未到底”而缩回（震荡）。
+const AT_BOTTOM_THRESHOLD = 180;
 
-export function CreationMessageThread({ sections, emptyState, onAtBottomChange }: CreationMessageThreadProps) {
+export function CreationMessageThread({ sections, emptyState, onAtBottomChange, onActionReply, onUploadImage }: CreationMessageThreadProps) {
     const scrollRef = useRef<HTMLDivElement>(null);
     const keepPinnedToBottomRef = useRef(true);
     const latestFreshUserRoundIdRef = useRef<string | null>(null);
@@ -46,7 +48,12 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange }
             keepPinnedToBottomRef.current = true;
             onAtBottomChange?.(true);
         } else {
-            onAtBottomChange?.(isAtBottom());
+            const atBottom = isAtBottom();
+            // 内容更新后若实际已在底部，同步 pinned 语义，避免后续渲染误判。
+            if (atBottom) {
+                keepPinnedToBottomRef.current = true;
+            }
+            onAtBottomChange?.(atBottom);
         }
         latestFreshUserRoundIdRef.current = latestFreshUserRoundId;
     }, [hasNewFreshUserRound, latestFreshUserRoundId, onAtBottomChange, sections]);
@@ -60,7 +67,7 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange }
     return (
         <div ref={scrollRef} className="thin-scrollbar min-h-0 flex-1 overflow-y-auto" onScroll={handleScroll}>
             {sections.length ? (
-                <div className="mx-auto w-full max-w-5xl px-4 pb-64 pt-6 sm:px-6">
+                <div className="mx-auto w-full max-w-5xl px-4 pb-6 pt-6 sm:px-6">
                     {sections.map((section) => (
                         <section key={section.id} className="mb-10 last:mb-0">
                             <div className="mb-5 flex items-center gap-3">
@@ -125,6 +132,9 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange }
                                                     </Button>
                                                 </div>
                                             ) : null}
+                                            {round.action?.type === "choice" && round.action.options?.length ? (
+                                                <ChoiceGroup options={round.action.options} onReply={(value) => onActionReply?.(value)} onUpload={onUploadImage} />
+                                            ) : null}
                                             {round.actionBar ? <div className="pt-1">{round.actionBar}</div> : null}
                                         </div>
                                     </article>
@@ -136,6 +146,137 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange }
             ) : (
                 emptyState
             )}
+        </div>
+    );
+}
+
+/** 选项按钮组：单选点击即发；multiple 标记整组多选（勾选后确认提交，多个 value 用顿号拼接）；action=upload_image 的选项点击触发参考图上传；均支持自定义输入。 */
+function ChoiceGroup({
+    options,
+    onReply,
+    onUpload,
+}: {
+    options: { label: string; value: string; multiple?: boolean; action?: string }[];
+    onReply: (value: string) => void;
+    onUpload?: () => void;
+}) {
+    const multiple = options.some((option) => option.multiple);
+    const [selected, setSelected] = useState<string[]>([]);
+    const [customOpen, setCustomOpen] = useState(false);
+    const [customValue, setCustomValue] = useState("");
+
+    /** 识别"上传图片"类选项：优先 action=upload_image，兜底按按钮文案（label）以"上传"开头判定；
+     *  不能用 value 判断——"确认生成"按钮的 value 是完整提示词，可能包含"上传"字样（如"以用户上传的产品图片为基准"）。 */
+    const isUploadOption = (option: { label: string; value: string; multiple?: boolean; action?: string }) =>
+        option.action === "upload_image" || option.label.startsWith("上传");
+
+    /** 点击选项：上传类选项直接触发参考图上传；否则单选发送或多选切换选中。 */
+    const handleOptionClick = (option: { label: string; value: string; multiple?: boolean; action?: string }) => {
+        if (isUploadOption(option)) {
+            onUpload?.();
+            return;
+        }
+        if (multiple) {
+            toggle(option.value);
+            return;
+        }
+        onReply(option.value);
+    };
+
+    const toggle = (value: string) => {
+        setSelected((current) => (current.includes(value) ? current.filter((item) => item !== value) : [...current, value]));
+    };
+
+    const submitMulti = () => {
+        if (!selected.length) return;
+        onReply(selected.join("、"));
+    };
+
+    const submitCustom = () => {
+        const text = customValue.trim();
+        if (!text) return;
+        setCustomOpen(false);
+        setCustomValue("");
+        onReply(text);
+    };
+
+    const customButton = (
+        <Button className="creation-choice-custom-button" icon={<PenLine className="size-3.5" />} onClick={() => {
+            setCustomValue("");
+            setCustomOpen(true);
+        }}>
+            自定义
+        </Button>
+    );
+    const customModal = (
+        <Modal
+            title="自定义输入"
+            open={customOpen}
+            onOk={submitCustom}
+            onCancel={() => setCustomOpen(false)}
+            okText="发送"
+            cancelText="取消"
+            destroyOnHidden
+        >
+            <Input.TextArea
+                value={customValue}
+                rows={4}
+                autoFocus
+                placeholder="输入您想要的风格、内容或其它补充说明，将作为消息发送给助手"
+                onChange={(event) => setCustomValue(event.target.value)}
+            />
+        </Modal>
+    );
+
+    if (!multiple) {
+        return (
+            <div className="flex flex-wrap items-center gap-2.5 pt-2">
+                {options.map((option) => (
+                    <Button key={option.value} className="creation-choice-button" onClick={() => handleOptionClick(option)}>
+                        {option.label}
+                    </Button>
+                ))}
+                {customButton}
+                {customModal}
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-2.5 pt-2">
+            <div className="flex flex-wrap items-center gap-2.5">
+                {options.map((option) => (
+                    <Button
+                        key={option.value}
+                        className={selected.includes(option.value)
+                            ? "creation-choice-button creation-choice-multi creation-choice-selected"
+                            : "creation-choice-button creation-choice-multi"}
+                        onClick={() => handleOptionClick(option)}
+                    >
+                        {option.label}
+                    </Button>
+                ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2.5">
+                <Button type="primary" size="small" disabled={!selected.length} onClick={submitMulti}>
+                    {selected.length ? `确认（已选 ${selected.length} 项）` : "确认选择"}
+                </Button>
+                {customButton}
+            </div>
+            {customModal}
+        </div>
+    );
+}
+
+/** 历史记录中的只读选项条：展示该轮系统给出的选项，不可再点击。 */
+export function ChoiceHistoryBar({ choices }: { choices: { label: string; value: string; multiple?: boolean; action?: string }[] }) {
+    return (
+        <div className="flex flex-wrap items-center gap-2.5 pt-2">
+            {choices.map((choice) => (
+                <Button key={choice.value} className="creation-choice-button creation-choice-readonly" disabled>
+                    {choice.label}
+                </Button>
+            ))}
         </div>
     );
 }

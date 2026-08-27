@@ -20,6 +20,7 @@ import java.util.Map;
  * @param attachments    List<Attachment> 附件（图片参考等，generation profile 使用）
  * @param history        List<HistoryMessage> 前端对话历史
  * @param creationSettings CreationSettings 页面选择的生成设置
+ * @param skillId String 选中技能ID（图片/视频页 skills 功能，可为空）
  */
 public record AgentChatRequest(
     String sessionId,
@@ -29,7 +30,8 @@ public record AgentChatRequest(
     List<Reference> references,
     List<Attachment> attachments,
     List<HistoryMessage> history,
-    CreationSettings creationSettings
+    CreationSettings creationSettings,
+    String skillId
 ) {
 
     /**

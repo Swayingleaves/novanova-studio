@@ -11,6 +11,8 @@ export type ChatMessageItem = {
   detail?: unknown;
   attachments?: ChatAttachment[];
   generationStyles?: ChatGenerationStyle[];
+  /** 该用户消息发送时选中的技能快照（当前会话聊天区展示用，与历史区 round.skill 一致） */
+  skill?: { id: number; name: string; targetType: string } | null;
   action?: AgentAction;
 };
 

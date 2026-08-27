@@ -105,6 +105,20 @@ export type PromptOptimizationType = "image" | "video";
 
 export type GenerationStyleType = "image" | "video";
 
+export type SkillType = "image" | "video";
+
+export type SkillOption = {
+    id: number;
+    name: string;
+    description: string;
+    targetType: SkillType;
+    coverUrl: string;
+};
+
+export type SkillOptionListResponse = {
+    skills: SkillOption[];
+};
+
 export type GenerationStyleSnapshot = {
     id: number;
     name: string;
@@ -619,6 +633,77 @@ export function deleteAdminPrompts(ids: number[]) {
 
 export function listGenerationStyles(generationType: GenerationStyleType) {
     return serverGet<GenerationStyleOptionListResponse>(`/style/listStyles?generationType=${encodeURIComponent(generationType)}`);
+}
+
+// ---- 图片和视频生成技能 ----
+
+export function listSkills(targetType: SkillType) {
+    return serverGet<SkillOptionListResponse>(`/skill/listSkills?targetType=${encodeURIComponent(targetType)}`);
+}
+
+export type ServerSkill = {
+    id: number;
+    name: string;
+    description: string;
+    targetType: SkillType;
+    systemPrompt: string;
+    coverUrl: string;
+    status: number;
+    sortOrder: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type ServerSkillListResponse = {
+    skills: ServerSkill[];
+    total: number;
+};
+
+export type ServerSkillListParams = {
+    keyword?: string;
+    targetType?: "all" | SkillType;
+    status?: number;
+    page?: number;
+    pageSize?: number;
+};
+
+function skillQuery(params: ServerSkillListParams = {}) {
+    const query = new URLSearchParams({ page: String(params.page || 1), pageSize: String(params.pageSize || 20) });
+    if (params.keyword) query.set("keyword", params.keyword);
+    if (params.targetType) query.set("targetType", params.targetType);
+    if (params.status !== undefined) query.set("status", String(params.status));
+    return `?${query.toString()}`;
+}
+
+export function listAdminSkills(params: ServerSkillListParams = {}) {
+    return serverGet<ServerSkillListResponse>(`/admin/skill/listSkills${skillQuery(params)}`);
+}
+
+export type ServerSkillInput = {
+    id?: number;
+    name: string;
+    description?: string;
+    targetType: SkillType;
+    systemPrompt: string;
+    coverUrl?: string;
+    status?: number;
+    sortOrder?: number;
+};
+
+export function createAdminSkill(input: Omit<ServerSkillInput, "id">) {
+    return serverPost("/admin/skill/createSkill", input);
+}
+
+export function updateAdminSkill(input: ServerSkillInput & { id: number }) {
+    return serverPost("/admin/skill/updateSkill", input);
+}
+
+export function updateAdminSkillStatus(id: number, status: number) {
+    return serverPost("/admin/skill/updateSkillStatus", { id, status });
+}
+
+export function deleteAdminSkills(ids: number[]) {
+    return serverPost("/admin/skill/deleteSkills", { ids });
 }
 
 export type ServerGenerationStyleListParams = {

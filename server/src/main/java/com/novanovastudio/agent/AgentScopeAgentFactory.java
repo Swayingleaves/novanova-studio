@@ -6,6 +6,7 @@ import io.agentscope.core.ReActAgent;
 import io.agentscope.core.model.Model;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 /**
  * 固定主Agent、图片子Agent和视频子Agent工厂。
@@ -30,7 +31,22 @@ public class AgentScopeAgentFactory {
      * @return ReActAgent 主Agent
      */
     public ReActAgent mainAgent(Model model) {
-        return build("main-agent", promptService.get(PromptTemplateType.AGENT_MAIN), model,
+        return mainAgent(model, null);
+    }
+
+    /**
+     * 创建主Agent，可追加技能流程系统提示词。
+     *
+     * @param model AgentScope文本模型
+     * @param extraSystemPrompt String 追加到主Agent系统提示词末尾的技能流程指令，可为空
+     * @return ReActAgent 主Agent
+     */
+    public ReActAgent mainAgent(Model model, String extraSystemPrompt) {
+        String prompt = promptService.get(PromptTemplateType.AGENT_MAIN);
+        if (StringUtils.hasText(extraSystemPrompt)) {
+            prompt = prompt + "\n\n" + extraSystemPrompt;
+        }
+        return build("main-agent", prompt, model,
                 "只能返回 CreationPlan 结构化结果，不得调用工具。", true);
     }
 

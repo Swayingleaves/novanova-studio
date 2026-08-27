@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, CloudUpload, Download, FolderPlus, Cog, HelpCircle, LoaderCircle, Palette, Play, RefreshCw, Sparkles, TriangleAlert, Upload, VideoIcon } from "lucide-react";
+import { BookOpen, CloudUpload, Download, FolderPlus, Cog, HelpCircle, Link2, LoaderCircle, Palette, Play, RefreshCw, Sparkles, TriangleAlert, Upload, VideoIcon } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -29,11 +29,13 @@ import { uploadRemoteObjectToStorage } from "@/features/storage/services/object-
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
+import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
-import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/features/chat/types";
+import type { AgentActivityState, ChatAttachment, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
+import { ChoiceHistoryBar } from "@/features/generation/components/creation-message-thread";
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, mergePlanTaskActivityMessage, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { hasPendingVideoConversation } from "@/features/generation/lib/generation-conversation-recovery";
@@ -46,7 +48,7 @@ import { useRecentReferenceImages } from "@/features/generation/hooks/use-recent
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { availableVideoModelsForMode, quoteVideoGeneration, videoGenerationReferenceIssue } from "@/features/generation/lib/video-billing";
-import { cancelAiTask, deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
+import { cancelAiTask, deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
 import { findLatestPlayableVideo, hasPlayableVideoUrl } from "./video-display";
 
 type GeneratedVideo = {
@@ -81,10 +83,15 @@ type Round = {
     prompt: string;
     generationPrompt?: string;
     generationStyleSnapshots?: GenerationStyleSnapshot[];
+    /** 生成该轮时用户选择的技能快照 */
+    skill?: { id: number; name: string; targetType: string } | null;
+    /** 对话轮次中系统提供的选项（历史只读展示，不可再点击） */
+    choices?: { label: string; value: string; multiple?: boolean; action?: string }[];
     references: ReferenceImage[];
     videoReferences: ReferenceVideo[];
     config: RoundConfig;
-    result: GenerationResult;
+    /** 纯对话轮次（技能引导/澄清问答）无生成结果，可为空 */
+    result?: GenerationResult;
     createdAt: number;
     activities?: AgentActivityState[];
 };
@@ -100,6 +107,7 @@ type Conversation = GenerationLogStatusFields & {
 export default function VideoPage() {
     const { message, modal } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const uploadChoiceInputRef = useRef<HTMLInputElement>(null);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -121,6 +129,10 @@ export default function VideoPage() {
     const [selectedStyles, setSelectedStyles] = useState<CreationStyleOption[]>([]);
     const [styleLoading, setStyleLoading] = useState(false);
     const [styleError, setStyleError] = useState<string | null>(null);
+    const [skillOptions, setSkillOptions] = useState<SkillOption[]>([]);
+    const [selectedSkill, setSelectedSkill] = useState<SkillOption | null>(null);
+    const [skillLoading, setSkillLoading] = useState(false);
+    const [skillError, setSkillError] = useState<string | null>(null);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
@@ -161,6 +173,25 @@ export default function VideoPage() {
             })
             .finally(() => {
                 if (!cancelled) setStyleLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [message]);
+
+    useEffect(() => {
+        let cancelled = false;
+        setSkillLoading(true);
+        setSkillError(null);
+        void listSkills("video")
+            .then((result) => {
+                if (!cancelled) setSkillOptions(result.skills);
+            })
+            .catch((error) => {
+                if (!cancelled) setSkillError(error instanceof Error ? error.message : "技能加载失败");
+            })
+            .finally(() => {
+                if (!cancelled) setSkillLoading(false);
             });
         return () => {
             cancelled = true;
@@ -246,6 +277,7 @@ export default function VideoPage() {
 
     const { sessionId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, canChangeSession, resetSession, restoreSession } = useAgentChatSSE({
         entrySource: "videoPage",
+        skillId: selectedSkill ? String(selectedSkill.id) : undefined,
         creationSettings: agentCreationSettings,
         onTextDelta: (msgId, delta) => {
             setStreamingText((prev) => {
@@ -509,7 +541,7 @@ export default function VideoPage() {
         };
     }, [conversations, refreshConversations]);
 
-    const addReferences = async (files?: FileList | File[] | null) => {
+    const addReferences = async (files?: FileList | File[] | null): Promise<{ images: ReferenceImage[]; videos: ReferenceVideo[] }> => {
         try {
             const selectedFiles = Array.from(files || []);
             const unsupportedFiles = selectedFiles.filter((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/"));
@@ -540,31 +572,31 @@ export default function VideoPage() {
             }));
             const placeholders = [...imagePlaceholders, ...videoPlaceholders];
             if (!placeholders.length) {
-                return;
+                return { images: [], videos: [] };
             }
             setReferences((current) => [...current, ...imagePlaceholders].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
             setVideoReferences((current) => [...current, ...videoPlaceholders].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
             autoSwitchModeForReferences(imageFiles.length, videoFiles.length);
             setUploadingReferenceIds((current) => [...current, ...placeholders.map((placeholder) => placeholder.id)]);
 
+            const uploadedImages: ReferenceImage[] = [];
+            const uploadedVideos: ReferenceVideo[] = [];
             await Promise.all([
                 ...imagePlaceholders.map(async (placeholder, index) => {
                     const file = imageFiles[index];
                     try {
                         const image = await uploadImage(file);
                         recordRecentReferenceImage(image.objectStorage?.url);
+                        const uploadedReference: ReferenceImage = {
+                            ...placeholder,
+                            type: image.mimeType,
+                            dataUrl: image.url,
+                            storageKey: image.storageKey,
+                            objectStorage: image.objectStorage,
+                        };
+                        uploadedImages.push(uploadedReference);
                         setReferences((current) =>
-                            current.map((reference) =>
-                                reference.id === placeholder.id
-                                    ? {
-                                          ...placeholder,
-                                          type: image.mimeType,
-                                          dataUrl: image.url,
-                                          storageKey: image.storageKey,
-                                          objectStorage: image.objectStorage,
-                                      }
-                                    : reference,
-                            ),
+                            current.map((reference) => (reference.id === placeholder.id ? uploadedReference : reference)),
                         );
                     } catch (error) {
                         setReferences((current) => current.filter((reference) => reference.id !== placeholder.id));
@@ -578,22 +610,20 @@ export default function VideoPage() {
                     const file = videoFiles[index];
                     try {
                         const video = await uploadMediaFile(file, "video-reference");
+                        const uploadedReference: ReferenceVideo = {
+                            ...placeholder,
+                            type: video.mimeType,
+                            url: video.url,
+                            storageKey: video.storageKey,
+                            bytes: video.bytes,
+                            width: video.width,
+                            height: video.height,
+                            durationMs: video.durationMs,
+                            objectStorage: video.objectStorage,
+                        };
+                        uploadedVideos.push(uploadedReference);
                         setVideoReferences((current) =>
-                            current.map((reference) =>
-                                reference.id === placeholder.id
-                                    ? {
-                                          ...placeholder,
-                                          type: video.mimeType,
-                                          url: video.url,
-                                          storageKey: video.storageKey,
-                                          bytes: video.bytes,
-                                          width: video.width,
-                                          height: video.height,
-                                          durationMs: video.durationMs,
-                                          objectStorage: video.objectStorage,
-                                      }
-                                    : reference,
-                            ),
+                            current.map((reference) => (reference.id === placeholder.id ? uploadedReference : reference)),
                         );
                     } catch (error) {
                         setVideoReferences((current) => current.filter((reference) => reference.id !== placeholder.id));
@@ -604,8 +634,10 @@ export default function VideoPage() {
                     }
                 }),
             ]);
+            return { images: uploadedImages, videos: uploadedVideos };
         } catch (error) {
             message.error(error instanceof Error ? error.message : "上传参考素材失败");
+            return { images: [], videos: [] };
         }
     };
 
@@ -650,7 +682,7 @@ export default function VideoPage() {
         const attachments = buildChatAttachments(allRefs);
 
         setChatMessages((prev) => {
-            const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments, generationStyles: selectedStyles }];
+            const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments, generationStyles: selectedStyles, skill: selectedSkill }];
             chatMessagesRef.current = next;
             return next;
         });
@@ -672,6 +704,69 @@ export default function VideoPage() {
         setSelectedStyles([]);
     };
 
+    const handleActionReply = async (value: string) => {
+        if (isStreaming || isQueued) return;
+        const text = value.trim();
+        if (!text) return;
+        // 技能引导中选择生成比例时同步页面尺寸配置，保证最终生成任务按用户选择的比例（而非页面默认值）
+        if (/^\d+:\d+$/.test(text)) {
+            updateConfig("size", text);
+        }
+        setChatMessages((prev) => {
+            const next = [...prev, { id: nanoid(), role: "user" as const, text, skill: selectedSkill }];
+            chatMessagesRef.current = next;
+            return next;
+        });
+        // 携带当前参考素材附件：技能引导中用户上传的图片/视频需随确认消息送达，作为最终生成参考
+        const currentAttachments = [
+            ...imageReferenceAttachments(references),
+            ...videoReferenceAttachments(videoReferences),
+        ];
+        await sendMessage(text, currentAttachments.length ? currentAttachments : undefined);
+    };
+
+    /** 技能引导中"上传图片"按钮选择文件后：上传参考素材并在对话区回显，随后自动发送带附件的消息。 */
+    const handleUploadFromChoice = async (files?: FileList | null) => {
+        if (!files?.length) return;
+        const { images, videos } = await addReferences(files);
+        const attachments = [...imageReferenceAttachments(images), ...videoReferenceAttachments(videos)];
+        if (!attachments.length || isStreaming || isQueued) return;
+        const videoModel = effectiveConfig.videoModel || effectiveConfig.model || model;
+        const size = config.size || "16:9";
+        const seconds = config.videoSeconds || "5";
+        const quality = config.vquality || "720p";
+        const watermark = config.videoWatermark ?? true;
+        const text = "已上传产品图片";
+        const selectedVideoQuote = quoteVideoGeneration({
+            config: effectiveConfig,
+            model: videoModel,
+            mode: config.videoGenerationMode,
+            resolution: quality,
+            seconds,
+            imageReferenceCount: attachments.filter((reference) => reference.type.startsWith("image/")).length,
+            videoReferenceCount: attachments.filter((reference) => reference.type.startsWith("video/")).length,
+        });
+        if (!selectedVideoQuote.available) {
+            message.error(selectedVideoQuote.reason);
+            return;
+        }
+        setChatMessages((prev) => {
+            const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments: buildChatAttachments(attachments), skill: selectedSkill }];
+            chatMessagesRef.current = next;
+            return next;
+        });
+        await sendMessage(text, attachments.length ? attachments : undefined, {
+            model: videoModel,
+            size,
+            resolution: quality,
+            quality: quality.includes("1080") ? "high" : quality.includes("480") ? "low" : "medium",
+            seconds,
+            watermark: String(watermark).toLowerCase() === "true",
+            videoGenerationMode: config.videoGenerationMode,
+            ...(selectedStyles.length ? { generationStyleIds: selectedStyles.map((style) => style.id) } : {}),
+        });
+    };
+
     const regenerateRound = async (round: Round) => {
         if (!canChangeSession()) return;
         const videoModel = round.config.videoModel || round.config.model || model;
@@ -689,6 +784,7 @@ export default function VideoPage() {
                 text: round.prompt,
                 attachments: buildChatAttachments(attachments),
                 generationStyles: round.generationStyleSnapshots,
+                skill: round.skill,
             }];
             chatMessagesRef.current = next;
             return next;
@@ -722,6 +818,7 @@ export default function VideoPage() {
         setReferences([]);
         setVideoReferences([]);
         setSelectedStyles([]);
+        setSelectedSkill(null);
         setSelectedIds([]);
         setManagementMode(false);
         setMobileSidebarOpen(false);
@@ -758,6 +855,7 @@ export default function VideoPage() {
         setReferences([]);
         setVideoReferences([]);
         setSelectedStyles([]);
+        setSelectedSkill(null);
         setMobileSidebarOpen(false);
         restoreSession(conversation.id);
     };
@@ -771,7 +869,7 @@ export default function VideoPage() {
             message.warning("当前生成任务尚未结束，请先停止或等待完成");
             return;
         }
-        const mediaKeys = conversations.filter((conversation) => selectedIds.includes(conversation.id)).flatMap((conversation) => conversation.rounds.flatMap((round) => (round.result.video?.storageKey ? [round.result.video.storageKey] : [])));
+        const mediaKeys = conversations.filter((conversation) => selectedIds.includes(conversation.id)).flatMap((conversation) => conversation.rounds.flatMap((round) => (round.result?.video?.storageKey ? [round.result.video.storageKey] : [])));
         void Promise.all([deleteStoredMedia(mediaKeys), deleteGenerationLogs(selectedIds)]).then(refreshConversations);
         if (activeId && selectedIds.includes(activeId)) {
             setActiveId(null);
@@ -781,6 +879,7 @@ export default function VideoPage() {
             setReferences([]);
             setVideoReferences([]);
             setSelectedStyles([]);
+            setSelectedSkill(null);
             resetSession();
         }
         setSelectedIds([]);
@@ -800,7 +899,7 @@ export default function VideoPage() {
 
     const openVideoResultDetail = (video: GeneratedVideo, round: Round) => {
         setResultDetail({
-            media: { kind: "video", url: video.url, width: video.width, height: video.height, bytes: video.bytes, durationMs: video.durationMs, mimeType: video.mimeType },
+            media: { kind: "video", url: video.url, ossUrl: video.objectStorage?.url, width: video.width, height: video.height, bytes: video.bytes, durationMs: video.durationMs, mimeType: video.mimeType },
             prompt: round.prompt,
             generationPrompt: round.generationPrompt,
             references: round.references,
@@ -855,7 +954,7 @@ export default function VideoPage() {
                 current.map((conversation) => ({
                     ...conversation,
                     rounds: conversation.rounds.map((round) =>
-                        round.result.video?.id === video.id
+                        round.result?.video?.id === video.id
                             ? {
                                   ...round,
                                   result: {
@@ -940,7 +1039,7 @@ export default function VideoPage() {
             return;
         }
         const conversation = conversationsRef.current.find((item) => item.id === conversationId);
-        const mediaKeys = conversation?.rounds.flatMap((round) => (round.result.video?.storageKey ? [round.result.video.storageKey] : [])) || [];
+        const mediaKeys = conversation?.rounds.flatMap((round) => (round.result?.video?.storageKey ? [round.result.video.storageKey] : [])) || [];
         await Promise.all([deleteStoredMedia(mediaKeys), deleteGenerationLogs([conversationId])]);
         if (activeIdRef.current === conversationId) {
             newConversation();
@@ -1062,26 +1161,40 @@ export default function VideoPage() {
         activeThinking,
         streamingText,
         toolCalls,
-        (data) =>
-            renderResultVideos(data, {
+        (data, round) => {
+            const roundReferences = splitChatAttachments(round?.attachments);
+            return renderResultVideos(data, {
                 onDownload: downloadVideo,
                 onSaveAsset: saveResultToAssets,
                 onUploadObjectStorage: uploadResultToObjectStorage,
                 onOpenDetail: (video) =>
                     setResultDetail({
-                        media: { kind: "video", url: video.url, width: video.width, height: video.height, bytes: video.bytes, durationMs: video.durationMs, mimeType: video.mimeType },
-                        prompt,
-                        references,
-                        videoReferences,
+                        media: { kind: "video", url: video.url, ossUrl: video.objectStorage?.url, width: video.width, height: video.height, bytes: video.bytes, durationMs: video.durationMs, mimeType: video.mimeType },
+                        prompt: round?.userText || prompt,
+                        references: roundReferences.images.length ? roundReferences.images : references,
+                        videoReferences: roundReferences.videos.length ? roundReferences.videos : videoReferences,
                         onDownload: () => void downloadVideo(video),
                     }),
-            }),
+            });
+        },
         renderPendingVideoToolCall,
     );
     // 聊天区已实时渲染的生成轮次不再进入历史区，避免同一轮重复展示；纯文本对话保留在聊天区。
+    // 当前会话激活时（chatMessages 非空），已落库的纯对话轮次也在聊天区渲染过，历史区一并跳过；
+    // 刷新或切换会话后 chatMessages 清空，历史区恢复完整展示（含纯对话轮次）。
     const liveRoundIds = new Set(chatMessages.filter((item) => item.role === "tool").map((item) => item.id));
-    const threadSections = activeConversation
-        ? buildVideoThreadSections(activeConversation, liveRoundIds, {
+    const hideDialogueRounds = chatMessages.length > 0;
+    const displayedConversation = activeConversation && (liveRoundIds.size || hideDialogueRounds)
+        ? {
+              ...activeConversation,
+              rounds: activeConversation.rounds.filter((round) => {
+                  if (liveRoundIds.has(round.id)) return false;
+                  return !(hideDialogueRounds && !round.result);
+              }),
+          }
+        : activeConversation;
+    const threadSections = displayedConversation
+        ? buildVideoThreadSections(displayedConversation, liveRoundIds, {
               uploadingObjectStorageId,
               onDownload: downloadVideo,
               onSaveAsset: saveResultToAssets,
@@ -1103,6 +1216,17 @@ export default function VideoPage() {
                 className="hidden"
                 onChange={(event) => {
                     void addReferences(event.target.files);
+                    event.target.value = "";
+                }}
+            />
+            <input
+                ref={uploadChoiceInputRef}
+                type="file"
+                accept="image/*,video/mp4,video/quicktime"
+                multiple
+                className="hidden"
+                onChange={(event) => {
+                    void handleUploadFromChoice(event.target.files);
                     event.target.value = "";
                 }}
             />
@@ -1132,6 +1256,11 @@ export default function VideoPage() {
                 }}
                 thread={{
                     sections: allThreadSections,
+                    onActionReply: (value) => void handleActionReply(value),
+                    onUploadImage: () => {
+                        // 与页面"添加参考图"同一上传链路；上传完成后自动发送带附件消息，对话区回显图片
+                        uploadChoiceInputRef.current?.click();
+                    },
                     emptyState: (
                         <div className="flex h-full flex-col justify-center pb-28 pt-12">
                             <div className="relative mx-auto w-full max-w-5xl px-6 sm:px-10 lg:-left-4 lg:px-3">
@@ -1160,6 +1289,10 @@ export default function VideoPage() {
                     selectedStyles,
                     styleLoading,
                     styleError,
+                    skillOptions,
+                    selectedSkill,
+                    skillLoading,
+                    skillError,
                     actions: composerActions,
                     running: isStreaming || activeConversationPending,
                     queued: isQueued,
@@ -1170,6 +1303,8 @@ export default function VideoPage() {
                     onChange: setPrompt,
                     onStyleSelect: (style) => setSelectedStyles([style]),
                     onStyleRemove: (styleId) => setSelectedStyles((current) => current.filter((style) => style.id !== styleId)),
+                    onSkillSelect: (skill) => setSelectedSkill(skill),
+                    onSkillRemove: () => setSelectedSkill(null),
                     onPasteImages: (files) => void addReferences(files),
                     onSubmit: () => void generate(),
                     onStop: isStreaming || isQueued ? () => void cancelMessage() : activeConversationPending ? () => void stopPendingGeneration() : undefined,
@@ -1230,6 +1365,21 @@ export default function VideoPage() {
             <ResultDetailDialog detail={resultDetail} onClose={() => setResultDetail(null)} />
         </>
     );
+}
+
+/** 聊天区该轮用户消息的参考附件按类型拆分为详情弹窗使用的图片/视频引用。 */
+function splitChatAttachments(attachments: ChatAttachment[] | undefined): { images: ReferenceImage[]; videos: ReferenceVideo[] } {
+    const images: ReferenceImage[] = [];
+    const videos: ReferenceVideo[] = [];
+    for (const attachment of attachments || []) {
+        if (!attachment.url.trim()) continue;
+        if (attachment.type?.startsWith("video/")) {
+            videos.push({ id: attachment.id, name: attachment.name, type: attachment.type || "video/*", url: attachment.url });
+        } else {
+            images.push({ id: attachment.id, name: attachment.name, type: attachment.type || "image/*", dataUrl: attachment.url });
+        }
+    }
+    return { images, videos };
 }
 
 function renderResultVideos(
@@ -1339,9 +1489,17 @@ function buildVideoThreadSections(
             id: round.id,
             userText: round.prompt,
             userCopyText: formatGenerationStyleMessage(round.prompt, round.generationStyleSnapshots),
-            userAttachments: round.references.length || round.videoReferences.length || round.generationStyleSnapshots?.length
+            userAttachments: round.references.length || round.videoReferences.length || round.generationStyleSnapshots?.length || round.skill
                 ? (
                     <div className="space-y-2">
+                        {round.skill ? (
+                            <div className="flex flex-wrap gap-2">
+                                <span className="inline-flex max-w-52 items-center gap-1.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]" title={`技能：${round.skill.name}`}>
+                                    <Sparkles className="size-3.5 shrink-0 text-[var(--studio-action)]" />
+                                    <span className="truncate">{round.skill.name}</span>
+                                </span>
+                            </div>
+                        ) : null}
                         {renderGenerationStyleSnapshots(round.generationStyleSnapshots)}
                         {renderVideoRoundReferences(round)}
                     </div>
@@ -1350,6 +1508,7 @@ function buildVideoThreadSections(
             statusText: buildVideoStatusText(round),
             assistantText: buildVideoAssistantText(round),
             activities: round.activities,
+            actionBar: round.choices?.length ? <ChoiceHistoryBar choices={round.choices} /> : undefined,
             resultContent: (
                 <div className="grid gap-3 xl:grid-cols-2">
                     {getVideoDisplayResults(round).map((result) =>
@@ -1421,6 +1580,9 @@ function getVideoDisplayResults(round: Round): GenerationResult[] {
 }
 
 function buildVideoStatusText(round: Round): string {
+    if (!round.result) {
+        return "";
+    }
     if (round.result.status === "pending") {
         return round.result.progress != null && round.result.progress > 0 ? `生成中 ${round.result.progress}%` : "生成中";
     }
@@ -1434,6 +1596,9 @@ function buildVideoStatusText(round: Round): string {
 }
 
 function buildVideoAssistantText(round: Round): string {
+    if (!round.result) {
+        return round.assistantText || "";
+    }
     if (round.result.status === "pending") {
         return "我正在整理这一轮视频结果，请稍等。";
     }
@@ -1494,6 +1659,7 @@ function ResultCard({
     onRegenerate?: () => void;
 }) {
     const [isDownloading, setIsDownloading] = useState(false);
+    const copyText = useCopyText();
     if (!hasPlayableVideoUrl(video.url)) {
         return <FailedCard error="视频地址为空，无法播放" />;
     }
@@ -1538,6 +1704,9 @@ function ResultCard({
                     ) : null}
                 </div>
                 <div className="flex gap-1">
+                    <Tooltip title="拷贝链接">
+                        <Button aria-label="拷贝链接" size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<Link2 className="size-3.5" />} onClick={() => copyText(video.objectStorage?.url || video.url, "链接已复制")} />
+                    </Tooltip>
                     <Tooltip title={video.objectStorage?.url ? "复制云储存地址" : "上传到云储存"}>
                         <Button size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" loading={uploadingObjectStorage} icon={<CloudUpload className="size-3.5" />} onClick={() => void onUploadObjectStorage(video)} />
                     </Tooltip>

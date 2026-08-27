@@ -16,10 +16,14 @@ import com.novanovastudio.agent.dto.RecoveryNodeFailure;
 import com.novanovastudio.agent.dto.RecoveryTaskContext;
 import com.novanovastudio.agent.dto.RecoveryTaskDecision;
 import com.novanovastudio.agent.dto.SpecialistAgentResult;
+import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.GenerationStyleDtos;
+import com.novanovastudio.entity.SkillRecords;
 import com.novanovastudio.logging.MappedDiagnosticContext;
 import com.novanovastudio.service.PromptOptimizationService;
 import com.novanovastudio.service.AiTaskService;
+import com.novanovastudio.service.SkillService;
 import com.novanovastudio.repository.AgentPlanRepository;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
@@ -74,6 +78,8 @@ public class CreationPlanExecutor {
     private final List<AgentLoopProfile> profiles;
     /** 主Agent恢复计划校验器 */
     private final CreationRecoveryPlanValidator recoveryPlanValidator;
+    /** 技能服务 */
+    private final SkillService skillService;
 
     /**
      * 执行完整创作计划。
@@ -652,7 +658,7 @@ public class CreationPlanExecutor {
                                 plan.creationSettings() == null ? List.of() : plan.creationSettings().generationStyleIds(),
                                 plan.creationSettings() == null ? List.of() : plan.creationSettings().generationStyleSnapshots())
                         .onErrorMap(this::agentExecutionFailure)
-                        .flatMap(styles -> callSpecialist(userId, sessionId, model, task, task.prompt())
+                        .flatMap(styles -> callSpecialist(userId, sessionId, model, request, task, task.prompt())
                                 .onErrorMap(this::agentExecutionFailure)
                                 .flatMap(decision -> preparePrompt(userId, sessionId, task.taskType(), task.prompt(), decision, styles)
                                         .onErrorMap(this::agentExecutionFailure)
@@ -723,23 +729,78 @@ public class CreationPlanExecutor {
 
     /**
      * 调用固定图片或视频子Agent选择提示词策略。
+     * <p>
+     * 技能场景下额外携带技能摘要，帮助子Agent识别技能约束（如电商商品图、保留图上文字）。
      *
      * @param userId Long 用户ID
      * @param sessionId String 会话ID
      * @param model Model 默认文本模型
+     * @param request AgentChatRequest 原始请求
      * @param task CreationTask 计划任务
      * @param originalPrompt String 用户原文
      * @return Mono<SpecialistAgentResult> 子Agent结构化结果
      */
     private Mono<SpecialistAgentResult> callSpecialist(Long userId, String sessionId, Model model,
-                                                       CreationTask task, String originalPrompt) {
+                                                       AgentChatRequest request, CreationTask task, String originalPrompt) {
+        return Mono.defer(() -> {
+            if (request == null || !StringUtils.hasText(request.skillId())) {
+                return callSpecialistWith(userId, sessionId, model, task, baseSpecialistInput(task, originalPrompt));
+            }
+            Long skillId;
+            try {
+                skillId = Long.valueOf(request.skillId());
+            } catch (NumberFormatException exception) {
+                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "技能ID不合法"));
+            }
+            return skillService.findEnabledSkill(skillId)
+                    .map(skill -> {
+                        Map<String, Object> input = baseSpecialistInput(task, originalPrompt);
+                        input.put("skill", Map.of(
+                                "name", skill.getName(),
+                                "targetType", skill.getTargetType(),
+                                "summary", skillSummary(skill)));
+                        return input;
+                    })
+                    .flatMap(input -> callSpecialistWith(userId, sessionId, model, task, input));
+        });
+    }
+
+    /** 构造子Agent基础输入。 */
+    private Map<String, Object> baseSpecialistInput(CreationTask task, String originalPrompt) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("taskId", task.taskId());
+        input.put("taskType", task.taskType());
+        input.put("action", task.action());
+        input.put("originalPrompt", originalPrompt);
+        return input;
+    }
+
+    /** 构造技能摘要，优先使用简介，缺失时截取系统提示词前200字符。 */
+    private String skillSummary(SkillRecords.SkillRecord skill) {
+        String summary = skill.getDescription();
+        if (!StringUtils.hasText(summary)) {
+            summary = skill.getSystemPrompt();
+        }
+        if (summary == null || summary.length() <= 200) {
+            return summary == null ? "" : summary;
+        }
+        return summary.substring(0, 200);
+    }
+
+    /**
+     * 使用指定输入调用图片或视频子Agent。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param model Model 默认文本模型
+     * @param task CreationTask 计划任务
+     * @param input Map<String, Object> 子Agent输入
+     * @return Mono<SpecialistAgentResult> 子Agent结构化结果
+     */
+    private Mono<SpecialistAgentResult> callSpecialistWith(Long userId, String sessionId, Model model,
+                                                           CreationTask task, Map<String, Object> input) {
         ReActAgent agent = "image".equals(task.taskType()) ? agentFactory.imageAgent(model) : agentFactory.videoAgent(model);
-        String input = JSON.toJSONString(Map.of(
-                "taskId", task.taskId(),
-                "taskType", task.taskType(),
-                "action", task.action(),
-                "originalPrompt", originalPrompt));
-        return agent.call(input, SpecialistAgentResult.class, RuntimeContext.builder()
+        return agent.call(JSON.toJSONString(input), SpecialistAgentResult.class, RuntimeContext.builder()
                         .sessionId(sessionId + ":" + task.taskId()).userId(String.valueOf(userId)).build())
                 .timeout(Duration.ofSeconds(60))
                 .map(message -> validateSpecialistResult(task, message.getStructuredData(SpecialistAgentResult.class)))
@@ -800,12 +861,51 @@ public class CreationPlanExecutor {
                                                         SpecialistAgentResult decision, String finalPrompt,
                                                         List<GenerationStyleDtos.GenerationStyleSnapshot> styles,
                                                         List<AgentChatRequest.Attachment> dependencyAttachments) {
-        Map<String, Object> arguments = generationArguments(finalPrompt, plan.creationSettings(), plan.entrySource(), styles, task);
-        List<AgentChatRequest.Attachment> attachments = new ArrayList<>(request.attachments() == null ? List.of() : request.attachments());
-        attachments.addAll(dependencyAttachments);
-        String promptStrategy = styles == null || styles.isEmpty() ? decision.promptStrategy() : "OPTIMIZE";
-        return executeGenerationTool(userId, sessionId, plan, request, task, promptStrategy,
-                finalPrompt, arguments, attachments, 0);
+        return Mono.defer(() -> resolveSkillSnapshot(request)
+                .map(skillSnapshot -> {
+                    Map<String, Object> arguments = generationArguments(finalPrompt, plan.creationSettings(), plan.entrySource(), styles, task, skillSnapshot);
+                    List<AgentChatRequest.Attachment> attachments = new ArrayList<>(request.attachments() == null ? List.of() : request.attachments());
+                    attachments.addAll(dependencyAttachments);
+                    String promptStrategy = styles == null || styles.isEmpty() ? decision.promptStrategy() : "OPTIMIZE";
+                    return new GenerationInvocation(arguments, attachments, promptStrategy);
+                })
+                .flatMap(invocation -> executeGenerationTool(userId, sessionId, plan, request, task,
+                        invocation.promptStrategy(), finalPrompt, invocation.arguments(), invocation.attachments(), 0)));
+    }
+
+    /** 生成任务调用参数打包，供技能快照异步加载后一次性透传。 */
+    private record GenerationInvocation(Map<String, Object> arguments,
+                                        List<AgentChatRequest.Attachment> attachments,
+                                        String promptStrategy) {
+    }
+
+    /**
+     * 加载请求所选技能的快照（id/name/targetType），供生成轮次落库时展示。
+     * <p>
+     * 技能缺失、停用或解析失败时降级为空快照，不阻断生成。
+     *
+     * @param request AgentChatRequest 原始请求
+     * @return Mono<Map<String, Object>> 技能快照或空Map
+     */
+    private Mono<Map<String, Object>> resolveSkillSnapshot(AgentChatRequest request) {
+        if (request == null || !StringUtils.hasText(request.skillId())) {
+            return Mono.just(Map.of());
+        }
+        Long skillId;
+        try {
+            skillId = Long.valueOf(request.skillId());
+        } catch (NumberFormatException exception) {
+            return Mono.just(Map.of());
+        }
+        return skillService.findEnabledSkill(skillId)
+                .map(skill -> Map.<String, Object>of(
+                        "id", skill.getId(),
+                        "name", skill.getName(),
+                        "targetType", skill.getTargetType()))
+                .onErrorResume(exception -> {
+                    log.warn("加载技能快照失败: skillId={}, 原因={}", request.skillId(), exception.getMessage());
+                    return Mono.just(Map.of());
+                });
     }
 
     /**
@@ -1151,7 +1251,8 @@ public class CreationPlanExecutor {
      * @return Map<String, Object> 工具参数
      */
     private Map<String, Object> generationArguments(String finalPrompt, CreationSettings settings, String entrySource,
-                                                    List<GenerationStyleDtos.GenerationStyleSnapshot> styles, CreationTask task) {
+                                                    List<GenerationStyleDtos.GenerationStyleSnapshot> styles, CreationTask task,
+                                                    Map<String, Object> skillSnapshot) {
         Map<String, Object> arguments = new LinkedHashMap<>();
         arguments.put("prompt", finalPrompt);
         String model = "video".equals(task == null ? null : task.taskType()) && StringUtils.hasText(settings.videoModel())
@@ -1166,6 +1267,7 @@ public class CreationPlanExecutor {
         if (settings.watermark() != null) arguments.put("watermark", settings.watermark());
         arguments.put("videoGenerationMode", VideoGenerationMode.defaultIfBlank(settings.videoGenerationMode()));
         if (styles != null && !styles.isEmpty()) arguments.put("generationStyleSnapshots", styles);
+        if (skillSnapshot != null && !skillSnapshot.isEmpty()) arguments.put("internal_skill_snapshot", skillSnapshot);
         return arguments;
     }
 

@@ -34,7 +34,7 @@ class GenerationProfileSystemPromptTest {
                 "session-1", 1L, "测试会话", "generation", List.of(), OffsetDateTime.now(), OffsetDateTime.now());
         AgentChatRequest request = new AgentChatRequest(
                 "session-1", "imagePage", "生成内容", Map.of(), List.of(), List.of(), List.of(),
-                new CreationSettings("model-1", "1:1", "2K", "high", 1, null, null));
+                new CreationSettings("model-1", "1:1", "2K", "high", 1, null, null), null);
 
         List<AiMessage> imageMessages = new ImageProfile(null, null, templateService, new AgentExecutionRegistry(), properties).buildMessages(1L, session, request).block();
         List<AiMessage> videoMessages = new VideoProfile(null, null, templateService, new AgentExecutionRegistry(), properties).buildMessages(1L, session, request).block();

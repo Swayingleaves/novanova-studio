@@ -51,7 +51,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
 
     /** 仅供生成轮次快照使用的内部参数键，不能进入渠道请求。 */
     private static final String INTERNAL_STYLE_SNAPSHOTS = "generationStyleSnapshots";
-
+    /** 仅供生成轮次快照使用的内部技能快照键，不能进入渠道请求。 */
+    private static final String INTERNAL_SKILL_SNAPSHOT = "internal_skill_snapshot";
     protected final AiTaskService aiTaskService;
 
     /** 生成记录持久化服务 */
@@ -172,6 +173,10 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         List<GenerationStyleDtos.GenerationStyleSnapshot> styleSnapshots = readStyleSnapshots(args.get(INTERNAL_STYLE_SNAPSHOTS));
         if (!styleSnapshots.isEmpty()) {
             params.put(INTERNAL_STYLE_SNAPSHOTS, JSON.toJSON(styleSnapshots));
+        }
+        Object skillSnapshot = args.get(INTERNAL_SKILL_SNAPSHOT);
+        if (skillSnapshot != null) {
+            params.put(INTERNAL_SKILL_SNAPSHOT, skillSnapshot);
         }
 
         if (executionRegistry.isCancelRequested(sessionId)) {
@@ -740,6 +745,10 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         round.put("videoReferences", JSON.toJSON(videoReferences));
         if (!styleSnapshots.isEmpty()) {
             round.put(INTERNAL_STYLE_SNAPSHOTS, JSON.toJSON(styleSnapshots));
+        }
+        Object skillSnapshot = persistedParameters.remove(INTERNAL_SKILL_SNAPSHOT);
+        if (skillSnapshot != null) {
+            round.put("skill", skillSnapshot);
         }
         round.put("createdAt", createdAt);
         return round;

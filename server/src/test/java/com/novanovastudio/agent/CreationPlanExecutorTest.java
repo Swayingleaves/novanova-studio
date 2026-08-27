@@ -406,7 +406,7 @@ class CreationPlanExecutorTest {
      */
     private CreationPlan plan(List<CreationTask> tasks) {
         return new CreationPlan("plan", "操作画布", CreationEntrySource.CANVAS,
-                "执行画布操作", "", false, null, tasks);
+                "执行画布操作", "", false, null, tasks, List.of());
     }
 
     /**
@@ -428,6 +428,6 @@ class CreationPlanExecutorTest {
      */
     private AgentChatRequest request() {
         return new AgentChatRequest(null, CreationEntrySource.CANVAS, "创建文本节点",
-                Map.of(), List.of(), List.of(), List.of(), null);
+                Map.of(), List.of(), List.of(), List.of(), null, null);
     }
 }

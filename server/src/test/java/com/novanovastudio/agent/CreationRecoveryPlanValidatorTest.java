@@ -63,7 +63,7 @@ class CreationRecoveryPlanValidatorTest {
         CreationTask task = new CreationTask("task-1", "canvas", "tool", "原始提示词", List.of(),
                 "canvas_generate_text", Map.of("prompt", "原始提示词"));
         CreationPlan originalPlan = new CreationPlan("plan-1", "生成文本", CreationEntrySource.CANVAS,
-                "生成一段文本", "", false, null, List.of(task));
+                "生成一段文本", "", false, null, List.of(task), List.of());
         CreationRecoveryPlan candidate = plan(new RecoveryTaskDecision("task-1", List.of("node-2"),
                 "ADJUST_AND_RETRY", "调整后的文本提示词", Map.of(), "调整提示词"));
 
@@ -278,6 +278,6 @@ class CreationRecoveryPlanValidatorTest {
         CreationTask task = new CreationTask("task-1", "image", "generate", "原始提示词", List.of(),
                 "canvas_generate_image", Map.of("prompt", "原始提示词", "size", "1:1", "quality", "high"));
         return new CreationPlan("plan-1", "生成图片", CreationEntrySource.CANVAS,
-                "生成一张图片", "", false, null, List.of(task));
+                "生成一张图片", "", false, null, List.of(task), List.of());
     }
 }

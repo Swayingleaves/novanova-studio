@@ -13,6 +13,7 @@ import java.util.List;
  * @param canvasGuidance Boolean 是否应引导用户前往画布处理批量任务
  * @param creationSettings CreationSettings 页面生成硬约束
  * @param tasks List<CreationTask> 计划任务列表
+ * @param choices List<AgentChoice> 需要用户从选项中挑选时的可点击选项，可为空
  * @author   zhenglin.cn.cq@gmail.com
  * @date     2026-07-23 00:00
  */
@@ -24,6 +25,7 @@ public record CreationPlan(
         String clarificationQuestion,
         Boolean canvasGuidance,
         CreationSettings creationSettings,
-        List<CreationTask> tasks
+        List<CreationTask> tasks,
+        List<AgentChoice> choices
 ) {
 }

@@ -49,8 +49,15 @@ public class CreationPlanValidator {
         if (plan == null) {
             throw invalid("主Agent未返回创作计划");
         }
-        if (!CreationEntrySource.supported(entrySource) || !entrySource.equals(plan.entrySource())) {
+        if (!CreationEntrySource.supported(entrySource)) {
             throw invalid("Agent计划入口来源与当前页面不一致");
+        }
+        // 入口来源是请求级硬约束，模型结构化输出偶尔会把该字段填错；按请求值纠正而非中断，
+        // 后续任务类型校验（allowedTaskType）仍会拒绝与页面不符的任务。
+        if (!entrySource.equals(plan.entrySource())) {
+            plan = new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(),
+                    plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(),
+                    plan.tasks(), plan.choices());
         }
         if (settings != null) {
             boolean hasStyleIds = settings.generationStyleIds() != null && !settings.generationStyleIds().isEmpty();
@@ -83,7 +90,7 @@ public class CreationPlanValidator {
             return canvasGuidancePlan(plan, entrySource, settings);
         }
         if (StringUtils.hasText(plan.clarificationQuestion())) {
-            return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), plan.clarificationQuestion(), false, settings, List.of());
+            return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), plan.clarificationQuestion(), false, settings, List.of(), plan.choices());
         }
         if (tasks.isEmpty()) {
             throw invalid("Agent计划任务数量不合法");
@@ -111,11 +118,11 @@ public class CreationPlanValidator {
         }
         if (!missingCanvasArguments.isEmpty()) {
             String question = "请补充画布操作所需参数：" + String.join("、", missingCanvasArguments) + "。";
-            return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), question, false, settings, List.of());
+            return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), question, false, settings, List.of(), plan.choices());
         }
         String missingQuestion = missingSettingsQuestion(entrySource, tasks, settings);
         if (StringUtils.hasText(missingQuestion)) {
-            return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), missingQuestion, false, settings, List.of());
+            return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), missingQuestion, false, settings, List.of(), plan.choices());
         }
         for (CreationTask task : tasks) {
             List<String> dependencies = task.dependsOn() == null ? List.of() : task.dependsOn();
@@ -124,7 +131,7 @@ public class CreationPlanValidator {
             }
         }
         detectCycle(tasks);
-        return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), "", false, settings, tasks);
+        return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), "", false, settings, tasks, List.of());
     }
 
     /**
@@ -191,7 +198,7 @@ public class CreationPlanValidator {
         String message = CreationEntrySource.IMAGE_PAGE.equals(entrySource)
                 ? "图片生成页面每次只能生成 1 张图片。需要批量生成多个画面时，请前往画布操作。"
                 : "视频生成页面每次只能生成 1 个视频。需要批量生成多个视频时，请前往画布操作。";
-        return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), message, true, settings, List.of());
+        return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), message, true, settings, List.of(), List.of());
     }
 
     /**

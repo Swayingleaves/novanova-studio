@@ -1,18 +1,14 @@
 package com.novanovastudio.agent;
 
 import com.alibaba.fastjson2.JSON;
-import com.novanovastudio.agent.dto.AgentAction;
-import com.novanovastudio.agent.dto.AgentChatRequest;
-import com.novanovastudio.agent.dto.CreationAgentChatResponse;
-import com.novanovastudio.agent.dto.AgentEvent;
-import com.novanovastudio.agent.dto.CreationPlan;
-import com.novanovastudio.agent.dto.CreationSettings;
-import com.novanovastudio.agent.dto.CreationTask;
-import com.novanovastudio.agent.dto.AgentSession;
+import com.alibaba.fastjson2.JSONObject;
+import com.novanovastudio.agent.dto.*;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.logging.MappedDiagnosticContext;
 import com.novanovastudio.service.AiTaskService;
+import com.novanovastudio.service.PersistenceService;
+import com.novanovastudio.service.SkillService;
 import com.novanovastudio.repository.AgentPlanRepository;
 import com.novanovastudio.repository.CreationAgentRequestRepository;
 import com.novanovastudio.entity.CreationAgentRequest;
@@ -70,6 +66,10 @@ public class CreationAgentOrchestrator {
     private final AgentPlanRepository planRepository;
     /** AI任务服务 */
     private final AiTaskService aiTaskService;
+    /** 技能服务 */
+    private final SkillService skillService;
+    /** 持久化服务（对话生成记录） */
+    private final PersistenceService persistenceService;
     /** Java固定注册的画布工具 */
     private final AgentToolRegistry toolRegistry;
     /** 主Agent请求持久化仓储 */
@@ -124,13 +124,122 @@ public class CreationAgentOrchestrator {
                     queuedRequest.setRequestData(JSON.toJSONString(snapshot));
                     queuedRequest.setStatus("queued");
                     queuedRequest.setCreatedAt(OffsetDateTime.now());
-                    return requestRepository.create(queuedRequest)
+                    return ensureGenerationLogForRequest(userId, session.id(), snapshot)
+                            .then(requestRepository.create(queuedRequest))
                             .then(Mono.fromRunnable(() -> eventEmitter.emit(userId,
                                     AgentEvent.queueStatus(session.id(), queuedRequest.getId(), "queued", "排队中"))))
                             .then(requestDispatcher.enqueue(queuedRequest))
                             .then(requestRepository.findStatusById(queuedRequest.getId())
                                     .defaultIfEmpty("queued")
                                     .map(status -> new CreationAgentChatResponse(session.id(), queuedRequest.getId(), status)));
+                });
+    }
+
+    /**
+     * 图片/视频入口发起对话时幂等创建对话生成记录，保证刷新后左侧会话列表可见。
+     * <p>
+     * 仅当会话尚无生成记录时初始化空记录；失败不阻断对话主流程。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String Agent 会话ID
+     * @param request AgentChatRequest 对话请求
+     * @return Mono<Void> 完成信号
+     */
+    private Mono<Void> ensureGenerationLogForRequest(Long userId, String sessionId, AgentChatRequest request) {
+        String logType = "videoPage".equals(request.entrySource()) ? "video" : "image";
+        if (!"imagePage".equals(request.entrySource()) && !"videoPage".equals(request.entrySource())) {
+            return Mono.empty();
+        }
+        String message = request.message() == null ? "" : request.message().trim();
+        String title = StringUtils.hasText(message)
+                ? (message.length() > 30 ? message.substring(0, 30) : message) : "新对话";
+        return persistenceService.ensureGenerationLog(userId, sessionId, logType, title)
+                .onErrorResume(exception -> {
+                    log.warn("创建对话生成记录失败: sessionId={}, 原因={}", sessionId, exception.getMessage());
+                    return Mono.empty();
+                });
+    }
+
+    /**
+     * 将技能引导/澄清问答轮次写入生成记录，保证历史会话能看到完整对话过程。
+     * <p>
+     * 生成轮次由任务执行链路（AbstractTaskProfile）保存，这里只保存纯对话（无生成任务）轮次；
+     * 仅在图片/视频入口生效，失败不阻断对话主流程。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 会话
+     * @param request AgentChatRequest 对话请求
+     * @param reply String 助手澄清回复
+     * @param choices List<AgentChoice> 该轮提供给用户的选项（历史记录只读展示，可为空）
+     * @return Mono<Void> 完成信号
+     */
+    private Mono<Void> saveClarificationRound(Long userId, AgentSession session, AgentChatRequest request, String reply,
+                                              List<AgentChoice> choices) {
+        String logType = "videoPage".equals(request.entrySource()) ? "video" : "image";
+        if (!"imagePage".equals(request.entrySource()) && !"videoPage".equals(request.entrySource())) {
+            return Mono.empty();
+        }
+        String message = request.message() == null ? "" : request.message().trim();
+        if (!StringUtils.hasText(message) && !StringUtils.hasText(reply)) {
+            return Mono.empty();
+        }
+        return resolveSkillSnapshot(request)
+                .flatMap(skill -> {
+                    JSONObject round = new JSONObject();
+                    round.put("id", UUID.randomUUID().toString());
+                    round.put("prompt", message);
+                    round.put("assistantText", reply == null ? "" : reply);
+                    round.put("config", new JSONObject());
+                    // 图片/视频入口的轮次结构不同：图片用 results 数组，视频用 result 单数对象
+                    if ("video".equals(logType)) {
+                        round.put("result", new JSONObject());
+                    } else {
+                        round.put("results", List.of());
+                    }
+                    round.put("references", List.of());
+                    round.put("videoReferences", List.of());
+                    if (!skill.isEmpty()) {
+                        round.put("skill", skill);
+                    }
+                    if (choices != null && !choices.isEmpty()) {
+                        round.put("choices", JSON.toJSON(choices));
+                    }
+                    round.put("createdAt", System.currentTimeMillis());
+                    String title = StringUtils.hasText(message)
+                            ? (message.length() > 30 ? message.substring(0, 30) : message) : "新对话";
+                    Mono<Void> save = persistenceService.saveOrUpdateGenerationRound(userId, session.id(), logType, title, round);
+                    return Mono.defer(() -> save == null ? Mono.empty() : save)
+                            .onErrorResume(exception -> {
+                                log.warn("保存澄清问答轮次失败: sessionId={}, 原因={}", session.id(), exception.getMessage());
+                                return Mono.empty();
+                            });
+                });
+    }
+
+    /**
+     * 加载请求所选技能的快照（id/name/targetType），供对话轮次落库时展示。
+     *
+     * @param request AgentChatRequest 原始请求
+     * @return Mono<Map<String, Object>> 技能快照或空Map
+     */
+    private Mono<Map<String, Object>> resolveSkillSnapshot(AgentChatRequest request) {
+        if (request == null || !StringUtils.hasText(request.skillId())) {
+            return Mono.just(Map.of());
+        }
+        Long skillId;
+        try {
+            skillId = Long.valueOf(request.skillId());
+        } catch (NumberFormatException exception) {
+            return Mono.just(Map.of());
+        }
+        return skillService.findEnabledSkill(skillId)
+                .map(skill -> Map.<String, Object>of(
+                        "id", skill.getId(),
+                        "name", skill.getName(),
+                        "targetType", skill.getTargetType()))
+                .onErrorResume(exception -> {
+                    log.warn("加载技能快照失败: skillId={}, 原因={}", request.skillId(), exception.getMessage());
+                    return Mono.just(Map.of());
                 });
     }
 
@@ -292,10 +401,17 @@ public class CreationAgentOrchestrator {
                                 return Mono.empty();
                             }
                             if (StringUtils.hasText(validated.clarificationQuestion())) {
-                                AgentAction action = Boolean.TRUE.equals(validated.canvasGuidance())
-                                        ? AgentAction.navigateToCanvas(request.message())
-                                        : null;
-                                return completeWithMessage(userId, session.id(), validated.clarificationQuestion(), action);
+                                AgentAction action;
+                                if (validated.choices() != null && !validated.choices().isEmpty()) {
+                                    action = AgentAction.choice(validated.choices());
+                                } else if (Boolean.TRUE.equals(validated.canvasGuidance())) {
+                                    action = AgentAction.navigateToCanvas(request.message());
+                                } else {
+                                    action = null;
+                                }
+                                String clarification = validated.clarificationQuestion();
+                                return saveClarificationRound(userId, session, request, clarification, validated.choices())
+                                        .then(completeWithMessage(userId, session.id(), clarification, action));
                             }
                             CreationPlan plan = composeFollowUpPrompts(withServerPlanId(validated, session, request.message()),
                                     session, request.message());
@@ -347,7 +463,7 @@ public class CreationAgentOrchestrator {
         }
         if (tasks.isEmpty()) return null;
         return new CreationPlan("", "按已选风格重新生成", CreationEntrySource.CANVAS,
-                "按已选风格重新生成画布内容", "", false, request.creationSettings(), tasks);
+                "按已选风格重新生成画布内容", "", false, request.creationSettings(), tasks, List.of());
     }
 
     /** 判断是否为不含额外创作要求的通用风格命令。 */
@@ -454,7 +570,7 @@ public class CreationAgentOrchestrator {
                 .map(historicalSettings -> new AgentChatRequest(
                         request.sessionId(), request.entrySource(), request.message(), request.canvasSnapshot(),
                         request.references(), request.attachments(), request.history(),
-                        mergeRetrySettings(request.creationSettings(), historicalSettings)))
+                        mergeRetrySettings(request.creationSettings(), historicalSettings), request.skillId()))
                 .defaultIfEmpty(request);
     }
 
@@ -502,24 +618,58 @@ public class CreationAgentOrchestrator {
      * @return Mono<CreationPlan> 候选计划
      */
     private Mono<CreationPlan> callMainAgent(Long userId, AgentSession session, AgentChatRequest request, Model model) {
-        ReActAgent agent = agentFactory.mainAgent(model);
-        Map<String, Object> input = new java.util.LinkedHashMap<>();
-        input.put("entrySource", request.entrySource());
-        input.put("message", request.message());
-        input.put("history", historyForAgent(request, session));
-        input.put("promptCandidates", promptSources(session, request.message()));
-        input.put("creationSettings", request.creationSettings());
-        input.put("generationStyleSelection", generationStyleSelection(request));
-        input.put("styleFollowUp", isStyleFollowUpRequest(request));
-        input.put("retryRequested", isRetryMessage(request.message()));
-        if (isRetryMessage(request.message())) {
-            input.put("retryPrompt", latestRetryPrompt(session));
-        }
-        input.put("attachmentCount", request.attachments() == null ? 0 : request.attachments().size());
-        input.put("canvasSnapshot", CreationEntrySource.CANVAS.equals(request.entrySource()) ? request.canvasSnapshot() : Map.of());
-        input.put("canvasTools", CreationEntrySource.CANVAS.equals(request.entrySource())
-                ? toolRegistry.allTools().stream().filter(com.novanovastudio.agent.dto.AgentTool::frontend).toList()
-                : List.of());
+        return Mono.defer(() -> {
+            ReActAgent agent;
+            Map<String, Object> input = new java.util.LinkedHashMap<>();
+            input.put("entrySource", request.entrySource());
+            input.put("message", request.message());
+            input.put("history", historyForAgent(request, session));
+            input.put("promptCandidates", promptSources(session, request.message()));
+            input.put("creationSettings", request.creationSettings());
+            input.put("generationStyleSelection", generationStyleSelection(request));
+            input.put("styleFollowUp", isStyleFollowUpRequest(request));
+            input.put("retryRequested", isRetryMessage(request.message()));
+            if (isRetryMessage(request.message())) {
+                input.put("retryPrompt", latestRetryPrompt(session));
+            }
+            input.put("attachmentCount", request.attachments() == null ? 0 : request.attachments().size());
+            input.put("canvasSnapshot", CreationEntrySource.CANVAS.equals(request.entrySource()) ? request.canvasSnapshot() : Map.of());
+            input.put("canvasTools", CreationEntrySource.CANVAS.equals(request.entrySource())
+                    ? toolRegistry.allTools().stream().filter(com.novanovastudio.agent.dto.AgentTool::frontend).toList()
+                    : List.of());
+            if (StringUtils.hasText(request.skillId())) {
+                Long skillId;
+                try {
+                    skillId = Long.valueOf(request.skillId());
+                } catch (NumberFormatException exception) {
+                    return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "技能ID不合法"));
+                }
+                return skillService.findEnabledSkill(skillId)
+                        .map(skill -> {
+                            input.put("skillId", request.skillId());
+                            input.put("skill", Map.of(
+                                    "name", skill.getName(),
+                                    "targetType", skill.getTargetType(),
+                                    "instructions", skill.getSystemPrompt()));
+                            return agentFactory.mainAgent(model, skill.getSystemPrompt());
+                        })
+                        .flatMap(skillAgent -> callMainAgentWith(skillAgent, userId, session, input));
+            }
+            agent = agentFactory.mainAgent(model);
+            return callMainAgentWith(agent, userId, session, input);
+        });
+    }
+
+    /**
+     * 使用指定主Agent实例调用模型并解析计划。
+     *
+     * @param agent ReActAgent 主Agent实例
+     * @param userId Long 用户ID
+     * @param session AgentSession 当前会话
+     * @param input Map<String, Object> 模型输入
+     * @return Mono<CreationPlan> 候选计划
+     */
+    private Mono<CreationPlan> callMainAgentWith(ReActAgent agent, Long userId, AgentSession session, Map<String, Object> input) {
         return agent.call(JSON.toJSONString(input), CreationPlan.class, RuntimeContext.builder()
                         .sessionId(session.id() + ":main")
                         .userId(String.valueOf(userId))
@@ -583,7 +733,8 @@ public class CreationAgentOrchestrator {
                     task.toolName(), task.toolArguments());
         }).toList();
         return new CreationPlan(plan.planId(), plan.intent(), plan.entrySource(), plan.summary(),
-                plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(), tasks);
+                plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(), tasks,
+                plan.choices());
     }
 
     /**
@@ -745,7 +896,8 @@ public class CreationAgentOrchestrator {
                     task.toolName(), task.toolArguments());
         }).toList();
         return new CreationPlan(plan.planId(), plan.intent(), plan.entrySource(), plan.summary(),
-                plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(), tasks);
+                plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(), tasks,
+                plan.choices());
     }
 
     /**
@@ -780,7 +932,7 @@ public class CreationAgentOrchestrator {
                 })
                 .toList();
         return new CreationPlan(UUID.randomUUID().toString(), plan.intent(), plan.entrySource(), plan.summary(), "",
-                false, plan.creationSettings(), tasks);
+                false, plan.creationSettings(), tasks, List.of());
     }
 
     /**
@@ -860,6 +1012,10 @@ public class CreationAgentOrchestrator {
         }
         if (!StringUtils.hasText(request.message())) {
             throw new BusinessException(ErrorCode.PARAM_MISSING, "用户消息不能为空");
+        }
+        if (StringUtils.hasText(request.skillId())
+                && !"imagePage".equals(request.entrySource()) && !"videoPage".equals(request.entrySource())) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "技能仅支持图片或视频生成页面");
         }
     }
 
@@ -1165,7 +1321,8 @@ public class CreationAgentOrchestrator {
      */
     private AgentChatRequest requestWithSessionId(AgentChatRequest request, String sessionId) {
         return new AgentChatRequest(sessionId, request.entrySource(), request.message(), request.canvasSnapshot(),
-                request.references(), request.attachments(), request.history(), request.creationSettings());
+                request.references(), request.attachments(), request.history(), request.creationSettings(),
+                request.skillId());
     }
 
     /**

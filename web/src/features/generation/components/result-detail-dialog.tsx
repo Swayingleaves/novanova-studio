@@ -1,7 +1,7 @@
 "use client";
 
 import { App, Button, Image, Modal } from "antd";
-import { Copy, Download } from "lucide-react";
+import { Copy, Download, Link2 } from "lucide-react";
 
 import { formatBytes, formatDuration } from "@/features/generation/lib/image-utils";
 import type { ReferenceImage } from "@/features/generation/types/image";
@@ -11,6 +11,8 @@ import type { ReferenceVideo } from "@/features/generation/types/media";
 export type ResultDetailMedia = {
     kind: "image" | "video";
     url: string;
+    /** 已转存云储存时的 OSS 地址，用于「拷贝链接」优先复制 */
+    ossUrl?: string;
     width?: number;
     height?: number;
     bytes?: number;
@@ -43,10 +45,10 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
     const showGenerationPrompt = Boolean(detail.generationPrompt?.trim()) && detail.generationPrompt !== detail.prompt;
     const hasRightContent = Boolean(detail.prompt?.trim()) || showGenerationPrompt || visibleReferences.length > 0 || visibleVideoReferences.length > 0;
 
-    const copyText = async (text: string) => {
+    const copyText = async (text: string, successText = "已复制") => {
         try {
             await navigator.clipboard.writeText(text);
-            message.success("已复制");
+            message.success(successText);
         } catch {
             message.error("复制失败");
         }
@@ -72,11 +74,16 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
                             {hasDuration ? <span>{formatDuration(media.durationMs!)}</span> : null}
                             {media.mimeType ? <span>{media.mimeType}</span> : null}
                         </div>
-                        {detail.onDownload ? (
-                            <Button size="small" icon={<Download className="size-3.5" />} onClick={detail.onDownload}>
-                                下载{media.kind === "video" ? "视频" : "图片"}
+                        <div className="flex items-center gap-1.5">
+                            <Button size="small" icon={<Link2 className="size-3.5" />} onClick={() => void copyText(media.ossUrl || media.url, "链接已复制")}>
+                                拷贝链接
                             </Button>
-                        ) : null}
+                            {detail.onDownload ? (
+                                <Button size="small" icon={<Download className="size-3.5" />} onClick={detail.onDownload}>
+                                    下载{media.kind === "video" ? "视频" : "图片"}
+                                </Button>
+                            ) : null}
+                        </div>
                     </div>
                 </div>
                 <div className="max-h-[64vh] space-y-5 overflow-y-auto">

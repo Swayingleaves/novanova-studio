@@ -21,6 +21,8 @@ import com.novanovastudio.entity.CreationAgentRequest;
 import com.novanovastudio.repository.AgentPlanRepository;
 import com.novanovastudio.repository.CreationAgentRequestRepository;
 import com.novanovastudio.service.AiTaskService;
+import com.novanovastudio.service.PersistenceService;
+import com.novanovastudio.service.SkillService;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -187,7 +189,7 @@ class CreationAgentOrchestratorTest {
                 mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
         AgentChatRequest request = new AgentChatRequest(null, CreationEntrySource.CANVAS, "修改风格", Map.of(),
                 List.of(), List.of(), List.of(), new CreationSettings("image-model", "16:9", "2K", "high", 1,
-                null, null, null, null, Map.of("image", List.of(7L))));
+                null, null, null, null, Map.of("image", List.of(7L))), null);
 
         Assertions.assertTrue(orchestrator.isStyleFollowUpRequest(request));
     }
@@ -204,7 +206,7 @@ class CreationAgentOrchestratorTest {
                 Map.of("selectedNodeIds", List.of("image-1"), "nodes", List.of(Map.of(
                         "id", "image-1", "kind", "image", "generation", Map.of("prompt", "生成图片：小马在奔跑")))),
                 List.of(), List.of(), List.of(), new CreationSettings("image-model", "16:9", "2K", "high", 1,
-                null, null, null, null, Map.of("image", List.of(7L))));
+                null, null, null, null, Map.of("image", List.of(7L))), null);
 
         CreationPlan plan = orchestrator.buildStyleFollowUpPlan(session, request);
 
@@ -224,7 +226,7 @@ class CreationAgentOrchestratorTest {
                 mock(AgentSessionService.class), mock(AgentScopeModelFactory.class), mock(AgentPlanRepository.class));
         AgentChatRequest request = new AgentChatRequest(null, CreationEntrySource.CANVAS, "生成图片：小马在奔跑", Map.of(),
                 List.of(), List.of(), List.of(), new CreationSettings("image-model", "16:9", "2K", "high", 1,
-                null, null));
+                null, null), null);
 
         Assertions.assertFalse(orchestrator.isStyleFollowUpRequest(request));
     }
@@ -436,10 +438,12 @@ class CreationAgentOrchestratorTest {
                 mock(CreationPlanExecutor.class),
                 planRepository,
                 mock(AiTaskService.class),
+                mock(SkillService.class),
                 new AgentToolRegistry(),
                 mock(CreationAgentRequestRepository.class),
                 mock(CreationAgentRequestDispatcher.class),
-                mock(CreationAgentRequestQueue.class));
+                mock(CreationAgentRequestQueue.class),
+                mock(PersistenceService.class));
     }
 
     /**
@@ -471,10 +475,12 @@ class CreationAgentOrchestratorTest {
                 mock(CreationPlanExecutor.class),
                 planRepository,
                 aiTaskService,
+                mock(SkillService.class),
                 new AgentToolRegistry(),
                 requestRepository,
                 requestDispatcher,
-                requestQueue);
+                requestQueue,
+                mock(PersistenceService.class));
     }
 
     /**
@@ -484,7 +490,7 @@ class CreationAgentOrchestratorTest {
      * @return AgentChatRequest 聊天请求
      */
     private AgentChatRequest chatRequest(String message) {
-        return new AgentChatRequest(null, CreationEntrySource.IMAGE_PAGE, message, Map.of(), List.of(), List.of(), List.of(), null);
+        return new AgentChatRequest(null, CreationEntrySource.IMAGE_PAGE, message, Map.of(), List.of(), List.of(), List.of(), null, null);
     }
 
     /**
@@ -538,7 +544,8 @@ class CreationAgentOrchestratorTest {
     private CreationPlan plan(String prompt) {
         return new CreationPlan("model-plan", "生成图片", CreationEntrySource.IMAGE_PAGE, "生成一张图片", "", false,
                 new CreationSettings("image-model", "1:1", "2K", "high", 1, null, null),
-                List.of(new CreationTask("task-1", "image", "generate", prompt, List.of(), null, Map.of())));
+                List.of(new CreationTask("task-1", "image", "generate", prompt, List.of(), null, Map.of())),
+                List.of());
     }
 
     /**
@@ -551,7 +558,8 @@ class CreationAgentOrchestratorTest {
     private CreationPlan planWithSourcePromptId(String prompt, String sourcePromptId) {
         return new CreationPlan("model-plan", "生成图片", CreationEntrySource.IMAGE_PAGE, "生成一张图片", "", false,
                 new CreationSettings("image-model", "1:1", "2K", "high", 1, null, null),
-                List.of(new CreationTask("task-1", "image", "generate", prompt, sourcePromptId, List.of(), null, Map.of())));
+                List.of(new CreationTask("task-1", "image", "generate", prompt, sourcePromptId, List.of(), null, Map.of())),
+                List.of());
     }
 
     /**
@@ -564,7 +572,8 @@ class CreationAgentOrchestratorTest {
         return new CreationPlan("model-plan", "生成图片", CreationEntrySource.CANVAS, "生成一张图片", "", false,
                 new CreationSettings("image-model", "1:1", "2K", "high", 1, null, null),
                 List.of(new CreationTask("task-1", "image", "generate", prompt, List.of(), "canvas_generate_image",
-                        Map.of("prompt", prompt, "size", "9:16"))));
+                        Map.of("prompt", prompt, "size", "9:16"))),
+                List.of());
     }
 
     /**
@@ -577,6 +586,7 @@ class CreationAgentOrchestratorTest {
         return new CreationPlan("model-plan", "生成视频", CreationEntrySource.CANVAS, "生成一个视频", "", false,
                 new CreationSettings("video-model", "16:9", "1080P", "high", 1, "5", false),
                 List.of(new CreationTask("task-1", "video", "generate", prompt, List.of(), "canvas_generate_video",
-                        Map.of("prompt", prompt, "size", "16:9"))));
+                        Map.of("prompt", prompt, "size", "16:9"))),
+                List.of());
     }
 }

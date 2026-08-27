@@ -1035,6 +1035,36 @@ public class PersistenceService {
     }
 
     /**
+     * 幂等创建空对话生成记录，保证"发起一次对话即有一条记录"。
+     * <p>
+     * 仅当会话尚无生成记录时初始化（id=sessionId，rounds 为空），
+     * 后续生成轮次仍由 saveOrUpdateGenerationRound 在原记录上追加。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String Agent 会话ID（复用为生成记录ID）
+     * @param logType String 记录类型（image / video）
+     * @param title String 对话标题（首次创建时使用）
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> ensureGenerationLog(Long userId, String sessionId, String logType, String title) {
+        return repository.findGenerationLogById(userId, sessionId)
+                .hasElement()
+                .flatMap(exists -> Boolean.TRUE.equals(exists)
+                        ? Mono.empty()
+                        : Mono.defer(() -> {
+                            JSONObject log = new JSONObject();
+                            log.put("id", sessionId);
+                            log.put("title", title);
+                            log.put("createdAt", System.currentTimeMillis());
+                            log.put("updatedAt", System.currentTimeMillis());
+                            log.put("rounds", new JSONArray());
+                            PersistenceRecords.GenerationLogRecord record = buildGenerationLogRecord(
+                                    userId, sessionId, logType, title, log, new PersistenceRecords.GenerationLogRecord());
+                            return repository.saveGenerationLog(record);
+                        }));
+    }
+
+    /**
      * 构建生成记录实体并根据完整轮次快照计算任务状态。
      *
      * @param userId Long 用户ID

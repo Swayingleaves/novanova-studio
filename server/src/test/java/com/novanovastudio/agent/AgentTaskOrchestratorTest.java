@@ -211,7 +211,7 @@ class AgentTaskOrchestratorTest {
         );
         AgentSession session = new AgentSession("session-1", 1L, "新对话", "canvas", new ArrayList<>(), OffsetDateTime.now(), OffsetDateTime.now());
         AgentChatRequest request = new AgentChatRequest("session-1", "canvas", "你好", Map.of(), List.of(), List.of(), List.of(),
-                new CreationSettings("channel-1::missing-model", null, null, null, null, null, null));
+                new CreationSettings("channel-1::missing-model", null, null, null, null, null, null), null);
 
         invokeRunAgentLoop(orchestrator, session, request).block();
 
@@ -287,7 +287,7 @@ class AgentTaskOrchestratorTest {
                 "[用户设置：尺寸=704x1280]\n\n用户原始输入 A", Map.of(), List.of(), List.of(
                 new AgentChatRequest.Attachment("https://untrusted.example.com/cat-dog.png", "image/png", "猫狗.png", "image:cat-dog"),
                 new AgentChatRequest.Attachment("https://untrusted.example.com/source.mp4", "video/mp4", "素材.mp4", "video:source")),
-                List.of(), new CreationSettings("model-1", "704x1280", "720p", "medium", null, "5", false));
+                List.of(), new CreationSettings("model-1", "704x1280", "720p", "medium", null, "5", false), null);
 
         invokeSaveInitialVideoRound(orchestrator, "session-1", request).block();
 

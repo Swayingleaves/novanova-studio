@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Image } from "antd";
-import { LoaderCircle, Palette } from "lucide-react";
+import { LoaderCircle, Palette, Sparkles } from "lucide-react";
 import { nanoid } from "nanoid";
 
 import type { AgentAction } from "@/features/canvas/api/agent";
@@ -20,7 +20,7 @@ import { formatGenerationStyleMessage } from "../lib/style-command.ts";
  * @param activeThinking ThinkingBlockState | null 当前活跃思考
  * @param streamingText  { messageId, text } | null 流式文本
  * @param toolCalls      ToolCallState[] 工具调用状态（供外部引用，此处仅作为上下文透传）
- * @param renderResults  (data) => ReactNode 结果渲染回调，注入页面自己的 renderResultImages/Videos
+ * @param renderResults  (data, round) => ReactNode 结果渲染回调，注入页面自己的 renderResultImages/Videos；round 携带该轮用户消息上下文（id/提示词/参考附件）
  */
 export function buildChatThreadSection(
     messages: ChatMessageItem[],
@@ -28,7 +28,7 @@ export function buildChatThreadSection(
     activeThinking: ThinkingBlockState | null,
     streamingText: { messageId: string; text: string } | null,
     toolCalls: ToolCallState[],
-    renderResults: (data: Record<string, unknown>) => React.ReactNode,
+    renderResults: (data: Record<string, unknown>, round: { id: string; userText: string; attachments?: ChatAttachment[] }) => React.ReactNode,
     renderPendingToolCall?: (call: ToolCallState) => React.ReactNode,
 ): CreationThreadSection | null {
     if (!messages.length && !thinkings.length && !activeThinking && !streamingText) return null;
@@ -40,6 +40,7 @@ export function buildChatThreadSection(
     let currentUserText = "";
     let currentUserStyles: ChatGenerationStyle[] | undefined;
     let currentUserAttachments: React.ReactNode = null;
+    let currentRawAttachments: ChatAttachment[] | undefined;
     let currentResultContent: React.ReactNode = null;
     let currentAssistantText = "";
     let currentStatusText = "";
@@ -54,7 +55,8 @@ export function buildChatThreadSection(
             currentRoundId = msg.id;
             currentUserText = msg.text;
             currentUserStyles = msg.generationStyles;
-            currentUserAttachments = renderUserAttachments(msg.attachments, currentUserStyles);
+            currentUserAttachments = renderUserAttachments(msg.attachments, msg.generationStyles, msg.skill);
+            currentRawAttachments = msg.attachments;
             currentResultContent = null;
             currentAssistantText = "";
             currentStatusText = "";
@@ -76,7 +78,7 @@ export function buildChatThreadSection(
             } else if (call?.status === "canceled") {
                 currentStatusText = "已停止生成";
             } else if (call?.status === "success" && call.resultData) {
-                const mediaNodes = renderResults(call.resultData);
+                const mediaNodes = renderResults(call.resultData, { id: currentRoundId, userText: currentUserText, attachments: currentRawAttachments });
                 if (mediaNodes) {
                     currentStatusText = "✅ 生成完成";
                     currentResultContent = mediaNodes;
@@ -130,9 +132,9 @@ function makeRound(
     } as CreationThreadRound;
 }
 
-function renderUserAttachments(attachments?: ChatAttachment[], styles?: ChatGenerationStyle[]): React.ReactNode {
+function renderUserAttachments(attachments?: ChatAttachment[], styles?: ChatGenerationStyle[], skill?: { id: number; name: string; targetType: string } | null): React.ReactNode {
     const visibleAttachments = attachments?.filter((attachment) => Boolean(attachment.url.trim())) || [];
-    if (!visibleAttachments.length && !styles?.length) {
+    if (!visibleAttachments.length && !styles?.length && !skill) {
         return null;
     }
     const imageAttachments = visibleAttachments.filter((attachment) => !attachment.type || attachment.type.startsWith("image/"));
@@ -141,6 +143,16 @@ function renderUserAttachments(attachments?: ChatAttachment[], styles?: ChatGene
     return React.createElement(
         "div",
         { className: "flex flex-wrap gap-2" },
+        skill ? React.createElement(
+            "span",
+            {
+                key: `chat-skill-${skill.id}`,
+                className: "inline-flex max-w-52 items-center gap-1.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]",
+                title: `技能：${skill.name}`,
+            },
+            React.createElement(Sparkles, { className: "size-3.5 shrink-0 text-[var(--studio-action)]" }),
+            React.createElement("span", { className: "truncate" }, skill.name),
+        ) : null,
         styles?.map((style) => React.createElement(
             "span",
             {

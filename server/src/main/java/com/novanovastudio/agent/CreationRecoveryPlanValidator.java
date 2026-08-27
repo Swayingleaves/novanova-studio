@@ -235,7 +235,7 @@ public class CreationRecoveryPlanValidator {
                     task.toolName(), arguments);
         }).toList();
         planValidator.validate(new CreationPlan(plan.planId(), plan.intent(), plan.entrySource(), plan.summary(), "",
-                false, plan.creationSettings(), tasks), plan.entrySource(), plan.creationSettings());
+                false, plan.creationSettings(), tasks, List.of()), plan.entrySource(), plan.creationSettings());
     }
 
     /**

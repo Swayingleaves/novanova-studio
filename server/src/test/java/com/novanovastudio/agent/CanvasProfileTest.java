@@ -50,7 +50,7 @@ class CanvasProfileTest {
                         new AgentChatRequest.HistoryMessage("assistant", "请描述画面主体"),
                         new AgentChatRequest.HistoryMessage("user", "一只小猫在吃一只巨大的鱼"),
                         new AgentChatRequest.HistoryMessage("assistant", "请补充图片尺寸")),
-                new CreationSettings("model-1", null, null, null, null, null, null));
+                new CreationSettings("model-1", null, null, null, null, null, null), null);
 
         List<AiMessage> messages = profile.buildMessages(1L, session, request).block();
 
@@ -76,7 +76,7 @@ class CanvasProfileTest {
                 OffsetDateTime.now());
         AgentChatRequest request = new AgentChatRequest(
                 "session-1", "canvas", "9:16", Map.of(), List.of(), List.of(), List.of(),
-                new CreationSettings("model-1", null, null, null, null, null, null));
+                new CreationSettings("model-1", null, null, null, null, null, null), null);
 
         List<AiMessage> messages = profile.buildMessages(1L, session, request).block();
 
@@ -95,7 +95,7 @@ class CanvasProfileTest {
                 "session-1", 1L, "测试会话", "canvas", List.of(), OffsetDateTime.now(), OffsetDateTime.now());
         AgentChatRequest request = new AgentChatRequest(
                 "session-1", "canvas", "生成图片", Map.of(), List.of(), List.of(), List.of(),
-                new CreationSettings("model-1", null, null, null, null, null, null));
+                new CreationSettings("model-1", null, null, null, null, null, null), null);
 
         List<AiMessage> messages = profile.buildMessages(1L, session, request).block();
 

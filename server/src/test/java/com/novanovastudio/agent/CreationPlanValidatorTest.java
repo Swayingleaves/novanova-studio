@@ -350,7 +350,7 @@ class CreationPlanValidatorTest {
      * @return CreationPlan 计划
      */
     private CreationPlan plan(String entrySource, List<CreationTask> tasks) {
-        return new CreationPlan("model-plan", "生成内容", entrySource, "执行生成", "", false, null, tasks);
+        return new CreationPlan("model-plan", "生成内容", entrySource, "执行生成", "", false, null, tasks, List.of());
     }
 
     /**
