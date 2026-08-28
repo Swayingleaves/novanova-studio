@@ -20,6 +20,7 @@ import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.repository.AgentPlanRepository;
 import com.novanovastudio.service.AiTaskService;
 import com.novanovastudio.service.PromptOptimizationService;
+import com.novanovastudio.service.SkillService;
 import io.agentscope.core.model.Model;
 import java.lang.reflect.Method;
 import java.time.Duration;
@@ -78,8 +79,9 @@ class CreationPlanExecutorTest {
                 executionRegistry,
                 mock(AiTaskService.class),
                 frontendToolExecutor,
-                List.of(),
-                new CreationRecoveryPlanValidator(new CreationPlanValidator(new AgentToolRegistry())));
+                List.<AgentLoopProfile>of(),
+                new CreationRecoveryPlanValidator(new CreationPlanValidator(new AgentToolRegistry())),
+                mock(SkillService.class));
     }
 
     /**

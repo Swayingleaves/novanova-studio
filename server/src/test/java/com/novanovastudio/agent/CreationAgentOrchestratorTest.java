@@ -439,11 +439,11 @@ class CreationAgentOrchestratorTest {
                 planRepository,
                 mock(AiTaskService.class),
                 mock(SkillService.class),
+                mock(PersistenceService.class),
                 new AgentToolRegistry(),
                 mock(CreationAgentRequestRepository.class),
                 mock(CreationAgentRequestDispatcher.class),
-                mock(CreationAgentRequestQueue.class),
-                mock(PersistenceService.class));
+                mock(CreationAgentRequestQueue.class));
     }
 
     /**
@@ -476,11 +476,11 @@ class CreationAgentOrchestratorTest {
                 planRepository,
                 aiTaskService,
                 mock(SkillService.class),
+                mock(PersistenceService.class),
                 new AgentToolRegistry(),
                 requestRepository,
                 requestDispatcher,
-                requestQueue,
-                mock(PersistenceService.class));
+                requestQueue);
     }
 
     /**
