@@ -1,6 +1,7 @@
 package com.novanovastudio.common;
 
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.web.reactive.resource.NoResourceFoundException;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -89,6 +90,19 @@ public class GlobalExceptionHandler {
         // 处理请求参数级别的约束异常。
         log.error("约束验证异常: {}", exception.getMessage(), exception);
         return ResponseEntity.badRequest().body(ApiResponse.fail(ErrorCode.PARAM_ERROR, exception.getMessage()));
+    }
+
+    /**
+     * 处理不存在的接口请求（如扫描/爬虫访问不存在的路径）
+     *
+     * @param exception NoResourceFoundException 静态资源不存在异常
+     * @return ResponseEntity<ApiResponse<Void>> 响应
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResourceFoundException(NoResourceFoundException exception) {
+        // 不存在的接口不做错误日志，避免被扫描请求刷屏；仅 debug 级别记录
+        log.error("不存在的接口请求: {}", exception.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.fail(ErrorCode.RESOURCE_NOT_FOUND, "接口不存在"));
     }
 
     /**
