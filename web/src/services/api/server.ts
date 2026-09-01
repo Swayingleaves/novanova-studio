@@ -47,6 +47,7 @@ export type ServerAiTaskMediaReference = {
     mimeType?: string;
     storageKey?: string;
     url?: string;
+    role?: string;
 };
 
 export type ServerAiTask = {
@@ -98,7 +99,27 @@ export type ServerAiTaskCreateInput = {
     generationSource?: ServerGenerationSource;
     generationStyleIds?: number[];
     generationStyleSnapshots?: GenerationStyleSnapshot[];
-    videoGenerationMode?: "text-to-video" | "image-to-video" | "reference-to-video";
+    videoGenerationMode?: "text-to-video" | "image-to-video" | "reference-to-video" | "first-last-frame-to-video";
+};
+
+export type ServerVideoWorkflowStageQuote = {
+    role: string;
+    displayName: string;
+    taskType: "image" | "video" | string;
+    model?: string | null;
+    taskCount: number;
+    /** 阶段定价失败（报价整体不可用）时为 null，仅保留阶段骨架供前端识别工作流构成。 */
+    credits?: number | null;
+    videoGenerationMode?: "text-to-video" | "image-to-video" | "reference-to-video" | "first-last-frame-to-video" | string | null;
+};
+
+export type ServerVideoWorkflowQuote = {
+    available: boolean;
+    workflowType?: string;
+    stages: ServerVideoWorkflowStageQuote[];
+    credits?: number | null;
+    reason?: string;
+    requiredCapabilities: string[];
 };
 
 export type PromptOptimizationType = "image" | "video";
@@ -113,6 +134,8 @@ export type SkillOption = {
     description: string;
     targetType: SkillType;
     coverUrl: string;
+    /** 服务端从技能提示词识别的视频工作流类型。 */
+    workflowType?: string | null;
 };
 
 export type SkillOptionListResponse = {
@@ -606,7 +629,7 @@ export type ServerPromptInput = {
 };
 
 export function listServerPrompts(params: ServerPromptListParams = {}) {
-    return serverGet<ServerPromptListResponse>(`/prompt/listPrompts${promptQuery(params)}`, { auth: false });
+    return serverGet<ServerPromptListResponse>(`/prompt/listPrompts${promptQuery(params)}`);
 }
 
 export function listAdminPrompts(params: ServerPromptListParams = {}) {
@@ -880,6 +903,10 @@ export function uploadServerMedia(file: Blob, input: ServerMediaInput, fileName 
 
 export function createAiTask(input: ServerAiTaskCreateInput) {
     return serverPost<ServerAiTask>("/ai/task/createTask", input);
+}
+
+export function quoteVideoWorkflow(input: { workflowType: string; model: string; imageModel: string; resolution: string; seconds: string; stage?: "image" | "video" }) {
+    return serverPost<ServerVideoWorkflowQuote>("/ai/video/workflowQuote", input);
 }
 
 export function createPromptOptimizationTask(input: { generationType: PromptOptimizationType; prompt: string; generationStyleIds?: number[] }) {

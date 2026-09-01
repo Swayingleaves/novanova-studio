@@ -12,6 +12,8 @@ import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.ai.VideoResolution;
+import com.novanovastudio.agent.workflow.VideoWorkflowRegistry;
+import com.novanovastudio.agent.workflow.VideoWorkflowDefinition;
 import com.novanovastudio.ai.provider.CustomProviderAdapter;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -142,6 +144,144 @@ public class AiTaskService {
     @Autowired
     @Lazy
     private PromptOptimizationService promptOptimizationService;
+
+    /** 视频技能工作流注册表。 */
+    @Autowired
+    private VideoWorkflowRegistry videoWorkflowRegistry;
+
+    /**
+     * 计算视频技能工作流报价。
+     *
+     * @param request VideoWorkflowQuoteRequest 报价请求
+     * @return Mono<VideoWorkflowQuoteResponse> 报价结果
+     */
+    public Mono<AiTaskDtos.VideoWorkflowQuoteResponse> quoteVideoWorkflow(AiTaskDtos.VideoWorkflowQuoteRequest request) {
+        if (request == null || !StringUtils.hasText(request.workflowType())) {
+            return Mono.just(unavailable("未选择视频工作流", null));
+        }
+        VideoWorkflowDefinition definition;
+        try {
+            definition = videoWorkflowRegistry.require(request.workflowType());
+        } catch (BusinessException exception) {
+            return Mono.just(unavailable(exception.getMessage(), request.workflowType()));
+        }
+        VideoWorkflowDefinition.VideoWorkflowQuotePlan quotePlan;
+        try {
+            quotePlan = definition.buildQuotePlan(request)
+                    .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR,
+                            "工作流暂未提供报价定义：" + definition.workflowType()));
+        } catch (BusinessException exception) {
+            return Mono.just(unavailable(exception.getMessage(), request.workflowType()));
+        }
+        java.util.LinkedHashSet<String> capabilitySet = quotePlan.stages().stream()
+                .flatMap(stage -> java.util.stream.Stream.concat(stage.requiredCapabilities().stream(),
+                        stage.videoGenerationModes().stream()))
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+        List<VideoWorkflowDefinition.VideoWorkflowQuoteStage> stages = quoteStages(quotePlan, request.stage());
+        if (stages.isEmpty()) {
+            return Mono.just(unavailable("工作流报价阶段不受支持", request.workflowType()));
+        }
+        return Flux.fromIterable(stages)
+                .concatMap(stage -> quoteStage(request, stage)
+                        .map(quote -> new StageQuoteAttempt(quote, null))
+                        .onErrorResume(BusinessException.class, exception -> Mono.just(new StageQuoteAttempt(null, exception.getMessage()))))
+                .collectList()
+                .map(attempts -> {
+                    List<AiTaskDtos.VideoWorkflowStageQuote> succeeded = attempts.stream()
+                            .map(StageQuoteAttempt::quote).filter(java.util.Objects::nonNull).toList();
+                    String firstError = attempts.stream().map(StageQuoteAttempt::error)
+                            .filter(StringUtils::hasText).findFirst().orElse("");
+                    // 部分阶段不可用时仍返回阶段骨架，供前端展示工作流构成与图片参数选择
+                    List<AiTaskDtos.VideoWorkflowStageQuote> stageSkeleton = new java.util.ArrayList<>();
+                    for (int index = 0; index < attempts.size(); index++) {
+                        AiTaskDtos.VideoWorkflowStageQuote quote = attempts.get(index).quote();
+                        if (quote != null) {
+                            stageSkeleton.add(quote);
+                            continue;
+                        }
+                        VideoWorkflowDefinition.VideoWorkflowQuoteStage declared = stages.get(index);
+                        stageSkeleton.add(new AiTaskDtos.VideoWorkflowStageQuote(declared.role(), declared.displayName(),
+                                declared.taskType(), null, declared.taskCount(), null, null));
+                    }
+                    if (StringUtils.hasText(firstError)) {
+                        return new AiTaskDtos.VideoWorkflowQuoteResponse(false, definition.workflowType(),
+                                List.copyOf(stageSkeleton), null, firstError, List.copyOf(capabilitySet));
+                    }
+                    int total = succeeded.stream().mapToInt(AiTaskDtos.VideoWorkflowStageQuote::credits).sum();
+                    succeeded.stream().map(AiTaskDtos.VideoWorkflowStageQuote::videoGenerationMode)
+                            .filter(StringUtils::hasText).forEach(capabilitySet::add);
+                    return new AiTaskDtos.VideoWorkflowQuoteResponse(true, definition.workflowType(), succeeded,
+                            total, "", List.copyOf(capabilitySet));
+                });
+    }
+
+    /**
+     * 按请求阶段筛选工作流报价，避免图片阶段被后续视频阶段的价格配置阻断。
+     *
+     * @param quotePlan VideoWorkflowQuotePlan 工作流报价计划
+     * @param stage String 报价阶段，image、video或空值（完整工作流）
+     * @return List<VideoWorkflowQuoteStage> 待报价阶段
+     */
+    private List<VideoWorkflowDefinition.VideoWorkflowQuoteStage> quoteStages(
+            VideoWorkflowDefinition.VideoWorkflowQuotePlan quotePlan, String stage) {
+        if (!StringUtils.hasText(stage)) return quotePlan.stages();
+        if (!"image".equals(stage) && !"video".equals(stage)) return List.of();
+        return quotePlan.stages().stream()
+                .filter(item -> "image".equals(stage) == "image".equals(item.modelType()))
+                .toList();
+    }
+
+    /** 单阶段报价尝试结果：定价失败时保留错误信息。 */
+    private record StageQuoteAttempt(AiTaskDtos.VideoWorkflowStageQuote quote, String error) {
+    }
+
+    /** 计算工作流单阶段报价。 */
+    private Mono<AiTaskDtos.VideoWorkflowStageQuote> quoteStage(
+            AiTaskDtos.VideoWorkflowQuoteRequest request, VideoWorkflowDefinition.VideoWorkflowQuoteStage stage) {
+        String selectedModel = "image".equals(stage.modelType()) ? request.imageModel() : request.model();
+        if (!StringUtils.hasText(selectedModel)) {
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
+                    ("image".equals(stage.modelType()) ? "图片" : "视频") + "工作流阶段必须明确选择模型"));
+        }
+        String taskType = stage.taskType();
+        return resolveModel(taskType, selectedModel).map(model -> {
+            Set<String> capabilities = model.capabilities() == null ? Set.of() : Set.copyOf(model.capabilities());
+            if (!capabilities.containsAll(stage.requiredCapabilities())) {
+                String missing = stage.requiredCapabilities().stream().filter(capability -> !capabilities.contains(capability)).findFirst().orElse("所需");
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前" + ("image".equals(stage.modelType()) ? "图片" : "视频") + "模型未配置" + missing + "能力");
+            }
+            List<String> modes = stage.videoGenerationModes().stream().filter(capabilities::contains).toList();
+            if (TYPE_VIDEO.equals(taskType) && modes.isEmpty()) {
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前视频模型未配置工作流要求的视频生成能力");
+            }
+            List<AiTaskDtos.AiTaskMediaReference> references = stage.referenceRoles().stream()
+                    .map(role -> new AiTaskDtos.AiTaskMediaReference(role, role, "image/png", role,
+                            "https://placeholder.invalid/" + role, role)).toList();
+            Map<String, Object> parameters = stage.parameters();
+            List<String> candidateModes = modes.isEmpty() ? List.of("") : modes;
+            BusinessException firstException = null;
+            for (String candidateMode : candidateModes) {
+                String mode = candidateMode.isEmpty() ? null : candidateMode;
+                AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(taskType, "工作流阶段报价",
+                        selectedModel, parameters, references, List.of(), AiTaskSources.VIDEO_PAGE, null, null, mode);
+                try {
+                    int credits = Math.multiplyExact(calculateTaskCredits(taskRequest, model), stage.taskCount());
+                    return new AiTaskDtos.VideoWorkflowStageQuote(stage.role(), stage.displayName(), taskType, selectedModel,
+                            stage.taskCount(), credits, mode);
+                } catch (BusinessException exception) {
+                    if (firstException == null) firstException = exception;
+                } catch (ArithmeticException exception) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "工作流报价积分计算超出范围");
+                }
+            }
+            throw firstException;
+        });
+    }
+
+    /** 构造不可用报价。 */
+    private AiTaskDtos.VideoWorkflowQuoteResponse unavailable(String reason, String workflowType) {
+        return new AiTaskDtos.VideoWorkflowQuoteResponse(false, workflowType, List.of(), null, reason, List.of());
+    }
 
     /**
      * 服务启动时恢复未完成任务
@@ -949,7 +1089,7 @@ public class AiTaskService {
     private VideoBillingQuote validateVideoTask(AiTaskDtos.CreateAiTaskRequest request, ResolvedModel resolvedModel) {
         String mode = VideoGenerationMode.defaultIfBlank(request.videoGenerationMode());
         if (!VideoGenerationMode.isSupported(mode)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式只支持文生视频、图生视频和全能参考");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持");
         }
         List<AiTaskDtos.AiTaskMediaReference> imageReferences = request.references() == null ? List.of() : request.references();
         List<AiTaskDtos.AiTaskMediaReference> videoReferences = request.videoReferences() == null ? List.of() : request.videoReferences();
@@ -976,6 +1116,14 @@ public class AiTaskService {
             case VideoGenerationMode.REFERENCE_TO_VIDEO -> {
                 if (imageReferences.isEmpty() && videoReferences.isEmpty()) {
                     throw new BusinessException(ErrorCode.PARAM_INVALID, "全能参考至少需要一张图片或一个视频参考素材");
+                }
+            }
+            case VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO -> {
+                if (!videoReferences.isEmpty() || imageReferences.size() != 2) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "首尾帧原生视频必须按顺序提供两张图片");
+                }
+                if (!"first_frame".equals(imageReferences.get(0).role()) || !"last_frame".equals(imageReferences.get(1).role())) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "首尾帧原生视频的图片角色必须依次为首帧和尾帧");
                 }
             }
             default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持");
@@ -1197,6 +1345,7 @@ public class AiTaskService {
             case VideoGenerationMode.TEXT_TO_VIDEO -> "文生视频";
             case VideoGenerationMode.IMAGE_TO_VIDEO -> "图生视频";
             case VideoGenerationMode.REFERENCE_TO_VIDEO -> "全能参考";
+            case VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO -> "首尾帧原生生成";
             default -> "视频";
         };
     }

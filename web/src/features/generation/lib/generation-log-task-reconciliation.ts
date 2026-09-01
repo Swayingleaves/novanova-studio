@@ -93,9 +93,27 @@ function reconcileRound(round: JsonRecord, tasks: ReadonlyMap<string, ServerAiTa
         }
     }
 
+    for (const key of ["stages", "tasks"] as const) {
+        const value = round[key];
+        if (!Array.isArray(value)) continue;
+        const nextItems = value.map((item) => reconcileWorkflowItem(item, tasks));
+        if (nextItems.some((item, index) => item !== value[index])) {
+            nextRound[key] = nextItems;
+            changed = true;
+        }
+    }
+
     if (changed || text(round.status) !== "pending") return changed ? nextRound : round;
     const task = roundTaskId ? tasks.get(roundTaskId) : undefined;
     return task ? updatePendingResult(round, task) : updateMissingTaskResult(round);
+}
+
+function reconcileWorkflowItem(value: unknown, tasks: ReadonlyMap<string, ServerAiTask>): unknown {
+    if (!isRecord(value) || !["pending", "running"].includes(text(value.status))) return value;
+    const taskId = text(value.taskId);
+    const task = taskId ? tasks.get(taskId) : undefined;
+    if (!task) return taskId ? value : updateMissingTaskResult(value);
+    return updatePendingResult(value, task);
 }
 
 function reconcileResult(value: unknown, roundTaskId: string, tasks: ReadonlyMap<string, ServerAiTask>): unknown {
@@ -129,7 +147,12 @@ function findPendingTaskIds(log: GenerationTaskLog): string[] {
             ...(round.result === undefined ? [] : [round.result]),
         ];
         const taskIds = results.flatMap((result) => isRecord(result) && text(result.status) === "pending" ? [text(result.taskId) || roundTaskId] : []);
-        return taskIds.length ? taskIds.filter(Boolean) : text(round.status) === "pending" && roundTaskId ? [roundTaskId] : [];
+        const workflowTaskIds = ["stages", "tasks"].flatMap((key) => Array.isArray(round[key])
+            ? round[key].flatMap((item) => isRecord(item) && ["pending", "running"].includes(text(item.status)) && text(item.taskId) ? [text(item.taskId)] : [])
+            : []);
+        return [...taskIds.filter(Boolean), ...workflowTaskIds].length
+            ? [...taskIds.filter(Boolean), ...workflowTaskIds]
+            : text(round.status) === "pending" && roundTaskId ? [roundTaskId] : [];
     });
 }
 
@@ -148,6 +171,8 @@ function roundStatuses(round: unknown): string[] {
         ...(round.result === undefined ? [] : [round.result]),
     ];
     const statuses = results.flatMap((result) => isRecord(result) ? [text(result.status)] : []).filter(Boolean);
+    const workflowStatuses = ["stages", "tasks"].flatMap((key) => Array.isArray(round[key]) ? round[key].flatMap((item) => isRecord(item) ? [text(item.status)] : []).filter(Boolean) : []);
+    statuses.push(...workflowStatuses);
     return statuses.length ? statuses : [text(round.status)].filter(Boolean);
 }
 

@@ -72,8 +72,21 @@ public record AgentChatRequest(
      * @param type String MIME类型
      * @param name String 文件名
      * @param storageKey String 后端媒体存储键
+     * @param role String 工作流媒体业务角色
      */
-    public record Attachment(String url, String type, String name, String storageKey) {
+    public record Attachment(String url, String type, String name, String storageKey, String role) {
+
+        /**
+         * 保留媒体角色扩展前的构造方式。
+         *
+         * @param url String 访问地址
+         * @param type String MIME类型
+         * @param name String 文件名
+         * @param storageKey String 后端媒体存储键
+         */
+        public Attachment(String url, String type, String name, String storageKey) {
+            this(url, type, name, storageKey, null);
+        }
     }
 
     /**

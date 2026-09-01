@@ -306,7 +306,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考素材必须是图片或视频"));
                         }
                         String name = StringUtils.hasText(attachment.name()) ? attachment.name() : "reference";
-                        return Mono.just(new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, "", referenceUrl));
+                            return Mono.just(new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, "", referenceUrl, attachment.role()));
                     }
                     return persistenceService.getMediaInfoForUser(userId, attachment.storageKey())
                             .map(media -> {
@@ -316,7 +316,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                     throw new BusinessException(ErrorCode.PARAM_INVALID, "参考素材必须是图片或视频");
                                 }
                                 String name = StringUtils.hasText(attachment.name()) ? attachment.name() : "reference";
-                                return new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, media.storageKey(), media.url());
+                                return new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, media.storageKey(), media.url(), attachment.role());
                             });
                 })
                 .collectList()
@@ -364,6 +364,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
             case VideoGenerationMode.TEXT_TO_VIDEO -> "文生视频";
             case VideoGenerationMode.IMAGE_TO_VIDEO -> "图生视频";
             case VideoGenerationMode.REFERENCE_TO_VIDEO -> "全能参考";
+            case VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO -> "首尾帧原生生成";
             default -> "视频";
         };
     }

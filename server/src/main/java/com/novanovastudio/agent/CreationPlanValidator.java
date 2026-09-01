@@ -7,6 +7,8 @@ import com.novanovastudio.agent.dto.CreationPlan;
 import com.novanovastudio.agent.dto.CreationSettings;
 import com.novanovastudio.agent.dto.CreationTask;
 import com.novanovastudio.agent.dto.AgentTool;
+import com.novanovastudio.agent.workflow.VideoWorkflowDefinition;
+import com.novanovastudio.agent.workflow.VideoWorkflowRegistry;
 import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -21,6 +23,7 @@ import java.util.Objects;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 
 /**
@@ -35,6 +38,19 @@ public class CreationPlanValidator {
 
     /** Java固定注册的画布工具 */
     private final AgentToolRegistry toolRegistry;
+    /** 视频技能工作流注册表。 */
+    private VideoWorkflowRegistry videoWorkflowRegistry;
+
+    /**
+     * 注入视频技能工作流注册表。
+     *
+     * @param registry VideoWorkflowRegistry 工作流注册表
+     * @return void 无返回值
+     */
+    @Autowired
+    void setVideoWorkflowRegistry(VideoWorkflowRegistry registry) {
+        this.videoWorkflowRegistry = registry;
+    }
 
     /**
      * 校验计划并返回使用请求硬约束替换后的计划。
@@ -57,6 +73,14 @@ public class CreationPlanValidator {
         if (!entrySource.equals(plan.entrySource())) {
             plan = new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(),
                     plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(),
+                    plan.tasks(), plan.choices(), plan.workflowType());
+        }
+        // 普通视频生成的模式属于页面设置，不是视频技能工作流类型；模型误将模式写入该字段时纠正为空。
+        // 仅纠正服务端明确支持的模式，其他非空值仍必须通过工作流注册表校验。
+        if (CreationEntrySource.VIDEO_PAGE.equals(entrySource)
+                && VideoGenerationMode.isSupported(plan.workflowType())) {
+            plan = new CreationPlan(plan.planId(), plan.intent(), plan.entrySource(), plan.summary(),
+                    plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(),
                     plan.tasks(), plan.choices());
         }
         if (settings != null) {
@@ -74,6 +98,9 @@ public class CreationPlanValidator {
                 throw invalid("生成风格ID和历史风格快照不能同时提交");
             }
             validateGenerationStyles(settings, hasStyleSnapshots);
+        }
+        if (StringUtils.hasText(plan.workflowType())) {
+            return validateVideoWorkflowPlan(plan, entrySource, settings);
         }
         List<CreationTask> tasks = plan.tasks() == null ? List.of() : plan.tasks();
         if (isGenerationPage(entrySource) && tasks.size() > 1) {
@@ -132,6 +159,76 @@ public class CreationPlanValidator {
         }
         detectCycle(tasks);
         return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), "", false, settings, tasks, List.of());
+    }
+
+    /**
+     * 校验已由服务端注册的视频技能工作流计划。
+     *
+     * @param plan CreationPlan 工作流计划
+     * @param entrySource String 页面入口
+     * @param settings CreationSettings 页面设置
+     * @return CreationPlan 校验后的工作流计划
+     */
+    private CreationPlan validateVideoWorkflowPlan(CreationPlan plan, String entrySource, CreationSettings settings) {
+        if (!CreationEntrySource.VIDEO_PAGE.equals(entrySource)) {
+            throw invalid("视频技能工作流只能从视频生成页面启动");
+        }
+        if (videoWorkflowRegistry == null) {
+            throw invalid("视频技能工作流注册表未初始化");
+        }
+        VideoWorkflowDefinition definition = videoWorkflowRegistry.require(plan.workflowType());
+        if (StringUtils.hasText(plan.clarificationQuestion())) {
+            if (plan.tasks() != null && !plan.tasks().isEmpty()) throw invalid("澄清阶段不能创建生成任务");
+            return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), plan.clarificationQuestion(),
+                    false, settings, List.of(), plan.choices(), plan.workflowType());
+        }
+        if (settings == null || !StringUtils.hasText(settings.model())) {
+            throw invalid("请选择视频生成模型后再继续");
+        }
+        List<CreationTask> tasks = plan.tasks() == null ? List.of() : plan.tasks();
+        if (!StringUtils.hasText(settings.size()) || !StringUtils.hasText(settings.resolution())
+                || !StringUtils.hasText(settings.quality()) || !StringUtils.hasText(settings.seconds())
+                || settings.watermark() == null) {
+            throw invalid("请补充视频尺寸、分辨率、质量、时长和水印设置后再继续");
+        }
+        if (tasks.stream().anyMatch(task -> task == null || !StringUtils.hasText(task.taskId())
+                || !StringUtils.hasText(task.taskRole()))) {
+            throw invalid("视频工作流任务缺少编号或角色");
+        }
+        if (tasks.stream().map(CreationTask::taskId).distinct().count() != tasks.size()) {
+            throw invalid("视频工作流任务编号不能重复");
+        }
+        if (tasks.stream().anyMatch(definition::usesWorkflowImageModel) && !StringUtils.hasText(settings.imageModel())) {
+            throw invalid("该视频技能需要选择图片生成模型");
+        }
+        if (tasks.stream().map(CreationTask::taskRole).distinct().count() != tasks.size()) {
+            throw invalid("视频工作流任务角色不能重复");
+        }
+        definition.validateTasks(tasks);
+        validateDependencies(tasks);
+        return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), "", false,
+                settings, tasks, List.of(), plan.workflowType());
+    }
+
+    /**
+     * 校验任务依赖存在、自依赖与循环依赖。
+     *
+     * @param tasks List<CreationTask> 任务列表
+     * @return void 无返回值
+     */
+    private void validateDependencies(List<CreationTask> tasks) {
+        Set<String> taskIds = tasks.stream().map(CreationTask::taskId).collect(java.util.stream.Collectors.toSet());
+        for (CreationTask task : tasks) {
+            List<String> dependencies = task.dependsOn() == null ? List.of() : task.dependsOn();
+            if (dependencies.stream().anyMatch(dependency -> !StringUtils.hasText(dependency)
+                    || !taskIds.contains(dependency) || dependency.equals(task.taskId()))) {
+                throw invalid("Agent计划包含越权依赖");
+            }
+            if (dependencies.stream().distinct().count() != dependencies.size()) {
+                throw invalid("Agent计划不能重复声明依赖任务");
+            }
+        }
+        detectCycle(tasks);
     }
 
     /**

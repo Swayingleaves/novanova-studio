@@ -240,6 +240,33 @@ CREATE INDEX idx_skills_deleted_at
     ON skills(deleted_at);
 ```
 
+### 视频技能工作流
+
+```sql
+ALTER TABLE agent_plan ADD COLUMN workflow_type VARCHAR(100) NOT NULL DEFAULT '';
+ALTER TABLE agent_plan_task ADD COLUMN task_role VARCHAR(100) NOT NULL DEFAULT '';
+
+CREATE TABLE video_workflow_context (
+    id VARCHAR(64) PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id),
+    session_id VARCHAR(64) NOT NULL REFERENCES agent_session(id) ON DELETE CASCADE,
+    workflow_type VARCHAR(100) NOT NULL,
+    skill_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    original_request TEXT NOT NULL,
+    clarification_question TEXT NOT NULL DEFAULT '',
+    answers JSONB NOT NULL DEFAULT '[]'::jsonb,
+    drafted_prompts JSONB NOT NULL DEFAULT '{}'::jsonb,
+    creation_settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status VARCHAR(30) NOT NULL,
+    context_version INTEGER NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_video_workflow_context_status CHECK (status IN ('clarifying', 'pending_confirm', 'planned', 'completed', 'failed', 'canceled'))
+);
+```
+
+`agent_plan.workflow_type` 为空时表示普通计划；`agent_plan_task.task_role` 由工作流定义解释。`video_workflow_context` 保存技能快照、原始需求、澄清问答与页面设置，确保后续回复继续原工作流而不会重新被解释成普通视频请求。状态流转：`clarifying`（多轮对话理解意图）→ `pending_confirm`（助手已起草提示词，等待用户确认）→ `planned`（用户确认，开始执行）→ 终态 `completed`/`failed`/`canceled`。`drafted_prompts` 保存助手起草的首帧、尾帧和视频提示词，用户确认后由工作流定义生成任务。
+
 ```sql
 CREATE TABLE creation_agent_request (
     id VARCHAR(64) PRIMARY KEY,

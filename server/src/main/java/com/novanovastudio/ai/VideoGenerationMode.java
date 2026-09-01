@@ -19,11 +19,15 @@ public final class VideoGenerationMode {
     /** 全能参考视频模式。 */
     public static final String REFERENCE_TO_VIDEO = "reference-to-video";
 
+    /** 首尾帧原生视频模式。 */
+    public static final String FIRST_LAST_FRAME_TO_VIDEO = "first-last-frame-to-video";
+
     /** 所有支持的视频生成模式。 */
     private static final Set<String> SUPPORTED_VALUES = Set.of(
             TEXT_TO_VIDEO,
             IMAGE_TO_VIDEO,
-            REFERENCE_TO_VIDEO
+            REFERENCE_TO_VIDEO,
+            FIRST_LAST_FRAME_TO_VIDEO
     );
 
     /**

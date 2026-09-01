@@ -4,6 +4,7 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.SkillDtos;
 import com.novanovastudio.entity.SkillRecords;
+import com.novanovastudio.agent.workflow.VideoWorkflowRegistry;
 import com.novanovastudio.repository.SkillRepository;
 import java.util.List;
 import java.util.Locale;
@@ -32,6 +33,8 @@ public class SkillService {
 
     /** 技能仓储。 */
     private final SkillRepository repository;
+    /** 视频工作流注册表。 */
+    private final VideoWorkflowRegistry videoWorkflowRegistry;
 
     /**
      * 查询用户侧启用技能。
@@ -191,7 +194,10 @@ public class SkillService {
 
     /** 技能记录转用户选项。 */
     private SkillDtos.SkillOption toOption(SkillRecords.SkillRecord record) {
-        return new SkillDtos.SkillOption(record.getId(), record.getName(), record.getDescription(), record.getTargetType(), record.getCoverUrl());
+        String workflowType = "video".equals(record.getTargetType())
+                ? videoWorkflowRegistry.resolveWorkflowType(record.getSystemPrompt()).orElse(null) : null;
+        return new SkillDtos.SkillOption(record.getId(), record.getName(), record.getDescription(), record.getTargetType(),
+                record.getCoverUrl(), workflowType);
     }
 
     /** 技能记录转管理端条目。 */

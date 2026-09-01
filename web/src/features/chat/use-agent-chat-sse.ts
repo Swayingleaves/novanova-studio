@@ -36,7 +36,7 @@ type AgentChatSSEReturn = {
   isStreaming: boolean;
   isQueued: boolean;
   isStopping: boolean;
-  sendMessage: (message: string, attachments?: AgentAttachment[], creationSettings?: CreationSettings) => Promise<void>;
+  sendMessage: (message: string, attachments?: AgentAttachment[], creationSettings?: CreationSettings, skillIdOverride?: string) => Promise<void>;
   cancelMessage: () => Promise<void>;
   canChangeSession: () => boolean;
   resetSession: () => boolean;
@@ -317,7 +317,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
   connectSSERef.current = connectSSE;
 
   const sendMessage = useCallback(
-    async (message: string, attachments?: AgentAttachment[], settingsOverride?: CreationSettings) => {
+    async (message: string, attachments?: AgentAttachment[], settingsOverride?: CreationSettings, skillIdOverride?: string) => {
       if (sendingRef.current || activeRequestRef.current) return;
       sendingRef.current = true;
       activeRequestRef.current = true;
@@ -337,7 +337,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
           message,
           attachments,
           creationSettings: settingsOverride || creationSettings,
-          skillId,
+          skillId: skillIdOverride ?? skillId,
         });
         sessionIdRef.current = sid;
         requestIdRef.current = rid;

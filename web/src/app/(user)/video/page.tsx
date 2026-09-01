@@ -2,16 +2,18 @@
 
 import { BookOpen, CloudUpload, Download, FolderPlus, Cog, HelpCircle, Link2, LoaderCircle, Palette, Play, RefreshCw, Sparkles, TriangleAlert, Upload, VideoIcon } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
+import { App, Button, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
 
 import { bindPendingVideoSize, renderPendingVideoToolCall, VideoGeneratingCard } from "./components/pending-video-tool-call";
+import { renderPendingImageToolCall } from "@/app/(user)/image/components/pending-image-tool-call";
 import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import type { AgentAttachment } from "@/features/canvas/api/agent";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
 import { RecentReferenceImagePicker } from "@/features/generation/components/recent-reference-image-picker";
+import { ImageSettingsPanel } from "@/features/generation/components/image-settings-panel";
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/features/generation/components/video-settings-panel";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { seedanceReferenceLabel, SEEDANCE_REFERENCE_LIMITS } from "@/features/generation/lib/seedance-video";
@@ -37,7 +39,15 @@ import type { AgentActivityState, ChatAttachment, ChatMessageItem, ToolCallState
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
 import { ChoiceHistoryBar } from "@/features/generation/components/creation-message-thread";
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
-import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, mergePlanTaskActivityMessage, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
+import {
+    createToolExecutionActivity,
+    finishRoundAgentActivities,
+    finishRunningAgentActivities,
+    mergePlanTaskActivityMessage,
+    normalizeHistoricalAgentActivities,
+    updateAgentActivityMessage,
+    upsertAgentActivityMessage,
+} from "@/features/generation/components/agent-activity";
 import { hasPendingVideoConversation } from "@/features/generation/lib/generation-conversation-recovery";
 import { reconcileGenerationLogTasks } from "@/features/generation/lib/generation-log-task-reconciliation";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
@@ -48,7 +58,22 @@ import { useRecentReferenceImages } from "@/features/generation/hooks/use-recent
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { availableVideoModelsForMode, quoteVideoGeneration, videoGenerationReferenceIssue } from "@/features/generation/lib/video-billing";
-import { cancelAiTask, deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
+import { requestCreditCost } from "@/features/generation/constants/credits";
+import {
+    cancelAiTask,
+    deleteGenerationLogs,
+    getAiTaskPollingIntervalMilliseconds,
+    listGenerationLogs,
+    listGenerationStyles,
+    listSkills,
+    markGenerationLogViewed,
+    quoteVideoWorkflow as quoteVideoWorkflowOnServer,
+    renameGenerationLogTitle,
+    type GenerationStyleSnapshot,
+    type SkillOption,
+    type ServerVideoWorkflowQuote,
+    type ServerVideoWorkflowStageQuote,
+} from "@/services/api/server";
 import { findLatestPlayableVideo, hasPlayableVideoUrl } from "./video-display";
 
 type GeneratedVideo = {
@@ -72,10 +97,66 @@ type GenerationResult = {
     error?: string;
 };
 
+type WorkflowOutput = {
+    id?: string;
+    role?: string;
+    taskId?: string;
+    taskType?: "image" | "video" | string;
+    url?: string;
+    storageKey?: string;
+    key?: string;
+    mimeType?: string;
+    width?: number;
+    height?: number;
+    durationMs?: number;
+    bytes?: number;
+    objectStorage?: ObjectStorageFile;
+};
+
+type WorkflowStage = {
+    role: string;
+    displayName: string;
+    planTaskId: string;
+    taskId?: string;
+    status: "pending" | "running" | "success" | "failed" | "canceled" | "skipped";
+    progress?: number;
+    outputs?: WorkflowOutput[];
+    error?: string;
+    blocking?: boolean;
+};
+
+type WorkflowTaskSnapshot = {
+    planTaskId?: string;
+    taskId?: string;
+    role?: string;
+    status?: string;
+};
+
 type RoundConfig = Pick<AiConfig, "model" | "videoModel" | "size" | "vquality" | "videoSeconds" | "videoWatermark"> & {
+    imageModel?: string;
     videoGenerationMode?: AiConfig["videoGenerationMode"];
     resolution?: string;
     seconds?: string;
+    imageSize?: string;
+    imageResolution?: string;
+    imageQuality?: string;
+};
+
+/** 工作流草案轮的图片参数选择：按草案轮次ID绑定，每轮重新选择。 */
+type WorkflowImageSelection = {
+    roundId: string;
+    imageModel: string;
+    size: string;
+    quality: string;
+    imageResolution: string;
+};
+
+/** 工作流图片确认轮的视频参数选择：按图片确认轮次ID绑定，确认生成视频前必须显式确认比例/清晰度/时长。 */
+type WorkflowVideoSelection = {
+    roundId: string;
+    size: string;
+    resolution: string;
+    seconds: string;
 };
 
 type Round = {
@@ -91,7 +172,15 @@ type Round = {
     videoReferences: ReferenceVideo[];
     config: RoundConfig;
     /** 纯对话轮次（技能引导/澄清问答）无生成结果，可为空 */
+    assistantText?: string;
     result?: GenerationResult;
+    workflowType?: string;
+    workflowStatus?: string;
+    draftedPrompts?: Record<string, string>;
+    stages?: WorkflowStage[];
+    tasks?: WorkflowTaskSnapshot[];
+    outputs?: WorkflowOutput[];
+    error?: string;
     createdAt: number;
     activities?: AgentActivityState[];
 };
@@ -115,6 +204,7 @@ export default function VideoPage() {
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const userId = useUserStore((state) => state.user?.id);
     const userRole = useUserStore((state) => state.user?.role);
+    const creditBalance = useUserStore((state) => state.user?.creditBalance);
     const addAsset = useAssetStore((state) => state.addAsset);
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
     const theme = canvasThemes[resolvedTheme];
@@ -131,6 +221,9 @@ export default function VideoPage() {
     const [styleError, setStyleError] = useState<string | null>(null);
     const [skillOptions, setSkillOptions] = useState<SkillOption[]>([]);
     const [selectedSkill, setSelectedSkill] = useState<SkillOption | null>(null);
+    const [serverWorkflowQuote, setServerWorkflowQuote] = useState<ServerVideoWorkflowQuote | null>(null);
+    const [workflowImageSelection, setWorkflowImageSelection] = useState<WorkflowImageSelection | null>(null);
+    const [workflowVideoSelection, setWorkflowVideoSelection] = useState<WorkflowVideoSelection | null>(null);
     const [skillLoading, setSkillLoading] = useState(false);
     const [skillError, setSkillError] = useState<string | null>(null);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
@@ -140,6 +233,9 @@ export default function VideoPage() {
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [videoDraftSettingsModified, setVideoDraftSettingsModified] = useState(false);
     const [promptDialogOpen, setPromptDialogOpen] = useState(false);
+    const [promptEditDialogOpen, setPromptEditDialogOpen] = useState(false);
+    const [promptEditValue, setPromptEditValue] = useState({ firstFrame: "", lastFrame: "", video: "" });
+    const [promptEditMode, setPromptEditMode] = useState<"single" | "three">("single");
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -223,6 +319,14 @@ export default function VideoPage() {
         updateVideoSettings(key, value);
     };
 
+    /** 工作流图片面板的键映射到本轮草案的图片参数选择（count 不适用，固定单张）。 */
+    const handleWorkflowImageSettingChange = (key: "quality" | "imageResolution" | "size" | "count", value: string) => {
+        if (key === "count") return;
+        if (key === "quality") updateWorkflowImageSelection({ quality: value });
+        else if (key === "imageResolution") updateWorkflowImageSelection({ imageResolution: value });
+        else updateWorkflowImageSelection({ size: value });
+    };
+
     // 文生视频模式下上传参考素材时，按素材类型自动切换生成模式：仅图片 → 图生视频；含视频 → 全能参考。
     const autoSwitchModeForReferences = (addedImages: number, addedVideos: number) => {
         if (config.videoGenerationMode !== "text-to-video") return;
@@ -238,16 +342,93 @@ export default function VideoPage() {
     const { completedThinkings, activeThinking, onThoughtDelta, onThoughtComplete, resetThinkings } = useAgentThinking();
     const [toolCalls, setToolCalls] = useState<ToolCallState[]>([]);
     const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null);
+    const activeConversation = conversations.find((item) => item.id === activeId) || null;
+    const latestRound = activeConversation?.rounds.at(-1);
+    // 实时对话中的草案待确认轮：SSE 聊天区最后一条携带 choice 动作且含"确认生成"选项的助手消息。
+    // 不依赖后端落库时序（saveClarificationRound 是异步落库，latestRound 可能尚未刷新），
+    // 用户点"确认生成"的瞬间即用聊天区实时消息判定。
+    const liveDraftChoiceRound = (() => {
+        for (let index = chatMessages.length - 1; index >= 0; index--) {
+            const message = chatMessages[index];
+            if (message.role === "assistant") {
+                return message.action?.type === "choice" && message.action.options?.some((option) => option.value === "确认生成") ? message : null;
+            }
+        }
+        return null;
+    })();
+    // 实时对话中的图片待确认轮：最后一条携带 choice 动作且含"用这些图片生成视频"选项的助手消息。
+    // 图片阶段完成后询问用户"用这些图片生成视频 / 修改提示词重新生成"。
+    const liveImageConfirmChoiceRound = (() => {
+        for (let index = chatMessages.length - 1; index >= 0; index--) {
+            const message = chatMessages[index];
+            if (message.role === "assistant") {
+                return message.action?.type === "choice" && message.action.options?.some((option) => option.value === "用这些图片生成视频") ? message : null;
+            }
+        }
+        return null;
+    })();
+    // 历史刷新场景兜底：最新落库轮次是 clarifying 且携带确认选项（刷新/切换会话后从记录恢复时命中）。
+    const historyWorkflowChargingNext = Boolean(selectedSkill?.workflowType) && latestRound?.workflowStatus === "clarifying" && Boolean(latestRound.choices?.length);
+    // 历史刷新场景兜底：最新落库轮次是图片待确认状态（刷新/切换会话后从记录恢复时命中）。
+    const historyWorkflowImageConfirmNext = Boolean(selectedSkill?.workflowType) && latestRound?.workflowStatus === "image_pending_confirm" && Boolean(latestRound.choices?.length);
+    // 工作流对话轮免费；仅当处于"草案待确认"（下一步可能确认生成并扣费）时才展示和校验报价。
+    const workflowChargingNext = Boolean(selectedSkill?.workflowType) && (Boolean(liveDraftChoiceRound) || historyWorkflowChargingNext);
+    // 图片阶段完成后的二次确认轮：下一步确认将生成视频并扣费，同样需要校验视频报价。
+    const workflowImageConfirmNext = Boolean(selectedSkill?.workflowType) && (Boolean(liveImageConfirmChoiceRound) || historyWorkflowImageConfirmNext);
+    // 草案轮绑定标识：实时对话用聊天消息 id，历史刷新场景用落库轮次 id
+    const workflowDraftRoundId = liveDraftChoiceRound?.id ?? (historyWorkflowChargingNext ? (latestRound?.id ?? null) : null);
+    // 草案轮的图片参数选择：按轮次绑定，每个草案轮重新选择；未显式选择时回退有效配置默认值（与卡片 UI 默认勾选一致）
+    const activeWorkflowImageSelection = workflowDraftRoundId && workflowImageSelection?.roundId === workflowDraftRoundId ? workflowImageSelection : null;
+    // 画质/清晰度/比例/模型：未显式点击时回退到有效配置默认值，避免默认勾选被误判为未选择。
+    // 仅当模型也没有默认配置（effectiveConfig.imageModel 为空）时，才需要用户显式选择模型。
+    const workflowImageModel = activeWorkflowImageSelection?.imageModel || effectiveConfig.imageModel || "";
+    const workflowImageSize = activeWorkflowImageSelection?.size || effectiveConfig.size || "1:1";
+    const workflowImageResolution = activeWorkflowImageSelection?.imageResolution || effectiveConfig.imageResolution || "2K";
+    const workflowImageQuality = activeWorkflowImageSelection?.quality || effectiveConfig.quality || "medium";
+    const workflowImageSelectionComplete = Boolean(workflowImageModel && workflowImageSize && workflowImageResolution && workflowImageQuality);
+    const updateWorkflowImageSelection = (patch: Partial<Omit<WorkflowImageSelection, "roundId">>) => {
+        if (!workflowDraftRoundId) return;
+        setWorkflowImageSelection((current) => {
+            const base = current && current.roundId === workflowDraftRoundId ? current : { roundId: workflowDraftRoundId, imageModel: "", size: "", quality: "", imageResolution: "" };
+            return { ...base, ...patch };
+        });
+    };
+    // 图片确认轮的视频参数选择：按图片确认轮次绑定，确认生成视频前必须显式确认比例/清晰度/时长。
+    // 未显式选择时回退有效配置默认值（与视频设置面板默认勾选一致），仅当用户显式修改时才记录覆盖值。
+    const workflowImageConfirmRoundId = liveImageConfirmChoiceRound?.id ?? (historyWorkflowImageConfirmNext ? (latestRound?.id ?? null) : null);
+    const activeWorkflowVideoSelection = workflowImageConfirmRoundId && workflowVideoSelection?.roundId === workflowImageConfirmRoundId ? workflowVideoSelection : null;
+    const workflowVideoSize = activeWorkflowVideoSelection?.size || config.size || "16:9";
+    const workflowVideoResolution = activeWorkflowVideoSelection?.resolution || config.vquality || "720p";
+    const workflowVideoSeconds = activeWorkflowVideoSelection?.seconds || config.videoSeconds || "5";
+    const workflowVideoSelectionComplete = Boolean(workflowVideoSize && workflowVideoResolution && workflowVideoSeconds);
+    const updateWorkflowVideoSelection = (patch: Partial<Omit<WorkflowVideoSelection, "roundId">>) => {
+        if (!workflowImageConfirmRoundId) return;
+        setWorkflowVideoSelection((current) => {
+            const base = current && current.roundId === workflowImageConfirmRoundId ? current : { roundId: workflowImageConfirmRoundId, size: "", resolution: "", seconds: "" };
+            return { ...base, ...patch };
+        });
+    };
+    /** 视频设置面板键映射到工作流视频参数选择（生成模式/水印/数量不适用，固定引用配置）。 */
+    const handleWorkflowVideoSettingChange = (key: "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark", value: string) => {
+        if (key === "vquality") updateWorkflowVideoSelection({ resolution: value });
+        else if (key === "size") updateWorkflowVideoSelection({ size: value });
+        else if (key === "videoSeconds") updateWorkflowVideoSelection({ seconds: value });
+    };
     const model = effectiveConfig.videoModel || effectiveConfig.model;
     const videoResolution = config.vquality || "720p";
     const agentCreationSettings = {
         model,
-        size: config.size || "16:9",
-        resolution: videoResolution,
-        quality: videoResolution.includes("1080") ? "high" : videoResolution.includes("480") ? "low" : "medium",
-        seconds: config.videoSeconds || "5",
+        imageModel: workflowImageModel,
+        // 图片确认轮按用户确认的视频参数覆盖；草案轮/普通视频按页面配置
+        size: workflowImageConfirmNext ? workflowVideoSize : config.size || "16:9",
+        resolution: workflowImageConfirmNext ? workflowVideoResolution : videoResolution,
+        quality: workflowImageConfirmNext ? (workflowVideoResolution.includes("1080") ? "high" : workflowVideoResolution.includes("480") ? "low" : "medium") : videoResolution.includes("1080") ? "high" : videoResolution.includes("480") ? "low" : "medium",
+        seconds: workflowImageConfirmNext ? workflowVideoSeconds : config.videoSeconds || "5",
         watermark: String(config.videoWatermark).toLowerCase() === "true",
         videoGenerationMode: config.videoGenerationMode,
+        imageSize: workflowImageSize,
+        imageResolution: workflowImageResolution,
+        imageQuality: workflowImageQuality,
         ...(selectedStyles.length ? { generationStyleIds: selectedStyles.map((style) => style.id) } : {}),
     };
 
@@ -290,11 +471,14 @@ export default function VideoPage() {
         onThoughtComplete,
         onToolCall: (call) => {
             const isVideoTool = call.name === "generate_video" || call.name === "edit_video";
-            const pendingCall = isVideoTool ? bindPendingVideoSize(call, pendingVideoSizeRef.current) : call;
+            const isImageTool = call.name === "generate_image" || call.name === "edit_image";
+            const isMediaTool = isVideoTool || isImageTool;
+            // 图片确认轮已确认的视频比例优先于页面配置（pendingVideoSizeRef 只在 generate/regenerateRound 更新，
+            // handleActionReply 路径不会同步，否则 tool 消息会显示页面默认比例而非用户确认的比例）。
+            const effectiveVideoSize = workflowImageConfirmNext ? workflowVideoSize : pendingVideoSizeRef.current;
+            const pendingCall = isVideoTool ? bindPendingVideoSize(call, effectiveVideoSize) : call;
             setToolCalls((prev) => {
-                const next = prev.some((item) => item.callId === pendingCall.callId)
-                    ? prev.map((item) => (item.callId === pendingCall.callId ? pendingCall : item))
-                    : [...prev, pendingCall];
+                const next = prev.some((item) => item.callId === pendingCall.callId) ? prev.map((item) => (item.callId === pendingCall.callId ? pendingCall : item)) : [...prev, pendingCall];
                 toolCallsRef.current = next;
                 return next;
             });
@@ -303,24 +487,20 @@ export default function VideoPage() {
                 chatMessagesRef.current = next;
                 return next;
             });
-            if (isVideoTool) {
+            if (isMediaTool) {
                 // 工具开始执行前，将 LLM 已输出的文本保存为助手消息，避免被清空丢失
                 const streamed = streamingTextRef.current;
                 if (streamed && streamed.text) {
                     setChatMessages((prev) => {
-                        const next = prev.some((item) => item.id === streamed.messageId)
-                            ? prev
-                            : [...prev, { id: streamed.messageId, role: "assistant" as const, text: streamed.text }];
+                        const next = prev.some((item) => item.id === streamed.messageId) ? prev : [...prev, { id: streamed.messageId, role: "assistant" as const, text: streamed.text }];
                         chatMessagesRef.current = next;
                         return next;
                     });
                 }
-                const toolText = call.name === "generate_video" ? "正在生成视频..." : "正在编辑视频...";
+                const toolText = call.name === "generate_video" ? "正在生成视频..." : call.name === "edit_video" ? "正在编辑视频..." : call.name === "generate_image" ? "正在生成图片..." : "正在编辑图片...";
                 setChatMessages((prev) => {
                     const toolMessage = { id: pendingCall.callId, role: "tool" as const, text: toolText, detail: pendingCall };
-                    const next = prev.some((item) => item.id === pendingCall.callId)
-                        ? prev.map((item) => (item.id === pendingCall.callId ? toolMessage : item))
-                        : [...prev, toolMessage];
+                    const next = prev.some((item) => item.id === pendingCall.callId) ? prev.map((item) => (item.id === pendingCall.callId ? toolMessage : item)) : [...prev, toolMessage];
                     chatMessagesRef.current = next;
                     return next;
                 });
@@ -370,14 +550,15 @@ export default function VideoPage() {
                 let next = finishRoundAgentActivities(prev, text || "已完成");
                 if (streamed && streamed.text) {
                     const assistantMessage = { id: streamed.messageId, role: "assistant" as const, text: streamed.text, ...(action ? { action } : {}) };
-                    next = next.some((item) => item.id === streamed.messageId)
-                        ? next.map((item) => item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)
-                        : [...next, assistantMessage];
+                    next = next.some((item) => item.id === streamed.messageId) ? next.map((item) => (item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)) : [...next, assistantMessage];
                 } else if (text || action) {
                     const lastMessage = next.at(-1);
-                    next = lastMessage?.role === "assistant" && lastMessage.text === text
-                        ? action ? next.map((item, index) => index === next.length - 1 ? { ...item, action } : item) : next
-                        : [...next, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
+                    next =
+                        lastMessage?.role === "assistant" && lastMessage.text === text
+                            ? action
+                                ? next.map((item, index) => (index === next.length - 1 ? { ...item, action } : item))
+                                : next
+                            : [...next, { id: messageId || nanoid(), role: "assistant" as const, text, ...(action ? { action } : {}) }];
                 }
                 chatMessagesRef.current = next;
                 return next;
@@ -393,7 +574,7 @@ export default function VideoPage() {
             setStreamingText(null);
             streamingTextRef.current = null;
             setToolCalls((prev) => {
-                const next = prev.map((call) => call.status === "executing" ? { ...call, status: "canceled" as const, resultMessage: stoppedMessage } : call);
+                const next = prev.map((call) => (call.status === "executing" ? { ...call, status: "canceled" as const, resultMessage: stoppedMessage } : call));
                 toolCallsRef.current = next;
                 return next;
             });
@@ -473,25 +654,73 @@ export default function VideoPage() {
         videoReferenceCount: videoReferences.length,
         requireReferences: false,
     });
+    useEffect(() => {
+        if (!selectedSkill?.workflowType) {
+            setServerWorkflowQuote(null);
+            return;
+        }
+        let cancelled = false;
+        setServerWorkflowQuote(null);
+        // 图片确认轮时按用户确认的视频参数报价（清晰度/时长影响视频阶段计费）；草案轮按页面配置报价。
+        const quoteResolution = workflowImageConfirmNext ? workflowVideoResolution : config.vquality;
+        const quoteSeconds = workflowImageConfirmNext ? workflowVideoSeconds : config.videoSeconds;
+        void quoteVideoWorkflowOnServer({ workflowType: selectedSkill.workflowType, model, imageModel: workflowImageModel, resolution: quoteResolution, seconds: quoteSeconds,
+            stage: workflowImageConfirmNext ? "video" : "image" })
+            .then((quote) => {
+                if (!cancelled) setServerWorkflowQuote(quote);
+            })
+            .catch((error) => {
+                if (!cancelled) setServerWorkflowQuote({ available: false, stages: [], reason: error instanceof Error ? error.message : "工作流报价请求失败", requiredCapabilities: [] });
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [config.videoSeconds, config.vquality, workflowImageModel, workflowDraftRoundId, workflowImageConfirmNext, workflowVideoResolution, workflowVideoSeconds, model, selectedSkill?.workflowType]);
+    // 图片确认轮：本次确认仅生成视频，报价只取视频阶段（首/尾帧图片已按草案确认时参数生成完毕）。
+    const workflowVideoStageQuote = workflowImageConfirmNext && serverWorkflowQuote ? (serverWorkflowQuote.stages.find((stage) => stage.role === "video") ?? null) : null;
+    const workflowImageConfirmQuote = workflowVideoStageQuote
+        ? ({
+              available: Boolean(serverWorkflowQuote?.available && workflowVideoStageQuote.credits != null),
+              credits: workflowVideoStageQuote.credits ?? 0,
+              reason: serverWorkflowQuote?.available ? undefined : serverWorkflowQuote?.reason || "视频工作流报价不可用",
+              stages: serverWorkflowQuote?.stages ?? [],
+          } as { available: boolean; credits: number; reason?: string; stages: ServerVideoWorkflowStageQuote[] })
+        : null;
+    const activeQuote = selectedSkill?.workflowType
+        ? workflowChargingNext
+            ? (serverWorkflowQuote ?? { available: false as const, reason: "正在获取工作流报价" })
+            : (workflowImageConfirmQuote ?? (workflowImageConfirmNext ? { available: false as const, reason: "正在获取工作流报价" } : null))
+        : videoQuote;
     // 素材要求单独校验，用于「可生成」判定与提示，不阻断价格预览。
     const referenceIssue = videoGenerationReferenceIssue(config.videoGenerationMode, references.length, videoReferences.length);
-    const creditCost = videoQuote.available ? videoQuote.credits : null;
-    const activeConversation = conversations.find((item) => item.id === activeId) || null;
-    const latestRound = activeConversation?.rounds.at(-1);
+    const creditCost = activeQuote === null ? undefined : activeQuote.available ? (activeQuote.credits ?? null) : null;
+    const workflowBalanceInsufficient = Boolean(selectedSkill?.workflowType) && activeQuote !== null && activeQuote.available && typeof creditBalance === "number" && (activeQuote.credits ?? 0) > creditBalance;
     const draftSettingsSummary = videoDraftSettingsModified ? buildVideoSettingsSummary(config, effectiveConfig, model) : "";
     const historySettingsSummary = !videoDraftSettingsModified && activeId && latestRound?.config ? buildVideoSettingsSummary(latestRound.config, effectiveConfig, latestRound.config.videoModel || latestRound.config.model || "") : "";
     const settingsSummary = draftSettingsSummary || historySettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingVideoConversation(activeConversation) : false;
-    const canGenerate = Boolean(prompt.trim()) && videoQuote.available && !referenceIssue && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
+    // 声明视频工作流的技能，其首轮及后续引导消息属于免费对话，不应被视频报价阻断；
+    // 工作流进入确认生成阶段后，activeQuote 与积分余额仍会继续控制提交状态。
+    const workflowSkillConversation = Boolean(selectedSkill?.workflowType) && !workflowChargingNext && !workflowImageConfirmNext;
+    const quoteReady = workflowSkillConversation || activeQuote === null || (activeQuote.available && !workflowBalanceInsufficient);
+    // 工作流会自行生成阶段素材，不要求页面先上传普通视频参考素材。
+    const referenceReady = Boolean(selectedSkill?.workflowType) || !referenceIssue;
+    const canGenerate = Boolean(prompt.trim()) && quoteReady && referenceReady && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
 
     // SSE 请求状态丢失（刷新页面、连接中断或服务重启）但记录轮次仍在生成时，直接取消底层AI任务实现停止。
     const stopPendingGeneration = async () => {
         const conversation = conversationsRef.current.find((item) => item.id === activeIdRef.current);
         if (!conversation) return;
-        const taskIds = conversation.rounds
-            .filter((round) => round.result?.status === "pending" && round.result.taskId)
-            .map((round) => round.result.taskId as string);
+        const taskIds = [
+            ...new Set(
+                conversation.rounds.flatMap((round) => [
+                    ...(round.result?.status === "pending" && round.result.taskId ? [round.result.taskId] : []),
+                    ...(round.stages || []).filter((stage) => stage.taskId && stage.status === "pending").map((stage) => stage.taskId as string),
+                    ...(round.tasks || []).flatMap((task) => (isPendingWorkflowTask(task) ? [task.taskId] : [])),
+                ]),
+            ),
+        ];
         if (!taskIds.length) {
             message.warning("没有可停止的生成任务");
             return;
@@ -595,9 +824,7 @@ export default function VideoPage() {
                             objectStorage: image.objectStorage,
                         };
                         uploadedImages.push(uploadedReference);
-                        setReferences((current) =>
-                            current.map((reference) => (reference.id === placeholder.id ? uploadedReference : reference)),
-                        );
+                        setReferences((current) => current.map((reference) => (reference.id === placeholder.id ? uploadedReference : reference)));
                     } catch (error) {
                         setReferences((current) => current.filter((reference) => reference.id !== placeholder.id));
                         message.error(error instanceof Error ? error.message : `上传参考图 ${placeholder.name} 失败`);
@@ -622,9 +849,7 @@ export default function VideoPage() {
                             objectStorage: video.objectStorage,
                         };
                         uploadedVideos.push(uploadedReference);
-                        setVideoReferences((current) =>
-                            current.map((reference) => (reference.id === placeholder.id ? uploadedReference : reference)),
-                        );
+                        setVideoReferences((current) => current.map((reference) => (reference.id === placeholder.id ? uploadedReference : reference)));
                     } catch (error) {
                         setVideoReferences((current) => current.filter((reference) => reference.id !== placeholder.id));
                         message.error(error instanceof Error ? error.message : `上传参考视频 ${placeholder.name} 失败`);
@@ -657,14 +882,8 @@ export default function VideoPage() {
         const quality = config.vquality || "720p";
         const watermark = config.videoWatermark ?? true;
         pendingVideoSizeRef.current = size;
-        const currentAttachments = [
-            ...imageReferenceAttachments(references),
-            ...videoReferenceAttachments(videoReferences),
-        ];
-        const previousAttachments = [
-            ...imageReferenceAttachments(latestRound?.references || []),
-            ...videoReferenceAttachments(latestRound?.videoReferences || []),
-        ];
+        const currentAttachments = [...imageReferenceAttachments(references), ...videoReferenceAttachments(videoReferences)];
+        const previousAttachments = [...imageReferenceAttachments(latestRound?.references || []), ...videoReferenceAttachments(latestRound?.videoReferences || [])];
         const allRefs = selectGenerationAttachments(text, currentAttachments, previousAttachments);
         const selectedVideoQuote = quoteVideoGeneration({
             config: effectiveConfig,
@@ -675,9 +894,48 @@ export default function VideoPage() {
             imageReferenceCount: allRefs.filter((reference) => reference.type.startsWith("image/")).length,
             videoReferenceCount: allRefs.filter((reference) => reference.type.startsWith("video/")).length,
         });
-        if (!selectedVideoQuote.available) {
-            message.error(selectedVideoQuote.reason);
-            return;
+        // 无技能时每次提交都是真实视频生成；选择技能后仅在即将创建生成任务的确认阶段校验报价与余额。
+        const shouldValidateQuote = !selectedSkill?.workflowType || workflowChargingNext || workflowImageConfirmNext;
+        if (shouldValidateQuote) {
+            // 每次确认生成都必须先显式选择图片模型与参数
+            if (workflowChargingNext && !workflowImageSelectionComplete) {
+                message.warning("请先选择本次生成使用的图片模型与参数");
+                return;
+            }
+            // 图片确认轮：先确认视频参数，再校验视频阶段报价与余额（图片已生成）
+            if (workflowImageConfirmNext) {
+                if (!workflowVideoSelectionComplete) {
+                    message.warning("请先确认视频比例、清晰度和时长");
+                    return;
+                }
+                const videoQuote = workflowVideoStageQuote;
+                if (!videoQuote || videoQuote.credits == null) {
+                    message.error("视频工作流报价尚未完成，请稍候重试");
+                    return;
+                }
+                if (serverWorkflowQuote && !serverWorkflowQuote.available) {
+                    message.error(serverWorkflowQuote.reason || "视频工作流报价不可用");
+                    return;
+                }
+                if (typeof videoQuote.credits === "number" && typeof creditBalance === "number" && videoQuote.credits > creditBalance) {
+                    message.error(`积分不足，生成视频需要 ${videoQuote.credits} 积分，当前可用 ${creditBalance} 积分`);
+                    return;
+                }
+            } else {
+                const selectedQuote = selectedSkill?.workflowType ? serverWorkflowQuote : selectedVideoQuote;
+                if (!selectedQuote) {
+                    message.error("工作流报价尚未完成");
+                    return;
+                }
+                if (!selectedQuote.available) {
+                    message.error(selectedQuote.reason);
+                    return;
+                }
+                if (selectedSkill?.workflowType && typeof creditCost === "number" && typeof creditBalance === "number" && creditCost > creditBalance) {
+                    message.error(`积分不足，本次工作流需要 ${creditCost} 积分，当前可用 ${creditBalance} 积分`);
+                    return;
+                }
+            }
         }
         const attachments = buildChatAttachments(allRefs);
 
@@ -689,10 +947,14 @@ export default function VideoPage() {
 
         await sendMessage(text, allRefs.length ? allRefs : undefined, {
             model: videoModel,
-            size,
-            resolution: quality,
-            quality: quality.includes("1080") ? "high" : quality.includes("480") ? "low" : "medium",
-            seconds,
+            imageModel: workflowImageModel,
+            imageSize: workflowImageSize,
+            imageResolution: workflowImageResolution,
+            imageQuality: workflowImageQuality,
+            size: workflowImageConfirmNext ? workflowVideoSize : size,
+            resolution: workflowImageConfirmNext ? workflowVideoResolution : quality,
+            quality: workflowImageConfirmNext ? (workflowVideoResolution.includes("1080") ? "high" : workflowVideoResolution.includes("480") ? "low" : "medium") : quality.includes("1080") ? "high" : quality.includes("480") ? "low" : "medium",
+            seconds: workflowImageConfirmNext ? workflowVideoSeconds : seconds,
             watermark: String(watermark).toLowerCase() === "true",
             videoGenerationMode: config.videoGenerationMode,
             ...(selectedStyles.length ? { generationStyleIds: selectedStyles.map((style) => style.id) } : {}),
@@ -708,6 +970,42 @@ export default function VideoPage() {
         if (isStreaming || isQueued) return;
         const text = value.trim();
         if (!text) return;
+        // 点击"确认生成"即真实扣费：报价不可用或余额不足时拦截；调整提示词等其余选项免费
+        if (workflowChargingNext && text === "确认生成") {
+            if (!workflowImageSelectionComplete) {
+                message.warning("请先选择本次生成使用的图片模型与参数");
+                return;
+            }
+            if (serverWorkflowQuote && !serverWorkflowQuote.available) {
+                message.error(serverWorkflowQuote.reason);
+                return;
+            }
+            if (typeof creditCost === "number" && typeof creditBalance === "number" && creditCost > creditBalance) {
+                message.error(`积分不足，本次工作流需要 ${creditCost} 积分，当前可用 ${creditBalance} 积分`);
+                return;
+            }
+        }
+        // 图片确认轮点击"用这些图片生成视频"即真实扣费：先确认视频参数，再校验视频阶段报价与余额；"修改提示词重新生成"免费
+        if (workflowImageConfirmNext && text === "用这些图片生成视频") {
+            if (!workflowVideoSelectionComplete) {
+                message.warning("请先确认视频比例、清晰度和时长");
+                return;
+            }
+            const videoQuote = workflowVideoStageQuote;
+            if (!videoQuote || videoQuote.credits == null) {
+                message.error("视频工作流报价尚未完成，请稍候重试");
+                return;
+            }
+            if (serverWorkflowQuote && !serverWorkflowQuote.available) {
+                message.error(serverWorkflowQuote.reason || "视频工作流报价不可用");
+                return;
+            }
+            const videoCost = videoQuote.credits;
+            if (typeof videoCost === "number" && typeof creditBalance === "number" && videoCost > creditBalance) {
+                message.error(`积分不足，生成视频需要 ${videoCost} 积分，当前可用 ${creditBalance} 积分`);
+                return;
+            }
+        }
         // 技能引导中选择生成比例时同步页面尺寸配置，保证最终生成任务按用户选择的比例（而非页面默认值）
         if (/^\d+:\d+$/.test(text)) {
             updateConfig("size", text);
@@ -718,11 +1016,56 @@ export default function VideoPage() {
             return next;
         });
         // 携带当前参考素材附件：技能引导中用户上传的图片/视频需随确认消息送达，作为最终生成参考
-        const currentAttachments = [
-            ...imageReferenceAttachments(references),
-            ...videoReferenceAttachments(videoReferences),
-        ];
-        await sendMessage(text, currentAttachments.length ? currentAttachments : undefined);
+        const currentAttachments = [...imageReferenceAttachments(references), ...videoReferenceAttachments(videoReferences)];
+        // 图片确认轮确认生成视频时，携带用户确认的视频参数（比例/清晰度/时长）覆盖页面默认值
+        const settingsOverride =
+            workflowImageConfirmNext && text === "用这些图片生成视频"
+                ? {
+                      model,
+                      imageModel: workflowImageModel,
+                      imageSize: workflowImageSize,
+                      imageResolution: workflowImageResolution,
+                      imageQuality: workflowImageQuality,
+                      size: workflowVideoSize,
+                      resolution: workflowVideoResolution,
+                      quality: workflowVideoResolution.includes("1080") ? "high" : workflowVideoResolution.includes("480") ? "low" : "medium",
+                      seconds: workflowVideoSeconds,
+                      watermark: String(config.videoWatermark).toLowerCase() === "true",
+                      videoGenerationMode: config.videoGenerationMode,
+                  }
+                : undefined;
+        if (workflowImageConfirmNext && text === "用这些图片生成视频") {
+            // 同步 tool 消息展示用的比例（否则生成中的占位卡片会显示页面默认比例）
+            pendingVideoSizeRef.current = workflowVideoSize;
+        }
+        await sendMessage(text, currentAttachments.length ? currentAttachments : undefined, settingsOverride);
+    };
+
+    const handlePromptEdit = (value: string, assistantText?: string, draftedPrompts?: Record<string, string>) => {
+        const drafts = parseWorkflowDraftPrompts(assistantText, draftedPrompts);
+        const hasThree = Boolean(drafts.firstFrame || drafts.lastFrame || drafts.video);
+        setPromptEditMode(hasThree ? "three" : "single");
+        setPromptEditValue(drafts);
+        setPromptEditDialogOpen(true);
+    };
+
+    const submitPromptEdit = () => {
+        const values = promptEditValue;
+        if (promptEditMode === "three") {
+            if (![values.firstFrame, values.lastFrame, values.video].some((item) => item.trim())) {
+                message.warning("请至少填写一段提示词");
+                return;
+            }
+            setPromptEditDialogOpen(false);
+            void handleActionReply(`请按以下修改后的提示词重新生成：\n首帧提示词：${values.firstFrame.trim()}\n尾帧提示词：${values.lastFrame.trim()}\n视频提示词：${values.video.trim()}`);
+            return;
+        }
+        if (!values.video.trim()) {
+            message.warning("请输入修改后的提示词");
+            return;
+        }
+        setPromptEditDialogOpen(false);
+        void handleActionReply(values.video.trim());
     };
 
     /** 技能引导中"上传图片"按钮选择文件后：上传参考素材并在对话区回显，随后自动发送带附件的消息。 */
@@ -757,6 +1100,10 @@ export default function VideoPage() {
         });
         await sendMessage(text, attachments.length ? attachments : undefined, {
             model: videoModel,
+            imageModel: workflowImageModel,
+            imageSize: workflowImageSize,
+            imageResolution: workflowImageResolution,
+            imageQuality: workflowImageQuality,
             size,
             resolution: quality,
             quality: quality.includes("1080") ? "high" : quality.includes("480") ? "low" : "medium",
@@ -772,37 +1119,43 @@ export default function VideoPage() {
         const videoModel = round.config.videoModel || round.config.model || model;
         const size = round.config.size;
         const resolution = round.config.vquality;
-        const attachments = [
-            ...imageReferenceAttachments(round.references),
-            ...videoReferenceAttachments(round.videoReferences),
-        ];
+        const attachments = [...imageReferenceAttachments(round.references), ...videoReferenceAttachments(round.videoReferences)];
         if (size) pendingVideoSizeRef.current = size;
         setChatMessages((prev) => {
-            const next = [...prev, {
-                id: nanoid(),
-                role: "user" as const,
-                text: round.prompt,
-                attachments: buildChatAttachments(attachments),
-                generationStyles: round.generationStyleSnapshots,
-                skill: round.skill,
-            }];
+            const next = [
+                ...prev,
+                {
+                    id: nanoid(),
+                    role: "user" as const,
+                    text: round.prompt,
+                    attachments: buildChatAttachments(attachments),
+                    generationStyles: round.generationStyleSnapshots,
+                    skill: round.skill,
+                },
+            ];
             chatMessagesRef.current = next;
             return next;
         });
-        await sendMessage(round.prompt, attachments.length ? attachments : undefined, {
-            model: videoModel,
-            ...(size ? { size } : {}),
-            ...(resolution ? {
-                resolution,
-                quality: resolution.includes("1080") ? "high" : resolution.includes("480") ? "low" : "medium",
-            } : {}),
-            ...(round.config.videoSeconds ? { seconds: round.config.videoSeconds } : {}),
-            videoGenerationMode: round.config.videoGenerationMode || "text-to-video",
-            ...(round.config.videoWatermark !== undefined && round.config.videoWatermark !== null
-                ? { watermark: String(round.config.videoWatermark).toLowerCase() === "true" }
-                : {}),
-            ...(round.generationStyleSnapshots?.length ? { generationStyleSnapshots: round.generationStyleSnapshots } : {}),
-        });
+        await sendMessage(
+            round.prompt,
+            attachments.length ? attachments : undefined,
+            {
+                model: videoModel,
+                imageModel: round.config.imageModel || effectiveConfig.imageModel,
+                ...(size ? { size } : {}),
+                ...(resolution
+                    ? {
+                          resolution,
+                          quality: resolution.includes("1080") ? "high" : resolution.includes("480") ? "low" : "medium",
+                      }
+                    : {}),
+                ...(round.config.videoSeconds ? { seconds: round.config.videoSeconds } : {}),
+                videoGenerationMode: round.config.videoGenerationMode || "text-to-video",
+                ...(round.config.videoWatermark !== undefined && round.config.videoWatermark !== null ? { watermark: String(round.config.videoWatermark).toLowerCase() === "true" } : {}),
+                ...(round.generationStyleSnapshots?.length ? { generationStyleSnapshots: round.generationStyleSnapshots } : {}),
+            },
+            round.skill ? String(round.skill.id) : undefined,
+        );
         setSelectedStyles([]);
     };
 
@@ -869,7 +1222,7 @@ export default function VideoPage() {
             message.warning("当前生成任务尚未结束，请先停止或等待完成");
             return;
         }
-        const mediaKeys = conversations.filter((conversation) => selectedIds.includes(conversation.id)).flatMap((conversation) => conversation.rounds.flatMap((round) => (round.result?.video?.storageKey ? [round.result.video.storageKey] : [])));
+        const mediaKeys = conversations.filter((conversation) => selectedIds.includes(conversation.id)).flatMap((conversation) => collectRoundMediaKeys(conversation.rounds));
         void Promise.all([deleteStoredMedia(mediaKeys), deleteGenerationLogs(selectedIds)]).then(refreshConversations);
         if (activeId && selectedIds.includes(activeId)) {
             setActiveId(null);
@@ -953,20 +1306,7 @@ export default function VideoPage() {
             setConversations((current) =>
                 current.map((conversation) => ({
                     ...conversation,
-                    rounds: conversation.rounds.map((round) =>
-                        round.result?.video?.id === video.id
-                            ? {
-                                  ...round,
-                                  result: {
-                                      ...round.result,
-                                      video: {
-                                          ...round.result.video,
-                                          objectStorage: file,
-                                      },
-                                  },
-                              }
-                            : round,
-                    ),
+                    rounds: conversation.rounds.map((round) => updateRoundVideoObjectStorage(round, video.id, file)),
                 })),
             );
             message.success("已上传到云储存，地址已保存");
@@ -1039,7 +1379,7 @@ export default function VideoPage() {
             return;
         }
         const conversation = conversationsRef.current.find((item) => item.id === conversationId);
-        const mediaKeys = conversation?.rounds.flatMap((round) => (round.result?.video?.storageKey ? [round.result.video.storageKey] : [])) || [];
+        const mediaKeys = collectRoundMediaKeys(conversation?.rounds || []);
         await Promise.all([deleteStoredMedia(mediaKeys), deleteGenerationLogs([conversationId])]);
         if (activeIdRef.current === conversationId) {
             newConversation();
@@ -1115,14 +1455,7 @@ export default function VideoPage() {
             key: "upload",
             label: "素材",
             icon: <Upload className="size-3.5" />,
-            popoverContent: (
-                <RecentReferenceImagePicker
-                    urls={recentReferenceImageUrls}
-                    selectedUrls={references.map((reference) => reference.dataUrl)}
-                    disabled={references.length >= SEEDANCE_REFERENCE_LIMITS.images}
-                    onSelect={addRecentReference}
-                />
-            ),
+            popoverContent: <RecentReferenceImagePicker urls={recentReferenceImageUrls} selectedUrls={references.map((reference) => reference.dataUrl)} disabled={references.length >= SEEDANCE_REFERENCE_LIMITS.images} onSelect={addRecentReference} />,
             onClick: () => fileInputRef.current?.click(),
         },
         {
@@ -1155,14 +1488,98 @@ export default function VideoPage() {
             onClick: () => setSettingsOpen(true),
         },
     ];
+    // 工作流草案确认卡片：草案轮要求用户确认图片模型与参数，未显式选择时回退有效配置默认值。
+    // 设置项与图片生成页"更多设置"保持一致（画质/清晰度/比例 + 模型），卡片作为消息内联在草案轮下方展示。
+    const workflowImageSettingsNode = workflowChargingNext ? (
+        <div className="space-y-4 rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
+            <div className="text-sm font-semibold text-[var(--studio-ink)]">图片生成设置</div>
+            <p className="text-xs leading-relaxed text-[var(--studio-muted)]">请为本次生成选择画质、清晰度、比例和模型，选择后才能确认生成。</p>
+            <ImageSettingsPanel
+                config={{ ...effectiveConfig, size: workflowImageSize, quality: workflowImageQuality, imageResolution: workflowImageResolution }}
+                onConfigChange={handleWorkflowImageSettingChange}
+                theme={theme}
+                showTitle={false}
+                showCount={false}
+                className="space-y-4 px-0 py-0"
+            />
+            <div>
+                <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">模型</label>
+                <ModelPicker
+                    config={effectiveConfig}
+                    value={workflowImageModel}
+                    onChange={(value) => updateWorkflowImageSelection({ imageModel: value })}
+                    capability="image"
+                    fullWidth
+                    onMissingConfig={() => (userRole === "admin" ? openConfigDialog(false) : message.error("请联系管理员配置默认生图模型"))}
+                />
+            </div>
+        </div>
+    ) : null;
+    // 工作流图片确认轮的视频参数卡片：确认生成视频前要求用户确认比例/清晰度/时长，未显式选择时回退有效配置默认值。
+    // 设置项与视频设置面板保持一致（比例/清晰度/时长），卡片作为消息内联在图片确认轮下方展示。
+    const workflowVideoSettingsNode = workflowImageConfirmNext ? (
+        <div className="space-y-4 rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
+            <div className="text-sm font-semibold text-[var(--studio-ink)]">视频生成设置</div>
+            <p className="text-xs leading-relaxed text-[var(--studio-muted)]">请为本次生成确认视频比例、清晰度和时长，确认后生成视频。</p>
+            <VideoSettingsPanel
+                config={{ ...effectiveConfig, size: workflowVideoSize, vquality: workflowVideoResolution, videoSeconds: workflowVideoSeconds }}
+                onConfigChange={handleWorkflowVideoSettingChange}
+                theme={theme}
+                showTitle={false}
+                showGenerationMode={false}
+                showDuration
+                className="space-y-4 px-0 py-0"
+            />
+        </div>
+    ) : null;
+    // 工作流草案待确认且图片参数未选完时，聊天区"确认生成"按钮置灰并提示；选完参数后恢复可点。
+    // 图片确认轮要求先确认视频参数（比例/清晰度/时长），再校验视频报价与余额。
+    const workflowConfirmDisabledReasons =
+        workflowChargingNext && !workflowImageSelectionComplete
+            ? { 确认生成: "请先选择图片模型与参数" }
+            : workflowImageConfirmNext
+              ? (() => {
+                    if (!workflowVideoSelectionComplete) return { 用这些图片生成视频: "请先确认视频比例、清晰度和时长" };
+                    const videoQuote = workflowVideoStageQuote;
+                    if (!videoQuote || videoQuote.credits == null) return { 用这些图片生成视频: "正在获取视频报价" };
+                    if (serverWorkflowQuote && !serverWorkflowQuote.available) return { 用这些图片生成视频: serverWorkflowQuote.reason || "视频工作流报价不可用" };
+                    if (typeof videoQuote.credits === "number" && typeof creditBalance === "number" && videoQuote.credits > creditBalance) {
+                        return { 用这些图片生成视频: `积分不足，生成视频需要 ${videoQuote.credits} 积分` };
+                    }
+                    return undefined;
+                })()
+              : undefined;
+    // 仅把设置卡片内联到当前活跃草案轮（最后一条带"确认生成"choice 的助手消息）所在轮次，历史草案轮不重复展示。
+    const draftChoiceUserRoundId = (() => {
+        const draft = liveDraftChoiceRound;
+        if (!draft) return null;
+        const index = chatMessages.findIndex((message) => message.id === draft.id);
+        for (let cursor = index - 1; cursor >= 0; cursor--) {
+            if (chatMessages[cursor].role === "user") return chatMessages[cursor].id;
+        }
+        return null;
+    })();
+    // 仅把视频参数卡片内联到当前活跃图片确认轮（最后一条带"用这些图片生成视频"choice 的助手消息）所在轮次。
+    const imageConfirmUserRoundId = (() => {
+        const confirm = liveImageConfirmChoiceRound;
+        if (!confirm) return null;
+        const index = chatMessages.findIndex((message) => message.id === confirm.id);
+        for (let cursor = index - 1; cursor >= 0; cursor--) {
+            if (chatMessages[cursor].role === "user") return chatMessages[cursor].id;
+        }
+        return null;
+    })();
     const chatThreadSection = buildChatThreadSection(
         chatMessages,
         completedThinkings,
         activeThinking,
         streamingText,
         toolCalls,
-        (data, round) => {
+        (data, round, call) => {
             const roundReferences = splitChatAttachments(round?.attachments);
+            const workflowReferences = workflowResultImageReferences(data);
+            const imageNodes = renderLiveWorkflowImages(data, call);
+            if (imageNodes) return imageNodes;
             return renderResultVideos(data, {
                 onDownload: downloadVideo,
                 onSaveAsset: saveResultToAssets,
@@ -1171,28 +1588,36 @@ export default function VideoPage() {
                     setResultDetail({
                         media: { kind: "video", url: video.url, ossUrl: video.objectStorage?.url, width: video.width, height: video.height, bytes: video.bytes, durationMs: video.durationMs, mimeType: video.mimeType },
                         prompt: round?.userText || prompt,
-                        references: roundReferences.images.length ? roundReferences.images : references,
+                        references: workflowReferences.length ? workflowReferences : roundReferences.images.length ? roundReferences.images : references,
                         videoReferences: roundReferences.videos.length ? roundReferences.videos : videoReferences,
                         onDownload: () => void downloadVideo(video),
                     }),
             });
         },
-        renderPendingVideoToolCall,
+        // 执行中占位动画：图片工具与图片生成页面同款动画卡片（首尾帧工作流图片阶段），视频工具走视频动画卡片
+        (call) => renderPendingImageToolCall(call) ?? renderPendingVideoToolCall(call),
+        workflowConfirmDisabledReasons,
+        (roundId) => {
+            if (draftChoiceUserRoundId && roundId === draftChoiceUserRoundId) return workflowImageSettingsNode;
+            if (imageConfirmUserRoundId && roundId === imageConfirmUserRoundId) return workflowVideoSettingsNode;
+            return null;
+        },
     );
     // 聊天区已实时渲染的生成轮次不再进入历史区，避免同一轮重复展示；纯文本对话保留在聊天区。
     // 当前会话激活时（chatMessages 非空），已落库的纯对话轮次也在聊天区渲染过，历史区一并跳过；
     // 刷新或切换会话后 chatMessages 清空，历史区恢复完整展示（含纯对话轮次）。
     const liveRoundIds = new Set(chatMessages.filter((item) => item.role === "tool").map((item) => item.id));
     const hideDialogueRounds = chatMessages.length > 0;
-    const displayedConversation = activeConversation && (liveRoundIds.size || hideDialogueRounds)
-        ? {
-              ...activeConversation,
-              rounds: activeConversation.rounds.filter((round) => {
-                  if (liveRoundIds.has(round.id)) return false;
-                  return !(hideDialogueRounds && !round.result);
-              }),
-          }
-        : activeConversation;
+    const displayedConversation =
+        activeConversation && (liveRoundIds.size || hideDialogueRounds)
+            ? {
+                  ...activeConversation,
+                  rounds: activeConversation.rounds.filter((round) => {
+                      if (liveRoundIds.has(round.id)) return false;
+                      return !(hideDialogueRounds && !round.result && !round.stages?.length);
+                  }),
+              }
+            : activeConversation;
     const threadSections = displayedConversation
         ? buildVideoThreadSections(displayedConversation, liveRoundIds, {
               uploadingObjectStorageId,
@@ -1257,6 +1682,7 @@ export default function VideoPage() {
                 thread={{
                     sections: allThreadSections,
                     onActionReply: (value) => void handleActionReply(value),
+                    onPromptEdit: handlePromptEdit,
                     onUploadImage: () => {
                         // 与页面"添加参考图"同一上传链路；上传完成后自动发送带附件消息，对话区回显图片
                         uploadChoiceInputRef.current?.click();
@@ -1316,10 +1742,24 @@ export default function VideoPage() {
                     content: (
                         <div className="space-y-4">
                             <VideoSettingsPanel config={config} onConfigChange={handleVideoSettingsChange} theme={theme} showTitle={false} className="space-y-4 px-0 py-0" />
-                            {(!videoQuote.available || referenceIssue) ? (
+                            {activeQuote !== null && (!activeQuote.available || (!selectedSkill?.workflowType && referenceIssue) || workflowBalanceInsufficient) ? (
                                 <div className="flex items-start gap-1.5 text-xs leading-relaxed" style={{ color: theme.node.muted }}>
                                     <HelpCircle className="mt-px size-3.5 shrink-0" />
-                                    <span>{videoQuote.reason || referenceIssue}</span>
+                                    <span>{workflowBalanceInsufficient ? `积分不足，本次工作流需要 ${creditCost} 积分，当前可用 ${creditBalance} 积分` : activeQuote.available ? referenceIssue : activeQuote.reason}</span>
+                                </div>
+                            ) : null}
+                            {workflowChargingNext && serverWorkflowQuote?.available ? (
+                                <div className="flex items-start gap-1.5 text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                                    <HelpCircle className="mt-px size-3.5 shrink-0" />
+                                    <span>工作流阶段报价：{serverWorkflowQuote.stages.map((stage) => `${stage.displayName} ${stage.credits} 积分`).join("，")}</span>
+                                </div>
+                            ) : null}
+                            {workflowImageConfirmNext && workflowVideoStageQuote?.credits != null ? (
+                                <div className="flex items-start gap-1.5 text-xs leading-relaxed" style={{ color: theme.node.muted }}>
+                                    <HelpCircle className="mt-px size-3.5 shrink-0" />
+                                    <span>
+                                        生成视频报价：{workflowVideoStageQuote.displayName} {workflowVideoStageQuote.credits} 积分
+                                    </span>
                                 </div>
                             ) : null}
                             <div>
@@ -1345,22 +1785,32 @@ export default function VideoPage() {
             />
 
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
+            <Modal title="修改提示词重新生成" open={promptEditDialogOpen} onOk={submitPromptEdit} onCancel={() => setPromptEditDialogOpen(false)} okText="提交修改" cancelText="取消" destroyOnHidden>
+                {promptEditMode === "three" ? (
+                    <div className="space-y-4">
+                        <div>
+                            <label className="mb-1 block text-sm font-medium">首帧提示词</label>
+                            <Input.TextArea rows={5} value={promptEditValue.firstFrame} onChange={(event) => setPromptEditValue((current) => ({ ...current, firstFrame: event.target.value }))} />
+                        </div>
+                        <div>
+                            <label className="mb-1 block text-sm font-medium">尾帧提示词</label>
+                            <Input.TextArea rows={5} value={promptEditValue.lastFrame} onChange={(event) => setPromptEditValue((current) => ({ ...current, lastFrame: event.target.value }))} />
+                        </div>
+                        <div>
+                            <label className="mb-1 block text-sm font-medium">视频提示词</label>
+                            <Input.TextArea rows={5} value={promptEditValue.video} onChange={(event) => setPromptEditValue((current) => ({ ...current, video: event.target.value }))} />
+                        </div>
+                    </div>
+                ) : (
+                    <Input.TextArea rows={6} autoFocus value={promptEditValue.video} onChange={(event) => setPromptEditValue((current) => ({ ...current, video: event.target.value }))} placeholder="输入修改后的提示词" />
+                )}
+            </Modal>
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
             <Modal title="删除对话" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelected} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
                 确定删除选中的 {selectedIds.length} 条对话吗？
             </Modal>
-            <Modal
-                open={Boolean(videoPreviewUrl)}
-                title="参考视频预览"
-                footer={null}
-                onCancel={() => setVideoPreviewUrl(null)}
-                width={720}
-                centered
-                destroyOnHidden
-            >
-                {videoPreviewUrl ? (
-                    <video src={videoPreviewUrl} controls autoPlay className="max-h-[70vh] w-full rounded-xl bg-black" />
-                ) : null}
+            <Modal open={Boolean(videoPreviewUrl)} title="参考视频预览" footer={null} onCancel={() => setVideoPreviewUrl(null)} width={720} centered destroyOnHidden>
+                {videoPreviewUrl ? <video src={videoPreviewUrl} controls autoPlay className="max-h-[70vh] w-full rounded-xl bg-black" /> : null}
             </Modal>
             <ResultDetailDialog detail={resultDetail} onClose={() => setResultDetail(null)} />
         </>
@@ -1380,6 +1830,109 @@ function splitChatAttachments(attachments: ChatAttachment[] | undefined): { imag
         }
     }
     return { images, videos };
+}
+
+/** 从视频工作流工具结果恢复实际提交给模型的首帧、尾帧引用。 */
+function workflowResultImageReferences(data: Record<string, unknown>): ReferenceImage[] {
+    const values = Array.isArray(data.workflowReferences) ? data.workflowReferences : [];
+    return values.flatMap((value, index) => {
+        if (!value || typeof value !== "object") return [];
+        const reference = value as Record<string, unknown>;
+        const dataUrl = typeof reference.url === "string" ? reference.url : "";
+        const storageKey = typeof reference.storageKey === "string" ? reference.storageKey : "";
+        if (!dataUrl && !storageKey) return [];
+        const role = typeof reference.role === "string" ? reference.role : "";
+        return [{
+            id: typeof reference.id === "string" && reference.id ? reference.id : storageKey || `workflow-reference-${index}`,
+            name: typeof reference.name === "string" && reference.name ? reference.name : frameRoleLabel(role) || `引用图片 ${index + 1}`,
+            type: typeof reference.mimeType === "string" && reference.mimeType ? reference.mimeType : "image/*",
+            dataUrl,
+            ...(storageKey ? { storageKey } : {}),
+        }];
+    });
+}
+
+function parseWorkflowDraftPrompts(text?: string, draftedPrompts?: Record<string, string>): { firstFrame: string; lastFrame: string; video: string } {
+    const structured = draftedPrompts || {};
+    const structuredValues = {
+        firstFrame: structured.first_frame || structured.firstFrame || structured.firstFramePrompt || "",
+        lastFrame: structured.last_frame || structured.lastFrame || structured.lastFramePrompt || "",
+        video: structured.video || structured.video_prompt || structured.videoPrompt || "",
+    };
+    if (structuredValues.firstFrame || structuredValues.lastFrame || structuredValues.video) return structuredValues;
+    if (!text) return { firstFrame: "", lastFrame: "", video: "" };
+    const read = (label: string, nextLabels: string[]) => {
+        const labelPattern = `${label}\\*{0,2}`;
+        const endingPattern = nextLabels.length ? `(?=\\n\\s*(?:${nextLabels.map((item) => `${item}\\*{0,2}`).join("|")})\\s*[：:]|$)` : "(?=$)";
+        const match = text.match(new RegExp(`${labelPattern}\\s*[：:]\\s*([\\s\\S]*?)${endingPattern}`, "i"));
+        return match?.[1]?.trim() || "";
+    };
+    return {
+        firstFrame: read("首帧提示词", ["尾帧提示词", "视频提示词"]),
+        lastFrame: read("尾帧提示词", ["视频提示词"]),
+        video: read("视频提示词", []),
+    };
+}
+
+/**
+ * 从实时工作流工具结果中提取图片并渲染为可预览的图片网格。
+ * 首尾帧工作流图片阶段的两个 generate_image 工具结果均为图片，需与视频结果区分渲染。
+ * 服务端 AbstractTaskProfile.buildResult 在结果顶层写入 taskType（image/video），优先按它判定。
+ *
+ * @param data Record<string, unknown> 工具结果数据
+ * @return React.ReactNode 图片网格；结果不含图片时返回 null（由视频渲染接管）
+ */
+function renderLiveWorkflowImages(data: Record<string, unknown>, call: ToolCallState): React.ReactNode {
+    const dataTaskType = typeof data.taskType === "string" ? data.taskType.toLowerCase() : "";
+    if (dataTaskType === "video") return null;
+    const items = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : [];
+    const images = items
+        .map((item) => ({ item, url: typeof item.url === "string" ? item.url : "" }))
+        .filter(({ item, url }) => {
+            if (!url) return false;
+            if (dataTaskType === "image") return true;
+            const mimeType = typeof item.mimeType === "string" ? item.mimeType.toLowerCase() : "";
+            const itemTaskType = typeof item.taskType === "string" ? item.taskType.toLowerCase() : "";
+            if (itemTaskType === "video") return false;
+            if (mimeType.startsWith("image/")) return true;
+            if (mimeType.startsWith("video/")) return false;
+            // 无 mimeType 时按常见图片扩展名兜底，避免将视频当图片渲染
+            return /\.(png|jpe?g|webp|gif|bmp|avif)(\?|$)/i.test(url);
+        });
+    if (!images.length) return null;
+    return (
+        <div data-result-layout="compact" className="flex flex-wrap gap-3">
+            {images.map(({ item, url }, index) => (
+                <FrameImagePreview
+                    key={(typeof item.id === "string" ? item.id : "") || (typeof item.storageKey === "string" ? item.storageKey : "") || `workflow-image-${index}`}
+                    url={url}
+                    role={readFrameRole(call, item)}
+                />
+            ))}
+        </div>
+    );
+}
+
+function readFrameRole(call: ToolCallState, item: Record<string, unknown>): string | undefined {
+    const candidates = [item.role, call.arguments.taskRole, call.arguments.role, call.callId];
+    return candidates.find((value): value is string => typeof value === "string" && ["first_frame", "last_frame", "first-frame", "last-frame"].includes(value))
+        ?.replace("-", "_");
+}
+
+function frameRoleLabel(role?: string): string | undefined {
+    if (role === "first_frame") return "首帧";
+    if (role === "last_frame") return "尾帧";
+    return undefined;
+}
+
+function FrameImagePreview({ url, role }: { url: string; role?: string }) {
+    const label = frameRoleLabel(role);
+    return (
+        <div className="relative w-48 shrink-0 overflow-hidden rounded-xl border border-[var(--studio-line)] sm:w-56">
+            {label ? <span className="absolute left-2 top-2 z-10 rounded-md bg-black/65 px-2 py-1 text-xs font-semibold text-white backdrop-blur-sm">{label}</span> : null}
+            <Image src={url} alt={label || "工作流图片结果"} className="w-full object-cover" preview={{ mask: "查看大图" }} />
+        </div>
+    );
 }
 
 function renderResultVideos(
@@ -1445,7 +1998,7 @@ function buildVideoSettingsSummary(settings: Partial<Pick<AiConfig, "vquality" |
 
 function buildVideoConversationItems(conversations: Conversation[], activeId: string | null, selectedIds: string[]): CreationConversationItem[] {
     return conversations.map((conversation) => {
-        const latestVideo = findLatestPlayableVideo(conversation.rounds.map((round) => round.result));
+        const latestVideo = findLatestPlayableVideo(conversation.rounds.flatMap((round) => workflowVideos(round).map((video) => ({ id: video.id, status: "success" as const, video }))));
 
         return {
             id: conversation.id,
@@ -1489,12 +2042,15 @@ function buildVideoThreadSections(
             id: round.id,
             userText: round.prompt,
             userCopyText: formatGenerationStyleMessage(round.prompt, round.generationStyleSnapshots),
-            userAttachments: round.references.length || round.videoReferences.length || round.generationStyleSnapshots?.length || round.skill
-                ? (
+            userAttachments:
+                round.references.length || round.videoReferences.length || round.generationStyleSnapshots?.length || round.skill ? (
                     <div className="space-y-2">
                         {round.skill ? (
                             <div className="flex flex-wrap gap-2">
-                                <span className="inline-flex max-w-52 items-center gap-1.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]" title={`技能：${round.skill.name}`}>
+                                <span
+                                    className="inline-flex max-w-52 items-center gap-1.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]"
+                                    title={`技能：${round.skill.name}`}
+                                >
                                     <Sparkles className="size-3.5 shrink-0 text-[var(--studio-action)]" />
                                     <span className="truncate">{round.skill.name}</span>
                                 </span>
@@ -1503,32 +2059,38 @@ function buildVideoThreadSections(
                         {renderGenerationStyleSnapshots(round.generationStyleSnapshots)}
                         {renderVideoRoundReferences(round)}
                     </div>
-                )
-                : undefined,
+                ) : undefined,
             statusText: buildVideoStatusText(round),
             assistantText: buildVideoAssistantText(round),
+            draftedPrompts: round.draftedPrompts,
             activities: round.activities,
             actionBar: round.choices?.length ? <ChoiceHistoryBar choices={round.choices} /> : undefined,
             resultContent: (
-                <div className="grid gap-3 xl:grid-cols-2">
-                    {getVideoDisplayResults(round).map((result) =>
-                        result.status === "success" && result.video ? (
-                            <ResultCard
-                                key={result.id}
-                                video={result.video}
-                                uploadingObjectStorage={handlers.uploadingObjectStorageId === result.video.id}
-                                onDownload={handlers.onDownload}
-                                onSaveAsset={handlers.onSaveAsset}
-                                onUploadObjectStorage={handlers.onUploadObjectStorage}
-                                onOpenDetail={(video) => handlers.onOpenDetail(video, round)}
-                                onRegenerate={() => void handlers.onRegenerate(round)}
-                            />
-                        ) : result.status === "failed" || result.status === "canceled" ? (
-                            <FailedCard key={result.id} error={result.error || "生成失败"} canceled={result.status === "canceled"} />
-                        ) : (
-                            <VideoGeneratingCard key={result.id} size={round.config.size} progress={result.progress} />
-                        ),
-                    )}
+                <div className="space-y-3">
+                    {round.stages?.length ? (
+                        renderWorkflowStages(round, handlers)
+                    ) : getVideoDisplayResults(round).length ? (
+                        <div className="grid gap-3 xl:grid-cols-2">
+                            {getVideoDisplayResults(round).map((result) =>
+                                result.status === "success" && result.video ? (
+                                    <ResultCard
+                                        key={result.id}
+                                        video={result.video}
+                                        uploadingObjectStorage={handlers.uploadingObjectStorageId === result.video.id}
+                                        onDownload={handlers.onDownload}
+                                        onSaveAsset={handlers.onSaveAsset}
+                                        onUploadObjectStorage={handlers.onUploadObjectStorage}
+                                        onOpenDetail={(video) => handlers.onOpenDetail(video, round)}
+                                        onRegenerate={() => void handlers.onRegenerate(round)}
+                                    />
+                                ) : result.status === "failed" || result.status === "canceled" ? (
+                                    <FailedCard key={result.id} error={result.error || "生成失败"} canceled={result.status === "canceled"} />
+                                ) : (
+                                    <VideoGeneratingCard key={result.id} size={round.config.size} progress={result.progress} />
+                                ),
+                            )}
+                        </div>
+                    ) : null}
                 </div>
             ),
         });
@@ -1579,7 +2141,94 @@ function getVideoDisplayResults(round: Round): GenerationResult[] {
     return round.result ? [round.result] : [];
 }
 
+function renderWorkflowStages(
+    round: Round,
+    handlers: {
+        uploadingObjectStorageId: string;
+        onDownload: (video: GeneratedVideo) => void;
+        onSaveAsset: (video: GeneratedVideo) => void;
+        onUploadObjectStorage: (video: GeneratedVideo) => void;
+        onOpenDetail: (video: GeneratedVideo, round: Round) => void;
+        onRegenerate: (round: Round) => Promise<void>;
+    },
+): React.ReactNode {
+    const compactFramePreview = round.workflowStatus === "image_pending_confirm"
+        && round.stages?.every((stage) => ["first_frame", "last_frame"].includes(stage.role));
+    return (
+        <div className={compactFramePreview ? "flex flex-wrap gap-3" : "grid gap-3 xl:grid-cols-2"}>
+            {round.stages?.map((stage) => {
+                const images = (stage.outputs || []).filter((output) => output.taskType === "image" && output.url);
+                const videos = (stage.outputs || []).map(workflowOutputToVideo).filter((video): video is GeneratedVideo => video !== null);
+                return (
+                    <div key={stage.planTaskId} className={compactFramePreview ? "w-48 shrink-0 space-y-2 sm:w-56" : "space-y-2"}>
+                        {!compactFramePreview ? <div className="text-xs font-medium text-[var(--studio-muted)]">{stage.displayName}</div> : null}
+                        {stage.status === "success" && images.length ? (
+                            <div className={compactFramePreview ? "flex flex-wrap gap-3" : "grid gap-3 sm:grid-cols-2"}>
+                                {images.map((image, index) =>
+                                    image.url ? (
+                                        compactFramePreview ? <FrameImagePreview key={image.id || image.storageKey || index} url={image.url} role={stage.role} /> : <Image key={image.id || image.storageKey || index} src={image.url} alt={stage.displayName} className="w-full rounded-xl border border-[var(--studio-line)] object-cover" preview={{ mask: "查看大图" }} />
+                                    ) : null,
+                                )}
+                            </div>
+                        ) : null}
+                        {stage.status === "success" &&
+                            videos.map((video) => (
+                                <ResultCard
+                                    key={video.id}
+                                    video={video}
+                                    uploadingObjectStorage={handlers.uploadingObjectStorageId === video.id}
+                                    onDownload={handlers.onDownload}
+                                    onSaveAsset={handlers.onSaveAsset}
+                                    onUploadObjectStorage={handlers.onUploadObjectStorage}
+                                    onOpenDetail={(item) => handlers.onOpenDetail(item, round)}
+                                    onRegenerate={() => void handlers.onRegenerate(round)}
+                                />
+                            ))}
+                        {stage.status === "failed" || stage.status === "canceled" || stage.status === "skipped" ? (
+                            <FailedCard error={stage.error || (stage.status === "skipped" ? "依赖阶段未成功完成，当前阶段已跳过" : "生成失败")} canceled={stage.status === "canceled"} skipped={stage.status === "skipped"} />
+                        ) : null}
+                        {["pending", "running"].includes(stage.status) ? <VideoGeneratingCard size={round.config.size} progress={stage.progress} /> : null}
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+function workflowOutputToVideo(output: WorkflowOutput): GeneratedVideo | null {
+    if (output.taskType !== "video" || !output.url) return null;
+    return {
+        id: output.id || output.storageKey || output.url,
+        url: output.url,
+        storageKey: output.storageKey || output.key || "",
+        durationMs: output.durationMs || 0,
+        width: output.width || 0,
+        height: output.height || 0,
+        bytes: output.bytes || 0,
+        mimeType: output.mimeType || "video/mp4",
+        objectStorage: output.objectStorage,
+    };
+}
+
+function workflowVideos(round: Round): GeneratedVideo[] {
+    if (round.stages?.length) return round.stages.flatMap((stage) => (stage.outputs || []).map(workflowOutputToVideo).filter((video): video is GeneratedVideo => video !== null));
+    return round.result?.status === "success" && round.result.video ? [round.result.video] : [];
+}
+
 function buildVideoStatusText(round: Round): string {
+    if (round.stages?.length) {
+        const stages = round.stages;
+        if (round.workflowStatus === "clarifying") return "等待补充信息";
+        if (round.workflowStatus === "image_pending_confirm") return "图片已生成，等待确认";
+        if (stages.some((stage) => stage.status === "pending" || stage.status === "running")) {
+            const running = stages.find((stage) => stage.status === "running") || stages.find((stage) => stage.status === "pending");
+            return running?.progress ? `${running.displayName} ${running.progress}%` : `${running?.displayName || "工作流"}进行中`;
+        }
+        if (stages.some((stage) => stage.status === "failed")) return "工作流执行失败";
+        if (stages.some((stage) => stage.status === "canceled")) return "工作流已停止";
+        if (stages.some((stage) => stage.status === "skipped")) return "部分阶段已跳过";
+        return "工作流已完成";
+    }
     if (!round.result) {
         return "";
     }
@@ -1596,6 +2245,14 @@ function buildVideoStatusText(round: Round): string {
 }
 
 function buildVideoAssistantText(round: Round): string {
+    if (round.stages?.length) {
+        if (round.workflowStatus === "clarifying") return round.assistantText || "请补充工作流所需信息。";
+        if (round.workflowStatus === "image_pending_confirm") return round.assistantText || "首帧和尾帧图片已生成，请确认是否用这些图片生成视频，或修改提示词重新生成。";
+        if (round.stages.some((stage) => stage.status === "pending")) return "我正在执行视频工作流，请稍等。";
+        if (round.stages.some((stage) => stage.status === "failed")) return "工作流中有阶段失败，你可以重新生成。";
+        if (round.stages.some((stage) => stage.status === "canceled")) return "工作流已停止，你可以重新生成。";
+        return "视频工作流结果已经准备好了。";
+    }
     if (!round.result) {
         return round.assistantText || "";
     }
@@ -1731,11 +2388,11 @@ function ResultCard({
     );
 }
 
-function FailedCard({ error, canceled }: { error: string; canceled?: boolean }) {
+function FailedCard({ error, canceled, skipped }: { error: string; canceled?: boolean; skipped?: boolean }) {
     return (
         <div className="overflow-hidden rounded-xl border border-red-300/40 bg-red-500/10">
             <div className="flex aspect-video flex-col items-center justify-center gap-3 p-5 text-center">
-                <div className="rounded-full bg-[var(--studio-panel-solid)] px-3 py-1 text-sm font-medium text-red-500">{canceled ? "已停止生成" : "生成失败"}</div>
+                <div className="rounded-full bg-[var(--studio-panel-solid)] px-3 py-1 text-sm font-medium text-red-500">{canceled ? "已停止生成" : skipped ? "已跳过" : "生成失败"}</div>
                 <Typography.Paragraph ellipsis={{ rows: 3 }} className="!mb-0 !text-xs !text-red-400">
                     {error}
                 </Typography.Paragraph>
@@ -1763,20 +2420,39 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
     const rounds = await Promise.all(
         (raw.rounds || []).map(async (round) => {
             // 兼容服务端 saveGenerationRound 写入的 results[] 数组格式，转为前端 result 单数格式
-            const normalizedResult = (round as any).result != null ? (round as any).result : Array.isArray((round as any).results) && (round as any).results.length > 0 ? (round as any).results[0] : null;
+            const rawResult = (round as any).result != null ? (round as any).result : Array.isArray((round as any).results) && (round as any).results.length > 0 ? (round as any).results[0] : null;
+            // 澄清轮等纯对话轮的 result 是无状态空对象，归一化为空，避免渲染出无 key 的结果卡片
+            const normalizedResult = rawResult && typeof rawResult === "object" && (rawResult.status || rawResult.video || rawResult.error || rawResult.taskId) ? rawResult : null;
 
             const video = normalizedResult?.video ? { ...normalizedResult.video, storageKey: readVideoStorageKey(normalizedResult.video) } : undefined;
+            const rawStages = Array.isArray((round as any).stages) ? (round as any).stages : [];
+            const stageOutputs = await Promise.all(
+                rawStages.map(async (stage: WorkflowStage) => ({
+                    ...stage,
+                    outputs: await Promise.all(
+                        (stage.outputs || []).map(async (output) => {
+                            const storageKey = readMediaStorageKey(output);
+                            const url = output.taskType === "image" ? await resolveImageUrl(storageKey, output.url || "") : (await resolveMediaStorageInfo(storageKey, output.url || "", output.objectStorage))?.url || output.url;
+                            return { ...output, storageKey, url };
+                        }),
+                    ),
+                })),
+            );
             const [normalizedReferences, normalizedVideoReferences, storageInfo] = await Promise.all([
-                Promise.all((round.references || []).map(async (reference) => ({
-                    ...reference,
-                    type: referenceMediaType(reference, "image/*"),
-                    dataUrl: await resolveImageUrl(reference.storageKey, referenceMediaUrl(reference)),
-                }))),
-                Promise.all((round.videoReferences || []).map(async (reference) => ({
-                    ...reference,
-                    type: referenceMediaType(reference, "video/*"),
-                    url: reference.storageKey ? await resolveMediaUrl(reference.storageKey, referenceMediaUrl(reference)) : referenceMediaUrl(reference),
-                }))),
+                Promise.all(
+                    (round.references || []).map(async (reference) => ({
+                        ...reference,
+                        type: referenceMediaType(reference, "image/*"),
+                        dataUrl: await resolveImageUrl(reference.storageKey, referenceMediaUrl(reference)),
+                    })),
+                ),
+                Promise.all(
+                    (round.videoReferences || []).map(async (reference) => ({
+                        ...reference,
+                        type: referenceMediaType(reference, "video/*"),
+                        url: reference.storageKey ? await resolveMediaUrl(reference.storageKey, referenceMediaUrl(reference)) : referenceMediaUrl(reference),
+                    })),
+                ),
                 video ? resolveMediaStorageInfo(video.storageKey, video.url, video.objectStorage) : Promise.resolve(null),
             ]);
 
@@ -1796,6 +2472,7 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
                               },
                           }
                         : normalizedResult,
+                stages: stageOutputs.length ? stageOutputs : undefined,
             };
         }),
     );
@@ -1810,6 +2487,27 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
         generationCompletedAt: raw.generationCompletedAt,
         generationViewedAt: raw.generationViewedAt,
     };
+}
+
+function readMediaStorageKey(value: WorkflowOutput): string {
+    return value.storageKey?.trim() || value.key?.trim() || "";
+}
+
+function collectRoundMediaKeys(rounds: readonly Round[]): string[] {
+    return [...new Set(rounds.flatMap((round) => [...(round.result?.video?.storageKey ? [round.result.video.storageKey] : []), ...(round.stages || []).flatMap((stage) => (stage.outputs || []).map(readMediaStorageKey).filter(Boolean))]))];
+}
+
+function updateRoundVideoObjectStorage(round: Round, videoId: string, objectStorage: ObjectStorageFile): Round {
+    const result = round.result?.video?.id === videoId && round.result.video ? { ...round.result, video: { ...round.result.video, objectStorage } } : round.result;
+    const stages = round.stages?.map((stage) => ({
+        ...stage,
+        outputs: stage.outputs?.map((output) => (output.id === videoId || output.storageKey === videoId ? { ...output, objectStorage } : output)),
+    }));
+    return result !== round.result || stages !== round.stages ? { ...round, result, stages } : round;
+}
+
+function isPendingWorkflowTask(value: WorkflowTaskSnapshot): value is WorkflowTaskSnapshot & { taskId: string; status: string } {
+    return typeof value.taskId === "string" && (value.status === "pending" || value.status === "running");
 }
 
 function buildChatAttachments(attachments: AgentAttachment[]) {

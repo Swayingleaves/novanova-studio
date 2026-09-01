@@ -22,8 +22,10 @@ public final class SkillDtos {
      * @param description 技能简介
      * @param targetType 适用生成类型
      * @param coverUrl 封面地址
+     * @param workflowType 服务端识别的视频工作流类型
      */
-    public record SkillOption(Long id, String name, String description, String targetType, String coverUrl) {
+    public record SkillOption(Long id, String name, String description, String targetType, String coverUrl,
+                              String workflowType) {
     }
 
     /**

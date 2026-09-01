@@ -13,7 +13,7 @@ type CanvasLastUsedGenerationSettings = {
         vquality?: string;
         size?: string;
         seconds?: string;
-        videoGenerationMode?: "text-to-video" | "image-to-video" | "reference-to-video";
+        videoGenerationMode?: import("@/features/settings/stores/use-config-store").VideoGenerationMode;
         watermark?: string;
         count?: number;
     };

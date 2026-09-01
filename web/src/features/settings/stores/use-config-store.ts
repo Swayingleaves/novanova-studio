@@ -14,7 +14,7 @@ import { refreshModelConfigurationSnapshot } from "../lib/model-configuration-re
 export type ApiCallFormat = "openai" | "newapi" | "evolink" | "gemini" | "agnes" | "anthropic" | "seedance" | "minimax" | "custom";
 export type ModelCapability = "image" | "video" | "text";
 export type ModelCreditUnit = "generation" | "second";
-export type VideoGenerationMode = "text-to-video" | "image-to-video" | "reference-to-video";
+export type VideoGenerationMode = "text-to-video" | "image-to-video" | "reference-to-video" | "first-last-frame-to-video";
 export type VideoResolution = "auto" | "480p" | "720p" | "768p" | "1080p" | "2k" | "4k";
 export type VideoBillingConfiguration = {
     billingUnit: ModelCreditUnit;
@@ -57,6 +57,7 @@ export const MODEL_CAPABILITY_OPTIONS: Record<ModelCapability, Array<{ value: st
         { value: "text-to-video", label: "文生视频" },
         { value: "image-to-video", label: "图生视频" },
         { value: "reference-to-video", label: "全能参考" },
+        { value: "first-last-frame-to-video", label: "首尾帧原生生成" },
     ],
 };
 
@@ -181,6 +182,11 @@ const defaultObjectStorage: ObjectStorageConfig = createObjectStorageConfig({
     defaultStorage: true,
 });
 
+/** 配置初始化连续失败的自动重试次数与间隔（服务刚启动时首次请求易瞬时失败）。 */
+const MAX_HYDRATE_CONFIG_RETRY_ATTEMPTS = 5;
+const HYDRATE_CONFIG_RETRY_DELAY_MS = 2000;
+let hydrateConfigRetryAttempts = 0;
+
 export const useConfigStore = create<ConfigStore>()((set, get) => ({
     hydrated: false,
     hydratedUserId: "",
@@ -197,6 +203,14 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
         if (!user || (get().hydrated && get().hydratedUserId === user.id)) return;
         if (user?.role !== "admin") {
             const modelResult = await listServerAiModels().catch(() => null);
+            // 服务刚启动等瞬时故障时不能提交空配置，否则整个会话都会处于“无模型可生成”状态；
+            // 保持未就绪并稍后自动重试，成功后前端能力自动恢复（刷新页面也能立即恢复）。
+            if (modelResult === null && hydrateConfigRetryAttempts < MAX_HYDRATE_CONFIG_RETRY_ATTEMPTS) {
+                hydrateConfigRetryAttempts += 1;
+                setTimeout(() => void useConfigStore.getState().hydrateConfig(), HYDRATE_CONFIG_RETRY_DELAY_MS);
+                return;
+            }
+            hydrateConfigRetryAttempts = 0;
             set({
                 hydrated: true,
                 hydratedUserId: user.id,
@@ -209,6 +223,12 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
             return;
         }
         const [channelResult, modelResult, storageResult] = await Promise.all([listChannels().catch(() => null), listModelConfigs().catch(() => null), listObjectStorages().catch(() => null)]);
+        if ((channelResult === null || modelResult === null) && hydrateConfigRetryAttempts < MAX_HYDRATE_CONFIG_RETRY_ATTEMPTS) {
+            hydrateConfigRetryAttempts += 1;
+            setTimeout(() => void useConfigStore.getState().hydrateConfig(), HYDRATE_CONFIG_RETRY_DELAY_MS);
+            return;
+        }
+        hydrateConfigRetryAttempts = 0;
         const channels = normalizeChannels(channelResult?.channels || defaultChannels);
         const modelConfigs = (modelResult?.modelConfigs || []).map(normalizeServerModelConfig);
         const objectStorages = normalizeObjectStorages(storageResult?.objectStorages || [defaultObjectStorage]);
@@ -437,7 +457,7 @@ function normalizeConfig(config: Partial<AiConfig> = {}): AiConfig {
     next.apiKey = next.apiKey || channels[0]?.apiKey || "";
     next.apiFormat = normalizeApiFormat(next.apiFormat || channels[0]?.apiFormat);
     next.channelMode = next.channelMode === "local" ? "local" : "remote";
-    next.videoGenerationMode = ["text-to-video", "image-to-video", "reference-to-video"].includes(next.videoGenerationMode)
+    next.videoGenerationMode = ["text-to-video", "image-to-video", "reference-to-video", "first-last-frame-to-video"].includes(next.videoGenerationMode)
         ? next.videoGenerationMode : "text-to-video";
     return next;
 }

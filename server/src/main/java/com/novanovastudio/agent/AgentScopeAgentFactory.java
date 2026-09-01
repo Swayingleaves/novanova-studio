@@ -95,6 +95,18 @@ public class AgentScopeAgentFactory {
     }
 
     /**
+     * 创建视频技能工作流对话Agent，负责多轮理解意图并起草阶段提示词。
+     *
+     * @param model Model 用户明确选择的文本模型
+     * @param conversationPrompt String 工作流定义提供的对话系统提示词
+     * @return ReActAgent 工作流对话Agent
+     */
+    public ReActAgent workflowConversationAgent(Model model, String conversationPrompt) {
+        return build("workflow-conversation-agent", conversationPrompt, model,
+                "只能返回 VideoWorkflowConversationTurn 结构化结果，不得调用工具，不得创建生成任务。", true);
+    }
+
+    /**
      * 构建无业务工具权限的ReActAgent。
      *
      * @param name String Agent名称

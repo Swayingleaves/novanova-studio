@@ -3,7 +3,7 @@
 import { App, Button, Input, Popover, Tooltip } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Bot, LoaderCircle, Sparkles, Square, X } from "lucide-react";
+import { ArrowUp, BookOpenText, Bot, LoaderCircle, Square, X } from "lucide-react";
 
 import type { CreationComposerProps } from "@/features/generation/components/creation-workspace-types";
 import { CreditCostDisplay } from "@/features/generation/constants/credits";
@@ -41,6 +41,7 @@ export function CreationComposer({
     onPasteImages,
     onSubmit,
     onStop,
+    notice,
 }: CreationComposerProps) {
     const { message } = App.useApp();
     const inputRef = useRef<TextAreaRef>(null);
@@ -183,6 +184,8 @@ export function CreationComposer({
                         </span>
                         <span>{queued ? "排队中" : running ? "生成中" : `${value.length} / 2000`}</span>
                     </div>
+                    {notice}
+
                     {references.length || activeStyles.length || selectedSkill ? (
                         <div className={`flex flex-wrap gap-2 overflow-hidden transition-all duration-200 ${compact ? "invisible mb-0 max-h-0 opacity-0" : "mb-3 max-h-56 opacity-100"}`}>
                             {selectedSkill ? (
@@ -321,13 +324,13 @@ export function CreationComposer({
                                     className="creation-composer-submit-trigger creation-composer-submit-trigger-cost"
                                     disabled={!canSubmit || requestActive}
                                     onClick={onSubmit}
-                                    aria-label={queued ? "排队中" : running ? "生成中" : creditCost === null ? "当前配置无法报价" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
+                                    aria-label={queued ? "排队中" : running ? "生成中" : creditCost === undefined ? "生成" : creditCost === null ? "当前配置无法报价" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
                                 >
                                     {queued || running ? (
                                         queued ? "排队中" : "生成中"
                                     ) : (
                                         <>
-                                            {creditCost === null ? <span className="text-xs font-medium">不可报价</span> : <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />}
+                                            {creditCost === undefined ? null : creditCost === null ? <span className="text-xs font-medium">不可报价</span> : <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />}
                                             <ArrowUp className="size-[18px] shrink-0" strokeWidth={2.1} />
                                         </>
                                     )}
@@ -363,7 +366,7 @@ function SkillMenu({
         <div className="w-[min(24rem,calc(100vw-24px))] p-1" role="dialog" aria-label="技能列表">
             <div className="flex items-center justify-between gap-3 px-2 pb-2 pt-1">
                 <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-[var(--studio-ink)]">
-                    <Sparkles className="size-4 shrink-0 text-[var(--studio-action)]" />
+                    <BookOpenText className="size-4 shrink-0 text-[var(--studio-action)]" />
                     <span>技能</span>
                 </div>
             </div>
@@ -404,7 +407,7 @@ function SkillMenu({
                 </div>
             ) : (
                 <div className="flex min-h-28 flex-col items-center justify-center gap-2 text-xs text-[var(--studio-muted)]">
-                    <Sparkles className="size-5" />
+                    <BookOpenText className="size-5" />
                     <span>暂无可用技能</span>
                 </div>
             )}
@@ -428,7 +431,7 @@ function SkillMenu({
         >
             <span className="inline-flex">
                 <Tooltip title={selectedSkill ? `已选择技能：${selectedSkill.name}` : "选择技能"}>
-                    <Button size="small" className="creation-composer-action" icon={<Sparkles className="size-3.5" />} aria-expanded={open} aria-haspopup="dialog">
+                    <Button size="small" className="creation-composer-action" icon={<BookOpenText className="size-3.5" />} aria-expanded={open} aria-haspopup="dialog">
                         技能
                     </Button>
                 </Tooltip>

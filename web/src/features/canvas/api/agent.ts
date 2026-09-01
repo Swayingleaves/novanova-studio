@@ -7,6 +7,8 @@ export type AgentAttachment = {
     type: string;
     name: string;
     storageKey?: string;
+    /** 工作流内媒体业务角色，由服务端按顺序解释。 */
+    role?: string;
 };
 
 export type CreationSettings = {
@@ -24,6 +26,14 @@ export type CreationSettings = {
     videoGenerationMode?: VideoGenerationMode;
     /** 画布 Agent 执行视频任务时固定使用的视频模型。 */
     videoModel?: string;
+    /** 视频工作流图片阶段固定使用的图片模型。 */
+    imageModel?: string;
+    /** 视频工作流图片阶段宽高比。 */
+    imageSize?: string;
+    /** 视频工作流图片阶段清晰度。 */
+    imageResolution?: string;
+    /** 视频工作流图片阶段画质。 */
+    imageQuality?: string;
 };
 
 export type GenerationStyleSnapshot = {

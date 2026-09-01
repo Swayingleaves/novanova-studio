@@ -195,7 +195,10 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
      * @return Mono<JSONObject> 视频结果
      */
     private Mono<JSONObject> createVideoTask(AiTaskExecutionContext context, List<String> imageUrls, List<String> videoUrls) {
-        Map<String, Object> payload = buildVideoRequestPayload(context.model(), context.request().prompt(), context.request().parameters(), imageUrls, videoUrls);
+        List<String> imageRoles = AiTaskParameterReader.safeReferences(context.request().references()).stream()
+                .map(AiTaskDtos.AiTaskMediaReference::role).toList();
+        Map<String, Object> payload = buildVideoRequestPayload(context.model(), context.request().prompt(), context.request().parameters(),
+                imageUrls, videoUrls, context.request().videoGenerationMode(), imageRoles);
         log.info("创建New API视频任务: taskId={}, model={}, imageCount={}, videoCount={}", context.task().getId(), context.model(), imageUrls.size(), videoUrls.size());
         return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_GENERATION_PATH, com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .map(AiJsonUtils::responsePayload)
@@ -318,6 +321,24 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
      * @return Map<String, Object> 渠道请求体
      */
     static Map<String, Object> buildVideoRequestPayload(String model, String prompt, Map<String, Object> parameters, List<String> imageUrls, List<String> videoUrls) {
+        return buildVideoRequestPayload(model, prompt, parameters, imageUrls, videoUrls, null, List.of());
+    }
+
+    /**
+     * 构建保留视频模式和媒体角色的New API视频提交请求体。
+     *
+     * @param model String 模型名称
+     * @param prompt String 视频提示词
+     * @param parameters Map<String, Object> 页面视频参数
+     * @param imageUrls List<String> 参考图片URL
+     * @param videoUrls List<String> 参考视频URL
+     * @param videoGenerationMode String 视频生成模式
+     * @param imageRoles List<String> 图片角色
+     * @return Map<String, Object> 渠道请求体
+     */
+    static Map<String, Object> buildVideoRequestPayload(String model, String prompt, Map<String, Object> parameters,
+                                                        List<String> imageUrls, List<String> videoUrls,
+                                                        String videoGenerationMode, List<String> imageRoles) {
         int duration = AiTaskParameterReader.intParameter(parameters, "seconds", 5, 1, 15);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", model);
@@ -325,12 +346,16 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
         payload.put("duration", duration);
         payload.put("seconds", String.valueOf(duration));
         payload.put("resolution", normalizeVideoResolution(AiTaskParameterReader.parameterText(parameters, "resolution", "720p")));
+        String mode = AiTaskParameterReader.firstNonEmpty(videoGenerationMode,
+                AiTaskParameterReader.parameterText(parameters, "videoGenerationMode", "text-to-video"));
+        payload.put("video_generation_mode", mode);
         String size = AiTaskParameterReader.parameterText(parameters, "size", "");
         if (size.matches("^\\d+x\\d+$")) payload.put("size", size);
         if (!imageUrls.isEmpty()) {
             payload.put("images", imageUrls);
             payload.put("image", imageUrls.getFirst());
             payload.put("input_reference", imageUrls.getFirst());
+            payload.put("reference_image_roles", imageRoles == null ? List.of() : imageRoles);
         }
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put("aspect_ratio", normalizeAspectRatio(size));

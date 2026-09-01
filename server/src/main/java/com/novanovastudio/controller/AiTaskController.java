@@ -125,6 +125,18 @@ public class AiTaskController {
     }
 
     /**
+     * 获取视频技能工作流的服务端权威报价。
+     *
+     * @param request VideoWorkflowQuoteRequest 工作流报价请求
+     * @return Mono<ApiResponse<VideoWorkflowQuoteResponse>> 工作流阶段报价
+     */
+    @PostMapping("/video/workflowQuote")
+    public Mono<ApiResponse<AiTaskDtos.VideoWorkflowQuoteResponse>> workflowQuote(
+            @RequestBody AiTaskDtos.VideoWorkflowQuoteRequest request) {
+        return aiTaskService.quoteVideoWorkflow(request).map(ApiResponse::ok);
+    }
+
+    /**
      * 兼容旧视频轮询接口
      *
      * @param taskId String 任务ID
