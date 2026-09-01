@@ -1,6 +1,6 @@
 import { getCanvasNodeTemplate } from "../constants.ts";
 import type { CanvasConnection, CanvasNode } from "../types.ts";
-import { nodeSizeFromRatio } from "../utils/canvas-node-size.ts";
+import { MINIMUM_CONTENT_NODE_DIMENSION, nodeSizeFromRatio, nodeSizeFromRatioWithMinimum } from "../utils/canvas-node-size.ts";
 import {
     applyCanvasNodeAttributes,
     isImageNode,
@@ -13,10 +13,12 @@ import {
 
 export function applyCanvasNodeConfig(node: CanvasNode, attributes: CanvasNodeAttributes): CanvasNode {
     const updated = applyCanvasNodeAttributes(node, attributes);
-    if (isTextNode(updated) || isStoryboardNode(updated) || typeof attributes.size !== "string" || !isImageNode(updated) || updated.content.source) return updated;
+    if (typeof attributes.size !== "string" || (isImageNode(updated) && updated.content.source) || (!isImageNode(updated) && !isTextNode(updated) && !isStoryboardNode(updated))) return updated;
 
     const template = getCanvasNodeTemplate(updated.kind);
-    const size = nodeSizeFromRatio(attributes.size, template.width, template.height);
+    const size = isTextNode(updated) || isStoryboardNode(updated)
+        ? nodeSizeFromRatioWithMinimum(attributes.size, template.width, template.height, MINIMUM_CONTENT_NODE_DIMENSION)
+        : nodeSizeFromRatio(attributes.size, template.width, template.height);
     if (!size) return updated;
 
     return updateCanvasNodeFrame(updated, {

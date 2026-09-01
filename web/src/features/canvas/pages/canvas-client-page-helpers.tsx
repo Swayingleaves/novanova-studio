@@ -8,7 +8,8 @@ import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { readCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
 import { formatGroupedGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { createImageNode, createStoryboardNode, createTextNode, createVideoCompositionNode, createVideoNode, getCanvasNodeTemplate } from "../constants";
-import { applyCanvasNodeAttributes, isImageNode, isTextNode, isVideoNode, type CanvasNodeAttributes } from "../domain/canvas-node";
+import { applyCanvasNodeAttributes, isImageNode, isTextNode, isVideoNode, updateCanvasNodeFrame, type CanvasNodeAttributes } from "../domain/canvas-node";
+import { MINIMUM_CONTENT_NODE_DIMENSION, nodeSizeFromRatioWithMinimum } from "../utils/canvas-node-size";
 import {
     type CanvasAssistantMessage,
     type CanvasAssistantSession,
@@ -57,11 +58,15 @@ const AGENT_HISTORY_MESSAGE_LIMIT = 12;
 
 export function createCanvasNode(kind: CanvasNodeKind, position: CanvasPoint, attributes?: CanvasNodeAttributes): CanvasNode {
     const template = getCanvasNodeTemplate(kind);
+    const ratioSize = (kind === "text" || kind === "storyboard") && typeof attributes?.size === "string"
+        ? nodeSizeFromRatioWithMinimum(attributes.size, template.width, template.height, MINIMUM_CONTENT_NODE_DIMENSION)
+        : null;
+    const frameSize = ratioSize || template;
     const input = {
         id: `${kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         position: {
-            x: position.x - template.width / 2,
-            y: position.y - template.height / 2,
+            x: position.x - frameSize.width / 2,
+            y: position.y - frameSize.height / 2,
         },
     };
     const node = kind === "image"
@@ -73,7 +78,8 @@ export function createCanvasNode(kind: CanvasNodeKind, position: CanvasPoint, at
                 : kind === "videoComposition"
                     ? createVideoCompositionNode(input)
                     : createTextNode(input);
-    return applyCanvasNodeAttributes(node, { ...readCanvasLastUsedGenerationSettings(kind), ...attributes });
+    const withFrame = ratioSize ? updateCanvasNodeFrame(node, ratioSize) : node;
+    return applyCanvasNodeAttributes(withFrame, { ...readCanvasLastUsedGenerationSettings(kind), ...attributes });
 }
 
 export function buildAgentChatHistory(messages: CanvasAssistantMessage[]) {

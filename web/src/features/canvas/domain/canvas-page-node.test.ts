@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createImageNode, createStoryboardNode, createTextNode } from "../constants.ts";
+import { MINIMUM_CONTENT_NODE_DIMENSION } from "../utils/canvas-node-size.ts";
 import {
     applyCanvasNodeConfig,
     createCanvasConnection,
@@ -32,6 +33,19 @@ test("已有内容的图片节点修改配置时不自动调整尺寸", () => {
     const updated = applyCanvasNodeConfig(node, { size: "16:9" });
 
     assert.deepEqual(updated.frame, node.frame);
+});
+
+test("文本和分镜节点按比例调整时短边至少为500", () => {
+    const text = createTextNode({ id: "text-1", position: { x: 0, y: 0 } });
+    const storyboard = createStoryboardNode({ id: "storyboard-1", position: { x: 0, y: 0 } });
+
+    const portraitText = applyCanvasNodeConfig(text, { size: "9:16" });
+    const landscapeStoryboard = applyCanvasNodeConfig(storyboard, { size: "16:9" });
+
+    assert.equal(portraitText.frame.width, MINIMUM_CONTENT_NODE_DIMENSION);
+    assert.equal(Math.round(portraitText.frame.height), 1067);
+    assert.equal(Math.round(landscapeStoryboard.frame.width), 1067);
+    assert.equal(landscapeStoryboard.frame.height, MINIMUM_CONTENT_NODE_DIMENSION);
 });
 
 test("连接使用明确的源端点和目标端点", () => {

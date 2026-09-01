@@ -236,6 +236,9 @@ novanova:
       agent-canvas-file: ${AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE:file:./server/config/prompts/agent-canvas.md}
       # 分镜脚本 Agent 系统提示词文件路径
       agent-storyboard-file: ${AI_SYSTEM_PROMPT_AGENT_STORYBOARD_FILE:file:./server/config/prompts/agent-storyboard.md}
+    storyboard-agent:
+      # 分镜 Agent 单次调用超时时间（秒）
+      timeout-seconds: ${AI_STORYBOARD_AGENT_TIMEOUT_SECONDS:90}
     image:
       # 是否将第三方HTTP图片结果下载并转存到默认对象存储
       upload-http-result-to-object-storage: ${AI_IMAGE_HTTP_RESULT_UPLOAD_TO_OBJECT_STORAGE:false}

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createImageNode, createStoryboardNode, createTextNode, createVideoNode, getCanvasNodeTemplate } from "./constants.ts";
+import { MINIMUM_CONTENT_NODE_DIMENSION, nodeSizeFromRatioWithMinimum } from "./utils/canvas-node-size.ts";
 
 test("图片节点工厂每次返回独立的嵌套对象", () => {
     const first = createImageNode({ id: "image-1", position: { x: 0, y: 0 } });
@@ -22,6 +23,7 @@ test("文本节点工厂使用独立文本内容和默认字号", () => {
     assert.notEqual(first.content, second.content);
     assert.deepEqual(first.content, { text: "内容", fontSize: 14 });
     assert.deepEqual(second.content, { text: "", fontSize: 14 });
+    assert.deepEqual(first.frame, { position: { x: 10, y: 20 }, width: 600, height: 600 });
 });
 
 test("视频节点工厂创建独立生成配置", () => {
@@ -46,7 +48,17 @@ test("分镜脚本节点保留独立的编辑数据与空执行状态", () => {
 
 test("节点模板按类型返回固定尺寸", () => {
     assert.deepEqual(getCanvasNodeTemplate("image"), { title: "图像", width: 510, height: 360 });
-    assert.deepEqual(getCanvasNodeTemplate("text"), { title: "文本", width: 340, height: 240 });
+    assert.deepEqual(getCanvasNodeTemplate("text"), { title: "文本", width: 600, height: 600 });
     assert.deepEqual(getCanvasNodeTemplate("video"), { title: "视频", width: 630, height: 354 });
-    assert.deepEqual(getCanvasNodeTemplate("storyboard"), { title: "分镜脚本", width: 360, height: 380 });
+    assert.deepEqual(getCanvasNodeTemplate("storyboard"), { title: "分镜脚本", width: 600, height: 600 });
+});
+
+test("文本和分镜节点按比例创建时保持比例且短边至少为500", () => {
+    const portraitText = nodeSizeFromRatioWithMinimum("9:16", 600, 600, MINIMUM_CONTENT_NODE_DIMENSION);
+    const landscapeStoryboard = nodeSizeFromRatioWithMinimum("16:9", 600, 600, MINIMUM_CONTENT_NODE_DIMENSION);
+
+    assert.equal(portraitText?.width, 600);
+    assert.equal(Math.round(portraitText?.height || 0), 1067);
+    assert.equal(Math.round(landscapeStoryboard?.width || 0), 1067);
+    assert.equal(landscapeStoryboard?.height, 600);
 });

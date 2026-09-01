@@ -22,8 +22,8 @@ const IMAGE_NODE_TEMPLATE: CanvasNodeTemplate = {
 
 const TEXT_NODE_TEMPLATE: CanvasNodeTemplate = {
     title: "文本",
-    width: 340,
-    height: 240,
+    width: 600,
+    height: 600,
 };
 
 const VIDEO_NODE_TEMPLATE: CanvasNodeTemplate = {
@@ -40,8 +40,8 @@ const VIDEO_COMPOSITION_NODE_TEMPLATE: CanvasNodeTemplate = {
 
 const STORYBOARD_NODE_TEMPLATE: CanvasNodeTemplate = {
     title: "分镜脚本",
-    width: 360,
-    height: 380,
+    width: 600,
+    height: 600,
 };
 
 const CANVAS_NODE_TEMPLATES: Record<CanvasNodeKind, CanvasNodeTemplate> = {

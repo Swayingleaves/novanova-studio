@@ -45,4 +45,18 @@ class NovanovaPropertiesTest {
 
         Assertions.assertFalse(properties.getAi().getImage().isUploadHttpResultToObjectStorage());
     }
+
+    /**
+     * 测试分镜Agent超时配置默认值和修改能力。
+     */
+    @Test
+    void shouldConfigureStoryboardAgentTimeout() {
+        NovanovaProperties properties = new NovanovaProperties();
+
+        Assertions.assertEquals(90, properties.getAi().getStoryboardAgent().getTimeoutSeconds());
+
+        properties.getAi().getStoryboardAgent().setTimeoutSeconds(180);
+
+        Assertions.assertEquals(180, properties.getAi().getStoryboardAgent().getTimeoutSeconds());
+    }
 }
