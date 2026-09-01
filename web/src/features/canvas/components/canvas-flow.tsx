@@ -63,6 +63,8 @@ type CanvasFlowProps = {
 const MIN_ZOOM = 0.05;
 const MAX_ZOOM = 5;
 const CANVAS_EDGE_STROKE_WIDTH = 2.5;
+// 使用归一化路径长度，让每条连线始终显示三段光带。
+const CANVAS_EDGE_FLOW_DASH = "0.08 0.2533 0.08 0.2533 0.08 0.2534";
 const CANVAS_PAN_ON_DRAG = [0, 1, 2];
 const CANVAS_SELECTION_KEY_CODES = ["Control", "Meta"];
 const CANVAS_PRO_OPTIONS = { hideAttribution: true };
@@ -91,6 +93,7 @@ function CanvasConnectionEdge({
   pathOptions,
   interactionWidth,
 }: EdgeProps) {
+  const theme = useCanvasTheme();
   const source = moveConnectionAnchorToNodeEdge(sourceX, sourceY, sourcePosition);
   const target = moveConnectionAnchorToNodeEdge(targetX, targetY, targetPosition);
   const [path, labelX, labelY] = getBezierPath({
@@ -104,22 +107,37 @@ function CanvasConnectionEdge({
   });
 
   return (
-    <BaseEdge
-      id={id}
-      path={path}
-      labelX={labelX}
-      labelY={labelY}
-      label={label}
-      labelStyle={labelStyle}
-      labelShowBg={labelShowBg}
-      labelBgStyle={labelBgStyle}
-      labelBgPadding={labelBgPadding}
-      labelBgBorderRadius={labelBgBorderRadius}
-      style={style}
-      markerEnd={markerEnd}
-      markerStart={markerStart}
-      interactionWidth={interactionWidth}
-    />
+    <>
+      <BaseEdge
+        id={id}
+        path={path}
+        labelX={labelX}
+        labelY={labelY}
+        label={label}
+        labelStyle={labelStyle}
+        labelShowBg={labelShowBg}
+        labelBgStyle={labelBgStyle}
+        labelBgPadding={labelBgPadding}
+        labelBgBorderRadius={labelBgBorderRadius}
+        className="canvas-edge-base"
+        style={style}
+        markerEnd={markerEnd}
+        markerStart={markerStart}
+        interactionWidth={interactionWidth}
+      />
+      <path
+        d={path}
+        pathLength={1}
+        fill="none"
+        stroke={theme.node.activeStroke}
+        strokeWidth={CANVAS_EDGE_STROKE_WIDTH + 0.25}
+        strokeLinecap="round"
+        strokeDasharray={CANVAS_EDGE_FLOW_DASH}
+        className="canvas-edge-flow"
+        pointerEvents="none"
+        aria-hidden="true"
+      />
+    </>
   );
 }
 
