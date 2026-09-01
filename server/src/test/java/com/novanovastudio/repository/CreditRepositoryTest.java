@@ -64,6 +64,17 @@ class CreditRepositoryTest {
         Assertions.assertTrue(sql.contains("cards.redeemed_at IS NOT NULL"));
         Assertions.assertTrue(sql.contains("cards.code_hash = :codeHash"));
         Assertions.assertTrue(sql.contains(":redeemedUserKeyword"));
+        Assertions.assertTrue(sql.endsWith("\n"));
+    }
+
+    /**
+     * 兑换记录筛选条件后应保留换行，避免与排序子句黏连。
+     */
+    @Test
+    void shouldKeepLineBreakAfterRedemptionFilters() {
+        CreditCardRepository.RedemptionQuery query = new CreditCardRepository.RedemptionQuery(1L, null, null, "hash", null);
+
+        Assertions.assertTrue(CreditCardRepository.redemptionFilters(query).endsWith("\n"));
     }
 
     /**
