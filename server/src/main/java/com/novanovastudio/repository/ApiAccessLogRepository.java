@@ -120,9 +120,9 @@ public class ApiAccessLogRepository {
             builder.append(")");
         }
         if ("success".equals(query.result())) {
-            builder.append(" AND success = TRUE");
+            builder.append(" AND success = TRUE ");
         } else if ("error".equals(query.result())) {
-            builder.append(" AND has_error = TRUE");
+            builder.append(" AND has_error = TRUE ");
         }
         return builder.toString();
     }

@@ -6,6 +6,7 @@ import io.agentscope.core.ReActAgent;
 import io.agentscope.core.model.Model;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 /**
  * 固定主Agent、图片子Agent和视频子Agent工厂。
@@ -30,7 +31,22 @@ public class AgentScopeAgentFactory {
      * @return ReActAgent 主Agent
      */
     public ReActAgent mainAgent(Model model) {
-        return build("main-agent", promptService.get(PromptTemplateType.AGENT_MAIN), model,
+        return mainAgent(model, null);
+    }
+
+    /**
+     * 创建主Agent，可追加技能流程系统提示词。
+     *
+     * @param model AgentScope文本模型
+     * @param extraSystemPrompt String 追加到主Agent系统提示词末尾的技能流程指令，可为空
+     * @return ReActAgent 主Agent
+     */
+    public ReActAgent mainAgent(Model model, String extraSystemPrompt) {
+        String prompt = promptService.get(PromptTemplateType.AGENT_MAIN);
+        if (StringUtils.hasText(extraSystemPrompt)) {
+            prompt = prompt + "\n\n" + extraSystemPrompt;
+        }
+        return build("main-agent", prompt, model,
                 "只能返回 CreationPlan 结构化结果，不得调用工具。", true);
     }
 
@@ -76,6 +92,18 @@ public class AgentScopeAgentFactory {
     public ReActAgent storyboardAgent(Model model) {
         return build("storyboard-agent", promptService.get(PromptTemplateType.AGENT_STORYBOARD), model,
                 "只能返回当前请求对应的分镜结构化结果，不得调用工具、解释或输出额外文本。", false);
+    }
+
+    /**
+     * 创建视频技能工作流对话Agent，负责多轮理解意图并起草阶段提示词。
+     *
+     * @param model Model 用户明确选择的文本模型
+     * @param conversationPrompt String 工作流定义提供的对话系统提示词
+     * @return ReActAgent 工作流对话Agent
+     */
+    public ReActAgent workflowConversationAgent(Model model, String conversationPrompt) {
+        return build("workflow-conversation-agent", conversationPrompt, model,
+                "只能返回 VideoWorkflowConversationTurn 结构化结果，不得调用工具，不得创建生成任务。", true);
     }
 
     /**

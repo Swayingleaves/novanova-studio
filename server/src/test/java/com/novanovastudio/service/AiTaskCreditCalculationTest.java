@@ -4,6 +4,7 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.VideoBillingConfiguration;
 import com.novanovastudio.ai.VideoGenerationMode;
+import com.novanovastudio.agent.workflow.VideoWorkflowDefinition;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -20,6 +21,24 @@ import org.junit.jupiter.api.Test;
  * @date     2026-08-03 00:00
  */
 class AiTaskCreditCalculationTest {
+
+    /** 图片阶段报价不得包含会因视频分辨率价格缺失而失败的视频阶段。 */
+    @Test
+    @SuppressWarnings("unchecked")
+    void shouldFilterWorkflowQuoteByStage() throws Exception {
+        VideoWorkflowDefinition.VideoWorkflowQuotePlan plan = new VideoWorkflowDefinition.VideoWorkflowQuotePlan(List.of(
+                new VideoWorkflowDefinition.VideoWorkflowQuoteStage("first_frame", "生成首帧", "image", "image", 1,
+                        Map.of(), List.of(), List.of(), List.of()),
+                new VideoWorkflowDefinition.VideoWorkflowQuoteStage("video", "合成视频", "video", "video", 1,
+                        Map.of("resolution", "768p"), List.of(), List.of("reference-to-video"), List.of())));
+        Method method = AiTaskService.class.getDeclaredMethod("quoteStages", VideoWorkflowDefinition.VideoWorkflowQuotePlan.class, String.class);
+        method.setAccessible(true);
+
+        List<VideoWorkflowDefinition.VideoWorkflowQuoteStage> imageStages =
+                (List<VideoWorkflowDefinition.VideoWorkflowQuoteStage>) method.invoke(new AiTaskService(null, null, null, null, null, null, null, null, null, null, null, null), plan, "image");
+
+        Assertions.assertEquals(List.of("first_frame"), imageStages.stream().map(VideoWorkflowDefinition.VideoWorkflowQuoteStage::role).toList());
+    }
 
     /** 按次图片任务应按生成数量计费。 */
     @Test

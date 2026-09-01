@@ -19,7 +19,9 @@ import com.novanovastudio.ai.AiErrorDetails;
 import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.repository.AgentPlanRepository;
 import com.novanovastudio.service.AiTaskService;
+import com.novanovastudio.service.PersistenceService;
 import com.novanovastudio.service.PromptOptimizationService;
+import com.novanovastudio.service.SkillService;
 import io.agentscope.core.model.Model;
 import java.lang.reflect.Method;
 import java.time.Duration;
@@ -32,6 +34,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -55,6 +58,8 @@ class CreationPlanExecutorTest {
     private CreationPlanExecutor executor;
     /** 风格解析服务 */
     private PromptOptimizationService promptOptimizationService;
+    /** 生成记录持久化服务 */
+    private PersistenceService persistenceService;
 
     /**
      * 初始化计划执行测试依赖。
@@ -66,6 +71,9 @@ class CreationPlanExecutorTest {
         executionRegistry = mock(AgentExecutionRegistry.class);
         frontendToolExecutor = mock(AgentTaskOrchestrator.class);
         promptOptimizationService = mock(PromptOptimizationService.class);
+        persistenceService = mock(PersistenceService.class);
+        when(persistenceService.saveOrUpdateGenerationRound(anyLong(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(Mono.empty());
         when(planRepository.updateCreationAgentPlanStatus(anyString(), anyString(), anyString())).thenReturn(Mono.empty());
         when(planRepository.updateTask(anyString(), anyString(), anyString(), anyString(), anyString(), any(), anyString()))
                 .thenReturn(Mono.empty());
@@ -78,8 +86,52 @@ class CreationPlanExecutorTest {
                 executionRegistry,
                 mock(AiTaskService.class),
                 frontendToolExecutor,
-                List.of(),
-                new CreationRecoveryPlanValidator(new CreationPlanValidator(new AgentToolRegistry())));
+                List.<AgentLoopProfile>of(),
+                new CreationRecoveryPlanValidator(new CreationPlanValidator(new AgentToolRegistry())),
+                mock(SkillService.class));
+        executor.setPersistenceService(persistenceService);
+    }
+
+    /**
+     * 视频工作流终态轮次必须保存视频任务提示词，不能保存图片确认按钮文案。
+     *
+     * @throws Exception 反射调用私有保存方法失败
+     */
+    @Test
+    void shouldPersistWorkflowVideoPromptInsteadOfImageConfirmationText() throws Exception {
+        CreationTask videoTask = new CreationTask("video", "video", "generate", "视频提示词", null,
+                List.of(), "", Map.of(), "video");
+        CreationPlan plan = new CreationPlan("workflow-plan", "首尾帧视频", CreationEntrySource.VIDEO_PAGE,
+                "正在根据已确认图片生成视频", "", false, null, List.of(videoTask), List.of(), "first-last-frame");
+        AgentChatRequest request = new AgentChatRequest(null, CreationEntrySource.VIDEO_PAGE,
+                "用这些图片生成视频", Map.of(), List.of(), List.of(), List.of(), null, null);
+        CreationPlanExecutor.TaskExecutionResult result = new CreationPlanExecutor.TaskExecutionResult(
+                "video", "success", "生成成功", Map.of("workflowReferences", List.of(
+                        Map.of("role", "first_frame", "url", "https://example.com/first-frame.png",
+                                "storageKey", "workflow/first-frame.png", "mimeType", "image/png"),
+                        Map.of("role", "last_frame", "url", "https://example.com/last-frame.png",
+                                "storageKey", "workflow/last-frame.png", "mimeType", "image/png"))), "KEEP", "镜头从近景平稳拉远至地平线",
+                Map.of("prompt", "镜头从近景平稳拉远至地平线"), null, 0);
+
+        Method method = CreationPlanExecutor.class.getDeclaredMethod("saveWorkflowRound", Long.class, String.class,
+                CreationPlan.class, AgentChatRequest.class, String.class, String.class, List.class);
+        method.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Mono<Void> save = (Mono<Void>) method.invoke(executor, 1L, "session", plan, request,
+                "success", "", List.of(result));
+        save.block();
+
+        ArgumentCaptor<com.alibaba.fastjson2.JSONObject> roundCaptor = ArgumentCaptor.forClass(com.alibaba.fastjson2.JSONObject.class);
+        verify(persistenceService).saveOrUpdateGenerationRound(anyLong(), anyString(), anyString(), anyString(), roundCaptor.capture());
+        com.alibaba.fastjson2.JSONObject round = roundCaptor.getValue();
+        Assertions.assertEquals("镜头从近景平稳拉远至地平线", round.getString("prompt"));
+        Assertions.assertEquals("镜头从近景平稳拉远至地平线", round.getString("generationPrompt"));
+        com.alibaba.fastjson2.JSONArray references = round.getJSONArray("references");
+        Assertions.assertEquals(2, references.size());
+        Assertions.assertEquals("first_frame", references.getJSONObject(0).getString("role"));
+        Assertions.assertEquals("https://example.com/first-frame.png", references.getJSONObject(0).getString("url"));
+        Assertions.assertEquals("last_frame", references.getJSONObject(1).getString("role"));
+        Assertions.assertEquals("https://example.com/last-frame.png", references.getJSONObject(1).getString("url"));
     }
 
     /**
@@ -406,7 +458,7 @@ class CreationPlanExecutorTest {
      */
     private CreationPlan plan(List<CreationTask> tasks) {
         return new CreationPlan("plan", "操作画布", CreationEntrySource.CANVAS,
-                "执行画布操作", "", false, null, tasks);
+                "执行画布操作", "", false, null, tasks, List.of());
     }
 
     /**
@@ -428,6 +480,6 @@ class CreationPlanExecutorTest {
      */
     private AgentChatRequest request() {
         return new AgentChatRequest(null, CreationEntrySource.CANVAS, "创建文本节点",
-                Map.of(), List.of(), List.of(), List.of(), null);
+                Map.of(), List.of(), List.of(), List.of(), null, null);
     }
 }

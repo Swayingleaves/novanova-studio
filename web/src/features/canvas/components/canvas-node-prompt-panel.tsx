@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Paperclip, Sparkles, Square, Video, X } from "lucide-react";
+import { ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Plus, Sparkles, Square, Video, X } from "lucide-react";
 import { App, Button, Modal, Tooltip } from "antd";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
@@ -410,113 +410,50 @@ export function CanvasNodePromptPanel({
                 </>
             ) : null}
 
-            {displayReferences.length > 0 ? (
-                <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">
-                    {displayReferences.map(({ reference, canInsert }) => {
-                        const canPreview = mode === "video" && reference.kind === "image" && Boolean(reference.previewUrl);
-                        const style = { background: `${theme.node.activeStroke}1a`, color: theme.node.activeStroke, border: `1px solid ${theme.node.activeStroke}38` };
-                        if (!canInsert) {
-                            const chip = canPreview ? (
-                                <button
-                                    type="button"
-                                    title="放大查看参考图"
-                                    aria-label={`放大查看${reference.label}`}
-                                    className="inline-flex cursor-zoom-in items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium transition hover:brightness-110 active:scale-95"
-                                    style={style}
-                                    onClick={(event) => {
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        setReferencePreview(reference);
-                                    }}
-                                >
-                                    <ReferenceChipThumb reference={reference} />
-                                    {reference.label}
-                                </button>
-                            ) : (
-                                <span className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium" style={style}>
-                                    <ReferenceChipThumb reference={reference} />
-                                    {reference.label}
-                                </span>
-                            );
-                            return mode === "video" ? (
-                                <span key={reference.nodeId} className="inline-flex items-center">
-                                    {chip}
-                                    <button
-                                        type="button"
-                                        title="移除参考素材"
-                                        aria-label={`移除${reference.label}`}
-                                        className="ml-0.5 grid size-4 place-items-center rounded-full opacity-60 transition hover:bg-red-500/15 hover:text-red-500 hover:opacity-100"
-                                        onClick={(event) => {
-                                            event.preventDefault();
-                                            event.stopPropagation();
-                                            removePersistedReference(reference);
-                                        }}
-                                    >
-                                        <X className="size-3" />
-                                    </button>
-                                </span>
-                            ) : (
-                                <span key={reference.nodeId}>{chip}</span>
-                            );
-                        }
-                        return (
-                            <span key={reference.nodeId} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium" style={style}>
-                                {canPreview ? (
-                                    <button
-                                        type="button"
-                                        title="放大查看参考图"
-                                        aria-label={`放大查看${reference.label}`}
-                                        className="inline-flex cursor-zoom-in rounded"
-                                        onClick={(event) => {
-                                            event.preventDefault();
-                                            event.stopPropagation();
-                                            setReferencePreview(reference);
-                                        }}
-                                    >
-                                        <ReferenceChipThumb reference={reference} />
-                                    </button>
-                                ) : (
-                                    <ReferenceChipThumb reference={reference} />
-                                )}
-                                <button
-                                    type="button"
-                                    className="cursor-pointer transition hover:brightness-110 active:scale-95"
-                                    onClick={(event) => {
-                                        event.preventDefault();
-                                        event.stopPropagation();
-                                        promptEditorRef.current?.insertAtCursor(reference.label);
-                                    }}
-                                >
-                                    {reference.label}
-                                </button>
-                            </span>
-                        );
-                    })}
+            {displayReferences.length > 0 || (mode === "video" && (config.videoGenerationMode === "image-to-video" || config.videoGenerationMode === "reference-to-video")) ? (
+                <div className="mt-3 min-w-0 border-t pt-3" style={{ borderColor: theme.node.stroke }}>
+                    <p className="mb-2 text-xs font-medium" style={{ color: theme.node.muted }}>
+                        参考内容
+                    </p>
+                    <div className="thin-scrollbar flex min-w-0 gap-2 overflow-x-auto pb-1">
+                        {displayReferences.map(({ reference, canInsert }) => (
+                            <ReferenceContentItem
+                                key={reference.nodeId}
+                                reference={reference}
+                                canInsert={canInsert}
+                                canRemove={mode === "video" && !canInsert}
+                                theme={theme}
+                                onPreview={() => setReferencePreview(reference)}
+                                onInsert={() => promptEditorRef.current?.insertAtCursor(reference.label)}
+                                onRemove={() => removePersistedReference(reference)}
+                            />
+                        ))}
+                        {mode === "video" && (config.videoGenerationMode === "image-to-video" || config.videoGenerationMode === "reference-to-video") ? (
+                            <button
+                                type="button"
+                                title="上传参考素材"
+                                aria-label="上传参考素材"
+                                className="grid size-14 shrink-0 place-items-center rounded-xl border transition hover:brightness-110 active:scale-95"
+                                style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.muted }}
+                                disabled={uploadingReference}
+                                onClick={() => referenceInputRef.current?.click()}
+                            >
+                                {uploadingReference ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                            </button>
+                        ) : null}
+                    </div>
                 </div>
             ) : null}
             {mode === "video" && videoQuote && !videoQuote.available ? (
                 <p className="mt-2 text-xs text-red-500">
                     {videoQuote.reason}
-                    {videoQuote.reason.includes("至少需要") ? "，可点击下方回形针按钮上传参考素材，或在画布中连接图片/视频节点" : ""}
+                    {videoQuote.reason.includes("至少需要") ? "，可点击上方加号卡片上传参考素材，或在画布中连接图片/视频节点" : ""}
                 </p>
             ) : null}
 
             <div className="mt-2 flex min-w-0 items-center gap-2">
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                     <CanvasPromptPicker onChoose={applyPromptFromLibrary} />
-                    {mode === "video" && (config.videoGenerationMode === "image-to-video" || config.videoGenerationMode === "reference-to-video") ? (
-                        <Tooltip title="上传参考素材">
-                            <Button
-                                type="text"
-                                className="!size-10 shrink-0 !rounded-full !p-0"
-                                loading={uploadingReference}
-                                disabled={uploadingReference}
-                                icon={<Paperclip className="size-3.5" />}
-                                onClick={() => referenceInputRef.current?.click()}
-                                aria-label="上传参考素材"
-                            />
-                        </Tooltip>
-                    ) : null}
                     {mode === "image" ? (
                         <>
                             <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" className="!h-10 !min-w-0 flex-1" onMissingConfig={() => onMissingConfig("image")} />
@@ -693,15 +630,69 @@ function formatPromptReferenceLabels(prompt: string, labels: string[]) {
     return prompt.replace(new RegExp("`*(" + labelPattern + ")(?!\\d)`*", "g"), "`$1`");
 }
 
-function ReferenceChipThumb({ reference }: { reference: CanvasResourceReference }) {
-    if (reference.kind === "image" && reference.previewUrl) {
-        return <img src={reference.previewUrl} alt="" className="size-4 rounded object-cover" draggable={false} />;
-    }
-    if (reference.kind === "video" && reference.previewUrl) {
-        return <video src={reference.previewUrl} className="size-4 rounded bg-black object-cover" muted preload="metadata" />;
-    }
+type ReferenceContentItemProps = {
+    reference: CanvasResourceReference;
+    canInsert: boolean;
+    canRemove: boolean;
+    theme: CanvasTheme;
+    onPreview: () => void;
+    onInsert: () => void;
+    onRemove: () => void;
+};
+
+function ReferenceContentItem({ reference, canInsert, canRemove, theme, onPreview, onInsert, onRemove }: ReferenceContentItemProps) {
+    const canPreview = !canInsert && reference.kind === "image" && Boolean(reference.previewUrl);
     const Icon = reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
-    return <Icon className="size-3.5" />;
+    const actionLabel = canPreview ? `放大查看${reference.label}` : canInsert ? `在提示词中插入${reference.label}` : reference.label;
+
+    return (
+        <div className="group relative size-14 shrink-0">
+            <button
+                type="button"
+                title={actionLabel}
+                aria-label={actionLabel}
+                className="grid size-full overflow-hidden rounded-xl border transition hover:brightness-110 active:scale-95"
+                style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.muted, borderRadius: 12, overflow: "hidden" }}
+                onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (canPreview) onPreview();
+                    else if (canInsert) onInsert();
+                }}
+            >
+                {reference.kind === "image" && reference.previewUrl ? (
+                    <img src={reference.previewUrl} alt={reference.title} className="block size-full rounded-xl object-cover" style={{ borderRadius: 12 }} draggable={false} />
+                ) : reference.kind === "video" && reference.previewUrl ? (
+                    <video src={reference.previewUrl} aria-label={reference.title} className="block size-full rounded-xl bg-black object-cover" style={{ borderRadius: 12 }} muted preload="metadata" />
+                ) : reference.kind === "text" ? (
+                    <span className="line-clamp-3 px-1.5 text-left text-[10px] leading-4">{reference.text || reference.title}</span>
+                ) : (
+                    <Icon className="m-auto size-4" />
+                )}
+            </button>
+            {reference.kind !== "text" ? (
+                <span className="pointer-events-none absolute bottom-1 left-1 grid size-4 place-items-center rounded-sm" style={{ background: theme.node.panel, color: theme.node.muted }}>
+                    <Icon className="size-2.5" />
+                </span>
+            ) : null}
+            {canRemove ? (
+                <button
+                    type="button"
+                    title="移除参考素材"
+                    aria-label={`移除${reference.label}`}
+                    className="absolute -right-1 -top-1 grid size-4 place-items-center rounded-full opacity-0 transition group-hover:opacity-100 focus:opacity-100"
+                    style={{ background: theme.node.panel, color: theme.node.muted, border: `1px solid ${theme.node.stroke}` }}
+                    onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onRemove();
+                    }}
+                >
+                    <X className="size-2.5" />
+                </button>
+            ) : null}
+        </div>
+    );
 }
 
 type PromptEditorProps = {

@@ -7,6 +7,8 @@ export type AgentAttachment = {
     type: string;
     name: string;
     storageKey?: string;
+    /** 工作流内媒体业务角色，由服务端按顺序解释。 */
+    role?: string;
 };
 
 export type CreationSettings = {
@@ -24,6 +26,14 @@ export type CreationSettings = {
     videoGenerationMode?: VideoGenerationMode;
     /** 画布 Agent 执行视频任务时固定使用的视频模型。 */
     videoModel?: string;
+    /** 视频工作流图片阶段固定使用的图片模型。 */
+    imageModel?: string;
+    /** 视频工作流图片阶段宽高比。 */
+    imageSize?: string;
+    /** 视频工作流图片阶段清晰度。 */
+    imageResolution?: string;
+    /** 视频工作流图片阶段画质。 */
+    imageQuality?: string;
 };
 
 export type GenerationStyleSnapshot = {
@@ -34,10 +44,12 @@ export type GenerationStyleSnapshot = {
 };
 
 export type AgentAction = {
-    type: "navigate";
+    type: "navigate" | "choice";
     label: string;
-    href: string;
+    href?: string;
     initialPrompt?: string;
+    /** type=choice 时的可点击选项，点击后其 value 作为用户消息发送；multiple=true 时整组支持多选（勾选多个后提交，value 用顿号拼接）；action=upload_image 时点击直接触发页面参考图上传、不发送消息 */
+    options?: { label: string; value: string; multiple?: boolean; action?: string }[];
 };
 
 export interface AgentChatParams {
@@ -49,6 +61,8 @@ export interface AgentChatParams {
     attachments?: AgentAttachment[];
     history?: AgentChatHistoryMessage[];
     creationSettings?: CreationSettings;
+    /** 选中技能ID（图片/视频页 skills 功能，可为空） */
+    skillId?: string;
 }
 
 export type AgentChatHistoryMessage = {

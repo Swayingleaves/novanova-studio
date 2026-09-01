@@ -6,6 +6,12 @@ export const VIDEO_GENERATION_MODE_OPTIONS: Array<{ value: VideoGenerationMode; 
     { value: "reference-to-video", label: "全能参考" },
 ];
 
+/** 管理员配置模型能力时可选择的全部视频模式。 */
+export const VIDEO_GENERATION_CAPABILITY_OPTIONS: Array<{ value: VideoGenerationMode; label: string }> = [
+    ...VIDEO_GENERATION_MODE_OPTIONS,
+    { value: "first-last-frame-to-video", label: "首尾帧原生生成" },
+];
+
 export const VIDEO_RESOLUTION_OPTIONS: Array<{ value: VideoResolution; label: string }> = [
     { value: "auto", label: "Auto" },
     { value: "480p", label: "480P" },
@@ -18,7 +24,7 @@ export const VIDEO_RESOLUTION_OPTIONS: Array<{ value: VideoResolution; label: st
 
 /** 返回视频生成模式的界面名称。 */
 export function videoGenerationModeLabel(mode: VideoGenerationMode): string {
-    return VIDEO_GENERATION_MODE_OPTIONS.find((item) => item.value === mode)?.label || "视频生成";
+    return VIDEO_GENERATION_CAPABILITY_OPTIONS.find((item) => item.value === mode)?.label || "视频生成";
 }
 
 export type VideoGenerationQuote =
@@ -104,6 +110,7 @@ export function createVideoBillingConfiguration(): VideoBillingConfiguration {
             "text-to-video": {},
             "image-to-video": {},
             "reference-to-video": {},
+            "first-last-frame-to-video": {},
         },
     };
 }

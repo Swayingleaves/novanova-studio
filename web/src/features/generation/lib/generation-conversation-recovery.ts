@@ -8,9 +8,11 @@ type ImageConversation = {
 
 type VideoConversation = {
     rounds: readonly {
-        result: {
+        result?: {
             status: string;
         };
+        stages?: readonly { status: string }[];
+        tasks?: readonly { status?: string }[];
     }[];
 };
 
@@ -23,7 +25,9 @@ export function hasPendingImageConversation(conversation: ImageConversation): bo
 }
 
 export function hasPendingVideoConversation(conversation: VideoConversation): boolean {
-    return conversation.rounds.some((round) => round.result.status === "pending");
+    return conversation.rounds.some((round) => round.result?.status === "pending"
+        || round.stages?.some((stage) => stage.status === "pending" || stage.status === "running")
+        || round.tasks?.some((task) => task.status === "pending" || task.status === "running"));
 }
 
 export function findLatestPendingConversation<Conversation extends ConversationWithUpdatedAt>(

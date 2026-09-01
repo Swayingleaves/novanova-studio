@@ -292,12 +292,10 @@ html[data-theme="dark"] {
     }
 
     .creation-composer-band {
-        position: absolute;
-        inset-inline: 0;
-        bottom: 0;
-        z-index: 10;
+        flex-shrink: 0;
         padding: 0 16px 18px;
         pointer-events: none;
+        position: relative;
     }
 
     .creation-composer-tray {
@@ -496,6 +494,108 @@ html[data-theme="dark"] {
     .creation-composer-submit.ant-btn:disabled:not(.ant-btn-loading) svg {
         color: var(--studio-muted) !important;
         opacity: 1 !important;
+    }
+
+    .creation-choice-button.ant-btn {
+        align-items: center;
+        background: var(--studio-action) !important;
+        border: 1px solid var(--studio-primary-line) !important;
+        border-radius: 999px !important;
+        box-shadow: 0 6px 14px var(--studio-primary-soft) !important;
+        color: var(--studio-action-foreground) !important;
+        display: inline-flex;
+        font-weight: 600;
+        height: 40px !important;
+        min-width: 128px;
+        padding-inline: 22px !important;
+        transition:
+            transform 0.15s ease,
+            box-shadow 0.15s ease,
+            background-color 0.15s ease,
+            border-color 0.15s ease;
+    }
+
+    .creation-choice-button.ant-btn:not(:disabled):hover,
+    .creation-choice-button.ant-btn:not(:disabled):focus-visible {
+        background: var(--studio-action-hover) !important;
+        border-color: var(--studio-action) !important;
+        box-shadow:
+            0 0 0 3px var(--studio-primary-soft),
+            0 10px 24px var(--studio-primary-soft) !important;
+        color: var(--studio-action-foreground) !important;
+        transform: translateY(-1px) scale(1.05);
+    }
+
+    .creation-choice-button.ant-btn:not(:disabled):active {
+        transform: translateY(0) scale(0.96);
+    }
+
+    .creation-choice-button.ant-btn:focus-visible {
+        outline: 2px solid var(--studio-primary-line);
+        outline-offset: 2px;
+    }
+
+    /* 多选模式：未选中项描边透明底弱化，避免整组荧光绿误导；选中项恢复荧光绿实心 */
+    .creation-choice-button.ant-btn.creation-choice-multi {
+        background: transparent !important;
+        border: 1.5px solid var(--studio-primary-line) !important;
+        box-shadow: none !important;
+        color: var(--studio-ink) !important;
+    }
+
+    .creation-choice-button.ant-btn.creation-choice-multi:not(:disabled):hover {
+        background: var(--studio-primary-soft) !important;
+        border-color: var(--studio-action) !important;
+        box-shadow: 0 0 0 3px var(--studio-primary-soft) !important;
+        color: var(--studio-ink) !important;
+        transform: none;
+    }
+
+    .creation-choice-button.ant-btn.creation-choice-multi.creation-choice-selected {
+        background: var(--studio-action) !important;
+        border-color: var(--studio-action) !important;
+        box-shadow: 0 6px 14px var(--studio-primary-soft) !important;
+        color: var(--studio-action-foreground) !important;
+    }
+
+    /* 历史记录只读选项：弱化、无交互 */
+    .creation-choice-button.ant-btn.creation-choice-readonly,
+    .creation-choice-button.ant-btn.creation-choice-readonly:disabled,
+    .creation-choice-button.ant-btn.creation-choice-readonly:disabled:hover {
+        background: var(--studio-primary-soft) !important;
+        border-color: var(--studio-primary-line) !important;
+        box-shadow: none !important;
+        color: var(--studio-muted) !important;
+        cursor: default;
+        opacity: 1;
+        transform: none;
+    }
+
+    .creation-choice-custom-button.ant-btn {
+        align-items: center;
+        background: transparent !important;
+        border: 1px dashed var(--studio-primary-line) !important;
+        border-radius: 999px !important;
+        box-shadow: none !important;
+        color: var(--studio-action) !important;
+        display: inline-flex;
+        font-weight: 500;
+        height: 40px !important;
+        min-width: 96px;
+        padding-inline: 18px !important;
+    }
+
+    .creation-choice-custom-button.ant-btn:not(:disabled):hover,
+    .creation-choice-custom-button.ant-btn:not(:disabled):focus-visible {
+        background: var(--studio-primary-soft) !important;
+        border-color: var(--studio-action) !important;
+        border-style: dashed !important;
+        color: var(--studio-action) !important;
+    }
+
+    .creation-choice-custom-button.ant-btn:focus-visible {
+        outline: 2px solid var(--studio-primary-line);
+        outline-offset: 2px;
     }
 
     .studio-title {

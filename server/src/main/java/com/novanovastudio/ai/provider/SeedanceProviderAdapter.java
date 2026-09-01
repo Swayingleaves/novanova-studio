@@ -118,7 +118,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
         Mono<List<String>> imageUrls = resolveReferenceUrls(context, imageReferences);
         Mono<List<String>> videoUrls = resolveReferenceUrls(context, videoReferences);
         return Mono.zip(imageUrls, videoUrls)
-                .flatMap(urls -> createSeedanceVideoTask(context, urls.getT1(), urls.getT2()));
+                .flatMap(urls -> createSeedanceVideoTask(context, urls.getT1(), urls.getT2(), imageReferences));
     }
 
     /**
@@ -145,10 +145,12 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
      * @return Mono<JSONObject> 视频生成结果
      */
     private Mono<JSONObject> createSeedanceVideoTask(
-            AiTaskExecutionContext context, List<String> imageUrls, List<String> videoUrls) {
+            AiTaskExecutionContext context, List<String> imageUrls, List<String> videoUrls,
+            List<AiTaskDtos.AiTaskMediaReference> imageReferences) {
         Map<String, Object> payload = buildRequestPayload(
                 context.model(), context.request().prompt(), context.request().parameters(), imageUrls, videoUrls,
-                context.request().videoGenerationMode());
+                context.request().videoGenerationMode(), imageReferences.stream()
+                        .map(AiTaskDtos.AiTaskMediaReference::role).toList());
         log.info("创建Seedance视频任务: taskId={}, model={}, imageCount={}, videoCount={}",
                 context.task().getId(), context.model(), imageUrls.size(), videoUrls.size());
         return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_TASK_PATH, com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
@@ -341,7 +343,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
         }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", model);
-        payload.put("content", buildContent(prompt, imageUrls, videoUrls, mode));
+        payload.put("content", buildContent(prompt, imageUrls, videoUrls, mode, List.of()));
         payload.put("ratio", normalizeRatio(AiTaskParameterReader.parameterText(parameters, "size", "adaptive")));
         payload.put("resolution", normalizeResolution(
                 AiTaskParameterReader.parameterText(parameters, "resolution", "720p")));
@@ -350,6 +352,26 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
         if (watermark != null) {
             payload.put("watermark", watermark);
         }
+        return payload;
+    }
+
+    /** 构建带媒体角色的Seedance请求体。 */
+    private static Map<String, Object> buildRequestPayload(
+            String model, String prompt, Map<String, Object> parameters,
+            List<String> imageUrls, List<String> videoUrls, String videoGenerationMode,
+            List<String> imageRoles) {
+        String mode = VideoGenerationMode.defaultIfBlank(videoGenerationMode);
+        if (!VideoGenerationMode.isSupported(mode)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持");
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("model", model);
+        payload.put("content", buildContent(prompt, imageUrls, videoUrls, mode, imageRoles));
+        payload.put("ratio", normalizeRatio(AiTaskParameterReader.parameterText(parameters, "size", "adaptive")));
+        payload.put("resolution", normalizeResolution(AiTaskParameterReader.parameterText(parameters, "resolution", "720p")));
+        payload.put("duration", parseDuration(AiTaskParameterReader.parameterText(parameters, "seconds", "5")));
+        Boolean watermark = booleanParameter(parameters, "watermark");
+        if (watermark != null) payload.put("watermark", watermark);
         return payload;
     }
 
@@ -363,6 +385,13 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
      */
     private static List<Map<String, Object>> buildContent(
             String prompt, List<String> imageUrls, List<String> videoUrls, String videoGenerationMode) {
+        return buildContent(prompt, imageUrls, videoUrls, videoGenerationMode, List.of());
+    }
+
+    /** 构建保留工作流媒体角色的Seedance多模态内容列表。 */
+    private static List<Map<String, Object>> buildContent(
+            String prompt, List<String> imageUrls, List<String> videoUrls, String videoGenerationMode,
+            List<String> imageRoles) {
         List<Map<String, Object>> content = new ArrayList<>();
         content.add(Map.of("type", "text", "text", referenceAwarePrompt(prompt, imageUrls.size(), videoUrls.size())));
         for (int index = 0; index < imageUrls.size(); index++) {
@@ -370,7 +399,9 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
             content.add(Map.of(
                     "type", "image_url",
                     "image_url", Map.of("url", imageUrl),
-                    "role", VideoGenerationMode.IMAGE_TO_VIDEO.equals(videoGenerationMode) && index == 0
+                    "role", index < imageRoles.size() && StringUtils.hasText(imageRoles.get(index))
+                            ? imageRoles.get(index)
+                            : VideoGenerationMode.IMAGE_TO_VIDEO.equals(videoGenerationMode) && index == 0
                             ? "first_frame" : "reference_image"
             ));
         }

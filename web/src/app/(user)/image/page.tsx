@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, CloudUpload, Download, FolderPlus, ImagePlus, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, TriangleAlert, Upload } from "lucide-react";
+import { BookOpen, CloudUpload, Download, FolderPlus, ImagePlus, Link2, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, TriangleAlert, Upload } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -17,8 +17,9 @@ import { requestCreditCost } from "@/features/generation/constants/credits";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
-import type { AgentActivityState, ChatMessageItem, ToolCallState } from "@/features/chat/types";
+import type { AgentActivityState, ChatAttachment, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
+import { ChoiceHistoryBar } from "@/features/generation/components/creation-message-thread";
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, mergePlanTaskActivityMessage, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { findLatestPendingConversation, hasPendingImageConversation } from "@/features/generation/lib/generation-conversation-recovery";
@@ -43,8 +44,9 @@ import { uploadRemoteObjectToStorage } from "@/features/storage/services/object-
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
+import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
-import { deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot } from "@/services/api/server";
+import { deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
 
 type GeneratedImage = {
     id: string;
@@ -74,6 +76,10 @@ type Round = {
     prompt: string;
     generationPrompt?: string;
     generationStyleSnapshots?: GenerationStyleSnapshot[];
+    /** 生成该轮时用户选择的技能快照 */
+    skill?: { id: number; name: string; targetType: string } | null;
+    /** 对话轮次中系统提供的选项（历史只读展示，不可再点击） */
+    choices?: { label: string; value: string; multiple?: boolean; action?: string }[];
     references: ReferenceImage[];
     config: RoundConfig;
     results: GenerationResult[];
@@ -97,6 +103,7 @@ type Conversation = GenerationLogStatusFields & {
 export default function ImagePage() {
     const { message, modal } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const uploadChoiceInputRef = useRef<HTMLInputElement>(null);
     const config = useConfigStore((state) => state.config);
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
@@ -119,6 +126,10 @@ export default function ImagePage() {
     const [selectedStyles, setSelectedStyles] = useState<CreationStyleOption[]>([]);
     const [styleLoading, setStyleLoading] = useState(false);
     const [styleError, setStyleError] = useState<string | null>(null);
+    const [skillOptions, setSkillOptions] = useState<SkillOption[]>([]);
+    const [selectedSkill, setSelectedSkill] = useState<SkillOption | null>(null);
+    const [skillLoading, setSkillLoading] = useState(false);
+    const [skillError, setSkillError] = useState<string | null>(null);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -157,6 +168,25 @@ export default function ImagePage() {
             })
             .finally(() => {
                 if (!cancelled) setStyleLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [message]);
+
+    useEffect(() => {
+        let cancelled = false;
+        setSkillLoading(true);
+        setSkillError(null);
+        void listSkills("image")
+            .then((result) => {
+                if (!cancelled) setSkillOptions(result.skills);
+            })
+            .catch((error) => {
+                if (!cancelled) setSkillError(error instanceof Error ? error.message : "技能加载失败");
+            })
+            .finally(() => {
+                if (!cancelled) setSkillLoading(false);
             });
         return () => {
             cancelled = true;
@@ -228,6 +258,7 @@ export default function ImagePage() {
     const { sessionId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, canChangeSession, resetSession, restoreSession } = useAgentChatSSE({
         entrySource: "imagePage",
         creationSettings: agentCreationSettings,
+        skillId: selectedSkill ? String(selectedSkill.id) : undefined,
         onTextDelta: (msgId, delta) => {
             setStreamingText((prev) => {
                 const next = prev?.messageId === msgId ? { ...prev, text: prev.text + delta } : { messageId: msgId, text: delta };
@@ -457,7 +488,7 @@ export default function ImagePage() {
         };
     }, [conversations, refreshConversations]);
 
-    const addReferences = async (files?: FileList | File[] | null) => {
+    const addReferences = async (files?: FileList | File[] | null): Promise<ReferenceImage[]> => {
         const imageFiles = Array.from(files || []).filter((file) => file.type.startsWith("image/"));
         const placeholders = imageFiles.map((file) => ({
             id: nanoid(),
@@ -466,29 +497,28 @@ export default function ImagePage() {
             dataUrl: URL.createObjectURL(file),
         }));
         if (!placeholders.length) {
-            return;
+            return [];
         }
         setReferences((current) => [...current, ...placeholders]);
         setUploadingReferenceIds((current) => [...current, ...placeholders.map((placeholder) => placeholder.id)]);
+        const uploaded: ReferenceImage[] = [];
         await Promise.all(
             placeholders.map(async (placeholder, index) => {
                 try {
                     const file = imageFiles[index];
                     const image = await uploadImage(file);
                     recordRecentReferenceImage(image.objectStorage?.url);
+                    const uploadedReference: ReferenceImage = {
+                        ...placeholder,
+                        name: file.name,
+                        type: image.mimeType,
+                        dataUrl: image.url,
+                        storageKey: image.storageKey,
+                        objectStorage: image.objectStorage,
+                    };
+                    uploaded.push(uploadedReference);
                     setReferences((current) =>
-                        current.map((reference) =>
-                            reference.id === placeholder.id
-                                ? {
-                                      ...placeholder,
-                                      name: file.name,
-                                      type: image.mimeType,
-                                      dataUrl: image.url,
-                                      storageKey: image.storageKey,
-                                      objectStorage: image.objectStorage,
-                                  }
-                                : reference,
-                        ),
+                        current.map((reference) => (reference.id === placeholder.id ? uploadedReference : reference)),
                     );
                 } catch (error) {
                     setReferences((current) => current.filter((reference) => reference.id !== placeholder.id));
@@ -499,6 +529,7 @@ export default function ImagePage() {
                 }
             }),
         );
+        return uploaded;
     };
 
     const generate = async () => {
@@ -513,7 +544,7 @@ export default function ImagePage() {
 
         // Add user message to chat
         setChatMessages((prev) => {
-            const next = [...prev, { id: nanoid(), role: "user" as const, text, generationStyles: selectedStyles }];
+            const next = [...prev, { id: nanoid(), role: "user" as const, text, generationStyles: selectedStyles, skill: selectedSkill }];
             chatMessagesRef.current = next;
             return next;
         });
@@ -529,13 +560,52 @@ export default function ImagePage() {
         setSelectedStyles([]);
     };
 
+    const handleActionReply = async (value: string) => {
+        if (isStreaming || isQueued) return;
+        const text = value.trim();
+        if (!text) return;
+        // 技能引导中选择生成比例时同步页面尺寸配置，保证最终生成任务按用户选择的比例（而非页面默认 1:1）
+        if (/^\d+:\d+$/.test(text)) {
+            updateConfig("size", text);
+        }
+        setChatMessages((prev) => {
+            const next = [...prev, { id: nanoid(), role: "user" as const, text, skill: selectedSkill }];
+            chatMessagesRef.current = next;
+            return next;
+        });
+        // 携带当前参考图附件：技能引导中用户上传的产品图需随确认消息送达，作为最终生成参考
+        const currentAttachments = imageReferenceAttachments(references);
+        await sendMessage(text, currentAttachments.length ? currentAttachments : undefined, agentCreationSettings);
+    };
+
+    /** 技能引导中"上传图片"按钮选择文件后：上传参考图并在对话区回显，随后自动发送带附件的消息。 */
+    const handleUploadFromChoice = async (files?: FileList | null) => {
+        if (!files?.length) return;
+        const uploaded = await addReferences(files);
+        if (!uploaded.length || isStreaming || isQueued) return;
+        const text = "已上传产品图片";
+        const attachments = imageReferenceAttachments(uploaded);
+        const chatAttachments = attachments.map((attachment, index) => ({
+            id: `uploaded-${index}-${attachment.url || "unknown"}`,
+            name: attachment.name,
+            url: attachment.url,
+            type: attachment.type,
+        }));
+        setChatMessages((prev) => {
+            const next = [...prev, { id: nanoid(), role: "user" as const, text, attachments: chatAttachments, skill: selectedSkill }];
+            chatMessagesRef.current = next;
+            return next;
+        });
+        await sendMessage(text, attachments.length ? attachments : undefined, agentCreationSettings);
+    };
+
     const regenerateRound = async (round: Round) => {
         if (!canChangeSession()) return;
         await regenerateImageRound(round, {
             fallbackModel: model,
             appendUserMessage: (text, generationStyles) => {
                 setChatMessages((prev) => {
-                    const next = [...prev, { id: nanoid(), role: "user" as const, text, generationStyles }];
+                    const next = [...prev, { id: nanoid(), role: "user" as const, text, generationStyles, skill: round.skill }];
                     chatMessagesRef.current = next;
                     return next;
                 });
@@ -556,6 +626,7 @@ export default function ImagePage() {
         setPrompt("");
         setReferences([]);
         setSelectedStyles([]);
+        setSelectedSkill(null);
         setSelectedIds([]);
         setManagementMode(false);
         setMobileSidebarOpen(false);
@@ -592,6 +663,7 @@ export default function ImagePage() {
         setPrompt("");
         setReferences([]);
         setSelectedStyles([]);
+        setSelectedSkill(null);
         setMobileSidebarOpen(false);
         restoreSession(conversation.id);
     };
@@ -616,6 +688,7 @@ export default function ImagePage() {
             setPrompt("");
             setReferences([]);
             setSelectedStyles([]);
+            setSelectedSkill(null);
             resetSession();
         }
         setSelectedIds([]);
@@ -633,7 +706,7 @@ export default function ImagePage() {
 
     const openImageResultDetail = (image: GeneratedImage, index: number, round: Round) => {
         setResultDetail({
-            media: { kind: "image", url: image.dataUrl, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
+            media: { kind: "image", url: image.dataUrl, ossUrl: image.objectStorage?.url, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
             prompt: round.prompt,
             generationPrompt: round.generationPrompt,
             references: round.references,
@@ -844,9 +917,18 @@ export default function ImagePage() {
         },
     ];
     // 聊天区已实时渲染的生成轮次不再进入历史区，避免同一轮重复展示；纯文本对话保留在聊天区。
+    // 当前会话激活时（chatMessages 非空），已落库的纯对话轮次也在聊天区渲染过，历史区一并跳过；
+    // 刷新或切换会话后 chatMessages 清空，历史区恢复完整展示（含纯对话轮次）。
     const liveRoundIds = new Set(chatMessages.filter((item) => item.role === "tool").map((item) => item.id));
-    const displayedConversation = activeConversation && liveRoundIds.size
-        ? { ...activeConversation, rounds: activeConversation.rounds.filter((round) => !liveRoundIds.has(round.id)) }
+    const hideDialogueRounds = chatMessages.length > 0;
+    const displayedConversation = activeConversation && (liveRoundIds.size || hideDialogueRounds)
+        ? {
+              ...activeConversation,
+              rounds: activeConversation.rounds.filter((round) => {
+                  if (liveRoundIds.has(round.id)) return false;
+                  return !(hideDialogueRounds && round.results.length === 0);
+              }),
+          }
         : activeConversation;
     const threadSections = displayedConversation
         ? buildImageThreadSections(displayedConversation, {
@@ -866,20 +948,22 @@ export default function ImagePage() {
         activeThinking,
         streamingText,
         toolCalls,
-        (data) =>
+        (data, round) =>
             renderResultImages(data, {
                 uploadingObjectStorageId,
                 onEdit: addResultToReferences,
                 onDownload: downloadImage,
                 onSaveAsset: saveResultToAssets,
                 onUploadObjectStorage: uploadResultToObjectStorage,
-                onOpenDetail: (image, index) =>
+                onOpenDetail: (image, index) => {
+                    const roundReferences = chatAttachmentsToImageReferences(round?.attachments);
                     setResultDetail({
-                        media: { kind: "image", url: image.dataUrl, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
-                        prompt,
-                        references,
+                        media: { kind: "image", url: image.dataUrl, ossUrl: image.objectStorage?.url, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
+                        prompt: round?.userText || prompt,
+                        references: roundReferences.length ? roundReferences : references,
                         onDownload: () => void downloadImage(image, index),
-                    }),
+                    });
+                },
             }),
         renderPendingImageToolCall,
     );
@@ -896,6 +980,17 @@ export default function ImagePage() {
                 className="hidden"
                 onChange={(event) => {
                     void addReferences(event.target.files);
+                    event.target.value = "";
+                }}
+            />
+            <input
+                ref={uploadChoiceInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(event) => {
+                    void handleUploadFromChoice(event.target.files);
                     event.target.value = "";
                 }}
             />
@@ -925,6 +1020,11 @@ export default function ImagePage() {
                 }}
                 thread={{
                     sections: allThreadSections,
+                    onActionReply: (value) => void handleActionReply(value),
+                    onUploadImage: () => {
+                        // 与页面"添加参考图"同一上传链路；上传完成后自动发送带附件消息，对话区回显图片
+                        uploadChoiceInputRef.current?.click();
+                    },
                     emptyState: (
                         <div className="flex h-full flex-col justify-center pb-28 pt-12">
                             <div className="relative mx-auto w-full max-w-5xl px-6 sm:px-10 lg:-left-4 lg:px-3">
@@ -953,6 +1053,10 @@ export default function ImagePage() {
                     selectedStyles,
                     styleLoading,
                     styleError,
+                    skillOptions,
+                    selectedSkill,
+                    skillLoading,
+                    skillError,
                     actions: composerActions,
                     running: isStreaming || activeConversationPending,
                     queued: isQueued,
@@ -963,6 +1067,8 @@ export default function ImagePage() {
                     onChange: setPrompt,
                     onStyleSelect: (style) => setSelectedStyles([style]),
                     onStyleRemove: (styleId) => setSelectedStyles((current) => current.filter((style) => style.id !== styleId)),
+                    onSkillSelect: (skill) => setSelectedSkill(skill),
+                    onSkillRemove: () => setSelectedSkill(null),
                     onPasteImages: (files) => void addReferences(files),
                     onSubmit: () => void generate(),
                     onStop: isStreaming || isQueued ? () => void cancelMessage() : undefined,
@@ -1090,6 +1196,19 @@ function readObjectStorage(value: unknown): ObjectStorageFile | undefined {
     return value as ObjectStorageFile;
 }
 
+/** 聊天区该轮用户消息的参考附件转换为详情弹窗使用的 ReferenceImage（仅取图片附件）。 */
+function chatAttachmentsToImageReferences(attachments: ChatAttachment[] | undefined): ReferenceImage[] {
+    if (!attachments?.length) return [];
+    return attachments
+        .filter((attachment) => Boolean(attachment.url.trim()) && (!attachment.type || attachment.type.startsWith("image/")))
+        .map((attachment) => ({
+            id: attachment.id,
+            name: attachment.name,
+            type: attachment.type || "image/*",
+            dataUrl: attachment.url,
+        }));
+}
+
 /** 根据图片设置生成 composer 按钮摘要，历史配置缺字段时沿用面板默认值。 */
 function buildImageSettingsSummary(settings: Partial<Pick<AiConfig, "quality" | "imageResolution" | "size">> & { resolution?: string }, modelConfig: AiConfig, model: string): string {
     return formatImageGenerationSettingsSummary({
@@ -1147,9 +1266,17 @@ function buildImageThreadSections(
             id: round.id,
             userText: round.prompt,
             userCopyText: formatGenerationStyleMessage(round.prompt, round.generationStyleSnapshots),
-            userAttachments: round.references.length || round.generationStyleSnapshots?.length
+            userAttachments: round.references.length || round.generationStyleSnapshots?.length || round.skill
                 ? (
                     <div className="space-y-2">
+                        {round.skill ? (
+                            <div className="flex flex-wrap gap-2">
+                                <span className="inline-flex max-w-52 items-center gap-1.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]" title={`技能：${round.skill.name}`}>
+                                    <Sparkles className="size-3.5 shrink-0 text-[var(--studio-action)]" />
+                                    <span className="truncate">{round.skill.name}</span>
+                                </span>
+                            </div>
+                        ) : null}
                         {renderGenerationStyleSnapshots(round.generationStyleSnapshots)}
                         {round.references.length ? renderImageRoundReferences(round) : null}
                     </div>
@@ -1158,6 +1285,7 @@ function buildImageThreadSections(
             statusText: buildImageStatusText(round),
             assistantText: buildImageAssistantText(round),
             activities: round.activities,
+            actionBar: round.choices?.length ? <ChoiceHistoryBar choices={round.choices} /> : undefined,
             resultContent: (
                 <div className="flex flex-wrap items-start gap-3">
                     {round.results.map((result, index) =>
@@ -1238,7 +1366,7 @@ function buildImageStatusText(round: Round): string {
         return canceledCount ? `已完成 ${successCount} 张，已停止 ${canceledCount} 张` : `已完成 ${successCount} 张`;
     }
     if (canceledCount) return "已停止生成";
-    return "生成失败";
+    return round.results.length ? "生成失败" : "";
 }
 
 function buildImageAssistantText(round: Round): string {
@@ -1253,7 +1381,7 @@ function buildImageAssistantText(round: Round): string {
     if (successCount && failedCount) return `已完成 ${successCount} 张，失败 ${failedCount} 张`;
     if (successCount) return canceledCount ? `已完成 ${successCount} 张，已停止 ${canceledCount} 张` : `已完成 ${successCount} 张`;
     if (canceledCount) return "已停止生成，你可以直接重新生成。";
-    return "生成失败";
+    return round.results.length ? "生成失败" : "";
 }
 
 function formatConversationTime(value: number): string {
@@ -1309,6 +1437,7 @@ function ResultCard({
 }) {
     const [loadedMeta, setLoadedMeta] = useState<{ width: number; height: number; bytes: number }>({ width: image.width, height: image.height, bytes: image.bytes });
     const [isDownloading, setIsDownloading] = useState(false);
+    const copyText = useCopyText();
     const displayWidth = image.width > 0 ? image.width : loadedMeta.width;
     const displayHeight = image.height > 0 ? image.height : loadedMeta.height;
     const displayBytes = image.bytes > 0 ? image.bytes : loadedMeta.bytes;
@@ -1385,6 +1514,9 @@ function ResultCard({
                     <span>请尽快下载生成结果，超时将无法下载</span>
                 </div>
                 <div className="flex gap-1">
+                    <Tooltip title="拷贝链接">
+                        <Button aria-label="拷贝链接" size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<Link2 className="size-3.5" />} onClick={() => copyText(image.objectStorage?.url || image.dataUrl, "链接已复制")} />
+                    </Tooltip>
                     <Tooltip title={image.objectStorage?.url ? "复制云储存地址" : "上传到云储存"}>
                         <Button size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" loading={uploadingObjectStorage} icon={<CloudUpload className="size-3.5" />} onClick={() => void onUploadObjectStorage(image, index)} />
                     </Tooltip>

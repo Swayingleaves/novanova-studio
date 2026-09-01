@@ -28,7 +28,20 @@ public final class AiTaskDtos {
      * @param storageKey String 后端媒体存储键
      * @param url String 公网URL或远程URL
      */
-    public record AiTaskMediaReference(String id, String name, String mimeType, String storageKey, String url) {
+    public record AiTaskMediaReference(String id, String name, String mimeType, String storageKey, String url, String role) {
+
+        /**
+         * 保留媒体角色扩展前的构造方式。
+         *
+         * @param id String 媒体标识
+         * @param name String 媒体名称
+         * @param mimeType String MIME类型
+         * @param storageKey String 存储键
+         * @param url String 访问地址
+         */
+        public AiTaskMediaReference(String id, String name, String mimeType, String storageKey, String url) {
+            this(id, name, mimeType, storageKey, url, null);
+        }
     }
 
     /**
@@ -115,6 +128,51 @@ public final class AiTaskDtos {
      * @param tasks List<AiGenerationTaskResponse> 任务列表
      */
     public record AiTaskListResponse(List<AiGenerationTaskResponse> tasks) {
+    }
+
+    /** 视频工作流报价请求。 */
+    public record VideoWorkflowQuoteRequest(String workflowType, String model, String imageModel,
+                                            String resolution, String seconds, String stage) {
+
+        /**
+         * 兼容未指定报价阶段的调用，默认计算完整工作流报价。
+         *
+         * @param workflowType String 工作流类型
+         * @param model String 视频模型
+         * @param imageModel String 图片模型
+         * @param resolution String 视频分辨率
+         * @param seconds String 视频时长
+         */
+        public VideoWorkflowQuoteRequest(String workflowType, String model, String imageModel,
+                                        String resolution, String seconds) {
+            this(workflowType, model, imageModel, resolution, seconds, null);
+        }
+    }
+
+    /** 视频工作流阶段报价。 */
+    public record VideoWorkflowStageQuote(String role, String displayName, String taskType, String model,
+                                          Integer taskCount, Integer credits, String videoGenerationMode) {
+
+        /**
+         * 创建不适用视频模式的阶段报价，保留非视频阶段的原有构造方式。
+         *
+         * @param role String 阶段角色
+         * @param displayName String 阶段展示名称
+         * @param taskType String 阶段任务类型
+         * @param model String 阶段模型
+         * @param taskCount Integer 阶段任务数量
+         * @param credits Integer 阶段积分
+         */
+        public VideoWorkflowStageQuote(String role, String displayName, String taskType, String model,
+                                       Integer taskCount, Integer credits) {
+            this(role, displayName, taskType, model, taskCount, credits, null);
+        }
+    }
+
+    /** 视频工作流报价响应。 */
+    public record VideoWorkflowQuoteResponse(Boolean available, String workflowType,
+                                             List<VideoWorkflowStageQuote> stages, Integer credits,
+                                             String reason, List<String> requiredCapabilities) {
     }
 
     /**

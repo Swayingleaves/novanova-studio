@@ -111,6 +111,21 @@ class StoryboardAgentServiceTest {
     }
 
     /**
+     * 多行视觉风格中的空行不应破坏固定提示词段落校验。
+     */
+    @Test
+    void shouldAllowMultilineVisualStyleWithBlankLines() {
+        String visualStyle = "暖琥珀色电影风格。\n\n主色调：低饱和暖棕色。\n\n光线：柔和自然光。";
+        List<StoryboardDtos.StoryboardShot> shots = List.of(shot("shot-1", 1));
+        StoryboardDtos.PromptCompositionResult result = new StoryboardDtos.PromptCompositionResult(List.of(
+                new StoryboardDtos.StoryboardPrompt("shot-1", formattedPrompt("旧书店中的来客", visualStyle))));
+
+        List<StoryboardDtos.StoryboardPrompt> prompts = invokePromptValidation(shots, visualStyle, result);
+
+        Assertions.assertTrue(prompts.getFirst().finalPrompt().endsWith("视觉风格：" + visualStyle));
+    }
+
+    /**
      * 最终提示词必须以固定八段格式回传，且保留用户输入的视觉风格。
      */
     @Test

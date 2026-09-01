@@ -219,7 +219,6 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
         payload.put("model", context.model());
         payload.put("prompt", context.request().prompt());
         payload.put("size", resolveAgnesRequestSize(context));
-        AiTaskParameterReader.putNonAuto(payload, context.request().parameters(), "quality");
         payload.put("extra_body", extraBody);
         return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/images/generations", com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .flatMap(response -> {

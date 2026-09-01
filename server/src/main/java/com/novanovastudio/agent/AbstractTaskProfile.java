@@ -51,7 +51,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
 
     /** 仅供生成轮次快照使用的内部参数键，不能进入渠道请求。 */
     private static final String INTERNAL_STYLE_SNAPSHOTS = "generationStyleSnapshots";
-
+    /** 仅供生成轮次快照使用的内部技能快照键，不能进入渠道请求。 */
+    private static final String INTERNAL_SKILL_SNAPSHOT = "internal_skill_snapshot";
     protected final AiTaskService aiTaskService;
 
     /** 生成记录持久化服务 */
@@ -172,6 +173,10 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         List<GenerationStyleDtos.GenerationStyleSnapshot> styleSnapshots = readStyleSnapshots(args.get(INTERNAL_STYLE_SNAPSHOTS));
         if (!styleSnapshots.isEmpty()) {
             params.put(INTERNAL_STYLE_SNAPSHOTS, JSON.toJSON(styleSnapshots));
+        }
+        Object skillSnapshot = args.get(INTERNAL_SKILL_SNAPSHOT);
+        if (skillSnapshot != null) {
+            params.put(INTERNAL_SKILL_SNAPSHOT, skillSnapshot);
         }
 
         if (executionRegistry.isCancelRequested(sessionId)) {
@@ -301,7 +306,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考素材必须是图片或视频"));
                         }
                         String name = StringUtils.hasText(attachment.name()) ? attachment.name() : "reference";
-                        return Mono.just(new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, "", referenceUrl));
+                            return Mono.just(new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, "", referenceUrl, attachment.role()));
                     }
                     return persistenceService.getMediaInfoForUser(userId, attachment.storageKey())
                             .map(media -> {
@@ -311,7 +316,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                     throw new BusinessException(ErrorCode.PARAM_INVALID, "参考素材必须是图片或视频");
                                 }
                                 String name = StringUtils.hasText(attachment.name()) ? attachment.name() : "reference";
-                                return new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, media.storageKey(), media.url());
+                                return new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, media.storageKey(), media.url(), attachment.role());
                             });
                 })
                 .collectList()
@@ -359,6 +364,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
             case VideoGenerationMode.TEXT_TO_VIDEO -> "文生视频";
             case VideoGenerationMode.IMAGE_TO_VIDEO -> "图生视频";
             case VideoGenerationMode.REFERENCE_TO_VIDEO -> "全能参考";
+            case VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO -> "首尾帧原生生成";
             default -> "视频";
         };
     }
@@ -740,6 +746,10 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         round.put("videoReferences", JSON.toJSON(videoReferences));
         if (!styleSnapshots.isEmpty()) {
             round.put(INTERNAL_STYLE_SNAPSHOTS, JSON.toJSON(styleSnapshots));
+        }
+        Object skillSnapshot = persistedParameters.remove(INTERNAL_SKILL_SNAPSHOT);
+        if (skillSnapshot != null) {
+            round.put("skill", skillSnapshot);
         }
         round.put("createdAt", createdAt);
         return round;

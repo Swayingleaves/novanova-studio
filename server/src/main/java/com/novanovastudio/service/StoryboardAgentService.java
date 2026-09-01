@@ -19,6 +19,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -49,6 +51,9 @@ public class StoryboardAgentService {
     /** 最终提示词固定段落标题。 */
     private static final List<String> FINAL_PROMPT_SECTION_TITLES = List.of(
             "镜头规格：", "画面内容：", "场景：", "道具：", "光影氛围：", "运镜：", "声音：", "视觉风格：");
+
+    /** 前七个固定段落之间的分隔符，允许空白字符但不影响最后的多行视觉风格。 */
+    private static final Pattern PROMPT_SECTION_SEPARATOR = Pattern.compile("\\n[ \\t]*\\n");
 
     /** 当前用户提供器。 */
     private final CurrentUserProvider currentUserProvider;
@@ -325,7 +330,7 @@ public class StoryboardAgentService {
         if (result == null || result.prompts() == null || result.prompts().size() != shots.size()) {
             throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回的提示词数量与镜头数量不一致");
         }
-        String normalizedVisualStyle = normalizeRequiredText(visualStyle, "视觉风格");
+        String normalizedVisualStyle = normalizeLineBreaks(normalizeRequiredText(visualStyle, "视觉风格"));
         Set<String> expectedShotIds = shots.stream().map(StoryboardDtos.StoryboardShot::id).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
         Map<String, String> promptByShotId = new LinkedHashMap<>();
         for (StoryboardDtos.StoryboardPrompt prompt : result.prompts()) {
@@ -358,22 +363,30 @@ public class StoryboardAgentService {
      */
     private boolean isFixedPromptFormat(String finalPrompt, StoryboardDtos.StoryboardShot shot, String visualStyle) {
         String normalizedPrompt = finalPrompt.replace("\r\n", "\n").replace('\r', '\n').trim();
-        String[] sections = normalizedPrompt.split("\n\\s*\n", -1);
-        if (sections.length != FINAL_PROMPT_SECTION_TITLES.size()) {
-            return false;
-        }
         String expectedSpecification = "镜头规格：" + shot.shotSize().trim() + "，" + shot.durationSeconds() + " 秒。";
-        if (!expectedSpecification.equals(sections[0])) {
-            return false;
-        }
-        for (int index = 1; index < FINAL_PROMPT_SECTION_TITLES.size() - 1; index++) {
-            String section = sections[index];
-            String title = FINAL_PROMPT_SECTION_TITLES.get(index);
-            if (!section.startsWith(title) || !StringUtils.hasText(section.substring(title.length()).trim())) {
+        int sectionStart = 0;
+        Matcher separatorMatcher = PROMPT_SECTION_SEPARATOR.matcher(normalizedPrompt);
+        for (int index = 0; index < FINAL_PROMPT_SECTION_TITLES.size() - 1; index++) {
+            separatorMatcher.region(sectionStart, normalizedPrompt.length());
+            if (!separatorMatcher.find()) {
                 return false;
             }
+            String rawSection = normalizedPrompt.substring(sectionStart, separatorMatcher.start());
+            if (!rawSection.equals(rawSection.trim())) {
+                return false;
+            }
+            String section = rawSection.trim();
+            if (index == 0 && !expectedSpecification.equals(section)) {
+                return false;
+            }
+            String title = FINAL_PROMPT_SECTION_TITLES.get(index);
+            if (index > 0 && (!section.startsWith(title) || !StringUtils.hasText(section.substring(title.length()).trim()))) {
+                return false;
+            }
+            sectionStart = separatorMatcher.end();
         }
-        return sections[sections.length - 1].equals("视觉风格：" + visualStyle);
+        String visualStyleSection = normalizedPrompt.substring(sectionStart).trim();
+        return visualStyleSection.equals("视觉风格：" + visualStyle);
     }
 
     /**
@@ -503,6 +516,16 @@ public class StoryboardAgentService {
             throw new BusinessException(ErrorCode.PARAM_MISSING, fieldName + "不能为空");
         }
         return normalized;
+    }
+
+    /**
+     * 统一文本换行符。
+     *
+     * @param value String 原始文本
+     * @return String 使用换行符的文本
+     */
+    private String normalizeLineBreaks(String value) {
+        return value.replace("\r\n", "\n").replace('\r', '\n');
     }
 
     /**

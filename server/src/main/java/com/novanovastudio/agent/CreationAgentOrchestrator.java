@@ -1,19 +1,20 @@
 package com.novanovastudio.agent;
 
 import com.alibaba.fastjson2.JSON;
-import com.novanovastudio.agent.dto.AgentAction;
-import com.novanovastudio.agent.dto.AgentChatRequest;
-import com.novanovastudio.agent.dto.CreationAgentChatResponse;
-import com.novanovastudio.agent.dto.AgentEvent;
-import com.novanovastudio.agent.dto.CreationPlan;
-import com.novanovastudio.agent.dto.CreationSettings;
-import com.novanovastudio.agent.dto.CreationTask;
-import com.novanovastudio.agent.dto.AgentSession;
+import com.alibaba.fastjson2.JSONObject;
+import com.novanovastudio.agent.dto.*;
+import com.novanovastudio.agent.workflow.VideoWorkflowContext;
+import com.novanovastudio.agent.workflow.VideoWorkflowConversationTurn;
+import com.novanovastudio.agent.workflow.VideoWorkflowDefinition;
+import com.novanovastudio.agent.workflow.VideoWorkflowRegistry;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.logging.MappedDiagnosticContext;
 import com.novanovastudio.service.AiTaskService;
+import com.novanovastudio.service.PersistenceService;
+import com.novanovastudio.service.SkillService;
 import com.novanovastudio.repository.AgentPlanRepository;
+import com.novanovastudio.repository.VideoWorkflowContextRepository;
 import com.novanovastudio.repository.CreationAgentRequestRepository;
 import com.novanovastudio.entity.CreationAgentRequest;
 import io.agentscope.core.ReActAgent;
@@ -36,6 +37,7 @@ import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 import reactor.core.Disposable;
 import reactor.core.publisher.Mono;
@@ -70,6 +72,10 @@ public class CreationAgentOrchestrator {
     private final AgentPlanRepository planRepository;
     /** AI任务服务 */
     private final AiTaskService aiTaskService;
+    /** 技能服务 */
+    private final SkillService skillService;
+    /** 持久化服务（对话生成记录） */
+    private final PersistenceService persistenceService;
     /** Java固定注册的画布工具 */
     private final AgentToolRegistry toolRegistry;
     /** 主Agent请求持久化仓储 */
@@ -78,6 +84,10 @@ public class CreationAgentOrchestrator {
     private final CreationAgentRequestDispatcher requestDispatcher;
     /** 主Agent请求Redis队列 */
     private final CreationAgentRequestQueue requestQueue;
+    /** 视频技能工作流注册表。 */
+    private VideoWorkflowRegistry videoWorkflowRegistry;
+    /** 视频技能工作流上下文仓储。 */
+    private VideoWorkflowContextRepository videoWorkflowContextRepository;
     /** 本实例正在执行的请求上下文 */
     private final Map<String, ActiveRequestExecution> activeRequests = new ConcurrentHashMap<>();
     /** 已领取请求的可取消订阅，用于及时中断前端工具等待 */
@@ -90,6 +100,40 @@ public class CreationAgentOrchestrator {
     private static final Pattern CANVAS_VIDEO_COMMAND_PATTERN = Pattern.compile(
             "^(?:生成|创建|绘制|制作)\\s*(?:一个|一段)?\\s*视频\\s*[：:]\\s*(.+)$",
             Pattern.DOTALL);
+    /** 从非结构化回复中识别中文引号包裹的候选项。 */
+    private static final Pattern WORKFLOW_QUOTED_CHOICE_PATTERN = Pattern.compile(
+            "[「『“\\\"]([^」』”\\\"]{1,30})[」』”\\\"]");
+    /** 从非结构化回复中识别编号或短横线列表候选项。 */
+    private static final Pattern WORKFLOW_LIST_CHOICE_PATTERN = Pattern.compile(
+            "(?m)(?:^|[：:])\\s*(?:\\d+[、.．)]|[-*])\\s*([^\\n；;。！？]{1,30})");
+    /** 从“选项：A、B、C”形式的回复中识别候选项。 */
+    private static final Pattern WORKFLOW_INLINE_CHOICE_PATTERN = Pattern.compile(
+            "(?:选项|方案|方式)\\s*[：:]\\s*([^\\n。！？]{1,100})");
+    /** 首尾帧工作流常见运镜候选项，用于模型承诺提供选项但未输出列表时补全按钮。 */
+    private static final List<String> FIRST_LAST_FRAME_CAMERA_CHOICES = List.of(
+            "缓慢推进", "缓慢拉远", "平稳横移", "轻微环绕");
+
+    /**
+     * 注入视频技能工作流注册表。
+     *
+     * @param registry VideoWorkflowRegistry 工作流注册表
+     * @return void 无返回值
+     */
+    @Autowired
+    void setVideoWorkflowRegistry(VideoWorkflowRegistry registry) {
+        this.videoWorkflowRegistry = registry;
+    }
+
+    /**
+     * 注入视频技能工作流上下文仓储。
+     *
+     * @param repository VideoWorkflowContextRepository 上下文仓储
+     * @return void 无返回值
+     */
+    @Autowired
+    void setVideoWorkflowContextRepository(VideoWorkflowContextRepository repository) {
+        this.videoWorkflowContextRepository = repository;
+    }
 
     /**
      * 判断请求是否应进入统一主Agent。
@@ -124,13 +168,139 @@ public class CreationAgentOrchestrator {
                     queuedRequest.setRequestData(JSON.toJSONString(snapshot));
                     queuedRequest.setStatus("queued");
                     queuedRequest.setCreatedAt(OffsetDateTime.now());
-                    return requestRepository.create(queuedRequest)
+                    return ensureGenerationLogForRequest(userId, session.id(), snapshot)
+                            .then(requestRepository.create(queuedRequest))
                             .then(Mono.fromRunnable(() -> eventEmitter.emit(userId,
                                     AgentEvent.queueStatus(session.id(), queuedRequest.getId(), "queued", "排队中"))))
                             .then(requestDispatcher.enqueue(queuedRequest))
                             .then(requestRepository.findStatusById(queuedRequest.getId())
                                     .defaultIfEmpty("queued")
                                     .map(status -> new CreationAgentChatResponse(session.id(), queuedRequest.getId(), status)));
+                });
+    }
+
+    /**
+     * 图片/视频入口发起对话时幂等创建对话生成记录，保证刷新后左侧会话列表可见。
+     * <p>
+     * 仅当会话尚无生成记录时初始化空记录；失败不阻断对话主流程。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String Agent 会话ID
+     * @param request AgentChatRequest 对话请求
+     * @return Mono<Void> 完成信号
+     */
+    private Mono<Void> ensureGenerationLogForRequest(Long userId, String sessionId, AgentChatRequest request) {
+        String logType = "videoPage".equals(request.entrySource()) ? "video" : "image";
+        if (!"imagePage".equals(request.entrySource()) && !"videoPage".equals(request.entrySource())) {
+            return Mono.empty();
+        }
+        String message = request.message() == null ? "" : request.message().trim();
+        String title = StringUtils.hasText(message)
+                ? (message.length() > 30 ? message.substring(0, 30) : message) : "新对话";
+        return Mono.defer(() -> {
+                    Mono<Void> save = persistenceService.ensureGenerationLog(userId, sessionId, logType, title);
+                    return save == null ? Mono.empty() : save;
+                })
+                .onErrorResume(exception -> {
+                    log.warn("创建对话生成记录失败: sessionId={}, 原因={}", sessionId, exception.getMessage());
+                    return Mono.empty();
+                });
+    }
+
+    /**
+     * 将技能引导/澄清问答轮次写入生成记录，保证历史会话能看到完整对话过程。
+     * <p>
+     * 生成轮次由任务执行链路（AbstractTaskProfile）保存，这里只保存纯对话（无生成任务）轮次；
+     * 仅在图片/视频入口生效，失败不阻断对话主流程。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 会话
+     * @param request AgentChatRequest 对话请求
+     * @param reply String 助手澄清回复
+     * @param choices List<AgentChoice> 该轮提供给用户的选项（历史记录只读展示，可为空）
+     * @return Mono<Void> 完成信号
+     */
+    private Mono<Void> saveClarificationRound(Long userId, AgentSession session, AgentChatRequest request, String reply,
+                                              List<AgentChoice> choices) {
+        String logType = "videoPage".equals(request.entrySource()) ? "video" : "image";
+        if (!"imagePage".equals(request.entrySource()) && !"videoPage".equals(request.entrySource())) {
+            return Mono.empty();
+        }
+        String message = request.message() == null ? "" : request.message().trim();
+        if (!StringUtils.hasText(message) && !StringUtils.hasText(reply)) {
+            return Mono.empty();
+        }
+        return resolveSkillSnapshot(request)
+                .flatMap(skill -> {
+                    JSONObject round = new JSONObject();
+                    round.put("id", UUID.randomUUID().toString());
+                    round.put("prompt", message);
+                    round.put("assistantText", reply == null ? "" : reply);
+                    round.put("config", new JSONObject());
+                    // 图片/视频入口的轮次结构不同：图片用 results 数组，视频用 result 单数对象
+                    if ("video".equals(logType)) {
+                        round.put("result", new JSONObject());
+                        if (request.creationSettings() != null) {
+                            round.put("config", JSON.toJSON(request.creationSettings()));
+                        }
+                        Object workflowType = skill.get("workflowType");
+                        if (workflowType instanceof String workflow && StringUtils.hasText(workflow)) {
+                            round.put("workflowType", workflowType);
+                            round.put("workflowStatus", "clarifying");
+                        }
+                    } else {
+                        round.put("results", List.of());
+                    }
+                    round.put("references", List.of());
+                    round.put("videoReferences", List.of());
+                    if (!skill.isEmpty()) {
+                        round.put("skill", skill);
+                    }
+                    if (choices != null && !choices.isEmpty()) {
+                        round.put("choices", JSON.toJSON(choices));
+                    }
+                    round.put("createdAt", System.currentTimeMillis());
+                    String title = StringUtils.hasText(message)
+                            ? (message.length() > 30 ? message.substring(0, 30) : message) : "新对话";
+                    Mono<Void> save = persistenceService.saveOrUpdateGenerationRound(userId, session.id(), logType, title, round);
+                    return Mono.defer(() -> save == null ? Mono.empty() : save)
+                            .onErrorResume(exception -> {
+                                log.warn("保存澄清问答轮次失败: sessionId={}, 原因={}", session.id(), exception.getMessage());
+                                return Mono.empty();
+                            });
+                });
+    }
+
+    /**
+     * 加载请求所选技能的快照（id/name/targetType），供对话轮次落库时展示。
+     *
+     * @param request AgentChatRequest 原始请求
+     * @return Mono<Map<String, Object>> 技能快照或空Map
+     */
+    private Mono<Map<String, Object>> resolveSkillSnapshot(AgentChatRequest request) {
+        if (request == null || !StringUtils.hasText(request.skillId())) {
+            return Mono.just(Map.of());
+        }
+        Long skillId;
+        try {
+            skillId = Long.valueOf(request.skillId());
+        } catch (NumberFormatException exception) {
+            return Mono.just(Map.of());
+        }
+        return skillService.findEnabledSkill(skillId)
+                .map(skill -> {
+                    Map<String, Object> snapshot = new LinkedHashMap<>();
+                    snapshot.put("id", skill.getId());
+                    snapshot.put("name", skill.getName());
+                    snapshot.put("targetType", skill.getTargetType());
+                    if (CreationEntrySource.VIDEO_PAGE.equals(request.entrySource()) && videoWorkflowRegistry != null) {
+                        videoWorkflowRegistry.resolveWorkflowType(skill.getSystemPrompt()).ifPresent(type -> snapshot.put("workflowType", type));
+                    }
+                    return snapshot;
+                })
+                .onErrorResume(exception -> {
+                    log.warn("加载技能快照失败: skillId={}, 原因={}", request.skillId(), exception.getMessage());
+                    return Mono.just(Map.of());
                 });
     }
 
@@ -282,20 +452,29 @@ public class CreationAgentOrchestrator {
                                             ActiveRequestExecution active) {
         return isRequestCancellationRequested(active)
                 .flatMap(canceled -> Boolean.TRUE.equals(canceled) ? Mono.empty() : modelFactory.defaultTextModel()
-                .flatMap(model -> Mono.justOrEmpty(buildStyleFollowUpPlan(session, request))
-                        .map(candidate -> planValidator.validate(candidate, request.entrySource(), request.creationSettings()))
-                        .switchIfEmpty(Mono.defer(() -> callMainAgent(userId, session, request, model)
-                                .map(candidate -> planValidator.validate(candidate, request.entrySource(), request.creationSettings()))
-                                .map(candidate -> resolveTaskPromptSources(candidate, session, request.message()))))
+                .flatMap(model -> resolveVideoWorkflowPlan(userId, session, request, model)
+                        .map(candidate -> validateCandidatePlan(candidate, request))
+                        .switchIfEmpty(Mono.justOrEmpty(buildStyleFollowUpPlan(session, request))
+                                .map(candidate -> validateCandidatePlan(candidate, request))
+                                .switchIfEmpty(Mono.defer(() -> callMainAgent(userId, session, request, model)
+                                        .map(candidate -> validateCandidatePlan(candidate, request))
+                                        .map(candidate -> resolveTaskPromptSources(candidate, session, request.message())))))
                         .flatMap(validated -> isRequestCancellationRequested(active).flatMap(canceledAfterPlanning -> {
                             if (Boolean.TRUE.equals(canceledAfterPlanning)) {
                                 return Mono.empty();
                             }
                             if (StringUtils.hasText(validated.clarificationQuestion())) {
-                                AgentAction action = Boolean.TRUE.equals(validated.canvasGuidance())
-                                        ? AgentAction.navigateToCanvas(request.message())
-                                        : null;
-                                return completeWithMessage(userId, session.id(), validated.clarificationQuestion(), action);
+                                AgentAction action;
+                                if (validated.choices() != null && !validated.choices().isEmpty()) {
+                                    action = AgentAction.choice(validated.choices());
+                                } else if (Boolean.TRUE.equals(validated.canvasGuidance())) {
+                                    action = AgentAction.navigateToCanvas(request.message());
+                                } else {
+                                    action = null;
+                                }
+                                String clarification = validated.clarificationQuestion();
+                                return saveClarificationRound(userId, session, request, clarification, validated.choices())
+                                        .then(completeWithMessage(userId, session.id(), clarification, action));
                             }
                             CreationPlan plan = composeFollowUpPrompts(withServerPlanId(validated, session, request.message()),
                                     session, request.message());
@@ -311,11 +490,539 @@ public class CreationAgentOrchestrator {
                                                     .then(planExecutor.execute(userId, session.id(), plan, request, model)
                                                             .contextWrite(context -> MappedDiagnosticContext.put(
                                                                     context, MappedDiagnosticContext.PLAN_ID, plan.planId())))
-                                                    .flatMap(summary -> {
-                                                        active.setCompletion(summary.status(), summary.message());
-                                                        return completeWithMessage(userId, session.id(), summary.message());
-                                                    }));
+                                                            .flatMap(summary -> {
+                                                                active.setCompletion(summary.status(), summary.message());
+                                                                return isWorkflowImageStagePlan(plan)
+                                                                        ? completeImageStageWithConfirmation(userId, session, request, plan, summary)
+                                                                        : completeWithMessage(userId, session.id(), summary.message());
+                                                            }));
                         }))));
+    }
+
+    /**
+     * 使用当前请求设置校验计划，并在澄清恢复场景下保留上下文中的原始设置。
+     *
+     * @param candidate CreationPlan 待校验计划
+     * @param request AgentChatRequest 当前请求
+     * @return CreationPlan 校验后的计划
+     */
+    private CreationPlan validateCandidatePlan(CreationPlan candidate, AgentChatRequest request) {
+        CreationSettings settings = candidate != null && StringUtils.hasText(candidate.workflowType())
+                ? candidate.creationSettings()
+                : request != null && request.creationSettings() != null
+                ? request.creationSettings() : candidate == null ? null : candidate.creationSettings();
+        return planValidator.validate(candidate, request.entrySource(), settings);
+    }
+
+    /**
+     * 识别或恢复视频技能工作流。
+     * <p>
+     * 已存在澄清上下文时优先恢复，通过工作流对话助手多轮理解意图并起草提示词，
+     * 用户确认草案后才构建执行计划，避免中途回复被解释为普通视频请求。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 当前会话
+     * @param request AgentChatRequest 当前请求
+     * @param model Model 默认文本模型
+     * @return Mono<CreationPlan> 工作流计划；未选择工作流时为空
+     */
+    private Mono<CreationPlan> resolveVideoWorkflowPlan(Long userId, AgentSession session, AgentChatRequest request, Model model) {
+        if (!CreationEntrySource.VIDEO_PAGE.equals(request.entrySource()) || videoWorkflowRegistry == null
+                || videoWorkflowContextRepository == null) {
+            return Mono.empty();
+        }
+        return videoWorkflowContextRepository.findImagePendingConfirmByUserAndSession(userId, session.id())
+                .filter(context -> videoWorkflowRegistry.isRegistered(context.workflowType()))
+                .flatMap(context -> handleWorkflowImageConfirmTurn(userId, session, request, model, context))
+                .switchIfEmpty(Mono.defer(() -> videoWorkflowContextRepository.findPendingConfirmByUserAndSession(userId, session.id())
+                        .filter(context -> videoWorkflowRegistry.isRegistered(context.workflowType()))
+                        .flatMap(context -> handleWorkflowDraftTurn(userId, session, request, model, context))
+                        .switchIfEmpty(Mono.defer(() -> videoWorkflowContextRepository.findClarifyingByUserAndSession(userId, session.id())
+                                .filter(context -> videoWorkflowRegistry.isRegistered(context.workflowType()))
+                                .flatMap(context -> handleWorkflowClarifyingTurn(userId, session, request, model, context))
+                                .switchIfEmpty(Mono.defer(() -> startWorkflowConversation(userId, session, request, model)))))));
+    }
+
+    /**
+     * 处理图片待确认阶段的用户回复。
+     * <p>用户确认使用已生成图片时构建视频阶段计划；用户要求修改提示词时回到澄清阶段重新起草。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 当前会话
+     * @param request AgentChatRequest 当前请求
+     * @param model Model 默认文本模型
+     * @param context VideoWorkflowContext 图片待确认的工作流上下文
+     * @return Mono<CreationPlan> 视频阶段计划或澄清计划
+     */
+    private Mono<CreationPlan> handleWorkflowImageConfirmTurn(Long userId, AgentSession session, AgentChatRequest request,
+                                                              Model model, VideoWorkflowContext context) {
+        VideoWorkflowDefinition definition = videoWorkflowRegistry.require(context.workflowType());
+        String message = request.message() == null ? "" : request.message().trim();
+        // 用户确认使用已生成图片生成视频
+        if ("用这些图片生成视频".equals(message) || "确认生成".equals(message)) {
+            return videoWorkflowContextRepository.confirmGeneratedImages(context)
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
+                            "视频工作流图片确认状态已变化，请重新发送")))
+                    // 图片确认轮用户可能调整了视频比例/清晰度/时长，用最新设置构建视频阶段计划
+                    .map(confirmed -> request.creationSettings() != null
+                            ? definition.buildVideoStagePlan(confirmed.withCreationSettings(request.creationSettings()))
+                            : definition.buildVideoStagePlan(confirmed));
+        }
+        // 用户要求修改提示词：回到澄清阶段，由对话助手重新起草
+        return videoWorkflowContextRepository.reopenImages(context)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
+                        "视频工作流状态已变化，请重新发送")))
+                .flatMap(reopened -> handleWorkflowClarifyingTurn(userId, session, request, model, reopened));
+    }
+
+    /**
+     * 判断计划是否为工作流图片阶段计划（仅图片任务且工作流支持图片二次确认）。
+     *
+     * @param plan CreationPlan 创作计划
+     * @return boolean 是否图片阶段计划
+     */
+    private boolean isWorkflowImageStagePlan(CreationPlan plan) {
+        if (plan == null || !StringUtils.hasText(plan.workflowType()) || videoWorkflowRegistry == null
+                || plan.tasks() == null || plan.tasks().isEmpty()) {
+            return false;
+        }
+        VideoWorkflowDefinition definition;
+        try {
+            definition = videoWorkflowRegistry.require(plan.workflowType());
+        } catch (BusinessException exception) {
+            return false;
+        }
+        return definition.supportsImageConfirmation()
+                && plan.tasks().stream().allMatch(task -> "image".equals(task.taskType()));
+    }
+
+    /**
+     * 图片阶段计划执行完成后收尾：保存首帧/尾帧图片到工作流上下文并推送图片确认询问。
+     * <p>
+     * 仅当图片阶段全部成功时保存图片结果并推进上下文到图片待确认状态；
+     * 阶段失败时直接推送失败消息，由用户决定下一步。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 当前会话
+     * @param request AgentChatRequest 原始请求
+     * @param plan CreationPlan 图片阶段计划
+     * @param summary CreationPlanExecutor.PlanExecutionSummary 计划汇总
+     * @return Mono<Void> 完成信号
+     */
+    private Mono<Void> completeImageStageWithConfirmation(Long userId, AgentSession session, AgentChatRequest request,
+                                                          CreationPlan plan,
+                                                          CreationPlanExecutor.PlanExecutionSummary summary) {
+        if (!"success".equals(summary.status())) {
+            return completeWithMessage(userId, session.id(), summary.message());
+        }
+        return saveImageStageResults(userId, session.id(), plan, summary)
+                .then(saveImageConfirmationRound(userId, session, request, plan))
+                .then(completeWithMessage(userId, session.id(),
+                        "首帧和尾帧图片已生成，请确认是否用这些图片生成视频，或修改提示词重新生成。",
+                        AgentAction.choice(List.of(
+                                new AgentChoice("用这些图片生成视频", "用这些图片生成视频", null, null),
+                                new AgentChoice("修改提示词重新生成", "修改提示词重新生成", null, null)))));
+    }
+
+    /**
+     * 从图片阶段执行结果提取首帧/尾帧图片并保存到工作流上下文（推进到图片待确认状态）。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param plan CreationPlan 图片阶段计划
+     * @param summary CreationPlanExecutor.PlanExecutionSummary 计划汇总
+     * @return Mono<Void> 保存完成信号
+     */
+    private Mono<Void> saveImageStageResults(Long userId, String sessionId, CreationPlan plan,
+                                             CreationPlanExecutor.PlanExecutionSummary summary) {
+        if (videoWorkflowContextRepository == null) {
+            return Mono.empty();
+        }
+        Map<String, Object> images = new LinkedHashMap<>();
+        for (CreationPlanExecutor.TaskExecutionResult result : summary.tasks()) {
+            if (result == null || !"success".equals(result.status()) || result.data() == null) {
+                continue;
+            }
+            String role = plan.tasks().stream()
+                    .filter(task -> task.taskId().equals(result.taskId()))
+                    .map(CreationTask::taskRole).filter(StringUtils::hasText).findFirst().orElse(null);
+            if (!StringUtils.hasText(role) || images.containsKey(role)) {
+                continue;
+            }
+            List<JSONObject> media = CreationPlanExecutor.mediaItems(result.data());
+            if (media.isEmpty()) {
+                continue;
+            }
+            JSONObject first = media.get(0);
+            JSONObject image = new JSONObject();
+            image.put("url", first.getString("url"));
+            String storageKey = first.getString("storageKey");
+            if (!StringUtils.hasText(storageKey)) storageKey = first.getString("key");
+            image.put("storageKey", storageKey);
+            image.put("mimeType", first.getString("mimeType"));
+            images.put(role, image);
+        }
+        if (images.isEmpty()) {
+            return Mono.empty();
+        }
+        return videoWorkflowContextRepository.findLatestByUserAndSession(userId, sessionId)
+                .flatMap(context -> videoWorkflowContextRepository.saveGeneratedImages(context, images))
+                .then();
+    }
+
+    /**
+     * 保存图片确认询问轮次到生成记录，保证刷新/切换会话后历史区可见。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 当前会话
+     * @param request AgentChatRequest 原始请求
+     * @param plan CreationPlan 图片阶段计划
+     * @return Mono<Void> 保存完成信号
+     */
+    private Mono<Void> saveImageConfirmationRound(Long userId, AgentSession session, AgentChatRequest request,
+                                                  CreationPlan plan) {
+        if (persistenceService == null) {
+            return Mono.empty();
+        }
+        Mono<VideoWorkflowContext> contextMono = videoWorkflowContextRepository == null
+                ? Mono.justOrEmpty((VideoWorkflowContext) null)
+                : videoWorkflowContextRepository.findLatestByUserAndSession(userId, session.id());
+        return contextMono.flatMap(context -> Mono.justOrEmpty(context.draftedPrompts())).defaultIfEmpty(Map.of()).flatMap(draftedPrompts -> {
+            JSONObject round = new JSONObject();
+            round.put("id", UUID.randomUUID().toString());
+            round.put("prompt", request.message());
+            round.put("assistantText", "首帧和尾帧图片已生成，请确认是否用这些图片生成视频，或修改提示词重新生成。");
+            round.put("config", JSON.toJSON(plan.creationSettings()));
+            round.put("workflowType", plan.workflowType());
+            round.put("workflowStatus", "image_pending_confirm");
+            if (!draftedPrompts.isEmpty()) round.put("draftedPrompts", JSON.toJSON(draftedPrompts));
+            round.put("references", List.of());
+            round.put("videoReferences", List.of());
+            round.put("result", new JSONObject());
+            round.put("choices", JSON.toJSON(List.of(
+                    new AgentChoice("用这些图片生成视频", "用这些图片生成视频", null, null),
+                    new AgentChoice("修改提示词重新生成", "修改提示词重新生成", null, null))));
+            round.put("createdAt", System.currentTimeMillis());
+            String title = StringUtils.hasText(request.message())
+                    ? (request.message().length() > 30 ? request.message().substring(0, 30) : request.message()) : "新对话";
+            Mono<Void> save = persistenceService.saveOrUpdateGenerationRound(userId, session.id(), "video", title, round);
+            return save == null ? Mono.empty() : save;
+        }).onErrorResume(exception -> {
+            log.warn("保存图片确认轮次失败: sessionId={}, 原因={}", session.id(), exception.getMessage());
+            return Mono.empty();
+        });
+    }
+
+    /**
+     * 处理提示词草案待确认阶段的用户回复。
+     * <p>用户确认后从草案构建执行计划；用户要求修改时重新起草；其余回复维持待确认状态继续对话。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 当前会话
+     * @param request AgentChatRequest 当前请求
+     * @param model Model 默认文本模型
+     * @param context VideoWorkflowContext 待确认的工作流上下文
+     * @return Mono<CreationPlan> 工作流计划或澄清计划
+     */
+    private Mono<CreationPlan> handleWorkflowDraftTurn(Long userId, AgentSession session, AgentChatRequest request,
+                                                       Model model, VideoWorkflowContext context) {
+        VideoWorkflowDefinition definition = videoWorkflowRegistry.require(context.workflowType());
+        return callWorkflowConversationAgent(userId, session, request, model, definition, context, "pending_confirm")
+                .flatMap(turn -> {
+                    if (turn.isConfirm() && context.hasDraftedPrompts()) {
+                        // 确认草案：推进到已规划状态；两阶段工作流执行图片阶段计划，一次性工作流执行完整计划。
+                        // 用户确认草案时可能已在卡片调整图片模型/比例/清晰度/画质，先合并最新请求设置，
+                        // 否则图片阶段会沿用上下文初始默认值（如 1:1/2K），用户选择不生效。
+                        VideoWorkflowContext withSettings = request.creationSettings() != null
+                                ? context.withCreationSettings(request.creationSettings())
+                                : context;
+                        return videoWorkflowContextRepository.confirmDrafts(withSettings)
+                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
+                                        "视频工作流确认状态已变化，请重新发送")))
+                                .map(confirmed -> definition.supportsImageConfirmation()
+                                        ? definition.buildImageStagePlan(confirmed)
+                                        : definition.buildPlan(confirmed));
+                    }
+                    if (turn.isDraft() && definition.isDraftComplete(turn.prompts())) {
+                        VideoWorkflowContext withSettings = request.creationSettings() != null
+                                ? context.withAnswer(request.message()).withCreationSettings(request.creationSettings())
+                                : context.withAnswer(request.message());
+                        return videoWorkflowContextRepository.saveDrafts(withSettings, turn.prompts())
+                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
+                                        "视频工作流状态已变化，请重新发送")))
+                                .map(updated -> workflowClarificationPlan(updated, definition,
+                                        definition.draftDisplayMessage(turn.message(), updated.draftedPrompts()), turn.choices()));
+                    }
+                    return Mono.just(workflowClarificationPlan(context, definition, turn.message(), turn.choices()));
+                });
+    }
+
+    /**
+     * 处理意图澄清阶段的用户回复。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 当前会话
+     * @param request AgentChatRequest 当前请求
+     * @param model Model 默认文本模型
+     * @param context VideoWorkflowContext 澄清中的工作流上下文
+     * @return Mono<CreationPlan> 澄清计划或待确认草案计划
+     */
+    private Mono<CreationPlan> handleWorkflowClarifyingTurn(Long userId, AgentSession session, AgentChatRequest request,
+                                                            Model model, VideoWorkflowContext context) {
+        VideoWorkflowDefinition definition = videoWorkflowRegistry.require(context.workflowType());
+        return callWorkflowConversationAgent(userId, session, request, model, definition, context, "clarifying")
+                .flatMap(turn -> turn.isDraft() && definition.isDraftComplete(turn.prompts())
+                        ? videoWorkflowContextRepository.saveDrafts(request.creationSettings() != null
+                                ? context.withAnswer(request.message()).withCreationSettings(request.creationSettings())
+                                : context.withAnswer(request.message()), turn.prompts())
+                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
+                                        "视频工作流状态已变化，请重新发送")))
+                                .map(updated -> workflowClarificationPlan(updated, definition,
+                                        definition.draftDisplayMessage(turn.message(), updated.draftedPrompts()), turn.choices()))
+                        : Mono.just(workflowClarificationPlan(context, definition, turn.message(), turn.choices())));
+    }
+
+    /**
+     * 根据本轮选择的技能创建工作流上下文并开始多轮意图对话。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 当前会话
+     * @param request AgentChatRequest 当前请求
+     * @param model Model 默认文本模型
+     * @return Mono<CreationPlan> 首轮对话计划；非工作流技能时为空
+     */
+    private Mono<CreationPlan> startWorkflowConversation(Long userId, AgentSession session, AgentChatRequest request, Model model) {
+        if (!StringUtils.hasText(request.skillId())) return Mono.empty();
+        Long skillId;
+        try {
+            skillId = Long.valueOf(request.skillId());
+        } catch (NumberFormatException exception) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "技能ID不合法"));
+        }
+        return skillService.findEnabledSkill(skillId).flatMap(skill -> {
+            if (!"video".equals(skill.getTargetType())) {
+                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "当前技能不支持视频生成页面"));
+            }
+            return Mono.justOrEmpty(videoWorkflowRegistry.resolveWorkflowType(skill.getSystemPrompt())
+                    .map(workflowType -> {
+                        VideoWorkflowDefinition definition = videoWorkflowRegistry.require(workflowType);
+                        Map<String, Object> skillSnapshot = new LinkedHashMap<>();
+                        skillSnapshot.put("id", skill.getId());
+                        skillSnapshot.put("name", skill.getName());
+                        skillSnapshot.put("targetType", skill.getTargetType());
+                        skillSnapshot.put("systemPrompt", skill.getSystemPrompt());
+                        skillSnapshot.put("workflowType", workflowType);
+                        VideoWorkflowContext context = new VideoWorkflowContext(UUID.randomUUID().toString(), workflowType,
+                                skillSnapshot, request.message(), definition.clarificationQuestion(), List.of(), Map.of(),
+                                Map.of(), request.creationSettings(), "clarifying", 1);
+                        return context;
+                    }))
+                    .flatMap(context -> videoWorkflowContextRepository.create(userId, session.id(), context)
+                            .then(callWorkflowConversationAgent(userId, session, request, model,
+                                    videoWorkflowRegistry.require(context.workflowType()), context, "clarifying"))
+                            .flatMap(turn -> {
+                                VideoWorkflowDefinition definition = videoWorkflowRegistry.require(context.workflowType());
+                                if (turn.isDraft() && definition.isDraftComplete(turn.prompts())) {
+                                    return videoWorkflowContextRepository.saveDrafts(context, turn.prompts())
+                                            .map(updated -> workflowClarificationPlan(updated, definition,
+                                                    definition.draftDisplayMessage(turn.message(), updated.draftedPrompts()), turn.choices()));
+                                }
+                                return Mono.just(workflowClarificationPlan(context, definition, turn.message(), turn.choices()));
+                            }));
+        });
+    }
+
+    /**
+     * 调用工作流对话助手，多轮理解意图并起草阶段提示词。
+     *
+     * @param userId Long 用户ID
+     * @param session AgentSession 当前会话
+     * @param request AgentChatRequest 当前请求
+     * @param model Model 默认文本模型
+     * @param definition VideoWorkflowDefinition 工作流定义
+     * @param context VideoWorkflowContext 工作流上下文
+     * @param phase String 当前对话阶段：clarifying意图澄清、pending_confirm草案待确认
+     * @return Mono<VideoWorkflowConversationTurn> 对话助手结构化结果
+     */
+    private Mono<VideoWorkflowConversationTurn> callWorkflowConversationAgent(Long userId, AgentSession session,
+                                                                              AgentChatRequest request, Model model,
+                                                                              VideoWorkflowDefinition definition,
+                                                                              VideoWorkflowContext context, String phase) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("workflowType", context.workflowType());
+        input.put("phase", phase);
+        input.put("originalRequest", context.originalRequest());
+        input.put("collectedAnswers", context.answers() == null ? List.of() : context.answers());
+        if (context.hasDraftedPrompts()) {
+            input.put("draftedPrompts", context.draftedPrompts());
+        }
+        input.put("history", historyForAgent(request, session));
+        input.put("message", request.message());
+        ReActAgent agent = agentFactory.workflowConversationAgent(model, workflowConversationPrompt(definition, context));
+        return agent.call(JSON.toJSONString(input), VideoWorkflowConversationTurn.class, RuntimeContext.builder()
+                        .sessionId(session.id() + ":workflow")
+                        .userId(String.valueOf(userId))
+                        .put(AgentThinkingEventMiddleware.ThinkingEventContext.class,
+                                new AgentThinkingEventMiddleware.ThinkingEventContext(userId, session.id()))
+                        .build())
+                .timeout(Duration.ofSeconds(60))
+                .map(message -> parseWorkflowConversationTurn(message, definition.clarificationQuestion()))
+                .doFinally(signal -> agent.close());
+    }
+
+    /**
+     * 组装工作流对话助手系统提示词：服务端固定契约 + 技能正文自定义要求（剔除工作流标识行）。
+     *
+     * @param definition VideoWorkflowDefinition 工作流定义
+     * @param context VideoWorkflowContext 工作流上下文
+     * @return String 对话助手系统提示词
+     */
+    private String workflowConversationPrompt(VideoWorkflowDefinition definition, VideoWorkflowContext context) {
+        Object skillPrompt = context.skillSnapshot() == null ? null : context.skillSnapshot().get("systemPrompt");
+        String skillBody = skillPrompt instanceof String text && StringUtils.hasText(text)
+                ? text.replaceAll("(?m)^\\s*workflow\\s*:.*$", "").trim() : "";
+        String prompt = StringUtils.hasText(skillBody)
+                ? definition.conversationSystemPrompt() + "\n\n技能自定义要求（不得改变上方JSON输出契约）：\n" + skillBody
+                : definition.conversationSystemPrompt();
+        return prompt + "\n\n运行时交互约束（优先级高于技能自定义文案）：本轮需要用户在两个或以上候选项中选择时，必须在结构化结果的 choices 数组中返回全部选项，以便前端渲染为可直接点击的按钮，禁止只在 message 中罗列多个候选项。";
+    }
+
+    /**
+     * 解析对话助手的结构化结果，失败时降级为普通回复，避免单轮解析失败中断整个对话。
+     *
+     * @param message Msg 模型输出消息
+     * @param fallbackReply String 全部解析失败时使用的默认回复
+     * @return VideoWorkflowConversationTurn 对话轮次结果
+     */
+    private VideoWorkflowConversationTurn parseWorkflowConversationTurn(io.agentscope.core.message.Msg message,
+                                                                        String fallbackReply) {
+        if (message.hasStructuredData()) {
+            try {
+                VideoWorkflowConversationTurn turn = message.getStructuredData(VideoWorkflowConversationTurn.class);
+                if (turn != null && StringUtils.hasText(turn.action())) {
+                    String structuredText = (StringUtils.hasText(message.getTextContent())
+                            ? message.getTextContent() : "") + "\n" + (turn.message() == null ? "" : turn.message());
+                    return normalizeWorkflowChoices(turn, structuredText);
+                }
+            } catch (Exception exception) {
+                log.warn("工作流对话助手结构化结果转换失败: {}", exception.getMessage());
+            }
+        }
+        String text = message.getTextContent() == null ? "" : message.getTextContent().trim();
+        VideoWorkflowConversationTurn fromText = parseWorkflowTurnFromText(text);
+        if (fromText != null) {
+            return normalizeWorkflowChoices(fromText, text);
+        }
+        // 文本本身就是无法解析的JSON片段时不能原样展示给用户
+        String reply = StringUtils.hasText(text) && !text.startsWith("{") ? text
+                : StringUtils.hasText(fallbackReply) ? fallbackReply : "请继续描述你的想法";
+        return normalizeWorkflowChoices(
+                new VideoWorkflowConversationTurn(VideoWorkflowConversationTurn.ACTION_REPLY, reply, null), reply);
+    }
+
+    /**
+     * 从模型原始文本中提取JSON结构化结果，兼容Markdown代码围栏等包裹格式。
+     *
+     * @param text String 模型原始文本
+     * @return VideoWorkflowConversationTurn 对话轮次结果，无法提取时为null
+     */
+    private VideoWorkflowConversationTurn parseWorkflowTurnFromText(String text) {
+        if (!StringUtils.hasText(text)) {
+            return null;
+        }
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        if (start < 0 || end <= start) {
+            return null;
+        }
+        try {
+            VideoWorkflowConversationTurn turn = JSON.parseObject(text.substring(start, end + 1),
+                    VideoWorkflowConversationTurn.class);
+            return turn != null && StringUtils.hasText(turn.action()) ? turn : null;
+        } catch (Exception exception) {
+            return null;
+        }
+    }
+
+    /**
+     * 规范化工作流对话选项，并兼容模型未按JSON契约返回纯文本的情况。
+     * <p>
+     * 只有回复明确表达“选项/方案/运镜候选”且能识别出至少两个候选项时才生成按钮；
+     * 首尾帧回复若明确承诺提供其他运镜选项但列表为空，则使用工作流内置的常见运镜项补齐。
+     *
+     * @param turn VideoWorkflowConversationTurn 模型结构化结果
+     * @param text String 模型可见文本
+     * @return VideoWorkflowConversationTurn 带规范化选项的结果
+     */
+    private VideoWorkflowConversationTurn normalizeWorkflowChoices(VideoWorkflowConversationTurn turn, String text) {
+        if (turn == null) return null;
+        List<AgentChoice> choices = turn.choices() == null ? List.of() : turn.choices().stream()
+                .filter(choice -> choice != null && StringUtils.hasText(choice.label()) && StringUtils.hasText(choice.value()))
+                .toList();
+        if (choices.isEmpty() && VideoWorkflowConversationTurn.ACTION_REPLY.equalsIgnoreCase(turn.action())) {
+            choices = extractWorkflowChoices(text);
+        }
+        if (choices.equals(turn.choices())) return turn;
+        return new VideoWorkflowConversationTurn(turn.action(), turn.message(), turn.prompts(), choices);
+    }
+
+    /**
+     * 从工作流助手纯文本中提取可点击候选项。
+     *
+     * @param text String 模型回复文本
+     * @return List<AgentChoice> 至少两个候选项时返回按钮列表，否则返回空列表
+     */
+    static List<AgentChoice> extractWorkflowChoices(String text) {
+        if (!StringUtils.hasText(text)) return List.of();
+        boolean choiceIntent = text.contains("选项") || text.contains("候选") || text.contains("请选择")
+                || text.contains("可选") || text.contains("方案");
+        if (!choiceIntent) return List.of();
+        LinkedHashSet<String> labels = new LinkedHashSet<>();
+        Matcher quotedMatcher = WORKFLOW_QUOTED_CHOICE_PATTERN.matcher(text);
+        while (quotedMatcher.find()) addWorkflowChoiceLabel(labels, quotedMatcher.group(1));
+        Matcher listMatcher = WORKFLOW_LIST_CHOICE_PATTERN.matcher(text);
+        while (listMatcher.find()) addWorkflowChoiceLabel(labels, listMatcher.group(1));
+        Matcher inlineMatcher = WORKFLOW_INLINE_CHOICE_PATTERN.matcher(text);
+        while (inlineMatcher.find()) {
+            for (String candidate : inlineMatcher.group(1).split("[、，,或/]+")) {
+                addWorkflowChoiceLabel(labels, candidate);
+            }
+        }
+        boolean cameraAlternatives = text.contains("运镜")
+                && (text.contains("其他") || text.contains("选项") || text.contains("可选"));
+        if (cameraAlternatives && labels.size() == 1) {
+            FIRST_LAST_FRAME_CAMERA_CHOICES.forEach(label -> addWorkflowChoiceLabel(labels, label));
+        }
+        if (labels.size() < 2) return List.of();
+        return labels.stream().map(label -> new AgentChoice(label, label, false, null)).toList();
+    }
+
+    /** 将候选项清理后加入有序集合，避免把整段说明误渲染为按钮。 */
+    private static void addWorkflowChoiceLabel(Set<String> labels, String rawLabel) {
+        if (rawLabel == null) return;
+        String label = rawLabel.trim().replaceFirst("^[：:、，,。；;\\s]+", "");
+        if (label.length() > 30 || label.isBlank() || label.contains("可以看看") || label.contains("也可以")) return;
+        labels.add(label);
+    }
+
+    /**
+     * 构造工作流对话轮次的澄清计划，草案齐备时附带确认选项。
+     *
+     * @param context VideoWorkflowContext 工作流上下文
+     * @param definition VideoWorkflowDefinition 工作流定义
+     * @param replyMessage String 助手回复文本
+     * @param turnChoices List<AgentChoice> 本轮需要用户选择的候选项
+     * @return CreationPlan 澄清计划
+     */
+    private CreationPlan workflowClarificationPlan(VideoWorkflowContext context, VideoWorkflowDefinition definition,
+                                                   String replyMessage, List<AgentChoice> turnChoices) {
+        String message = StringUtils.hasText(replyMessage) ? replyMessage : definition.clarificationQuestion();
+        List<AgentChoice> choices = context.hasDraftedPrompts() ? List.of(
+                new AgentChoice("确认生成", "确认生成", null, null),
+                new AgentChoice("调整提示词", "我想调整提示词", null, null))
+                : turnChoices == null ? List.of() : turnChoices;
+        return new CreationPlan("", "视频技能工作流", CreationEntrySource.VIDEO_PAGE,
+                "正在补充工作流信息", message, false, context.creationSettings(), List.of(), choices, context.workflowType());
     }
 
     /**
@@ -347,7 +1054,7 @@ public class CreationAgentOrchestrator {
         }
         if (tasks.isEmpty()) return null;
         return new CreationPlan("", "按已选风格重新生成", CreationEntrySource.CANVAS,
-                "按已选风格重新生成画布内容", "", false, request.creationSettings(), tasks);
+                "按已选风格重新生成画布内容", "", false, request.creationSettings(), tasks, List.of());
     }
 
     /** 判断是否为不含额外创作要求的通用风格命令。 */
@@ -454,7 +1161,7 @@ public class CreationAgentOrchestrator {
                 .map(historicalSettings -> new AgentChatRequest(
                         request.sessionId(), request.entrySource(), request.message(), request.canvasSnapshot(),
                         request.references(), request.attachments(), request.history(),
-                        mergeRetrySettings(request.creationSettings(), historicalSettings)))
+                        mergeRetrySettings(request.creationSettings(), historicalSettings), request.skillId()))
                 .defaultIfEmpty(request);
     }
 
@@ -475,7 +1182,7 @@ public class CreationAgentOrchestrator {
                 && !historical.generationStyleSnapshots().isEmpty() ? null : historical.generationStyleIdsByType();
         return new CreationSettings(current.model(), current.size(), current.resolution(), current.quality(),
                 current.count(), current.seconds(), current.watermark(), styleIds, historical.generationStyleSnapshots(),
-                styleIdsByType, current.videoGenerationMode(), current.videoModel());
+                styleIdsByType, current.videoGenerationMode(), current.videoModel(), current.imageModel());
     }
 
     /**
@@ -502,24 +1209,58 @@ public class CreationAgentOrchestrator {
      * @return Mono<CreationPlan> 候选计划
      */
     private Mono<CreationPlan> callMainAgent(Long userId, AgentSession session, AgentChatRequest request, Model model) {
-        ReActAgent agent = agentFactory.mainAgent(model);
-        Map<String, Object> input = new java.util.LinkedHashMap<>();
-        input.put("entrySource", request.entrySource());
-        input.put("message", request.message());
-        input.put("history", historyForAgent(request, session));
-        input.put("promptCandidates", promptSources(session, request.message()));
-        input.put("creationSettings", request.creationSettings());
-        input.put("generationStyleSelection", generationStyleSelection(request));
-        input.put("styleFollowUp", isStyleFollowUpRequest(request));
-        input.put("retryRequested", isRetryMessage(request.message()));
-        if (isRetryMessage(request.message())) {
-            input.put("retryPrompt", latestRetryPrompt(session));
-        }
-        input.put("attachmentCount", request.attachments() == null ? 0 : request.attachments().size());
-        input.put("canvasSnapshot", CreationEntrySource.CANVAS.equals(request.entrySource()) ? request.canvasSnapshot() : Map.of());
-        input.put("canvasTools", CreationEntrySource.CANVAS.equals(request.entrySource())
-                ? toolRegistry.allTools().stream().filter(com.novanovastudio.agent.dto.AgentTool::frontend).toList()
-                : List.of());
+        return Mono.defer(() -> {
+            ReActAgent agent;
+            Map<String, Object> input = new java.util.LinkedHashMap<>();
+            input.put("entrySource", request.entrySource());
+            input.put("message", request.message());
+            input.put("history", historyForAgent(request, session));
+            input.put("promptCandidates", promptSources(session, request.message()));
+            input.put("creationSettings", request.creationSettings());
+            input.put("generationStyleSelection", generationStyleSelection(request));
+            input.put("styleFollowUp", isStyleFollowUpRequest(request));
+            input.put("retryRequested", isRetryMessage(request.message()));
+            if (isRetryMessage(request.message())) {
+                input.put("retryPrompt", latestRetryPrompt(session));
+            }
+            input.put("attachmentCount", request.attachments() == null ? 0 : request.attachments().size());
+            input.put("canvasSnapshot", CreationEntrySource.CANVAS.equals(request.entrySource()) ? request.canvasSnapshot() : Map.of());
+            input.put("canvasTools", CreationEntrySource.CANVAS.equals(request.entrySource())
+                    ? toolRegistry.allTools().stream().filter(com.novanovastudio.agent.dto.AgentTool::frontend).toList()
+                    : List.of());
+            if (StringUtils.hasText(request.skillId())) {
+                Long skillId;
+                try {
+                    skillId = Long.valueOf(request.skillId());
+                } catch (NumberFormatException exception) {
+                    return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "技能ID不合法"));
+                }
+                return skillService.findEnabledSkill(skillId)
+                        .map(skill -> {
+                            input.put("skillId", request.skillId());
+                            input.put("skill", Map.of(
+                                    "name", skill.getName(),
+                                    "targetType", skill.getTargetType(),
+                                    "instructions", skill.getSystemPrompt()));
+                            return agentFactory.mainAgent(model, skill.getSystemPrompt());
+                        })
+                        .flatMap(skillAgent -> callMainAgentWith(skillAgent, userId, session, input));
+            }
+            agent = agentFactory.mainAgent(model);
+            return callMainAgentWith(agent, userId, session, input);
+        });
+    }
+
+    /**
+     * 使用指定主Agent实例调用模型并解析计划。
+     *
+     * @param agent ReActAgent 主Agent实例
+     * @param userId Long 用户ID
+     * @param session AgentSession 当前会话
+     * @param input Map<String, Object> 模型输入
+     * @return Mono<CreationPlan> 候选计划
+     */
+    private Mono<CreationPlan> callMainAgentWith(ReActAgent agent, Long userId, AgentSession session, Map<String, Object> input) {
         return agent.call(JSON.toJSONString(input), CreationPlan.class, RuntimeContext.builder()
                         .sessionId(session.id() + ":main")
                         .userId(String.valueOf(userId))
@@ -579,11 +1320,12 @@ public class CreationAgentOrchestrator {
             if (!StringUtils.hasText(prompt)) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, "主Agent任务引用的用户原始提示词不存在");
             }
-            return new CreationTask(task.taskId(), task.taskType(), task.action(), prompt, task.dependsOn(),
-                    task.toolName(), task.toolArguments());
+            return new CreationTask(task.taskId(), task.taskType(), task.action(), prompt, task.sourcePromptId(), task.dependsOn(),
+                    task.toolName(), task.toolArguments(), task.taskRole());
         }).toList();
         return new CreationPlan(plan.planId(), plan.intent(), plan.entrySource(), plan.summary(),
-                plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(), tasks);
+                plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(), tasks,
+                plan.choices(), plan.workflowType());
     }
 
     /**
@@ -732,7 +1474,7 @@ public class CreationAgentOrchestrator {
             if ("edit".equals(task.action())) {
                 return new CreationTask(task.taskId(), task.taskType(), task.action(),
                         currentMessage, task.sourcePromptId(), task.dependsOn(),
-                        task.toolName(), task.toolArguments());
+                        task.toolName(), task.toolArguments(), task.taskRole());
             }
             if (!historyPrompts.contains(task.prompt())) {
                 return task;
@@ -742,10 +1484,11 @@ public class CreationAgentOrchestrator {
                     + currentMessage + "\n\n原文：\n" + task.prompt();
             return new CreationTask(task.taskId(), task.taskType(), task.action(),
                     mergedPrompt, task.sourcePromptId(), task.dependsOn(),
-                    task.toolName(), task.toolArguments());
+                    task.toolName(), task.toolArguments(), task.taskRole());
         }).toList();
         return new CreationPlan(plan.planId(), plan.intent(), plan.entrySource(), plan.summary(),
-                plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(), tasks);
+                plan.clarificationQuestion(), plan.canvasGuidance(), plan.creationSettings(), tasks,
+                plan.choices(), plan.workflowType());
     }
 
     /**
@@ -758,6 +1501,10 @@ public class CreationAgentOrchestrator {
      * @throws BusinessException 任务提示词不是用户逐字输入时抛出
      */
     CreationPlan withServerPlanId(CreationPlan plan, AgentSession session, String currentMessage) {
+        if (StringUtils.hasText(plan.workflowType())) {
+            return new CreationPlan(UUID.randomUUID().toString(), plan.intent(), plan.entrySource(), plan.summary(), "",
+                    false, plan.creationSettings(), plan.tasks(), List.of(), plan.workflowType());
+        }
         Set<String> userPrompts = new java.util.HashSet<>();
         userPrompts.add(currentMessage);
         session.messages().stream()
@@ -775,12 +1522,12 @@ public class CreationAgentOrchestrator {
                         throw new BusinessException(ErrorCode.PARAM_INVALID, "主Agent任务提示词必须逐字来自用户消息");
                     }
                     return new com.novanovastudio.agent.dto.CreationTask(
-                            task.taskId(), task.taskType(), task.action(), taskPrompt, task.dependsOn(),
-                            task.toolName(), task.toolArguments());
+                            task.taskId(), task.taskType(), task.action(), taskPrompt, task.sourcePromptId(), task.dependsOn(),
+                            task.toolName(), task.toolArguments(), task.taskRole());
                 })
                 .toList();
         return new CreationPlan(UUID.randomUUID().toString(), plan.intent(), plan.entrySource(), plan.summary(), "",
-                false, plan.creationSettings(), tasks);
+                false, plan.creationSettings(), tasks, List.of(), plan.workflowType());
     }
 
     /**
@@ -860,6 +1607,10 @@ public class CreationAgentOrchestrator {
         }
         if (!StringUtils.hasText(request.message())) {
             throw new BusinessException(ErrorCode.PARAM_MISSING, "用户消息不能为空");
+        }
+        if (StringUtils.hasText(request.skillId())
+                && !"imagePage".equals(request.entrySource()) && !"videoPage".equals(request.entrySource())) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "技能仅支持图片或视频生成页面");
         }
     }
 
@@ -1165,7 +1916,8 @@ public class CreationAgentOrchestrator {
      */
     private AgentChatRequest requestWithSessionId(AgentChatRequest request, String sessionId) {
         return new AgentChatRequest(sessionId, request.entrySource(), request.message(), request.canvasSnapshot(),
-                request.references(), request.attachments(), request.history(), request.creationSettings());
+                request.references(), request.attachments(), request.history(), request.creationSettings(),
+                request.skillId());
     }
 
     /**

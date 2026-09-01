@@ -20,6 +20,7 @@ import java.util.Map;
  * @param attachments    List<Attachment> 附件（图片参考等，generation profile 使用）
  * @param history        List<HistoryMessage> 前端对话历史
  * @param creationSettings CreationSettings 页面选择的生成设置
+ * @param skillId String 选中技能ID（图片/视频页 skills 功能，可为空）
  */
 public record AgentChatRequest(
     String sessionId,
@@ -29,7 +30,8 @@ public record AgentChatRequest(
     List<Reference> references,
     List<Attachment> attachments,
     List<HistoryMessage> history,
-    CreationSettings creationSettings
+    CreationSettings creationSettings,
+    String skillId
 ) {
 
     /**
@@ -70,8 +72,21 @@ public record AgentChatRequest(
      * @param type String MIME类型
      * @param name String 文件名
      * @param storageKey String 后端媒体存储键
+     * @param role String 工作流媒体业务角色
      */
-    public record Attachment(String url, String type, String name, String storageKey) {
+    public record Attachment(String url, String type, String name, String storageKey, String role) {
+
+        /**
+         * 保留媒体角色扩展前的构造方式。
+         *
+         * @param url String 访问地址
+         * @param type String MIME类型
+         * @param name String 文件名
+         * @param storageKey String 后端媒体存储键
+         */
+        public Attachment(String url, String type, String name, String storageKey) {
+            this(url, type, name, storageKey, null);
+        }
     }
 
     /**

@@ -378,7 +378,7 @@ public class PersistenceService {
         }
         Map<String, Map<String, Integer>> normalizedPrices = new LinkedHashMap<>();
         for (String mode : List.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO,
-                VideoGenerationMode.REFERENCE_TO_VIDEO)) {
+                VideoGenerationMode.REFERENCE_TO_VIDEO, VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO)) {
             Map<String, Integer> prices = inputPrices.get(mode);
             Map<String, Integer> normalizedModePrices = new LinkedHashMap<>();
             if (prices != null) {
@@ -401,7 +401,7 @@ public class PersistenceService {
     }
 
     /**
-     * 规范化模型细能力，并限制视频模型只能声明三个明确的视频生成模式。
+     * 规范化模型细能力，并限制视频模型只能声明明确的视频生成模式。
      *
      * @param modelType String 模型类型
      * @param capabilities List<String> 原始细能力列表
@@ -417,7 +417,7 @@ public class PersistenceService {
             return normalized;
         }
         if (normalized.stream().anyMatch(capability -> !VideoGenerationMode.isSupported(capability))) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频模型能力只支持文生视频、图生视频和全能参考");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频模型能力包含不支持的生成模式");
         }
         return normalized;
     }
@@ -495,7 +495,8 @@ public class PersistenceService {
             return Map.of();
         }
         Set<String> allowedKeys = "video".equals(modelType)
-                ? Set.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO, VideoGenerationMode.REFERENCE_TO_VIDEO)
+                ? Set.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO, VideoGenerationMode.REFERENCE_TO_VIDEO,
+                VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO)
                 : Set.of("text-to-image", "image-to-image");
         Map<String, PersistenceDtos.CustomModelGroupConfig> normalized = new LinkedHashMap<>();
         for (Map.Entry<String, PersistenceDtos.CustomModelGroupConfig> entry : input.entrySet()) {
@@ -1032,6 +1033,36 @@ public class PersistenceService {
                             userId, sessionId, logType, log.getString("title"), log, existingRecord);
                     return repository.saveGenerationLog(record);
                 });
+    }
+
+    /**
+     * 幂等创建空对话生成记录，保证"发起一次对话即有一条记录"。
+     * <p>
+     * 仅当会话尚无生成记录时初始化（id=sessionId，rounds 为空），
+     * 后续生成轮次仍由 saveOrUpdateGenerationRound 在原记录上追加。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String Agent 会话ID（复用为生成记录ID）
+     * @param logType String 记录类型（image / video）
+     * @param title String 对话标题（首次创建时使用）
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> ensureGenerationLog(Long userId, String sessionId, String logType, String title) {
+        return repository.findGenerationLogById(userId, sessionId)
+                .hasElement()
+                .flatMap(exists -> Boolean.TRUE.equals(exists)
+                        ? Mono.empty()
+                        : Mono.defer(() -> {
+                            JSONObject log = new JSONObject();
+                            log.put("id", sessionId);
+                            log.put("title", title);
+                            log.put("createdAt", System.currentTimeMillis());
+                            log.put("updatedAt", System.currentTimeMillis());
+                            log.put("rounds", new JSONArray());
+                            PersistenceRecords.GenerationLogRecord record = buildGenerationLogRecord(
+                                    userId, sessionId, logType, title, log, new PersistenceRecords.GenerationLogRecord());
+                            return repository.saveGenerationLog(record);
+                        }));
     }
 
     /**

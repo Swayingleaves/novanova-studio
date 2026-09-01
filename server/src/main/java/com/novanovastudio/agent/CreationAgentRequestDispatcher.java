@@ -111,6 +111,8 @@ public class CreationAgentRequestDispatcher {
             recoveryDisposable.dispose();
         }
         recoveryDisposable = Flux.interval(leaseRenewalInterval())
+                // interval 固定频率产 tick，数据库繁忙时 concatMap 消费不及会背压溢出导致轮询终止；丢弃来不及处理的 tick 即可（幂等状态检查）
+                .onBackpressureDrop()
                 .concatMap(ignored -> recoverRequests().onErrorResume(exception -> {
                     log.error("恢复主Agent请求失败", exception);
                     return Mono.empty();
@@ -225,6 +227,7 @@ public class CreationAgentRequestDispatcher {
         Disposable executionDisposable = null;
         try {
             renewDisposable = Flux.interval(leaseRenewalInterval())
+                    .onBackpressureDrop()
                     .concatMap(ignored -> requestQueue.renewActiveRequest(userId, entrySource, requestId)
                             .flatMap(renewed -> Boolean.TRUE.equals(renewed) ? Mono.empty()
                                     : interruptLostLeaseRequest(userId, entrySource, requestId))
@@ -234,6 +237,7 @@ public class CreationAgentRequestDispatcher {
                             }))
                 .subscribe();
             cancellationDisposable = Flux.interval(Duration.ZERO, Duration.ofSeconds(1))
+                    .onBackpressureDrop()
                     .concatMap(ignored -> requestQueue.isCancelRequested(requestId)
                             .filter(Boolean::booleanValue)
                             .flatMap(cancelRequested -> orchestratorProvider.getObject().stopClaimedExecution(requestId)))
@@ -379,6 +383,7 @@ public class CreationAgentRequestDispatcher {
     private Mono<Void> recoverWithRenewedClaim(CreationAgentRequestQueue.RecoveryClaim recoveryClaim, String message) {
         Mono<Void> recovery = recoverClaim(recoveryClaim, message);
         Mono<Void> lostRecoveryClaim = Flux.interval(leaseRenewalInterval())
+                .onBackpressureDrop()
                 .concatMap(ignored -> requestQueue.renewRecoveryClaim(recoveryClaim))
                 .filter(renewed -> !Boolean.TRUE.equals(renewed))
                 .next()

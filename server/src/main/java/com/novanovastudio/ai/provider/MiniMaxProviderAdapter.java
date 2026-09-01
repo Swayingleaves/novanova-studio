@@ -126,7 +126,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
                 AiTaskParameterReader.safeReferences(context.request().videoReferences());
         validateReferenceCounts(imageReferences.size(), videoReferences.size());
         return Mono.zip(resolveReferenceUrls(context, imageReferences), resolveReferenceUrls(context, videoReferences))
-                .flatMap(urls -> createMiniMaxVideoTask(context, urls.getT1(), urls.getT2()));
+                .flatMap(urls -> createMiniMaxVideoTask(context, urls.getT1(), urls.getT2(), imageReferences));
     }
 
     /**
@@ -152,10 +152,12 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
      * @return Mono<JSONObject> 视频生成结果
      */
     private Mono<JSONObject> createMiniMaxVideoTask(
-            AiTaskExecutionContext context, List<String> imageUrls, List<String> videoUrls) {
+            AiTaskExecutionContext context, List<String> imageUrls, List<String> videoUrls,
+            List<AiTaskDtos.AiTaskMediaReference> imageReferences) {
         Map<String, Object> payload = buildRequestPayload(
                 context.model(), context.request().prompt(), context.request().parameters(), imageUrls, videoUrls,
-                context.request().videoGenerationMode());
+                context.request().videoGenerationMode(), imageReferences.stream()
+                        .map(AiTaskDtos.AiTaskMediaReference::role).toList());
         log.info("创建MiniMax H3视频任务: taskId={}, model={}, imageCount={}, videoCount={}",
                 context.task().getId(), context.model(), imageUrls.size(), videoUrls.size());
         return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_GENERATION_PATH, com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
@@ -360,7 +362,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
         }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", MINIMAX_H3_MODEL);
-        payload.put("content", buildContent(prompt, imageUrls, videoUrls, imageToVideo));
+        payload.put("content", buildContent(prompt, imageUrls, videoUrls, imageToVideo, List.of()));
         payload.put("resolution", normalizeResolution(
                 AiTaskParameterReader.parameterText(parameters, "resolution", "768p")));
         payload.put("duration", parseDuration(AiTaskParameterReader.parameterText(parameters, "seconds", "5")));
@@ -369,6 +371,30 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
         if (watermark != null) {
             payload.put("aigc_watermark", watermark);
         }
+        return payload;
+    }
+
+    /** 构建带媒体角色的MiniMax请求体。 */
+    private static Map<String, Object> buildRequestPayload(
+            String model, String prompt, Map<String, Object> parameters,
+            List<String> imageUrls, List<String> videoUrls, String videoGenerationMode,
+            List<String> imageRoles) {
+        validateModel(model);
+        validatePrompt(prompt);
+        validateReferenceCounts(imageUrls.size(), videoUrls.size());
+        String mode = VideoGenerationMode.defaultIfBlank(videoGenerationMode);
+        if (!VideoGenerationMode.isSupported(mode)) throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持");
+        boolean imageToVideo = VideoGenerationMode.IMAGE_TO_VIDEO.equals(mode);
+        String ratio = imageToVideo ? "adaptive" : normalizeRatio(AiTaskParameterReader.parameterText(parameters, "size", "16:9"));
+        if (imageUrls.isEmpty() && videoUrls.isEmpty() && "adaptive".equals(ratio)) throw new BusinessException(ErrorCode.PARAM_INVALID, "MiniMax H3 文生视频必须指定非自适应比例");
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("model", MINIMAX_H3_MODEL);
+        payload.put("content", buildContent(prompt, imageUrls, videoUrls, imageToVideo, imageRoles));
+        payload.put("resolution", normalizeResolution(AiTaskParameterReader.parameterText(parameters, "resolution", "768p")));
+        payload.put("duration", parseDuration(AiTaskParameterReader.parameterText(parameters, "seconds", "5")));
+        payload.put("ratio", ratio);
+        Boolean watermark = booleanParameter(parameters, "watermark");
+        if (watermark != null) payload.put("aigc_watermark", watermark);
         return payload;
     }
 
@@ -398,13 +424,22 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
      */
     private static List<Map<String, Object>> buildContent(
             String prompt, List<String> imageUrls, List<String> videoUrls, boolean imageToVideo) {
+        return buildContent(prompt, imageUrls, videoUrls, imageToVideo, List.of());
+    }
+
+    /** 构建保留工作流媒体角色的MiniMax多模态内容列表。 */
+    private static List<Map<String, Object>> buildContent(
+            String prompt, List<String> imageUrls, List<String> videoUrls, boolean imageToVideo,
+            List<String> imageRoles) {
         List<Map<String, Object>> content = new ArrayList<>();
         content.add(Map.of("type", "text", "text", prompt));
-        for (String imageUrl : imageUrls) {
+        for (int index = 0; index < imageUrls.size(); index++) {
+            String imageUrl = imageUrls.get(index);
             content.add(Map.of(
                     "type", "image_url",
                     "image_url", Map.of("url", imageUrl),
-                    "role", imageToVideo ? "first_frame" : "reference_image"
+                    "role", index < imageRoles.size() && StringUtils.hasText(imageRoles.get(index))
+                            ? imageRoles.get(index) : imageToVideo ? "first_frame" : "reference_image"
             ));
         }
         for (String videoUrl : videoUrls) {

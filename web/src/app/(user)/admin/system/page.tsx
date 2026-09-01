@@ -6,7 +6,7 @@ import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Checkbox, DatePicker, Empty, Form, Input, InputNumber, Modal, Pagination, Segmented, Select, Skeleton, Space, Table, Tabs, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { Edit, Image as ImageIcon, Plus, Power, Search, Send, Trash2, Upload, Video } from "lucide-react";
+import { Edit, Image as ImageIcon, Plus, Power, Search, Send, Sparkles, Trash2, Upload, Video } from "lucide-react";
 
 import {
     adjustServerUserCredits,
@@ -30,6 +30,11 @@ import {
     updateAdminGenerationStyle,
     updateAdminGenerationStyleStatus,
     deleteAdminGenerationStyles,
+    listAdminSkills,
+    createAdminSkill,
+    updateAdminSkill,
+    updateAdminSkillStatus,
+    deleteAdminSkills,
     listAdminHomepageShowcases,
     createAdminHomepageShowcase,
     updateAdminHomepageShowcase,
@@ -41,6 +46,7 @@ import {
     type ServerAdminCreditTransaction,
     type ServerPrompt,
     type ServerGenerationStyle,
+    type ServerSkill,
     type SystemNotification,
 } from "@/services/api/server";
 import { useUserStore, type ServerUserProfile, type ServerUserRole } from "@/features/auth/stores/use-user-store";
@@ -94,6 +100,7 @@ export default function AdminSystemPage() {
                         { key: "notifications", label: "消息管理", children: <NotificationManagement /> },
                         { key: "prompts", label: "提示词库", children: <PromptManagement /> },
                         { key: "styles", label: "风格管理", children: <GenerationStyleManagement /> },
+                        { key: "skills", label: "技能管理", children: <SkillManagement /> },
                         { key: "homepage", label: "首页展示", children: <HomepageShowcaseManagement /> },
                         { key: "apiLogs", label: "接口记录", children: <ApiLogsManagement /> },
                     ]}
@@ -1668,6 +1675,362 @@ function splitTags(value?: string) {
         .split(/[,，]/)
         .map((item) => item.trim())
         .filter(Boolean);
+}
+
+type SkillFormValues = {
+    name: string;
+    targetType: "image" | "video";
+    description?: string;
+    systemPrompt: string;
+    coverUrl?: string;
+    sortOrder?: number;
+    status?: number;
+};
+
+function SkillManagement() {
+    const { message, modal } = App.useApp();
+    const [form] = Form.useForm<SkillFormValues>();
+    const [skills, setSkills] = useState<ServerSkill[]>([]);
+    const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(1);
+    const [keyword, setKeyword] = useState("");
+    const [targetType, setTargetType] = useState<"all" | "image" | "video">("all");
+    const [status, setStatus] = useState<number | undefined>();
+    const [loading, setLoading] = useState(false);
+    const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
+    const [editOpen, setEditOpen] = useState(false);
+    const [editingSkill, setEditingSkill] = useState<ServerSkill | null>(null);
+    const [coverUploading, setCoverUploading] = useState(false);
+    const coverInputRef = useRef<HTMLInputElement>(null);
+    const coverUrl = Form.useWatch("coverUrl", form) || "";
+    const coverName = Form.useWatch("name", form) || "技能封面";
+
+    const loadSkills = useCallback(
+        async (nextPage = page) => {
+            setLoading(true);
+            try {
+                const result = await listAdminSkills({
+                    page: nextPage,
+                    pageSize: PAGE_SIZE,
+                    keyword: keyword || undefined,
+                    targetType,
+                    status,
+                });
+                setSkills(result.skills);
+                setTotal(result.total);
+                setSelectedRowKeys((current) => current.filter((id) => result.skills.some((skill) => skill.id === Number(id))));
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "查询技能失败");
+            } finally {
+                setLoading(false);
+            }
+        },
+        [keyword, message, page, status, targetType],
+    );
+
+    useEffect(() => {
+        void loadSkills(page);
+    }, [loadSkills, page]);
+
+    const openCreate = () => {
+        setEditingSkill(null);
+        form.setFieldsValue({ name: "", targetType: "image", description: "", systemPrompt: "", coverUrl: "", sortOrder: 1000, status: 1 });
+        setEditOpen(true);
+    };
+
+    const openEdit = (skill: ServerSkill) => {
+        setEditingSkill(skill);
+        form.setFieldsValue({
+            name: skill.name,
+            targetType: skill.targetType,
+            description: skill.description || "",
+            systemPrompt: skill.systemPrompt,
+            coverUrl: skill.coverUrl || "",
+            sortOrder: skill.sortOrder ?? 1000,
+            status: skill.status ?? 1,
+        });
+        setEditOpen(true);
+    };
+
+    const saveSkill = async () => {
+        try {
+            const values = await form.validateFields();
+            const input = {
+                name: values.name.trim(),
+                targetType: values.targetType,
+                description: (values.description || "").trim(),
+                systemPrompt: values.systemPrompt.trim(),
+                coverUrl: (values.coverUrl || "").trim(),
+                sortOrder: values.sortOrder ?? 1000,
+                status: values.status ?? 1,
+            };
+            if (editingSkill) {
+                await updateAdminSkill({ id: editingSkill.id, ...input });
+                message.success("技能已更新");
+            } else {
+                await createAdminSkill(input);
+                message.success("技能已创建");
+            }
+            setEditOpen(false);
+            await loadSkills(editingSkill ? page : 1);
+            if (!editingSkill) setPage(1);
+        } catch (error) {
+            if (error instanceof Error) message.error(error.message);
+        }
+    };
+
+    const uploadCover = async (file: File | undefined) => {
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            message.error("请选择图片文件");
+            return;
+        }
+        setCoverUploading(true);
+        try {
+            const uploaded = await uploadImage(file);
+            form.setFieldValue("coverUrl", uploaded.url);
+            message.success("封面已上传");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "封面上传失败");
+        } finally {
+            setCoverUploading(false);
+        }
+    };
+
+    const changeStatus = (skill: ServerSkill) => {
+        const nextStatus = skill.status === 1 ? 0 : 1;
+        modal.confirm({
+            title: nextStatus === 1 ? "启用技能" : "停用技能",
+            content: nextStatus === 1 ? "启用后用户可以在图片或视频对话框中选择该技能。" : "停用后用户不能继续选择该技能。",
+            okText: nextStatus === 1 ? "启用" : "停用",
+            cancelText: "取消",
+            onOk: async () => {
+                try {
+                    await updateAdminSkillStatus(skill.id, nextStatus);
+                    message.success("技能状态已更新");
+                    await loadSkills(page);
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : "更新技能状态失败");
+                }
+            },
+        });
+    };
+
+    const deleteSkills = (ids: number[]) => {
+        modal.confirm({
+            title: "删除技能",
+            content: "删除后用户不能继续选择这些技能，确定删除？",
+            okText: "删除",
+            okButtonProps: { danger: true },
+            cancelText: "取消",
+            onOk: async () => {
+                try {
+                    await deleteAdminSkills(ids);
+                    message.success("技能已删除");
+                    setSelectedRowKeys([]);
+                    const nextPage = skills.length <= ids.length && page > 1 ? page - 1 : page;
+                    setPage(nextPage);
+                    await loadSkills(nextPage);
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : "删除技能失败");
+                }
+            },
+        });
+    };
+
+    const columns: ColumnsType<ServerSkill> = [
+        {
+            title: "技能名称",
+            dataIndex: "name",
+            render: (name: string, skill) => (
+                <div className="flex min-w-0 items-center gap-2">
+                    <Sparkles className="size-3.5 shrink-0 text-[var(--studio-action)]" />
+                    <span className="truncate font-medium text-[var(--studio-ink)]" title={name}>
+                        {name}
+                    </span>
+                </div>
+            ),
+        },
+        {
+            title: "类型",
+            dataIndex: "targetType",
+            width: 80,
+            render: (value: string) => <Tag>{value === "video" ? "视频" : "图片"}</Tag>,
+        },
+        {
+            title: "简介",
+            dataIndex: "description",
+            ellipsis: true,
+            render: (description: string) => (description ? <span className="text-[var(--studio-muted)]">{description}</span> : <span className="text-[var(--studio-faint)]">—</span>),
+        },
+        {
+            title: "状态",
+            dataIndex: "status",
+            width: 80,
+            render: (value: number) =>
+                value === 1 ? (
+                    <span className="text-[var(--studio-success)]">启用</span>
+                ) : (
+                    <span className="text-[var(--studio-muted)]">停用</span>
+                ),
+        },
+        {
+            title: "排序",
+            dataIndex: "sortOrder",
+            width: 80,
+            render: (value: number) => <span className="tabular-nums text-[var(--studio-muted)]">{value}</span>,
+        },
+        {
+            title: "操作",
+            key: "actions",
+            width: 110,
+            render: (_, skill) => (
+                <Space size={0}>
+                    <Tooltip title="编辑">
+                        <Button type="text" size="small" shape="circle" icon={<Edit className="size-3.5" />} onClick={() => openEdit(skill)} aria-label={`编辑技能${skill.name}`} />
+                    </Tooltip>
+                    <Tooltip title={skill.status === 1 ? "停用" : "启用"}>
+                        <Button type="text" size="small" shape="circle" icon={<Power className="size-3.5" />} onClick={() => changeStatus(skill)} aria-label={`${skill.status === 1 ? "停用" : "启用"}技能${skill.name}`} />
+                    </Tooltip>
+                </Space>
+            ),
+        },
+    ];
+
+    return (
+        <div>
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <Space wrap>
+                    <Input.Search
+                        value={keyword}
+                        allowClear
+                        placeholder="搜索技能名称或简介"
+                        onChange={(event) => setKeyword(event.target.value)}
+                        onSearch={() => {
+                            setPage(1);
+                            void loadSkills(1);
+                        }}
+                    />
+                    <Select
+                        value={targetType}
+                        options={[
+                            { label: "全部类型", value: "all" },
+                            { label: "图片", value: "image" },
+                            { label: "视频", value: "video" },
+                        ]}
+                        onChange={(value) => {
+                            setTargetType(value);
+                            setPage(1);
+                        }}
+                    />
+                    <Select
+                        allowClear
+                        placeholder="全部状态"
+                        value={status}
+                        options={[
+                            { label: "启用", value: 1 },
+                            { label: "停用", value: 0 },
+                        ]}
+                        onChange={(value) => {
+                            setStatus(value);
+                            setPage(1);
+                        }}
+                    />
+                </Space>
+                <Space>
+                    {selectedRowKeys.length ? (
+                        <Button danger icon={<Trash2 className="size-3.5" />} onClick={() => deleteSkills(selectedRowKeys.map(Number))}>
+                            批量删除
+                        </Button>
+                    ) : null}
+                    <Button type="primary" icon={<Plus className="size-4" />} onClick={openCreate}>
+                        新增技能
+                    </Button>
+                </Space>
+            </div>
+            <Table<ServerSkill>
+                rowKey="id"
+                columns={columns}
+                dataSource={skills}
+                loading={loading}
+                pagination={{
+                    current: page,
+                    pageSize: PAGE_SIZE,
+                    total,
+                    showSizeChanger: false,
+                    onChange: setPage,
+                }}
+                rowSelection={{
+                    selectedRowKeys,
+                    onChange: setSelectedRowKeys,
+                }}
+                locale={{ emptyText: <Empty description="暂无技能" /> }}
+            />
+            <Modal title={editingSkill ? "编辑技能" : "新增技能"} open={editOpen} onOk={saveSkill} onCancel={() => setEditOpen(false)} okText="保存" cancelText="取消" width={640} confirmLoading={coverUploading}>
+                <Form form={form} layout="vertical">
+                    <div className="grid grid-cols-3 gap-3">
+                        <Form.Item name="name" label="技能名称" rules={[{ required: true, message: "请输入技能名称" }]} className="col-span-2">
+                            <Input placeholder="例如：电商商品图片制作" maxLength={100} />
+                        </Form.Item>
+                        <Form.Item name="targetType" label="适用类型" rules={[{ required: true, message: "请选择类型" }]}>
+                            <Select
+                                options={[
+                                    { label: "图片", value: "image" },
+                                    { label: "视频", value: "video" },
+                                ]}
+                            />
+                        </Form.Item>
+                    </div>
+                    <Form.Item name="description" label="技能简介">
+                        <Input.TextArea rows={2} maxLength={500} placeholder="展示在用户侧技能选择面板的简介" />
+                    </Form.Item>
+                    <Form.Item name="coverUrl" label="封面">
+                        <Input placeholder="https://...，可留空" />
+                    </Form.Item>
+                    <div className="mb-4 flex items-start gap-3">
+                        <div className="h-28 w-[84px] shrink-0 overflow-hidden rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface-raised)]">
+                            <GenerationStyleCover key={coverUrl} style={{ name: coverName, coverUrl }} className="size-full" />
+                        </div>
+                        <div className="min-w-0">
+                            <input
+                                ref={coverInputRef}
+                                hidden
+                                type="file"
+                                accept="image/*"
+                                onChange={(event) => {
+                                    void uploadCover(event.target.files?.[0]);
+                                    event.target.value = "";
+                                }}
+                            />
+                            <Button icon={<Upload className="size-3.5" />} loading={coverUploading} onClick={() => coverInputRef.current?.click()}>
+                                上传封面
+                            </Button>
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">上传后会保存对象存储公开地址，展示在用户侧技能选择面板。</p>
+                        </div>
+                    </div>
+                    <Form.Item name="systemPrompt" label="流程提示词" rules={[{ required: true, message: "请输入流程提示词" }]}>
+                        <Input.TextArea
+                            rows={12}
+                            placeholder="技能内置的生成详情与提示词，驱动主 Agent 按步骤引导用户，例如：步骤1 索要商品信息；步骤2 通过 choices 提供风格选项；最后一步组装完整提示词并让用户确认生成…"
+                        />
+                    </Form.Item>
+                    <div className="grid grid-cols-3 gap-3">
+                        <Form.Item name="sortOrder" label="排序">
+                            <InputNumber className="w-full" min={0} />
+                        </Form.Item>
+                        <Form.Item name="status" label="状态">
+                            <Select
+                                options={[
+                                    { label: "启用", value: 1 },
+                                    { label: "停用", value: 0 },
+                                ]}
+                            />
+                        </Form.Item>
+                    </div>
+                </Form>
+            </Modal>
+        </div>
+    );
 }
 
 function HomepageShowcaseManagement() {

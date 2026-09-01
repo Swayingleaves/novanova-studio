@@ -268,6 +268,21 @@ class CreationPlanValidatorTest {
     }
 
     /**
+     * 普通视频请求误填生成模式到工作流字段时，应按普通视频计划校验，不得要求注册技能工作流。
+     */
+    @Test
+    void shouldTreatVideoGenerationModeAsOrdinaryVideoPlan() {
+        CreationPlan plan = new CreationPlan("model-plan", "生成视频", CreationEntrySource.VIDEO_PAGE,
+                "执行生成", "", false, null,
+                List.of(task("video-task", "video", List.of())), List.of(), "text-to-video");
+
+        CreationPlan result = validator.validate(plan, CreationEntrySource.VIDEO_PAGE, videoSettings());
+
+        Assertions.assertNull(result.workflowType());
+        Assertions.assertEquals(1, result.tasks().size());
+    }
+
+    /**
      * 主Agent通过用户原文引用提交任务时，服务端回填前允许提示词为空。
      */
     @Test
@@ -350,7 +365,7 @@ class CreationPlanValidatorTest {
      * @return CreationPlan 计划
      */
     private CreationPlan plan(String entrySource, List<CreationTask> tasks) {
-        return new CreationPlan("model-plan", "生成内容", entrySource, "执行生成", "", false, null, tasks);
+        return new CreationPlan("model-plan", "生成内容", entrySource, "执行生成", "", false, null, tasks, List.of());
     }
 
     /**

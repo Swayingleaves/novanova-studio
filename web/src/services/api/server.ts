@@ -47,6 +47,7 @@ export type ServerAiTaskMediaReference = {
     mimeType?: string;
     storageKey?: string;
     url?: string;
+    role?: string;
 };
 
 export type ServerAiTask = {
@@ -98,12 +99,48 @@ export type ServerAiTaskCreateInput = {
     generationSource?: ServerGenerationSource;
     generationStyleIds?: number[];
     generationStyleSnapshots?: GenerationStyleSnapshot[];
-    videoGenerationMode?: "text-to-video" | "image-to-video" | "reference-to-video";
+    videoGenerationMode?: "text-to-video" | "image-to-video" | "reference-to-video" | "first-last-frame-to-video";
+};
+
+export type ServerVideoWorkflowStageQuote = {
+    role: string;
+    displayName: string;
+    taskType: "image" | "video" | string;
+    model?: string | null;
+    taskCount: number;
+    /** 阶段定价失败（报价整体不可用）时为 null，仅保留阶段骨架供前端识别工作流构成。 */
+    credits?: number | null;
+    videoGenerationMode?: "text-to-video" | "image-to-video" | "reference-to-video" | "first-last-frame-to-video" | string | null;
+};
+
+export type ServerVideoWorkflowQuote = {
+    available: boolean;
+    workflowType?: string;
+    stages: ServerVideoWorkflowStageQuote[];
+    credits?: number | null;
+    reason?: string;
+    requiredCapabilities: string[];
 };
 
 export type PromptOptimizationType = "image" | "video";
 
 export type GenerationStyleType = "image" | "video";
+
+export type SkillType = "image" | "video";
+
+export type SkillOption = {
+    id: number;
+    name: string;
+    description: string;
+    targetType: SkillType;
+    coverUrl: string;
+    /** 服务端从技能提示词识别的视频工作流类型。 */
+    workflowType?: string | null;
+};
+
+export type SkillOptionListResponse = {
+    skills: SkillOption[];
+};
 
 export type GenerationStyleSnapshot = {
     id: number;
@@ -592,7 +629,7 @@ export type ServerPromptInput = {
 };
 
 export function listServerPrompts(params: ServerPromptListParams = {}) {
-    return serverGet<ServerPromptListResponse>(`/prompt/listPrompts${promptQuery(params)}`, { auth: false });
+    return serverGet<ServerPromptListResponse>(`/prompt/listPrompts${promptQuery(params)}`);
 }
 
 export function listAdminPrompts(params: ServerPromptListParams = {}) {
@@ -619,6 +656,77 @@ export function deleteAdminPrompts(ids: number[]) {
 
 export function listGenerationStyles(generationType: GenerationStyleType) {
     return serverGet<GenerationStyleOptionListResponse>(`/style/listStyles?generationType=${encodeURIComponent(generationType)}`);
+}
+
+// ---- 图片和视频生成技能 ----
+
+export function listSkills(targetType: SkillType) {
+    return serverGet<SkillOptionListResponse>(`/skill/listSkills?targetType=${encodeURIComponent(targetType)}`);
+}
+
+export type ServerSkill = {
+    id: number;
+    name: string;
+    description: string;
+    targetType: SkillType;
+    systemPrompt: string;
+    coverUrl: string;
+    status: number;
+    sortOrder: number;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export type ServerSkillListResponse = {
+    skills: ServerSkill[];
+    total: number;
+};
+
+export type ServerSkillListParams = {
+    keyword?: string;
+    targetType?: "all" | SkillType;
+    status?: number;
+    page?: number;
+    pageSize?: number;
+};
+
+function skillQuery(params: ServerSkillListParams = {}) {
+    const query = new URLSearchParams({ page: String(params.page || 1), pageSize: String(params.pageSize || 20) });
+    if (params.keyword) query.set("keyword", params.keyword);
+    if (params.targetType) query.set("targetType", params.targetType);
+    if (params.status !== undefined) query.set("status", String(params.status));
+    return `?${query.toString()}`;
+}
+
+export function listAdminSkills(params: ServerSkillListParams = {}) {
+    return serverGet<ServerSkillListResponse>(`/admin/skill/listSkills${skillQuery(params)}`);
+}
+
+export type ServerSkillInput = {
+    id?: number;
+    name: string;
+    description?: string;
+    targetType: SkillType;
+    systemPrompt: string;
+    coverUrl?: string;
+    status?: number;
+    sortOrder?: number;
+};
+
+export function createAdminSkill(input: Omit<ServerSkillInput, "id">) {
+    return serverPost("/admin/skill/createSkill", input);
+}
+
+export function updateAdminSkill(input: ServerSkillInput & { id: number }) {
+    return serverPost("/admin/skill/updateSkill", input);
+}
+
+export function updateAdminSkillStatus(id: number, status: number) {
+    return serverPost("/admin/skill/updateSkillStatus", { id, status });
+}
+
+export function deleteAdminSkills(ids: number[]) {
+    return serverPost("/admin/skill/deleteSkills", { ids });
 }
 
 export type ServerGenerationStyleListParams = {
@@ -795,6 +903,10 @@ export function uploadServerMedia(file: Blob, input: ServerMediaInput, fileName 
 
 export function createAiTask(input: ServerAiTaskCreateInput) {
     return serverPost<ServerAiTask>("/ai/task/createTask", input);
+}
+
+export function quoteVideoWorkflow(input: { workflowType: string; model: string; imageModel: string; resolution: string; seconds: string; stage?: "image" | "video" }) {
+    return serverPost<ServerVideoWorkflowQuote>("/ai/video/workflowQuote", input);
 }
 
 export function createPromptOptimizationTask(input: { generationType: PromptOptimizationType; prompt: string; generationStyleIds?: number[] }) {

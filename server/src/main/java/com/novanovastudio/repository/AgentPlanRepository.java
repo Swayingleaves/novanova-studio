@@ -37,8 +37,8 @@ public class AgentPlanRepository {
      */
     public Mono<Void> create(Long userId, String sessionId, CreationPlan plan) {
         Mono<Void> insertPlan = databaseClient.sql("""
-                INSERT INTO agent_plan(id, user_id, session_id, intent, entry_source, summary, creation_settings, status, created_at, updated_at)
-                VALUES (:id, :userId, :sessionId, :intent, :entrySource, :summary, :settings::jsonb, 'pending', :now, :now)
+                INSERT INTO agent_plan(id, user_id, session_id, intent, entry_source, summary, workflow_type, creation_settings, status, created_at, updated_at)
+                VALUES (:id, :userId, :sessionId, :intent, :entrySource, :summary, :workflowType, :settings::jsonb, 'pending', :now, :now)
                 """)
                 .bind("id", plan.planId())
                 .bind("userId", userId)
@@ -46,6 +46,7 @@ public class AgentPlanRepository {
                 .bind("intent", text(plan.intent()))
                 .bind("entrySource", plan.entrySource())
                 .bind("summary", text(plan.summary()))
+                .bind("workflowType", text(plan.workflowType()))
                 .bind("settings", JSON.toJSONString(plan.creationSettings()))
                 .bind("now", OffsetDateTime.now())
                 .then();
@@ -212,13 +213,14 @@ public class AgentPlanRepository {
      */
     private Mono<Void> insertTask(String planId, CreationTask task) {
         return databaseClient.sql("""
-                INSERT INTO agent_plan_task(plan_id, task_id, task_type, action, original_prompt, dependencies,
+                INSERT INTO agent_plan_task(plan_id, task_id, task_role, task_type, action, original_prompt, dependencies,
                                             tool_name, tool_arguments, status, created_at, updated_at)
-                VALUES (:planId, :taskId, :taskType, :action, :prompt, :dependencies::jsonb,
+                VALUES (:planId, :taskId, :taskRole, :taskType, :action, :prompt, :dependencies::jsonb,
                         :toolName, :toolArguments::jsonb, 'pending', NOW(), NOW())
                 """)
                 .bind("planId", planId)
                 .bind("taskId", task.taskId())
+                .bind("taskRole", text(task.taskRole()))
                 .bind("taskType", task.taskType())
                 .bind("action", task.action())
                 .bind("prompt", task.prompt())

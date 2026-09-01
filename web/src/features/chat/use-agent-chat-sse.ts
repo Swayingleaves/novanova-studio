@@ -13,6 +13,7 @@ const CLOSED_CONNECTION_ERROR_PATTERN = /(?:java\.io\.IOException:\s*)?closed\b/
 type UseAgentChatSSEProps = {
   entrySource: "imagePage" | "videoPage" | "canvas";
   creationSettings?: CreationSettings;
+  skillId?: string;
   onTextDelta?: (messageId: string, delta: string) => void;
   onThoughtDelta?: (thoughtId: string, delta: string) => void;
   onThoughtComplete?: (thoughtId: string, durationMs: number) => void;
@@ -35,7 +36,7 @@ type AgentChatSSEReturn = {
   isStreaming: boolean;
   isQueued: boolean;
   isStopping: boolean;
-  sendMessage: (message: string, attachments?: AgentAttachment[], creationSettings?: CreationSettings) => Promise<void>;
+  sendMessage: (message: string, attachments?: AgentAttachment[], creationSettings?: CreationSettings, skillIdOverride?: string) => Promise<void>;
   cancelMessage: () => Promise<void>;
   canChangeSession: () => boolean;
   resetSession: () => boolean;
@@ -47,7 +48,7 @@ type AgentChatSSEReturn = {
  * 图片与视频入口下后端自行执行工具，前端透传事件给回调。
  */
 export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn {
-  const { entrySource, creationSettings } = props;
+  const { entrySource, creationSettings, skillId } = props;
 
   const sessionIdRef = useRef<string | undefined>(undefined);
   const requestIdRef = useRef<string | undefined>(undefined);
@@ -316,7 +317,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
   connectSSERef.current = connectSSE;
 
   const sendMessage = useCallback(
-    async (message: string, attachments?: AgentAttachment[], settingsOverride?: CreationSettings) => {
+    async (message: string, attachments?: AgentAttachment[], settingsOverride?: CreationSettings, skillIdOverride?: string) => {
       if (sendingRef.current || activeRequestRef.current) return;
       sendingRef.current = true;
       activeRequestRef.current = true;
@@ -336,6 +337,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
           message,
           attachments,
           creationSettings: settingsOverride || creationSettings,
+          skillId: skillIdOverride ?? skillId,
         });
         sessionIdRef.current = sid;
         requestIdRef.current = rid;
@@ -377,7 +379,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
         sendingRef.current = false;
       }
     },
-    [entrySource, creationSettings, cancelSession, completePendingCancellation, flushPendingEvents, markRequestTerminal]
+    [entrySource, creationSettings, skillId, cancelSession, completePendingCancellation, flushPendingEvents, markRequestTerminal]
   );
 
   const canChangeSession = useCallback(() => !sendingRef.current && !activeRequestRef.current, []);

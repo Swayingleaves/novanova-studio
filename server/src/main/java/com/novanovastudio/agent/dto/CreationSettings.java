@@ -19,6 +19,10 @@ import java.util.Map;
  * @param generationStyleIdsByType Map<String, List<Long>> 画布Agent按图片和视频分组的风格ID
  * @param videoGenerationMode String 视频生成模式
  * @param videoModel String 画布Agent固定使用的视频模型
+ * @param imageModel String 视频工作流生成图片阶段使用的图片模型
+ * @param imageSize String 工作流图片阶段宽高比
+ * @param imageResolution String 工作流图片阶段清晰度
+ * @param imageQuality String 工作流图片阶段画质
  * @author   zhenglin.cn.cq@gmail.com
  * @date     2026-07-23 00:00
  */
@@ -34,8 +38,63 @@ public record CreationSettings(
         List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots,
         Map<String, List<Long>> generationStyleIdsByType,
         String videoGenerationMode,
-        String videoModel
+        String videoModel,
+        String imageModel,
+        String imageSize,
+        String imageResolution,
+        String imageQuality
 ) {
+
+    /**
+     * 保留图片模型扩展前的完整参数构造方式。
+     *
+     * @param model String 模型编码
+     * @param size String 画面尺寸或比例
+     * @param resolution String 清晰度或分辨率
+     * @param quality String 质量等级
+     * @param count Integer 生成数量
+     * @param seconds String 视频时长秒数
+     * @param watermark Boolean 是否添加水印
+     * @param generationStyleIds List<Long> 普通生成风格ID
+     * @param generationStyleSnapshots List<GenerationStyleSnapshot> 历史风格快照
+     * @param generationStyleIdsByType Map<String, List<Long>> 按类型风格ID
+     * @param videoGenerationMode String 视频生成模式
+     * @param videoModel String 视频模型
+     */
+    public CreationSettings(String model, String size, String resolution, String quality, Integer count,
+                            String seconds, Boolean watermark, List<Long> generationStyleIds,
+                            List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots,
+                            Map<String, List<Long>> generationStyleIdsByType, String videoGenerationMode,
+                            String videoModel) {
+        this(model, size, resolution, quality, count, seconds, watermark, generationStyleIds,
+                generationStyleSnapshots, generationStyleIdsByType, videoGenerationMode, videoModel, null, null, null, null);
+    }
+
+    /**
+     * 保留工作流图片参数扩展前的完整参数构造方式。
+     *
+     * @param model String 模型编码
+     * @param size String 画面尺寸或比例
+     * @param resolution String 清晰度或分辨率
+     * @param quality String 质量等级
+     * @param count Integer 生成数量
+     * @param seconds String 视频时长秒数
+     * @param watermark Boolean 是否添加水印
+     * @param generationStyleIds List<Long> 普通生成风格ID
+     * @param generationStyleSnapshots List<GenerationStyleSnapshot> 历史风格快照
+     * @param generationStyleIdsByType Map<String, List<Long>> 按类型风格ID
+     * @param videoGenerationMode String 视频生成模式
+     * @param videoModel String 视频模型
+     * @param imageModel String 视频工作流生成图片阶段使用的图片模型
+     */
+    public CreationSettings(String model, String size, String resolution, String quality, Integer count,
+                            String seconds, Boolean watermark, List<Long> generationStyleIds,
+                            List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots,
+                            Map<String, List<Long>> generationStyleIdsByType, String videoGenerationMode,
+                            String videoModel, String imageModel) {
+        this(model, size, resolution, quality, count, seconds, watermark, generationStyleIds,
+                generationStyleSnapshots, generationStyleIdsByType, videoGenerationMode, videoModel, imageModel, null, null, null);
+    }
 
     /**
      * 保留视频模型扩展前的完整参数构造方式。
@@ -57,7 +116,7 @@ public record CreationSettings(
                             List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots,
                             Map<String, List<Long>> generationStyleIdsByType, String videoGenerationMode) {
         this(model, size, resolution, quality, count, seconds, watermark, generationStyleIds,
-                generationStyleSnapshots, generationStyleIdsByType, videoGenerationMode, null);
+                generationStyleSnapshots, generationStyleIdsByType, videoGenerationMode, null, null, null, null, null);
     }
 
     /**
@@ -79,7 +138,7 @@ public record CreationSettings(
                             List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots,
                             Map<String, List<Long>> generationStyleIdsByType) {
         this(model, size, resolution, quality, count, seconds, watermark, generationStyleIds,
-                generationStyleSnapshots, generationStyleIdsByType, null, null);
+                generationStyleSnapshots, generationStyleIdsByType, null, null, null, null, null, null);
     }
 
     /**
@@ -95,7 +154,7 @@ public record CreationSettings(
      */
     public CreationSettings(String model, String size, String resolution, String quality, Integer count,
                             String seconds, Boolean watermark) {
-        this(model, size, resolution, quality, count, seconds, watermark, null, null, null, null, null);
+        this(model, size, resolution, quality, count, seconds, watermark, null, null, null, null, null, null, null, null, null);
     }
 
     /**
@@ -115,6 +174,6 @@ public record CreationSettings(
                             String seconds, Boolean watermark, List<Long> generationStyleIds,
                             List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots) {
         this(model, size, resolution, quality, count, seconds, watermark, generationStyleIds,
-                generationStyleSnapshots, null, null, null);
+                generationStyleSnapshots, null, null, null, null, null, null, null);
     }
 }

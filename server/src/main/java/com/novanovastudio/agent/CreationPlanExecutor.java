@@ -16,16 +16,28 @@ import com.novanovastudio.agent.dto.RecoveryNodeFailure;
 import com.novanovastudio.agent.dto.RecoveryTaskContext;
 import com.novanovastudio.agent.dto.RecoveryTaskDecision;
 import com.novanovastudio.agent.dto.SpecialistAgentResult;
+import com.novanovastudio.agent.workflow.FirstLastFrameVideoWorkflow;
+import com.novanovastudio.agent.workflow.VideoWorkflowDefinition;
+import com.novanovastudio.agent.workflow.VideoWorkflowRegistry;
+import com.novanovastudio.ai.AiTaskSources;
+import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.GenerationStyleDtos;
+import com.novanovastudio.dto.PersistenceDtos;
+import com.novanovastudio.entity.SkillRecords;
 import com.novanovastudio.logging.MappedDiagnosticContext;
 import com.novanovastudio.service.PromptOptimizationService;
 import com.novanovastudio.service.AiTaskService;
+import com.novanovastudio.service.PersistenceService;
+import com.novanovastudio.service.SkillService;
 import com.novanovastudio.repository.AgentPlanRepository;
+import com.novanovastudio.repository.VideoWorkflowContextRepository;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.model.Model;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -36,6 +48,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -74,6 +87,47 @@ public class CreationPlanExecutor {
     private final List<AgentLoopProfile> profiles;
     /** 主Agent恢复计划校验器 */
     private final CreationRecoveryPlanValidator recoveryPlanValidator;
+    /** 技能服务 */
+    private final SkillService skillService;
+    /** 生成记录持久化服务。 */
+    private PersistenceService persistenceService;
+    /** 视频技能工作流注册表。 */
+    private VideoWorkflowRegistry videoWorkflowRegistry;
+    /** 视频技能工作流上下文仓储。 */
+    private VideoWorkflowContextRepository videoWorkflowContextRepository;
+
+    /**
+     * 注入视频技能工作流注册表。
+     *
+     * @param registry VideoWorkflowRegistry 工作流注册表
+     * @return void 无返回值
+     */
+    @Autowired
+    void setVideoWorkflowRegistry(VideoWorkflowRegistry registry) {
+        this.videoWorkflowRegistry = registry;
+    }
+
+    /**
+     * 注入视频技能工作流上下文仓储。
+     *
+     * @param repository VideoWorkflowContextRepository 工作流上下文仓储
+     * @return void 无返回值
+     */
+    @Autowired
+    void setVideoWorkflowContextRepository(VideoWorkflowContextRepository repository) {
+        this.videoWorkflowContextRepository = repository;
+    }
+
+    /**
+     * 注入工作流生成记录持久化服务。
+     *
+     * @param service PersistenceService 生成记录持久化服务
+     * @return void 无返回值
+     */
+    @Autowired
+    void setPersistenceService(PersistenceService service) {
+        this.persistenceService = service;
+    }
 
     /**
      * 执行完整创作计划。
@@ -89,10 +143,93 @@ public class CreationPlanExecutor {
                                               AgentChatRequest request, Model model) {
         Map<String, TaskExecutionResult> completed = new LinkedHashMap<>();
         return planRepository.updateCreationAgentPlanStatus(plan.planId(), "running", "")
+                .then(saveWorkflowRound(userId, sessionId, plan, request, "running", "", List.of()))
                 .then(executeLayer(userId, sessionId, plan, request, model, new ArrayList<>(plan.tasks()), completed))
                 .map(results -> summarize(plan, results))
-                .flatMap(summary -> planRepository.updateCreationAgentPlanStatus(plan.planId(), summary.status(),
-                        "success".equals(summary.status()) ? "" : summary.message()).thenReturn(summary));
+                .flatMap(summary -> isImageStagePlan(plan)
+                        ? completeImageStage(userId, sessionId, plan, request, summary)
+                        : completeFinalStage(userId, sessionId, plan, request, summary));
+    }
+
+    /**
+     * 判断当前计划是否为工作流"图片阶段计划"（仅含图片任务且工作流支持图片二次确认）。
+     * 图片阶段执行完成后不进入终态，等待用户确认图片后再执行视频阶段。
+     *
+     * @param plan CreationPlan 创作计划
+     * @return boolean 是否图片阶段计划
+     */
+    private boolean isImageStagePlan(CreationPlan plan) {
+        return workflowDefinition(plan)
+                .map(definition -> definition.supportsImageConfirmation()
+                        && plan.tasks() != null && !plan.tasks().isEmpty()
+                        && plan.tasks().stream().allMatch(task -> "image".equals(task.taskType())))
+                .orElse(false);
+    }
+
+    /**
+     * 图片阶段计划收尾：保存阶段轮次但不推进上下文终态。
+     * 图片生成结果与"图片待确认"状态由编排器在汇总后统一落库并推送询问。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param plan CreationPlan 创作计划
+     * @param request AgentChatRequest 原始请求
+     * @param summary PlanExecutionSummary 计划汇总
+     * @return Mono<PlanExecutionSummary> 计划汇总
+     */
+    private Mono<PlanExecutionSummary> completeImageStage(Long userId, String sessionId, CreationPlan plan,
+                                                          AgentChatRequest request, PlanExecutionSummary summary) {
+        String status = summary.status();
+        String error = "success".equals(status) ? "" : summary.message();
+        return saveWorkflowRound(userId, sessionId, plan, request,
+                        "success".equals(status) ? "image_pending_confirm" : status, error, summary.tasks())
+                .then(planRepository.updateCreationAgentPlanStatus(plan.planId(), status, error))
+                .thenReturn(summary);
+    }
+
+    /**
+     * 完整计划/视频阶段计划收尾：保存终态轮次并推进上下文终态。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param plan CreationPlan 创作计划
+     * @param summary PlanExecutionSummary 计划汇总
+     * @return Mono<PlanExecutionSummary> 计划汇总
+     */
+    private Mono<PlanExecutionSummary> completeFinalStage(Long userId, String sessionId, CreationPlan plan,
+                                                          AgentChatRequest request, PlanExecutionSummary summary) {
+        return saveWorkflowRound(userId, sessionId, plan, request, summary.status(),
+                        "success".equals(summary.status()) ? "" : summary.message(), summary.tasks())
+                .then(planRepository.updateCreationAgentPlanStatus(plan.planId(), summary.status(),
+                        "success".equals(summary.status()) ? "" : summary.message()))
+                .then(updateWorkflowContextStatus(userId, sessionId, plan.workflowType(), summary.status()))
+                .thenReturn(summary);
+    }
+
+    /**
+     * 将工作流上下文推进到与计划汇总一致的终态。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param workflowType String 工作流类型，普通计划为空
+     * @param summaryStatus String 计划汇总状态
+     * @return Mono<Void> 更新完成信号
+     */
+    private Mono<Void> updateWorkflowContextStatus(Long userId, String sessionId, String workflowType, String summaryStatus) {
+        if (!StringUtils.hasText(workflowType) || videoWorkflowContextRepository == null) {
+            return Mono.empty();
+        }
+        String status = switch (summaryStatus == null ? "" : summaryStatus) {
+            case "success" -> "completed";
+            case "canceled" -> "canceled";
+            default -> "failed";
+        };
+        return videoWorkflowContextRepository.updateStatusByUserAndSession(userId, sessionId, status)
+                .onErrorResume(exception -> {
+                    log.warn("更新视频工作流上下文终态失败: sessionId={}, workflowType={}, 原因={}",
+                            sessionId, workflowType, exception.getMessage());
+                    return Mono.empty();
+                });
     }
 
     /**
@@ -121,9 +258,9 @@ public class CreationPlanExecutor {
             return Mono.error(new IllegalStateException("创作计划依赖图无法继续执行"));
         }
         return Flux.fromIterable(ready)
-                .flatMap(task -> (dependenciesSucceeded(task, completed)
-                        ? executeTask(userId, sessionId, plan, request, model, task, dependencyAttachments(task, completed))
-                        : skipTask(userId, sessionId, plan.planId(), task))
+                .flatMap(task -> (dependenciesSucceeded(plan, task, completed)
+                        ? executeTask(userId, sessionId, plan, request, model, task, dependencyAttachments(plan, task, completed))
+                        : skipTask(userId, sessionId, plan.planId(), task, dependencySkipReason(plan, task, completed)))
                         .contextWrite(context -> MappedDiagnosticContext.put(
                                 context, MappedDiagnosticContext.PLAN_TASK_ID, task.taskId())), ready.size())
                 .collectList()
@@ -134,7 +271,9 @@ public class CreationPlanExecutor {
                         completed.put(result.taskId(), result);
                     }
                     List<CreationTask> next = remaining.stream().filter(task -> !completed.containsKey(task.taskId())).toList();
-                    return executeLayer(userId, sessionId, plan, request, model, new ArrayList<>(next), completed);
+                    return saveWorkflowRound(userId, sessionId, plan, request, "running", "",
+                            List.copyOf(completed.values()))
+                            .then(executeLayer(userId, sessionId, plan, request, model, new ArrayList<>(next), completed));
                 });
     }
 
@@ -156,7 +295,7 @@ public class CreationPlanExecutor {
                                                          List<CreationTask> ready,
                                                          Map<String, TaskExecutionResult> completed,
                                                          List<TaskExecutionResult> layerResults) {
-        if (executionRegistry.isCancelRequested(sessionId)) return Mono.just(layerResults);
+        if (executionRegistry.isCancelRequested(sessionId) || StringUtils.hasText(plan.workflowType())) return Mono.just(layerResults);
         List<RecoveryTaskContext> contexts = layerResults.stream()
                 .filter(result -> "failed".equals(result.status()) && result.recoveryAttempt() == 0)
                 .map(result -> recoveryContext(plan, ready, result))
@@ -264,7 +403,7 @@ public class CreationPlanExecutor {
                     }
                     CreationTask task = taskById.get(result.taskId());
                     return retryTask(userId, sessionId, plan, request, task,
-                            dependencyAttachments(task, completed), result, decision);
+                            dependencyAttachments(plan, task, completed), result, decision);
                 })
                 .collectList();
     }
@@ -652,7 +791,7 @@ public class CreationPlanExecutor {
                                 plan.creationSettings() == null ? List.of() : plan.creationSettings().generationStyleIds(),
                                 plan.creationSettings() == null ? List.of() : plan.creationSettings().generationStyleSnapshots())
                         .onErrorMap(this::agentExecutionFailure)
-                        .flatMap(styles -> callSpecialist(userId, sessionId, model, task, task.prompt())
+                        .flatMap(styles -> callSpecialist(userId, sessionId, model, request, task, task.prompt())
                                 .onErrorMap(this::agentExecutionFailure)
                                 .flatMap(decision -> preparePrompt(userId, sessionId, task.taskType(), task.prompt(), decision, styles)
                                         .onErrorMap(this::agentExecutionFailure)
@@ -718,28 +857,84 @@ public class CreationPlanExecutor {
             return executeCanvasTool(userId, sessionId, plan, task, decision.promptStrategy(),
                     finalPrompt, task.toolArguments(), 0);
         }
-        return executeGeneration(userId, sessionId, plan, request, task, decision, finalPrompt, styles, dependencyAttachments);
+        String workflowPrompt = workflowDefinition(plan).map(definition -> definition.enrichPrompt(task, finalPrompt)).orElse(finalPrompt);
+        return executeGeneration(userId, sessionId, plan, request, task, decision, workflowPrompt, styles, dependencyAttachments);
     }
 
     /**
      * 调用固定图片或视频子Agent选择提示词策略。
+     * <p>
+     * 技能场景下额外携带技能摘要，帮助子Agent识别技能约束（如电商商品图、保留图上文字）。
      *
      * @param userId Long 用户ID
      * @param sessionId String 会话ID
      * @param model Model 默认文本模型
+     * @param request AgentChatRequest 原始请求
      * @param task CreationTask 计划任务
      * @param originalPrompt String 用户原文
      * @return Mono<SpecialistAgentResult> 子Agent结构化结果
      */
     private Mono<SpecialistAgentResult> callSpecialist(Long userId, String sessionId, Model model,
-                                                       CreationTask task, String originalPrompt) {
+                                                       AgentChatRequest request, CreationTask task, String originalPrompt) {
+        return Mono.defer(() -> {
+            if (request == null || !StringUtils.hasText(request.skillId())) {
+                return callSpecialistWith(userId, sessionId, model, task, baseSpecialistInput(task, originalPrompt));
+            }
+            Long skillId;
+            try {
+                skillId = Long.valueOf(request.skillId());
+            } catch (NumberFormatException exception) {
+                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "技能ID不合法"));
+            }
+            return skillService.findEnabledSkill(skillId)
+                    .map(skill -> {
+                        Map<String, Object> input = baseSpecialistInput(task, originalPrompt);
+                        input.put("skill", Map.of(
+                                "name", skill.getName(),
+                                "targetType", skill.getTargetType(),
+                                "summary", skillSummary(skill)));
+                        return input;
+                    })
+                    .flatMap(input -> callSpecialistWith(userId, sessionId, model, task, input));
+        });
+    }
+
+    /** 构造子Agent基础输入。 */
+    private Map<String, Object> baseSpecialistInput(CreationTask task, String originalPrompt) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("taskId", task.taskId());
+        input.put("taskType", task.taskType());
+        input.put("action", task.action());
+        input.put("originalPrompt", originalPrompt);
+        return input;
+    }
+
+    /** 构造技能摘要，优先使用简介，缺失时截取系统提示词前200字符。 */
+    private String skillSummary(SkillRecords.SkillRecord skill) {
+        String summary = skill.getDescription();
+        if (!StringUtils.hasText(summary)) {
+            summary = skill.getSystemPrompt();
+        }
+        if (summary == null || summary.length() <= 200) {
+            return summary == null ? "" : summary;
+        }
+        return summary.substring(0, 200);
+    }
+
+    /**
+     * 使用指定输入调用图片或视频子Agent。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param model Model 默认文本模型
+     * @param task CreationTask 计划任务
+     * @param input Map<String, Object> 子Agent输入
+     * @return Mono<SpecialistAgentResult> 子Agent结构化结果
+     */
+    private Mono<SpecialistAgentResult> callSpecialistWith(Long userId, String sessionId, Model model,
+                                                           CreationTask task, Map<String, Object> input) {
         ReActAgent agent = "image".equals(task.taskType()) ? agentFactory.imageAgent(model) : agentFactory.videoAgent(model);
-        String input = JSON.toJSONString(Map.of(
-                "taskId", task.taskId(),
-                "taskType", task.taskType(),
-                "action", task.action(),
-                "originalPrompt", originalPrompt));
-        return agent.call(input, SpecialistAgentResult.class, RuntimeContext.builder()
+        return agent.call(JSON.toJSONString(input), SpecialistAgentResult.class, RuntimeContext.builder()
                         .sessionId(sessionId + ":" + task.taskId()).userId(String.valueOf(userId)).build())
                 .timeout(Duration.ofSeconds(60))
                 .map(message -> validateSpecialistResult(task, message.getStructuredData(SpecialistAgentResult.class)))
@@ -800,12 +995,121 @@ public class CreationPlanExecutor {
                                                         SpecialistAgentResult decision, String finalPrompt,
                                                         List<GenerationStyleDtos.GenerationStyleSnapshot> styles,
                                                         List<AgentChatRequest.Attachment> dependencyAttachments) {
-        Map<String, Object> arguments = generationArguments(finalPrompt, plan.creationSettings(), plan.entrySource(), styles, task);
-        List<AgentChatRequest.Attachment> attachments = new ArrayList<>(request.attachments() == null ? List.of() : request.attachments());
-        attachments.addAll(dependencyAttachments);
-        String promptStrategy = styles == null || styles.isEmpty() ? decision.promptStrategy() : "OPTIMIZE";
-        return executeGenerationTool(userId, sessionId, plan, request, task, promptStrategy,
-                finalPrompt, arguments, attachments, 0);
+        return Mono.defer(() -> resolveSkillSnapshot(request)
+                .flatMap(skillSnapshot -> workflowStageAttachments(userId, sessionId, plan, task, dependencyAttachments)
+                        .map(stageAttachments -> {
+                            Map<String, Object> arguments = generationArguments(finalPrompt, plan, plan.creationSettings(), plan.entrySource(), styles, task, skillSnapshot);
+                            List<AgentChatRequest.Attachment> attachments = new ArrayList<>(request.attachments() == null ? List.of() : request.attachments());
+                            attachments.addAll(stageAttachments);
+                            String promptStrategy = styles == null || styles.isEmpty() ? decision.promptStrategy() : "OPTIMIZE";
+                            return new GenerationInvocation(arguments, attachments, promptStrategy);
+                        }))
+                .flatMap(invocation -> executeGenerationTool(userId, sessionId, plan, request, task,
+                        invocation.promptStrategy(), finalPrompt, invocation.arguments(), invocation.attachments(), 0)));
+    }
+
+    /**
+     * 组装工作流任务的参考图附件。
+     * <p>
+     * 常规工作流（首尾帧完整计划）通过 plan 内依赖取图；两阶段执行下视频阶段计划无 plan 内图片依赖，
+     * 图片引用从工作流上下文已确认的 generated_images 读取，并按定义的角色顺序注入。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param plan CreationPlan 创作计划
+     * @param task CreationTask 当前任务
+     * @param dependencyAttachments List<Attachment> plan 内依赖附件
+     * @return Mono<List<Attachment>> 完整参考图附件
+     */
+    private Mono<List<AgentChatRequest.Attachment>> workflowStageAttachments(Long userId, String sessionId, CreationPlan plan,
+                                                                               CreationTask task,
+                                                                               List<AgentChatRequest.Attachment> dependencyAttachments) {
+        List<AgentChatRequest.Attachment> fromDependencies = dependencyAttachments == null
+                ? List.of() : dependencyAttachments;
+        boolean supportsConfirmation = workflowDefinition(plan)
+                .map(VideoWorkflowDefinition::supportsImageConfirmation).orElse(false);
+        // 仅两阶段工作流的视频任务需要从上下文读取已确认图片；plan 内已有图片依赖时以 plan 内为准。
+        if (!supportsConfirmation || !"video".equals(task.taskRole())
+                || videoWorkflowContextRepository == null || !fromDependencies.isEmpty()) {
+            return Mono.just(fromDependencies);
+        }
+        return videoWorkflowContextRepository.findLatestByUserAndSession(userId, sessionId)
+                .map(context -> context == null || context.generatedImages() == null
+                        ? fromDependencies
+                        : mergeStageAttachments(plan, task, context.generatedImages(), fromDependencies))
+                .defaultIfEmpty(fromDependencies);
+    }
+
+    /**
+     * 将上下文已生成图片按工作流定义的角色顺序合并为参考图附件。
+     *
+     * @param plan CreationPlan 创作计划
+     * @param task CreationTask 当前任务
+     * @param generatedImages Map<String, Object> 上下文中的图片结果（key 为任务角色）
+     * @param existing List<Attachment> 既有附件
+     * @return List<Attachment> 合并后的参考图附件
+     */
+    private List<AgentChatRequest.Attachment> mergeStageAttachments(CreationPlan plan, CreationTask task,
+                                                                     Map<String, Object> generatedImages,
+                                                                     List<AgentChatRequest.Attachment> existing) {
+        List<String> orderedRoles = workflowDefinition(plan).map(definition -> definition.orderedDependencies(task))
+                .orElseGet(() -> dependencies(task));
+        if (orderedRoles.isEmpty()) {
+            // 两阶段首尾帧工作流：视频任务无 plan 内依赖，orderedDependencies 为空。
+            // 显式按首帧→尾帧角色顺序组装，避免依赖 generated_images keySet 的遍历序
+            // （JSON 反序列化后顺序不稳定，可能导致视频任务参考图角色顺序错乱）。
+            orderedRoles = FirstLastFrameVideoWorkflow.TYPE.equals(plan.workflowType())
+                    ? List.of("first_frame", "last_frame")
+                    : new ArrayList<>(generatedImages.keySet());
+        }
+        List<AgentChatRequest.Attachment> result = new ArrayList<>(existing);
+        for (String role : orderedRoles) {
+            Object value = generatedImages.get(role);
+            if (!(value instanceof Map<?, ?> image)) continue;
+            String url = String.valueOf(image.get("url") == null ? "" : image.get("url"));
+            String storageKey = String.valueOf(image.get("storageKey") == null ? "" : image.get("storageKey"));
+            if (!StringUtils.hasText(storageKey)) storageKey = String.valueOf(image.get("key") == null ? "" : image.get("key"));
+            String mimeType = String.valueOf(image.get("mimeType") == null ? "" : image.get("mimeType"));
+            if (StringUtils.hasText(url) || StringUtils.hasText(storageKey)) {
+                result.add(new AgentChatRequest.Attachment(url, mimeType, "工作流确认图片", storageKey, role));
+            }
+        }
+        return result;
+    }
+
+    /** 生成任务调用参数打包，供技能快照异步加载后一次性透传。 */
+    private record GenerationInvocation(Map<String, Object> arguments,
+                                        List<AgentChatRequest.Attachment> attachments,
+                                        String promptStrategy) {
+    }
+
+    /**
+     * 加载请求所选技能的快照（id/name/targetType），供生成轮次落库时展示。
+     * <p>
+     * 技能缺失、停用或解析失败时降级为空快照，不阻断生成。
+     *
+     * @param request AgentChatRequest 原始请求
+     * @return Mono<Map<String, Object>> 技能快照或空Map
+     */
+    private Mono<Map<String, Object>> resolveSkillSnapshot(AgentChatRequest request) {
+        if (request == null || !StringUtils.hasText(request.skillId())) {
+            return Mono.just(Map.of());
+        }
+        Long skillId;
+        try {
+            skillId = Long.valueOf(request.skillId());
+        } catch (NumberFormatException exception) {
+            return Mono.just(Map.of());
+        }
+        return skillService.findEnabledSkill(skillId)
+                .map(skill -> Map.<String, Object>of(
+                        "id", skill.getId(),
+                        "name", skill.getName(),
+                        "targetType", skill.getTargetType()))
+                .onErrorResume(exception -> {
+                    log.warn("加载技能快照失败: skillId={}, 原因={}", request.skillId(), exception.getMessage());
+                    return Mono.just(Map.of());
+                });
     }
 
     /**
@@ -831,20 +1135,32 @@ public class CreationPlanExecutor {
                                                             int recoveryAttempt) {
         String toolName = toolName(task);
         Map<String, Object> effectiveArguments = new LinkedHashMap<>(arguments == null ? Map.of() : arguments);
-        applyGenerationSettings(effectiveArguments, plan.creationSettings(), task);
-        effectiveArguments.put("entrySource", plan.entrySource());
-        emit(userId, AgentEvent.toolExecute(sessionId, task.taskId(), toolName, effectiveArguments));
-        AgentLoopProfile profile = resolveProfile(task.taskType());
-        return profile.executeTool(userId, toolName, effectiveArguments, request.message(), attachments,
-                        eventEmitter, sessionId, task.taskId())
+        return resolveWorkflowVideoMode(plan, task)
+                .flatMap(videoMode -> {
+                    applyGenerationSettings(effectiveArguments, plan.creationSettings(), task, workflowDefinition(plan).orElse(null), videoMode);
+                    workflowDefinition(plan).ifPresent(definition -> effectiveArguments.put("prompt",
+                            definition.enrichPrompt(task, actualPrompt, videoMode)));
+                    // 视频工作流的图片阶段按图片任务执行，来源标记为图片页以满足任务类型与入口校验
+                    effectiveArguments.put("entrySource", workflowDefinition(plan).map(definition -> definition.usesWorkflowImageModel(task))
+                            .orElse(false) ? AiTaskSources.IMAGE_PAGE : plan.entrySource());
+                    emit(userId, AgentEvent.toolExecute(sessionId, task.taskId(), toolName, effectiveArguments));
+                    AgentLoopProfile profile = resolveProfile(task.taskType());
+                    return profile.executeTool(userId, toolName, effectiveArguments, request.message(), attachments,
+                                    eventEmitter, sessionId, task.taskId());
+                })
                 .flatMap(result -> {
                     if (executionRegistry.isCancelRequested(sessionId)) {
                         return canceledTask(userId, sessionId, plan.planId(), task);
                     }
-                    emit(userId, AgentEvent.toolResult(sessionId, task.taskId(), result.ok(), result.message(), result.data()));
                     String status = taskStatus(result);
+                    Map<String, Object> data = new LinkedHashMap<>(result.data() == null ? Map.of() : result.data());
+                    List<Map<String, Object>> workflowReferences = workflowImageReferences(attachments);
+                    if (!workflowReferences.isEmpty()) {
+                        // 首尾帧由工作流上下文注入，必须随最终视频工具结果保存，供详情弹窗回放真实引用图。
+                        data.put("workflowReferences", workflowReferences);
+                    }
+                    emit(userId, AgentEvent.toolResult(sessionId, task.taskId(), result.ok(), result.message(), data));
                     emit(userId, AgentEvent.planTaskStatus(sessionId, plan.planId(), task.taskId(), status, result.message()));
-                    Map<String, Object> data = result.data() == null ? Map.of() : result.data();
                     AiErrorDetails error = "failed".equals(status)
                             ? result.error() != null ? result.error() : toolError(data, result.message(), "task", "execution")
                             : null;
@@ -864,7 +1180,8 @@ public class CreationPlanExecutor {
      * @param task CreationTask 当前计划任务
      * @return void 无返回值
      */
-    private void applyGenerationSettings(Map<String, Object> arguments, CreationSettings settings, CreationTask task) {
+    private void applyGenerationSettings(Map<String, Object> arguments, CreationSettings settings, CreationTask task,
+                                         VideoWorkflowDefinition workflowDefinition, String workflowVideoMode) {
         if (settings == null || task == null) {
             return;
         }
@@ -877,16 +1194,67 @@ public class CreationPlanExecutor {
             if (StringUtils.hasText(settings.seconds())) arguments.put("seconds", settings.seconds());
             if (settings.watermark() != null) arguments.put("watermark", settings.watermark());
             arguments.put("count", 1);
-            arguments.put("videoGenerationMode", VideoGenerationMode.defaultIfBlank(settings.videoGenerationMode()));
+            arguments.put("videoGenerationMode", workflowVideoMode);
             return;
         }
         if ("image".equals(task.taskType())) {
-            if (StringUtils.hasText(settings.model())) arguments.put("model", settings.model());
-            if (StringUtils.hasText(settings.size())) arguments.put("size", settings.size());
-            if (StringUtils.hasText(settings.resolution())) arguments.put("resolution", settings.resolution());
-            if (StringUtils.hasText(settings.quality())) arguments.put("quality", settings.quality());
-            if (settings.count() != null) arguments.put("count", settings.count());
+            boolean workflowImage = workflowDefinition != null && workflowDefinition.usesWorkflowImageModel(task);
+            if (workflowImage && !StringUtils.hasText(settings.imageModel())) {
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "视频工作流图片阶段未配置图片模型");
+            }
+            String model = workflowImage ? settings.imageModel() : settings.model();
+            if (StringUtils.hasText(model)) arguments.put("model", model);
+            if (workflowImage) {
+                if (StringUtils.hasText(settings.imageSize())) arguments.put("size", settings.imageSize());
+                else if (StringUtils.hasText(settings.size())) arguments.put("size", settings.size());
+                if (StringUtils.hasText(settings.imageResolution())) arguments.put("resolution", settings.imageResolution());
+                else if (StringUtils.hasText(settings.resolution())) arguments.put("resolution", settings.resolution());
+                if (StringUtils.hasText(settings.imageQuality())) arguments.put("quality", settings.imageQuality());
+                else if (StringUtils.hasText(settings.quality())) arguments.put("quality", settings.quality());
+                arguments.put("count", 1);
+            } else {
+                if (StringUtils.hasText(settings.size())) arguments.put("size", settings.size());
+                if (StringUtils.hasText(settings.resolution())) arguments.put("resolution", settings.resolution());
+                if (StringUtils.hasText(settings.quality())) arguments.put("quality", settings.quality());
+                if (settings.count() != null) arguments.put("count", settings.count());
+            }
         }
+    }
+
+    /**
+     * 结合当前视频模型能力确定工作流的视频模式。
+     *
+     * @param plan CreationPlan 创作计划
+     * @param task CreationTask 当前任务
+     * @return Mono<String> 实际视频模式
+     */
+    private Mono<String> resolveWorkflowVideoMode(CreationPlan plan, CreationTask task) {
+        CreationSettings settings = plan.creationSettings();
+        String configuredMode = VideoGenerationMode.defaultIfBlank(settings == null ? null : settings.videoGenerationMode());
+        VideoWorkflowDefinition definition = workflowDefinition(plan).orElse(null);
+        if (definition == null || task == null || !"video".equals(task.taskType())) return Mono.just(configuredMode);
+        if (settings == null) return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "视频工作流缺少生成设置"));
+        String selectedModel = StringUtils.hasText(settings.videoModel()) ? settings.videoModel() : settings.model();
+        if (!StringUtils.hasText(selectedModel)) {
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "视频工作流未配置视频模型"));
+        }
+        return persistenceService.getPlatformModelConfigs().map(configs -> configs.stream()
+                .filter(config -> selectedModel.equals(config.channelId() + "::" + config.modelName()) || selectedModel.equals(config.modelName()))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "工作流视频模型未找到能力配置"))
+        ).map(modelConfig -> {
+            Set<String> capabilities = modelConfig.capabilities() == null ? Set.of() : Set.copyOf(modelConfig.capabilities());
+            List<String> modes = definition.videoGenerationModes(task, configuredMode, capabilities);
+            String resolution = settings.resolution() == null ? "" : settings.resolution().trim().toLowerCase();
+            return modes.stream()
+                    .filter(mode -> modelConfig.videoBillingConfiguration() != null
+                            && modelConfig.videoBillingConfiguration().modePrices() != null
+                            && modelConfig.videoBillingConfiguration().modePrices().get(mode) != null
+                            && modelConfig.videoBillingConfiguration().modePrices().get(mode).containsKey(resolution))
+                    .findFirst()
+                    .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR,
+                            "当前工作流视频模式未配置" + resolution + "分辨率价格"));
+        });
     }
 
     /**
@@ -1104,8 +1472,7 @@ public class CreationPlanExecutor {
      * @param task CreationTask 计划任务
      * @return Mono<TaskExecutionResult> 跳过结果
      */
-    private Mono<TaskExecutionResult> skipTask(Long userId, String sessionId, String planId, CreationTask task) {
-        String message = "前置任务失败，当前任务未执行";
+    private Mono<TaskExecutionResult> skipTask(Long userId, String sessionId, String planId, CreationTask task, String message) {
         emit(userId, AgentEvent.planTaskStatus(sessionId, planId, task.taskId(), "skipped", message));
         return planRepository.updateTask(planId, task.taskId(), "skipped", "", "", null, message)
                 .thenReturn(new TaskExecutionResult(task.taskId(), "skipped", message, Map.of()));
@@ -1150,11 +1517,21 @@ public class CreationPlanExecutor {
      * @param styles List<GenerationStyleSnapshot> 已解析的风格快照
      * @return Map<String, Object> 工具参数
      */
-    private Map<String, Object> generationArguments(String finalPrompt, CreationSettings settings, String entrySource,
-                                                    List<GenerationStyleDtos.GenerationStyleSnapshot> styles, CreationTask task) {
+    private Map<String, Object> generationArguments(String finalPrompt, CreationPlan plan, CreationSettings settings, String entrySource,
+                                                    List<GenerationStyleDtos.GenerationStyleSnapshot> styles, CreationTask task,
+                                                    Map<String, Object> skillSnapshot) {
+        if (settings == null) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "生成任务缺少页面生成设置");
+        }
         Map<String, Object> arguments = new LinkedHashMap<>();
         arguments.put("prompt", finalPrompt);
-        String model = "video".equals(task == null ? null : task.taskType()) && StringUtils.hasText(settings.videoModel())
+        VideoWorkflowDefinition definition = workflowDefinition(plan).orElse(null);
+        boolean workflowImage = definition != null && definition.usesWorkflowImageModel(task);
+        if (workflowImage && !StringUtils.hasText(settings.imageModel())) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "视频工作流图片阶段未配置图片模型");
+        }
+        String model = workflowImage ? settings.imageModel()
+                : "video".equals(task == null ? null : task.taskType()) && StringUtils.hasText(settings.videoModel())
                 ? settings.videoModel() : settings.model();
         arguments.put("model", model);
         arguments.put("size", settings.size());
@@ -1164,8 +1541,10 @@ public class CreationPlanExecutor {
         if (settings.count() != null) arguments.put("count", settings.count());
         if (settings.seconds() != null) arguments.put("seconds", settings.seconds());
         if (settings.watermark() != null) arguments.put("watermark", settings.watermark());
-        arguments.put("videoGenerationMode", VideoGenerationMode.defaultIfBlank(settings.videoGenerationMode()));
+        String configuredVideoMode = VideoGenerationMode.defaultIfBlank(settings.videoGenerationMode());
+        arguments.put("videoGenerationMode", definition == null ? configuredVideoMode : definition.videoGenerationMode(task, configuredVideoMode));
         if (styles != null && !styles.isEmpty()) arguments.put("generationStyleSnapshots", styles);
+        if (skillSnapshot != null && !skillSnapshot.isEmpty()) arguments.put("internal_skill_snapshot", skillSnapshot);
         return arguments;
     }
 
@@ -1194,12 +1573,46 @@ public class CreationPlanExecutor {
     /**
      * 判断任务的全部依赖是否成功。
      *
+     * @param plan CreationPlan 创作计划
      * @param task CreationTask 计划任务
      * @param completed Map<String, TaskExecutionResult> 已完成任务
      * @return boolean 是否可以执行
      */
-    private boolean dependenciesSucceeded(CreationTask task, Map<String, TaskExecutionResult> completed) {
-        return dependencies(task).stream().allMatch(dependency -> "success".equals(completed.get(dependency).status()));
+    private boolean dependenciesSucceeded(CreationPlan plan, CreationTask task, Map<String, TaskExecutionResult> completed) {
+        boolean requireMediaOutput = StringUtils.hasText(plan.workflowType());
+        return dependencies(task).stream().allMatch(dependency -> {
+            TaskExecutionResult result = completed.get(dependency);
+            return result != null && "success".equals(result.status())
+                    && (!requireMediaOutput || hasValidMediaOutput(result));
+        });
+    }
+
+    /**
+     * 判断任务是否产生可供下游使用的媒体输出。
+     *
+     * @param result TaskExecutionResult 已完成任务结果
+     * @return boolean 是否包含有效媒体
+     */
+    private boolean hasValidMediaOutput(TaskExecutionResult result) {
+        return result != null && "success".equals(result.status())
+                && mediaItems(result.data()).stream().anyMatch(CreationPlanExecutor::hasMediaReference);
+    }
+
+    /**
+     * 构造下游任务跳过原因。
+     *
+     * @param plan CreationPlan 创作计划
+     * @param task CreationTask 当前任务
+     * @param completed Map<String, TaskExecutionResult> 前置任务结果
+     * @return String 跳过原因
+     */
+    private String dependencySkipReason(CreationPlan plan, CreationTask task, Map<String, TaskExecutionResult> completed) {
+        if (!StringUtils.hasText(plan.workflowType())) return "前置任务失败、取消或被跳过，当前任务未执行";
+        boolean invalidOutput = dependencies(task).stream().anyMatch(dependency -> {
+            TaskExecutionResult result = completed.get(dependency);
+            return result != null && "success".equals(result.status()) && !hasValidMediaOutput(result);
+        });
+        return invalidOutput ? "前置任务完成但没有有效媒体输出，当前任务未执行" : "前置任务失败、取消或被跳过，当前任务未执行";
     }
 
     /**
@@ -1219,28 +1632,39 @@ public class CreationPlanExecutor {
      * @param completed Map<String, TaskExecutionResult> 已完成任务
      * @return List<Attachment> 依赖媒体附件
      */
-    private List<AgentChatRequest.Attachment> dependencyAttachments(CreationTask task,
+    private List<AgentChatRequest.Attachment> dependencyAttachments(CreationPlan plan, CreationTask task,
                                                                     Map<String, TaskExecutionResult> completed) {
         List<AgentChatRequest.Attachment> attachments = new ArrayList<>();
-        for (String dependency : dependencies(task)) {
+        List<String> orderedDependencies = workflowDefinition(plan).map(definition -> definition.orderedDependencies(task))
+                .orElseGet(() -> dependencies(task));
+        for (String dependency : orderedDependencies) {
             TaskExecutionResult result = completed.get(dependency);
-            Object itemsValue = result == null ? null : result.data().get("items");
-            if (!(itemsValue instanceof List<?> items)) {
-                continue;
-            }
-            for (Object itemValue : items) {
-                JSONObject item = JSON.parseObject(JSON.toJSONString(itemValue));
-                if (item == null) continue;
+            String role = plan.tasks().stream().filter(candidate -> dependency.equals(candidate.taskId()))
+                    .map(CreationTask::taskRole).filter(StringUtils::hasText).findFirst().orElse(null);
+            for (JSONObject item : mediaItems(result == null ? null : result.data())) {
                 String url = item.getString("url");
                 String storageKey = item.getString("storageKey");
                 if (storageKey == null || storageKey.isBlank()) storageKey = item.getString("key");
                 String mimeType = item.getString("mimeType");
-                if (url != null && !url.isBlank() && storageKey != null && !storageKey.isBlank()) {
-                    attachments.add(new AgentChatRequest.Attachment(url, mimeType == null ? "" : mimeType, "依赖任务结果", storageKey));
+                if (StringUtils.hasText(url) || StringUtils.hasText(storageKey)) {
+                    attachments.add(new AgentChatRequest.Attachment(url, mimeType == null ? "" : mimeType, "依赖任务结果", storageKey, role));
                 }
             }
         }
         return attachments;
+    }
+
+    /**
+     * 获取当前计划绑定的工作流定义。
+     *
+     * @param plan CreationPlan 创作计划
+     * @return java.util.Optional<VideoWorkflowDefinition> 工作流定义
+     */
+    private java.util.Optional<VideoWorkflowDefinition> workflowDefinition(CreationPlan plan) {
+        if (plan == null || !StringUtils.hasText(plan.workflowType()) || videoWorkflowRegistry == null) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(videoWorkflowRegistry.require(plan.workflowType()));
     }
 
     /**
@@ -1263,6 +1687,275 @@ public class CreationPlanExecutor {
                 .map(TaskExecutionResult::message).distinct().limit(3).reduce((left, right) -> left + "；" + right).orElse("");
         if (StringUtils.hasText(failureDetails)) message += " " + failureDetails;
         return new PlanExecutionSummary(plan.planId(), status, message, results);
+    }
+
+    /**
+     * 保存视频工作流统一轮次快照，供页面刷新、阶段展示和任务取消恢复使用。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param plan CreationPlan 创作计划
+     * @param request AgentChatRequest 原始请求
+     * @param workflowStatus String 工作流状态
+     * @param error String 工作流错误信息
+     * @param results List<TaskExecutionResult> 已完成子任务结果
+     * @return Mono<Void> 保存完成信号
+     */
+    private Mono<Void> saveWorkflowRound(Long userId, String sessionId, CreationPlan plan, AgentChatRequest request,
+                                         String workflowStatus, String error, List<TaskExecutionResult> results) {
+        if (!StringUtils.hasText(plan.workflowType()) || persistenceService == null) {
+            return Mono.empty();
+        }
+        Map<String, TaskExecutionResult> resultByTaskId = new LinkedHashMap<>();
+        (results == null ? List.<TaskExecutionResult>of() : results).stream()
+                .filter(Objects::nonNull)
+                .forEach(result -> resultByTaskId.put(result.taskId(), result));
+        String workflowPrompt = workflowRoundPrompt(plan, request, resultByTaskId);
+        JSONObject round = new JSONObject();
+        round.put("id", plan.planId());
+        round.put("prompt", workflowPrompt);
+        round.put("generationPrompt", workflowPrompt);
+        round.put("config", JSON.toJSON(plan.creationSettings()));
+        round.put("workflowType", plan.workflowType());
+        round.put("workflowStatus", workflowStatus);
+        round.put("references", workflowResultReferences(plan, resultByTaskId));
+        round.put("videoReferences", List.of());
+        round.put("createdAt", System.currentTimeMillis());
+        if (StringUtils.hasText(error)) {
+            round.put("error", error);
+        }
+
+        List<JSONObject> stages = new ArrayList<>();
+        List<JSONObject> taskSnapshots = new ArrayList<>();
+        List<JSONObject> outputs = new ArrayList<>();
+        List<JSONObject> legacyResults = new ArrayList<>();
+        for (CreationTask task : plan.tasks()) {
+            TaskExecutionResult result = resultByTaskId.get(task.taskId());
+            JSONObject stage = new JSONObject();
+            stage.put("role", task.taskRole());
+            stage.put("displayName", workflowDefinition(plan).map(definition -> definition.displayName(task)).orElse(task.taskId()));
+            stage.put("planTaskId", task.taskId());
+            stage.put("status", result == null ? "pending" : result.status());
+            stage.put("progress", result == null ? 0 : stageProgress(result.status()));
+            boolean hasDownstream = plan.tasks().stream()
+                    .anyMatch(candidate -> candidate.dependsOn() != null && candidate.dependsOn().contains(task.taskId()));
+            stage.put("blocking", hasDownstream);
+            if (result != null) {
+                String taskId = taskIdentifier(result);
+                if (StringUtils.hasText(taskId)) stage.put("taskId", taskId);
+                if (StringUtils.hasText(result.message()) && !"success".equals(result.status())) stage.put("error", result.message());
+                List<JSONObject> stageOutputs = mediaOutputs(task, result);
+                stage.put("outputs", stageOutputs);
+                outputs.addAll(stageOutputs);
+            } else {
+                stage.put("outputs", List.of());
+            }
+            JSONObject taskSnapshot = new JSONObject();
+            taskSnapshot.put("planTaskId", task.taskId());
+            taskSnapshot.put("role", task.taskRole());
+            if (result != null && StringUtils.hasText(taskIdentifier(result))) {
+                taskSnapshot.put("taskId", taskIdentifier(result));
+            }
+            taskSnapshot.put("status", result == null ? "pending" : result.status());
+            taskSnapshot.put("progress", result == null ? 0 : stageProgress(result.status()));
+            taskSnapshots.add(taskSnapshot);
+            stages.add(stage);
+
+            // 该数组仅用于持久化层清理子任务临时轮次，页面展示只读取 stages。
+            JSONObject legacyResult = new JSONObject();
+            legacyResult.put("id", task.taskId());
+            legacyResults.add(legacyResult);
+        }
+        round.put("stages", stages);
+        round.put("tasks", taskSnapshots);
+        round.put("outputs", outputs);
+        round.put("results", legacyResults);
+        String title = request.message().length() > 30 ? request.message().substring(0, 30) : request.message();
+        return persistenceService.saveOrUpdateGenerationRound(userId, sessionId, "video", title, round);
+    }
+
+    /**
+     * 从视频阶段的工具结果提取实际使用的工作流图片引用。
+     *
+     * @param plan CreationPlan 创作计划
+     * @param resultByTaskId Map<String, TaskExecutionResult> 已完成任务结果
+     * @return List<JSONObject> 首帧、尾帧引用列表
+     */
+    private List<JSONObject> workflowResultReferences(CreationPlan plan,
+                                                       Map<String, TaskExecutionResult> resultByTaskId) {
+        if (plan == null || resultByTaskId == null) {
+            return List.of();
+        }
+        List<JSONObject> references = new ArrayList<>();
+        for (CreationTask task : plan.tasks()) {
+            if (!"video".equals(task.taskRole())) {
+                continue;
+            }
+            TaskExecutionResult result = resultByTaskId.get(task.taskId());
+            Object values = result == null || result.data() == null ? null : result.data().get("workflowReferences");
+            if (!(values instanceof Collection<?> collection)) {
+                continue;
+            }
+            collection.stream().map(CreationPlanExecutor::toMediaItem)
+                    .filter(Objects::nonNull)
+                    .forEach(references::add);
+        }
+        return List.copyOf(references);
+    }
+
+    /**
+     * 将实际提交给视频模型的首尾帧附件转换为可持久化的图片引用。
+     *
+     * @param attachments List<Attachment> 当前视频任务的全部附件
+     * @return List<Map<String, Object>> 带角色的首帧、尾帧引用
+     */
+    private List<Map<String, Object>> workflowImageReferences(List<AgentChatRequest.Attachment> attachments) {
+        if (attachments == null || attachments.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> references = new ArrayList<>();
+        for (AgentChatRequest.Attachment attachment : attachments) {
+            if (attachment == null || !"first_frame".equals(attachment.role()) && !"last_frame".equals(attachment.role())) {
+                continue;
+            }
+            Map<String, Object> reference = new LinkedHashMap<>();
+            reference.put("id", StringUtils.hasText(attachment.storageKey()) ? attachment.storageKey() : attachment.url());
+            reference.put("name", "first_frame".equals(attachment.role()) ? "首帧" : "尾帧");
+            reference.put("mimeType", attachment.type());
+            reference.put("storageKey", attachment.storageKey());
+            reference.put("url", attachment.url());
+            reference.put("role", attachment.role());
+            references.add(reference);
+        }
+        return List.copyOf(references);
+    }
+
+    /**
+     * 获取工作流轮次应展示的提示词。
+     * <p>
+     * 视频阶段确认请求的消息只是按钮文案，不能作为最终视频提示词；执行结果中的实际提示词
+     * 才是工作流起草并提交给视频模型的 {@code videoPrompt}。
+     *
+     * @param plan CreationPlan 当前工作流计划
+     * @param request AgentChatRequest 当前请求
+     * @param results Map<String, TaskExecutionResult> 已完成任务结果
+     * @return String 工作流轮次展示提示词
+     */
+    private String workflowRoundPrompt(CreationPlan plan, AgentChatRequest request,
+                                       Map<String, TaskExecutionResult> results) {
+        if (plan != null && plan.tasks() != null && results != null) {
+            for (CreationTask task : plan.tasks()) {
+                if (!"video".equals(task.taskRole())) {
+                    continue;
+                }
+                TaskExecutionResult result = results.get(task.taskId());
+                if (result != null && StringUtils.hasText(result.actualPrompt())) {
+                    return result.actualPrompt();
+                }
+            }
+        }
+        return request == null || request.message() == null ? "" : request.message();
+    }
+
+    /**
+     * 将子任务结果中的实际AI任务标识转换为文本。
+     *
+     * @param result TaskExecutionResult 子任务结果
+     * @return String 实际AI任务标识
+     */
+    private String taskIdentifier(TaskExecutionResult result) {
+        Object value = result == null || result.data() == null ? null : result.data().get("taskId");
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    /**
+     * 将内部状态转换为页面可展示的阶段进度。
+     *
+     * @param status String 子任务状态
+     * @return int 阶段进度
+     */
+    private int stageProgress(String status) {
+        return "success".equals(status) || "failed".equals(status) || "canceled".equals(status) || "skipped".equals(status) ? 100 : 0;
+    }
+
+    /**
+     * 提取子任务返回的媒体输出，并保留角色、存储键和供应商结果字段。
+     *
+     * @param task CreationTask 工作流任务
+     * @param result TaskExecutionResult 子任务结果
+     * @return List<JSONObject> 阶段媒体输出
+     */
+    private List<JSONObject> mediaOutputs(CreationTask task, TaskExecutionResult result) {
+        List<JSONObject> outputs = new ArrayList<>();
+        for (JSONObject output : mediaItems(result == null ? null : result.data())) {
+            output.put("role", task.taskRole());
+            output.put("taskId", taskIdentifier(result));
+            output.put("taskType", task.taskType());
+            outputs.add(output);
+        }
+        return outputs;
+    }
+
+    /**
+     * 从供应商结果中提取统一媒体项，兼容图片的items数组和视频的单个item。
+     *
+     * @param data Map<String, Object> 供应商任务结果
+     * @return List<JSONObject> 统一媒体项
+     */
+    static List<JSONObject> mediaItems(Map<String, Object> data) {
+        if (data == null) return List.of();
+        List<JSONObject> items = new ArrayList<>();
+        Object itemsValue = data.get("items");
+        if (itemsValue instanceof Collection<?> values) {
+            values.stream().map(CreationPlanExecutor::toMediaItem)
+                    .filter(CreationPlanExecutor::hasMediaReference)
+                    .forEach(items::add);
+        }
+        if (items.isEmpty()) {
+            JSONObject item = toMediaItem(data.get("item"));
+            if (hasMediaReference(item)) items.add(item);
+        }
+        if (items.isEmpty()) {
+            JSONObject item = toMediaItem(data);
+            if (hasMediaReference(item)) items.add(item);
+        }
+        return List.copyOf(items);
+    }
+
+    /**
+     * 将未知供应商媒体项转换为JSON对象。
+     *
+     * @param value Object 原始媒体项
+     * @return JSONObject 媒体项，无法转换时为空
+     */
+    private static JSONObject toMediaItem(Object value) {
+        if (value == null) return null;
+        if (value instanceof String text) {
+            String reference = text.trim();
+            if (!StringUtils.hasText(reference)) return null;
+            JSONObject item = new JSONObject();
+            if (reference.startsWith("http://") || reference.startsWith("https://")) {
+                item.put("url", reference);
+            } else {
+                item.put("storageKey", reference);
+            }
+            return item;
+        }
+        JSONObject item = value instanceof JSONObject object
+                ? object : JSON.parseObject(JSON.toJSONString(value));
+        return item == null || item.isEmpty() ? null : item;
+    }
+
+    /**
+     * 判断媒体项是否包含可供后续任务使用的引用。
+     *
+     * @param item JSONObject 媒体项
+     * @return boolean 是否有效
+     */
+    private static boolean hasMediaReference(JSONObject item) {
+        return item != null && (StringUtils.hasText(item.getString("url"))
+                || StringUtils.hasText(item.getString("storageKey"))
+                || StringUtils.hasText(item.getString("key")));
     }
 
     /**
