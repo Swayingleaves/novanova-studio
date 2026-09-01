@@ -1,4 +1,4 @@
-import { type CanvasExecutionState, type CanvasImageNode, type CanvasNodeFrame, type CanvasNodeKind, type CanvasPoint, type CanvasStoryboardNode, type CanvasTextNode, type CanvasVideoCompositionNode, type CanvasVideoNode } from "./types.ts";
+import { type CanvasBackgroundNode, type CanvasExecutionState, type CanvasImageNode, type CanvasNodeFrame, type CanvasNodeKind, type CanvasPoint, type CanvasStoryboardNode, type CanvasTextNode, type CanvasVideoCompositionNode, type CanvasVideoNode } from "./types.ts";
 
 export interface CreateCanvasNodeInput {
     id: string;
@@ -44,13 +44,25 @@ const STORYBOARD_NODE_TEMPLATE: CanvasNodeTemplate = {
     height: 600,
 };
 
+const BACKGROUND_NODE_TEMPLATE: CanvasNodeTemplate = {
+    title: "背景板",
+    width: 960,
+    height: 640,
+};
+
 const CANVAS_NODE_TEMPLATES: Record<CanvasNodeKind, CanvasNodeTemplate> = {
     image: IMAGE_NODE_TEMPLATE,
     text: TEXT_NODE_TEMPLATE,
     video: VIDEO_NODE_TEMPLATE,
     storyboard: STORYBOARD_NODE_TEMPLATE,
     videoComposition: VIDEO_COMPOSITION_NODE_TEMPLATE,
+    background: BACKGROUND_NODE_TEMPLATE,
 };
+
+export const CANVAS_BACKGROUND_MIN_WIDTH = 320;
+export const CANVAS_BACKGROUND_MIN_HEIGHT = 220;
+export const CANVAS_BACKGROUND_PADDING = 32;
+export const CANVAS_BACKGROUND_DEFAULT_COLOR = "var(--studio-surface-raised)";
 
 export function createImageNode(input: CreateCanvasNodeInput): CanvasImageNode {
     return {
@@ -156,6 +168,19 @@ export function createVideoCompositionNode(input: CreateCanvasNodeInput): Canvas
         composition: {
             inputVideoNodeIds: [],
         },
+    };
+}
+
+/** 创建背景板节点。 */
+export function createBackgroundNode(input: CreateCanvasNodeInput & { backgroundColor?: string; memberNodeIds?: string[] }): CanvasBackgroundNode {
+    return {
+        id: input.id,
+        kind: "background",
+        title: input.title?.trim() || BACKGROUND_NODE_TEMPLATE.title,
+        frame: createNodeFrame(BACKGROUND_NODE_TEMPLATE, input.position),
+        execution: createIdleExecution(),
+        backgroundColor: input.backgroundColor || CANVAS_BACKGROUND_DEFAULT_COLOR,
+        memberNodeIds: [...(input.memberNodeIds || [])],
     };
 }
 

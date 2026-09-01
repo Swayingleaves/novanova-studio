@@ -39,7 +39,7 @@ type CanvasFlowProps = {
   viewport?: Viewport;
   backgroundMode?: CanvasBackgroundMode;
   onViewportChange?: (viewport: Viewport) => void;
-  nodes?: Node[];
+  nodes?: Node<any>[];
   edges?: Edge[];
   onNodesChange?: OnNodesChange;
   onEdgesChange?: (changes: any[]) => void;
@@ -50,6 +50,7 @@ type CanvasFlowProps = {
   onNodeMouseDown?: (event: React.MouseEvent, nodeId: string) => void;
   onNodeClick?: (event: React.MouseEvent, nodeId: string) => void;
   onNodeDragStop?: (event: MouseEvent | TouchEvent, node: Node, nodes: Node[]) => void;
+  onNodeDrag?: OnNodeDrag;
   onNodeContextMenu?: (event: React.MouseEvent, nodeId: string) => void;
   onSelectionContextMenu?: (event: React.MouseEvent, nodeIds: string[]) => void;
   onEdgeClick?: (event: React.MouseEvent, edgeId: string) => void;
@@ -192,6 +193,7 @@ export function CanvasFlow({
   onNodeMouseDown,
   onNodeClick,
   onNodeDragStop,
+  onNodeDrag,
   onNodeContextMenu,
   onSelectionContextMenu,
   onEdgeClick,
@@ -385,10 +387,12 @@ export function CanvasFlow({
         onPaneClick={handlePaneClick}
         onPaneContextMenu={handlePaneContextMenu}
         onNodeDragStop={handleNodeDragStop}
+        onNodeDrag={onNodeDrag}
         nodeTypes={nodeTypes}
         edgeTypes={canvasEdgeTypes}
         fitView={false}
         nodesDraggable={true}
+        deleteKeyCode={null}
         nodesConnectable={true}
         connectionRadius={30}
         elementsSelectable={nodesReadyForSelection}
@@ -426,7 +430,7 @@ export function CanvasFlow({
   );
 }
 
-function CanvasFlowGraphSync({ nodes, edges, onNodesInitializedChange }: { nodes: Node[]; edges: Edge[]; onNodesInitializedChange: (nodesInitialized: boolean) => void }) {
+function CanvasFlowGraphSync({ nodes, edges, onNodesInitializedChange }: { nodes: Node<any>[]; edges: Edge[]; onNodesInitializedChange: (nodesInitialized: boolean) => void }) {
   const { setNodes, setEdges } = useReactFlow();
   const nodesInitialized = useNodesInitialized();
 

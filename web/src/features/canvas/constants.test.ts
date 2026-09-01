@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createImageNode, createStoryboardNode, createTextNode, createVideoNode, getCanvasNodeTemplate } from "./constants.ts";
+import { createBackgroundNode, createImageNode, createStoryboardNode, createTextNode, createVideoNode, getCanvasNodeTemplate } from "./constants.ts";
 import { MINIMUM_CONTENT_NODE_DIMENSION, nodeSizeFromRatioWithMinimum } from "./utils/canvas-node-size.ts";
 
 test("图片节点工厂每次返回独立的嵌套对象", () => {
@@ -46,11 +46,22 @@ test("分镜脚本节点保留独立的编辑数据与空执行状态", () => {
     assert.equal(first.execution.phase, "idle");
 });
 
+test("背景板节点工厂使用默认尺寸和独立成员列表", () => {
+    const first = createBackgroundNode({ id: "background-1", position: { x: 0, y: 0 } });
+    const second = createBackgroundNode({ id: "background-2", position: { x: 0, y: 0 }, memberNodeIds: ["text-1"] });
+    assert.equal(first.kind, "background");
+    assert.deepEqual(first.frame, { position: { x: 0, y: 0 }, width: 960, height: 640 });
+    assert.deepEqual(first.memberNodeIds, []);
+    assert.deepEqual(second.memberNodeIds, ["text-1"]);
+    assert.notEqual(first.memberNodeIds, second.memberNodeIds);
+});
+
 test("节点模板按类型返回固定尺寸", () => {
     assert.deepEqual(getCanvasNodeTemplate("image"), { title: "图像", width: 510, height: 360 });
     assert.deepEqual(getCanvasNodeTemplate("text"), { title: "文本", width: 600, height: 600 });
     assert.deepEqual(getCanvasNodeTemplate("video"), { title: "视频", width: 630, height: 354 });
     assert.deepEqual(getCanvasNodeTemplate("storyboard"), { title: "分镜脚本", width: 600, height: 600 });
+    assert.deepEqual(getCanvasNodeTemplate("background"), { title: "背景板", width: 960, height: 640 });
 });
 
 test("文本和分镜节点按比例创建时保持比例且短边至少为500", () => {

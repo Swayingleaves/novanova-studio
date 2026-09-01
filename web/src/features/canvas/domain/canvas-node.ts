@@ -1,4 +1,5 @@
 import type {
+    CanvasBackgroundNode,
     CanvasExecutionState,
     CanvasImageContent,
     CanvasImageGenerationSettings,
@@ -88,9 +89,27 @@ export function isStoryboardNode(node: CanvasNode): node is CanvasStoryboardNode
     return node.kind === "storyboard";
 }
 
+/** 判断节点是否为背景板。 */
+export function isBackgroundNode(node: CanvasNode): node is CanvasBackgroundNode {
+    return node.kind === "background";
+}
+
 export function updateCanvasNodeTitle<Node extends CanvasNode>(node: Node, title: string): Node {
     const normalizedTitle = title.trim();
     return normalizedTitle && normalizedTitle !== node.title ? { ...node, title: normalizedTitle } : node;
+}
+
+/** 更新背景板颜色。 */
+export function updateCanvasBackgroundColor(node: CanvasBackgroundNode, backgroundColor: string): CanvasBackgroundNode {
+    const normalizedColor = backgroundColor.trim();
+    return normalizedColor && normalizedColor !== node.backgroundColor ? { ...node, backgroundColor: normalizedColor } : node;
+}
+
+/** 更新背景板成员标识，并自动去重。 */
+export function updateCanvasBackgroundMembers(node: CanvasBackgroundNode, memberNodeIds: string[]): CanvasBackgroundNode {
+    const normalized = Array.from(new Set(memberNodeIds.filter(Boolean))).filter((id) => id !== node.id);
+    if (normalized.length === node.memberNodeIds.length && normalized.every((id, index) => id === node.memberNodeIds[index])) return node;
+    return { ...node, memberNodeIds: normalized };
 }
 
 export function updateCanvasNodeFrame<Node extends CanvasNode>(node: Node, patch: Partial<CanvasNodeFrame>): Node {
@@ -255,6 +274,7 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
             resultVideoNodeId: attributes.videoCompositionResultVideoNodeId,
         });
     }
+    if (isBackgroundNode(framed)) return framed;
     const withContent = updateVideoNodeContent(framed, {
         source: attributes.content ?? framed.content.source,
         storageKey: attributes.storageKey,

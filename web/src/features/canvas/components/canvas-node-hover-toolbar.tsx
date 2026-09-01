@@ -371,6 +371,7 @@ function readNodeTypeLabel(type: CanvasNodeKind) {
     if (type === "image") return "图片";
     if (type === "storyboard") return "分镜脚本";
     if (type === "videoComposition") return "合成视频";
+    if (type === "background") return "背景板";
     return "视频";
 }
 

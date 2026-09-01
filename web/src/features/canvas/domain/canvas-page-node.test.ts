@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createImageNode, createStoryboardNode, createTextNode } from "../constants.ts";
+import { createBackgroundNode, createImageNode, createStoryboardNode, createTextNode } from "../constants.ts";
 import { MINIMUM_CONTENT_NODE_DIMENSION } from "../utils/canvas-node-size.ts";
 import {
     applyCanvasNodeConfig,
@@ -14,7 +14,45 @@ import {
     moveCanvasNodesFromOrigins,
     applyGeneratedImageToBatchNodes,
     synchronizeImageBatchRootExecution,
+    expandBackgroundBoardsToMembers,
+    reconcileBackgroundBoardMembership,
+    normalizeBackgroundBoardMembers,
 } from "./canvas-page-node.ts";
+
+test("背景板默认尺寸并可扩展包裹成员", () => {
+    const board = createBackgroundNode({ id: "background-1", position: { x: 0, y: 0 } });
+    const member = createTextNode({ id: "text-1", position: { x: 0, y: 0 } });
+    const withMember = { ...board, memberNodeIds: [member.id] };
+    const expanded = expandBackgroundBoardsToMembers([withMember, member])[0];
+    assert.equal(board.frame.width, 960);
+    assert.ok(expanded.frame.width >= member.frame.width + 64);
+});
+
+test("节点从背景板外拖入时建立归属，完全移出时解除归属", () => {
+    const board = createBackgroundNode({ id: "background-1", position: { x: 0, y: 0 } });
+    const member = createTextNode({ id: "text-1", position: { x: 100, y: 100 } });
+    const entered = reconcileBackgroundBoardMembership([board, member], new Set([member.id]), new Set());
+    assert.deepEqual((entered[0].kind === "background" ? entered[0].memberNodeIds : []), [member.id]);
+    const movedOut = { ...member, frame: { ...member.frame, position: { x: 2000, y: 2000 } } };
+    const exited = reconcileBackgroundBoardMembership([entered[0], movedOut], new Set([member.id]), new Set([member.id]));
+    assert.deepEqual((exited[0].kind === "background" ? exited[0].memberNodeIds : []), []);
+});
+
+test("重叠背景板按场景中靠后的背景板建立唯一归属", () => {
+    const firstBoard = createBackgroundNode({ id: "background-1", position: { x: 0, y: 0 } });
+    const secondBoard = createBackgroundNode({ id: "background-2", position: { x: 0, y: 0 } });
+    const member = createTextNode({ id: "text-1", position: { x: 100, y: 100 } });
+    const [normalizedFirst, normalizedSecond] = reconcileBackgroundBoardMembership([firstBoard, secondBoard, member], new Set([member.id]), new Set());
+    assert.deepEqual(normalizedFirst.kind === "background" ? normalizedFirst.memberNodeIds : [], []);
+    assert.deepEqual(normalizedSecond.kind === "background" ? normalizedSecond.memberNodeIds : [], [member.id]);
+});
+
+test("恢复文档时清理不存在的成员和背景板互相引用", () => {
+    const board = createBackgroundNode({ id: "background-1", position: { x: 0, y: 0 }, memberNodeIds: ["missing", "background-2"] });
+    const otherBoard = createBackgroundNode({ id: "background-2", position: { x: 0, y: 0 }, memberNodeIds: [board.id] });
+    const [normalized] = normalizeBackgroundBoardMembers([board, otherBoard]);
+    assert.deepEqual(normalized.kind === "background" ? normalized.memberNodeIds : [], []);
+});
 
 test("修改空图片节点尺寸配置时保持中心点不变", () => {
     const node = createImageNode({ id: "image-1", position: { x: 100, y: 80 } });

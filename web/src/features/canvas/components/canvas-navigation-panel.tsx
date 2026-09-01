@@ -5,7 +5,7 @@ import { Empty, Modal, Tabs, Tag, Tooltip } from "antd";
 import { Boxes, ChevronsLeft, CircleCheck, CircleDashed, CircleX, Clapperboard, FileText, FolderOpen, Image as ImageIcon, PanelLeftClose, PanelLeftOpen, UserRound, Video } from "lucide-react";
 
 import type { Asset } from "@/features/assets/stores/use-asset-store";
-import { isImageNode } from "../domain/canvas-node";
+import { isBackgroundNode, isImageNode, isVideoNode } from "../domain/canvas-node";
 import type { CanvasNode, CanvasStoryboardAsset, CanvasStoryboardAssetKind } from "../types";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
@@ -127,6 +127,7 @@ function NodeList({ nodes, selectedNodeIds, onLocateNode }: { nodes: CanvasNode[
                 {nodes.map((node) => {
                     const selected = selectedNodeIds.has(node.id);
                     const batchCount = isImageNode(node) && node.grouping.isRoot ? node.grouping.childIds.length : 0;
+                    const backgroundCount = isBackgroundNode(node) ? node.memberNodeIds.length : 0;
                     return (
                         <button
                             key={node.id}
@@ -147,7 +148,7 @@ function NodeList({ nodes, selectedNodeIds, onLocateNode }: { nodes: CanvasNode[
                                 <span className="block truncate text-xs font-medium">{node.title || "未命名节点"}</span>
                                 <span className="mt-0.5 flex items-center gap-1 text-[11px]" style={{ color: theme.node.muted }}><NodeKindIcon kind={node.kind} className="size-3" />{nodeKindLabel(node.kind)}<NodeStatus phase={node.execution.phase} /></span>
                             </span>
-                            {batchCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{batchCount} 张</span> : null}
+                            {batchCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{batchCount} 张</span> : backgroundCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{backgroundCount} 个节点</span> : null}
                         </button>
                     );
                 })}
@@ -194,9 +195,17 @@ function PanelEmpty({ description }: { description: string }) {
 
 function NodePreview({ node }: { node: CanvasNode }) {
     const theme = useCanvasTheme();
+    const imageSource = isImageNode(node) ? node.content.source : "";
+    const videoSource = isVideoNode(node) ? node.content.source : "";
     return (
         <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md" style={{ background: theme.node.fill, color: theme.node.muted }}>
-            {isImageNode(node) && node.content.source ? <img src={node.content.source} alt="" loading="lazy" className="size-full object-cover" /> : <NodeKindIcon kind={node.kind} className="size-4" />}
+            {imageSource ? (
+                <img src={imageSource} alt="" loading="lazy" className="size-full object-cover" />
+            ) : videoSource ? (
+                <video src={videoSource} aria-hidden="true" muted playsInline preload="auto" className="pointer-events-none size-full object-cover" />
+            ) : isBackgroundNode(node) ? <Boxes className="size-4" /> : (
+                <NodeKindIcon kind={node.kind} className="size-4" />
+            )}
         </span>
     );
 }
@@ -232,7 +241,7 @@ function AssetKindIcon({ asset, className }: { asset: CanvasNavigationAsset; cla
 }
 
 function nodeKindLabel(kind: CanvasNode["kind"]) {
-    return kind === "image" ? "图片" : kind === "text" ? "文本" : kind === "video" ? "视频" : kind === "storyboard" ? "分镜" : "视频合成";
+    return kind === "image" ? "图片" : kind === "text" ? "文本" : kind === "video" ? "视频" : kind === "storyboard" ? "分镜" : kind === "videoComposition" ? "视频合成" : "背景板";
 }
 
 function assetTitle(asset: CanvasNavigationAsset) {

@@ -7,7 +7,7 @@ import type { CanvasTheme, CanvasBackgroundMode } from "@/shared/lib/canvas-them
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { readCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
 import { formatGroupedGenerationStyleMessage } from "@/features/generation/lib/style-command";
-import { createImageNode, createStoryboardNode, createTextNode, createVideoCompositionNode, createVideoNode, getCanvasNodeTemplate } from "../constants";
+import { createBackgroundNode, createImageNode, createStoryboardNode, createTextNode, createVideoCompositionNode, createVideoNode, getCanvasNodeTemplate } from "../constants";
 import { applyCanvasNodeAttributes, isImageNode, isTextNode, isVideoNode, updateCanvasNodeFrame, type CanvasNodeAttributes } from "../domain/canvas-node";
 import { MINIMUM_CONTENT_NODE_DIMENSION, nodeSizeFromRatioWithMinimum } from "../utils/canvas-node-size";
 import {
@@ -77,6 +77,8 @@ export function createCanvasNode(kind: CanvasNodeKind, position: CanvasPoint, at
                 ? createStoryboardNode(input)
                 : kind === "videoComposition"
                     ? createVideoCompositionNode(input)
+                : kind === "background"
+                    ? createBackgroundNode(input)
                     : createTextNode(input);
     const withFrame = ratioSize ? updateCanvasNodeFrame(node, ratioSize) : node;
     return applyCanvasNodeAttributes(withFrame, { ...readCanvasLastUsedGenerationSettings(kind), ...attributes });
