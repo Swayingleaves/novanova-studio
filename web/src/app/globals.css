@@ -1210,6 +1210,36 @@ html[data-theme="dark"] {
             transform: translate(var(--batch-from-x), var(--batch-from-y)) rotate(var(--batch-from-rotate)) scale(0.72);
         }
     }
+
+    /* 画布连线上的流动高光，沿 SVG 路径从源节点移动到目标节点。 */
+    @keyframes canvas-edge-flow {
+        from {
+            stroke-dashoffset: 0;
+        }
+
+        to {
+            stroke-dashoffset: -1;
+        }
+    }
+
+    .canvas-edge-flow {
+        animation: none;
+        opacity: 0;
+        transition: opacity 140ms ease;
+    }
+
+    .canvas-edge-base {
+        transition: stroke-width 140ms ease;
+    }
+
+    .react-flow__edge:hover .canvas-edge-base {
+        stroke-width: 3.25px !important;
+    }
+
+    .react-flow__edge:hover .canvas-edge-flow {
+        animation: canvas-edge-flow 3.2s linear infinite;
+        opacity: 0.88;
+    }
 }
 
 /* 黑色主题预览稿的直角表面与细边框规范。 */
@@ -1594,6 +1624,20 @@ html[data-theme="dark"] .creation-composer-submit-trigger:disabled {
 
     .studio-skeleton {
         animation: none !important;
+    }
+
+    .canvas-edge-flow {
+        animation: none !important;
+        opacity: 0 !important;
+    }
+
+    .canvas-edge-base {
+        transition: none;
+    }
+
+    .react-flow__edge:hover .canvas-edge-base {
+        stroke-width: 2.5px !important;
+        transition: none;
     }
 
     .sidebar-rail-item:hover,

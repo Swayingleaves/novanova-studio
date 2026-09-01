@@ -567,6 +567,9 @@ public class NovanovaProperties {
         /** AI系统提示词文件配置 */
         private SystemPrompt systemPrompt = new SystemPrompt();
 
+        /** 分镜Agent配置 */
+        private StoryboardAgent storyboardAgent = new StoryboardAgent();
+
         /** AI图片结果配置 */
         private Image image = new Image();
 
@@ -610,6 +613,24 @@ public class NovanovaProperties {
         }
 
         /**
+         * 获取分镜Agent配置。
+         *
+         * @return StoryboardAgent 分镜Agent配置
+         */
+        public StoryboardAgent getStoryboardAgent() {
+            return storyboardAgent;
+        }
+
+        /**
+         * 设置分镜Agent配置。
+         *
+         * @param storyboardAgent StoryboardAgent 分镜Agent配置
+         */
+        public void setStoryboardAgent(StoryboardAgent storyboardAgent) {
+            this.storyboardAgent = storyboardAgent;
+        }
+
+        /**
          * 获取AI图片结果配置。
          *
          * @return Image AI图片结果配置
@@ -643,6 +664,33 @@ public class NovanovaProperties {
          */
         public void setVideoComposition(VideoComposition videoComposition) {
             this.videoComposition = videoComposition;
+        }
+
+        /**
+         * 分镜Agent配置。
+         */
+        public static class StoryboardAgent {
+
+            /** Agent单次调用超时时间（秒） */
+            private int timeoutSeconds = 90;
+
+            /**
+             * 获取Agent单次调用超时时间（秒）。
+             *
+             * @return int 超时时间秒数
+             */
+            public int getTimeoutSeconds() {
+                return timeoutSeconds;
+            }
+
+            /**
+             * 设置Agent单次调用超时时间（秒）。
+             *
+             * @param timeoutSeconds int 超时时间秒数
+             */
+            public void setTimeoutSeconds(int timeoutSeconds) {
+                this.timeoutSeconds = timeoutSeconds;
+            }
         }
 
         /**

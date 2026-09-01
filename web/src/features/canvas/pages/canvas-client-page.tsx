@@ -35,6 +35,7 @@ import type { OnConnectEnd, OnConnectStartParams } from "@xyflow/react";
 import { getCanvasNodeTemplate } from "../constants";
 import {
     applyCanvasNodeAttributes,
+    isBackgroundNode,
     isImageNode,
     isStoryboardNode,
     isTextNode,
@@ -52,6 +53,9 @@ import {
     createCanvasConnection,
     findCanvasConnectionDropTarget,
     moveCanvasNodesFromOrigins,
+    expandBackgroundBoardsToMembers,
+    reconcileBackgroundBoardMembership,
+    normalizeBackgroundBoardMembers,
     normalizeCanvasConnection,
     readCanvasNodePrompt,
     resetInterruptedCanvasNodes,
@@ -121,6 +125,7 @@ import {
 } from "../domain/storyboard";
 import {
     type CanvasAssistantImage,
+    type CanvasBackgroundNode,
     type CanvasAssistantMessage,
     type CanvasAssistantSession,
     type CanvasConnection,
@@ -225,6 +230,7 @@ function CanvasWorkspacePage() {
         startX: number;
         startY: number;
         initialSelectedNodes: { id: string; x: number; y: number }[];
+        originalBackgroundMemberNodeIds: string[];
     }>({
         isDraggingNode: false,
         hasMoved: false,
@@ -232,7 +238,9 @@ function CanvasWorkspacePage() {
         startX: 0,
         startY: 0,
         initialSelectedNodes: [],
+        originalBackgroundMemberNodeIds: [],
     });
+    const backgroundDragRef = useRef<{ boardId: string; originX: number; originY: number; memberOrigins: Array<{ id: string; x: number; y: number }> } | null>(null);
 
     const onNodeDropRef = useRef<((nodeId: string) => void) | null>(null);
     const panelRectRef = useRef<DOMRect | null>(null);
@@ -539,10 +547,11 @@ function CanvasWorkspacePage() {
         }
 
         const restore = async () => {
-            const hydratedNodes = await hydrateCanvasImages(resetInterruptedCanvasNodes(document.scene.nodes));
+            const hydratedNodes = normalizeBackgroundBoardMembers(await hydrateCanvasImages(resetInterruptedCanvasNodes(document.scene.nodes)));
             const restoredSessions = await hydrateAssistantImages(document.conversation.sessions);
             const nodeIdSet = new Set(hydratedNodes.map((node) => node.id));
-            const restoredConnections = document.scene.connections.filter((connection) => nodeIdSet.has(connection.source.nodeId) && nodeIdSet.has(connection.target.nodeId));
+            const backgroundNodeIdSet = new Set(hydratedNodes.filter(isBackgroundNode).map((node) => node.id));
+            const restoredConnections = document.scene.connections.filter((connection) => nodeIdSet.has(connection.source.nodeId) && nodeIdSet.has(connection.target.nodeId) && !backgroundNodeIdSet.has(connection.source.nodeId) && !backgroundNodeIdSet.has(connection.target.nodeId));
             const restoredNodes = synchronizeVideoCompositionInputs(hydratedNodes, restoredConnections);
             setNodes(restoredNodes);
             // 过滤掉孤立边（源/目标节点不存在），防止 React Flow 报错。
@@ -1102,22 +1111,33 @@ function CanvasWorkspacePage() {
             requestFocusNodes([newNode.id]);
             setSelectedNodeIds(new Set([newNode.id]));
             setSelectedConnectionId(null);
-            setDialogNodeId(newNode.id);
+            setDialogNodeId(type === "background" ? null : newNode.id);
         },
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter, requestFocusNodes],
     );
 
-    const deleteNodes = useCallback(
+    const performDeleteNodes = useCallback(
         (ids: Set<string>) => {
             if (!ids.size) return;
             const allIds = new Set(ids);
-            nodesRef.current.forEach((node) => {
-                if (ids.has(node.id) && isImageNode(node)) node.grouping.childIds.forEach((childId) => allIds.add(childId));
-            });
+            let expanded = true;
+            while (expanded) {
+                expanded = false;
+                nodesRef.current.forEach((node) => {
+                    const before = allIds.size;
+                    if (allIds.has(node.id) && isImageNode(node)) node.grouping.childIds.forEach((childId) => allIds.add(childId));
+                    if (allIds.has(node.id) && isBackgroundNode(node)) node.memberNodeIds.forEach((memberId) => allIds.add(memberId));
+                    expanded ||= allIds.size !== before;
+                });
+            }
             cancelVideoCompositionTasksForDeletedNodes(allIds);
             setNodes((prev) => {
                 const next = prev.filter((node) => !allIds.has(node.id));
                 return next.map((node) => {
+                    if (isBackgroundNode(node)) {
+                        const memberNodeIds = node.memberNodeIds.filter((memberId) => !allIds.has(memberId));
+                        return memberNodeIds.length === node.memberNodeIds.length ? node : { ...node, memberNodeIds };
+                    }
                     if (!isImageNode(node) || !node.grouping.isRoot) return node;
                     const childIds = node.grouping.childIds.filter((childId) => !allIds.has(childId));
                     if (childIds.length === node.grouping.childIds.length) return node;
@@ -1150,6 +1170,24 @@ function CanvasWorkspacePage() {
             cleanupCanvasFiles({ projectId, nodes: nodesRef.current.filter((node) => !allIds.has(node.id)), chatSessions });
         },
         [cancelVideoCompositionTasksForDeletedNodes, chatSessions, cleanupCanvasFiles, projectId],
+    );
+
+    const confirmDeleteNodes = useCallback(
+        (ids: Set<string>) => {
+            if (!ids.size) return;
+            const selectedNodes = nodesRef.current.filter((node) => ids.has(node.id));
+            const hasBackgroundBoard = selectedNodes.some(isBackgroundNode);
+            const message = hasBackgroundBoard ? "删除背景板会同时删除其中的全部成员节点及相关连线，此操作可通过撤销恢复。" : "删除选中的节点及相关连线？此操作可通过撤销恢复。";
+            modal.confirm({
+                title: selectedNodes.length > 1 ? `删除选中节点（${selectedNodes.length}）？` : "删除节点？",
+                content: message,
+                okText: "删除",
+                cancelText: "取消",
+                okButtonProps: { danger: true },
+                onOk: () => performDeleteNodes(ids),
+            });
+        },
+        [modal, performDeleteNodes],
     );
 
     const deleteConnection = useCallback((connectionId: string) => {
@@ -1190,6 +1228,29 @@ function CanvasWorkspacePage() {
             const source = nodesRef.current.find((node) => node.id === nodeId);
             if (!source) return;
 
+            if (isBackgroundNode(source)) {
+                const groupIds = new Set([source.id, ...source.memberNodeIds]);
+                const groupNodes = nodesRef.current.filter((node) => groupIds.has(node.id));
+                const idMap = new Map(groupNodes.map((node) => [node.id, `${node.kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`]));
+                const nextNodes = groupNodes.map((node) => {
+                    const copied = structuredClone(node);
+                    const mappedId = idMap.get(node.id) as string;
+                    const frame = { ...node.frame, position: { x: node.frame.position.x + 36, y: node.frame.position.y + 36 } };
+                    if (isBackgroundNode(copied)) return { ...copied, id: mappedId, title: `${node.title} 副本`, frame, memberNodeIds: copied.memberNodeIds.flatMap((memberId) => (idMap.has(memberId) ? [idMap.get(memberId) as string] : [])) };
+                    return { ...copied, id: mappedId, title: `${node.title} 副本`, frame };
+                });
+                const nextConnections = connectionsRef.current
+                    .filter((connection) => groupIds.has(connection.source.nodeId) && groupIds.has(connection.target.nodeId))
+                    .map((connection, index) => ({ ...structuredClone(connection), id: `conn-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`, source: { ...connection.source, nodeId: idMap.get(connection.source.nodeId) as string }, target: { ...connection.target, nodeId: idMap.get(connection.target.nodeId) as string } }));
+                setNodes((prev) => [...prev, ...nextNodes]);
+                setConnections((prev) => [...prev, ...nextConnections]);
+                requestFocusNodes([idMap.get(source.id) as string]);
+                setSelectedNodeIds(new Set(nextNodes.map((node) => node.id)));
+                setSelectedConnectionId(null);
+                setDialogNodeId(null);
+                return;
+            }
+
             const id = `${source.kind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
             const copied = structuredClone(source);
             const next: CanvasDomainNode = isVideoCompositionNode(copied)
@@ -1227,13 +1288,17 @@ function CanvasWorkspacePage() {
         const selectedIds = selectedNodeIdsRef.current;
         if (!selectedIds.size) return;
 
-        const copiedNodes = nodesRef.current.filter((node) => selectedIds.has(node.id)).map((node) => structuredClone(node));
+        const copyIds = new Set(selectedIds);
+        nodesRef.current.forEach((node) => {
+            if (selectedIds.has(node.id) && isBackgroundNode(node)) node.memberNodeIds.forEach((memberId) => copyIds.add(memberId));
+        });
+        const copiedNodes = nodesRef.current.filter((node) => copyIds.has(node.id)).map((node) => structuredClone(node));
 
         if (!copiedNodes.length) return;
 
         clipboardRef.current = {
             nodes: copiedNodes,
-            connections: connectionsRef.current.filter((connection) => selectedIds.has(connection.source.nodeId) && selectedIds.has(connection.target.nodeId)).map((connection) => structuredClone(connection)),
+            connections: connectionsRef.current.filter((connection) => copyIds.has(connection.source.nodeId) && copyIds.has(connection.target.nodeId)).map((connection) => structuredClone(connection)),
         };
     }, []);
 
@@ -1280,6 +1345,15 @@ function CanvasWorkspacePage() {
                             return mappedNodeId ? [mappedNodeId] : [];
                         }),
                     },
+                };
+            }
+            if (isBackgroundNode(copied)) {
+                return {
+                    ...copied,
+                    id: idMap.get(node.id) as string,
+                    title: node.title.endsWith("副本") ? node.title : `${node.title} 副本`,
+                    frame,
+                    memberNodeIds: copied.memberNodeIds.flatMap((memberNodeId) => (idMap.has(memberNodeId) ? [idMap.get(memberNodeId) as string] : [])),
                 };
             }
             return {
@@ -1415,7 +1489,9 @@ function CanvasWorkspacePage() {
         const nextSelected = updateCanvasNodeSelection(selectedNodeIdsRef.current, nodeId, additive);
         setSelectedNodeIds(nextSelected);
         const groupedChildIds = currentNodes.flatMap((node) => (nextSelected.has(node.id) && isImageNode(node) ? node.grouping.childIds : []));
-        const dragIds = new Set([...nextSelected, ...groupedChildIds]);
+        const backgroundMemberIds = currentNodes.flatMap((node) => (nextSelected.has(node.id) && isBackgroundNode(node) ? node.memberNodeIds : []));
+        const dragIds = new Set([...nextSelected, ...groupedChildIds, ...backgroundMemberIds]);
+        const originalBackgroundMemberNodeIds = currentNodes.filter((node) => isBackgroundNode(node)).flatMap((node) => node.memberNodeIds);
         dragRef.current = {
             isDraggingNode: true,
             hasMoved: false,
@@ -1423,6 +1499,7 @@ function CanvasWorkspacePage() {
             startX: event.clientX,
             startY: event.clientY,
             initialSelectedNodes: currentNodes.filter((node) => dragIds.has(node.id)).map((node) => ({ id: node.id, x: node.frame.position.x, y: node.frame.position.y })),
+            originalBackgroundMemberNodeIds,
         };
         historyPausedRef.current = true;
         nodeDraggingRef.current = true;
@@ -1447,12 +1524,15 @@ function CanvasWorkspacePage() {
         nodeDraggingRef.current = false;
         setIsNodeDragging(false);
         if (dragRef.current.hasMoved && clientX != null && clientY != null) {
-            setNodes((currentNodes) => moveCanvasNodesFromOrigins(currentNodes, initialPositions, dx, dy));
+            const movedNodeIds = new Set(initialPositions.map((item) => item.id));
+            const originalBackgroundMemberNodeIds = new Set(dragRef.current.originalBackgroundMemberNodeIds);
+            setNodes((currentNodes) => reconcileBackgroundBoardMembership(moveCanvasNodesFromOrigins(currentNodes, initialPositions, dx, dy), movedNodeIds, originalBackgroundMemberNodeIds));
         }
 
         dragRef.current.isDraggingNode = false;
         dragRef.current.hasMoved = false;
         dragRef.current.initialSelectedNodes = [];
+        dragRef.current.originalBackgroundMemberNodeIds = [];
         if (wasClick && clickedNodeId) setDialogNodeId(clickedNodeId);
     }, []);
 
@@ -1683,7 +1763,7 @@ function CanvasWorkspacePage() {
                 if (!pasteCopiedNodes()) void pasteSystemClipboard();
             },
             delete: () => {
-                if (selectedNodeIdsRef.current.size) deleteNodes(new Set(selectedNodeIdsRef.current));
+                if (selectedNodeIdsRef.current.size) confirmDeleteNodes(new Set(selectedNodeIdsRef.current));
                 else if (selectedConnectionId) deleteConnection(selectedConnectionId);
             },
             cancel: () => {
@@ -1695,7 +1775,7 @@ function CanvasWorkspacePage() {
                 setPendingConnectionCreate(null);
             },
         }),
-        [copySelectedNodes, deleteConnection, deleteNodes, deselectCanvas, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, selectedConnectionId, setConnecting, undoCanvas],
+        [copySelectedNodes, confirmDeleteNodes, deleteConnection, deselectCanvas, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, selectedConnectionId, setConnecting, undoCanvas],
     );
     useCanvasKeyboardShortcuts(keyboardHandlers);
 
@@ -1712,7 +1792,44 @@ function CanvasWorkspacePage() {
     );
 
     const handleNodeResize = useCallback((nodeId: string, width: number, height: number, position?: CanvasPoint) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? updateCanvasNodeFrame(node, { width, height, position: position || node.frame.position }) : node)));
+        setNodes((prev) => {
+            const resized = prev.map((node) => (node.id === nodeId ? updateCanvasNodeFrame(node, { width, height, position: position || node.frame.position }) : node));
+            return resized.some((node) => node.id === nodeId && isBackgroundNode(node)) ? expandBackgroundBoardsToMembers(resized) : resized;
+        });
+    }, []);
+
+    const handleBackgroundNodeDrag = useCallback((_event: MouseEvent | TouchEvent, node: { id: string; position: { x: number; y: number } }) => {
+        const board = nodesRef.current.find((item): item is CanvasBackgroundNode => item.id === node.id && isBackgroundNode(item));
+        if (!board) return;
+        const dragState = backgroundDragRef.current || {
+            boardId: board.id,
+            originX: board.frame.position.x,
+            originY: board.frame.position.y,
+            memberOrigins: board.memberNodeIds.flatMap((memberId) => {
+                const member = nodesRef.current.find((item) => item.id === memberId);
+                return member ? [{ id: member.id, x: member.frame.position.x, y: member.frame.position.y }] : [];
+            }),
+        };
+        backgroundDragRef.current = dragState;
+        const offsetX = node.position.x - dragState.originX;
+        const offsetY = node.position.y - dragState.originY;
+        setNodes((prev) => prev.map((item) => {
+            if (item.id === dragState.boardId) return updateCanvasNodeFrame(item, { position: { x: node.position.x, y: node.position.y } });
+            const origin = dragState.memberOrigins.find((candidate) => candidate.id === item.id);
+            return origin ? updateCanvasNodeFrame(item, { position: { x: origin.x + offsetX, y: origin.y + offsetY } }) : item;
+        }));
+    }, []);
+
+    const handleBackgroundNodeDragStop = useCallback(() => {
+        backgroundDragRef.current = null;
+    }, []);
+
+    const handleBackgroundTitleChange = useCallback((node: CanvasBackgroundNode, title: string) => {
+        setNodes((prev) => prev.map((item) => (item.id === node.id && isBackgroundNode(item) ? { ...item, title } : item)));
+    }, []);
+
+    const handleBackgroundColorChange = useCallback((node: CanvasBackgroundNode, color: string) => {
+        setNodes((prev) => prev.map((item) => (item.id === node.id && isBackgroundNode(item) ? { ...item, backgroundColor: color } : item)));
     }, []);
 
     const toggleNodeFreeResize = useCallback((nodeId: string) => {
@@ -3650,13 +3767,29 @@ function CanvasWorkspacePage() {
     );
     const rfNodes = useMemo(() => toRFNodes(nodes, selectedNodeIds, hiddenBatchNodeIds), [hiddenBatchNodeIds, nodes, selectedNodeIds]);
     const nodeIdSet = useMemo(() => new Set(nodes.map((node) => node.id)), [nodes]);
-    const rfEdges = useMemo(() => toRFEdges(connections, nodeIdSet, hiddenBatchEdgeNodeIds), [connections, hiddenBatchEdgeNodeIds, nodeIdSet]);
+    const backgroundNodeIds = useMemo(() => new Set(nodes.filter(isBackgroundNode).map((node) => node.id)), [nodes]);
+    const rfEdges = useMemo(() => toRFEdges(connections, nodeIdSet, hiddenBatchEdgeNodeIds, backgroundNodeIds), [backgroundNodeIds, connections, hiddenBatchEdgeNodeIds, nodeIdSet]);
     const videoNodesById = useMemo(() => new Map(nodes.filter((node): node is CanvasVideoNode => isVideoNode(node)).map((node) => [node.id, node])), [nodes]);
     const onNodesChange = useMemo(
         () =>
             createNodesChangeHandler(setNodes, (nodeIds) => {
-                cancelVideoCompositionTasksForDeletedNodes(nodeIds);
-                setConnections((currentConnections) => currentConnections.filter((connection) => !nodeIds.has(connection.source.nodeId) && !nodeIds.has(connection.target.nodeId)));
+                const allIds = new Set(nodeIds);
+                let expanded = true;
+                while (expanded) {
+                    expanded = false;
+                    nodesRef.current.forEach((node) => {
+                        const before = allIds.size;
+                        if (allIds.has(node.id) && isBackgroundNode(node)) node.memberNodeIds.forEach((memberId) => allIds.add(memberId));
+                        if (allIds.has(node.id) && isImageNode(node)) node.grouping.childIds.forEach((childId) => allIds.add(childId));
+                        expanded ||= allIds.size !== before;
+                    });
+                }
+                if (allIds.size !== nodeIds.size) {
+                    setSelectedNodeIds((current) => new Set([...current].filter((id) => !allIds.has(id))));
+                }
+                cancelVideoCompositionTasksForDeletedNodes(allIds);
+                setConnections((currentConnections) => currentConnections.filter((connection) => !allIds.has(connection.source.nodeId) && !allIds.has(connection.target.nodeId)));
+                return allIds;
             }),
         [cancelVideoCompositionTasksForDeletedNodes],
     );
@@ -3704,21 +3837,26 @@ function CanvasWorkspacePage() {
             batchImagePreviewsByRootId: batchCardStacks.imagePreviewsByRootId,
             batchCardStackTransformsByNodeId: batchCardStacks.transformsByNodeId,
             onToggleFreeResize: (node) => handleConfigNodeChange(node.id, { freeResize: !node.frame.freeResize }),
-            onDelete: (n) => deleteNodes(new Set([n.id])),
+            onDelete: (n) => confirmDeleteNodes(new Set([n.id])),
             onKeepToolbar: keepNodeToolbar,
             onHideToolbar: hideNodeToolbar,
             onResize: (nodeId, width, height, position) => {
-                setNodes((prev) => prev.map((node) => (node.id === nodeId ? updateCanvasNodeFrame(node, { width, height, position: position ?? node.frame.position }) : node)));
+                handleNodeResize(nodeId, width, height, position);
             },
+            onBackgroundTitleChange: handleBackgroundTitleChange,
+            onBackgroundColorChange: handleBackgroundColorChange,
         }),
         [
             batchCardStacks,
             collapsingBatchIds,
-            deleteNodes,
+            confirmDeleteNodes,
             downloadNodeImage,
             editRequestNonce,
             editingNodeId,
             handleConfigNodeChange,
+            handleBackgroundColorChange,
+            handleBackgroundTitleChange,
+            handleNodeResize,
             handleGenerateNode,
             handleGenerateStoryboard,
             handleComposeVideo,
@@ -3774,7 +3912,8 @@ function CanvasWorkspacePage() {
         if (nodeIds.length || !edgeIds.length) setEdgeDeletePopover(null);
     }, []);
     const handleNodeClick = useCallback((_event: ReactMouseEvent, nodeId: string) => {
-        setDialogNodeId(nodeId);
+        const node = nodesRef.current.find((item) => item.id === nodeId);
+        setDialogNodeId(node && !isBackgroundNode(node) ? nodeId : null);
         setContextMenu(null);
         setEdgeDeletePopover(null);
         setPendingConnectionCreate(null);
@@ -3782,7 +3921,8 @@ function CanvasWorkspacePage() {
     const handleNodeContextMenu = useCallback((event: ReactMouseEvent, nodeId: string) => {
         setEdgeDeletePopover(null);
         const selectedNodeIds = selectedNodeIdsRef.current;
-        setContextMenu(selectedNodeIds.size > 1 && selectedNodeIds.has(nodeId) ? { type: "selection", x: event.clientX, y: event.clientY, nodeIds: [...selectedNodeIds] } : { type: "node", x: event.clientX, y: event.clientY, nodeId });
+        const targetNode = nodesRef.current.find((node) => node.id === nodeId);
+        setContextMenu(selectedNodeIds.size > 1 && selectedNodeIds.has(nodeId) ? { type: "selection", x: event.clientX, y: event.clientY, nodeIds: [...selectedNodeIds] } : { type: "node", x: event.clientX, y: event.clientY, nodeId, nodeKind: targetNode?.kind || "text" });
     }, []);
     const handleSelectionContextMenu = useCallback((event: ReactMouseEvent, nodeIds: string[]) => {
         if (!nodeIds.length) return;
@@ -3908,6 +4048,8 @@ function CanvasWorkspacePage() {
                         onConnectEnd={handleReactFlowConnectEnd}
                         nodeTypes={nodeTypes}
                         onNodeMouseDown={handleNodeMouseDown}
+                        onNodeDrag={handleBackgroundNodeDrag}
+                        onNodeDragStop={handleBackgroundNodeDragStop}
                         onNodeClick={handleNodeClick}
                         onSelectionChange={handleSelectionChange}
                         onNodeContextMenu={handleNodeContextMenu}
@@ -4038,7 +4180,7 @@ function CanvasWorkspacePage() {
                         if (isStoryboardNode(node)) setStoryboardVideoGenerationNodeId(node.id);
                     }}
                     onToggleFreeResize={(node) => toggleNodeFreeResize(node.id)}
-                    onDelete={(node) => deleteNodes(new Set([node.id]))}
+                    onDelete={(node) => confirmDeleteNodes(new Set([node.id]))}
                 />
 
                 <CanvasToolbar
@@ -4048,15 +4190,19 @@ function CanvasWorkspacePage() {
                     onAddImage={() => createNode("image")}
                     onAddVideo={() => createNode("video")}
                     onAddText={() => createNode("text")}
+                    onAddBackground={() => createNode("background")}
                     onUndo={undoCanvas}
                     onRedo={redoCanvas}
                     onUpload={() => handleUploadRequest()}
-                    onDelete={() => deleteNodes(new Set(selectedNodeIds))}
+                    onDelete={() => confirmDeleteNodes(new Set(selectedNodeIds))}
                     onClear={() => setClearConfirmOpen(true)}
                     onDeselect={deselectCanvas}
                     onOpenMyAssets={() => {
                         setAssetPickerOpen(true);
                     }}
+                    selectedBackground={selectedNodeIds.size === 1 ? (() => { const selected = nodes.find((node) => selectedNodeIds.has(node.id)); return selected && isBackgroundNode(selected) ? selected : null; })() : null}
+                    onBackgroundTitleChange={(nodeId, title) => { const node = nodesRef.current.find((item): item is CanvasBackgroundNode => item.id === nodeId && isBackgroundNode(item)); if (node) handleBackgroundTitleChange(node, title); }}
+                    onBackgroundColorChange={(nodeId, color) => { const node = nodesRef.current.find((item): item is CanvasBackgroundNode => item.id === nodeId && isBackgroundNode(item)); if (node) handleBackgroundColorChange(node, color); }}
                 />
 
                 <CanvasWorkspaceOverlays
@@ -4073,7 +4219,7 @@ function CanvasWorkspacePage() {
                     onCloseContextMenu={() => setContextMenu(null)}
                     onCreateNode={createNode}
                     onDuplicateNode={duplicateNode}
-                    onDeleteNodes={deleteNodes}
+                    onDeleteNodes={confirmDeleteNodes}
                     onDeleteConnection={deleteConnection}
                     onImageInputChange={handleImageInputChange}
                     onCloseInfo={() => setInfoNodeId(null)}
@@ -4502,6 +4648,10 @@ async function hydrateCanvasImages(nodes: CanvasDomainNode[]) {
             continue;
         }
         if (isVideoCompositionNode(node)) {
+            hydratedNodes.push(node);
+            continue;
+        }
+        if (isBackgroundNode(node)) {
             hydratedNodes.push(node);
             continue;
         }

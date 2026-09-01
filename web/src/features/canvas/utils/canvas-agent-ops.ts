@@ -177,10 +177,22 @@ function reduceSelection(snapshot: CanvasAgentSnapshot, op: CanvasAgentOp): Canv
 }
 
 function resolveDeletedNodeIds(nodes: CanvasNode[], op: CanvasAgentOp): Set<string> {
-    if (op.ids) return new Set(op.ids);
-    if (op.id) return new Set([op.id]);
-    const kind = readNodeKind(op.nodeType);
-    return new Set(kind ? nodes.filter((node) => node.kind === kind).map((node) => node.id) : []);
+    const removedNodeIds = op.ids ? new Set(op.ids) : op.id ? new Set([op.id]) : new Set<string>();
+    if (!op.ids && !op.id) {
+        const kind = readNodeKind(op.nodeType);
+        nodes.filter((node) => kind && node.kind === kind).forEach((node) => removedNodeIds.add(node.id));
+    }
+    let expanded = true;
+    while (expanded) {
+        expanded = false;
+        nodes.forEach((node) => {
+            const before = removedNodeIds.size;
+            if (removedNodeIds.has(node.id) && node.kind === "background") node.memberNodeIds.forEach((memberId) => removedNodeIds.add(memberId));
+            if (removedNodeIds.has(node.id) && node.kind === "image") node.grouping.childIds.forEach((childId) => removedNodeIds.add(childId));
+            expanded ||= removedNodeIds.size !== before;
+        });
+    }
+    return removedNodeIds;
 }
 
 function readNodeKind(nodeType?: unknown): CanvasGenerationMode | null {

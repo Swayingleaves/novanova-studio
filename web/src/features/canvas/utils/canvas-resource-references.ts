@@ -1,7 +1,7 @@
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/features/generation/lib/seedance-video";
 import type { CanvasConnection, CanvasNode } from "../types";
-import { isImageNode, isTextNode, isVideoNode } from "../domain/canvas-node";
+import { isImageNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
 
 export type CanvasResourceKind = "image" | "video" | "text";
 
@@ -88,7 +88,15 @@ function resolveContextResourceNodes(nodeId: string, graph: GraphIndex, includeS
 }
 
 function readDirectResourceInputs(nodeId: string, graph: GraphIndex): CanvasNode[] {
-    return uniqueNodes((graph.parentNodesById.get(nodeId) || []).filter((node) => Boolean(resolveResourceKind(node))));
+    const resources = (graph.parentNodesById.get(nodeId) || []).flatMap((node) => {
+        if (isVideoCompositionNode(node)) {
+            return node.composition.inputVideoNodeIds
+                .map((inputNodeId) => graph.nodeById.get(inputNodeId))
+                .filter((inputNode): inputNode is CanvasNode => Boolean(inputNode && resolveResourceKind(inputNode)));
+        }
+        return resolveResourceKind(node) ? [node] : [];
+    });
+    return uniqueNodes(resources);
 }
 
 function mapReferences(nodes: CanvasNode[], active: boolean | ((node: CanvasNode) => boolean) = false): CanvasResourceReference[] {

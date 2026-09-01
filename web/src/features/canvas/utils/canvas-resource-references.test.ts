@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createVideoNode } from "../constants.ts";
-import { buildNodeGenerationReferences } from "./canvas-resource-references.ts";
+import { createVideoCompositionNode, createVideoNode } from "../constants.ts";
+import { buildNodeMentionReferences, buildNodeGenerationReferences } from "./canvas-resource-references.ts";
 
 test("视频节点可从持久化生成配置恢复参考图", () => {
     const video = createVideoNode({ id: "video-1", position: { x: 0, y: 0 } });
@@ -89,5 +89,28 @@ test("历史混合参考字段可按媒体类型恢复", () => {
     assert.deepEqual(
         references.map((reference) => reference.kind),
         ["video", "image"],
+    );
+});
+
+test("合成视频结果节点展示全部输入视频作为参考内容", () => {
+    const composition = createVideoCompositionNode({ id: "composition-1", position: { x: 0, y: 0 } });
+    const videos = Array.from({ length: 4 }, (_, index) => {
+        const video = createVideoNode({ id: `video-${index + 1}`, position: { x: index * 100, y: 0 } });
+        video.content.source = `https://example.com/video-${index + 1}.mp4`;
+        return video;
+    });
+    composition.composition.inputVideoNodeIds = videos.map((video) => video.id);
+    const result = createVideoNode({ id: "result-1", position: { x: 500, y: 0 } });
+    result.content.source = "https://example.com/combined.mp4";
+    const connections = [
+        { id: "composition-result", source: { nodeId: composition.id }, target: { nodeId: result.id } },
+        ...videos.map((video, index) => ({ id: `video-composition-${index + 1}`, source: { nodeId: video.id }, target: { nodeId: composition.id } })),
+    ];
+
+    const references = buildNodeMentionReferences(result, [composition, ...videos, result], connections);
+
+    assert.deepEqual(
+        references.map((reference) => ({ id: reference.nodeId, kind: reference.kind, label: reference.label })),
+        videos.map((video, index) => ({ id: video.id, kind: "video", label: `视频${index + 1}` })),
     );
 });

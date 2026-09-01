@@ -1,9 +1,10 @@
-import { getCanvasNodeTemplate } from "../constants.ts";
-import type { CanvasConnection, CanvasNode } from "../types.ts";
-import { nodeSizeFromRatio } from "../utils/canvas-node-size.ts";
+import { CANVAS_BACKGROUND_DEFAULT_COLOR, CANVAS_BACKGROUND_MIN_HEIGHT, CANVAS_BACKGROUND_MIN_WIDTH, CANVAS_BACKGROUND_PADDING, getCanvasNodeTemplate } from "../constants.ts";
+import type { CanvasBackgroundNode, CanvasConnection, CanvasNode } from "../types.ts";
+import { MINIMUM_CONTENT_NODE_DIMENSION, nodeSizeFromRatio, nodeSizeFromRatioWithMinimum } from "../utils/canvas-node-size.ts";
 import {
     applyCanvasNodeAttributes,
     isImageNode,
+    isBackgroundNode,
     isStoryboardNode,
     isTextNode,
     updateCanvasNodeExecution,
@@ -13,10 +14,12 @@ import {
 
 export function applyCanvasNodeConfig(node: CanvasNode, attributes: CanvasNodeAttributes): CanvasNode {
     const updated = applyCanvasNodeAttributes(node, attributes);
-    if (isTextNode(updated) || isStoryboardNode(updated) || typeof attributes.size !== "string" || !isImageNode(updated) || updated.content.source) return updated;
+    if (typeof attributes.size !== "string" || (isImageNode(updated) && updated.content.source) || (!isImageNode(updated) && !isTextNode(updated) && !isStoryboardNode(updated))) return updated;
 
     const template = getCanvasNodeTemplate(updated.kind);
-    const size = nodeSizeFromRatio(attributes.size, template.width, template.height);
+    const size = isTextNode(updated) || isStoryboardNode(updated)
+        ? nodeSizeFromRatioWithMinimum(attributes.size, template.width, template.height, MINIMUM_CONTENT_NODE_DIMENSION)
+        : nodeSizeFromRatio(attributes.size, template.width, template.height);
     if (!size) return updated;
 
     return updateCanvasNodeFrame(updated, {
@@ -31,7 +34,7 @@ export function applyCanvasNodeConfig(node: CanvasNode, attributes: CanvasNodeAt
 export function normalizeCanvasConnection(firstNodeId: string, secondNodeId: string, nodes: CanvasNode[]): Omit<CanvasConnection, "id"> | null {
     const first = nodes.find((node) => node.id === firstNodeId);
     const second = nodes.find((node) => node.id === secondNodeId);
-    if (!first || !second || first.id === second.id) return null;
+    if (!first || !second || first.id === second.id || isBackgroundNode(first) || isBackgroundNode(second)) return null;
     return {
         source: { nodeId: first.id },
         target: { nodeId: second.id },
@@ -99,6 +102,7 @@ export function findCanvasConnectionDropTarget(
     let isNearNode = false;
 
     [...nodes].reverse().forEach((node) => {
+        if (isBackgroundNode(node)) return;
         const anchorX = handleType === "source" ? node.frame.position.x : node.frame.position.x + node.frame.width;
         const anchorY = node.frame.position.y + node.frame.height / 2;
         const distanceX = point.x - anchorX;
@@ -143,6 +147,77 @@ export function moveCanvasNodesFromOrigins(
         const origin = originById.get(node.id);
         return origin ? updateCanvasNodeFrame(node, { position: { x: origin.x + offsetX, y: origin.y + offsetY } }) : node;
     });
+}
+
+/** 判断两个画布矩形是否相交。 */
+export function canvasFramesIntersect(first: CanvasNode, second: CanvasNode): boolean {
+    return first.frame.position.x < second.frame.position.x + second.frame.width
+        && first.frame.position.x + first.frame.width > second.frame.position.x
+        && first.frame.position.y < second.frame.position.y + second.frame.height
+        && first.frame.position.y + first.frame.height > second.frame.position.y;
+}
+
+/** 将背景板扩展到完整包裹其成员，保持固定内边距。 */
+export function expandBackgroundBoardsToMembers(nodes: CanvasNode[]): CanvasNode[] {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    return nodes.map((node) => {
+        if (!isBackgroundNode(node) || !node.memberNodeIds.length) return node;
+        const members = node.memberNodeIds.map((id) => nodeById.get(id)).filter((member): member is CanvasNode => Boolean(member && !isBackgroundNode(member)));
+        if (!members.length) return updateCanvasNodeMembersSafely(node, []);
+        const left = Math.min(node.frame.position.x, ...members.map((member) => member.frame.position.x - CANVAS_BACKGROUND_PADDING));
+        const top = Math.min(node.frame.position.y, ...members.map((member) => member.frame.position.y - CANVAS_BACKGROUND_PADDING));
+        const right = Math.max(node.frame.position.x + node.frame.width, ...members.map((member) => member.frame.position.x + member.frame.width + CANVAS_BACKGROUND_PADDING));
+        const bottom = Math.max(node.frame.position.y + node.frame.height, ...members.map((member) => member.frame.position.y + member.frame.height + CANVAS_BACKGROUND_PADDING));
+        return updateCanvasNodeFrame(node, {
+            position: { x: left, y: top },
+            width: Math.max(CANVAS_BACKGROUND_MIN_WIDTH, right - left),
+            height: Math.max(CANVAS_BACKGROUND_MIN_HEIGHT, bottom - top),
+        });
+    });
+}
+
+/** 根据一次拖拽结果维护背景板归属；只对板外拖入建立新归属。 */
+export function reconcileBackgroundBoardMembership(nodes: CanvasNode[], movedNodeIds: Set<string>, originallyMemberNodeIds: Set<string>): CanvasNode[] {
+    const backgrounds = nodes.filter(isBackgroundNode);
+    if (!backgrounds.length || !movedNodeIds.size) return nodes;
+    const movedNodes = nodes.filter((node) => movedNodeIds.has(node.id) && !isBackgroundNode(node));
+    const nextMembers = new Map(backgrounds.map((board) => [board.id, new Set(board.memberNodeIds)]));
+    movedNodes.forEach((movedNode) => {
+        const previousBoard = backgrounds.find((board) => originallyMemberNodeIds.has(movedNode.id) && board.memberNodeIds.includes(movedNode.id));
+        if (previousBoard) {
+            if (!canvasFramesIntersect(movedNode, previousBoard)) nextMembers.get(previousBoard.id)?.delete(movedNode.id);
+            return;
+        }
+        const targetBoard = [...backgrounds].reverse().find((board) => canvasFramesIntersect(movedNode, board));
+        if (targetBoard) nextMembers.get(targetBoard.id)?.add(movedNode.id);
+    });
+    const reconciled = nodes.map((node) => {
+        if (!isBackgroundNode(node)) return node;
+        return updateCanvasNodeMembersSafely(node, [...(nextMembers.get(node.id) || [])]);
+    });
+    return expandBackgroundBoardsToMembers(reconciled);
+}
+
+/** 清理恢复文档中的失效背景板成员，并保持成员完整包裹。 */
+export function normalizeBackgroundBoardMembers(nodes: CanvasNode[]): CanvasNode[] {
+    const validNodeIds = new Set(nodes.filter((node) => !isBackgroundNode(node)).map((node) => node.id));
+    const normalized = nodes.map((node) => {
+        if (!isBackgroundNode(node)) return node;
+        const normalizedNode = {
+            ...node,
+            title: node.title || "背景板",
+            backgroundColor: node.backgroundColor || CANVAS_BACKGROUND_DEFAULT_COLOR,
+        };
+        const memberNodeIds = Array.isArray(node.memberNodeIds) ? node.memberNodeIds : [];
+        return updateCanvasNodeMembersSafely(normalizedNode, memberNodeIds.filter((id) => validNodeIds.has(id)));
+    });
+    return expandBackgroundBoardsToMembers(normalized);
+}
+
+function updateCanvasNodeMembersSafely(node: CanvasBackgroundNode, memberNodeIds: string[]): CanvasBackgroundNode {
+    const normalized = Array.from(new Set(memberNodeIds)).filter((id) => id !== node.id);
+    if (normalized.length === node.memberNodeIds.length && normalized.every((id, index) => id === node.memberNodeIds[index])) return node;
+    return { ...node, memberNodeIds: normalized };
 }
 
 export function applyGeneratedImageToBatchNodes(

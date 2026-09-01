@@ -5,6 +5,8 @@ type NodeRect = {
     height: number;
 };
 
+export const MINIMUM_CONTENT_NODE_DIMENSION = 600;
+
 export function fitNodeSize(width: number, height: number, maxWidth = 640, maxHeight = 640): NodeRect {
     const originalWidth = coercePositiveNumber(width);
     const originalHeight = coercePositiveNumber(height);
@@ -34,6 +36,26 @@ export function nodeSizeFromRatio(size: string, baseWidth: number, baseHeight: n
     }
 
     return { width: safeBaseHeight * ratio, height: safeBaseHeight };
+}
+
+/**
+ * 按比例计算节点尺寸，并保证短边不小于指定的最小尺寸。
+ * @param size 比例字符串，例如 9:16 或 16:9
+ * @param baseWidth 基准宽度
+ * @param baseHeight 基准高度
+ * @param minimumDimension 短边最小尺寸
+ * @returns 计算后的节点宽高；比例无效时返回 null
+ */
+export function nodeSizeFromRatioWithMinimum(size: string, baseWidth: number, baseHeight: number, minimumDimension: number): NodeRect | null {
+    const result = nodeSizeFromRatio(size, baseWidth, baseHeight);
+    const minimum = coercePositiveNumber(minimumDimension);
+    if (!result || minimum <= 1) return result;
+
+    const scale = Math.max(1, minimum / Math.min(result.width, result.height));
+    return {
+        width: result.width * scale,
+        height: result.height * scale,
+    };
 }
 
 function parseAspectRatio(size: string): number | null {

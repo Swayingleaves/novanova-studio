@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { CanvasNode, CanvasPoint, CanvasStoryboardNode, CanvasVideoCompositionNode, CanvasVideoNode } from "../types";
+import type { CanvasBackgroundNode, CanvasNode, CanvasPoint, CanvasStoryboardNode, CanvasVideoCompositionNode, CanvasVideoNode } from "../types";
 
 export type BatchImagePreview = {
   id: string;
@@ -46,6 +46,8 @@ export type NodeActions = {
   onKeepToolbar?: (nodeId: string) => void;
   onHideToolbar?: () => void;
   onResize?: (nodeId: string, width: number, height: number, position?: CanvasPoint) => void;
+  onBackgroundTitleChange?: (node: CanvasBackgroundNode, title: string) => void;
+  onBackgroundColorChange?: (node: CanvasBackgroundNode, color: string) => void;
 };
 
 const noop = () => {};

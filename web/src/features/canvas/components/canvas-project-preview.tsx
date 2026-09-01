@@ -6,7 +6,7 @@ import { canvasThemes } from "@/shared/lib/canvas-theme";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import type { CanvasConnection, CanvasDocument, CanvasNode } from "../types";
-import { isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
+import { isBackgroundNode, isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
 
 const previewWidth = 320;
 const previewHeight = 180;
@@ -87,7 +87,7 @@ export const CanvasProjectPreview = memo(function CanvasProjectPreview({ documen
 });
 
 export function buildCanvasProjectPreviewLayout(scene: Pick<CanvasDocument["scene"], "nodes" | "connections">): PreviewLayout {
-    const nodes = scene.nodes.filter(isRenderableNode);
+    const nodes = scene.nodes.filter(isRenderableNode).sort((first, second) => Number(!isBackgroundNode(first)) - Number(!isBackgroundNode(second)));
     const bounds = measureBounds(nodes);
     if (!bounds) return { nodes: [], connections: [], hiddenNodeCount: 0 };
 
@@ -102,6 +102,11 @@ export function buildCanvasProjectPreviewLayout(scene: Pick<CanvasDocument["scen
         nodes: visibleNodes,
         connections: scene.connections
             .filter((connection) => visibleNodeIds.has(connection.source.nodeId) && visibleNodeIds.has(connection.target.nodeId))
+            .filter((connection) => {
+                const sourceNode = nodeMap.get(connection.source.nodeId);
+                const targetNode = nodeMap.get(connection.target.nodeId);
+                return Boolean(sourceNode && targetNode && !isBackgroundNode(sourceNode) && !isBackgroundNode(targetNode));
+            })
             .slice(0, maxPreviewConnections)
             .map((connection) => toPreviewConnection(connection, nodeMap, scale, offsetX, offsetY))
             .filter((connection): connection is PreviewConnection => Boolean(connection)),
@@ -129,10 +134,16 @@ function PreviewNodeShape({ node, theme }: { node: PreviewNode; theme: CanvasThe
         ? node.content.text
         : isStoryboardNode(node)
             ? node.storyboard.shots.length ? `已生成 ${node.storyboard.shots.length} 个镜头` : node.content.instruction
-            : isVideoCompositionNode(node)
+        : isVideoCompositionNode(node)
                 ? `${node.composition.inputVideoNodeIds.length} 段视频`
-                : node.content.source || node.generation.prompt;
+                : isBackgroundNode(node)
+                    ? `${node.memberNodeIds.length} 个节点`
+                    : node.content.source || node.generation.prompt;
     const showText = node.previewWidth >= 42 && node.previewHeight >= 24;
+
+    if (isBackgroundNode(node)) {
+        return <g><rect x={node.previewX} y={node.previewY} width={node.previewWidth} height={node.previewHeight} rx="6" fill={node.backgroundColor} fillOpacity="0.55" stroke={theme.node.stroke} /><text x={node.previewX + 7} y={node.previewY + 13} fontSize="8.5" fontWeight="600" fill={theme.node.text}>{label}</text></g>;
+    }
 
     if ((isImageNode(node) || isVideoNode(node)) && node.content.source) {
         return (
@@ -257,6 +268,7 @@ function nodeLabel(node: CanvasNode) {
     if (isTextNode(node)) return "文本";
     if (isStoryboardNode(node)) return "分镜脚本";
     if (isVideoCompositionNode(node)) return "合成视频";
+    if (isBackgroundNode(node)) return "背景板";
     return "视频";
 }
 

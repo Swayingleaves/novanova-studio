@@ -75,6 +75,7 @@ type NodeContextMenuState = {
     x: number;
     y: number;
     nodeId: string;
+    nodeKind: CanvasNodeKind;
 };
 
 type ConnectionContextMenuState = {
@@ -111,7 +112,7 @@ export interface CanvasViewport {
     zoom: number;
 }
 
-export type CanvasNodeKind = "image" | "text" | "video" | "storyboard" | "videoComposition";
+export type CanvasNodeKind = "image" | "text" | "video" | "storyboard" | "videoComposition" | "background";
 
 export type CanvasExecutionPhase = "idle" | "running" | "succeeded" | "failed";
 
@@ -304,7 +305,15 @@ export interface CanvasVideoCompositionNode extends CanvasNodeBase<"videoComposi
     composition: CanvasVideoCompositionData;
 }
 
-export type CanvasNode = CanvasImageNode | CanvasTextNode | CanvasVideoNode | CanvasStoryboardNode | CanvasVideoCompositionNode;
+/** 画布背景板节点，使用绝对坐标包裹一组普通内容节点。 */
+export interface CanvasBackgroundNode extends CanvasNodeBase<"background"> {
+    /** 背景板填充颜色，使用主题预设颜色标识。 */
+    backgroundColor: string;
+    /** 背景板直接包含的普通节点标识。 */
+    memberNodeIds: string[];
+}
+
+export type CanvasNode = CanvasImageNode | CanvasTextNode | CanvasVideoNode | CanvasStoryboardNode | CanvasVideoCompositionNode | CanvasBackgroundNode;
 
 export interface CanvasConnectionEndpoint {
     nodeId: string;

@@ -11,6 +11,7 @@ import com.novanovastudio.agent.AgentScopeAgentFactory;
 import com.novanovastudio.agent.AgentScopeModelFactory;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.dto.StoryboardDtos;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.security.CurrentUserProvider;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -46,7 +47,8 @@ class StoryboardAgentServiceTest {
     void setUp() {
         creditService = mock(CreditService.class);
         storyboardAgentService = new StoryboardAgentService(
-                mock(CurrentUserProvider.class), mock(AgentScopeModelFactory.class), mock(AgentScopeAgentFactory.class), creditService);
+                mock(CurrentUserProvider.class), mock(AgentScopeModelFactory.class), mock(AgentScopeAgentFactory.class),
+                new NovanovaProperties(), creditService);
     }
 
     /**

@@ -5,6 +5,7 @@ import com.novanovastudio.agent.AgentScopeAgentFactory;
 import com.novanovastudio.agent.AgentScopeModelFactory;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.StoryboardDtos;
 import com.novanovastudio.security.CurrentUserProvider;
 import io.agentscope.core.ReActAgent;
@@ -38,9 +39,6 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 public class StoryboardAgentService {
 
-    /** Agent单次调用超时时间。 */
-    private static final Duration AGENT_TIMEOUT = Duration.ofSeconds(90);
-
     /** 标准景别集合。 */
     private static final Set<String> SHOT_SIZES = Set.of(
             "大特写", "特写", "近景", "头肩景", "中景", "中远景", "全景", "远景", "大远景", "大全景");
@@ -63,6 +61,9 @@ public class StoryboardAgentService {
 
     /** 分镜Agent工厂。 */
     private final AgentScopeAgentFactory agentFactory;
+
+    /** 服务配置。 */
+    private final NovanovaProperties properties;
 
     /** 积分服务。 */
     private final CreditService creditService;
@@ -243,7 +244,7 @@ public class StoryboardAgentService {
                                     .sessionId("storyboard:" + operationId)
                                     .userId(String.valueOf(userId))
                                     .build())
-                            .timeout(AGENT_TIMEOUT)
+                            .timeout(Duration.ofSeconds(properties.getAi().getStoryboardAgent().getTimeoutSeconds()))
                             .map(message -> message.getStructuredData(resultType))
                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent未返回结构化结果")))
                             .doFinally(signal -> agent.close());

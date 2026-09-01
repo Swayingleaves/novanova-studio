@@ -283,15 +283,15 @@ export function GenerationStyleMenu({
     );
 }
 
-/** 风格封面，空地址和加载失败时使用统一中性默认图。 */
-export function GenerationStyleCover({ style, className = "" }: { style: Pick<GenerationStyleSelection, "coverUrl" | "name">; className?: string }) {
+/** 风格封面，空地址和加载失败时使用默认图标或调用方指定的默认内容。 */
+export function GenerationStyleCover({ style, className = "", fallbackIcon }: { style: Pick<GenerationStyleSelection, "coverUrl" | "name">; className?: string; fallbackIcon?: ReactNode }) {
     const [failed, setFailed] = useState(false);
     useEffect(() => setFailed(false), [style.coverUrl]);
     const useDefaultCover = failed || usesGenerationStyleDefaultCover(style);
     if (useDefaultCover) {
         return (
             <span className={`grid place-items-center bg-[var(--studio-surface-raised)] text-[var(--studio-muted)] ${className}`}>
-                <ImageOff className="size-5" />
+                {fallbackIcon ?? <ImageOff className="size-5" />}
                 <span className="sr-only">{style.name}默认封面</span>
             </span>
         );

@@ -394,7 +394,7 @@ function SkillMenu({
                                     onOpenChange(false);
                                 }}
                             >
-                                <GenerationStyleCover style={skill} className="h-16 w-12 shrink-0 overflow-hidden rounded-md" />
+                                <GenerationStyleCover style={skill} className="h-16 w-12 shrink-0 overflow-hidden rounded-md" fallbackIcon={<BookOpenText className="size-6" />} />
                                 <span className="min-w-0 flex-1">
                                     <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-[var(--studio-ink)]">
                                         <span className="truncate">{skill.name}</span>

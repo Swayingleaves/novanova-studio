@@ -5,7 +5,7 @@ import { Empty, Modal, Tabs, Tag, Tooltip } from "antd";
 import { Boxes, ChevronsLeft, CircleCheck, CircleDashed, CircleX, Clapperboard, FileText, FolderOpen, Image as ImageIcon, PanelLeftClose, PanelLeftOpen, UserRound, Video } from "lucide-react";
 
 import type { Asset } from "@/features/assets/stores/use-asset-store";
-import { isImageNode } from "../domain/canvas-node";
+import { isBackgroundNode, isImageNode, isVideoNode } from "../domain/canvas-node";
 import type { CanvasNode, CanvasStoryboardAsset, CanvasStoryboardAssetKind } from "../types";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
@@ -127,6 +127,7 @@ function NodeList({ nodes, selectedNodeIds, onLocateNode }: { nodes: CanvasNode[
                 {nodes.map((node) => {
                     const selected = selectedNodeIds.has(node.id);
                     const batchCount = isImageNode(node) && node.grouping.isRoot ? node.grouping.childIds.length : 0;
+                    const backgroundCount = isBackgroundNode(node) ? node.memberNodeIds.length : 0;
                     return (
                         <button
                             key={node.id}
@@ -147,7 +148,7 @@ function NodeList({ nodes, selectedNodeIds, onLocateNode }: { nodes: CanvasNode[
                                 <span className="block truncate text-xs font-medium">{node.title || "未命名节点"}</span>
                                 <span className="mt-0.5 flex items-center gap-1 text-[11px]" style={{ color: theme.node.muted }}><NodeKindIcon kind={node.kind} className="size-3" />{nodeKindLabel(node.kind)}<NodeStatus phase={node.execution.phase} /></span>
                             </span>
-                            {batchCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{batchCount} 张</span> : null}
+                            {batchCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{batchCount} 张</span> : backgroundCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{backgroundCount} 个节点</span> : null}
                         </button>
                     );
                 })}
@@ -194,9 +195,17 @@ function PanelEmpty({ description }: { description: string }) {
 
 function NodePreview({ node }: { node: CanvasNode }) {
     const theme = useCanvasTheme();
+    const imageSource = isImageNode(node) ? node.content.source : "";
+    const videoSource = isVideoNode(node) ? node.content.source : "";
     return (
         <span className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md" style={{ background: theme.node.fill, color: theme.node.muted }}>
-            {isImageNode(node) && node.content.source ? <img src={node.content.source} alt="" loading="lazy" className="size-full object-cover" /> : <NodeKindIcon kind={node.kind} className="size-4" />}
+            {imageSource ? (
+                <img src={imageSource} alt="" loading="lazy" className="size-full object-cover" />
+            ) : videoSource ? (
+                <video src={videoSource} aria-hidden="true" muted playsInline preload="auto" className="pointer-events-none size-full object-cover" />
+            ) : isBackgroundNode(node) ? <Boxes className="size-4" /> : (
+                <NodeKindIcon kind={node.kind} className="size-4" />
+            )}
         </span>
     );
 }
@@ -232,7 +241,7 @@ function AssetKindIcon({ asset, className }: { asset: CanvasNavigationAsset; cla
 }
 
 function nodeKindLabel(kind: CanvasNode["kind"]) {
-    return kind === "image" ? "图片" : kind === "text" ? "文本" : kind === "video" ? "视频" : kind === "storyboard" ? "分镜" : "视频合成";
+    return kind === "image" ? "图片" : kind === "text" ? "文本" : kind === "video" ? "视频" : kind === "storyboard" ? "分镜" : kind === "videoComposition" ? "视频合成" : "背景板";
 }
 
 function assetTitle(asset: CanvasNavigationAsset) {
@@ -248,29 +257,34 @@ function storyboardAssetKindLabel(kind: CanvasStoryboardAssetKind) {
     return kind === "character" ? "角色" : kind === "scene" ? "场景" : "道具";
 }
 
+/** 预览画布导航中的分镜资产，并按原始比例展示完整图片。 */
 export function CanvasStoryboardAssetPreviewDialog({ asset, onClose }: { asset: CanvasNavigationStoryboardAsset | null; onClose: () => void }) {
     const theme = useCanvasTheme();
     if (!asset) return null;
     const title = asset.asset.name || "未命名分镜资产";
     const imageSource = asset.asset.image?.source;
     return (
-        <Modal title={title} open centered footer={null} width={720} onCancel={onClose} destroyOnHidden>
-            <div className="grid gap-5 pt-1">
-                {imageSource ? (
-                    <img src={imageSource} alt={title} className="max-h-[52vh] w-full rounded-lg object-contain" />
-                ) : (
-                    <div className="grid min-h-48 place-items-center gap-2 rounded-lg text-sm" style={{ background: theme.node.fill, color: theme.node.muted }}>
-                        <AssetKindIcon asset={asset} className="size-7" />
-                        <span>暂未关联图片</span>
-                    </div>
-                )}
-                <div className="flex flex-wrap gap-2">
-                    <Tag>分镜资产</Tag>
-                    <Tag>{storyboardAssetKindLabel(asset.asset.kind)}</Tag>
-                    {asset.storyboardNodeTitle ? <Tag>{asset.storyboardNodeTitle}</Tag> : null}
+        <Modal title={title} open centered footer={null} width="min(calc(100vw - 32px), 1080px)" onCancel={onClose} destroyOnHidden>
+            <div className="grid gap-5 pt-1 lg:grid-cols-[minmax(0,1fr)_260px]">
+                <div className="flex min-h-[56dvh] items-center justify-center rounded-lg p-3 sm:p-5" style={{ background: theme.node.fill }}>
+                    {imageSource ? (
+                        <img src={imageSource} alt={title} className="block max-h-[72dvh] max-w-full object-contain" decoding="async" />
+                    ) : (
+                        <div className="grid min-h-48 place-items-center gap-2 text-sm" style={{ color: theme.node.muted }}>
+                            <AssetKindIcon asset={asset} className="size-7" />
+                            <span>暂未关联图片</span>
+                        </div>
+                    )}
                 </div>
-                <div className="rounded-lg p-4 text-sm leading-6" style={{ background: theme.node.fill, color: asset.asset.description ? theme.node.text : theme.node.muted }}>
-                    {asset.asset.description || "暂无描述"}
+                <div className="space-y-4">
+                    <div className="flex flex-wrap gap-2">
+                        <Tag>分镜资产</Tag>
+                        <Tag>{storyboardAssetKindLabel(asset.asset.kind)}</Tag>
+                        {asset.storyboardNodeTitle ? <Tag>{asset.storyboardNodeTitle}</Tag> : null}
+                    </div>
+                    <div className="rounded-lg p-4 text-sm leading-6" style={{ background: theme.node.fill, color: asset.asset.description ? theme.node.text : theme.node.muted }}>
+                        {asset.asset.description || "暂无描述"}
+                    </div>
                 </div>
             </div>
         </Modal>
