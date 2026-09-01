@@ -294,13 +294,13 @@ public class CreditCardRepository {
      */
     static String cardFilters(CardListQuery query) {
         StringBuilder sql = new StringBuilder();
-        if (query.batchId() != null) sql.append(" AND cards.batch_id = :batchId");
-        if ("available".equals(query.status())) sql.append(" AND cards.redeemed_at IS NULL");
-        if ("redeemed".equals(query.status())) sql.append(" AND cards.redeemed_at IS NOT NULL");
-        if (query.codeHash() != null) sql.append(" AND cards.code_hash = :codeHash");
-        if (query.codeSuffix() != null) sql.append(" AND cards.code_suffix = :codeSuffix");
+        if (query.batchId() != null) sql.append(" AND cards.batch_id = :batchId\n");
+        if ("available".equals(query.status())) sql.append(" AND cards.redeemed_at IS NULL\n");
+        if ("redeemed".equals(query.status())) sql.append(" AND cards.redeemed_at IS NOT NULL\n");
+        if (query.codeHash() != null) sql.append(" AND cards.code_hash = :codeHash\n");
+        if (query.codeSuffix() != null) sql.append(" AND cards.code_suffix = :codeSuffix\n");
         if (query.redeemedUserKeyword() != null) {
-            sql.append(" AND (LOWER(COALESCE(redeemed_user.email, '')) LIKE :redeemedUserKeyword OR LOWER(COALESCE(redeemed_user.username, '')) LIKE :redeemedUserKeyword OR LOWER(COALESCE(redeemed_user.nickname, '')) LIKE :redeemedUserKeyword)");
+            sql.append(" AND (LOWER(COALESCE(redeemed_user.email, '')) LIKE :redeemedUserKeyword OR LOWER(COALESCE(redeemed_user.username, '')) LIKE :redeemedUserKeyword OR LOWER(COALESCE(redeemed_user.nickname, '')) LIKE :redeemedUserKeyword)\n");
         }
         return sql.toString();
     }
@@ -313,8 +313,8 @@ public class CreditCardRepository {
      */
     static String redemptionFilters(RedemptionQuery query) {
         StringBuilder sql = new StringBuilder();
-        if (query.codeHash() != null) sql.append(" AND cards.code_hash = :codeHash");
-        if (query.codeSuffix() != null) sql.append(" AND cards.code_suffix = :codeSuffix");
+        if (query.codeHash() != null) sql.append(" AND cards.code_hash = :codeHash\n");
+        if (query.codeSuffix() != null) sql.append(" AND cards.code_suffix = :codeSuffix\n");
         return sql.toString();
     }
 
