@@ -74,6 +74,42 @@ flowchart LR
 - **User and operations features**: Email login, OAuth2 login, credits, notifications, a prompt library, home-page showcases, and an administrator console.
 - **Asynchronous task processing**: Redis Stream consumer groups, task locks, failure recovery, and SSE event streams support traceable long-running tasks.
 
+### 🚀 New in the Current Branch
+
+- **Video generation skills and workflows**: Administrators can manage image and video skills. The video page supports guided clarification, prompt-draft confirmation, first-frame and last-frame image generation, and final video composition.
+- **First/last-frame video mode**: Adds `first-last-frame-to-video`, passing first-frame and last-frame references with explicit media roles to compatible providers.
+- **Custom model calls**: Image and video models can define request/response templates, asynchronous query paths, and placeholders for self-hosted model APIs.
+- **Model presentation settings**: Administrators can configure display names and icons; Evolink models can be synchronized from the provider.
+- **Tiered video billing**: Configure credit prices by video specifications such as resolution and duration; workflow quotes show the cost of each stage.
+- **Credit history and shortcut**: View the balance from the canvas header and open credit history, with filters for additions, spending, refunds, and their sources.
+- **Administration and observability**: Adds skill management, style-cover categories, prompt-cover management, result details, API access logs, and a unified AI-task polling interval setting.
+
+## 🌟 Key Advantages
+
+### 🧠 Agent-driven creative context
+
+The Agent is more than a one-shot model gateway. It spans intent understanding, tool selection, task orchestration, result feedback, and the next creative round. Conversations, generation records, materials, and canvas nodes can reference one another without repeatedly rebuilding context across separate tools.
+
+### 🎨 An infinite canvas for the whole process
+
+Text, reference materials, images, videos, generation tasks, and results can be arranged on one canvas. The Canvas Agent can read node state and create, move, scale, connect, and generate nodes, turning the canvas into an editable creation project rather than a result gallery.
+
+### 🧩 Skills and workflows for complex creation
+
+Skills use configurable prompts to guide users through structured interactions, while workflows define stages, task roles, and state transitions. For example, the first/last-frame video workflow can move from clarification and prompt confirmation to first-frame generation, last-frame generation, and video composition, with the same mechanism available for future workflows.
+
+### 🔌 Open model and provider integration
+
+Provider adapters are separated from model capability configuration. The project supports OpenAI-compatible, Gemini, Agnes, Seedance, MiniMax, and Evolink providers, as well as self-hosted image or video APIs through request/response templates. Administrators can configure model display names, icons, capabilities, and billing rules independently.
+
+### ⚡ Reliable execution for long-running tasks
+
+Image and video generation run through Redis Stream asynchronous queues, with task locks, status polling, real-time SSE events, cancellation, failure recovery, and a unified polling setting. This keeps video-generation tasks traceable without blocking the creation interface.
+
+### 🔒 Private deployment with operational controls
+
+Provider keys and object-storage credentials stay on the server. Docker Compose, PostgreSQL, Redis, and multiple object-storage options support private deployment. The administrator console covers models, skills, styles, prompt covers, result details, credit history, and API access logs for team or business operations.
+
 ## 🤖 Supported Models and Providers
 
 The project selects an adapter by a provider's `apiFormat` (API request format). Administrators synchronize and configure model names from providers, so there is no fixed, exhaustive model allowlist. Except for the dedicated models explicitly listed below, any model that implements the corresponding provider protocol and API can be added to the relevant image, video, or chat model catalog. Actual availability still depends on the models enabled for the provider account.
@@ -88,7 +124,8 @@ The project selects an adapter by a provider's `apiFormat` (API request format).
 | Anthropic (`anthropic`) | ❌ | ❌ | ✅ | `https://api.anthropic.com/v1` | Uses the Anthropic Messages API for Claude models. |
 | Seedance (`seedance`) | ❌ | ✅ | ❌ | `https://ark.cn-beijing.volces.com/api/v3` | Uses the Volcano Engine Ark video-generation task API. |
 | MiniMax (`minimax`) | ❌ | ✅ | ❌ | `https://api.minimaxi.com` | Uses the MiniMax H3 video-generation V2 API; the model must be configured manually. |
-| Evolink (`evolink`) | ❌ | ✅ | ❌ | `https://api.evolink.ai/v1` | Uses Evolink's native asynchronous video-generation API; models must be entered manually. |
+| Evolink (`evolink`) | ❌ | ✅ | ❌ | `https://api.evolink.ai/v1` | Uses Evolink's native asynchronous video-generation API and supports model-list synchronization. |
+| Custom (`custom`) | ✅ | ✅ | ❌ | Configured by the administrator | Calls self-hosted image or video APIs through per-model request/response templates; asynchronous video polling is supported and models must be entered manually. |
 
 ### Image Generation Models
 
@@ -107,6 +144,9 @@ The project selects an adapter by a provider's `apiFormat` (API request format).
 | Seedance | Doubao Seedance 2.0 series, Doubao Seedance 1.5 Pro, Doubao Seedance 1.0 Pro, Doubao Seedance 1.0 Pro Fast, and model IDs or inference endpoint IDs compatible with the same task API. | Text-to-video and reference-image generation; the Seedance 2.0 series supports up to nine reference images and three reference videos. |
 | MiniMax | `MiniMax-H3` | Text-to-video with image or video references; supports up to nine reference images and three reference videos, `768P` or `2K` resolution, and 4-15 second durations. |
 | Evolink | Seedance 2.0 models enabled in Evolink | Text-to-video and image/video references through Evolink's `/v1/videos/generations` and `/v1/tasks/{task_id}` asynchronous APIs. |
+| Custom | Models configured by the administrator | Calls a self-hosted video API through model templates, with text-to-video, reference materials, and asynchronous polling determined by the configuration. |
+
+The first/last-frame skill workflow contains three default stages: **Generate first frame**, **Generate last frame**, and **Compose video**. A quote is available only when the required model capabilities and credit prices are configured for every stage.
 
 ### Chat Models
 
@@ -151,6 +191,8 @@ The project selects an adapter by a provider's `apiFormat` (API request format).
 ### Server Deployment
 
 - [Complete Docker Deployment Guide](deploy_docs/docker-deploy.md)
+
+Docker deployments run Flyway migrations automatically; the current branch must migrate through `V23__Workflow_Image_Stage.sql`. Production deployments should also configure `APP_SECRET_KEY`, trusted proxy addresses via `TRUSTED_PROXY_ADDRESSES`, and the unified AI-task polling interval `AI_TASK_POLLING_INTERVAL_SECONDS`. See the [Docker Deployment Guide](deploy_docs/docker-deploy.md) for details.
 
 ## 📝 Agent Prompt Configuration
 
