@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { App, Button, Checkbox, Empty, Image, Input, InputNumber, Modal, Progress, Select, Table, Tag, Tooltip } from "antd";
+import { App, Button, Checkbox, Empty, Input, InputNumber, Modal, Progress, Select, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { FolderOpen, ImagePlus, Plus, RefreshCw, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { Eye, FolderOpen, ImagePlus, Link2, Maximize2, Plus, RefreshCw, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { nanoid } from "nanoid";
 
 import { useAssetStore, type ImageAsset } from "@/features/assets/stores/use-asset-store";
@@ -41,6 +41,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const creditBalance = useUserStore((state) => state.user?.creditBalance);
     const [assetModalOpen, setAssetModalOpen] = useState(false);
+    const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
     const [imagePickerAssetId, setImagePickerAssetId] = useState<string | null>(null);
     const [assetGenerationOpen, setAssetGenerationOpen] = useState(false);
     const [promptGenerationOpen, setPromptGenerationOpen] = useState(false);
@@ -68,6 +69,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
             setAssetGenerationOpen(false);
             setPromptGenerationOpen(false);
             setAssetModalOpen(false);
+            setPreviewAssetId(null);
         }
     }, [node?.id, open]);
 
@@ -205,6 +207,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
 
     const shots = node?.storyboard.shots || [];
     const storyboardAssets = node?.storyboard.assets || [];
+    const previewAsset = storyboardAssets.find((asset) => asset.id === previewAssetId) || null;
     const columns = useMemo<ColumnsType<CanvasStoryboardShot>>(
         () => buildShotColumns({
             editable: !editingLocked,
@@ -445,21 +448,35 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
             </Modal>
 
             <Modal
-                title="分镜资产"
+                title={null}
                 open={assetModalOpen && open && Boolean(node)}
-                onCancel={() => setAssetModalOpen(false)}
+                onCancel={() => {
+                    setAssetModalOpen(false);
+                    setPreviewAssetId(null);
+                }}
                 footer={null}
-                width="min(calc(100vw - 48px), 1180px)"
-                style={{ top: 24 }}
-                styles={{ body: { maxHeight: "calc(100dvh - 152px)", padding: 0, overflowY: "auto" } }}
+                width="min(calc(100vw - 32px), 1360px)"
+                style={{ top: 16 }}
+                styles={{ body: { maxHeight: "calc(100dvh - 112px)", padding: 0, overflowY: "auto" } }}
                 destroyOnHidden={false}
             >
-                <div className="space-y-7 px-5 py-5">
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3" style={{ borderColor: "var(--studio-line)" }}>
-                        <span className="text-sm text-[var(--studio-muted)]">已生成图片 {generatedAssetCount}/{storyboardAssets.length} 项</span>
-                        <Button size="small" icon={<ImagePlus className="size-4" />} disabled={editingLocked || !storyboardAssets.length} onClick={() => openAssetGeneration()}>
+                <div className="space-y-6 px-4 py-4 sm:px-6 sm:py-5">
+                    <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-5" style={{ borderColor: "var(--studio-line)" }}>
+                        <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h2 className="text-lg font-semibold">分镜资产</h2>
+                                <Tag className="m-0">{storyboardAssets.length} 项</Tag>
+                            </div>
+                            <p className="mt-1 text-sm text-[var(--studio-muted)]">统一管理角色、场景和道具。点击图片可查看完整原图。</p>
+                        </div>
+                        <Button icon={<ImagePlus className="size-4" />} disabled={editingLocked || !storyboardAssets.length} onClick={() => openAssetGeneration()}>
                             批量生成图片
                         </Button>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                        <StoryboardAssetSummary label="已生成图片" value={`${generatedAssetCount}/${storyboardAssets.length}`} hint="资产完成度" />
+                        <StoryboardAssetSummary label="已关联镜头" value={String(Object.values(assetAssociationCounts).reduce((total, count) => total + count, 0))} hint="资产与镜头的关联数" />
+                        <StoryboardAssetSummary label="待处理" value={String(Math.max(0, storyboardAssets.length - generatedAssetCount))} hint="还未生成图片" />
                     </div>
                     {ASSET_KINDS.map((kind) => (
                         <StoryboardAssetGroup
@@ -476,9 +493,49 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                             onChooseImage={setImagePickerAssetId}
                             onUploadImage={requestImageUpload}
                             onRegenerate={(assetId) => openAssetGeneration([assetId])}
+                            onPreview={(assetId) => setPreviewAssetId(assetId)}
                         />
                     ))}
                 </div>
+            </Modal>
+
+            <Modal
+                title={previewAsset?.name || "资产图片"}
+                open={Boolean(previewAsset?.image?.source)}
+                onCancel={() => setPreviewAssetId(null)}
+                footer={null}
+                width="min(calc(100vw - 32px), 1440px)"
+                centered
+                styles={{ body: { padding: 0, overflow: "hidden" } }}
+                destroyOnHidden
+            >
+                {previewAsset?.image?.source ? (
+                    <div className="grid min-h-0 lg:grid-cols-[minmax(0,1fr)_280px]">
+                        <div className="flex min-h-[52dvh] items-center justify-center bg-[var(--studio-surface-raised)] p-3 sm:p-6 lg:min-h-[min(76dvh,800px)]">
+                            <img
+                                src={previewAsset.image.source}
+                                alt={previewAsset.name || "资产图片"}
+                                className="block max-h-[min(76dvh,800px)] max-w-full object-contain"
+                                decoding="async"
+                            />
+                        </div>
+                        <aside className="space-y-5 border-t p-5 lg:border-l lg:border-t-0" style={{ borderColor: "var(--studio-line)" }}>
+                            <div>
+                                <p className="text-xs font-medium text-[var(--studio-muted)]">资产类型</p>
+                                <p className="mt-1 text-sm font-semibold">{STORYBOARD_ASSET_KIND_LABELS[previewAsset.kind]}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs font-medium text-[var(--studio-muted)]">关联镜头</p>
+                                <p className="mt-1 flex items-center gap-2 text-sm font-semibold"><Link2 className="size-4" aria-hidden="true" />{assetAssociationCounts[previewAsset.id] || 0} 个镜头</p>
+                            </div>
+                            <div>
+                                <p className="text-xs font-medium text-[var(--studio-muted)]">资产描述</p>
+                                <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--studio-muted)]">{previewAsset.description || "暂无资产描述"}</p>
+                            </div>
+                            <Button block icon={<Maximize2 className="size-4" />} onClick={() => window.open(previewAsset.image?.source, "_blank", "noopener,noreferrer")}>在新窗口打开原图</Button>
+                        </aside>
+                    </div>
+                ) : null}
             </Modal>
 
             <Modal
@@ -636,39 +693,73 @@ type StoryboardAssetGroupProps = {
     onChooseImage: (assetId: string) => void;
     onUploadImage: (assetId: string) => void;
     onRegenerate: (assetId: string) => void;
+    onPreview: (assetId: string) => void;
 };
 
+/** 资产面板顶部的摘要指标。 */
+function StoryboardAssetSummary({ label, value, hint }: { label: string; value: string; hint: string }) {
+    return (
+        <div className="rounded-lg border px-4 py-3" style={{ borderColor: "var(--studio-line)", background: "var(--studio-surface-raised)" }}>
+            <p className="text-xs text-[var(--studio-muted)]">{label}</p>
+            <div className="mt-1 flex items-end justify-between gap-2">
+                <strong className="text-xl font-semibold tabular-nums">{value}</strong>
+                <span className="text-[11px] text-[var(--studio-muted)]">{hint}</span>
+            </div>
+        </div>
+    );
+}
+
 /** 单类资产的可编辑列表。 */
-function StoryboardAssetGroup({ kind, assets, assetAssociationCounts, uploadingAssetId, disabled, onAdd, onUpdate, onRemove, onRemoveImage, onChooseImage, onUploadImage, onRegenerate }: StoryboardAssetGroupProps) {
+function StoryboardAssetGroup({ kind, assets, assetAssociationCounts, uploadingAssetId, disabled, onAdd, onUpdate, onRemove, onRemoveImage, onChooseImage, onUploadImage, onRegenerate, onPreview }: StoryboardAssetGroupProps) {
+    const gridClassName = kind === "scene"
+        ? "grid gap-4 md:grid-cols-2"
+        : "grid gap-4 md:grid-cols-2 xl:grid-cols-3";
+
     return (
         <section className="space-y-3">
-            <div className="flex items-center justify-between gap-4">
-                <h3 className="text-sm font-semibold">{STORYBOARD_ASSET_KIND_LABELS[kind]}</h3>
+            <div className="flex items-center justify-between gap-4 border-b pb-2" style={{ borderColor: "var(--studio-line)" }}>
+                <div className="flex items-center gap-2">
+                    <h3 className="text-base font-semibold">{STORYBOARD_ASSET_KIND_LABELS[kind]}</h3>
+                    <span className="rounded-full bg-[var(--studio-surface-raised)] px-2 py-0.5 text-xs text-[var(--studio-muted)]">{assets.length}</span>
+                </div>
                 <Button size="small" icon={<Plus className="size-4" />} disabled={disabled} onClick={onAdd}>
                     新增{STORYBOARD_ASSET_KIND_LABELS[kind]}
                 </Button>
             </div>
             {assets.length ? (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                <div className={gridClassName}>
                     {assets.map((asset) => (
                         <div
                             key={asset.id}
-                            className="min-w-0 overflow-hidden rounded-md border transition-[border-color,transform] duration-200 hover:-translate-y-px hover:border-[var(--studio-line-strong)] motion-reduce:transition-none motion-reduce:hover:translate-y-0"
+                            className="group min-w-0 overflow-hidden rounded-lg border bg-[var(--studio-surface)] transition-[border-color,transform] duration-200 hover:-translate-y-px hover:border-[var(--studio-line-strong)] motion-reduce:transition-none motion-reduce:hover:translate-y-0"
                             style={{ borderColor: "var(--studio-line)" }}
                         >
-                            <div className="relative aspect-video overflow-hidden" style={{ background: "var(--studio-surface-raised)" }}>
+                            <div className="relative overflow-hidden border-b" style={{ aspectRatio: storyboardAssetAspectRatio(kind), background: "var(--studio-surface-raised)", borderColor: "var(--studio-line)" }}>
                                 {asset.image?.source ? (
-                                    <Image src={asset.image.source} alt={asset.name || "资产图片"} preview={{ mask: "查看大图" }} style={{ display: "block", width: "100%", height: "100%", objectFit: "cover" }} />
+                                    <button
+                                        type="button"
+                                        className="group/image relative block size-full cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--studio-action)] focus-visible:ring-inset"
+                                        aria-label={`查看${asset.name || "未命名资产"}完整图片`}
+                                        onClick={() => onPreview(asset.id)}
+                                    >
+                                        <img src={asset.image.source} alt="" className="block size-full object-contain" loading="lazy" decoding="async" />
+                                        <span className="absolute inset-x-3 bottom-3 flex items-center justify-center gap-1.5 rounded-md bg-black/65 px-3 py-2 text-xs font-medium text-white opacity-100 transition-opacity sm:opacity-0 sm:group-hover/image:opacity-100 sm:group-focus-visible/image:opacity-100 motion-reduce:transition-none">
+                                            <Eye className="size-3.5" aria-hidden="true" />查看全图
+                                        </span>
+                                    </button>
                                 ) : (
                                     <div className="grid size-full place-items-center text-xs text-[var(--studio-muted)]">未关联图片</div>
                                 )}
                                 {uploadingAssetId === asset.id ? <div className="absolute inset-0 grid place-items-center bg-black/45 text-xs text-white">上传中</div> : null}
                             </div>
-                            <div className="min-w-0 space-y-2 p-2.5">
-                                <span className="text-xs text-[var(--studio-muted)]">关联 {assetAssociationCounts[asset.id] || 0} 个镜头</span>
-                                <Input value={asset.name} disabled={disabled} placeholder="资产名称" onChange={(event) => onUpdate(asset.id, { name: event.target.value })} />
+                            <div className="min-w-0 space-y-2.5 p-3">
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-medium text-[var(--studio-muted)]">资产信息</span>
+                                    <span className="shrink-0 text-[11px] text-[var(--studio-muted)]">关联 {assetAssociationCounts[asset.id] || 0} 镜头</span>
+                                </div>
+                                <Input className="!font-medium" value={asset.name} disabled={disabled} placeholder="资产名称" onChange={(event) => onUpdate(asset.id, { name: event.target.value })} />
                                 <Input.TextArea value={asset.description} disabled={disabled} placeholder="资产描述" autoSize={{ minRows: 2, maxRows: 4 }} onChange={(event) => onUpdate(asset.id, { description: event.target.value })} />
-                                <div className="flex flex-wrap items-center justify-end gap-1 border-t pt-1.5" style={{ borderColor: "var(--studio-line)" }}>
+                                <div className="flex flex-wrap items-center justify-end gap-1 border-t pt-2" style={{ borderColor: "var(--studio-line)" }}>
                                     <Tooltip title="AI重新生成">
                                         <Button type="text" size="small" disabled={disabled} aria-label="AI重新生成" icon={<RefreshCw className="size-4" />} onClick={() => onRegenerate(asset.id)} />
                                     </Tooltip>
@@ -698,6 +789,13 @@ function StoryboardAssetGroup({ kind, assets, assetAssociationCounts, uploadingA
             )}
         </section>
     );
+}
+
+/** 根据资产类型设置预览画幅，尽量完整展示角色、场景和道具图片。 */
+function storyboardAssetAspectRatio(kind: CanvasStoryboardAssetKind): string {
+    if (kind === "character") return "3 / 4";
+    if (kind === "scene") return "16 / 9";
+    return "1 / 1";
 }
 
 type StoryboardAssetGenerationRowProps = {

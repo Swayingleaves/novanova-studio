@@ -28,6 +28,12 @@ test("已选风格标签复用风格封面缩略图", () => {
     assert.match(picker, /<GenerationStyleCover style=\{style\} className="size-5 shrink-0 overflow-hidden rounded-sm"/);
 });
 
+test("技能无封面时显示技能选择图标", () => {
+    const composer = source("features/generation/components/creation-composer.tsx");
+
+    assert.match(composer, /fallbackIcon=\{<BookOpenText className="size-6" \/>\}/);
+});
+
 test("画布单类型和混合类型入口均复用同一风格库组件", () => {
     const nodePanel = source("features/canvas/components/canvas-node-prompt-panel.tsx");
     const agentComposer = source("features/canvas/components/canvas-agent-composer.tsx");
