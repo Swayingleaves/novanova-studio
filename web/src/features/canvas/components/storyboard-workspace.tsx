@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
-import { App, Button, Checkbox, Empty, Input, InputNumber, Modal, Progress, Select, Table, Tag, Tooltip } from "antd";
+import { App, Button, Checkbox, Empty, Input, InputNumber, Modal, Progress, Select, Table, Tabs, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Eye, FolderOpen, ImagePlus, Link2, Maximize2, Plus, RefreshCw, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { nanoid } from "nanoid";
@@ -41,6 +41,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const creditBalance = useUserStore((state) => state.user?.creditBalance);
     const [assetModalOpen, setAssetModalOpen] = useState(false);
+    const [activeAssetKind, setActiveAssetKind] = useState<CanvasStoryboardAssetKind>("character");
     const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
     const [imagePickerAssetId, setImagePickerAssetId] = useState<string | null>(null);
     const [assetGenerationOpen, setAssetGenerationOpen] = useState(false);
@@ -69,6 +70,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
             setAssetGenerationOpen(false);
             setPromptGenerationOpen(false);
             setAssetModalOpen(false);
+            setActiveAssetKind("character");
             setPreviewAssetId(null);
         }
     }, [node?.id, open]);
@@ -318,6 +320,15 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
             const status = assetGeneration.statuses[assetId];
             return status === "succeeded" || status === "failed";
         }).length || 0;
+    const openAssetModal = () => {
+        setActiveAssetKind("character");
+        setAssetModalOpen(true);
+    };
+    const closeAssetModal = () => {
+        setAssetModalOpen(false);
+        setActiveAssetKind("character");
+        setPreviewAssetId(null);
+    };
 
     return (
         <>
@@ -337,7 +348,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                             <span className="text-base font-semibold">镜头列表</span>
                             <span className="text-sm text-[var(--studio-muted)]">共 {shots.length} 个镜头</span>
                         </div>
-                        <Button icon={<FolderOpen className="size-4" />} onClick={() => setAssetModalOpen(true)}>
+                        <Button icon={<FolderOpen className="size-4" />} onClick={openAssetModal}>
                             资产（{storyboardAssets.length}）
                         </Button>
                     </div>
@@ -450,18 +461,15 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
             <Modal
                 title={null}
                 open={assetModalOpen && open && Boolean(node)}
-                onCancel={() => {
-                    setAssetModalOpen(false);
-                    setPreviewAssetId(null);
-                }}
+                onCancel={closeAssetModal}
                 footer={null}
                 width="min(calc(100vw - 32px), 1360px)"
                 style={{ top: 16 }}
-                styles={{ body: { maxHeight: "calc(100dvh - 112px)", padding: 0, overflowY: "auto" } }}
+                styles={{ body: { height: "calc(100dvh - 112px)", maxHeight: "calc(100dvh - 112px)", padding: 0, overflow: "hidden" } }}
                 destroyOnHidden={false}
             >
-                <div className="space-y-6 px-4 py-4 sm:px-6 sm:py-5">
-                    <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-5" style={{ borderColor: "var(--studio-line)" }}>
+                <div className="flex h-full min-h-0 flex-col gap-6 px-4 py-4 sm:px-6 sm:py-5">
+                    <div className="flex shrink-0 flex-wrap items-end justify-between gap-4 border-b pb-5" style={{ borderColor: "var(--studio-line)" }}>
                         <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                                 <h2 className="text-lg font-semibold">分镜资产</h2>
@@ -473,29 +481,48 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                             批量生成图片
                         </Button>
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="grid shrink-0 gap-3 sm:grid-cols-3">
                         <StoryboardAssetSummary label="已生成图片" value={`${generatedAssetCount}/${storyboardAssets.length}`} hint="资产完成度" />
                         <StoryboardAssetSummary label="已关联镜头" value={String(Object.values(assetAssociationCounts).reduce((total, count) => total + count, 0))} hint="资产与镜头的关联数" />
                         <StoryboardAssetSummary label="待处理" value={String(Math.max(0, storyboardAssets.length - generatedAssetCount))} hint="还未生成图片" />
                     </div>
-                    {ASSET_KINDS.map((kind) => (
-                        <StoryboardAssetGroup
-                            key={kind}
-                            kind={kind}
-                            assets={storyboardAssets.filter((asset) => asset.kind === kind)}
-                            assetAssociationCounts={assetAssociationCounts}
-                            uploadingAssetId={uploadingAssetId}
-                            disabled={editingLocked}
-                            onAdd={() => addAsset(kind)}
-                            onUpdate={updateAsset}
-                            onRemove={confirmDeleteAsset}
-                            onRemoveImage={confirmRemoveAssetImage}
-                            onChooseImage={setImagePickerAssetId}
-                            onUploadImage={requestImageUpload}
-                            onRegenerate={(assetId) => openAssetGeneration([assetId])}
-                            onPreview={(assetId) => setPreviewAssetId(assetId)}
-                        />
-                    ))}
+                    <Tabs
+                        activeKey={activeAssetKind}
+                        destroyOnHidden
+                        className="flex min-h-0 flex-1 flex-col [&_.ant-tabs-content]:h-full [&_.ant-tabs-content-holder]:min-h-0 [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-tabpane]:h-full [&_.ant-tabs-tabpane]:min-h-0"
+                        onChange={(key) => setActiveAssetKind(key as CanvasStoryboardAssetKind)}
+                        items={ASSET_KINDS.map((kind) => {
+                            const kindAssets = storyboardAssets.filter((asset) => asset.kind === kind);
+                            return {
+                                key: kind,
+                                label: (
+                                    <span className="inline-flex items-center gap-1.5">
+                                        {STORYBOARD_ASSET_KIND_LABELS[kind]}
+                                        <span className="text-xs opacity-60">{kindAssets.length}</span>
+                                    </span>
+                                ),
+                                children: (
+                                    <div className="thin-scrollbar h-full overflow-y-auto pr-1">
+                                        <StoryboardAssetGroup
+                                            kind={kind}
+                                            assets={kindAssets}
+                                            assetAssociationCounts={assetAssociationCounts}
+                                            uploadingAssetId={uploadingAssetId}
+                                            disabled={editingLocked}
+                                            onAdd={() => addAsset(kind)}
+                                            onUpdate={updateAsset}
+                                            onRemove={confirmDeleteAsset}
+                                            onRemoveImage={confirmRemoveAssetImage}
+                                            onChooseImage={setImagePickerAssetId}
+                                            onUploadImage={requestImageUpload}
+                                            onRegenerate={(assetId) => openAssetGeneration([assetId])}
+                                            onPreview={(assetId) => setPreviewAssetId(assetId)}
+                                        />
+                                    </div>
+                                ),
+                            };
+                        })}
+                    />
                 </div>
             </Modal>
 

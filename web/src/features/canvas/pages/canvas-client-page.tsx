@@ -1190,6 +1190,47 @@ function CanvasWorkspacePage() {
         [modal, performDeleteNodes],
     );
 
+    const performDeleteBackgroundOnly = useCallback(
+        (nodeId: string) => {
+            const target = nodesRef.current.find((node) => node.id === nodeId);
+            if (!target || !isBackgroundNode(target)) return;
+            setNodes((prev) => prev.filter((node) => node.id !== nodeId).map((node) => {
+                if (!isBackgroundNode(node) || !node.memberNodeIds.includes(nodeId)) return node;
+                return { ...node, memberNodeIds: node.memberNodeIds.filter((memberId) => memberId !== nodeId) };
+            }));
+            setConnections((prev) => prev.filter((connection) => connection.source.nodeId !== nodeId && connection.target.nodeId !== nodeId));
+            setSelectedNodeIds((current) => new Set([...current].filter((id) => id !== nodeId)));
+            setSelectedConnectionId(null);
+            setHoveredNodeId((current) => (current === nodeId ? null : current));
+            setToolbarNodeId((current) => (current === nodeId ? null : current));
+            setDialogNodeId((current) => (current === nodeId ? null : current));
+            setEditingNodeId((current) => (current === nodeId ? null : current));
+            setInfoNodeId((current) => (current === nodeId ? null : current));
+            setCropNodeId((current) => (current === nodeId ? null : current));
+            setPreviewNodeId((current) => (current === nodeId ? null : current));
+            setRunningNodeId((current) => (current === nodeId ? null : current));
+            setContextMenu((current) => (current?.type === "node" && current.nodeId === nodeId ? null : current));
+            cleanupCanvasFiles({ projectId, nodes: nodesRef.current.filter((node) => node.id !== nodeId), chatSessions });
+        },
+        [chatSessions, cleanupCanvasFiles, projectId],
+    );
+
+    const confirmDeleteBackgroundOnly = useCallback(
+        (nodeId: string) => {
+            const target = nodesRef.current.find((node) => node.id === nodeId);
+            if (!target || !isBackgroundNode(target)) return;
+            modal.confirm({
+                title: "仅删除背景板？",
+                content: "背景板内的节点会保留在画布上，相关连线也会保留。",
+                okText: "删除背景板",
+                cancelText: "取消",
+                okButtonProps: { danger: true },
+                onOk: () => performDeleteBackgroundOnly(nodeId),
+            });
+        },
+        [modal, performDeleteBackgroundOnly],
+    );
+
     const deleteConnection = useCallback((connectionId: string) => {
         setConnections((prev) => prev.filter((conn) => conn.id !== connectionId));
         setSelectedConnectionId((current) => (current === connectionId ? null : current));
@@ -4220,6 +4261,7 @@ function CanvasWorkspacePage() {
                     onCreateNode={createNode}
                     onDuplicateNode={duplicateNode}
                     onDeleteNodes={confirmDeleteNodes}
+                    onDeleteBackgroundOnly={confirmDeleteBackgroundOnly}
                     onDeleteConnection={deleteConnection}
                     onImageInputChange={handleImageInputChange}
                     onCloseInfo={() => setInfoNodeId(null)}
