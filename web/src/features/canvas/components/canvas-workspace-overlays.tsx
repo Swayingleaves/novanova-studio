@@ -1,11 +1,12 @@
 "use client";
 
 import type { ChangeEvent, RefObject } from "react";
-import { Modal } from "antd";
+import { Empty, Modal } from "antd";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
 import { isImageNode, isVideoNode } from "../domain/canvas-node";
 import type { CanvasNode, CanvasNodeKind, CanvasPoint, ContextMenuState } from "../types";
+import type { CanvasNavigationStoryboardAsset } from "./canvas-navigation-panel";
 import { CanvasNodeContextMenu } from "./canvas-context-menu";
 import { CanvasNodeCropDialog, type CanvasImageCropRect } from "./canvas-node-crop-dialog";
 import { CanvasNodeInfoModal } from "./canvas-node-hover-toolbar";
@@ -22,6 +23,8 @@ type CanvasWorkspaceOverlaysProps = {
     previewNode: CanvasNode | null;
     clearConfirmOpen: boolean;
     assetPickerOpen: boolean;
+    canvasAssetPickerOpen: boolean;
+    canvasAssets: CanvasNavigationStoryboardAsset[];
     onCloseContextMenu: () => void;
     onCreateNode: (kind: CanvasNodeKind, position: CanvasPoint) => void;
     onDuplicateNode: (nodeId: string) => void;
@@ -39,6 +42,8 @@ type CanvasWorkspaceOverlaysProps = {
     onClearCanvas: () => void;
     onInsertAsset: (payload: InsertAssetPayload) => void;
     onCloseAssetPicker: () => void;
+    onSelectCanvasAsset: (asset: CanvasNavigationStoryboardAsset) => void;
+    onCloseCanvasAssetPicker: () => void;
 };
 
 export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
@@ -115,6 +120,18 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
             </Modal>
 
             <AssetPickerModal open={props.assetPickerOpen} onInsert={props.onInsertAsset} onClose={props.onCloseAssetPicker} />
+            <Modal title="选择画布资产图片" open={props.canvasAssetPickerOpen} onCancel={props.onCloseCanvasAssetPicker} footer={null} width={760} centered destroyOnHidden>
+                {props.canvasAssets.length ? (
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                        {props.canvasAssets.map((item) => (
+                            <button key={item.id} type="button" className="overflow-hidden rounded-xl border text-left transition hover:-translate-y-0.5 hover:border-[var(--studio-primary)]" onClick={() => props.onSelectCanvasAsset(item)}>
+                                {item.asset.image?.source ? <img src={item.asset.image.source} alt={item.asset.name || "画布资产"} className="aspect-[4/3] w-full object-contain" /> : null}
+                                <div className="p-2"><div className="truncate text-sm font-medium">{item.asset.name || "未命名资产"}</div><div className="mt-1 truncate text-xs opacity-60">{item.storyboardNodeTitle}</div></div>
+                            </button>
+                        ))}
+                    </div>
+                ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前画布暂无可用的图片资产" className="py-12" />}
+            </Modal>
         </>
     );
 }

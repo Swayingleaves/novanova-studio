@@ -178,12 +178,17 @@ function createRunGenerationExecution(args: Record<string, unknown>): CanvasAgen
     const nodeId = readString(args.nodeId);
     if (!nodeId) return failureExecution("生成节点ID不能为空");
     const mode = readOptionalGenerationMode(args.mode);
+    const userPrompt = readString(args.prompt);
+    const settingGraphPrompt = readString(args.settingGraphPrompt);
+    const prompt = settingGraphPrompt && userPrompt
+        ? `${settingGraphPrompt}\n\n${userPrompt}`
+        : userPrompt;
     const videoAttributes = mode === "video" ? videoGenerationAttributes(args) : {};
     const generationStyleSnapshots = readStyleSnapshots(args.generationStyleSnapshots);
     return {
         ops: [
             ...(Object.keys(videoAttributes).length ? [{ type: "update_node" as const, id: nodeId, attributes: videoAttributes }] : []),
-            { type: "run_generation", nodeId, mode, prompt: readString(args.prompt), ...(generationStyleSnapshots.length ? { generationStyleSnapshots } : {}) },
+            { type: "run_generation", nodeId, mode, prompt, ...(generationStyleSnapshots.length ? { generationStyleSnapshots } : {}) },
         ],
         result: {
             ok: true,

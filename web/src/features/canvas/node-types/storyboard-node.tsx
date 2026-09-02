@@ -10,7 +10,7 @@ import { useEffectiveConfig } from "@/features/settings/stores/use-config-store"
 import type { CanvasStoryboardNode } from "../types";
 import { readStoryboardModelCost } from "../domain/storyboard";
 import { useNodeActions } from "./node-action-context";
-import { CanvasConnectionHandles, NodeHoverSurface } from "./shared";
+import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 
 export const StoryboardNode = memo(function StoryboardNode({ data: rawData, selected }: NodeProps) {
@@ -100,7 +100,7 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
             />
             <NodeHoverSurface
                 nodeId={data.id}
-                className="flex select-none flex-col overflow-hidden rounded-lg border"
+                className="relative flex select-none flex-col overflow-visible rounded-lg border"
                 style={{
                     width: "100%",
                     height: "100%",
@@ -109,6 +109,7 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
                     boxShadow: selected ? `0 0 0 1px ${theme.node.activeStroke}55` : undefined,
                 }}
             >
+                <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle="分镜脚本" onTitleChange={actions.onTitleChange} />
                 <div className="flex items-center gap-2 border-b px-3 py-2.5" style={{ borderColor: theme.node.stroke }}>
                     <Clapperboard className="size-4" style={{ color: theme.node.activeStroke }} />
                     <span className="text-sm font-medium" style={{ color: theme.node.text }}>

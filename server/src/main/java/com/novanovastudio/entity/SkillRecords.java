@@ -15,6 +15,8 @@ public final class SkillRecords {
     public static final String TYPE_IMAGE = "image";
     /** 视频生成类型。 */
     public static final String TYPE_VIDEO = "video";
+    /** 画布设定图技能类型。 */
+    public static final String TYPE_CANVAS_SETTING_GRAPH = "canvasSettingGraph";
     /** 停用状态。 */
     public static final int STATUS_DISABLED = 0;
     /** 启用状态。 */
@@ -35,10 +37,12 @@ public final class SkillRecords {
         private String name;
         /** 技能简介，展示在用户侧选择面板。 */
         private String description;
-        /** 适用生成类型：image图片，video视频。 */
+        /** 适用生成类型：image图片，video视频，canvasSettingGraph画布设定图。 */
         private String targetType;
         /** 技能流程系统提示词，驱动主Agent引导式多轮对话。 */
         private String systemPrompt;
+        /** 默认生成比例，例如16:9、9:16。 */
+        private String aspectRatio;
         /** 技能封面地址。 */
         private String coverUrl;
         /** 启用状态。 */

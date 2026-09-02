@@ -63,6 +63,7 @@ export type CanvasNodeAttributes = {
     objectStorage?: ObjectStorageFile;
     generationStyleIds?: number[];
     generationStyleSnapshots?: GenerationStyleSnapshot[];
+    settingGraph?: import("../types.ts").CanvasSettingGraphSkillSnapshot;
     storyboardShots?: CanvasStoryboardShot[];
     storyboardAssets?: CanvasStoryboardAsset[];
     videoCompositionInputVideoNodeIds?: string[];
@@ -248,6 +249,7 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
             referenceObjectStorages: attributes.referenceObjectStorages,
             generationStyleIds: attributes.generationStyleIds,
             generationStyleSnapshots: attributes.generationStyleSnapshots,
+            settingGraph: attributes.settingGraph,
         });
         return updateImageNodeGrouping(withGeneration, {
             isRoot: attributes.isBatchRoot,

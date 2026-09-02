@@ -38,7 +38,7 @@ public class SkillRepository {
         int pageSize = Math.max(1, request.pageSize());
         int offset = (Math.max(1, request.page()) - 1) * pageSize;
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                SELECT id, name, description, target_type, system_prompt, cover_url, status, sort_order, created_at, updated_at, deleted_at
+                SELECT id, name, description, target_type, system_prompt, aspect_ratio, cover_url, status, sort_order, created_at, updated_at, deleted_at
                 FROM skills
                 %s
                 ORDER BY sort_order ASC, id ASC
@@ -71,7 +71,7 @@ public class SkillRepository {
      */
     public Mono<SkillRecords.SkillRecord> findEnabledById(Long id) {
         return databaseClient.sql("""
-                SELECT id, name, description, target_type, system_prompt, cover_url, status, sort_order, created_at, updated_at, deleted_at
+                SELECT id, name, description, target_type, system_prompt, aspect_ratio, cover_url, status, sort_order, created_at, updated_at, deleted_at
                 FROM skills
                 WHERE id = :id AND deleted_at IS NULL AND status = 1
                 """)
@@ -88,14 +88,15 @@ public class SkillRepository {
      */
     public Mono<Long> createSkill(SkillRecords.SkillRecord record) {
         return databaseClient.sql("""
-                INSERT INTO skills(name, description, target_type, system_prompt, cover_url, status, sort_order)
-                VALUES (:name, :description, :targetType, :systemPrompt, :coverUrl, :status, :sortOrder)
+                INSERT INTO skills(name, description, target_type, system_prompt, aspect_ratio, cover_url, status, sort_order)
+                VALUES (:name, :description, :targetType, :systemPrompt, :aspectRatio, :coverUrl, :status, :sortOrder)
                 RETURNING id
                 """)
                 .bind("name", record.getName())
                 .bind("description", record.getDescription())
                 .bind("targetType", record.getTargetType())
                 .bind("systemPrompt", record.getSystemPrompt())
+                .bind("aspectRatio", record.getAspectRatio())
                 .bind("coverUrl", record.getCoverUrl())
                 .bind("status", record.getStatus())
                 .bind("sortOrder", record.getSortOrder())
@@ -116,6 +117,7 @@ public class SkillRepository {
                     description = :description,
                     target_type = :targetType,
                     system_prompt = :systemPrompt,
+                    aspect_ratio = :aspectRatio,
                     cover_url = :coverUrl,
                     status = :status,
                     sort_order = :sortOrder,
@@ -127,6 +129,7 @@ public class SkillRepository {
                 .bind("description", record.getDescription())
                 .bind("targetType", record.getTargetType())
                 .bind("systemPrompt", record.getSystemPrompt())
+                .bind("aspectRatio", record.getAspectRatio())
                 .bind("coverUrl", record.getCoverUrl())
                 .bind("status", record.getStatus())
                 .bind("sortOrder", record.getSortOrder())
@@ -229,6 +232,7 @@ public class SkillRepository {
         record.setDescription(row.get("description", String.class));
         record.setTargetType(row.get("target_type", String.class));
         record.setSystemPrompt(row.get("system_prompt", String.class));
+        record.setAspectRatio(row.get("aspect_ratio", String.class));
         record.setCoverUrl(row.get("cover_url", String.class));
         record.setStatus(row.get("status", Integer.class));
         record.setSortOrder(row.get("sort_order", Integer.class));

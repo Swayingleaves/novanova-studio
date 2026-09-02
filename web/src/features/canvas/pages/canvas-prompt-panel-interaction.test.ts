@@ -19,10 +19,38 @@ test("节点内部按下鼠标时不提前关闭提示面板", () => {
     assert.ok(interactionSelectorLine.includes(".react-flow__node"), "提示面板交互白名单缺少 React Flow 节点标识");
 });
 
-test("首次从连线构建引用提示词时记录已有标签", () => {
-    const emptyPromptBranch = promptPanelSource.match(/if \(nodePrompt === ""\) \{([\s\S]*?)return;/)?.[1] || "";
+test("连线参考内容不会自动写入节点提示词", () => {
+    assert.ok(!promptPanelSource.includes("buildInitialPrompt"), "节点提示面板仍会根据连线自动构建提示词");
+    assert.ok(!promptPanelSource.includes("prevLabelsRef"), "节点提示面板仍保留连线标签自动同步状态");
+    assert.ok(promptPanelSource.includes("onInsert={() => promptEditorRef.current?.insertAtCursor(reference.label)}"), "参考缩略图未保留点击后插入提示词功能");
+});
 
-    assert.ok(emptyPromptBranch.includes("prevLabelsRef.current = requiredLabels"), "空提示词初始化时未记录已有引用标签，会重复追加图片引用");
+test("节点提示词回显时隐藏引用标签反引号", () => {
+    assert.ok(promptPanelSource.includes("stripPromptReferenceDelimiters(text, requiredLabels)"), "提示词编辑器仍会回显引用标签两侧的反引号");
+    assert.ok(promptPanelSource.includes('new RegExp("`+("'), "引用标签反引号清理规则不完整");
+});
+
+test("节点提示词输入@时打开画布资产引用面板", () => {
+    assert.ok(promptPanelSource.includes("onMentionInput"), "提示编辑器未监听@引用输入");
+    assert.ok(promptPanelSource.includes("beforeCursor.match(/(^|\\s)@([^\\s@]*)$/)"), "@引用输入未解析搜索关键词");
+    assert.ok(promptPanelSource.includes("<MentionAssetMenu"), "@引用面板未渲染");
+    assert.ok(promptPanelSource.includes("replaceTextRange(range.start, range.end, label)"), "资产选择未替换@查询并插入引用标签");
+});
+
+test("@引用面板定位在光标右上侧", () => {
+    assert.ok(promptPanelSource.includes("caretRect"), "提示编辑器未暴露@光标位置");
+    assert.ok(promptPanelSource.includes("transform: \"translateY(calc(-100% - 0.5rem))\""), "@引用面板未定位到光标上方");
+    assert.ok(!promptPanelSource.includes("top-[8.75rem]"), "@引用面板仍使用固定的节点位置");
+    assert.ok(promptPanelSource.includes('aria-label="搜索画布资产"'), "@引用面板缺少可输入的搜索框");
+    assert.ok(promptPanelSource.includes("onQueryChange={(value) =>"), "@引用面板搜索关键词未同步");
+});
+
+test("节点@引用选择建立画布连线且避免重复连接", () => {
+    assert.ok(canvasPageSource.includes("connectMentionReference"), "画布未提供@引用连线处理");
+    assert.ok(canvasPageSource.includes("normalizeCanvasConnection(sourceNodeId, targetNodeId"), "@引用未复用画布连线规范化逻辑");
+    assert.ok(canvasPageSource.includes("connectionsRef.current.some((item) => item.source.nodeId === connection.source.nodeId && item.target.nodeId === connection.target.nodeId)"), "@引用未检查重复连线");
+    assert.ok(canvasPageSource.includes('source: { ...normalizedConnection.source, portId: "right" }') && canvasPageSource.includes('target: { ...normalizedConnection.target, portId: "left" }'), "@引用连线未固定使用右侧输出点和左侧输入点");
+    assert.ok(promptPanelSource.includes("onMentionSelect(reference)"), "资产选择未调用连线回调");
 });
 
 test("节点提示面板展示已持久化的生成参考图", () => {
@@ -30,9 +58,26 @@ test("节点提示面板展示已持久化的生成参考图", () => {
     assert.ok(promptPanelSource.includes("canInsert: false"), "已保存的生成参考图不应作为连线标签写回提示词");
 });
 
+test("节点提示面板将参考内容显示在文本输入框上方", () => {
+    const referenceContentIndex = promptPanelSource.indexOf("参考内容");
+    const promptEditorIndex = promptPanelSource.search(/<PromptEditor\s+ref=/);
+
+    assert.ok(referenceContentIndex >= 0, "提示面板缺少参考内容区域");
+    assert.ok(promptEditorIndex >= 0, "提示面板缺少文本输入框");
+    assert.ok(referenceContentIndex < promptEditorIndex, "参考内容区域未移动到文本输入框上方");
+    assert.ok(promptPanelSource.includes('className="mb-3 min-w-0 border-b pb-3"'), "参考内容区域未使用底部分隔布局");
+});
+
+test("节点参考内容按顺序显示序号并支持移除连线引用", () => {
+    assert.ok(promptPanelSource.includes("index={index + 1}"), "参考内容未按展示顺序生成序号");
+    assert.ok(promptPanelSource.includes('className="absolute right-1 top-1 grid size-4 place-items-center rounded-sm opacity-0'), "参考内容删除按钮未定位在卡片内侧右上角");
+    assert.ok(promptPanelSource.includes("onRemoveReference(reference)"), "参考内容删除操作未回调连线移除逻辑");
+    assert.ok(canvasPageSource.includes("removeNodeReferenceConnection(promptPanelNode.id, reference.nodeId)"), "节点参考删除未删除对应连线");
+});
+
 test("视频节点参考图支持放大预览", () => {
-    assert.ok(promptPanelSource.includes('mode === "video" && reference.kind === "image"'), "视频节点未识别可预览的参考图");
-    assert.ok(promptPanelSource.includes('title="放大查看参考图"'), "参考图缺少放大查看入口");
+    assert.ok(promptPanelSource.includes('const canPreview = !canInsert && reference.kind === "image"'), "视频节点未识别可预览的参考图");
+    assert.ok(promptPanelSource.includes("const actionLabel = canPreview ? `放大查看${reference.label}`"), "参考图缺少放大查看入口");
     assert.ok(promptPanelSource.includes("setReferencePreview(reference)"), "参考图点击后未打开预览");
 });
 
@@ -54,8 +99,9 @@ test("文本图片和视频节点的发送按钮显示积分消耗", () => {
 test("节点生成工具和提交操作保持在同一行", () => {
     assert.ok(promptPanelSource.includes('className="mt-2 flex min-w-0 items-center gap-2"'), "节点生成工具栏仍允许提交操作换行");
     assert.ok(promptPanelSource.includes('className="flex min-w-0 flex-1 items-center gap-2"'), "节点生成配置区未预留提交操作空间");
-    assert.ok(promptPanelSource.includes('className="!h-10 !min-w-0 flex-1"'), "模型选择器无法收缩，长模型名称会挤压提交操作");
+    assert.ok(promptPanelSource.includes('className="!h-10 !min-w-0 !max-w-[180px] flex-1"'), "模型选择器未限制宽度，长模型名称会挤压提交操作");
     assert.ok(promptPanelSource.includes('buttonClassName="!h-10 !w-[140px]'), "节点生成设置按钮未限制稳定宽度");
+    assert.ok(promptPanelSource.includes("iconOnly"), "节点风格入口未切换为仅图标模式");
 });
 
 test("画布图片设置按画质清晰度比例和限定数量排列", () => {

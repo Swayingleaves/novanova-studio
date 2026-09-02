@@ -1,14 +1,15 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { Clapperboard, ImageIcon, List, Video } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { BookOpenText, ChevronRight, Clapperboard, ImageIcon, List, LoaderCircle, Video } from "lucide-react";
+import { listSkills, type SkillOption } from "@/services/api/server";
 
 import type { CanvasTheme, CanvasBackgroundMode } from "@/shared/lib/canvas-theme";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { readCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
 import { formatGroupedGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { createBackgroundNode, createImageNode, createStoryboardNode, createTextNode, createVideoCompositionNode, createVideoNode, getCanvasNodeTemplate } from "../constants";
-import { applyCanvasNodeAttributes, isImageNode, isTextNode, isVideoNode, updateCanvasNodeFrame, type CanvasNodeAttributes } from "../domain/canvas-node";
+import { applyCanvasNodeAttributes, isBackgroundNode, isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode, updateCanvasNodeFrame, type CanvasNodeAttributes } from "../domain/canvas-node";
 import { MINIMUM_CONTENT_NODE_DIMENSION, nodeSizeFromRatioWithMinimum } from "../utils/canvas-node-size";
 import {
     type CanvasAssistantMessage,
@@ -58,8 +59,11 @@ const AGENT_HISTORY_MESSAGE_LIMIT = 12;
 
 export function createCanvasNode(kind: CanvasNodeKind, position: CanvasPoint, attributes?: CanvasNodeAttributes): CanvasNode {
     const template = getCanvasNodeTemplate(kind);
-    const ratioSize = (kind === "text" || kind === "storyboard") && typeof attributes?.size === "string"
-        ? nodeSizeFromRatioWithMinimum(attributes.size, template.width, template.height, MINIMUM_CONTENT_NODE_DIMENSION)
+    const configuredRatio = typeof attributes?.size === "string"
+        ? attributes.size
+        : kind === "image" ? attributes?.settingGraph?.aspectRatio : undefined;
+    const ratioSize = (kind === "text" || kind === "storyboard" || kind === "image") && configuredRatio
+        ? nodeSizeFromRatioWithMinimum(configuredRatio, template.width, template.height, kind === "image" ? 1 : MINIMUM_CONTENT_NODE_DIMENSION)
         : null;
     const frameSize = ratioSize || template;
     const input = {
@@ -142,11 +146,13 @@ export function ConnectionCreateMenu({
     pending,
     sourceNode,
     onCreate,
+    onCreateSettingGraph,
     onClose,
 }: {
     pending: PendingConnectionCreate;
     sourceNode: CanvasNode | null;
     onCreate: (type: PendingConnectionCreateNodeType) => void;
+    onCreateSettingGraph: (skill: SkillOption) => void;
     onClose: () => void;
 }) {
     const theme = useCanvasTheme();
@@ -177,6 +183,7 @@ export function ConnectionCreateMenu({
                 <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title="文本生成" description="脚本、广告词、品牌文案" onClick={() => onCreate("text")} />
                 <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title="图片生成" onClick={() => onCreate("image")} />
                 <ConnectionCreateOption theme={theme} icon={<Video className="size-5" />} title="视频生成" onClick={() => onCreate("video")} />
+                <ConnectionCreateSettingGraphOption theme={theme} sourceNode={sourceNode} onSelect={onCreateSettingGraph} />
                 <ConnectionCreateOption
                     theme={theme}
                     icon={<Clapperboard className="size-5" />}
@@ -188,6 +195,138 @@ export function ConnectionCreateMenu({
                 />
                 {sourceNode && isTextNode(sourceNode) ? <ConnectionCreateOption theme={theme} icon={<Clapperboard className="size-5" />} title="分镜脚本" description="根据剧本生成镜头和资产清单" onClick={() => onCreate("storyboard")} /> : null}
             </div>
+        </div>
+    );
+}
+
+function ConnectionCreateSettingGraphOption({
+    theme,
+    sourceNode,
+    onSelect,
+}: {
+    theme: CanvasTheme;
+    sourceNode: CanvasNode | null;
+    onSelect: (skill: SkillOption) => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [skills, setSkills] = useState<SkillOption[]>([]);
+    const [error, setError] = useState<string | null>(null);
+    const available = Boolean(sourceNode && (isTextNode(sourceNode) || isImageNode(sourceNode)));
+    const disabledReason = sourceNode ? settingGraphDisabledReason(sourceNode) : "设定图仅支持文本或图片节点";
+    const menuButtonRef = useRef<HTMLButtonElement>(null);
+    const skillButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+    const [highlightedIndex, setHighlightedIndex] = useState(0);
+
+    useEffect(() => {
+        if (open && skills.length > 0) skillButtonRefs.current[highlightedIndex]?.focus();
+    }, [highlightedIndex, open, skills.length]);
+
+    const load = async () => {
+        if (!available || loading || skills.length) return;
+        setLoading(true);
+        setError(null);
+        try {
+            const response = await listSkills("canvasSettingGraph");
+            setSkills(response.skills);
+        } catch (reason) {
+            setError(reason instanceof Error ? reason.message : "设定图技能加载失败");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="relative" onMouseLeave={() => setOpen(false)}>
+            <button
+                type="button"
+                ref={menuButtonRef}
+                role="menuitem"
+                aria-haspopup="menu"
+                aria-expanded={open}
+                disabled={!available}
+                className="flex h-16 w-full items-center gap-3 rounded-2xl px-3 text-left transition disabled:cursor-not-allowed"
+                style={{ color: theme.node.text, opacity: available ? 1 : 0.45, background: open ? theme.node.fill : "transparent" }}
+                title={available ? "设定图" : disabledReason}
+                onMouseEnter={() => {
+                    setOpen(true);
+                    void load();
+                }}
+                onFocus={() => {
+                    setOpen(true);
+                    void load();
+                }}
+                onClick={() => {
+                    setOpen((value) => !value);
+                    void load();
+                }}
+                onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                        event.preventDefault();
+                        setOpen(false);
+                    } else if (event.key === "ArrowRight" || event.key === "Enter") {
+                        event.preventDefault();
+                        setOpen(true);
+                        void load();
+                        window.setTimeout(() => skillButtonRefs.current[0]?.focus(), 0);
+                    }
+                }}
+            >
+                <span className="grid size-11 shrink-0 place-items-center rounded-xl" style={{ background: theme.node.fill, color: theme.node.muted }}>
+                    <BookOpenText className="size-5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2 text-base font-semibold leading-5">设定图</span>
+                    <span className="mt-1 block truncate text-sm" style={{ color: theme.node.muted }}>
+                        角色与场景设计参考
+                    </span>
+                </span>
+                <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
+            </button>
+            {open && available ? (
+                <div
+                    role="menu"
+                    aria-label="设定图类型"
+                    className="absolute left-full top-0 z-[130] min-w-56 rounded-2xl border p-2 shadow-2xl"
+                    style={{ background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                >
+                    {loading ? (
+                        <div className="flex h-24 items-center justify-center gap-2 text-xs" style={{ color: theme.node.muted }}>
+                            <LoaderCircle className="size-4 animate-spin" />
+                            加载设定图技能…
+                        </div>
+                    ) : error ? (
+                        <div className="px-3 py-4 text-xs" style={{ color: theme.node.muted }}>{error}</div>
+                    ) : skills.length ? skills.map((skill, index) => (
+                        <button
+                            key={skill.id}
+                            ref={(element) => { skillButtonRefs.current[index] = element; }}
+                            type="button"
+                            role="menuitem"
+                            className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm transition hover:bg-black/5 focus-visible:outline-none focus-visible:ring-2"
+                            style={{ color: theme.node.text }}
+                            onFocus={() => setHighlightedIndex(index)}
+                            aria-current={highlightedIndex === index ? "true" : undefined}
+                            onClick={() => onSelect(skill)}
+                            onKeyDown={(event) => {
+                                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                                    event.preventDefault();
+                                    const next = event.key === "ArrowDown" ? Math.min(index + 1, skills.length - 1) : Math.max(index - 1, 0);
+                                    setHighlightedIndex(next);
+                                    skillButtonRefs.current[next]?.focus();
+                                } else if (event.key === "ArrowLeft" || event.key === "Escape") {
+                                    event.preventDefault();
+                                    setOpen(false);
+                                    menuButtonRef.current?.focus();
+                                }
+                            }}
+                        >
+                            <span className="min-w-0 truncate">{skill.name}</span>
+                        </button>
+                    )) : <div className="px-3 py-4 text-xs" style={{ color: theme.node.muted }}>暂无可用设定图技能</div>}
+                </div>
+            ) : null}
         </div>
     );
 }
@@ -235,6 +374,15 @@ function ConnectionCreateOption({
             </span>
         </button>
     );
+}
+
+function settingGraphDisabledReason(sourceNode: CanvasNode): string {
+    if (isTextNode(sourceNode) || isImageNode(sourceNode)) return "";
+    if (isVideoNode(sourceNode)) return "视频节点暂不支持设定图";
+    if (isStoryboardNode(sourceNode)) return "分镜节点暂不支持设定图";
+    if (isBackgroundNode(sourceNode)) return "背景板节点暂不支持设定图";
+    if (isVideoCompositionNode(sourceNode)) return "合成视频节点暂不支持设定图";
+    return "当前节点类型暂不支持设定图";
 }
 
 export function PendingConnectionLine({

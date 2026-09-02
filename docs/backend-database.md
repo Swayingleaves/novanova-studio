@@ -194,8 +194,9 @@ COMMENT ON COLUMN generation_styles.category IS '风格分类';
 | `id` | `BIGINT` | 技能 ID，主键自增。 |
 | `name` | `VARCHAR(100)` | 技能名称。 |
 | `description` | `TEXT` | 技能简介，展示在用户侧选择面板。 |
-| `target_type` | `VARCHAR(20)` | 适用生成类型：`image` 图片、`video` 视频。 |
+| `target_type` | `VARCHAR(20)` | 适用生成类型：`image` 图片、`video` 视频、`canvasSettingGraph` 画布设定图。 |
 | `system_prompt` | `TEXT` | 技能流程系统提示词，驱动主 Agent 引导式多轮对话。 |
+| `aspect_ratio` | `VARCHAR(16)` | 技能默认生成比例，例如 `16:9`、`9:16`；图片和视频生成时优先使用。 |
 | `cover_url` | `TEXT` | 技能封面公开访问地址。 |
 | `status` | `INTEGER` | 状态：`1` 启用，`0` 停用。 |
 | `sort_order` | `INTEGER` | 排序值，越小越靠前。 |
@@ -210,22 +211,25 @@ CREATE TABLE skills (
     description TEXT NOT NULL DEFAULT '',
     target_type VARCHAR(20) NOT NULL,
     system_prompt TEXT NOT NULL,
+    aspect_ratio VARCHAR(16) NOT NULL DEFAULT '16:9',
     cover_url TEXT NOT NULL DEFAULT '',
     status INTEGER NOT NULL DEFAULT 1,
     sort_order INTEGER NOT NULL DEFAULT 1000,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMPTZ,
-    CONSTRAINT ck_skills_target_type CHECK (target_type IN ('image', 'video')),
-    CONSTRAINT ck_skills_status CHECK (status IN (0, 1))
+    CONSTRAINT ck_skills_target_type CHECK (target_type IN ('image', 'video', 'canvasSettingGraph')),
+    CONSTRAINT ck_skills_status CHECK (status IN (0, 1)),
+    CONSTRAINT ck_skills_aspect_ratio CHECK (aspect_ratio ~ '^[0-9]+:[0-9]+$')
 );
 
-COMMENT ON TABLE skills IS '图片和视频生成技能表';
+COMMENT ON TABLE skills IS '图片、视频和画布设定图生成技能表';
 COMMENT ON COLUMN skills.id IS '技能ID';
 COMMENT ON COLUMN skills.name IS '技能名称';
 COMMENT ON COLUMN skills.description IS '技能简介，展示在用户侧选择面板';
-COMMENT ON COLUMN skills.target_type IS '适用生成类型：image图片，video视频';
+COMMENT ON COLUMN skills.target_type IS '适用生成类型：image图片，video视频，canvasSettingGraph画布设定图';
 COMMENT ON COLUMN skills.system_prompt IS '技能流程系统提示词，驱动主Agent引导式多轮对话';
+COMMENT ON COLUMN skills.aspect_ratio IS '技能默认生成比例，例如16:9、9:16；图片和视频生成时优先使用';
 COMMENT ON COLUMN skills.cover_url IS '技能封面公开访问地址';
 COMMENT ON COLUMN skills.status IS '状态：1启用，0停用';
 COMMENT ON COLUMN skills.sort_order IS '排序值，越小越靠前';
@@ -239,6 +243,8 @@ CREATE INDEX idx_skills_type_status_sort
 CREATE INDEX idx_skills_deleted_at
     ON skills(deleted_at);
 ```
+
+迁移 `V24__Add_Canvas_Setting_Graph_Skills.sql` 会初始化四条启用的 `canvasSettingGraph` 技能：**角色脸部三视图、角色设定图、角色三视图、场景设定图**。迁移 `V25__Add_Skill_Aspect_Ratio.sql` 为技能增加 `aspect_ratio`，默认值为 `16:9`；节点或图片/视频页面选择技能后，优先使用该比例。每条技能的 `system_prompt` 保存中文多步骤流程、缺项询问规则、提示词组装要求及最终必须调用 `canvas_run_generation` 的约束，节点创建时会将其快照持久化。
 
 ### 视频技能工作流
 
@@ -366,8 +372,8 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 - `POST /api/v1/ai/agent/cancelChat`：按 `requestId` 精确取消排队或运行中的统一主 Agent 请求。
 - `GET /api/v1/style/listStyles`：返回当前类型的启用风格，包含 `coverUrl`、`category`，不改变风格 ID 和历史快照语义。
 - `GET /api/v1/admin/style/listStyles`、`POST /api/v1/admin/style/createStyle`、`POST /api/v1/admin/style/updateStyle`：管理端维护风格封面与分类；创建和更新请求均要求非空 `coverUrl`、`category`。
-- `GET /api/v1/skill/listSkills?targetType=image`：返回当前生成类型的启用技能列表（含 `id`、`name`、`description`、`targetType`、`coverUrl`）。
-- `GET /api/v1/admin/skill/listSkills`、`POST /api/v1/admin/skill/createSkill`、`POST /api/v1/admin/skill/updateSkill`、`POST /api/v1/admin/skill/updateSkillStatus`、`POST /api/v1/admin/skill/deleteSkills`：管理端维护技能（创建/更新要求非空 `name`、`system_prompt`，`targetType` 仅 `image`/`video`）。
+- `GET /api/v1/skill/listSkills?targetType=image`：返回当前生成类型的启用技能列表（含 `id`、`name`、`description`、`targetType`、`coverUrl`、`aspectRatio`）。
+- `GET /api/v1/admin/skill/listSkills`、`POST /api/v1/admin/skill/createSkill`、`POST /api/v1/admin/skill/updateSkill`、`POST /api/v1/admin/skill/updateSkillStatus`、`POST /api/v1/admin/skill/deleteSkills`：管理端维护技能（创建/更新要求非空 `name`、`system_prompt`，支持 `aspectRatio`，`targetType` 支持 `image`、`video`、`canvasSettingGraph`）。
 
 ## 6、测试与验收
 

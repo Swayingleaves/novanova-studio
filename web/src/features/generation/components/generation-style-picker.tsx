@@ -23,6 +23,7 @@ type GenerationStyleMenuProps = {
     onHighlightedIndexChange?: (index: number) => void;
     grouped?: boolean;
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
+    iconOnly?: boolean;
 };
 
 export function useGenerationStyles(generationType?: GenerationStyleType) {
@@ -95,6 +96,7 @@ export function GenerationStyleMenu({
     onHighlightedIndexChange,
     grouped = false,
     placement = "topLeft",
+    iconOnly = false,
 }: GenerationStyleMenuProps) {
     const [internalQuery, setInternalQuery] = useState("");
     const [category, setCategory] = useState(ALL_GENERATION_STYLE_CATEGORY);
@@ -272,8 +274,8 @@ export function GenerationStyleMenu({
             >
                 <span className="inline-flex">
                     <Tooltip title="选择风格">
-                        <Button size="small" className="creation-composer-action" icon={<Palette className="size-3.5" />} aria-expanded={open} aria-haspopup="dialog">
-                            风格
+                        <Button size="small" className={`creation-composer-action ${iconOnly ? "creation-composer-action-icon" : ""}`} icon={<Palette className="size-3.5" />} aria-expanded={open} aria-haspopup="dialog" aria-label="选择风格">
+                            {iconOnly ? null : "风格"}
                         </Button>
                     </Tooltip>
                 </span>

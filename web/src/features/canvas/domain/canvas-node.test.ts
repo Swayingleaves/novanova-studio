@@ -73,7 +73,21 @@ test("分镜节点属性更新保留镜头与资产编辑数据", () => {
     if (!isStoryboardNode(withInstruction)) throw new Error("应返回分镜节点");
     const withVisualStyle = updateStoryboardNodeContent(withInstruction, { visualStyle: "国风手绘厚涂" });
     const updated = updateStoryboardNodeData(withVisualStyle, {
-        shots: [{ id: "shot-1", shotNumber: 1, durationSeconds: 5, visualDescription: "雨夜街道", shotSize: "远景", lightingAtmosphere: "霓虹反光", dialogueVoiceover: "", soundEffect: "雨声", cameraMovement: "推进", finalPrompt: "待生成提示词", assetIds: ["asset-1"] }],
+        shots: [
+            {
+                id: "shot-1",
+                shotNumber: 1,
+                durationSeconds: 5,
+                visualDescription: "雨夜街道",
+                shotSize: "远景",
+                lightingAtmosphere: "霓虹反光",
+                dialogueVoiceover: "",
+                soundEffect: "雨声",
+                cameraMovement: "推进",
+                finalPrompt: "待生成提示词",
+                assetIds: ["asset-1"],
+            },
+        ],
         assets: [{ id: "asset-1", kind: "scene", name: "雨夜街道", description: "潮湿路面" }],
     });
 
@@ -108,6 +122,13 @@ test("视频内容、生成配置和标题独立更新", () => {
     assert.equal(renamed.generation.prompt, "视频提示");
     assert.equal(renamed.generation.seconds, "5");
     assert.equal(renamed.title, "新标题");
+});
+
+test("节点标题为空时保留原名称，相同名称保留原节点引用", () => {
+    const node = createTextNode({ id: "text-1", position: { x: 0, y: 0 }, title: "原名称" });
+
+    assert.equal(updateCanvasNodeTitle(node, "   "), node);
+    assert.equal(updateCanvasNodeTitle(node, "原名称"), node);
 });
 
 test("节点成功完成时清理运行任务和错误信息", () => {

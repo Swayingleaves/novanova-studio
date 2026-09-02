@@ -318,6 +318,7 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
       history?: AgentChatHistoryMessage[],
       generationStyleIdsByType?: { image?: number[]; video?: number[] },
       generationSettings?: Omit<CreationSettings, "model" | "generationStyleIdsByType">,
+      skillId?: string,
     ) => {
       if (sendingRef.current || activeRequestRef.current) return;
       sendingRef.current = true;
@@ -329,16 +330,23 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
       pendingEventsRef.current = [];
       queueStatusRef.current = "queued";
       try {
+        const { settingGraphNodeId, settingGraphSkillSnapshot, ...creationGenerationSettings } = generationSettings || {};
+        const requestCanvasSnapshot = settingGraphNodeId
+          ? buildSettingGraphCanvasSnapshot(snapshotRef.current, settingGraphNodeId)
+          : snapshotRef.current;
         const { sessionId, requestId, status } = await agentChat({
           sessionId: previousSessionId,
           entrySource: "canvas",
           message,
-          canvasSnapshot: snapshotRef.current as unknown as Record<string, unknown>,
+          canvasSnapshot: requestCanvasSnapshot as unknown as Record<string, unknown>,
           references,
           history,
           creationSettings: model || generationStyleIdsByType || generationSettings
-            ? { model, generationStyleIdsByType, ...generationSettings }
+            ? { model, generationStyleIdsByType, ...creationGenerationSettings }
             : undefined,
+          skillId,
+          settingGraphNodeId,
+          settingGraphSkillSnapshot,
         });
         sessionIdRef.current = sessionId;
         requestIdRef.current = requestId;
@@ -433,4 +441,26 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
   }, [token, clearReconnectTimer, connectSSE]);
 
   return { sendMessage, cancelMessage, resetSession };
+}
+
+/** 设定图生成只向 Agent 发送目标节点及其直接引用节点，避免把整张大型画布历史注入模型导致请求超时。 */
+function buildSettingGraphCanvasSnapshot(snapshot: CanvasAgentSnapshot, targetNodeId: string): CanvasAgentSnapshot {
+  const sourceNodeIds = snapshot.connections
+    .filter((connection) => connection.target.nodeId === targetNodeId)
+    .map((connection) => connection.source.nodeId);
+  const allowedNodeIds = new Set([targetNodeId, ...sourceNodeIds]);
+  return {
+    ...snapshot,
+    nodes: snapshot.nodes.filter((node) => allowedNodeIds.has(node.id)).map((node) => {
+      if (node.kind === "image" && node.content.source.startsWith("data:")) {
+        return { ...node, content: { ...node.content, source: "[图片参考]" } };
+      }
+      if (node.kind === "text" && node.content.text.length > 12000) {
+        return { ...node, content: { ...node.content, text: `${node.content.text.slice(0, 12000)}\n[文本已截断]` } };
+      }
+      return node;
+    }),
+    connections: snapshot.connections.filter((connection) => allowedNodeIds.has(connection.source.nodeId) && allowedNodeIds.has(connection.target.nodeId)),
+    selectedNodeIds: snapshot.selectedNodeIds.filter((nodeId) => allowedNodeIds.has(nodeId)),
+  };
 }
