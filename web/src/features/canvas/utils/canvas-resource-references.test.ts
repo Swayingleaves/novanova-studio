@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createVideoCompositionNode, createVideoNode } from "../constants.ts";
-import { buildNodeMentionReferences, buildNodeGenerationReferences } from "./canvas-resource-references.ts";
+import { createImageNode, createTextNode, createVideoCompositionNode, createVideoNode } from "../constants.ts";
+import { buildCanvasResourceReferences, buildNodeMentionReferences, buildNodeGenerationReferences } from "./canvas-resource-references.ts";
 
 test("视频节点可从持久化生成配置恢复参考图", () => {
     const video = createVideoNode({ id: "video-1", position: { x: 0, y: 0 } });
@@ -113,4 +113,25 @@ test("合成视频结果节点展示全部输入视频作为参考内容", () =>
         references.map((reference) => ({ id: reference.nodeId, kind: reference.kind, label: reference.label })),
         videos.map((video, index) => ({ id: video.id, kind: "video", label: `视频${index + 1}` })),
     );
+});
+
+test("@引用候选包含当前画布有效资产且已引用项按连线顺序排列", () => {
+    const imageA = createImageNode({ id: "image-a", position: { x: 0, y: 0 } });
+    imageA.content.source = "https://example.com/a.png";
+    const imageB = createImageNode({ id: "image-b", position: { x: 100, y: 0 } });
+    imageB.content.source = "https://example.com/b.png";
+    const text = createTextNode({ id: "text-1", position: { x: 200, y: 0 }, text: "街道上的人物" });
+    const target = createVideoNode({ id: "target", position: { x: 300, y: 0 } });
+    const connections = [
+        { id: "b-target", source: { nodeId: imageB.id }, target: { nodeId: target.id } },
+        { id: "a-target", source: { nodeId: imageA.id }, target: { nodeId: target.id } },
+    ];
+
+    const references = buildCanvasResourceReferences([imageA, imageB, text, target], connections, target.id);
+
+    assert.deepEqual(references.map((reference) => ({ nodeId: reference.nodeId, active: reference.active })), [
+        { nodeId: imageB.id, active: true },
+        { nodeId: imageA.id, active: true },
+        { nodeId: text.id, active: false },
+    ]);
 });

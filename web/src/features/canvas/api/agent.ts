@@ -34,6 +34,10 @@ export type CreationSettings = {
     imageResolution?: string;
     /** 视频工作流图片阶段画质。 */
     imageQuality?: string;
+    /** 设定图生成时锁定的目标图片节点。 */
+    settingGraphNodeId?: string;
+    /** 设定图技能快照，供历史节点复现流程。 */
+    settingGraphSkillSnapshot?: { id: number; name: string; targetType: "canvasSettingGraph"; systemPrompt: string; aspectRatio?: string };
 };
 
 export type GenerationStyleSnapshot = {
@@ -63,6 +67,10 @@ export interface AgentChatParams {
     creationSettings?: CreationSettings;
     /** 选中技能ID（图片/视频页 skills 功能，可为空） */
     skillId?: string;
+    /** 画布设定图生成目标节点ID。 */
+    settingGraphNodeId?: string;
+    /** 画布设定图技能快照。 */
+    settingGraphSkillSnapshot?: { id: number; name: string; targetType: "canvasSettingGraph"; systemPrompt: string; aspectRatio?: string };
 }
 
 export type AgentChatHistoryMessage = {

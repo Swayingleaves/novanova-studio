@@ -85,7 +85,7 @@ public class SkillService {
      */
     public Mono<Void> createSkill(SkillDtos.CreateSkillRequest request) {
         SkillRecords.SkillRecord record = buildRecord(
-                request.name(), request.description(), request.targetType(), request.systemPrompt(), request.coverUrl(), request.status(), request.sortOrder());
+                request.name(), request.description(), request.targetType(), request.systemPrompt(), request.aspectRatio(), request.coverUrl(), request.status(), request.sortOrder());
         return repository.createSkill(record)
                 .doOnSuccess(id -> log.info("创建技能成功: id={}, type={}", id, record.getTargetType()))
                 .then();
@@ -102,7 +102,7 @@ public class SkillService {
             return Mono.error(invalid("技能ID不能为空"));
         }
         SkillRecords.SkillRecord record = buildRecord(
-                request.name(), request.description(), request.targetType(), request.systemPrompt(), request.coverUrl(), request.status(), request.sortOrder());
+                request.name(), request.description(), request.targetType(), request.systemPrompt(), request.aspectRatio(), request.coverUrl(), request.status(), request.sortOrder());
         record.setId(request.id());
         return repository.updateSkill(record)
                 .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "技能不存在")))
@@ -146,10 +146,12 @@ public class SkillService {
     /** 规范化适用类型。 */
     private String normalizeTargetType(String targetType) {
         String type = targetType == null ? "" : targetType.trim().toLowerCase(Locale.ROOT);
-        if (!SkillRecords.TYPE_IMAGE.equals(type) && !SkillRecords.TYPE_VIDEO.equals(type)) {
-            throw invalid("技能类型只支持image或video");
-        }
-        return type;
+        return switch (type) {
+            case "image" -> SkillRecords.TYPE_IMAGE;
+            case "video" -> SkillRecords.TYPE_VIDEO;
+            case "canvassettinggraph" -> SkillRecords.TYPE_CANVAS_SETTING_GRAPH;
+            default -> throw invalid("技能类型只支持image、video或canvasSettingGraph");
+        };
     }
 
     /** 规范化状态。 */
@@ -163,12 +165,13 @@ public class SkillService {
 
     /** 构建技能记录。 */
     private SkillRecords.SkillRecord buildRecord(String name, String description, String targetType, String systemPrompt,
-                                                  String coverUrl, Integer status, Integer sortOrder) {
+                                                  String aspectRatio, String coverUrl, Integer status, Integer sortOrder) {
         SkillRecords.SkillRecord record = new SkillRecords.SkillRecord();
         record.setName(required(name, "技能名称不能为空"));
         record.setDescription(description == null ? "" : description.trim());
         record.setTargetType(normalizeTargetType(targetType));
         record.setSystemPrompt(required(systemPrompt, "技能系统提示词不能为空"));
+        record.setAspectRatio(normalizeAspectRatio(aspectRatio));
         record.setCoverUrl(coverUrl == null ? "" : coverUrl.trim());
         record.setStatus(normalizeStatus(status));
         if (sortOrder != null && sortOrder < 0) {
@@ -176,6 +179,23 @@ public class SkillService {
         }
         record.setSortOrder(sortOrder == null ? DEFAULT_SORT_ORDER : sortOrder);
         return record;
+    }
+
+    /** 规范化默认生成比例。 */
+    private String normalizeAspectRatio(String aspectRatio) {
+        String value = StringUtils.hasText(aspectRatio) ? aspectRatio.trim() : "16:9";
+        if (!value.matches("\\d+(?::\\d+)?")) {
+            throw invalid("默认生成比例格式不正确，例如16:9");
+        }
+        String[] parts = value.split(":");
+        try {
+            if (parts.length != 2 || Integer.parseInt(parts[0]) <= 0 || Integer.parseInt(parts[1]) <= 0) {
+                throw invalid("默认生成比例必须为正数宽高，例如16:9");
+            }
+        } catch (NumberFormatException exception) {
+            throw invalid("默认生成比例必须为正数宽高，例如16:9");
+        }
+        return value;
     }
 
     /** 规范化列表请求。 */
@@ -196,14 +216,15 @@ public class SkillService {
     private SkillDtos.SkillOption toOption(SkillRecords.SkillRecord record) {
         String workflowType = "video".equals(record.getTargetType())
                 ? videoWorkflowRegistry.resolveWorkflowType(record.getSystemPrompt()).orElse(null) : null;
+        String systemPrompt = SkillRecords.TYPE_CANVAS_SETTING_GRAPH.equals(record.getTargetType()) ? record.getSystemPrompt() : null;
         return new SkillDtos.SkillOption(record.getId(), record.getName(), record.getDescription(), record.getTargetType(),
-                record.getCoverUrl(), workflowType);
+                record.getCoverUrl(), workflowType, systemPrompt, record.getAspectRatio());
     }
 
     /** 技能记录转管理端条目。 */
     private SkillDtos.SkillItem toItem(SkillRecords.SkillRecord record) {
         return new SkillDtos.SkillItem(record.getId(), record.getName(), record.getDescription(), record.getTargetType(), record.getSystemPrompt(), record.getCoverUrl(),
-                record.getStatus(), record.getSortOrder(), formatTime(record.getCreatedAt()), formatTime(record.getUpdatedAt()));
+                record.getAspectRatio(), record.getStatus(), record.getSortOrder(), formatTime(record.getCreatedAt()), formatTime(record.getUpdatedAt()));
     }
 
     /** 必填文本。 */

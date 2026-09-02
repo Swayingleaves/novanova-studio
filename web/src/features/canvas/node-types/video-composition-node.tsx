@@ -8,7 +8,7 @@ import { canComposeVideo, reorderVideoCompositionInputIds } from "../domain/vide
 import type { CanvasVideoCompositionNode, CanvasVideoNode } from "../types";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { useNodeActions } from "./node-action-context";
-import { CanvasConnectionHandles, NodeHoverSurface } from "./shared";
+import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface } from "./shared";
 
 /** 画布视频合成节点。 */
 export const VideoCompositionNode = memo(function VideoCompositionNode({ data, selected }: NodeProps<Node<CanvasVideoCompositionNode>>) {
@@ -18,9 +18,7 @@ export const VideoCompositionNode = memo(function VideoCompositionNode({ data, s
     const [dragOverNodeId, setDragOverNodeId] = useState<string | null>(null);
     const cleanupDragRef = useRef<(() => void) | null>(null);
     const videoById = actions.videoNodesById || new Map<string, CanvasVideoNode>();
-    const inputVideos = data.composition.inputVideoNodeIds
-        .map((nodeId) => videoById.get(nodeId))
-        .filter((node): node is CanvasVideoNode => Boolean(node));
+    const inputVideos = data.composition.inputVideoNodeIds.map((nodeId) => videoById.get(nodeId)).filter((node): node is CanvasVideoNode => Boolean(node));
     const canCompose = canComposeVideo(data, videoById);
     const isRunning = data.execution.phase === "running";
     const isFailed = data.execution.phase === "failed";
@@ -79,30 +77,33 @@ export const VideoCompositionNode = memo(function VideoCompositionNode({ data, s
             />
             <NodeHoverSurface
                 nodeId={data.id}
-                className="flex select-none flex-col overflow-hidden rounded-2xl border-2"
+                className="relative flex select-none flex-col overflow-visible rounded-2xl border-2"
                 style={{ width: "100%", height: "100%", background: theme.node.fill, borderColor, boxShadow: selected ? `0 0 0 1px ${theme.node.activeStroke}55` : undefined }}
             >
+                <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle="合成视频" onTitleChange={actions.onTitleChange} />
                 <div className="flex items-center justify-between gap-3 border-b px-3 py-2.5" style={{ borderColor: theme.node.stroke }}>
                     <span className="inline-flex min-w-0 items-center gap-2 text-sm font-semibold" style={{ color: theme.node.text }}>
                         <Clapperboard className="size-4 shrink-0" style={{ color: theme.node.activeStroke }} />
-                        <span className="truncate">{data.title || "合成视频"}</span>
+                        <span className="truncate">合成视频</span>
                     </span>
                     <CompositionStatus node={data} valid={canCompose} />
                 </div>
 
                 <div className="thin-scrollbar min-h-0 flex-1 space-y-1.5 overflow-y-auto p-2" data-canvas-no-zoom onPointerDown={(event) => event.stopPropagation()}>
-                    {inputVideos.length ? inputVideos.map((video, index) => (
-                        <VideoInputRow
-                            key={video.id}
-                            video={video}
-                            index={index}
-                            dragging={draggedNodeId === video.id}
-                            dragOver={dragOverNodeId === video.id && draggedNodeId !== video.id}
-                            disabled={isRunning}
-                            onDragStart={startReorder}
-                            onPreview={() => actions.onViewVideo(video)}
-                        />
-                    )) : (
+                    {inputVideos.length ? (
+                        inputVideos.map((video, index) => (
+                            <VideoInputRow
+                                key={video.id}
+                                video={video}
+                                index={index}
+                                dragging={draggedNodeId === video.id}
+                                dragOver={dragOverNodeId === video.id && draggedNodeId !== video.id}
+                                disabled={isRunning}
+                                onDragStart={startReorder}
+                                onPreview={() => actions.onViewVideo(video)}
+                            />
+                        ))
+                    ) : (
                         <div className="flex h-28 flex-col items-center justify-center gap-2 px-4 text-center text-xs" style={{ color: theme.node.placeholder }}>
                             <Video className="size-5 opacity-50" />
                             <span>从视频节点拖出连线后，视频会按接入顺序显示在这里</span>
@@ -111,7 +112,9 @@ export const VideoCompositionNode = memo(function VideoCompositionNode({ data, s
                 </div>
 
                 {isFailed && data.execution.errorMessage ? (
-                    <div className="border-t px-3 py-2 text-xs text-red-400" style={{ borderColor: theme.node.stroke }}>{data.execution.errorMessage}</div>
+                    <div className="border-t px-3 py-2 text-xs text-red-400" style={{ borderColor: theme.node.stroke }}>
+                        {data.execution.errorMessage}
+                    </div>
                 ) : null}
 
                 <div className="border-t p-2" style={{ borderColor: theme.node.stroke }}>
@@ -192,7 +195,9 @@ function VideoInputRow({
                 <Play className="pointer-events-none absolute inset-0 m-auto size-3.5 text-white drop-shadow" />
             </button>
             <div className="min-w-0 flex-1">
-                <div className="truncate text-xs font-medium" style={{ color: theme.node.text }}>{index + 1}. {video.title || "视频"}</div>
+                <div className="truncate text-xs font-medium" style={{ color: theme.node.text }}>
+                    {index + 1}. {video.title || "视频"}
+                </div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-[11px]" style={{ color: status.color }}>
                     {status.icon}
                     <span>{status.label}</span>
@@ -206,10 +211,32 @@ function VideoInputRow({
 /** 合成节点状态标签。 */
 function CompositionStatus({ node, valid }: { node: CanvasVideoCompositionNode; valid: boolean }) {
     const theme = useCanvasTheme();
-    if (node.execution.phase === "running") return <span className="inline-flex shrink-0 items-center gap-1 text-[11px]" style={{ color: theme.node.activeStroke }}><LoaderCircle className="size-3 animate-spin" />处理中</span>;
-    if (node.execution.phase === "failed") return <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-red-400"><XCircle className="size-3" />失败</span>;
-    if (node.execution.phase === "succeeded") return <span className="inline-flex shrink-0 items-center gap-1 text-[11px]" style={{ color: theme.node.activeStroke }}><CheckCircle2 className="size-3" />已完成</span>;
-    return <span className="text-[11px]" style={{ color: valid ? theme.node.activeStroke : theme.node.muted }}>{valid ? "可合成" : "待补齐"}</span>;
+    if (node.execution.phase === "running")
+        return (
+            <span className="inline-flex shrink-0 items-center gap-1 text-[11px]" style={{ color: theme.node.activeStroke }}>
+                <LoaderCircle className="size-3 animate-spin" />
+                处理中
+            </span>
+        );
+    if (node.execution.phase === "failed")
+        return (
+            <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-red-400">
+                <XCircle className="size-3" />
+                失败
+            </span>
+        );
+    if (node.execution.phase === "succeeded")
+        return (
+            <span className="inline-flex shrink-0 items-center gap-1 text-[11px]" style={{ color: theme.node.activeStroke }}>
+                <CheckCircle2 className="size-3" />
+                已完成
+            </span>
+        );
+    return (
+        <span className="text-[11px]" style={{ color: valid ? theme.node.activeStroke : theme.node.muted }}>
+            {valid ? "可合成" : "待补齐"}
+        </span>
+    );
 }
 
 /** 视频输入的展示状态。 */

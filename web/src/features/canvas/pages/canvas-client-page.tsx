@@ -9,7 +9,7 @@ import { saveAs } from "file-saver";
 import { requestEdit, requestGeneration, requestImageQuestion } from "@/features/generation/api/image";
 import { requestVideoGeneration, storeGeneratedVideo } from "@/features/generation/api/video";
 import { composeStoryboardPrompts, createStoryboardAssetImageTask, generateStoryboard, readStoryboardAssetImage } from "@/services/api/storyboard";
-import { cancelAiTask, createAiTask, getAiTaskInfo, readAiTaskError, subscribeAiTaskDeltas, waitAiTask, type AiTaskErrorDetails, type GenerationStyleSnapshot } from "@/services/api/server";
+import { cancelAiTask, createAiTask, getAiTaskInfo, readAiTaskError, subscribeAiTaskDeltas, waitAiTask, type AiTaskErrorDetails, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
 import { cancelCompositionTask, composeVideo, waitVideoCompositionTask, type VideoCompositionTask } from "@/services/api/video-composition";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { normalizeImageGenerationCount } from "@/features/generation/components/image-settings-panel";
@@ -43,6 +43,7 @@ import {
     isVideoNode,
     updateCanvasNodeExecution,
     updateCanvasNodeFrame,
+    updateCanvasNodeTitle,
     updateStoryboardNodeContent,
     updateStoryboardNodeData,
     type CanvasNodeAttributes,
@@ -133,6 +134,7 @@ import {
     type CanvasImageGenerationSettings,
     type CanvasImageGenerationType,
     type CanvasImageNode,
+    type CanvasSettingGraphSkillSnapshot,
     type CanvasNode as CanvasDomainNode,
     type CanvasNodeKind,
     type CanvasStoryboardAsset,
@@ -179,6 +181,8 @@ const NODE_STATUS_IDLE = "idle" as const;
 const NODE_STATUS_LOADING = "loading" as const;
 const NODE_STATUS_SUCCESS = "success" as const;
 const NODE_STATUS_ERROR = "error" as const;
+/** 引用生成节点与源节点之间的统一画布间距。 */
+const CONNECTED_NODE_GAP = 144;
 
 export default function CanvasPage() {
     const [mounted, setMounted] = useState(false);
@@ -351,6 +355,8 @@ function CanvasWorkspacePage() {
     const [showImageInfo, setShowImageInfo] = useState(false);
     const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
     const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+    const [canvasAssetPickerOpen, setCanvasAssetPickerOpen] = useState(false);
+    const [canvasAssetReplaceNodeId, setCanvasAssetReplaceNodeId] = useState<string | null>(null);
     const [navigationPanelState, setNavigationPanelState] = useState<CanvasNavigationPanelState | "hidden">("expanded");
     const [navigationPanelTab, setNavigationPanelTab] = useState<CanvasNavigationTab>("nodes");
     const [previewAsset, setPreviewAsset] = useState<CanvasNavigationAsset | null>(null);
@@ -732,9 +738,25 @@ function CanvasWorkspacePage() {
             const scale = viewportRef.current.k;
             const centerX = (bounds.left + bounds.right) / 2;
             const centerY = (bounds.top + bounds.bottom) / 2;
+            // 聚焦应以用户实际可见的画布区域为中心，避开顶部工具栏和左侧导航覆盖层。
+            const container = containerRef.current;
+            const containerBounds = container?.getBoundingClientRect();
+            const canvasWidth = containerBounds?.width || size.width;
+            const canvasHeight = containerBounds?.height || size.height;
+            const navigation = container?.querySelector<HTMLElement>('[aria-label="画布导航"]');
+            const navigationBounds = navigation?.getBoundingClientRect();
+            const navigationRight = navigationBounds && containerBounds
+                ? Math.max(0, Math.min(canvasWidth, navigationBounds.right - containerBounds.left))
+                : 0;
+            const topToolbar = container?.querySelector<HTMLElement>(":scope > header");
+            const topToolbarHeight = topToolbar && containerBounds
+                ? Math.max(0, Math.min(canvasHeight, topToolbar.getBoundingClientRect().bottom - containerBounds.top))
+                : 56;
+            const visibleWidth = Math.max(1, canvasWidth - navigationRight);
+            const visibleHeight = Math.max(1, canvasHeight - topToolbarHeight);
             setViewport({
-                x: size.width / 2 - centerX * scale,
-                y: size.height / 2 - centerY * scale,
+                x: navigationRight + visibleWidth / 2 - centerX * scale,
+                y: topToolbarHeight + visibleHeight / 2 - centerY * scale,
                 k: scale,
             });
             return true;
@@ -823,8 +845,41 @@ function CanvasWorkspacePage() {
         [message],
     );
 
+    // 处理提示词@面板选择的资产连线，成功或已有连线时返回 true。
+    const connectMentionReference = useCallback(
+        (sourceNodeId: string, targetNodeId: string) => {
+            if (sourceNodeId === targetNodeId) return false;
+            const sourceNode = nodesRef.current.find((node) => node.id === sourceNodeId);
+            const targetNode = nodesRef.current.find((node) => node.id === targetNodeId);
+            if (!sourceNode || !targetNode || isBackgroundNode(sourceNode) || isBackgroundNode(targetNode)) {
+                message.warning("该画布资产无法作为节点引用");
+                return false;
+            }
+            const normalizedConnection = normalizeCanvasConnection(sourceNodeId, targetNodeId, nodesRef.current);
+            if (!normalizedConnection) {
+                message.warning("配置节点之间不能连接");
+                return false;
+            }
+            // @引用始终从源资产右侧输出点连接到当前节点左侧输入点，避免 React Flow 在缺少端口时默认落到左侧。
+            const connection = {
+                ...normalizedConnection,
+                source: { ...normalizedConnection.source, portId: "right" },
+                target: { ...normalizedConnection.target, portId: "left" },
+            };
+            const errorMessage = readVideoCompositionConnectionError(connection.source.nodeId, connection.target.nodeId, nodesRef.current, connectionsRef.current);
+            if (errorMessage) {
+                message.warning(errorMessage);
+                return false;
+            }
+            const exists = connectionsRef.current.some((item) => item.source.nodeId === connection.source.nodeId && item.target.nodeId === connection.target.nodeId);
+            if (!exists) setConnections((prev) => [...prev, { id: `conn-${Date.now()}`, ...connection }]);
+            return true;
+        },
+        [message],
+    );
+
     const createConnectedNode = useCallback(
-        (type: PendingConnectionCreateNodeType, pending: PendingConnectionCreate) => {
+        (type: PendingConnectionCreateNodeType, pending: PendingConnectionCreate, settingGraphSkill?: SkillOption) => {
             const sourceNode = nodesRef.current.find((node) => node.id === pending.connection.nodeId);
             if (type === "storyboard" && (!sourceNode || !isTextNode(sourceNode))) {
                 message.warning("分镜脚本只能引用文本剧本节点创建");
@@ -835,7 +890,29 @@ function CanvasWorkspacePage() {
                 return;
             }
             const defaultStoryboardModel = type === "storyboard" ? normalizeModelOptionValue(effectiveConfig.textModel, effectiveConfig.channels) : "";
-            const newNode = createCanvasNode(type, pending.position, defaultStoryboardModel ? { model: defaultStoryboardModel } : undefined);
+            const settingGraph = settingGraphSkill
+                ? ({ id: settingGraphSkill.id, name: settingGraphSkill.name, targetType: "canvasSettingGraph", systemPrompt: settingGraphSkill.systemPrompt || "", aspectRatio: settingGraphSkill.aspectRatio || "16:9" } satisfies CanvasSettingGraphSkillSnapshot)
+                : undefined;
+            const initialNode = {
+                ...createCanvasNode(type, pending.position, {
+                    ...(defaultStoryboardModel ? { model: defaultStoryboardModel } : {}),
+                    ...(settingGraph ? { settingGraph } : {}),
+                    ...(settingGraph ? { count: 1 } : {}),
+                }),
+                ...(settingGraphSkill ? { title: `设定图·${settingGraphSkill.name}` } : {}),
+            };
+            // 连接菜单的释放点通常紧贴源节点手柄，不能直接作为新节点位置；统一按源节点边缘外侧间距布局。
+            const newNode = sourceNode
+                ? updateCanvasNodeFrame(initialNode, {
+                      position: {
+                          x:
+                              pending.connection.handleType === "target"
+                                  ? sourceNode.frame.position.x - CONNECTED_NODE_GAP - initialNode.frame.width
+                                  : sourceNode.frame.position.x + sourceNode.frame.width + CONNECTED_NODE_GAP,
+                          y: sourceNode.frame.position.y + sourceNode.frame.height / 2 - initialNode.frame.height / 2,
+                      },
+                  })
+                : initialNode;
             const connection = normalizeCanvasConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode]);
             if (!connection) {
                 message.warning("配置节点之间不能连接");
@@ -1237,6 +1314,15 @@ function CanvasWorkspacePage() {
         setEdgeDeletePopover((current) => (current?.connectionId === connectionId ? null : current));
         setContextMenu((current) => (current?.type === "connection" && current.connectionId === connectionId ? null : current));
     }, []);
+
+    const removeNodeReferenceConnection = useCallback(
+        (targetNodeId: string, referenceNodeId: string) => {
+            connections
+                .filter((connection) => connection.target.nodeId === targetNodeId && connection.source.nodeId === referenceNodeId)
+                .forEach((connection) => deleteConnection(connection.id));
+        },
+        [connections, deleteConnection],
+    );
 
     const deselectCanvas = useCallback(() => {
         cancelPendingConnectionCreate();
@@ -1869,6 +1955,10 @@ function CanvasWorkspacePage() {
         setNodes((prev) => prev.map((item) => (item.id === node.id && isBackgroundNode(item) ? { ...item, title } : item)));
     }, []);
 
+    const handleNodeTitleChange = useCallback((nodeId: string, title: string) => {
+        setNodes((prev) => prev.map((node) => (node.id === nodeId ? updateCanvasNodeTitle(node, title) : node)));
+    }, []);
+
     const handleBackgroundColorChange = useCallback((node: CanvasBackgroundNode, color: string) => {
         setNodes((prev) => prev.map((item) => (item.id === node.id && isBackgroundNode(item) ? { ...item, backgroundColor: color } : item)));
     }, []);
@@ -1963,8 +2053,24 @@ function CanvasWorkspacePage() {
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: CanvasNodeAttributes) => {
         const node = nodesRef.current.find((item) => item.id === nodeId);
-        if (node) saveCanvasLastUsedGenerationSettings(node.kind, patch);
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyCanvasNodeConfig(node, patch) : node)));
+        const nextPatch = node && isImageNode(node) && patch.settingGraph?.aspectRatio
+            ? { ...patch, size: patch.settingGraph.aspectRatio }
+            : patch;
+        if (node) saveCanvasLastUsedGenerationSettings(node.kind, nextPatch);
+        setNodes((prev) => prev.map((current) => {
+            if (current.id !== nodeId) return current;
+            const updated = applyCanvasNodeConfig(current, nextPatch);
+            if (!isImageNode(updated) || !nextPatch.settingGraph?.aspectRatio || updated.frame.freeResize) return updated;
+            const nextSize = nodeSizeFromRatio(nextPatch.settingGraph.aspectRatio, updated.frame.width, updated.frame.height);
+            if (!nextSize) return updated;
+            return updateCanvasNodeFrame(updated, {
+                ...nextSize,
+                position: {
+                    x: updated.frame.position.x + (updated.frame.width - nextSize.width) / 2,
+                    y: updated.frame.position.y + (updated.frame.height - nextSize.height) / 2,
+                },
+            });
+        }));
     }, []);
 
     const resolveStoryboardRequest = useCallback(
@@ -2248,7 +2354,7 @@ function CanvasWorkspacePage() {
                     },
                     {
                         position: {
-                            x: currentNode.frame.position.x + currentNode.frame.width + 144 + column * (videoTemplate.width + 54),
+                            x: currentNode.frame.position.x + currentNode.frame.width + CONNECTED_NODE_GAP + column * (videoTemplate.width + 54),
                             y: currentNode.frame.position.y + row * (videoTemplate.height + 54),
                         },
                         width: videoTemplate.width,
@@ -2908,6 +3014,54 @@ function CanvasWorkspacePage() {
         handleAssistantSessionsChange([...chatSessions, newSession], sessionId);
     }, [activeChatId, agentQueued, agentRunning, chatSessions, handleAssistantSessionsChange, resetAgentSession, resetThinkings]);
 
+    const activeSessionMessages = useMemo(() => chatSessions.find((s) => s.id === activeChatId)?.messages || [], [chatSessions, activeChatId]);
+
+    const handleSettingGraphGenerate = useCallback(
+        async (nodeId: string, prompt: string, skill: CanvasSettingGraphSkillSnapshot) => {
+            if (agentRunning || agentQueued) {
+                message.warning("画布Agent正在处理，请等待当前任务完成");
+                return;
+            }
+            const sessionId = activeChatId || nanoid();
+            activeAgentSessionIdRef.current = sessionId;
+            activeAgentAssistantMessageIdRef.current = null;
+            resetThinkings();
+            resetTextStream(false);
+            setAgentQueued(true);
+            const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text: prompt };
+            if (!activeChatId) {
+                const now = new Date().toISOString();
+                handleAssistantSessionsChange([{ id: sessionId, title: `设定图：${skill.name}`, messages: [userMessage], createdAt: now, updatedAt: now }], sessionId);
+            } else {
+                appendAssistantMessage(sessionId, userMessage);
+            }
+            try {
+                await sendAgentMessage(
+                    prompt,
+                    [],
+                    config.agentModel || undefined,
+                    buildAgentChatHistory(activeSessionMessages),
+                    undefined,
+                    {
+                        size: skill.aspectRatio || "16:9",
+                        resolution: config.imageResolution || undefined,
+                        quality: config.quality || undefined,
+                        // 设定图节点始终只生成一张，避免沿用画布批量生成数量。
+                        count: 1,
+                        settingGraphNodeId: nodeId,
+                        settingGraphSkillSnapshot: skill,
+                    },
+                    String(skill.id),
+                );
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "设定图生成失败");
+                setAgentQueued(false);
+                setAgentRunning(false);
+            }
+        },
+        [activeChatId, activeSessionMessages, agentQueued, agentRunning, appendAssistantMessage, config.agentModel, config.canvasImageCount, config.count, config.imageResolution, config.quality, config.size, handleAssistantSessionsChange, message, resetTextStream, resetThinkings, sendAgentMessage],
+    );
+
     const startTitleEditing = useCallback(() => {
         setTitleDraft(currentDocument?.identity.title || "未命名画布");
         setTitleEditing(true);
@@ -3011,9 +3165,11 @@ function CanvasWorkspacePage() {
 
             try {
                 if (mode === "image") {
-                    const count = normalizeImageGenerationCount(generationConfig.count);
                     const sourceIsImage = Boolean(sourceNode && isImageNode(sourceNode));
                     const isEmptyImageNode = Boolean(sourceNode && isImageNode(sourceNode) && !sourceNode.content.source);
+                    const isSettingGraphNode = Boolean(sourceNode && isImageNode(sourceNode) && sourceNode.generation.settingGraph);
+                    const generationSize = isSettingGraphNode ? sourceNode?.generation.settingGraph?.aspectRatio || "16:9" : generationConfig.size;
+                    const count = isSettingGraphNode ? 1 : normalizeImageGenerationCount(generationConfig.count);
                     const sourceReference =
                         sourceNode && isImageNode(sourceNode) && sourceNode.content.source
                             ? [
@@ -3027,25 +3183,32 @@ function CanvasWorkspacePage() {
                                   },
                               ]
                             : [];
-                    const referenceImages = sourceReference.length ? sourceReference : generationContext.referenceImages;
+                    // 设定图节点始终使用上游引用作为参考图，不能把节点自身上一次结果再次作为参考图。
+                    const referenceImages = isSettingGraphNode
+                        ? generationContext.referenceImages
+                        : sourceReference.length
+                          ? sourceReference
+                          : generationContext.referenceImages;
                     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
-                    const generationAttributes = buildImageGenerationAttributes(generationType, generationConfig, count, referenceImages, styleIds, styleSnapshots);
+                    const generationAttributes = buildImageGenerationAttributes(generationType, { ...generationConfig, size: generationSize }, count, referenceImages, styleIds, styleSnapshots);
                     const parentConfig = getCanvasNodeTemplate(sourceIsImage ? "image" : "text");
                     const imageConfig = getCanvasNodeTemplate("image");
                     const parentPosition = sourceNode?.frame.position || { x: 0, y: 0 };
                     const gap = 144;
                     const rowGap = 54;
-                    const rootId = isEmptyImageNode ? nodeId : `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+                    // 设定图节点和空图片节点都原地生成，避免重复创建新的图片节点。
+                    const reuseImageNode = isEmptyImageNode || isSettingGraphNode;
+                    const rootId = reuseImageNode ? nodeId : `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                     const childIds = count > 1 ? Array.from({ length: count }, () => `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`) : [];
                     const targetIds = count > 1 ? childIds : [rootId];
-                    pendingChildIds = isEmptyImageNode ? childIds : [rootId, ...childIds];
+                    pendingChildIds = reuseImageNode ? childIds : [rootId, ...childIds];
                     const rootSize = {
-                        width: count > 1 ? IMAGE_GENERATION_NODE_WIDTH : isEmptyImageNode ? sourceNode?.frame.width || imageConfig.width : imageConfig.width,
-                        height: count > 1 ? IMAGE_GENERATION_NODE_HEIGHT : isEmptyImageNode ? sourceNode?.frame.height || imageConfig.height : imageConfig.height,
+                        width: count > 1 ? IMAGE_GENERATION_NODE_WIDTH : reuseImageNode ? sourceNode?.frame.width || imageConfig.width : imageConfig.width,
+                        height: count > 1 ? IMAGE_GENERATION_NODE_HEIGHT : reuseImageNode ? sourceNode?.frame.height || imageConfig.height : imageConfig.height,
                     };
                     const rootPosition = {
-                        x: isEmptyImageNode ? parentPosition.x : parentPosition.x + parentConfig.width + gap,
-                        y: parentPosition.y + parentConfig.height / 2 - rootSize.height / 2,
+                        x: reuseImageNode ? sourceNode?.frame.position.x || parentPosition.x : parentPosition.x + parentConfig.width + gap,
+                        y: reuseImageNode ? sourceNode?.frame.position.y || parentPosition.y : parentPosition.y + parentConfig.height / 2 - rootSize.height / 2,
                     };
                     const rootNode = updateCanvasNodeFrame(
                         {
@@ -3058,12 +3221,15 @@ function CanvasWorkspacePage() {
                                     isBatchRoot: count > 1,
                                     batchChildIds: childIds,
                                     batchUsesReferenceImages: referenceImages.length > 0,
+                                    ...(isSettingGraphNode && sourceNode && isImageNode(sourceNode) && sourceNode.generation.settingGraph
+                                        ? { settingGraph: sourceNode.generation.settingGraph }
+                                        : {}),
                                     ...generationAttributes,
                                     imageBatchExpanded: count > 1,
                                 },
                             ),
                             id: rootId,
-                            title: count > 1 ? "图片生成" : effectivePrompt.slice(0, 32) || "生成图片",
+                            title: isSettingGraphNode && sourceNode ? sourceNode.title : count > 1 ? "图片生成" : effectivePrompt.slice(0, 32) || "生成图片",
                         },
                         { position: rootPosition, ...rootSize },
                     );
@@ -3088,22 +3254,22 @@ function CanvasWorkspacePage() {
                             },
                         );
                     });
-                    const batchConnections = [...(isEmptyImageNode ? [] : [createRightToLeftConnection(nodeId, rootId)]), ...childIds.map((childId) => createRightToLeftConnection(rootId, childId))];
+                    const batchConnections = [...(reuseImageNode ? [] : [createRightToLeftConnection(nodeId, rootId)]), ...childIds.map((childId) => createRightToLeftConnection(rootId, childId))];
 
                     setNodes((prev) => [
                         ...prev.map((node) =>
                             node.id === nodeId
-                                ? isEmptyImageNode
+                                ? reuseImageNode
                                     ? rootNode
                                     : sourceIsImage
                                       ? updateCanvasNodeExecution(node, { phase: "succeeded", errorMessage: "" })
                                       : replaceCanvasNodeWithText(node, prompt, prompt.slice(0, 32) || "提示词", "succeeded")
                                 : node,
                         ),
-                        ...(isEmptyImageNode ? [] : [rootNode]),
+                        ...(reuseImageNode ? [] : [rootNode]),
                         ...childNodes,
                     ]);
-                    requestFocusNodes(isEmptyImageNode ? [nodeId] : [rootId, ...childIds]);
+                    requestFocusNodes(reuseImageNode ? [nodeId] : [rootId, ...childIds]);
                     setConnections((prev) => [...prev, ...batchConnections]);
                     setSelectedNodeIds(new Set([nodeId]));
                     setSelectedConnectionId(null);
@@ -3116,12 +3282,12 @@ function CanvasWorkspacePage() {
                         targetIds.map(async (targetId): Promise<CanvasNodeGenerationOutcome> => {
                             try {
                                 const generationRequest = referenceImages.length
-                                    ? requestEdit({ ...generationConfig, count: "1" }, effectivePrompt, referenceImages, undefined, "canvas", {
+                                    ? requestEdit({ ...generationConfig, size: generationSize, count: "1" }, effectivePrompt, referenceImages, undefined, "canvas", {
                                           signal: controller.signal,
                                           generationStyleIds: styleSnapshots.length ? undefined : styleIds,
                                           generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined,
                                       })
-                                    : requestGeneration({ ...generationConfig, count: "1" }, effectivePrompt, "canvas", {
+                                    : requestGeneration({ ...generationConfig, size: generationSize, count: "1" }, effectivePrompt, "canvas", {
                                           signal: controller.signal,
                                           generationStyleIds: styleSnapshots.length ? undefined : styleIds,
                                           generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined,
@@ -3200,7 +3366,7 @@ function CanvasWorkspacePage() {
                             isEmptyVideoNode && index === 0 && sourceNode
                                 ? sourceNode.frame.position
                                 : {
-                                      x: parent.x + (sourceNode?.frame.width || spec.width) + 144 + column * (spec.width + 54),
+                                      x: parent.x + (sourceNode?.frame.width || spec.width) + CONNECTED_NODE_GAP + column * (spec.width + 54),
                                       y: parent.y + row * (spec.height + 54),
                                   };
                         const videoSize = isEmptyVideoNode && index === 0 && sourceNode ? { width: sourceNode.frame.width, height: sourceNode.frame.height } : spec;
@@ -3308,7 +3474,7 @@ function CanvasWorkspacePage() {
                         updateCanvasNodeFrame(
                             { ...createCanvasNode("text", { x: 0, y: 0 }, { content: "", status: NODE_STATUS_LOADING, fontSize: 14 }), id, title: effectivePrompt.slice(0, 32) || "生成文本" },
                             {
-                                position: { x: parentPosition.x + parentConfig.width + 96, y: parentPosition.y + parentConfig.height / 2 - textConfig.height / 2 + (index - (1 - 1) / 2) * (textConfig.height + 36) },
+                                position: { x: parentPosition.x + parentConfig.width + CONNECTED_NODE_GAP, y: parentPosition.y + parentConfig.height / 2 - textConfig.height / 2 + (index - (1 - 1) / 2) * (textConfig.height + 36) },
                                 width: textConfig.width,
                                 height: textConfig.height,
                             },
@@ -3433,17 +3599,18 @@ function CanvasWorkspacePage() {
             const hasSavedImageGeneration = Boolean(savedImageGeneration && (savedImageGeneration.prompt || savedImageGeneration.model || savedImageGeneration.references.length));
             const retryMode = readCanvasGenerationMode(node.kind);
             if (!retryMode) return failedCanvasGenerationResult(node.id, canvasError("configuration", "分镜脚本节点请使用专属生成入口"));
+            const settingGraphRatio = isImageNode(node) && node.generation.settingGraph ? node.generation.settingGraph.aspectRatio || "16:9" : undefined;
             const generationConfig =
                 hasSavedImageGeneration && savedImageGeneration
                     ? {
                           ...effectiveConfig,
                           model: savedImageGeneration.model || effectiveConfig.imageModel || effectiveConfig.model,
                           quality: savedImageGeneration.quality || effectiveConfig.quality,
-                          size: savedImageGeneration.size || effectiveConfig.size,
+                          size: settingGraphRatio || savedImageGeneration.size || effectiveConfig.size,
                           imageResolution: savedImageGeneration.resolution || effectiveConfig.imageResolution,
                           count: "1",
                       }
-                    : { ...buildGenerationConfig(effectiveConfig, sourceNode, retryMode), count: "1" };
+                    : { ...buildGenerationConfig(effectiveConfig, sourceNode, retryMode), ...(settingGraphRatio ? { size: settingGraphRatio } : {}), count: "1" };
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 showMissingAiConfig(retryMode);
                 return failedCanvasGenerationResult(node.id, canvasError("configuration", "模型配置不完整"));
@@ -3705,6 +3872,44 @@ function CanvasWorkspacePage() {
         [insertAssistantImage, insertAssistantText, requestFocusNodes, screenToCanvas, size.height, size.width],
     );
 
+    const handleCanvasAssetSelect = useCallback((asset: CanvasNavigationAsset) => {
+        if (asset.source !== "storyboard" || !asset.asset.image?.source || !canvasAssetReplaceNodeId) return;
+        const targetNodeId = canvasAssetReplaceNodeId;
+        const source = asset.asset.image.source;
+        setNodes((prev) => prev.map((node) => node.id === targetNodeId && isImageNode(node)
+            ? applyCanvasNodeAttributes(node, {
+                content: source,
+                storageKey: asset.asset.image?.storageKey,
+                mimeType: asset.asset.image?.mimeType,
+                objectStorage: asset.asset.image?.objectStorage,
+                status: NODE_STATUS_SUCCESS,
+            })
+            : node));
+        setSelectedNodeIds(new Set([targetNodeId]));
+        setDialogNodeId(targetNodeId);
+        setCanvasAssetReplaceNodeId(null);
+        setCanvasAssetPickerOpen(false);
+        message.success("已使用画布资产替换当前图片");
+        const image = new window.Image();
+        image.onload = () => {
+            if (!image.naturalWidth || !image.naturalHeight) return;
+            setNodes((prev) => prev.map((node) => {
+                if (node.id !== targetNodeId || !isImageNode(node) || node.frame.freeResize) return node;
+                const nextSize = fitNodeSize(image.naturalWidth, image.naturalHeight);
+                return updateCanvasNodeFrame(node, {
+                    ...nextSize,
+                    position: {
+                        x: node.frame.position.x + (node.frame.width - nextSize.width) / 2,
+                        y: node.frame.position.y + (node.frame.height - nextSize.height) / 2,
+                    },
+                    naturalWidth: image.naturalWidth,
+                    naturalHeight: image.naturalHeight,
+                });
+            }));
+        };
+        image.src = source;
+    }, [canvasAssetReplaceNodeId, message]);
+
     const handleVideoCompositionInputOrderChange = useCallback((nodeId: string, inputVideoNodeIds: string[]) => {
         setNodes((currentNodes) =>
             currentNodes.map((node) => {
@@ -3837,12 +4042,12 @@ function CanvasWorkspacePage() {
     const onEdgesChange = useMemo(() => createEdgesChangeHandler(setConnections), []);
     const onConnect = useMemo(() => createConnectHandler(setConnections, connectionsRef, nodesRef, (errorMessage) => message.warning(errorMessage)), [message]);
 
-    const activeSessionMessages = useMemo(() => chatSessions.find((s) => s.id === activeChatId)?.messages || [], [chatSessions, activeChatId]);
     const nodeActions = useMemo(
         (): NodeActions => ({
             textEditingNodeId: editingNodeId,
             textEditRequestVersion: editRequestNonce,
             onInfo: (n) => setInfoNodeId(n.id),
+            onTitleChange: handleNodeTitleChange,
             onEditText: openTextEditor,
             onContentChange: handleNodeContentChange,
             onDecreaseFont: (node) => {
@@ -3902,6 +4107,7 @@ function CanvasWorkspacePage() {
             handleGenerateStoryboard,
             handleComposeVideo,
             handleNodeContentChange,
+            handleNodeTitleChange,
             handleRetryNode,
             handleStoryboardInstructionChange,
             handleStoryboardVisualStyleChange,
@@ -4160,6 +4366,7 @@ function CanvasWorkspacePage() {
                             pending={pendingConnectionCreate}
                             sourceNode={nodeById.get(pendingConnectionCreate.connection.nodeId) || null}
                             onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)}
+                            onCreateSettingGraph={(skill) => createConnectedNode("image", pendingConnectionCreate, skill)}
                             onClose={cancelPendingConnectionCreate}
                         />
                     </>
@@ -4183,12 +4390,20 @@ function CanvasWorkspacePage() {
                             onPromptChange={handleNodePromptChange}
                             onConfigChange={handleConfigNodeChange}
                             onGenerate={(nodeId, mode, prompt, styleIds, styleSnapshots) => {
+                                const target = nodesRef.current.find((item) => item.id === nodeId);
+                                if (target && isImageNode(target) && target.generation.settingGraph) {
+                                    void handleSettingGraphGenerate(nodeId, prompt, target.generation.settingGraph);
+                                    return;
+                                }
                                 void handleGenerateNode(nodeId, mode, prompt, false, undefined, { ids: styleIds, snapshots: styleSnapshots });
                             }}
                             onGeneratePrompt={handleGenerateNodePrompt}
                             onStop={confirmStopGeneration}
                             onMissingConfig={showMissingAiConfig}
                             onApplyContent={handleNodeContentChange}
+                            onRemoveReference={(reference) => removeNodeReferenceConnection(promptPanelNode.id, reference.nodeId)}
+                            mentionCandidates={canvasResourceReferences}
+                            onMentionSelect={(reference) => connectMentionReference(reference.nodeId, promptPanelNode.id)}
                             onImageSettingsOpenChange={(open) => {
                                 setNodeImageSettingsOpen(open);
                                 if (open) setToolbarNodeId(null);
@@ -4213,6 +4428,10 @@ function CanvasWorkspacePage() {
                     onUploadObjectStorage={(node) => void uploadNodeObjectStorage(node)}
                     onDownload={downloadNodeImage}
                     onSaveAsset={(node) => void saveNodeAsset(node)}
+                    onChooseAsset={(node) => {
+                        setCanvasAssetReplaceNodeId(node.id);
+                        setCanvasAssetPickerOpen(true);
+                    }}
                     onCrop={(node) => setCropNodeId(node.id)}
                     onSplit={(node) => setSplitNodeId(node.id)}
                     onViewImage={(node) => setPreviewNodeId(node.id)}
@@ -4257,6 +4476,8 @@ function CanvasWorkspacePage() {
                     previewNode={previewNode}
                     clearConfirmOpen={clearConfirmOpen}
                     assetPickerOpen={assetPickerOpen}
+                    canvasAssetPickerOpen={canvasAssetPickerOpen}
+                    canvasAssets={navigationAssets.filter((asset): asset is Extract<CanvasNavigationAsset, { source: "storyboard" }> => asset.source === "storyboard" && Boolean(asset.asset.image?.source))}
                     onCloseContextMenu={() => setContextMenu(null)}
                     onCreateNode={createNode}
                     onDuplicateNode={duplicateNode}
@@ -4277,7 +4498,14 @@ function CanvasWorkspacePage() {
                     onCloseClearConfirm={() => setClearConfirmOpen(false)}
                     onClearCanvas={clearCanvas}
                     onInsertAsset={handleAssetInsert}
-                    onCloseAssetPicker={() => setAssetPickerOpen(false)}
+                    onCloseAssetPicker={() => {
+                        setAssetPickerOpen(false);
+                    }}
+                    onSelectCanvasAsset={handleCanvasAssetSelect}
+                    onCloseCanvasAssetPicker={() => {
+                        setCanvasAssetPickerOpen(false);
+                        setCanvasAssetReplaceNodeId(null);
+                    }}
                 />
                 <AssetPreviewDialog
                     asset={previewLibraryAsset}

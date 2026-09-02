@@ -420,7 +420,7 @@ export default function VideoPage() {
         model,
         imageModel: workflowImageModel,
         // 图片确认轮按用户确认的视频参数覆盖；草案轮/普通视频按页面配置
-        size: workflowImageConfirmNext ? workflowVideoSize : config.size || "16:9",
+        size: workflowImageConfirmNext ? workflowVideoSize : selectedSkill?.aspectRatio || config.size || "16:9",
         resolution: workflowImageConfirmNext ? workflowVideoResolution : videoResolution,
         quality: workflowImageConfirmNext ? (workflowVideoResolution.includes("1080") ? "high" : workflowVideoResolution.includes("480") ? "low" : "medium") : videoResolution.includes("1080") ? "high" : videoResolution.includes("480") ? "low" : "medium",
         seconds: workflowImageConfirmNext ? workflowVideoSeconds : config.videoSeconds || "5",

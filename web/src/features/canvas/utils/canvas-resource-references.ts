@@ -23,8 +23,13 @@ type GraphIndex = {
 };
 
 export function buildCanvasResourceReferences(nodes: CanvasNode[], connections: CanvasConnection[], contextNodeId?: string | null): CanvasResourceReference[] {
-    const highlightedIds = new Set(contextNodeId ? getMentionResourceNodes(contextNodeId, nodes, connections).map((node) => node.id) : []);
-    return mapReferences(nodes, (node) => highlightedIds.has(node.id));
+    if (!contextNodeId) return mapReferences(nodes);
+
+    // 已引用资产按连线解析顺序置于候选列表前部，保证与参考内容区域的编号顺序一致。
+    const referencedNodes = getMentionResourceNodes(contextNodeId, nodes, connections);
+    const referencedIds = new Set(referencedNodes.map((node) => node.id));
+    const orderedNodes = [...referencedNodes, ...nodes.filter((node) => !referencedIds.has(node.id))];
+    return mapReferences(orderedNodes, (node) => referencedIds.has(node.id));
 }
 
 export function buildNodeMentionReferences(node: CanvasNode, nodes: CanvasNode[], connections: CanvasConnection[]): CanvasResourceReference[] {

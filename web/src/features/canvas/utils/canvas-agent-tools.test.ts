@@ -181,6 +181,20 @@ test("已有配置节点可以单独触发生成", () => {
     assert.deepEqual(execution.result.data, { nodeId: "image-existing", status: "running" });
 });
 
+test("设定图生成会把技能流程与用户描述合并到同一个节点", () => {
+    const execution = resolveCanvasAgentTool("canvas_run_generation", {
+        nodeId: "image-setting-graph",
+        mode: "image",
+        settingGraphPrompt: "要求生成正面、侧面、背面三视图",
+        prompt: "古装角色",
+    });
+
+    assert.ok(execution);
+    assert.equal(execution.ops[0]?.type, "run_generation");
+    assert.equal(execution.ops[0]?.nodeId, "image-setting-graph");
+    assert.equal(execution.ops[0]?.prompt, "要求生成正面、侧面、背面三视图\n\n古装角色");
+});
+
 test("已有视频节点生成前覆盖服务端固定设置", () => {
     const execution = resolveCanvasAgentTool("canvas_run_generation", {
         nodeId: "video-existing",

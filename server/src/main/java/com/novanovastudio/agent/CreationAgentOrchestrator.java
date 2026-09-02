@@ -279,13 +279,13 @@ public class CreationAgentOrchestrator {
      */
     private Mono<Map<String, Object>> resolveSkillSnapshot(AgentChatRequest request) {
         if (request == null || !StringUtils.hasText(request.skillId())) {
-            return Mono.just(Map.of());
+            return Mono.just(readCanvasSettingGraphSnapshot(request));
         }
         Long skillId;
         try {
             skillId = Long.valueOf(request.skillId());
         } catch (NumberFormatException exception) {
-            return Mono.just(Map.of());
+            return Mono.just(readCanvasSettingGraphSnapshot(request));
         }
         return skillService.findEnabledSkill(skillId)
                 .map(skill -> {
@@ -293,6 +293,8 @@ public class CreationAgentOrchestrator {
                     snapshot.put("id", skill.getId());
                     snapshot.put("name", skill.getName());
                     snapshot.put("targetType", skill.getTargetType());
+                    snapshot.put("systemPrompt", skill.getSystemPrompt());
+                    snapshot.put("aspectRatio", skill.getAspectRatio() == null ? "16:9" : skill.getAspectRatio());
                     if (CreationEntrySource.VIDEO_PAGE.equals(request.entrySource()) && videoWorkflowRegistry != null) {
                         videoWorkflowRegistry.resolveWorkflowType(skill.getSystemPrompt()).ifPresent(type -> snapshot.put("workflowType", type));
                     }
@@ -300,8 +302,26 @@ public class CreationAgentOrchestrator {
                 })
                 .onErrorResume(exception -> {
                     log.warn("加载技能快照失败: skillId={}, 原因={}", request.skillId(), exception.getMessage());
-                    return Mono.just(Map.of());
+                    return Mono.just(readCanvasSettingGraphSnapshot(request));
                 });
+    }
+
+    /** 读取画布节点携带的设定图技能快照。 */
+    private Map<String, Object> readCanvasSettingGraphSnapshot(AgentChatRequest request) {
+        if (request == null || !CreationEntrySource.CANVAS.equals(request.entrySource()) || request.settingGraphSkillSnapshot() == null) {
+            return Map.of();
+        }
+        Map<String, Object> snapshot = request.settingGraphSkillSnapshot();
+        if (!"canvasSettingGraph".equals(String.valueOf(snapshot.get("targetType")))
+                || !(snapshot.get("id") instanceof Number)
+                || !StringUtils.hasText(String.valueOf(snapshot.get("name")))
+                || !StringUtils.hasText(String.valueOf(snapshot.get("systemPrompt")))) {
+            return Map.of();
+        }
+        String aspectRatio = String.valueOf(snapshot.getOrDefault("aspectRatio", "16:9")).trim();
+        return Map.of("id", snapshot.get("id"), "name", snapshot.get("name"),
+                "targetType", "canvasSettingGraph", "systemPrompt", snapshot.get("systemPrompt"),
+                "aspectRatio", aspectRatio.isEmpty() || "null".equalsIgnoreCase(aspectRatio) ? "16:9" : aspectRatio);
     }
 
     /**
@@ -453,9 +473,11 @@ public class CreationAgentOrchestrator {
         return isRequestCancellationRequested(active)
                 .flatMap(canceled -> Boolean.TRUE.equals(canceled) ? Mono.empty() : modelFactory.defaultTextModel()
                 .flatMap(model -> resolveVideoWorkflowPlan(userId, session, request, model)
-                        .map(candidate -> validateCandidatePlan(candidate, request))
-                        .switchIfEmpty(Mono.justOrEmpty(buildStyleFollowUpPlan(session, request))
                                 .map(candidate -> validateCandidatePlan(candidate, request))
+                                .switchIfEmpty(Mono.justOrEmpty(buildStyleFollowUpPlan(session, request))
+                                .map(candidate -> validateCandidatePlan(candidate, request))
+                                .switchIfEmpty(Mono.justOrEmpty(buildSettingGraphPlan(request))
+                                        .map(candidate -> validateCandidatePlan(candidate, request)))
                                 .switchIfEmpty(Mono.defer(() -> callMainAgent(userId, session, request, model)
                                         .map(candidate -> validateCandidatePlan(candidate, request))
                                         .map(candidate -> resolveTaskPromptSources(candidate, session, request.message())))))
@@ -1057,6 +1079,53 @@ public class CreationAgentOrchestrator {
                 "按已选风格重新生成画布内容", "", false, request.creationSettings(), tasks, List.of());
     }
 
+    /**
+     * 为已选定设定图节点构造确定性的生成计划，避免重复等待主Agent规划。
+     * <p>
+     * 设定图按钮已经明确了技能、目标节点和生成类型，此处直接调用既有
+     * {@code canvas_run_generation} 工具；图片节点的连线引用仍由前端生成器统一解析。
+     *
+     * @param request AgentChatRequest 画布设定图请求
+     * @return CreationPlan 设定图生成计划；非设定图请求返回null
+     */
+    private CreationPlan buildSettingGraphPlan(AgentChatRequest request) {
+        if (request == null || !CreationEntrySource.CANVAS.equals(request.entrySource())
+                || !StringUtils.hasText(request.settingGraphNodeId())) {
+            return null;
+        }
+        Map<String, Object> snapshot = readCanvasSettingGraphSnapshot(request);
+        if (snapshot.isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "设定图技能快照无效");
+        }
+        CreationSettings settings = request.creationSettings();
+        if (settings == null || !StringUtils.hasText(settings.size())) {
+            log.info("设定图请求缺少图片尺寸，等待用户补充: nodeId={}, skillId={}",
+                    request.settingGraphNodeId(), snapshot.get("id"));
+            return new CreationPlan("", "生成设定图", CreationEntrySource.CANVAS,
+                    "正在准备设定图生成", "请先补充图片尺寸后再继续。", false, settings, List.of(), List.of());
+        }
+        String userPrompt = request.message() == null ? "" : request.message().trim();
+        if (!StringUtils.hasText(userPrompt)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "设定图描述不能为空");
+        }
+        // 任务提示词必须保持用户原文，避免绕过统一的来源校验；技能要求通过快照随工具参数传递。
+        String prompt = userPrompt;
+        String skillName = String.valueOf(snapshot.get("name"));
+        CreationTask task = new CreationTask(
+                "setting-graph-" + UUID.randomUUID(),
+                "canvas",
+                "tool",
+                prompt,
+                "current",
+                List.of(),
+                "canvas_run_generation",
+                Map.of("nodeId", request.settingGraphNodeId(), "mode", "image", "prompt", prompt));
+        log.info("设定图请求直接执行画布生成: nodeId={}, skillId={}, skillName={}",
+                request.settingGraphNodeId(), snapshot.get("id"), skillName);
+        return new CreationPlan("", "生成设定图", CreationEntrySource.CANVAS,
+                "生成设定图：" + skillName, "", false, settings, List.of(task), List.of());
+    }
+
     /** 判断是否为不含额外创作要求的通用风格命令。 */
     private boolean isGenericStyleFollowUpRequest(AgentChatRequest request) {
         if (!isStyleFollowUpRequest(request)) return false;
@@ -1225,6 +1294,12 @@ public class CreationAgentOrchestrator {
             }
             input.put("attachmentCount", request.attachments() == null ? 0 : request.attachments().size());
             input.put("canvasSnapshot", CreationEntrySource.CANVAS.equals(request.entrySource()) ? request.canvasSnapshot() : Map.of());
+            if (CreationEntrySource.CANVAS.equals(request.entrySource()) && StringUtils.hasText(request.settingGraphNodeId())) {
+                input.put("settingGraphNodeId", request.settingGraphNodeId());
+            }
+            if (CreationEntrySource.CANVAS.equals(request.entrySource()) && request.settingGraphSkillSnapshot() != null) {
+                input.put("settingGraphSkillSnapshot", request.settingGraphSkillSnapshot());
+            }
             input.put("canvasTools", CreationEntrySource.CANVAS.equals(request.entrySource())
                     ? toolRegistry.allTools().stream().filter(com.novanovastudio.agent.dto.AgentTool::frontend).toList()
                     : List.of());
@@ -1236,6 +1311,10 @@ public class CreationAgentOrchestrator {
                     return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "技能ID不合法"));
                 }
                 return skillService.findEnabledSkill(skillId)
+                        .filter(skill -> ("canvas".equals(request.entrySource()) && "canvasSettingGraph".equals(skill.getTargetType()))
+                                || (("imagePage".equals(request.entrySource()) || "videoPage".equals(request.entrySource()))
+                                && !"canvasSettingGraph".equals(skill.getTargetType())))
+                        .onErrorResume(exception -> Mono.empty())
                         .map(skill -> {
                             input.put("skillId", request.skillId());
                             input.put("skill", Map.of(
@@ -1244,6 +1323,15 @@ public class CreationAgentOrchestrator {
                                     "instructions", skill.getSystemPrompt()));
                             return agentFactory.mainAgent(model, skill.getSystemPrompt());
                         })
+                        .switchIfEmpty(Mono.defer(() -> {
+                            Map<String, Object> snapshot = readCanvasSettingGraphSnapshot(request);
+                            if (!"canvas".equals(request.entrySource()) || snapshot.isEmpty()) {
+                                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "技能类型与当前Agent入口不匹配"));
+                            }
+                            input.put("skillId", request.skillId());
+                            input.put("skill", Map.of("name", snapshot.get("name"), "targetType", snapshot.get("targetType"), "instructions", snapshot.get("systemPrompt")));
+                            return Mono.just(agentFactory.mainAgent(model, String.valueOf(snapshot.get("systemPrompt"))));
+                        }))
                         .flatMap(skillAgent -> callMainAgentWith(skillAgent, userId, session, input));
             }
             agent = agentFactory.mainAgent(model);
@@ -1609,8 +1697,8 @@ public class CreationAgentOrchestrator {
             throw new BusinessException(ErrorCode.PARAM_MISSING, "用户消息不能为空");
         }
         if (StringUtils.hasText(request.skillId())
-                && !"imagePage".equals(request.entrySource()) && !"videoPage".equals(request.entrySource())) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "技能仅支持图片或视频生成页面");
+                && !"imagePage".equals(request.entrySource()) && !"videoPage".equals(request.entrySource()) && !"canvas".equals(request.entrySource())) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "技能入口来源不合法");
         }
     }
 
@@ -1917,7 +2005,7 @@ public class CreationAgentOrchestrator {
     private AgentChatRequest requestWithSessionId(AgentChatRequest request, String sessionId) {
         return new AgentChatRequest(sessionId, request.entrySource(), request.message(), request.canvasSnapshot(),
                 request.references(), request.attachments(), request.history(), request.creationSettings(),
-                request.skillId());
+                request.skillId(), request.settingGraphNodeId(), request.settingGraphSkillSnapshot());
     }
 
     /**

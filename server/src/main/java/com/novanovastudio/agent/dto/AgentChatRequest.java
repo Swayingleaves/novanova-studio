@@ -20,7 +20,9 @@ import java.util.Map;
  * @param attachments    List<Attachment> 附件（图片参考等，generation profile 使用）
  * @param history        List<HistoryMessage> 前端对话历史
  * @param creationSettings CreationSettings 页面选择的生成设置
- * @param skillId String 选中技能ID（图片/视频页 skills 功能，可为空）
+ * @param skillId String 选中技能ID（图片/视频页或画布设定图，可为空）
+ * @param settingGraphNodeId String 画布设定图目标节点ID
+ * @param settingGraphSkillSnapshot Map 画布设定图技能快照
  */
 public record AgentChatRequest(
     String sessionId,
@@ -31,8 +33,17 @@ public record AgentChatRequest(
     List<Attachment> attachments,
     List<HistoryMessage> history,
     CreationSettings creationSettings,
-    String skillId
+    String skillId,
+    String settingGraphNodeId,
+    Map<String, Object> settingGraphSkillSnapshot
 ) {
+
+    /** 保留既有九参数构造方式。 */
+    public AgentChatRequest(String sessionId, String entrySource, String message, Map<String, Object> canvasSnapshot,
+                            List<Reference> references, List<Attachment> attachments, List<HistoryMessage> history,
+                            CreationSettings creationSettings, String skillId) {
+        this(sessionId, entrySource, message, canvasSnapshot, references, attachments, history, creationSettings, skillId, null, null);
+    }
 
     /**
      * 将入口来源转换为旧画布编排器使用的Profile名称。

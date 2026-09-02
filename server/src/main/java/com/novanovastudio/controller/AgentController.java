@@ -6,6 +6,8 @@
  */
 package com.novanovastudio.controller;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentEventEmitter;
 import com.novanovastudio.agent.CreationAgentOrchestrator;
 import com.novanovastudio.agent.CreationEntrySource;
@@ -63,6 +65,7 @@ public class AgentController {
                     com.novanovastudio.common.ErrorCode.PARAM_INVALID, "Agent入口来源不合法"));
         }
         log.info("Agent 对话请求: entrySource={}, sessionId={}, message={}", request.entrySource(), request.sessionId(), request.message());
+        log.info("Agent 对话请求详情: {}", JSONObject.toJSONString(request));
         return currentUserProvider.currentUserId()
             .flatMap(userId -> creationAgentOrchestrator.startChat(userId, request))
             .map(ApiResponse::ok);

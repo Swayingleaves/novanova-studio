@@ -225,7 +225,7 @@ export default function ImagePage() {
     const model = effectiveConfig.imageModel || effectiveConfig.model;
     const agentCreationSettings = {
         model,
-        size: config.size,
+        size: selectedSkill?.aspectRatio || config.size,
         resolution: config.imageResolution,
         quality: config.quality,
         count: 1,

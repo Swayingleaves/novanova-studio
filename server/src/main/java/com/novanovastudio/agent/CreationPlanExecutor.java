@@ -464,7 +464,9 @@ public class CreationPlanExecutor {
 
         Mono<TaskExecutionResult> execution;
         if (CreationEntrySource.CANVAS.equals(plan.entrySource())) {
-            execution = executeCanvasTool(userId, sessionId, plan, task, firstResult.promptStrategy(), prompt, arguments, 1);
+            validateSettingGraphTask(request, task);
+            execution = resolveSkillSnapshot(request)
+                    .flatMap(skillSnapshot -> executeCanvasTool(userId, sessionId, plan, task, firstResult.promptStrategy(), prompt, arguments, skillSnapshot, 1));
         } else {
             List<AgentChatRequest.Attachment> attachments = new ArrayList<>(
                     request.attachments() == null ? List.of() : request.attachments());
@@ -786,7 +788,7 @@ public class CreationPlanExecutor {
         emit(userId, AgentEvent.planTaskStatus(sessionId, plan.planId(), task.taskId(), "running", "子Agent正在准备任务"));
         return planRepository.updateTask(plan.planId(), task.taskId(), "running", "", "", null, "")
                 .then(Mono.defer(() -> "canvas".equals(task.taskType())
-                        ? executeCanvasTask(userId, sessionId, plan, task)
+                        ? executeCanvasTask(userId, sessionId, plan, request, task)
                         : promptOptimizationService.resolveStyles(task.taskType(),
                                 plan.creationSettings() == null ? List.of() : plan.creationSettings().generationStyleIds(),
                                 plan.creationSettings() == null ? List.of() : plan.creationSettings().generationStyleSnapshots())
@@ -830,8 +832,10 @@ public class CreationPlanExecutor {
      * @return Mono<TaskExecutionResult> 画布任务结果
      */
     private Mono<TaskExecutionResult> executeCanvasTask(Long userId, String sessionId, CreationPlan plan,
-                                                         CreationTask task) {
-        return executeCanvasTool(userId, sessionId, plan, task, "KEEP", task.prompt(), task.toolArguments(), 0);
+                                                         AgentChatRequest request, CreationTask task) {
+        validateSettingGraphTask(request, task);
+        return resolveSkillSnapshot(request)
+                .flatMap(skillSnapshot -> executeCanvasTool(userId, sessionId, plan, task, "KEEP", task.prompt(), task.toolArguments(), skillSnapshot, 0));
     }
 
     /**
@@ -854,8 +858,10 @@ public class CreationPlanExecutor {
                                                            List<GenerationStyleDtos.GenerationStyleSnapshot> styles,
                                                            List<AgentChatRequest.Attachment> dependencyAttachments) {
         if (CreationEntrySource.CANVAS.equals(plan.entrySource())) {
-            return executeCanvasTool(userId, sessionId, plan, task, decision.promptStrategy(),
-                    finalPrompt, task.toolArguments(), 0);
+            validateSettingGraphTask(request, task);
+            return resolveSkillSnapshot(request)
+                    .flatMap(skillSnapshot -> executeCanvasTool(userId, sessionId, plan, task, decision.promptStrategy(),
+                            finalPrompt, task.toolArguments(), skillSnapshot, 0));
         }
         String workflowPrompt = workflowDefinition(plan).map(definition -> definition.enrichPrompt(task, finalPrompt)).orElse(finalPrompt);
         return executeGeneration(userId, sessionId, plan, request, task, decision, workflowPrompt, styles, dependencyAttachments);
@@ -1093,23 +1099,39 @@ public class CreationPlanExecutor {
      */
     private Mono<Map<String, Object>> resolveSkillSnapshot(AgentChatRequest request) {
         if (request == null || !StringUtils.hasText(request.skillId())) {
-            return Mono.just(Map.of());
+            return Mono.just(canvasSettingGraphSnapshot(request));
         }
         Long skillId;
         try {
             skillId = Long.valueOf(request.skillId());
         } catch (NumberFormatException exception) {
-            return Mono.just(Map.of());
+            return Mono.just(canvasSettingGraphSnapshot(request));
         }
         return skillService.findEnabledSkill(skillId)
                 .map(skill -> Map.<String, Object>of(
                         "id", skill.getId(),
                         "name", skill.getName(),
-                        "targetType", skill.getTargetType()))
+                        "targetType", skill.getTargetType(),
+                        "systemPrompt", skill.getSystemPrompt(),
+                        "aspectRatio", skill.getAspectRatio() == null ? "16:9" : skill.getAspectRatio()))
                 .onErrorResume(exception -> {
                     log.warn("加载技能快照失败: skillId={}, 原因={}", request.skillId(), exception.getMessage());
-                    return Mono.just(Map.of());
+                    return Mono.just(canvasSettingGraphSnapshot(request));
                 });
+    }
+
+    /** 从画布请求读取设定图技能快照，供技能停用或删除后继续复现历史节点。 */
+    private Map<String, Object> canvasSettingGraphSnapshot(AgentChatRequest request) {
+        if (request == null || !"canvas".equals(request.entrySource()) || request.settingGraphSkillSnapshot() == null) return Map.of();
+        Map<String, Object> snapshot = request.settingGraphSkillSnapshot();
+        Object id = snapshot.get("id");
+        String name = String.valueOf(snapshot.getOrDefault("name", "")).trim();
+        String targetType = String.valueOf(snapshot.getOrDefault("targetType", ""));
+        String systemPrompt = String.valueOf(snapshot.getOrDefault("systemPrompt", "")).trim();
+        if (!(id instanceof Number) || !"canvasSettingGraph".equals(targetType) || name.isEmpty() || systemPrompt.isEmpty()) return Map.of();
+        String aspectRatio = String.valueOf(snapshot.getOrDefault("aspectRatio", "16:9")).trim();
+        return Map.of("id", id, "name", name, "targetType", targetType, "systemPrompt", systemPrompt,
+                "aspectRatio", aspectRatio.isEmpty() || "null".equalsIgnoreCase(aspectRatio) ? "16:9" : aspectRatio);
     }
 
     /**
@@ -1170,6 +1192,18 @@ public class CreationPlanExecutor {
                             .thenReturn(new TaskExecutionResult(task.taskId(), status, result.message(), data,
                                     promptStrategy, actualPrompt, effectiveArguments, error, recoveryAttempt));
                 });
+    }
+
+    /** 校验设定图请求只能执行指定的既有图片节点。 */
+    private void validateSettingGraphTask(AgentChatRequest request, CreationTask task) {
+        if (request == null || !StringUtils.hasText(request.settingGraphNodeId())) return;
+        if (task == null || !"canvas_run_generation".equals(task.toolName())) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "设定图请求只能调用已有节点生成工具");
+        }
+        Object nodeId = task.toolArguments() == null ? null : task.toolArguments().get("nodeId");
+        if (!request.settingGraphNodeId().equals(String.valueOf(nodeId))) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "设定图生成目标节点不匹配");
+        }
     }
 
     /**
@@ -1274,12 +1308,21 @@ public class CreationPlanExecutor {
                                                          CreationTask task,
                                                          String promptStrategy, String finalPrompt,
                                                          Map<String, Object> rawArguments,
+                                                         Map<String, Object> skillSnapshot,
                                                          int recoveryAttempt) {
         Map<String, Object> arguments = new LinkedHashMap<>(rawArguments == null ? Map.of() : rawArguments);
         if (!"canvas".equals(task.taskType())) {
             arguments.put("prompt", finalPrompt);
         }
+        // 设定图快捷请求已跳过主Agent规划，显式传递技能流程给前端生成器；
+        // 任务原始提示词仍保留用户原文，避免触发来源校验。
+        if ("canvas_run_generation".equals(task.toolName()) && skillSnapshot != null
+                && "canvasSettingGraph".equals(String.valueOf(skillSnapshot.get("targetType")))) {
+            String systemPrompt = stringValue(skillSnapshot.get("systemPrompt"));
+            if (StringUtils.hasText(systemPrompt)) arguments.put("settingGraphPrompt", systemPrompt);
+        }
         applyCanvasVideoSettings(arguments, plan.creationSettings(), task);
+        if (skillSnapshot != null && !skillSnapshot.isEmpty()) arguments.put("internal_skill_snapshot", skillSnapshot);
         String toolCallId = recoveryAttempt == 0 ? task.taskId() : task.taskId() + ":recovery:" + recoveryAttempt;
         return resolveCanvasStyleSnapshots(plan.creationSettings(), task)
                 .map(styles -> {

@@ -20,12 +20,14 @@ public final class SkillDtos {
      * @param id 技能ID
      * @param name 技能名称
      * @param description 技能简介
-     * @param targetType 适用生成类型
+     * @param targetType 适用生成类型：image、video或canvasSettingGraph
+     * @param aspectRatio 默认生成比例
      * @param coverUrl 封面地址
      * @param workflowType 服务端识别的视频工作流类型
+     * @param systemPrompt 技能流程提示词，画布设定图节点用于保存快照
      */
     public record SkillOption(Long id, String name, String description, String targetType, String coverUrl,
-                              String workflowType) {
+                              String workflowType, String systemPrompt, String aspectRatio) {
     }
 
     /**
@@ -34,8 +36,9 @@ public final class SkillDtos {
      * @param id 技能ID
      * @param name 技能名称
      * @param description 技能简介
-     * @param targetType 适用生成类型
+     * @param targetType 适用生成类型：image、video或canvasSettingGraph
      * @param systemPrompt 技能流程系统提示词
+     * @param aspectRatio 默认生成比例
      * @param coverUrl 封面地址
      * @param status 状态
      * @param sortOrder 排序值
@@ -43,14 +46,14 @@ public final class SkillDtos {
      * @param updatedAt 更新时间
      */
     public record SkillItem(Long id, String name, String description, String targetType, String systemPrompt, String coverUrl,
-                            Integer status, Integer sortOrder, String createdAt, String updatedAt) {
+                            String aspectRatio, Integer status, Integer sortOrder, String createdAt, String updatedAt) {
     }
 
     /**
      * 管理端技能列表请求。
      *
      * @param keyword 关键词
-     * @param targetType 适用生成类型
+     * @param targetType 适用生成类型：image、video或canvasSettingGraph
      * @param status 状态
      * @param page 页码
      * @param pageSize 每页数量
@@ -80,8 +83,9 @@ public final class SkillDtos {
      *
      * @param name 技能名称
      * @param description 技能简介
-     * @param targetType 适用生成类型
+     * @param targetType 适用生成类型：image、video或canvasSettingGraph
      * @param systemPrompt 技能流程系统提示词
+     * @param aspectRatio 默认生成比例
      * @param coverUrl 封面地址
      * @param status 状态
      * @param sortOrder 排序值
@@ -90,7 +94,7 @@ public final class SkillDtos {
                                      String description,
                                      @NotBlank(message = "技能类型不能为空") String targetType,
                                      @NotBlank(message = "技能系统提示词不能为空") String systemPrompt,
-                                     String coverUrl,
+                                     String aspectRatio, String coverUrl,
                                      Integer status, Integer sortOrder) {
     }
 
@@ -102,6 +106,7 @@ public final class SkillDtos {
      * @param description 技能简介
      * @param targetType 适用生成类型
      * @param systemPrompt 技能流程系统提示词
+     * @param aspectRatio 默认生成比例
      * @param coverUrl 封面地址
      * @param status 状态
      * @param sortOrder 排序值
@@ -111,7 +116,7 @@ public final class SkillDtos {
                                      String description,
                                      @NotBlank(message = "技能类型不能为空") String targetType,
                                      @NotBlank(message = "技能系统提示词不能为空") String systemPrompt,
-                                     String coverUrl,
+                                     String aspectRatio, String coverUrl,
                                      Integer status, Integer sortOrder) {
     }
 

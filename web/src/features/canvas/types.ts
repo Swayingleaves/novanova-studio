@@ -11,6 +11,15 @@ export interface CanvasViewTransform {
 
 export type CanvasGenerationMode = "text" | "image" | "video";
 
+export type CanvasSettingGraphSkillSnapshot = {
+    id: number;
+    name: string;
+    targetType: "canvasSettingGraph";
+    systemPrompt: string;
+    /** 技能默认生成比例；历史节点缺失时按16:9处理。 */
+    aspectRatio?: string;
+};
+
 export type CanvasImageGenerationType = "generation" | "edit";
 
 export interface CanvasConnection {
@@ -154,6 +163,7 @@ export interface CanvasImageGenerationSettings {
     referenceObjectStorages: ObjectStorageFile[];
     generationStyleIds: number[];
     generationStyleSnapshots: GenerationStyleSnapshot[];
+    settingGraph?: CanvasSettingGraphSkillSnapshot;
 }
 
 export interface CanvasImageGrouping {

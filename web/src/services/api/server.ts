@@ -126,7 +126,7 @@ export type PromptOptimizationType = "image" | "video";
 
 export type GenerationStyleType = "image" | "video";
 
-export type SkillType = "image" | "video";
+export type SkillType = "image" | "video" | "canvasSettingGraph";
 
 export type SkillOption = {
     id: number;
@@ -136,6 +136,10 @@ export type SkillOption = {
     coverUrl: string;
     /** 服务端从技能提示词识别的视频工作流类型。 */
     workflowType?: string | null;
+    /** 画布设定图技能的流程提示词快照。 */
+    systemPrompt?: string;
+    /** 技能默认生成比例。 */
+    aspectRatio?: string;
 };
 
 export type SkillOptionListResponse = {
@@ -670,6 +674,7 @@ export type ServerSkill = {
     description: string;
     targetType: SkillType;
     systemPrompt: string;
+    aspectRatio?: string;
     coverUrl: string;
     status: number;
     sortOrder: number;
@@ -708,6 +713,7 @@ export type ServerSkillInput = {
     description?: string;
     targetType: SkillType;
     systemPrompt: string;
+    aspectRatio?: string;
     coverUrl?: string;
     status?: number;
     sortOrder?: number;

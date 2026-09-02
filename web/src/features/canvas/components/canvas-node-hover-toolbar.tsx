@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Clapperboard, CloudUpload, Copy, Download, FolderPlus, Info, Minus, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
+import { Clapperboard, CloudUpload, Copy, Download, FolderPlus, ImagePlus, Info, Minus, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
 
 import { formatBytes, getDataUrlByteSize } from "@/features/generation/lib/image-utils";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
@@ -33,6 +33,7 @@ type ToolbarActionFactoryContext = {
     onDelete: (node: CanvasNode) => void;
     onRetry: (node: CanvasNode) => void;
     onSaveAsset: (node: CanvasNode) => void;
+    onChooseAsset: (node: CanvasNode) => void;
     onUploadObjectStorage: (node: CanvasNode) => void;
     onDownload: (node: CanvasNode) => void;
     onDecreaseFont: (node: CanvasNode) => void;
@@ -53,6 +54,7 @@ type CanvasNodeHoverToolbarProps = {
     onUploadObjectStorage: (node: CanvasNode) => void;
     onDownload: (node: CanvasNode) => void;
     onSaveAsset: (node: CanvasNode) => void;
+    onChooseAsset: (node: CanvasNode) => void;
     onCrop: (node: CanvasNode) => void;
     onSplit: (node: CanvasNode) => void;
     onViewImage: (node: CanvasNode) => void;
@@ -104,6 +106,7 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
         onDelete: props.onDelete,
         onRetry: props.onRetry,
         onSaveAsset: props.onSaveAsset,
+        onChooseAsset: props.onChooseAsset,
         onUploadObjectStorage: props.onUploadObjectStorage,
         onDownload: props.onDownload,
         onDecreaseFont: props.onDecreaseFont,
@@ -122,7 +125,8 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
     const allActions = hasImage ? [...baseActions, ...imageActions] : baseActions;
 
     const left = props.viewport.x + (node.frame.position.x + node.frame.width / 2) * props.viewport.k;
-    const top = props.viewport.y + node.frame.position.y * props.viewport.k - 14;
+    // 工具栏上移，为节点外侧左上角的浮动名称预留独立间距，避免两者重叠。
+    const top = props.viewport.y + node.frame.position.y * props.viewport.k - 42;
 
     return (
         <div
@@ -202,9 +206,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNode 
                             />
                             <InfoRow label="类型" value={readNodeTypeLabel(node.kind)} />
                             <InfoRow label="尺寸" value={`${Math.round(node.frame.width)} x ${Math.round(node.frame.height)}`} />
-                            {node.frame.naturalWidth && node.frame.naturalHeight ? (
-                                <InfoRow label="原始分辨率" value={`${node.frame.naturalWidth} x ${node.frame.naturalHeight}`} />
-                            ) : null}
+                            {node.frame.naturalWidth && node.frame.naturalHeight ? <InfoRow label="原始分辨率" value={`${node.frame.naturalWidth} x ${node.frame.naturalHeight}`} /> : null}
                             <InfoRow label="位置" value={`${Math.round(node.frame.position.x)}, ${Math.round(node.frame.position.y)}`} />
                             <InfoRow label="状态" value={node.execution.phase} />
                             {batchCount > 1 ? <InfoRow label="图片组" value={`${batchCount} 张`} /> : null}
@@ -247,10 +249,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNode 
                             ) : null}
                         </div>
                     ) : (
-                        <pre
-                            className="thin-scrollbar h-full overflow-auto rounded-lg border p-3 text-xs leading-5"
-                            style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}
-                        >
+                        <pre className="thin-scrollbar h-full overflow-auto rounded-lg border p-3 text-xs leading-5" style={{ background: theme.node.fill, borderColor: theme.node.stroke, color: theme.node.text }}>
                             {json}
                         </pre>
                     )}
@@ -292,6 +291,15 @@ function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarA
             label: "存资产",
             icon: <FolderPlus className="size-4" />,
             onClick: () => context.onSaveAsset(context.node),
+        });
+    }
+    if (isImageNode(context.node)) {
+        actions.push({
+            id: "chooseAsset",
+            title: "从画布资产中选择图片并替换当前节点",
+            label: "画布资产",
+            icon: <ImagePlus className="size-4" />,
+            onClick: () => context.onChooseAsset(context.node),
         });
     }
     if (context.hasImage || context.hasVideo) {
@@ -375,26 +383,11 @@ function readNodeTypeLabel(type: CanvasNodeKind) {
     return "视频";
 }
 
-function ToolbarActionButton({
-    title,
-    label,
-    icon,
-    onClick,
-    showLabel,
-    active = false,
-    danger = false,
-    disabled = false,
-}: ToolbarAction & { showLabel: boolean }) {
+function ToolbarActionButton({ title, label, icon, onClick, showLabel, active = false, danger = false, disabled = false }: ToolbarAction & { showLabel: boolean }) {
     const theme = useCanvasTheme();
     const hasText = showLabel && Boolean(label);
     return (
-        <Tooltip
-            title={title}
-            placement="top"
-            mouseEnterDelay={0.2}
-            color="#ffffff"
-            styles={{ root: { color: "#242529", boxShadow: "0 8px 24px rgba(15,23,42,.16)", fontSize: 13, fontWeight: 500 } }}
-        >
+        <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff" styles={{ root: { color: "#242529", boxShadow: "0 8px 24px rgba(15,23,42,.16)", fontSize: 13, fontWeight: 500 } }}>
             <span className="inline-flex">
                 <button
                     type="button"
@@ -404,9 +397,7 @@ function ToolbarActionButton({
                     aria-label={title}
                 >
                     <span
-                        className={`flex h-9 items-center rounded-lg transition ${
-                            hasText ? "gap-1.5 px-1.5" : "justify-center px-2"
-                        }`}
+                        className={`flex h-9 items-center rounded-lg transition ${hasText ? "gap-1.5 px-1.5" : "justify-center px-2"}`}
                         style={active ? { background: theme.toolbar.activeBg, color: theme.toolbar.activeText } : undefined}
                         onMouseEnter={(event) => {
                             if (!active && !disabled) event.currentTarget.style.background = theme.toolbar.itemHover;

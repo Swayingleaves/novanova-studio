@@ -1679,9 +1679,10 @@ function splitTags(value?: string) {
 
 type SkillFormValues = {
     name: string;
-    targetType: "image" | "video";
+    targetType: "image" | "video" | "canvasSettingGraph";
     description?: string;
     systemPrompt: string;
+    aspectRatio?: string;
     coverUrl?: string;
     sortOrder?: number;
     status?: number;
@@ -1694,7 +1695,7 @@ function SkillManagement() {
     const [total, setTotal] = useState(0);
     const [page, setPage] = useState(1);
     const [keyword, setKeyword] = useState("");
-    const [targetType, setTargetType] = useState<"all" | "image" | "video">("all");
+    const [targetType, setTargetType] = useState<"all" | "image" | "video" | "canvasSettingGraph">("all");
     const [status, setStatus] = useState<number | undefined>();
     const [loading, setLoading] = useState(false);
     const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
@@ -1734,7 +1735,7 @@ function SkillManagement() {
 
     const openCreate = () => {
         setEditingSkill(null);
-        form.setFieldsValue({ name: "", targetType: "image", description: "", systemPrompt: "", coverUrl: "", sortOrder: 1000, status: 1 });
+        form.setFieldsValue({ name: "", targetType: "image", description: "", systemPrompt: "", aspectRatio: "16:9", coverUrl: "", sortOrder: 1000, status: 1 });
         setEditOpen(true);
     };
 
@@ -1745,6 +1746,7 @@ function SkillManagement() {
             targetType: skill.targetType,
             description: skill.description || "",
             systemPrompt: skill.systemPrompt,
+            aspectRatio: skill.aspectRatio || "16:9",
             coverUrl: skill.coverUrl || "",
             sortOrder: skill.sortOrder ?? 1000,
             status: skill.status ?? 1,
@@ -1760,6 +1762,7 @@ function SkillManagement() {
                 targetType: values.targetType,
                 description: (values.description || "").trim(),
                 systemPrompt: values.systemPrompt.trim(),
+                aspectRatio: values.aspectRatio || "16:9",
                 coverUrl: (values.coverUrl || "").trim(),
                 sortOrder: values.sortOrder ?? 1000,
                 status: values.status ?? 1,
@@ -1854,7 +1857,7 @@ function SkillManagement() {
         {
             title: "类型",
             dataIndex: "targetType",
-            width: 80,
+            width: 110,
             render: (value: string) => <Tag>{value === "video" ? "视频" : "图片"}</Tag>,
         },
         {
@@ -1862,6 +1865,12 @@ function SkillManagement() {
             dataIndex: "description",
             ellipsis: true,
             render: (description: string) => (description ? <span className="text-[var(--studio-muted)]">{description}</span> : <span className="text-[var(--studio-faint)]">—</span>),
+        },
+        {
+            title: "默认比例",
+            dataIndex: "aspectRatio",
+            width: 100,
+            render: (value: string) => <span className="tabular-nums text-[var(--studio-muted)]">{value || "16:9"}</span>,
         },
         {
             title: "状态",
@@ -1917,6 +1926,7 @@ function SkillManagement() {
                             { label: "全部类型", value: "all" },
                             { label: "图片", value: "image" },
                             { label: "视频", value: "video" },
+                            { label: "画布设定图", value: "canvasSettingGraph" },
                         ]}
                         onChange={(value) => {
                             setTargetType(value);
@@ -1977,6 +1987,7 @@ function SkillManagement() {
                                 options={[
                                     { label: "图片", value: "image" },
                                     { label: "视频", value: "video" },
+                                    { label: "画布设定图", value: "canvasSettingGraph" },
                                 ]}
                             />
                         </Form.Item>
@@ -1986,6 +1997,17 @@ function SkillManagement() {
                     </Form.Item>
                     <Form.Item name="coverUrl" label="封面">
                         <Input placeholder="https://...，可留空" />
+                    </Form.Item>
+                    <Form.Item name="aspectRatio" label="默认比例" rules={[{ required: true, message: "请选择默认比例" }]}>
+                        <Select
+                            options={[
+                                { label: "16:9（横屏）", value: "16:9" },
+                                { label: "9:16（竖屏）", value: "9:16" },
+                                { label: "1:1（方形）", value: "1:1" },
+                                { label: "4:3", value: "4:3" },
+                                { label: "3:4", value: "3:4" },
+                            ]}
+                        />
                     </Form.Item>
                     <div className="mb-4 flex items-start gap-3">
                         <div className="h-28 w-[84px] shrink-0 overflow-hidden rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface-raised)]">

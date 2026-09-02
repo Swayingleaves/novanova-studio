@@ -45,7 +45,7 @@ export function CanvasNavigationPanel(props: CanvasNavigationPanelProps) {
                 onWheelCapture={(event) => event.stopPropagation()}
             >
                 <NavigationIconButton label="查看节点" active={props.activeTab === "nodes"} onClick={() => openTab(props, "nodes")}><Boxes className="size-4" /></NavigationIconButton>
-                <NavigationIconButton label="查看资产" active={props.activeTab === "assets"} onClick={() => openTab(props, "assets")}><FolderOpen className="size-4" /></NavigationIconButton>
+                <NavigationIconButton label="查看画布资产" active={props.activeTab === "assets"} onClick={() => openTab(props, "assets")}><FolderOpen className="size-4" /></NavigationIconButton>
                 <div className="h-px" style={{ background: theme.toolbar.border }} />
                 <NavigationIconButton label="展开导航栏" onClick={props.onExpand}><PanelLeftOpen className="size-4" /></NavigationIconButton>
                 <NavigationIconButton label="收起导航栏" onClick={props.onHide}><ChevronsLeft className="size-4" /></NavigationIconButton>
@@ -82,7 +82,7 @@ export function CanvasNavigationPanel(props: CanvasNavigationPanelProps) {
                     },
                     {
                         key: "assets",
-                        label: <TabLabel icon={<FolderOpen className="size-3.5" />} label="资产" count={props.assets.length} />,
+                        label: <TabLabel icon={<FolderOpen className="size-3.5" />} label="画布资产" count={props.assets.length} />,
                         children: <AssetList assets={props.assets} onPreviewAsset={props.onPreviewAsset} />,
                     },
                 ]}
@@ -159,7 +159,7 @@ function NodeList({ nodes, selectedNodeIds, onLocateNode }: { nodes: CanvasNode[
 
 function AssetList({ assets, onPreviewAsset }: { assets: CanvasNavigationAsset[]; onPreviewAsset: (asset: CanvasNavigationAsset) => void }) {
     const theme = useCanvasTheme();
-    if (!assets.length) return <PanelEmpty description="暂无资产" />;
+    if (!assets.length) return <PanelEmpty description="暂无画布资产" />;
     return (
         <div className="thin-scrollbar h-full overflow-y-auto pb-2">
             <div className="space-y-1">

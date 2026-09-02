@@ -1,10 +1,11 @@
 "use client";
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ArrowUp, FileText, Image as ImageIcon, LoaderCircle, Plus, Sparkles, Square, Video, X } from "lucide-react";
+import { ArrowUp, BookOpenText, ChevronDown, FileText, Image as ImageIcon, LoaderCircle, Plus, Search, Sparkles, Square, Video, X } from "lucide-react";
 import { App, Button, Modal, Tooltip } from "antd";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
+import { listSkills, type SkillOption } from "@/services/api/server";
 import { defaultConfig, normalizeModelOptionValue, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 import { normalizeImageGenerationCount } from "@/features/generation/components/image-settings-panel";
 import { normalizeVideoGenerationCount } from "@/features/generation/components/video-settings-panel";
@@ -17,8 +18,9 @@ import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
 import { CanvasPromptPicker } from "./canvas-prompt-picker";
 import { CanvasVideoSettingsPopover } from "./canvas-video-settings-popover";
 import type { CanvasGenerationMode, CanvasNode, CanvasNodeKind } from "../types";
+import type { CanvasSettingGraphSkillSnapshot } from "../types";
 import { isImageNode, isTextNode, isVideoNode, type CanvasNodeAttributes } from "../domain/canvas-node";
-import { buildNodeGenerationReferences, type CanvasResourceReference } from "../utils/canvas-resource-references";
+import { buildNodeGenerationReferences, labelForKind, type CanvasResourceReference } from "../utils/canvas-resource-references";
 import { useCanvasTheme } from "./canvas-theme-provider";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import type { GenerationStyleOption, GenerationStyleSnapshot } from "@/services/api/server";
@@ -42,6 +44,9 @@ type CanvasNodePromptPanelProps = {
     onGeneratePrompt: (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, onResult: (prompt: string) => void, styleIds?: number[]) => void;
     onStop: (nodeId: string) => void;
     onMissingConfig: (mode: CanvasNodeGenerationMode) => void;
+    onRemoveReference: (reference: CanvasResourceReference) => void;
+    mentionCandidates?: CanvasResourceReference[];
+    onMentionSelect?: (reference: CanvasResourceReference) => boolean;
     isPromptGenerating?: boolean;
     mentionReferences?: CanvasResourceReference[];
     onImageSettingsOpenChange?: (open: boolean) => void;
@@ -57,6 +62,9 @@ export function CanvasNodePromptPanel({
     onGeneratePrompt,
     onStop,
     onMissingConfig,
+    onRemoveReference,
+    mentionCandidates = [],
+    onMentionSelect,
     isPromptGenerating = false,
     mentionReferences = [],
     onImageSettingsOpenChange,
@@ -76,7 +84,14 @@ export function CanvasNodePromptPanel({
     const [referencePreview, setReferencePreview] = useState<CanvasResourceReference | null>(null);
     const referenceInputRef = useRef<HTMLInputElement>(null);
     const [uploadingReference, setUploadingReference] = useState(false);
+    const [mentionQuery, setMentionQuery] = useState("");
+    const [mentionMenuOpen, setMentionMenuOpen] = useState(false);
+    const [mentionRange, setMentionRange] = useState<{ start: number; end: number } | null>(null);
+    const [mentionHighlightedIndex, setMentionHighlightedIndex] = useState(0);
+    const [mentionPosition, setMentionPosition] = useState<{ left: number; top: number } | null>(null);
+    const [pendingMentionReference, setPendingMentionReference] = useState<CanvasResourceReference | null>(null);
     const promptEditorRef = useRef<PromptEditorHandle>(null);
+    const promptPanelRef = useRef<HTMLDivElement>(null);
     const libraryPromptRef = useRef<string | null>(null);
     const config = buildNodeConfig(globalConfig, node, mode);
     const nodePrompt = readNodePrompt(node);
@@ -99,11 +114,13 @@ export function CanvasNodePromptPanel({
         });
         return references;
     }, [mentionReferences, node]);
-    const [prompt, setPrompt] = useState(() => {
-        if (nodePrompt) return nodePrompt;
-        if (isEditingExistingContent) return "";
-        return buildInitialPrompt(mentionReferences);
-    });
+    const [prompt, setPrompt] = useState(nodePrompt);
+    const filteredMentionCandidates = useMemo(() => {
+        const query = mentionQuery.trim().toLowerCase();
+        return mentionCandidates
+            .filter((reference) => reference.nodeId !== node.id)
+            .filter((reference) => !query || `${reference.title} ${reference.label} ${reference.kind}`.toLowerCase().includes(query));
+    }, [mentionCandidates, mentionQuery, node.id]);
     const videoReferenceCounts = displayReferences.reduce(
         (counts, item) => {
             if (item.reference.kind === "image") counts.images += 1;
@@ -146,68 +163,39 @@ export function CanvasNodePromptPanel({
 
     useEffect(() => {
         setReferencePreview(null);
+        setMentionMenuOpen(false);
+        setMentionQuery("");
+        setMentionRange(null);
+        setMentionHighlightedIndex(0);
+        setMentionPosition(null);
+        setPendingMentionReference(null);
     }, [node.id]);
 
     useEffect(() => {
         if (nodePrompt) {
             setPrompt(nodePrompt);
-            isFirstSync.current = false;
             return;
         }
         if (isEditingExistingContent) {
             setPrompt(libraryPromptRef.current ?? "");
             libraryPromptRef.current = null;
-            isFirstSync.current = false;
             return;
         }
-        // undefined = 初次打开，从引用构建；"" = 用户清空，保持空
-        if (nodePrompt === "") {
-            prevLabelsRef.current = requiredLabels;
-            isFirstSync.current = false;
-            return;
-        }
-        setPrompt(buildInitialPrompt(mentionReferences));
-        // 同步标签追踪的初始值，避免 sync effect 重复追加
-        prevLabelsRef.current = requiredLabels;
-        isFirstSync.current = true;
-    }, [isEditingExistingContent, node.id, nodePrompt]); // eslint-disable-line react-hooks/exhaustive-deps
+        setPrompt("");
+    }, [isEditingExistingContent, node.id, nodePrompt]);
 
-    // 从连线引用中提取需要锁定在文本框中的标签（非文本类型的引用）
-    const requiredLabels = useMemo(() => mentionReferences.filter((ref) => ref.active && ref.kind !== "text").map((ref) => ref.label), [mentionReferences]);
-
-    // 当连线变动（引用标签增删）时，自动同步文本框内容
-    const prevLabelsRef = useRef<string[]>([]);
-    const isFirstSync = useRef(true);
+    // 从连线引用中提取非文本类型标签，用于点击缩略图后生成引用芯片
+    const editorReferences = useMemo(() => {
+        if (!pendingMentionReference) return mentionReferences;
+        const hasReference = mentionReferences.some((reference) => reference.nodeId === pendingMentionReference.nodeId);
+        if (!hasReference) return [...mentionReferences, pendingMentionReference];
+        // 连线刷新后可能重新计算编号，暂时保留用户刚插入的标签，避免芯片退化为普通文本。
+        return mentionReferences.map((reference) => reference.nodeId === pendingMentionReference.nodeId ? { ...reference, label: pendingMentionReference.label, active: true } : reference);
+    }, [mentionReferences, pendingMentionReference]);
     useEffect(() => {
-        // 编辑已有内容或已有自定义 prompt 时不自动同步标签
-        if (isEditingExistingContent || nodePrompt) return;
-        if (isFirstSync.current) {
-            isFirstSync.current = false;
-            prevLabelsRef.current = requiredLabels;
-            return;
-        }
-        const prev = prevLabelsRef.current;
-        const added = requiredLabels.filter((l) => !prev.includes(l));
-        const removed = prev.filter((l) => !requiredLabels.includes(l));
-        prevLabelsRef.current = requiredLabels;
-
-        if (!added.length && !removed.length) return;
-
-        setPrompt((current) => {
-            let next = current;
-            removed.forEach((label) => {
-                next = next
-                    .replace(new RegExp(`\\s*${escapeRegExp(label)}\\s*`, "g"), " ")
-                    .replace(/\s+/g, " ")
-                    .trim();
-            });
-            if (added.length > 0) {
-                next = next ? `${next} ${added.join(" ")}` : added.join(" ");
-            }
-            if (!isEditingExistingContent) queueMicrotask(() => onPromptChange(node.id, next));
-            return next;
-        });
-    }, [requiredLabels]); // eslint-disable-line react-hooks/exhaustive-deps
+        if (pendingMentionReference && !prompt.includes(pendingMentionReference.label)) setPendingMentionReference(null);
+    }, [pendingMentionReference, prompt]);
+    const requiredLabels = useMemo(() => editorReferences.filter((ref) => ref.active && ref.kind !== "text").map((ref) => ref.label), [editorReferences]);
 
     // 失焦时无额外处理（芯片可被用户自由删除）
     const handleBlur = useCallback(() => {
@@ -230,6 +218,27 @@ export function CanvasNodePromptPanel({
         setSelectedStyles([style]);
         updatePrompt(styleCommand ? removeStyleCommand(prompt, styleCommand.start, styleCommand.end) : prompt);
         closeStyleMenu();
+    };
+
+    const closeMentionMenu = () => {
+        setMentionMenuOpen(false);
+        setMentionQuery("");
+        setMentionRange(null);
+        setMentionHighlightedIndex(0);
+        setMentionPosition(null);
+    };
+
+    const chooseMention = (reference: CanvasResourceReference) => {
+        if (!mentionRange || !onMentionSelect) return;
+        if (!onMentionSelect(reference)) return;
+        const existingReference = mentionReferences.find((item) => item.nodeId === reference.nodeId);
+        const nextKindIndex = mentionReferences.filter((item) => item.active && item.kind === reference.kind).length;
+        const label = existingReference?.label || labelForKind(reference.kind, nextKindIndex);
+        setPendingMentionReference({ ...reference, active: true, label });
+        const range = { ...mentionRange };
+        // 连线状态更新后才会把视频预览信息传回编辑器，下一帧替换可避免先渲染成普通文本。
+        requestAnimationFrame(() => promptEditorRef.current?.replaceTextRange(range.start, range.end, label));
+        closeMentionMenu();
     };
 
     const applyPromptFromLibrary = (value: string) => {
@@ -302,7 +311,8 @@ export function CanvasNodePromptPanel({
     return (
         <div
             data-canvas-no-zoom
-            className="cursor-default rounded-2xl border p-3 shadow-2xl"
+            ref={promptPanelRef}
+            className="relative cursor-default rounded-2xl border p-3 shadow-2xl"
             style={{ background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseDown={(event) => event.stopPropagation()}
             onPointerDown={(event) => event.stopPropagation()}
@@ -320,16 +330,98 @@ export function CanvasNodePromptPanel({
                     event.target.value = "";
                 }}
             />
+
+            {displayReferences.length > 0 || (mode === "video" && (config.videoGenerationMode === "image-to-video" || config.videoGenerationMode === "reference-to-video")) ? (
+                <div className="mb-3 min-w-0 border-b pb-3" style={{ borderColor: theme.node.stroke }}>
+                    <p className="mb-2 text-xs font-medium" style={{ color: theme.node.muted }}>
+                        参考内容
+                    </p>
+                    <div className="thin-scrollbar flex min-w-0 gap-2 overflow-x-auto pb-1">
+                        {displayReferences.map(({ reference, canInsert }, index) => (
+                            <ReferenceContentItem
+                                key={reference.nodeId}
+                                reference={reference}
+                                index={index + 1}
+                                canInsert={canInsert}
+                                canRemove={reference.nodeId !== node.id && (canInsert || (mode === "video" && !canInsert))}
+                                theme={theme}
+                                onPreview={() => setReferencePreview(reference)}
+                                onInsert={() => promptEditorRef.current?.insertAtCursor(reference.label)}
+                                onRemove={() => (canInsert ? onRemoveReference(reference) : removePersistedReference(reference))}
+                            />
+                        ))}
+                        {mode === "video" && (config.videoGenerationMode === "image-to-video" || config.videoGenerationMode === "reference-to-video") ? (
+                            <button
+                                type="button"
+                                title="上传参考素材"
+                                aria-label="上传参考素材"
+                                className="grid size-14 shrink-0 place-items-center rounded-xl border transition hover:brightness-110 active:scale-95"
+                                style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.muted }}
+                                disabled={uploadingReference}
+                                onClick={() => referenceInputRef.current?.click()}
+                            >
+                                {uploadingReference ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                            </button>
+                        ) : null}
+                    </div>
+                </div>
+            ) : null}
+
             <PromptEditor
                 ref={promptEditorRef}
                 prompt={prompt}
                 requiredLabels={requiredLabels}
-                references={mentionReferences}
+                references={editorReferences}
                 placeholder={promptPlaceholder(mode, hasImageContent, hasTextContent)}
                 theme={theme}
                 onChange={updatePrompt}
                 onSubmit={submit}
                 onBlur={handleBlur}
+                onMentionInput={(value, cursor, caretRect) => {
+                    const beforeCursor = value.slice(0, cursor);
+                    const match = beforeCursor.match(/(^|\s)@([^\s@]*)$/);
+                    if (!match) {
+                        if (mentionMenuOpen) closeMentionMenu();
+                        return;
+                    }
+                    const start = cursor - match[0].length + (match[1] ? match[1].length : 0);
+                    setMentionRange({ start, end: cursor });
+                    setMentionQuery(match[2]);
+                    setMentionHighlightedIndex(0);
+                    const panelRect = promptPanelRef.current?.getBoundingClientRect();
+                    if (caretRect && panelRect) {
+                        setMentionPosition({
+                            left: caretRect.right - panelRect.left + 6,
+                            top: caretRect.top - panelRect.top - 6,
+                        });
+                    }
+                    setMentionMenuOpen(true);
+                }}
+                onMentionMenuKeyDown={(event) => {
+                    if (!mentionMenuOpen) return false;
+                    if (event.key === "ArrowDown") {
+                        event.preventDefault();
+                        setMentionHighlightedIndex((value) => Math.min(value + 1, Math.max(0, filteredMentionCandidates.length - 1)));
+                        return true;
+                    }
+                    if (event.key === "ArrowUp") {
+                        event.preventDefault();
+                        setMentionHighlightedIndex((value) => Math.max(value - 1, 0));
+                        return true;
+                    }
+                    if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        const reference = filteredMentionCandidates[mentionHighlightedIndex];
+                        if (reference) chooseMention(reference);
+                        return true;
+                    }
+                    if (event.key === "Escape") {
+                        event.preventDefault();
+                        closeMentionMenu();
+                        return true;
+                    }
+                    return false;
+                }}
                 onPasteText={(value) => {
                     const parsed = parseGenerationStyleMessage(
                         value,
@@ -379,10 +471,47 @@ export function CanvasNodePromptPanel({
                 }}
             />
 
-            {mode !== "text" ? (
-                <>
-                    <GenerationStyleChips styles={selectedStyles} onRemove={(id) => setSelectedStyles((current) => current.filter((style) => style.id !== id))} className="mt-2" />
-                    <div className="mt-2">
+            {mentionMenuOpen ? (
+                <MentionAssetMenu
+                    query={mentionQuery}
+                    candidates={filteredMentionCandidates}
+                    highlightedIndex={mentionHighlightedIndex}
+                    theme={theme}
+                    onSelect={chooseMention}
+                    onHighlight={setMentionHighlightedIndex}
+                    onQueryChange={(value) => {
+                        setMentionQuery(value);
+                        setMentionHighlightedIndex(0);
+                    }}
+                    onConfirm={() => {
+                        const reference = filteredMentionCandidates[mentionHighlightedIndex];
+                        if (reference) chooseMention(reference);
+                    }}
+                    onClose={closeMentionMenu}
+                    position={mentionPosition}
+                />
+            ) : null}
+
+            {mode === "image" && isImageNode(node) && node.generation.settingGraph ? (
+                <SettingGraphSelector
+                    selected={node.generation.settingGraph}
+                    onSelect={(skill) => onConfigChange(node.id, { settingGraph: toSettingGraphSnapshot(skill) })}
+                />
+            ) : null}
+
+            {mode !== "text" ? <GenerationStyleChips styles={selectedStyles} onRemove={(id) => setSelectedStyles((current) => current.filter((style) => style.id !== id))} className="mt-2" /> : null}
+
+            {mode === "video" && videoQuote && !videoQuote.available ? (
+                <p className="mt-2 text-xs text-red-500">
+                    {videoQuote.reason}
+                    {videoQuote.reason.includes("至少需要") ? "，可点击上方加号卡片上传参考素材，或在画布中连接图片/视频节点" : ""}
+                </p>
+            ) : null}
+
+            <div className="mt-2 flex min-w-0 items-center gap-2">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <CanvasPromptPicker onChoose={applyPromptFromLibrary} />
+                    {mode !== "text" ? (
                         <GenerationStyleMenu
                             styles={styleCatalog.styles}
                             selected={selectedStyles}
@@ -392,6 +521,7 @@ export function CanvasNodePromptPanel({
                             query={styleQuery}
                             highlightedIndex={highlightedStyleIndex}
                             placement="topLeft"
+                            iconOnly
                             onOpenChange={(open) => {
                                 if (open) {
                                     setStyleCommand(null);
@@ -406,57 +536,10 @@ export function CanvasNodePromptPanel({
                             onHighlightedIndexChange={setHighlightedStyleIndex}
                             onSelect={chooseStyle}
                         />
-                    </div>
-                </>
-            ) : null}
-
-            {displayReferences.length > 0 || (mode === "video" && (config.videoGenerationMode === "image-to-video" || config.videoGenerationMode === "reference-to-video")) ? (
-                <div className="mt-3 min-w-0 border-t pt-3" style={{ borderColor: theme.node.stroke }}>
-                    <p className="mb-2 text-xs font-medium" style={{ color: theme.node.muted }}>
-                        参考内容
-                    </p>
-                    <div className="thin-scrollbar flex min-w-0 gap-2 overflow-x-auto pb-1">
-                        {displayReferences.map(({ reference, canInsert }) => (
-                            <ReferenceContentItem
-                                key={reference.nodeId}
-                                reference={reference}
-                                canInsert={canInsert}
-                                canRemove={mode === "video" && !canInsert}
-                                theme={theme}
-                                onPreview={() => setReferencePreview(reference)}
-                                onInsert={() => promptEditorRef.current?.insertAtCursor(reference.label)}
-                                onRemove={() => removePersistedReference(reference)}
-                            />
-                        ))}
-                        {mode === "video" && (config.videoGenerationMode === "image-to-video" || config.videoGenerationMode === "reference-to-video") ? (
-                            <button
-                                type="button"
-                                title="上传参考素材"
-                                aria-label="上传参考素材"
-                                className="grid size-14 shrink-0 place-items-center rounded-xl border transition hover:brightness-110 active:scale-95"
-                                style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.muted }}
-                                disabled={uploadingReference}
-                                onClick={() => referenceInputRef.current?.click()}
-                            >
-                                {uploadingReference ? <LoaderCircle className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                            </button>
-                        ) : null}
-                    </div>
-                </div>
-            ) : null}
-            {mode === "video" && videoQuote && !videoQuote.available ? (
-                <p className="mt-2 text-xs text-red-500">
-                    {videoQuote.reason}
-                    {videoQuote.reason.includes("至少需要") ? "，可点击上方加号卡片上传参考素材，或在画布中连接图片/视频节点" : ""}
-                </p>
-            ) : null}
-
-            <div className="mt-2 flex min-w-0 items-center gap-2">
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                    <CanvasPromptPicker onChoose={applyPromptFromLibrary} />
+                    ) : null}
                     {mode === "image" ? (
                         <>
-                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" className="!h-10 !min-w-0 flex-1" onMissingConfig={() => onMissingConfig("image")} />
+                            <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="image" className="!h-10 !min-w-0 !max-w-[180px] flex-1" onMissingConfig={() => onMissingConfig("image")} />
                             <CanvasImageSettingsPopover
                                 config={config}
                                 placement="topLeft"
@@ -473,13 +556,13 @@ export function CanvasNodePromptPanel({
                                 modelOptions={availableVideoModelsForMode(config, config.videoGenerationMode)}
                                 onChange={(model) => onConfigChange(node.id, { model })}
                                 capability="video"
-                                className="!h-10 !min-w-0 flex-1"
+                                className="!h-10 !min-w-0 !max-w-[180px] flex-1"
                                 onMissingConfig={() => onMissingConfig("video")}
                             />
                             <CanvasVideoSettingsPopover config={config} buttonClassName="!h-10 !w-[140px] !justify-start !rounded-full !px-3" onConfigChange={(key, value) => onConfigChange(node.id, videoConfigPatch(key, value))} />
                         </>
                     ) : (
-                        <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" className="!h-10 !min-w-0 flex-1" onMissingConfig={() => onMissingConfig("text")} />
+                        <ModelPicker config={config} value={config.model} onChange={(model) => onConfigChange(node.id, { model })} capability="text" className="!h-10 !min-w-0 !max-w-[180px] flex-1" onMissingConfig={() => onMissingConfig("text")} />
                     )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
@@ -536,6 +619,53 @@ export function CanvasNodePromptPanel({
     );
 }
 
+function SettingGraphSelector({ selected, onSelect }: { selected: CanvasSettingGraphSkillSnapshot; onSelect: (skill: SkillOption) => void }) {
+    const theme = useCanvasTheme();
+    const [open, setOpen] = useState(false);
+    const [skills, setSkills] = useState<SkillOption[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!open || skills.length || loading) return;
+        setLoading(true);
+        void listSkills("canvasSettingGraph")
+            .then((response) => setSkills(response.skills))
+            .catch((reason) => setError(reason instanceof Error ? reason.message : "设定图技能加载失败"))
+            .finally(() => setLoading(false));
+    }, [loading, open, skills.length]);
+
+    return (
+        <div className="relative mt-2">
+            <button
+                type="button"
+                className="inline-flex min-h-10 max-w-full items-center gap-2 rounded-xl border px-3 text-sm transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2"
+                style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.text }}
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={() => setOpen((value) => !value)}
+            >
+                <BookOpenText className="size-4 shrink-0" />
+                <span className="truncate">设定图：{selected.name}</span>
+                <ChevronDown className="size-4 shrink-0" />
+            </button>
+            {open ? (
+                <div role="menu" aria-label="切换设定图类型" className="absolute left-0 top-full z-20 mt-2 min-w-56 rounded-xl border p-1 shadow-xl" style={{ background: theme.node.panel, borderColor: theme.node.stroke }}>
+                    {loading ? <div className="px-3 py-3 text-xs" style={{ color: theme.node.muted }}>加载中…</div> : error ? <div className="px-3 py-3 text-xs" style={{ color: theme.node.muted }}>{error}</div> : skills.length ? skills.map((skill) => (
+                        <button key={skill.id} type="button" role="menuitem" className="flex min-h-10 w-full items-center rounded-lg px-3 text-left text-sm hover:bg-black/5" style={{ color: theme.node.text }} onClick={() => { onSelect(skill); setOpen(false); }}>
+                            {skill.name}
+                        </button>
+                    )) : <div className="px-3 py-3 text-xs" style={{ color: theme.node.muted }}>暂无可用设定图技能</div>}
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+function toSettingGraphSnapshot(skill: SkillOption): CanvasSettingGraphSkillSnapshot {
+    return { id: skill.id, name: skill.name, targetType: "canvasSettingGraph", systemPrompt: skill.systemPrompt || "", aspectRatio: skill.aspectRatio || "16:9" };
+}
+
 function defaultMode(type: CanvasNodeKind): CanvasNodeGenerationMode {
     return type === "text" ? "text" : type === "video" ? "video" : "image";
 }
@@ -582,35 +712,6 @@ function videoConfigPatch(key: keyof AiConfig, value: string) {
     return { [key]: value };
 }
 
-function buildInitialPrompt(references: CanvasResourceReference[]) {
-    if (!references.length) return "";
-    const active = references.filter((ref) => ref.active);
-    if (!active.length) return "";
-
-    const grouped: Record<string, CanvasResourceReference[]> = {};
-    active.forEach((ref) => {
-        if (!grouped[ref.kind]) grouped[ref.kind] = [];
-        grouped[ref.kind].push(ref);
-    });
-
-    const parts: string[] = [];
-
-    if (grouped.text?.length) {
-        grouped.text.forEach((ref) => {
-            if (ref.text) parts.push(ref.text);
-        });
-    }
-
-    if (grouped.image?.length) {
-        parts.push(grouped.image.map((ref) => ref.label).join(" "));
-    }
-    if (grouped.video?.length) {
-        parts.push(grouped.video.map((ref) => ref.label).join(" "));
-    }
-
-    return parts.join("\n\n");
-}
-
 function escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -630,8 +731,129 @@ function formatPromptReferenceLabels(prompt: string, labels: string[]) {
     return prompt.replace(new RegExp("`*(" + labelPattern + ")(?!\\d)`*", "g"), "`$1`");
 }
 
+// 画布资产引用面板
+// @Description        展示已引用和可引用的画布资产，并维护键盘高亮顺序
+// @Param              query string 当前@查询关键词
+// @Param              candidates CanvasResourceReference[] 画布资产候选
+// @Param              highlightedIndex number 当前高亮索引
+// @Param              theme CanvasTheme 画布主题
+// @Param              onSelect Function 选择资产回调
+// @Param              onHighlight Function 更新高亮索引
+// @Return             JSX.Element 资产引用面板
+function MentionAssetMenu({ query, candidates, highlightedIndex, theme, onSelect, onHighlight, onQueryChange, onConfirm, onClose, position }: { query: string; candidates: CanvasResourceReference[]; highlightedIndex: number; theme: CanvasTheme; onSelect: (reference: CanvasResourceReference) => void; onHighlight: (index: number) => void; onQueryChange: (value: string) => void; onConfirm: () => void; onClose: () => void; position: { left: number; top: number } | null }) {
+    const referenced = candidates.filter((reference) => reference.active);
+    const available = candidates.filter((reference) => !reference.active);
+    const availableGroups = [
+        { title: "图片", kind: "image" as const },
+        { title: "视频", kind: "video" as const },
+        { title: "文本", kind: "text" as const },
+    ].map((group) => ({ ...group, items: available.filter((reference) => reference.kind === group.kind) })).filter((group) => group.items.length);
+    const flatItems = [...referenced, ...availableGroups.flatMap((group) => group.items)];
+    const activeIndex = Math.min(highlightedIndex, Math.max(0, flatItems.length - 1));
+
+    return (
+        <div
+            className="absolute z-[110] w-[min(24rem,calc(100% - 1.5rem))] overflow-hidden rounded-xl border p-2 shadow-2xl"
+            style={{ left: position?.left ?? 12, top: position?.top ?? 48, transform: "translateY(calc(-100% - 0.5rem))", background: theme.node.panel, borderColor: theme.node.stroke }}
+            role="listbox"
+            aria-label="引用画布资产"
+        >
+            <div className="flex items-center gap-2 border-b px-2 pb-2 text-xs" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
+                <Search className="size-3.5" />
+                <input
+                    value={query}
+                    onChange={(event) => onQueryChange(event.target.value)}
+                    onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                            event.preventDefault();
+                            onConfirm();
+                        } else if (event.key === "Escape") {
+                            event.preventDefault();
+                            onClose();
+                        } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                            event.preventDefault();
+                            const offset = event.key === "ArrowDown" ? 1 : -1;
+                            onHighlight(Math.max(0, Math.min(highlightedIndex + offset, Math.max(0, flatItems.length - 1))));
+                        }
+                    }}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    placeholder="搜索画布资产"
+                    aria-label="搜索画布资产"
+                    className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:opacity-60"
+                    style={{ color: theme.node.text }}
+                />
+            </div>
+            <div className="thin-scrollbar max-h-64 overflow-y-auto pt-1">
+                {referenced.length || availableGroups.length ? (
+                    <>
+                        {referenced.length ? <MentionAssetGroup title="已引用" items={referenced} flatItems={flatItems} activeIndex={activeIndex} theme={theme} onSelect={onSelect} onHighlight={onHighlight} /> : null}
+                        {availableGroups.length ? (
+                            <div className="pt-1">
+                                <p className="px-2 py-1 text-[11px] font-medium" style={{ color: theme.node.muted }}>素材引用</p>
+                                {availableGroups.map((group) => <MentionAssetGroup key={group.title} title={group.title} items={group.items} flatItems={flatItems} activeIndex={activeIndex} theme={theme} onSelect={onSelect} onHighlight={onHighlight} />)}
+                            </div>
+                        ) : null}
+                    </>
+                ) : <div className="px-2 py-6 text-center text-xs" style={{ color: theme.node.muted }}>暂无匹配的画布资产</div>}
+            </div>
+        </div>
+    );
+}
+
+// 画布资产引用分组
+// @Description        按引用类型渲染资产候选项
+// @Param              title string 分组标题
+// @Param              items CanvasResourceReference[] 分组资产
+// @Param              flatItems CanvasResourceReference[] 键盘导航扁平资产列表
+// @Param              activeIndex number 当前高亮索引
+// @Param              theme CanvasTheme 画布主题
+// @Param              onSelect Function 选择资产回调
+// @Param              onHighlight Function 更新高亮索引
+// @Return             JSX.Element 资产分组
+function MentionAssetGroup({ title, items, flatItems, activeIndex, theme, onSelect, onHighlight }: { title: string; items: CanvasResourceReference[]; flatItems: CanvasResourceReference[]; activeIndex: number; theme: CanvasTheme; onSelect: (reference: CanvasResourceReference) => void; onHighlight: (index: number) => void }) {
+    return (
+        <div className="pt-1">
+            <p className="px-2 py-1 text-[11px] font-medium" style={{ color: theme.node.muted }}>{title}</p>
+            {items.map((reference) => {
+                const index = flatItems.indexOf(reference);
+                return <MentionAssetOption key={reference.nodeId} reference={reference} selected={reference.active} highlighted={index === activeIndex} theme={theme} onSelect={() => onSelect(reference)} onHighlight={() => onHighlight(index)} />;
+            })}
+        </div>
+    );
+}
+
+// 画布资产引用选项
+// @Description        展示单个资产缩略图、名称和引用状态
+// @Param              reference CanvasResourceReference 资产引用
+// @Param              selected boolean 是否已引用
+// @Param              highlighted boolean 是否键盘高亮
+// @Param              theme CanvasTheme 画布主题
+// @Param              onSelect Function 选择资产回调
+// @Param              onHighlight Function 更新高亮索引
+// @Return             JSX.Element 资产选项
+function MentionAssetOption({ reference, selected, highlighted, theme, onSelect, onHighlight }: { reference: CanvasResourceReference; selected: boolean; highlighted: boolean; theme: CanvasTheme; onSelect: () => void; onHighlight: () => void }) {
+    const Icon = reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
+    return (
+        <button type="button" role="option" aria-selected={selected} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition" style={{ background: highlighted ? theme.node.fill : "transparent", color: theme.node.text, opacity: selected ? 0.65 : 1 }} onMouseEnter={onHighlight} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onSelect(); }}>
+            <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-md border" style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.muted }}>
+                {reference.kind === "image" && reference.previewUrl ? <img src={reference.previewUrl} alt="" className="size-full object-cover" /> : reference.kind === "video" && reference.previewUrl ? <video src={reference.previewUrl} className="size-full object-cover" muted preload="metadata" /> : reference.kind === "text" ? <span className="line-clamp-2 px-1 text-[9px] leading-3">{reference.text || reference.title}</span> : <Icon className="size-4" />}
+            </span>
+            <span className="min-w-0 flex-1 truncate">{reference.title}</span>
+            {selected ? <span className="text-[11px]" style={{ color: theme.node.muted }}>已引用</span> : null}
+        </button>
+    );
+}
+
+function stripPromptReferenceDelimiters(prompt: string, labels: string[]) {
+    const sortedLabels = [...new Set(labels)].sort((first, second) => second.length - first.length);
+    if (!sortedLabels.length) return prompt;
+    const labelPattern = sortedLabels.map(escapeRegExp).join("|");
+    return prompt.replace(new RegExp("`+(" + labelPattern + ")`+", "g"), "$1");
+}
+
 type ReferenceContentItemProps = {
     reference: CanvasResourceReference;
+    index: number;
     canInsert: boolean;
     canRemove: boolean;
     theme: CanvasTheme;
@@ -640,7 +862,7 @@ type ReferenceContentItemProps = {
     onRemove: () => void;
 };
 
-function ReferenceContentItem({ reference, canInsert, canRemove, theme, onPreview, onInsert, onRemove }: ReferenceContentItemProps) {
+function ReferenceContentItem({ reference, index, canInsert, canRemove, theme, onPreview, onInsert, onRemove }: ReferenceContentItemProps) {
     const canPreview = !canInsert && reference.kind === "image" && Boolean(reference.previewUrl);
     const Icon = reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
     const actionLabel = canPreview ? `放大查看${reference.label}` : canInsert ? `在提示词中插入${reference.label}` : reference.label;
@@ -675,12 +897,15 @@ function ReferenceContentItem({ reference, canInsert, canRemove, theme, onPrevie
                     <Icon className="size-2.5" />
                 </span>
             ) : null}
+            <span className={`pointer-events-none absolute right-1 top-1 grid size-4 place-items-center rounded-sm text-[10px] font-medium transition-opacity ${canRemove ? "group-hover:opacity-0" : ""}`} style={{ background: theme.node.panel, color: theme.node.muted }}>
+                {index}
+            </span>
             {canRemove ? (
                 <button
                     type="button"
                     title="移除参考素材"
                     aria-label={`移除${reference.label}`}
-                    className="absolute -right-1 -top-1 grid size-4 place-items-center rounded-full opacity-0 transition group-hover:opacity-100 focus:opacity-100"
+                    className="absolute right-1 top-1 grid size-4 place-items-center rounded-sm opacity-0 transition group-hover:opacity-100 focus:opacity-100"
                     style={{ background: theme.node.panel, color: theme.node.muted, border: `1px solid ${theme.node.stroke}` }}
                     onClick={(event) => {
                         event.preventDefault();
@@ -704,14 +929,16 @@ type PromptEditorProps = {
     onChange: (value: string) => void;
     onSubmit: () => void;
     onBlur: () => void;
+    onMentionInput?: (value: string, cursor: number, caretRect: DOMRect | null) => void;
+    onMentionMenuKeyDown?: (event: React.KeyboardEvent) => boolean;
     onPasteText?: (value: string) => boolean;
     onStyleInput?: (value: string, cursor: number) => void;
     onStyleMenuKeyDown?: (event: React.KeyboardEvent) => boolean;
 };
 
-export type PromptEditorHandle = { insertAtCursor: (text: string) => void; focus: () => void };
+export type PromptEditorHandle = { insertAtCursor: (text: string) => void; replaceTextRange: (start: number, end: number, text: string) => void; focus: () => void };
 
-const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function PromptEditor({ prompt, requiredLabels, references, placeholder, theme, onChange, onSubmit, onBlur, onPasteText, onStyleInput, onStyleMenuKeyDown }, ref) {
+const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function PromptEditor({ prompt, requiredLabels, references, placeholder, theme, onChange, onSubmit, onBlur, onMentionInput, onMentionMenuKeyDown, onPasteText, onStyleInput, onStyleMenuKeyDown }, ref) {
     const editorRef = useRef<HTMLDivElement>(null);
     const isComposingRef = useRef(false);
     const pendingRef = useRef<string | null>(null);
@@ -727,7 +954,8 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
     // 将纯文本转为带芯片的 HTML（按 label 长度降序替换，避免 "图片1" 误匹配 "图片10"）
     const buildHTML = useCallback(
         (text: string) => {
-            let html = escapeHTML(text);
+            // 生成请求可能为引用标签增加反引号，编辑器回显时隐藏这些协议标记，避免出现在缩略图两侧。
+            let html = escapeHTML(stripPromptReferenceDelimiters(text, requiredLabels));
             const sorted = [...requiredLabels].sort((a, b) => b.length - a.length);
             sorted.forEach((label) => {
                 const ref = refByLabel.get(label);
@@ -757,7 +985,9 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
         if (!editor) return;
         if (suppressInputRef.current) return;
         // 用户自己输入时 pendingRef 与 prompt 一致，跳过避免覆盖光标位置
-        if (pendingRef.current === prompt) return;
+        const labelsToRender = requiredLabels.filter((label) => prompt.includes(label));
+        const hasReferenceChips = labelsToRender.every((label) => Array.from(editor.querySelectorAll(".prompt-ref-chip")).some((chip) => chip.getAttribute("data-ref-label") === label));
+        if (pendingRef.current === prompt && hasReferenceChips) return;
         // 记录当前是否聚焦（用于外部更新后恢复）
         const wasFocused = document.activeElement === editor;
         suppressInputRef.current = true;
@@ -771,7 +1001,7 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
                 placeCaretAtEnd(editor);
             });
         }
-    }, [prompt]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [buildHTML, prompt, refByLabel, requiredLabels]);
 
     // 自动聚焦 & 清理
     useEffect(() => {
@@ -868,10 +1098,35 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
                     setCaretAtTextOffset(editor, next, afterOffset);
                 });
             },
+            replaceTextRange: (start: number, end: number, value: string) => {
+                const editor = editorRef.current;
+                if (!editor) return;
+                const current = extractText();
+                const next = current.slice(0, start) + value + current.slice(end);
+                pendingRef.current = next;
+                suppressInputRef.current = true;
+                editor.innerHTML = buildHTML(next);
+                suppressInputRef.current = false;
+                onChange(next);
+                requestAnimationFrame(() => setCaretAtTextOffset(editor, next, start + value.length));
+            },
             focus: () => editorRef.current?.focus(),
         }),
         [getTextOffset, extractText, buildHTML, onChange],
     );
+
+    const getCaretRect = useCallback((): DOMRect | null => {
+        const editor = editorRef.current;
+        const selection = window.getSelection();
+        if (!editor || !selection?.rangeCount || !editor.contains(selection.anchorNode)) return null;
+        const range = document.createRange();
+        range.setStart(selection.anchorNode!, selection.anchorOffset);
+        range.collapse(true);
+        const rect = range.getBoundingClientRect();
+        if (rect.width || rect.height) return rect;
+        const editorRect = editor.getBoundingClientRect();
+        return new DOMRect(editorRect.left, editorRect.top, 0, 0);
+    }, []);
 
     const handleInput = useCallback(() => {
         if (suppressInputRef.current) return;
@@ -888,18 +1143,21 @@ const PromptEditor = forwardRef<PromptEditorHandle, PromptEditorProps>(function 
         const text = extractText();
         pendingRef.current = text;
         onChange(text);
-        onStyleInput?.(text, getTextOffset() ?? text.length);
-    }, [extractText, getTextOffset, onChange, onStyleInput]);
+        const cursor = getTextOffset() ?? text.length;
+        onStyleInput?.(text, cursor);
+        onMentionInput?.(text, cursor, getCaretRect());
+    }, [extractText, getCaretRect, getTextOffset, onChange, onMentionInput, onStyleInput]);
 
     const handleKeyDown = useCallback(
         (event: React.KeyboardEvent) => {
+            if (onMentionMenuKeyDown?.(event)) return;
             if (onStyleMenuKeyDown?.(event)) return;
             if (event.key === "Enter" && !event.shiftKey && !isComposingRef.current) {
                 event.preventDefault();
                 onSubmit();
             }
         },
-        [onStyleMenuKeyDown, onSubmit],
+        [onMentionMenuKeyDown, onStyleMenuKeyDown, onSubmit],
     );
 
     const handleBlur = useCallback(() => {
