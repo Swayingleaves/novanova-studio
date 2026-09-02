@@ -26,6 +26,7 @@ type CanvasWorkspaceOverlaysProps = {
     onCreateNode: (kind: CanvasNodeKind, position: CanvasPoint) => void;
     onDuplicateNode: (nodeId: string) => void;
     onDeleteNodes: (nodeIds: Set<string>) => void;
+    onDeleteBackgroundOnly: (nodeId: string) => void;
     onDeleteConnection: (connectionId: string) => void;
     onImageInputChange: (event: ChangeEvent<HTMLInputElement>) => void;
     onCloseInfo: () => void;
@@ -70,6 +71,10 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
                         props.onCloseContextMenu();
                     }}
                     onDelete={deleteContextTarget}
+                    onDeleteBackgroundOnly={() => {
+                        if (props.contextMenu?.type === "node") props.onDeleteBackgroundOnly(props.contextMenu.nodeId);
+                        props.onCloseContextMenu();
+                    }}
                 />
             ) : null}
 

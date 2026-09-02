@@ -108,7 +108,7 @@ Image and video generation run through Redis Stream asynchronous queues, with ta
 
 ### 🔒 Private deployment with operational controls
 
-Provider keys and object-storage credentials stay on the server. Docker Compose, PostgreSQL, Redis, and multiple object-storage options support private deployment. The administrator console covers models, skills, styles, prompt covers, result details, credit history, and API access logs for team or business operations.
+Provider keys and object-storage credentials stay on the server. Docker Compose, PostgreSQL, Redis, and multiple object-storage options support private deployment. The administrator console covers models, skills, styles, prompt covers, result details, credit history, and API access logs for team or business operations.The architecture used in the project is based on mainstream Java frameworks, facilitating enterprise-level scalability and naturally supporting microservice architectures like SpringCloud and K8s.
 
 ## 🤖 Supported Models and Providers
 
