@@ -51,6 +51,7 @@ type CanvasNodePromptPanelProps = {
     mentionReferences?: CanvasResourceReference[];
     onImageSettingsOpenChange?: (open: boolean) => void;
     onApplyContent?: (nodeId: string, content: string) => void;
+    canGenerateWithoutPrompt?: boolean;
 };
 
 export function CanvasNodePromptPanel({
@@ -69,6 +70,7 @@ export function CanvasNodePromptPanel({
     mentionReferences = [],
     onImageSettingsOpenChange,
     onApplyContent,
+    canGenerateWithoutPrompt = false,
 }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
     const theme = useCanvasTheme();
@@ -206,6 +208,7 @@ export function CanvasNodePromptPanel({
         setPrompt(value);
         if (!isEditingExistingContent) onPromptChange(node.id, value);
     };
+    const canSubmit = Boolean(prompt.trim()) || canGenerateWithoutPrompt;
     const filteredStyles = useMemo(() => filterGenerationStyles(styleCatalog.styles, styleQuery), [styleCatalog.styles, styleQuery]);
     const closeStyleMenu = () => {
         setStyleMenuOpen(false);
@@ -251,7 +254,7 @@ export function CanvasNodePromptPanel({
 
     const submit = () => {
         const text = prompt.trim();
-        if (!text || isRunning || isPromptGenerating) return;
+        if (!canSubmit || isRunning || isPromptGenerating) return;
         if (mode === "video" && !videoQuote?.available) {
             message.error(videoQuote?.reason || "当前视频配置无法报价");
             return;
@@ -591,7 +594,7 @@ export function CanvasNodePromptPanel({
                         type="primary"
                         className="!h-10 !min-w-[88px] shrink-0 !justify-center !rounded-full !px-3"
                         danger={isRunning}
-                        disabled={isPromptGenerating || (!isRunning && (!prompt.trim() || (mode === "video" && !videoQuote?.available)))}
+                        disabled={isPromptGenerating || (!isRunning && (!canSubmit || (mode === "video" && !videoQuote?.available)))}
                         onClick={() => (isRunning ? onStop(node.id) : submit())}
                         aria-label={isRunning ? "停止生成" : creditCost === null ? "当前视频配置无法报价" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
                     >

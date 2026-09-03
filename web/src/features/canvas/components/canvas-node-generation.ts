@@ -33,6 +33,41 @@ export function buildNodeGenerationContext(nodeId: string, nodes: CanvasNode[], 
     return buildPlainContext(inputs, prompt);
 }
 
+/**
+ * 解析节点最终用户提示词，并将当前节点输入与上游文本内容合并。
+ *
+ * @param nodeId 目标生成节点ID
+ * @param nodes 当前画布节点列表
+ * @param connections 当前画布连线列表
+ * @param prompt 目标节点自身输入内容
+ * @param includeMediaReferencePrompt 是否在存在图片或视频引用时追加通用媒体引用指令
+ * @return string 合并并去除首尾空白后的用户提示词
+ */
+export function resolveNodeGenerationPrompt(nodeId: string, nodes: CanvasNode[], connections: CanvasConnection[], prompt: string, includeMediaReferencePrompt = false): string {
+    const context = buildNodeGenerationContext(nodeId, nodes, connections, prompt);
+    const resolvedPrompt = context.prompt.trim();
+    const labels = [
+        ...context.referenceImages.map((_, index) => imageReferenceLabel(index)),
+        ...context.referenceVideos.map((_, index) => seedanceReferenceLabel("video", index)),
+    ];
+    if (!includeMediaReferencePrompt || !labels.length) return resolvedPrompt;
+    const referencePrompt = `请根据${labels.join("、")}生成`;
+    if (!resolvedPrompt) return referencePrompt;
+    return labels.some((label) => resolvedPrompt.includes(label)) ? resolvedPrompt : `${resolvedPrompt}\n\n${referencePrompt}`;
+}
+
+/**
+ * 判断节点是否存在可用于生成的上游资源。
+ *
+ * @param nodeId 目标生成节点ID
+ * @param nodes 当前画布节点列表
+ * @param connections 当前画布连线列表
+ * @return boolean 是否存在有效上游资源
+ */
+export function hasNodeGenerationInputs(nodeId: string, nodes: CanvasNode[], connections: CanvasConnection[]): boolean {
+    return buildNodeGenerationInputs(nodeId, nodes, connections).length > 0;
+}
+
 export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNode[], connections: CanvasConnection[]): NodeGenerationInput[] {
     const inputs: NodeGenerationInput[] = [];
     for (const node of getGenerationResourceNodes(nodeId, nodes, connections)) {
@@ -85,12 +120,15 @@ export async function hydrateNodeGenerationContext(context: NodeGenerationContex
 }
 
 function buildPlainContext(inputs: NodeGenerationInput[], prompt: string): NodeGenerationContext {
-    const textBlocks = inputs.map((input) => input.text).filter((text): text is string => Boolean(text));
+    const normalizedPrompt = prompt.trim();
+    const textBlocks = [...new Set(inputs.map((input) => input.text?.trim()).filter((text): text is string => Boolean(text)))].filter(
+        (text) => !normalizedPrompt.includes(text),
+    );
     const upstreamText = textBlocks.join("\n\n");
     const references = collectMediaReferences(inputs);
 
     return {
-        prompt: upstreamText && !prompt.includes(upstreamText) ? `${prompt}\n\n${upstreamText}` : prompt,
+        prompt: upstreamText ? `${prompt}\n\n${upstreamText}` : prompt,
         ...references,
         textCount: inputs.filter((input) => input.type === "text").length,
         imageCount: references.referenceImages.length,
@@ -108,7 +146,7 @@ function collectMediaReferences(inputs: NodeGenerationInput[]): NodeMediaReferen
 function readNodeText(node: CanvasNode) {
     if (isTextNode(node)) return node.content.text;
     if (isStoryboardNode(node)) return node.content.instruction;
-    return isImageNode(node) || isVideoNode(node) ? node.generation.prompt : "";
+    return "";
 }
 
 function createGenerationLabel(type: NodeGenerationInput["type"], index: number) {

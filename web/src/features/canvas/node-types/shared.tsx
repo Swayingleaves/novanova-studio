@@ -38,9 +38,27 @@ export function NodeError({ node, onRetry }: { node: CanvasNode; onRetry?: (node
 /** 媒体节点下载提示：生成结果有时效，超时将无法下载 */
 export function MediaDownloadHint() {
     return (
-        <div className="pointer-events-none absolute bottom-2 left-2 z-10 flex max-w-[calc(100%-1rem)] items-center gap-1 rounded-full px-2.5 py-1 text-[11px]" style={{ background: "rgba(0,0,0,0.55)", color: "#fbbf24" }}>
-            <TriangleAlert className="size-3 shrink-0" />
-            <span className="truncate">请尽快下载生成结果，超时将无法下载</span>
+        <div className="group/media-download-hint pointer-events-auto absolute bottom-2 left-2 z-10">
+            <span
+                role="img"
+                tabIndex={0}
+                aria-label="请尽快下载生成结果，超时将无法下载"
+                className="flex size-6 cursor-help items-center justify-center rounded-full text-amber-300 outline-none transition-colors hover:bg-black/70 focus-visible:bg-black/70 focus-visible:ring-2 focus-visible:ring-amber-300/80 motion-reduce:transition-none"
+                style={{ background: "rgba(0,0,0,0.55)" }}
+                onMouseDown={(event) => event.stopPropagation()}
+                onPointerDown={(event) => event.stopPropagation()}
+                onWheel={(event) => event.stopPropagation()}
+            >
+                <TriangleAlert className="size-3.5 shrink-0" aria-hidden="true" />
+            </span>
+            <span
+                role="tooltip"
+                aria-hidden="true"
+                className="pointer-events-none absolute bottom-full left-0 mb-1.5 w-max max-w-56 -translate-y-1 text-[11px] leading-4 text-white opacity-0 transition-[opacity,transform] duration-150 group-hover/media-download-hint:translate-y-0 group-hover/media-download-hint:opacity-100 group-focus-within/media-download-hint:translate-y-0 group-focus-within/media-download-hint:opacity-100 motion-reduce:transition-none"
+                style={{ background: "rgba(0,0,0,0.78)", padding: "5px 8px", borderRadius: 6 }}
+            >
+                请尽快下载生成结果，超时将无法下载
+            </span>
         </div>
     );
 }

@@ -17,7 +17,16 @@ import {
     expandBackgroundBoardsToMembers,
     reconcileBackgroundBoardMembership,
     normalizeBackgroundBoardMembers,
+    findNonOverlappingCanvasNodePosition,
 } from "./canvas-page-node.ts";
+
+test("新节点位置会避开已有节点并保留首选位置附近的布局", () => {
+    const existing = createImageNode({ id: "image-1", position: { x: 0, y: 0 } });
+    const position = findNonOverlappingCanvasNodePosition([existing], { x: 0, y: 0 }, 200, 120);
+
+    assert.ok(position.x !== 0 || position.y !== 0);
+    assert.ok(position.x >= existing.frame.position.x + existing.frame.width + 54 || position.x + 200 <= existing.frame.position.x - 54 || position.y >= existing.frame.position.y + existing.frame.height + 54 || position.y + 120 <= existing.frame.position.y - 54);
+});
 
 test("背景板默认尺寸并可扩展包裹成员", () => {
     const board = createBackgroundNode({ id: "background-1", position: { x: 0, y: 0 } });

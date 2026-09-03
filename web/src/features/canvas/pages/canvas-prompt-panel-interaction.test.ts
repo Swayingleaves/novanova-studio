@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const canvasPageSource = readFileSync(new URL("./canvas-client-page.tsx", import.meta.url), "utf8");
+const canvasAgentOpsSource = readFileSync(new URL("../utils/canvas-agent-ops.ts", import.meta.url), "utf8");
 const promptPanelSource = readFileSync(new URL("../components/canvas-node-prompt-panel.tsx", import.meta.url), "utf8");
 const imageSettingsPopoverSource = readFileSync(new URL("../components/canvas-image-settings-popover.tsx", import.meta.url), "utf8");
 const videoSettingsPopoverSource = readFileSync(new URL("../components/canvas-video-settings-popover.tsx", import.meta.url), "utf8");
@@ -102,6 +103,30 @@ test("节点生成工具和提交操作保持在同一行", () => {
     assert.ok(promptPanelSource.includes('className="!h-10 !min-w-0 !max-w-[180px] flex-1"'), "模型选择器未限制宽度，长模型名称会挤压提交操作");
     assert.ok(promptPanelSource.includes('buttonClassName="!h-10 !w-[140px]'), "节点生成设置按钮未限制稳定宽度");
     assert.ok(promptPanelSource.includes("iconOnly"), "节点风格入口未切换为仅图标模式");
+});
+
+test("设定图节点存在上游资源时允许空输入生成", () => {
+    assert.ok(promptPanelSource.includes("canGenerateWithoutPrompt"), "提示面板缺少设定图上游内容生成开关");
+    assert.ok(promptPanelSource.includes("const canSubmit = Boolean(prompt.trim()) || canGenerateWithoutPrompt"), "提示面板未允许使用上游内容提交空输入");
+    assert.ok(canvasPageSource.includes("hasNodeGenerationInputs(promptPanelNode.id, nodes, connections)"), "画布未根据通用上游资源解析结果启用设定图空输入生成");
+    assert.ok(canvasPageSource.includes("canGenerateWithoutPrompt={promptPanelCanGenerateWithoutPrompt}"), "设定图空输入能力未传入提示面板");
+    assert.ok(canvasPageSource.includes("!promptPanelNode.generation.settingGraph"), "普通图片节点未与设定图节点区分空输入规则");
+});
+
+test("设定图请求提交前合并上游内容并拒绝完全空提示词", () => {
+    assert.ok(canvasPageSource.includes("resolveNodeGenerationPrompt(nodeId, nodesRef.current, connectionsRef.current, prompt, true)"), "设定图请求未解析节点自身输入和上游内容");
+    assert.ok(canvasPageSource.includes("resolveNodeGenerationPrompt(nodeId, nodesRef.current, connectionsRef.current, prompt, true)"), "设定图请求未使用图片引用提示词解析能力");
+    assert.ok(canvasPageSource.includes('message.warning("请输入生成描述或连接有内容的上游节点")'), "完全空的设定图请求缺少明确提示");
+    assert.ok(canvasPageSource.includes("sendAgentMessage(\n                    effectivePrompt"), "设定图请求未使用合并后的最终提示词");
+});
+
+test("切换节点时提示面板按节点隔离编辑器状态", () => {
+    assert.ok(canvasPageSource.includes("key={promptPanelNode.id}"), "提示面板未按节点ID重新挂载，可能残留上一个节点的编辑器状态");
+});
+
+test("画布新增和生成节点统一使用避让重叠布局", () => {
+    assert.ok(canvasPageSource.includes("findNonOverlappingCanvasNodePosition"), "画布新增节点未接入统一避让重叠布局");
+    assert.ok(canvasAgentOpsSource.includes("findNonOverlappingCanvasNodePosition"), "Agent 新增节点未接入统一避让重叠布局");
 });
 
 test("画布图片设置按画质清晰度比例和限定数量排列", () => {
