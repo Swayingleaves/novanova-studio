@@ -244,7 +244,7 @@ CREATE INDEX idx_skills_deleted_at
     ON skills(deleted_at);
 ```
 
-迁移 `V24__Add_Canvas_Setting_Graph_Skills.sql` 会初始化四条启用的 `canvasSettingGraph` 技能：**角色脸部三视图、角色设定图、角色三视图、场景设定图**。迁移 `V25__Add_Skill_Aspect_Ratio.sql` 为技能增加 `aspect_ratio`，默认值为 `16:9`；节点或图片/视频页面选择技能后，优先使用该比例。每条技能的 `system_prompt` 保存中文多步骤流程、缺项询问规则、提示词组装要求及最终必须调用 `canvas_run_generation` 的约束，节点创建时会将其快照持久化。
+迁移 `V24__Add_Canvas_Setting_Graph_Skills.sql` 会初始化四条启用的 `canvasSettingGraph` 技能：**角色脸部三视图、角色设定图、角色三视图、场景设定图**。迁移 `V25__Add_Skill_Aspect_Ratio.sql` 为技能增加 `aspect_ratio`，默认值为 `16:9`；节点或图片/视频页面选择技能后，优先使用该比例。迁移 `V26__Update_Character_Three_View_Skill.sql` 同步更新四条画布设定图技能的提示词：**角色三视图**按正面、左侧面、背面生成全身正交三视图，**场景设定图、角色设定图、角色脸部三视图**分别强化场景、角色设计板和脸部三视图要求，并统一保留用户原始描述、上游引用、尺寸询问与现有节点生成约束。每条技能的 `system_prompt` 保存中文多步骤流程、缺项询问规则、提示词组装要求及最终必须调用 `canvas_run_generation` 的约束，节点创建时会将其快照持久化。
 
 ### 视频技能工作流
 

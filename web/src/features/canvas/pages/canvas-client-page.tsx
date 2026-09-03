@@ -53,6 +53,7 @@ import {
     applyGeneratedImageToBatchNodes,
     createCanvasConnection,
     findCanvasConnectionDropTarget,
+    findNonOverlappingCanvasNodePosition,
     moveCanvasNodesFromOrigins,
     expandBackgroundBoardsToMembers,
     reconcileBackgroundBoardMembership,
@@ -70,7 +71,7 @@ import { CanvasChatPanel } from "../components/canvas-chat-panel";
 import type { CanvasImageCropRect } from "../components/canvas-node-crop-dialog";
 import { CanvasThemeProvider, useCanvasTheme } from "../components/canvas-theme-provider";
 import type { CanvasImageSplitParams } from "../components/canvas-node-split-dialog";
-import { buildNodeGenerationContext, buildNodeResponseMessages, hydrateNodeGenerationContext } from "../components/canvas-node-generation";
+import { buildNodeGenerationContext, buildNodeResponseMessages, hasNodeGenerationInputs, hydrateNodeGenerationContext, resolveNodeGenerationPrompt } from "../components/canvas-node-generation";
 import { CanvasNodeHoverToolbar } from "../components/canvas-node-hover-toolbar";
 import { CanvasNavigationPanel, CanvasStoryboardAssetPreviewDialog, type CanvasNavigationAsset, type CanvasNavigationPanelState, type CanvasNavigationTab } from "../components/canvas-navigation-panel";
 import { CanvasFlow } from "../components/canvas-flow";
@@ -902,17 +903,18 @@ function CanvasWorkspacePage() {
                 ...(settingGraphSkill ? { title: `设定图·${settingGraphSkill.name}` } : {}),
             };
             // 连接菜单的释放点通常紧贴源节点手柄，不能直接作为新节点位置；统一按源节点边缘外侧间距布局。
-            const newNode = sourceNode
-                ? updateCanvasNodeFrame(initialNode, {
-                      position: {
-                          x:
-                              pending.connection.handleType === "target"
-                                  ? sourceNode.frame.position.x - CONNECTED_NODE_GAP - initialNode.frame.width
-                                  : sourceNode.frame.position.x + sourceNode.frame.width + CONNECTED_NODE_GAP,
-                          y: sourceNode.frame.position.y + sourceNode.frame.height / 2 - initialNode.frame.height / 2,
-                      },
-                  })
-                : initialNode;
+            const preferredPosition = sourceNode
+                ? {
+                      x:
+                          pending.connection.handleType === "target"
+                              ? sourceNode.frame.position.x - CONNECTED_NODE_GAP - initialNode.frame.width
+                              : sourceNode.frame.position.x + sourceNode.frame.width + CONNECTED_NODE_GAP,
+                      y: sourceNode.frame.position.y + sourceNode.frame.height / 2 - initialNode.frame.height / 2,
+                  }
+                : initialNode.frame.position;
+            const newNode = updateCanvasNodeFrame(initialNode, {
+                position: findNonOverlappingCanvasNodePosition(nodesRef.current, preferredPosition, initialNode.frame.width, initialNode.frame.height, CONNECTED_NODE_GAP),
+            });
             const connection = normalizeCanvasConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode]);
             if (!connection) {
                 message.warning("配置节点之间不能连接");
@@ -1013,6 +1015,10 @@ function CanvasWorkspacePage() {
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const dialogNode = dialogNodeId ? nodeById.get(dialogNodeId) || null : null;
     const promptPanelNode = dialogNode && !selectionBox && !isStoryboardNode(dialogNode) && !isVideoCompositionNode(dialogNode) ? dialogNode : null;
+    const promptPanelCanGenerateWithoutPrompt = useMemo(() => {
+        if (!promptPanelNode || !isImageNode(promptPanelNode) || !promptPanelNode.generation.settingGraph) return false;
+        return hasNodeGenerationInputs(promptPanelNode.id, nodes, connections);
+    }, [connections, nodes, promptPanelNode]);
     const floatingPanelStyle = useMemo(() => {
         if (!promptPanelNode) return null;
         const canvasRect = containerRef.current?.getBoundingClientRect();
@@ -1180,15 +1186,17 @@ function CanvasWorkspacePage() {
     const createNode = useCallback(
         (type: CanvasNodeKind, position?: CanvasPoint) => {
             const targetPosition = position || getCanvasCenter();
-            // 工具栏创建时错开节点，右键指定位置创建时保持落点准确。
+            // 工具栏创建时随机错开节点，指定位置创建时仍优先保持落点并自动避开重叠。
             const offset = position ? { x: 0, y: 0 } : { x: (Math.random() - 0.5) * 200, y: (Math.random() - 0.5) * 200 };
             const newNode = createCanvasNode(type, { x: targetPosition.x + offset.x, y: targetPosition.y + offset.y });
+            const safePosition = findNonOverlappingCanvasNodePosition(nodesRef.current, newNode.frame.position, newNode.frame.width, newNode.frame.height);
+            const positionedNode = updateCanvasNodeFrame(newNode, { position: safePosition });
 
-            setNodes((prev) => [...prev, newNode]);
-            requestFocusNodes([newNode.id]);
-            setSelectedNodeIds(new Set([newNode.id]));
+            setNodes((prev) => [...prev, positionedNode]);
+            requestFocusNodes([positionedNode.id]);
+            setSelectedNodeIds(new Set([positionedNode.id]));
             setSelectedConnectionId(null);
-            setDialogNodeId(type === "background" ? null : newNode.id);
+            setDialogNodeId(type === "background" ? null : positionedNode.id);
         },
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter, requestFocusNodes],
     );
@@ -2323,12 +2331,18 @@ function CanvasWorkspacePage() {
             }
 
             const videoTemplate = nodeSizeFromRatio(generationConfig.size, getCanvasNodeTemplate("video").width, getCanvasNodeTemplate("video").height) || getCanvasNodeTemplate("video");
+            const occupiedStoryboardVideoNodes = nodesRef.current;
+            const placedStoryboardVideoNodes: CanvasDomainNode[] = [];
             const createdVideoNodes = selectedShots.map((shot, index) => {
                 const references = preparedReferenceImagesByShotId.get(shot.id) || [];
                 const videoGenerationMode = readStoryboardVideoGenerationMode(shot, currentNode.storyboard.assets, storyboardReferenceVideos);
                 const column = index % 2;
                 const row = Math.floor(index / 2);
                 const id = `video-${nanoid()}`;
+                const preferredPosition = {
+                    x: currentNode.frame.position.x + currentNode.frame.width + CONNECTED_NODE_GAP + column * (videoTemplate.width + 54),
+                    y: currentNode.frame.position.y + row * (videoTemplate.height + 54),
+                };
                 const node = updateCanvasNodeFrame(
                     {
                         ...createCanvasNode(
@@ -2354,13 +2368,13 @@ function CanvasWorkspacePage() {
                     },
                     {
                         position: {
-                            x: currentNode.frame.position.x + currentNode.frame.width + CONNECTED_NODE_GAP + column * (videoTemplate.width + 54),
-                            y: currentNode.frame.position.y + row * (videoTemplate.height + 54),
+                            ...findNonOverlappingCanvasNodePosition([...occupiedStoryboardVideoNodes, ...placedStoryboardVideoNodes], preferredPosition, videoTemplate.width, videoTemplate.height),
                         },
                         width: videoTemplate.width,
                         height: videoTemplate.height,
                     },
                 );
+                placedStoryboardVideoNodes.push(node);
                 return { id, shot, node, videoGenerationMode };
             });
             setGeneratingStoryboardVideoNodeId(nodeId);
@@ -2696,9 +2710,11 @@ function CanvasWorkspacePage() {
                 const image = await uploadImage(cropped);
                 const width = Math.min(node.frame.width, Math.max(220, image.width));
                 const childId = nanoid();
+                const height = width * (image.height / image.width);
+                const position = findNonOverlappingCanvasNodePosition(nodesRef.current, { x: node.frame.position.x + node.frame.width + 96, y: node.frame.position.y }, width, height);
                 const child = updateCanvasNodeFrame(
                     { ...createCanvasNode("image", node.frame.position, { ...imageAttributes(image), prompt: node.generation.prompt }), id: childId, title: "裁剪图片" },
-                    { position: { x: node.frame.position.x + node.frame.width + 96, y: node.frame.position.y }, width, height: width * (image.height / image.width) },
+                    { position, width, height },
                 );
                 setNodes((prev) => [...prev, child]);
                 requestFocusNodes([childId]);
@@ -2736,14 +2752,24 @@ function CanvasWorkspacePage() {
                         );
                     }),
                 );
-                setNodes((prev) => [...prev, ...childNodes]);
-                requestFocusNodes(childNodes.map((child) => child.id));
-                setConnections((prev) => [...prev, ...childNodes.map((child) => createRightToLeftConnection(node.id, child.id))]);
-                setSelectedNodeIds(new Set(childNodes.map((child) => child.id)));
+                const placedChildNodes: CanvasDomainNode[] = [];
+                childNodes.forEach((child) => {
+                    const position = findNonOverlappingCanvasNodePosition(
+                        [...nodesRef.current, ...placedChildNodes],
+                        child.frame.position,
+                        child.frame.width,
+                        child.frame.height,
+                    );
+                    placedChildNodes.push(updateCanvasNodeFrame(child, { position }));
+                });
+                setNodes((prev) => [...prev, ...placedChildNodes]);
+                requestFocusNodes(placedChildNodes.map((child) => child.id));
+                setConnections((prev) => [...prev, ...placedChildNodes.map((child) => createRightToLeftConnection(node.id, child.id))]);
+                setSelectedNodeIds(new Set(placedChildNodes.map((child) => child.id)));
                 setSelectedConnectionId(null);
                 setDialogNodeId(null);
                 setSplitNodeId(null);
-                message.success(`已切分为 ${childNodes.length} 个子节点`);
+                message.success(`已切分为 ${placedChildNodes.length} 个子节点`);
             } catch (error) {
                 message.error(error instanceof Error ? error.message : "切分图片失败");
             } finally {
@@ -3022,13 +3048,18 @@ function CanvasWorkspacePage() {
                 message.warning("画布Agent正在处理，请等待当前任务完成");
                 return;
             }
+            const effectivePrompt = resolveNodeGenerationPrompt(nodeId, nodesRef.current, connectionsRef.current, prompt, true);
+            if (!effectivePrompt) {
+                message.warning("请输入生成描述或连接有内容的上游节点");
+                return;
+            }
             const sessionId = activeChatId || nanoid();
             activeAgentSessionIdRef.current = sessionId;
             activeAgentAssistantMessageIdRef.current = null;
             resetThinkings();
             resetTextStream(false);
             setAgentQueued(true);
-            const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text: prompt };
+            const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text: effectivePrompt };
             if (!activeChatId) {
                 const now = new Date().toISOString();
                 handleAssistantSessionsChange([{ id: sessionId, title: `设定图：${skill.name}`, messages: [userMessage], createdAt: now, updatedAt: now }], sessionId);
@@ -3037,7 +3068,7 @@ function CanvasWorkspacePage() {
             }
             try {
                 await sendAgentMessage(
-                    prompt,
+                    effectivePrompt,
                     [],
                     config.agentModel || undefined,
                     buildAgentChatHistory(activeSessionMessages),
@@ -3206,10 +3237,14 @@ function CanvasWorkspacePage() {
                         width: count > 1 ? IMAGE_GENERATION_NODE_WIDTH : reuseImageNode ? sourceNode?.frame.width || imageConfig.width : imageConfig.width,
                         height: count > 1 ? IMAGE_GENERATION_NODE_HEIGHT : reuseImageNode ? sourceNode?.frame.height || imageConfig.height : imageConfig.height,
                     };
-                    const rootPosition = {
+                    const preferredRootPosition = {
                         x: reuseImageNode ? sourceNode?.frame.position.x || parentPosition.x : parentPosition.x + parentConfig.width + gap,
                         y: reuseImageNode ? sourceNode?.frame.position.y || parentPosition.y : parentPosition.y + parentConfig.height / 2 - rootSize.height / 2,
                     };
+                    const occupiedNodes = reuseImageNode ? nodesRef.current.filter((node) => node.id !== nodeId) : nodesRef.current;
+                    const rootPosition = reuseImageNode
+                        ? preferredRootPosition
+                        : findNonOverlappingCanvasNodePosition(occupiedNodes, preferredRootPosition, rootSize.width, rootSize.height);
                     const rootNode = updateCanvasNodeFrame(
                         {
                             ...createCanvasNode(
@@ -3235,24 +3270,27 @@ function CanvasWorkspacePage() {
                     );
                     const colCount = 2;
                     const rowCount = Math.ceil(count / colCount);
-                    const childNodes: CanvasDomainNode[] = childIds.map((id, index) => {
+                    const childNodes: CanvasDomainNode[] = [];
+                    childIds.forEach((id, index) => {
                         const col = Math.floor(index / rowCount);
                         const row = index % rowCount;
-                        return updateCanvasNodeFrame(
+                        const preferredPosition = {
+                            x: rootNode.frame.position.x + rootNode.frame.width + 180 + col * (imageConfig.width + 54),
+                            y: rootNode.frame.position.y + row * (imageConfig.height + rowGap),
+                        };
+                        const position = findNonOverlappingCanvasNodePosition([...occupiedNodes, rootNode, ...childNodes], preferredPosition, imageConfig.width, imageConfig.height);
+                        childNodes.push(updateCanvasNodeFrame(
                             {
                                 ...createCanvasNode("image", { x: 0, y: 0 }, { prompt: effectivePrompt, status: NODE_STATUS_LOADING, batchRootId: rootId, ...generationAttributes }),
                                 id,
                                 title: `${index + 1}/${count}`,
                             },
                             {
-                                position: {
-                                    x: rootNode.frame.position.x + rootNode.frame.width + 180 + col * (imageConfig.width + 54),
-                                    y: rootNode.frame.position.y + row * (imageConfig.height + rowGap),
-                                },
+                                position,
                                 width: imageConfig.width,
                                 height: imageConfig.height,
                             },
-                        );
+                        ));
                     });
                     const batchConnections = [...(reuseImageNode ? [] : [createRightToLeftConnection(nodeId, rootId)]), ...childIds.map((childId) => createRightToLeftConnection(rootId, childId))];
 
@@ -3358,11 +3396,13 @@ function CanvasWorkspacePage() {
                     const parent = sourceNode?.frame.position || { x: 0, y: 0 };
                     const videoIds = Array.from({ length: count }, (_, index) => (isEmptyVideoNode && index === 0 ? nodeId : nanoid()));
                     const additionalOffset = isEmptyVideoNode ? 1 : 0;
+                    const occupiedVideoNodes = isEmptyVideoNode ? nodesRef.current.filter((node) => node.id !== nodeId) : nodesRef.current;
+                    const placedVideoNodes: CanvasDomainNode[] = [];
                     const videoNodes = videoIds.map((videoId, index) => {
                         const additionalIndex = index - additionalOffset;
                         const column = Math.max(0, additionalIndex % 2);
                         const row = Math.max(0, Math.floor(additionalIndex / 2));
-                        const videoPosition =
+                        const preferredVideoPosition =
                             isEmptyVideoNode && index === 0 && sourceNode
                                 ? sourceNode.frame.position
                                 : {
@@ -3370,7 +3410,10 @@ function CanvasWorkspacePage() {
                                       y: parent.y + row * (spec.height + 54),
                                   };
                         const videoSize = isEmptyVideoNode && index === 0 && sourceNode ? { width: sourceNode.frame.width, height: sourceNode.frame.height } : spec;
-                        return updateCanvasNodeFrame(
+                        const videoPosition = isEmptyVideoNode && index === 0
+                            ? preferredVideoPosition
+                            : findNonOverlappingCanvasNodePosition([...occupiedVideoNodes, ...placedVideoNodes], preferredVideoPosition, videoSize.width, videoSize.height);
+                        const videoNode = updateCanvasNodeFrame(
                             {
                                 ...createCanvasNode(
                                     "video",
@@ -3395,6 +3438,8 @@ function CanvasWorkspacePage() {
                             },
                             { position: videoPosition, width: videoSize.width, height: videoSize.height },
                         );
+                        placedVideoNodes.push(videoNode);
+                        return videoNode;
                     });
                     pendingChildIds = isEmptyVideoNode ? videoIds.slice(1) : videoIds;
                     setNodes((prev) => [...prev.map((node) => (node.id === nodeId ? (isEmptyVideoNode ? videoNodes[0] : updateCanvasNodeExecution(node, { phase: "succeeded" })) : node)), ...videoNodes.slice(isEmptyVideoNode ? 1 : 0)]);
@@ -3474,7 +3519,12 @@ function CanvasWorkspacePage() {
                         updateCanvasNodeFrame(
                             { ...createCanvasNode("text", { x: 0, y: 0 }, { content: "", status: NODE_STATUS_LOADING, fontSize: 14 }), id, title: effectivePrompt.slice(0, 32) || "生成文本" },
                             {
-                                position: { x: parentPosition.x + parentConfig.width + CONNECTED_NODE_GAP, y: parentPosition.y + parentConfig.height / 2 - textConfig.height / 2 + (index - (1 - 1) / 2) * (textConfig.height + 36) },
+                                position: findNonOverlappingCanvasNodePosition(
+                                    nodesRef.current,
+                                    { x: parentPosition.x + parentConfig.width + CONNECTED_NODE_GAP, y: parentPosition.y + parentConfig.height / 2 - textConfig.height / 2 + (index - (1 - 1) / 2) * (textConfig.height + 36) },
+                                    textConfig.width,
+                                    textConfig.height,
+                                ),
                                 width: textConfig.width,
                                 height: textConfig.height,
                             },
@@ -3814,9 +3864,10 @@ function CanvasWorkspacePage() {
             const config = fitNodeSize(storedImage.width, storedImage.height);
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
             const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+            const position = findNonOverlappingCanvasNodePosition(nodesRef.current, { x: center.x - config.width / 2, y: center.y - config.height / 2 }, config.width, config.height);
             const node = updateCanvasNodeFrame(
                 { ...createCanvasNode("image", center, { ...imageAttributes(storedImage), prompt: image.prompt }), id, title: image.prompt.slice(0, 32) || "生成图片" },
-                { position: { x: center.x - config.width / 2, y: center.y - config.height / 2 }, ...config },
+                { position, ...config },
             );
 
             setNodes((prev) => [...prev, node]);
@@ -3831,10 +3882,12 @@ function CanvasWorkspacePage() {
     const insertAssistantText = useCallback(
         (text: string) => {
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-            const node = {
+            const template = getCanvasNodeTemplate("text");
+            const position = findNonOverlappingCanvasNodePosition(nodesRef.current, { x: center.x - template.width / 2, y: center.y - template.height / 2 }, template.width, template.height);
+            const node = updateCanvasNodeFrame({
                 ...createCanvasNode("text", center, { content: text, status: NODE_STATUS_SUCCESS }),
                 title: text.slice(0, 32) || "Assistant Text",
-            };
+            }, { position });
 
             setNodes((prev) => [...prev, node]);
             requestFocusNodes([node.id]);
@@ -3853,13 +3906,14 @@ function CanvasWorkspacePage() {
                 const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
                 const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                 const nextSize = fitNodeSize(payload.width || spec.width, payload.height || spec.height, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+                const position = findNonOverlappingCanvasNodePosition(nodesRef.current, { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 }, nextSize.width, nextSize.height);
                 const node = updateCanvasNodeFrame(
                     {
                         ...createCanvasNode("video", center, { content: payload.url, storageKey: payload.storageKey, status: NODE_STATUS_SUCCESS, naturalWidth: payload.width, naturalHeight: payload.height, objectStorage: payload.objectStorage }),
                         id,
                         title: payload.title,
                     },
-                    { position: { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 }, ...nextSize },
+                    { position, ...nextSize },
                 );
                 setNodes((prev) => [...prev, node]);
                 requestFocusNodes([node.id]);
@@ -3946,9 +4000,13 @@ function CanvasWorkspacePage() {
                 }
                 const resultId = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                 const resultTemplate = getCanvasNodeTemplate("video");
+                const resultPosition = findNonOverlappingCanvasNodePosition(nodesRef.current, {
+                    x: latestNode.frame.position.x + latestNode.frame.width + 144,
+                    y: latestNode.frame.position.y + latestNode.frame.height / 2 - resultTemplate.height / 2,
+                }, resultTemplate.width, resultTemplate.height);
                 const resultCenter = {
-                    x: latestNode.frame.position.x + latestNode.frame.width + 144 + resultTemplate.width / 2,
-                    y: latestNode.frame.position.y + latestNode.frame.height / 2,
+                    x: resultPosition.x + resultTemplate.width / 2,
+                    y: resultPosition.y + resultTemplate.height / 2,
                 };
                 const resultNode = {
                     ...createCanvasNode("video", resultCenter, { status: NODE_STATUS_LOADING, taskId: task.id, progress: task.progress }),
@@ -4383,6 +4441,7 @@ function CanvasWorkspacePage() {
                         }}
                     >
                         <CanvasNodePromptPanel
+                            key={promptPanelNode.id}
                             node={promptPanelNode}
                             isRunning={runningNodeId === promptPanelNode.id}
                             isPromptGenerating={promptGeneratingNodeId === promptPanelNode.id}
@@ -4401,6 +4460,7 @@ function CanvasWorkspacePage() {
                             onStop={confirmStopGeneration}
                             onMissingConfig={showMissingAiConfig}
                             onApplyContent={handleNodeContentChange}
+                            canGenerateWithoutPrompt={promptPanelCanGenerateWithoutPrompt}
                             onRemoveReference={(reference) => removeNodeReferenceConnection(promptPanelNode.id, reference.nodeId)}
                             mentionCandidates={canvasResourceReferences}
                             onMentionSelect={(reference) => connectMentionReference(reference.nodeId, promptPanelNode.id)}

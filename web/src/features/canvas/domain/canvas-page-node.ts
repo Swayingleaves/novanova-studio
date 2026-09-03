@@ -1,5 +1,5 @@
 import { CANVAS_BACKGROUND_DEFAULT_COLOR, CANVAS_BACKGROUND_MIN_HEIGHT, CANVAS_BACKGROUND_MIN_WIDTH, CANVAS_BACKGROUND_PADDING, getCanvasNodeTemplate } from "../constants.ts";
-import type { CanvasBackgroundNode, CanvasConnection, CanvasNode } from "../types.ts";
+import type { CanvasBackgroundNode, CanvasConnection, CanvasNode, CanvasPoint } from "../types.ts";
 import { MINIMUM_CONTENT_NODE_DIMENSION, nodeSizeFromRatio, nodeSizeFromRatioWithMinimum } from "../utils/canvas-node-size.ts";
 import {
     applyCanvasNodeAttributes,
@@ -155,6 +155,39 @@ export function canvasFramesIntersect(first: CanvasNode, second: CanvasNode): bo
         && first.frame.position.x + first.frame.width > second.frame.position.x
         && first.frame.position.y < second.frame.position.y + second.frame.height
         && first.frame.position.y + first.frame.height > second.frame.position.y;
+}
+
+/**
+ * 在首选位置附近寻找不与现有节点相交的位置。
+ *
+ * @param nodes 画布中已存在的节点
+ * @param preferredPosition 首选的节点左上角坐标
+ * @param width 待放置节点宽度
+ * @param height 待放置节点高度
+ * @param gap 节点之间保留的最小间距
+ * @return CanvasPoint 可安全放置的节点左上角坐标
+ */
+export function findNonOverlappingCanvasNodePosition(nodes: CanvasNode[], preferredPosition: CanvasPoint, width: number, height: number, gap = 54): CanvasPoint {
+    const step = Math.max(32, gap);
+    const candidateIntersects = (position: CanvasPoint) => nodes.some((node) =>
+        position.x < node.frame.position.x + node.frame.width + gap
+        && position.x + width + gap > node.frame.position.x
+        && position.y < node.frame.position.y + node.frame.height + gap
+        && position.y + height + gap > node.frame.position.y,
+    );
+    if (!candidateIntersects(preferredPosition)) return preferredPosition;
+
+    for (let radius = 1; radius <= 100; radius += 1) {
+        for (let row = -radius; row <= radius; row += 1) {
+            for (let column = -radius; column <= radius; column += 1) {
+                if (Math.max(Math.abs(column), Math.abs(row)) !== radius) continue;
+                const candidate = { x: preferredPosition.x + column * (width + step), y: preferredPosition.y + row * (height + step) };
+                if (!candidateIntersects(candidate)) return candidate;
+            }
+        }
+    }
+    const rightmost = nodes.reduce((right, node) => Math.max(right, node.frame.position.x + node.frame.width), preferredPosition.x + width);
+    return { x: rightmost + gap, y: preferredPosition.y };
 }
 
 /** 将背景板扩展到完整包裹其成员，保持固定内边距。 */

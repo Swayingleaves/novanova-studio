@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createImageNode } from "../constants.ts";
 import { applyCanvasAgentOps, type CanvasAgentOp, type CanvasAgentSnapshot } from "./canvas-agent-ops.ts";
 
 test("Agent 新增图片节点使用新领域模型", () => {
@@ -67,6 +68,15 @@ test("Agent 不会把分镜节点降级创建为文本节点", () => {
     const next = applyCanvasAgentOps(emptySnapshot(), [invalidOperation]);
 
     assert.deepEqual(next.nodes, []);
+});
+
+test("Agent 新增节点会避开已有节点", () => {
+    const existing = createImageNode({ id: "existing", position: { x: 0, y: 0 } });
+    const next = applyCanvasAgentOps({ ...emptySnapshot(), nodes: [existing] }, [{ type: "add_node", nodeType: "image", id: "created", x: 0, y: 0 }]);
+    const created = next.nodes.find((node) => node.id === "created");
+
+    assert.ok(created);
+    assert.notDeepEqual(created.frame.position, existing.frame.position);
 });
 
 function emptySnapshot(): CanvasAgentSnapshot {

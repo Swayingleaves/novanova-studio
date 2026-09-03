@@ -7,6 +7,7 @@ import {
     updateCanvasNodeTitle,
     type CanvasNodeAttributes,
 } from "../domain/canvas-node.ts";
+import { findNonOverlappingCanvasNodePosition } from "../domain/canvas-page-node.ts";
 import { readVideoCompositionConnectionError, synchronizeVideoCompositionInputs } from "../domain/video-composition";
 import type { CanvasConnection, CanvasGenerationMode, CanvasNode, CanvasViewTransform } from "../types.ts";
 
@@ -118,7 +119,8 @@ function reduceAddNode(snapshot: CanvasAgentSnapshot, op: CanvasAgentOp, index: 
         height: readDimension(op.height, created.frame.height),
     });
     const nextNode = applyCanvasNodeAttributes(framed, op.attributes);
-    return { ...snapshot, nodes: [...snapshot.nodes, nextNode], selectedNodeIds: [nextNode.id] };
+    const safePosition = findNonOverlappingCanvasNodePosition(snapshot.nodes, nextNode.frame.position, nextNode.frame.width, nextNode.frame.height);
+    return { ...snapshot, nodes: [...snapshot.nodes, updateCanvasNodeFrame(nextNode, { position: safePosition })], selectedNodeIds: [nextNode.id] };
 }
 
 function reduceUpdateNode(snapshot: CanvasAgentSnapshot, op: CanvasAgentOp): CanvasAgentSnapshot {
