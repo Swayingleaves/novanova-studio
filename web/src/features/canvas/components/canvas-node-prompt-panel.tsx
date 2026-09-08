@@ -206,7 +206,7 @@ export function CanvasNodePromptPanel({
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
-        if (!isEditingExistingContent) onPromptChange(node.id, value);
+        if (isTextNode(node) || !isEditingExistingContent) onPromptChange(node.id, value);
     };
     const canSubmit = Boolean(prompt.trim()) || canGenerateWithoutPrompt;
     const filteredStyles = useMemo(() => filterGenerationStyles(styleCatalog.styles, styleQuery), [styleCatalog.styles, styleQuery]);
