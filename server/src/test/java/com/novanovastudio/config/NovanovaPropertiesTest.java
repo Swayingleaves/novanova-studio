@@ -47,6 +47,24 @@ class NovanovaPropertiesTest {
     }
 
     /**
+     * 测试腾讯云COS重试与读取超时配置默认值和修改能力。
+     */
+    @Test
+    void shouldConfigureTencentCosRetryAndSocketTimeout() {
+        NovanovaProperties properties = new NovanovaProperties();
+        NovanovaProperties.ObjectStorage.TencentCos tencentCos = properties.getObjectStorage().getTencentCos();
+
+        Assertions.assertEquals(3, tencentCos.getMaxErrorRetry());
+        Assertions.assertEquals(120_000, tencentCos.getSocketTimeoutMilliseconds());
+
+        tencentCos.setMaxErrorRetry(5);
+        tencentCos.setSocketTimeoutMilliseconds(180_000);
+
+        Assertions.assertEquals(5, tencentCos.getMaxErrorRetry());
+        Assertions.assertEquals(180_000, tencentCos.getSocketTimeoutMilliseconds());
+    }
+
+    /**
      * 测试分镜Agent超时配置默认值和修改能力。
      */
     @Test

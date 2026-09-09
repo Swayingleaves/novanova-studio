@@ -1,8 +1,6 @@
 package com.novanovastudio.ai;
 
 import com.novanovastudio.ai.provider.AgnesProviderAdapter;
-import com.novanovastudio.common.BusinessException;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -19,7 +17,7 @@ import org.junit.jupiter.api.Test;
 class AgnesVideoReferenceTest {
 
     /**
-     * 无图、单图和两至三张关键帧图应生成对应请求参数。
+     * 无图、单图和多张参考图应生成对应请求参数。
      *
      * @throws ReflectiveOperationException 反射调用请求参数构建方法失败时抛出
      */
@@ -29,6 +27,7 @@ class AgnesVideoReferenceTest {
         Map<String, Object> singleImagePayload = applyReferenceImages(List.of("https://example.com/one.png"));
         Map<String, Object> twoImagePayload = applyReferenceImages(List.of("https://example.com/first.png", "https://example.com/second.png"));
         Map<String, Object> threeImagePayload = applyReferenceImages(List.of("https://example.com/first.png", "https://example.com/second.png", "https://example.com/third.png"));
+        Map<String, Object> fourImagePayload = applyReferenceImages(List.of("https://example.com/1.png", "https://example.com/2.png", "https://example.com/3.png", "https://example.com/4.png"));
 
         Assertions.assertFalse(noImagePayload.containsKey("images"));
         Assertions.assertFalse(noImagePayload.containsKey("extra_body"));
@@ -38,20 +37,8 @@ class AgnesVideoReferenceTest {
         Assertions.assertFalse(twoImagePayload.containsKey("extra_body"));
         Assertions.assertEquals(List.of("https://example.com/first.png", "https://example.com/second.png", "https://example.com/third.png"), threeImagePayload.get("images"));
         Assertions.assertFalse(threeImagePayload.containsKey("extra_body"));
-    }
-
-    /**
-     * 超过三张参考图片应在调用渠道前被拒绝。
-     *
-     * @throws ReflectiveOperationException 反射调用请求参数构建方法失败时抛出
-     */
-    @Test
-    void shouldRejectMoreThanThreeAgnesVideoReferenceImages() throws ReflectiveOperationException {
-        InvocationTargetException exception = Assertions.assertThrows(InvocationTargetException.class,
-                () -> applyReferenceImages(List.of("https://example.com/1.png", "https://example.com/2.png", "https://example.com/3.png", "https://example.com/4.png")));
-
-        Assertions.assertInstanceOf(BusinessException.class, exception.getCause());
-        Assertions.assertTrue(exception.getCause().getMessage().contains("最多支持3张参考图片"));
+        Assertions.assertEquals(List.of("https://example.com/1.png", "https://example.com/2.png", "https://example.com/3.png", "https://example.com/4.png"), fourImagePayload.get("images"));
+        Assertions.assertFalse(fourImagePayload.containsKey("extra_body"));
     }
 
     /**

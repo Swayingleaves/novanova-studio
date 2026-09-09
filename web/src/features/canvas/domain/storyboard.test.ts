@@ -144,7 +144,7 @@ test("分镜视频参考图保持镜头资产关联顺序", () => {
     assert.deepEqual(references.map((reference) => reference.id), ["scene-1", "character-1", "prop-1"]);
 });
 
-test("Agnes 视频拒绝超过三张已出图的关联资产", () => {
+test("Agnes 视频允许关联超过三张已出图的资产", () => {
     const shot: CanvasStoryboardNode["storyboard"]["shots"][number] = {
         id: "shot-1",
         shotNumber: 1,
@@ -167,7 +167,7 @@ test("Agnes 视频拒绝超过三张已出图的关联资产", () => {
     };
 
     assert.equal(readStoryboardVideoReferenceIssue({ ...shot, assetIds: shot.assetIds.slice(0, 3) }, assets, config), "");
-    assert.match(readStoryboardVideoReferenceIssue(shot, assets, config), /最多支持3张参考图片/);
+    assert.equal(readStoryboardVideoReferenceIssue(shot, assets, config), "");
 });
 
 test("分镜资产批量生成状态保存任务前的待生成清单并计算进度", () => {

@@ -2,6 +2,7 @@ package com.novanovastudio.storage;
 
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.qcloud.cos.COSClient;
 import com.qcloud.cos.ClientConfig;
@@ -10,6 +11,7 @@ import com.qcloud.cos.exception.CosClientException;
 import com.qcloud.cos.model.ObjectMetadata;
 import com.qcloud.cos.region.Region;
 import java.io.InputStream;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -22,10 +24,14 @@ import org.springframework.util.StringUtils;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProviderAdapter {
 
     /** 腾讯云COS服务商标识。 */
     public static final String PROVIDER = "tencentCos";
+
+    /** 应用配置。 */
+    private final NovanovaProperties properties;
 
     /**
      * 获取腾讯云COS服务商标识。
@@ -68,7 +74,7 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
     @Override
     public String putObject(PersistenceDtos.ObjectStorageConfig config, String key, InputStream inputStream, long contentLength, String mimeType) {
         validate(config);
-        COSClient client = new COSClient(new BasicCOSCredentials(config.accessKey().trim(), config.secretKey().trim()), new ClientConfig(new Region(config.region().trim())));
+        COSClient client = new COSClient(new BasicCOSCredentials(config.accessKey().trim(), config.secretKey().trim()), createClientConfig(config.region().trim()));
         try {
             ObjectMetadata metadata = new ObjectMetadata();
             metadata.setContentLength(contentLength);
@@ -86,5 +92,19 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
         } finally {
             client.shutdown();
         }
+    }
+
+    /**
+     * 创建腾讯云COS客户端配置。
+     *
+     * @param region String 腾讯云COS地域
+     * @return ClientConfig COS客户端配置
+     */
+    private ClientConfig createClientConfig(String region) {
+        NovanovaProperties.ObjectStorage.TencentCos tencentCos = properties.getObjectStorage().getTencentCos();
+        ClientConfig clientConfig = new ClientConfig(new Region(region));
+        clientConfig.setMaxErrorRetry(tencentCos.getMaxErrorRetry());
+        clientConfig.setSocketTimeout(tencentCos.getSocketTimeoutMilliseconds());
+        return clientConfig;
     }
 }
