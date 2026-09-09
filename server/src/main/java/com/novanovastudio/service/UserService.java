@@ -22,6 +22,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Optional;
 import java.util.Locale;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -105,6 +106,9 @@ public class UserService {
     /** 积分服务 */
     private final CreditService creditService;
 
+    /** 邀请服务 */
+    private final InvitationService invitationService;
+
     /** 用户实时事件发布器 */
     private final AiTaskEventPublisher eventPublisher;
 
@@ -134,6 +138,7 @@ public class UserService {
                     user.setNickname(firstNonEmpty(properties.getAdmin().getInitialNickname(), emailName(email)));
                     user.setRole(ROLE_ADMIN);
                     user.setStatus(STATUS_NORMAL);
+                    user.setInvitationCode(invitationService.generateInvitationCode());
                     user.setRegisteredAt(OffsetDateTime.now(ZoneOffset.UTC));
                     return userRepository.createInitialAdminIfAbsent(user)
                             .flatMap(userId -> creditService.initializeAccount(userId).thenReturn(true))
@@ -193,7 +198,10 @@ public class UserService {
         String email = normalizeEmail(request.email());
         log.info("用户注册: email={}", email);
         validatePassword(request.password());
-        return userRepository.findByEmail(email)
+        return invitationService.resolveInviterUserId(request.invitationCode())
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty())
+                .flatMap(inviterUserId -> userRepository.findByEmail(email)
                 .flatMap(existing -> Mono.<UserDtos.AuthResponse>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱已注册")))
                 .switchIfEmpty(userRepository.latestValidEmailCode(email, CODE_PURPOSE_REGISTER)
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱验证码无效或已过期")))
@@ -211,13 +219,17 @@ public class UserService {
                                                 user.setNickname(firstNonEmpty(request.nickname(), emailName(email)));
                                                 user.setRole(ROLE_USER);
                                                 user.setStatus(STATUS_NORMAL);
+                                                user.setInvitationCode(invitationService.generateInvitationCode());
+                                                user.setInvitedByUserId(inviterUserId.orElse(null));
                                                 user.setRegisteredAt(OffsetDateTime.now(ZoneOffset.UTC));
                                                 return userRepository.registerUserWithEmailCode(user, codeRecord.getId())
-                                                        .flatMap(userId -> creditService.initializeAccount(userId).then(userRepository.findById(userId)))
+                                                        .flatMap(userId -> creditService.initializeAccount(userId)
+                                                                .then(inviterUserId.map(inviterId -> creditService.grantInvitationReward(inviterId, userId)).orElseGet(Mono::empty))
+                                                                .then(userRepository.findById(userId)))
                                                         .as(transactionalOperator::transactional)
                                                         .map(this::buildAuthResponse);
                                             });
-                                })));
+                                }))));
     }
 
     /**
@@ -433,6 +445,7 @@ public class UserService {
                             user.setNickname(firstNonEmpty(request.nickname(), emailName(email)));
                             user.setRole(ROLE_ADMIN.equals(request.role()) ? ROLE_ADMIN : ROLE_USER);
                             user.setStatus(STATUS_NORMAL);
+                            user.setInvitationCode(invitationService.generateInvitationCode());
                             user.setRegisteredAt(java.time.OffsetDateTime.now());
                             return userRepository.createUser(user)
                                     .flatMap(userId -> creditService.initializeAccount(userId))

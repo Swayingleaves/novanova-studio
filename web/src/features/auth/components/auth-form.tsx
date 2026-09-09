@@ -28,11 +28,13 @@ type AuthFormProps = {
     onSuccess?: () => void;
     /** OAuth2登录成功后的站内跳转目标 */
     redirectPath?: string;
+    /** 邀请链接携带的邀请码 */
+    invitationCode?: string;
 };
 
-export function AuthForm({ onSuccess, redirectPath }: AuthFormProps) {
+export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormProps) {
     const { message } = App.useApp();
-    const [activeKey, setActiveKey] = useState("login");
+    const [activeKey, setActiveKey] = useState(invitationCode ? "register" : "login");
     const [sendingCode, setSendingCode] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [codeCooldownSeconds, setCodeCooldownSeconds] = useState(0);
@@ -99,7 +101,7 @@ export function AuthForm({ onSuccess, redirectPath }: AuthFormProps) {
     const register = async (values: RegisterForm) => {
         setSubmitting(true);
         try {
-            const result = await registerByEmail(values);
+            const result = await registerByEmail({ ...values, invitationCode });
             setSession(result);
             message.success("注册成功");
             onSuccess?.();
@@ -130,7 +132,7 @@ export function AuthForm({ onSuccess, redirectPath }: AuthFormProps) {
                             <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<ArrowRight className="size-4" />} iconPlacement="end">
                                 登录
                             </Button>
-                            <OAuth2LoginOptions redirectPath={redirectPath} />
+                            <OAuth2LoginOptions redirectPath={redirectPath} invitationCode={invitationCode} />
                         </Form>
                     ),
                 },
@@ -161,6 +163,7 @@ export function AuthForm({ onSuccess, redirectPath }: AuthFormProps) {
                             <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<ArrowRight className="size-4" />} iconPlacement="end">
                                 注册并登录
                             </Button>
+                            <OAuth2LoginOptions redirectPath={redirectPath} invitationCode={invitationCode} />
                         </Form>
                     ),
                 },

@@ -43,6 +43,8 @@ public final class RowMappers {
         user.setRole(row.get("role", String.class));
         user.setStatus(row.get("status", Integer.class));
         user.setCreditBalance(row.get("credit_balance", Integer.class));
+        user.setInvitationCode(row.get("invitation_code", String.class));
+        user.setInvitedByUserId(row.get("invited_by_user_id", Long.class));
         user.setLastLoginAt(row.get("last_login_at", OffsetDateTime.class));
         user.setWelcomeReadAt(row.get("welcome_read_at", OffsetDateTime.class));
         user.setRegisteredAt(row.get("registered_at", OffsetDateTime.class));

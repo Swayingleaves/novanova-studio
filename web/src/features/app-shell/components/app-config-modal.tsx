@@ -38,11 +38,13 @@ import {
     deleteModelConfig,
     deleteObjectStorage as deleteServerObjectStorage,
     getCreditSettings,
+    getInvitationRewardSettings,
     refreshChannelModels as refreshServerChannelModels,
     setDefaultModel,
     setDefaultObjectStorage as setServerDefaultObjectStorage,
     updateChannel as updateServerChannel,
     updateCreditSettings,
+    updateInvitationRewardSettings,
     updateModelConfig,
     updateObjectStorage as updateServerObjectStorage,
     type ServerModelConfig,
@@ -165,6 +167,8 @@ export function AppConfigModal() {
     const [draftObjectStorages, setDraftObjectStorages] = useState<ObjectStorageConfig[]>([]);
     const [creditBaseline, setCreditBaseline] = useState(100);
     const [draftInitialCredits, setDraftInitialCredits] = useState(100);
+    const [invitationRewardBaseline, setInvitationRewardBaseline] = useState(0);
+    const [draftInvitationRewardCredits, setDraftInvitationRewardCredits] = useState(0);
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
     const initializedRef = useRef(false);
@@ -213,12 +217,14 @@ export function AppConfigModal() {
         initializedRef.current = true;
         setDraftsReady(false);
         let active = true;
-        void Promise.all([refreshModelConfiguration(), refreshObjectStorages(), getCreditSettings()])
-            .then(([, , creditSettings]) => {
+        void Promise.all([refreshModelConfiguration(), refreshObjectStorages(), getCreditSettings(), getInvitationRewardSettings()])
+            .then(([, , creditSettings, invitationRewardSettings]) => {
                 if (!active) return;
                 resetAllDrafts();
                 setCreditBaseline(creditSettings.initialCredits);
                 setDraftInitialCredits(creditSettings.initialCredits);
+                setInvitationRewardBaseline(invitationRewardSettings.invitationRewardCredits);
+                setDraftInvitationRewardCredits(invitationRewardSettings.invitationRewardCredits);
                 setDraftsReady(true);
             })
             .catch(() => {
@@ -241,7 +247,8 @@ export function AppConfigModal() {
     const modelConfigsDirty = !sameValue(draftModelConfigs, modelConfigBaseline);
     const objectStoragesDirty = !sameValue(draftObjectStorages, objectStorageBaseline);
     const creditsDirty = draftInitialCredits !== creditBaseline;
-    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty;
+    const invitationRewardDirty = draftInvitationRewardCredits !== invitationRewardBaseline;
+    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty;
     const isSaving = Boolean(savingTab);
 
     const updateDraftChannel = (id: string, patch: Partial<ModelChannel>) => {
@@ -500,6 +507,20 @@ export function AppConfigModal() {
             message.success("积分设置已保存");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "保存积分设置失败");
+        } finally {
+            setSavingTab("");
+        }
+    };
+
+    const saveInvitationRewardSettings = async () => {
+        setSavingTab("invitationReward");
+        try {
+            const settings = await updateInvitationRewardSettings(draftInvitationRewardCredits);
+            setInvitationRewardBaseline(settings.invitationRewardCredits);
+            setDraftInvitationRewardCredits(settings.invitationRewardCredits);
+            message.success("邀请奖励设置已保存");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "保存邀请奖励设置失败");
         } finally {
             setSavingTab("");
         }
@@ -866,6 +887,40 @@ export function AppConfigModal() {
                                                 <InputNumber min={0} precision={0} value={draftInitialCredits} disabled={isSaving} className="w-40" onChange={(value) => setDraftInitialCredits(Math.max(0, Number(value) || 0))} />
                                             </Form.Item>
                                             <Button type="primary" disabled={!creditsDirty || isSaving} loading={savingTab === "credits"} onClick={() => void saveCreditSettings()}>
+                                                保存
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </Form>
+                            ),
+                        },
+                        {
+                            key: "invitationReward",
+                            label: "邀请奖励",
+                            children: (
+                                <Form layout="vertical" requiredMark={false} className="max-w-xl">
+                                    <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                        <div className="text-sm font-semibold">邀请注册奖励积分</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">
+                                            新用户通过有效邀请链接完成邮箱注册或首次第三方登录后，奖励发放给邀请人。设置为 0 表示暂停发放；只影响之后注册的用户，不追溯历史邀请。
+                                        </div>
+                                        <div className="mt-5 flex flex-wrap items-end gap-3">
+                                            <Form.Item label="每名新用户奖励积分" className="mb-0">
+                                                <InputNumber
+                                                    min={0}
+                                                    precision={0}
+                                                    value={draftInvitationRewardCredits}
+                                                    disabled={isSaving}
+                                                    className="w-48"
+                                                    onChange={(value) => setDraftInvitationRewardCredits(Math.max(0, Number(value) || 0))}
+                                                />
+                                            </Form.Item>
+                                            <Button
+                                                type="primary"
+                                                disabled={!invitationRewardDirty || isSaving}
+                                                loading={savingTab === "invitationReward"}
+                                                onClick={() => void saveInvitationRewardSettings()}
+                                            >
                                                 保存
                                             </Button>
                                         </div>

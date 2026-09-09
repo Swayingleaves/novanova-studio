@@ -18,6 +18,7 @@ export const CREDIT_SOURCE_OPTIONS: { label: string; value: "all" | ServerCredit
     { label: "管理员调整", value: "admin_adjustment" },
     { label: "任务退款", value: "task_refund" },
     { label: "初始发放", value: "initial_grant" },
+    { label: "邀请奖励", value: "invitation_reward" },
 ];
 
 type ChartDataItem = {
@@ -47,6 +48,7 @@ export function creditTransactionTypeLabel(transactionType: ServerCreditTransact
     if (transactionType === "admin_adjustment") return "管理员调整";
     if (transactionType === "card_redeem") return "卡密兑换";
     if (transactionType === "initial_grant") return "初始发放";
+    if (transactionType === "invitation_reward") return "邀请奖励";
     return "未知类型";
 }
 

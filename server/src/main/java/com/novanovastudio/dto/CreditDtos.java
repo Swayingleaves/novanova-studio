@@ -153,7 +153,7 @@ public final class CreditDtos {
      * 用户统一积分流水明细项（含增加与消耗）。
      *
      * @param id Long 流水ID
-     * @param transactionType String 流水类型：task_charge/task_refund/admin_adjustment/card_redeem/initial_grant
+     * @param transactionType String 流水类型：task_charge/task_refund/admin_adjustment/card_redeem/initial_grant/invitation_reward
      * @param direction String 变动方向：add 增加 / spend 消耗，服务端按 change_amount 符号派生
      * @param generationType String 生成任务类型：image/video，非任务流水为 null
      * @param model String 生成任务模型展示名，非任务流水为 null
@@ -161,6 +161,7 @@ public final class CreditDtos {
      * @param changeAmount Long 有符号积分变动：正数增加、负数消耗
      * @param reason String 变动原因
      * @param balanceAfter Long 变动后余额快照
+     * @param invitedUserId Long 邀请奖励关联的被邀请用户ID
      * @param createdAt String 变动时间
      */
     public record UserCreditTransactionItem(Long id,
@@ -172,6 +173,7 @@ public final class CreditDtos {
                                             Long changeAmount,
                                             String reason,
                                             Long balanceAfter,
+                                            Long invitedUserId,
                                             String createdAt) {
     }
 

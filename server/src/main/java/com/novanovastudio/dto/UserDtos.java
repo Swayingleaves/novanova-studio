@@ -34,11 +34,13 @@ public final class UserDtos {
      * @param code String 验证码
      * @param password String 密码
      * @param nickname String 昵称
+     * @param invitationCode String 可选邀请码
      */
     public record RegisterRequest(@NotBlank(message = "邮箱不能为空") String email,
                                   @NotBlank(message = "验证码不能为空") String code,
                                   @NotBlank(message = "密码不能为空") String password,
-                                  String nickname) {
+                                  String nickname,
+                                  @Size(max = 16, message = "邀请码不能超过16个字符") String invitationCode) {
     }
 
     /**

@@ -1,5 +1,31 @@
 # 后端数据库说明（已实现）
 
+## 邀请注册奖励
+
+### `users`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `invitation_code` | `VARCHAR(16)` | 用户唯一邀请码，创建用户时由服务端安全随机生成，长期有效并建立唯一约束。 |
+| `invited_by_user_id` | `BIGINT` | 邀请人用户 ID，关联 `users.id`；无邀请注册时为空。 |
+
+### `platform_credit_settings`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `invitation_reward_credits` | `INTEGER` | 每名受邀请新用户注册后发给邀请人的积分，默认 `0` 且不得小于 `0`。 |
+
+### `user_credit_transactions`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `transaction_type` | `VARCHAR(30)` | 新增 `invitation_reward` 邀请奖励类型。 |
+| `invited_user_id` | `BIGINT` | 邀请奖励关联的被邀请新用户 ID；通过部分唯一索引保证每名新用户最多产生一条邀请奖励流水。 |
+
+配置为 `0` 时仅保留 `users.invited_by_user_id` 邀请关系，不修改余额，也不创建零金额积分流水。
+
+---
+
 ## 1、设计目标
 
 - 目标：支持图像、视频模型按全站同一模型配置同时执行请求数量，并保证超额任务顺序排队。

@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, DatePicker, Empty, Pagination, Segmented, Select, Skeleton, Table, type TableProps } from "antd";
-import { Coins, Gift, ImageIcon, RotateCcw, UserCog, Video, Zap } from "lucide-react";
+import { Coins, Gift, ImageIcon, RotateCcw, UserCog, UserPlus, Video, Zap } from "lucide-react";
 
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import {
@@ -48,6 +48,7 @@ function transactionTypeIcon(transaction: ServerUserCreditTransaction) {
     if (transaction.transactionType === "task_refund") return RotateCcw;
     if (transaction.transactionType === "card_redeem") return Coins;
     if (transaction.transactionType === "admin_adjustment") return UserCog;
+    if (transaction.transactionType === "invitation_reward") return UserPlus;
     return Gift;
 }
 

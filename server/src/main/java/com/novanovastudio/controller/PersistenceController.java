@@ -6,6 +6,7 @@ import com.novanovastudio.common.ApiResponse;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.CreditDtos;
+import com.novanovastudio.dto.InvitationDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.security.RequireRole;
@@ -64,6 +65,30 @@ public class PersistenceController {
     @RequireRole("admin")
     public Mono<ApiResponse<CreditDtos.CreditSettingsResponse>> updateCreditSettings(@Valid @RequestBody CreditDtos.UpdateCreditSettingsRequest request) {
         return creditService.updateSettings(request).map(ApiResponse::ok);
+    }
+
+    /**
+     * 查询邀请奖励设置。
+     *
+     * @return 邀请奖励设置
+     */
+    @GetMapping("/config/invitation/getInvitationRewardSettings")
+    @RequireRole("admin")
+    public Mono<ApiResponse<InvitationDtos.InvitationRewardSettingsResponse>> getInvitationRewardSettings() {
+        return creditService.getInvitationRewardSettings().map(ApiResponse::ok);
+    }
+
+    /**
+     * 独立更新邀请奖励设置。
+     *
+     * @param request 邀请奖励设置请求
+     * @return 保存后的邀请奖励设置
+     */
+    @PostMapping("/config/invitation/updateInvitationRewardSettings")
+    @RequireRole("admin")
+    public Mono<ApiResponse<InvitationDtos.InvitationRewardSettingsResponse>> updateInvitationRewardSettings(
+            @Valid @RequestBody InvitationDtos.UpdateInvitationRewardSettingsRequest request) {
+        return creditService.updateInvitationRewardSettings(request).map(ApiResponse::ok);
     }
 
     /**

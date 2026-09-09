@@ -74,8 +74,8 @@ public class UserRepository {
     public Mono<Long> createUser(User user) {
         // 插入用户并通过RETURNING直接取回数据库生成的主键ID。
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                INSERT INTO users(username, password, email, nickname, avatar, role, status, registered_at)
-                VALUES (:username, :password, :email, :nickname, :avatar, :role, :status, :registeredAt)
+                INSERT INTO users(username, password, email, nickname, avatar, role, status, invitation_code, invited_by_user_id, registered_at)
+                VALUES (:username, :password, :email, :nickname, :avatar, :role, :status, :invitationCode, :invitedByUserId, :registeredAt)
                 RETURNING id
                 """)
                 .bind("username", user.getUsername())
@@ -85,6 +85,8 @@ public class UserRepository {
         spec = R2dbcBindings.bindNullable(spec, "avatar", user.getAvatar(), String.class)
                 .bind("role", user.getRole())
                 .bind("status", user.getStatus())
+                .bind("invitationCode", user.getInvitationCode());
+        spec = R2dbcBindings.bindNullable(spec, "invitedByUserId", user.getInvitedByUserId(), Long.class)
                 .bind("registeredAt", user.getRegisteredAt());
         return spec
                 .map((row, metadata) -> row.get("id", Long.class))
@@ -100,8 +102,8 @@ public class UserRepository {
     public Mono<Long> createInitialAdminIfAbsent(User user) {
         // 利用唯一约束原子创建，账号已存在时绝不更新其密码、角色或状态。
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                INSERT INTO users(username, password, email, nickname, avatar, role, status, registered_at)
-                VALUES (:username, :password, :email, :nickname, :avatar, :role, :status, :registeredAt)
+                INSERT INTO users(username, password, email, nickname, avatar, role, status, invitation_code, invited_by_user_id, registered_at)
+                VALUES (:username, :password, :email, :nickname, :avatar, :role, :status, :invitationCode, NULL, :registeredAt)
                 ON CONFLICT DO NOTHING
                 RETURNING id
                 """)
@@ -112,6 +114,7 @@ public class UserRepository {
         spec = R2dbcBindings.bindNullable(spec, "avatar", user.getAvatar(), String.class)
                 .bind("role", user.getRole())
                 .bind("status", user.getStatus())
+                .bind("invitationCode", user.getInvitationCode())
                 .bind("registeredAt", user.getRegisteredAt());
         return spec.map((row, metadata) -> row.get("id", Long.class)).one();
     }

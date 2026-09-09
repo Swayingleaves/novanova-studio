@@ -11,6 +11,8 @@ const OAUTH2_ERROR_MESSAGES: Record<string, string> = {
     providerIdentityUnavailable: "无法读取第三方账号身份。",
     providerProfileInvalid: "第三方账号资料超过系统字段限制。",
     providerUnavailable: "当前第三方登录渠道未启用。",
+    invitationContextExpired: "邀请授权信息已过期，请从邀请链接重新发起登录。",
+    invitationContextInvalid: "邀请授权信息无效，请从邀请链接重新发起登录。",
     authorizationFailed: "第三方平台授权失败，请重新尝试。",
 };
 

@@ -18,6 +18,8 @@ import org.springframework.security.oauth2.client.web.server.DefaultServerOAuth2
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.context.NoOpServerSecurityContextRepository;
 import org.springframework.security.web.server.util.matcher.PathPatternParserServerWebExchangeMatcher;
+import org.springframework.web.server.session.CookieWebSessionIdResolver;
+import org.springframework.web.server.session.WebSessionIdResolver;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.reactive.CorsConfigurationSource;
 import org.springframework.web.cors.reactive.CorsWebFilter;
@@ -31,6 +33,19 @@ import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
  */
 @Configuration
 public class SecurityConfiguration {
+
+    /**
+     * 创建仅限OAuth2接口路径使用的HttpOnly会话Cookie解析器。
+     *
+     * @return WebSessionIdResolver OAuth2会话标识解析器
+     */
+    @Bean
+    public WebSessionIdResolver webSessionIdResolver() {
+        CookieWebSessionIdResolver resolver = new CookieWebSessionIdResolver();
+        resolver.setCookieName("NOVANOVA_OAUTH2_SESSION");
+        resolver.addCookieInitializer(builder -> builder.httpOnly(true).sameSite("Lax").path("/api/v1/auth/oauth"));
+        return resolver;
+    }
 
     /**
      * 创建响应式安全过滤器链
@@ -125,7 +140,7 @@ public class SecurityConfiguration {
     public CorsConfigurationSource corsConfigurationSource(NovanovaProperties properties) {
         // 从应用配置读取允许来源，并配置前端访问服务端所需的HTTP方法与响应头。
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowCredentials(false);
+        configuration.setAllowCredentials(true);
         configuration.setAllowedOrigins(validAllowedOrigins(properties));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));

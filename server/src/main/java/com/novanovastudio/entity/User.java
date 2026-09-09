@@ -39,6 +39,12 @@ public class User {
     /** 可用积分 */
     private Integer creditBalance;
 
+    /** 用户唯一邀请码 */
+    private String invitationCode;
+
+    /** 邀请人用户ID */
+    private Long invitedByUserId;
+
     /** 最后登录时间 */
     private OffsetDateTime lastLoginAt;
 

@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, App, Avatar, Button, Descriptions, Form, Input, Modal, Skeleton } from "antd";
-import { Camera, LockKeyhole, LogIn, Save } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Camera, Copy, LockKeyhole, LogIn, Save } from "lucide-react";
 
-import { changeCurrentUserPassword, getCurrentUserInfo, updateCurrentUserProfile } from "@/services/api/server";
+import { changeCurrentUserPassword, getCurrentUserInfo, getInvitationInfo, updateCurrentUserProfile } from "@/services/api/server";
 import { uploadMediaFile } from "@/features/storage/services/file-storage";
 import { useUserStore, type ServerUserProfile } from "@/features/auth/stores/use-user-store";
+import { useCopyText } from "@/shared/hooks/use-copy-text";
 
 type ProfileFormValues = Pick<ServerUserProfile, "username" | "nickname" | "avatar">;
 type PasswordFormValues = { currentPassword: string; newPassword: string; confirmPassword: string };
@@ -211,6 +213,7 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
                         修改密码
                     </Button>
                 </div>
+                <InvitationLinkPanel />
             </section>
             <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
             <input
@@ -223,6 +226,42 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
                     event.target.value = "";
                 }}
             />
+        </div>
+    );
+}
+
+/**
+ * 展示当前用户长期有效的专属邀请链接。
+ *
+ * @return 邀请链接面板
+ */
+function InvitationLinkPanel() {
+    const copyText = useCopyText();
+    const invitationQuery = useQuery({ queryKey: ["invitation-info"], queryFn: getInvitationInfo });
+    const invitationLink = invitationQuery.data && typeof window !== "undefined"
+        ? `${window.location.origin}/auth?invitationCode=${encodeURIComponent(invitationQuery.data.invitationCode)}`
+        : "";
+
+    return (
+        <div className="mt-5 border-t border-[var(--studio-line)] pt-5">
+            <h2 className="studio-title text-base font-medium">专属邀请链接</h2>
+            <p className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">好友通过此链接完成注册后，你可获得系统当前配置的邀请奖励。</p>
+            {invitationQuery.isLoading ? <Skeleton.Input active block className="mt-3" /> : null}
+            {invitationQuery.isError ? (
+                <Alert
+                    className="mt-3"
+                    type="error"
+                    showIcon
+                    message="邀请链接加载失败"
+                    action={<Button size="small" onClick={() => void invitationQuery.refetch()}>重试</Button>}
+                />
+            ) : null}
+            {invitationLink ? (
+                <div className="mt-3 space-y-2">
+                    <Input readOnly value={invitationLink} aria-label="专属邀请链接" />
+                    <Button block icon={<Copy className="size-4" aria-hidden="true" />} onClick={() => copyText(invitationLink, "邀请链接已复制")}>复制邀请链接</Button>
+                </div>
+            ) : null}
         </div>
     );
 }

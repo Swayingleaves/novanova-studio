@@ -38,6 +38,9 @@ public class ThirdPartyAuthenticationService {
     /** 积分服务 */
     private final CreditService creditService;
 
+    /** 邀请服务 */
+    private final InvitationService invitationService;
+
     /** 响应式事务操作器 */
     private final TransactionalOperator transactionalOperator;
 
@@ -49,6 +52,18 @@ public class ThirdPartyAuthenticationService {
      * @return Mono<User> 已绑定或新创建的本地用户
      */
     public Mono<User> authenticate(String providerId, OidcUser oidcUser) {
+        return authenticate(providerId, oidcUser, null);
+    }
+
+    /**
+     * 校验第三方身份并解析本地用户，可在首次创建本地用户时记录邀请关系。
+     *
+     * @param providerId 第三方认证渠道标识
+     * @param oidcUser OpenID Connect用户
+     * @param inviterUserId 可选邀请人用户ID
+     * @return 已绑定或新创建的本地用户
+     */
+    public Mono<User> authenticate(String providerId, OidcUser oidcUser, Long inviterUserId) {
         return Mono.defer(() -> {
             ThirdPartyOAuth2Provider provider = providerRegistry.requireEnabled(providerId);
             ThirdPartyUserIdentity identity = provider.resolveIdentity(oidcUser);
@@ -56,7 +71,7 @@ public class ThirdPartyAuthenticationService {
                     .flatMap(binding -> identityRepository.updateBindingProfile(binding.getId(), identity)
                             .then(userRepository.findById(binding.getUserId())
                                     .switchIfEmpty(Mono.error(new OAuth2LoginException("accountUnavailable", "第三方身份绑定的本地用户不存在")))))
-                    .switchIfEmpty(Mono.defer(() -> createOrBindUser(identity)))
+                    .switchIfEmpty(Mono.defer(() -> createOrBindUser(identity, inviterUserId)))
                     .flatMap(this::validateUserStatus)
                     .doOnNext(user -> log.info("第三方账号认证成功: provider={}, userId={}", identity.providerId(), user.getId()));
         });
@@ -66,12 +81,18 @@ public class ThirdPartyAuthenticationService {
      * 按可信邮箱创建或绑定本地用户。
      *
      * @param identity ThirdPartyUserIdentity 第三方用户身份
+     * @param inviterUserId 可选邀请人用户ID
      * @return Mono<User> 本地用户
      */
-    private Mono<User> createOrBindUser(ThirdPartyUserIdentity identity) {
+    private Mono<User> createOrBindUser(ThirdPartyUserIdentity identity, Long inviterUserId) {
         // 用户解析和身份写入必须处于同一事务，避免只创建用户但未建立身份绑定。
-        return identityRepository.resolveUserByTrustedEmail(identity)
-                .flatMap(resolvedUser -> (resolvedUser.created() ? creditService.initializeAccount(resolvedUser.user().getId()) : Mono.<Void>empty())
+        return identityRepository.resolveUserByTrustedEmail(identity, invitationService.generateInvitationCode(), inviterUserId)
+                .flatMap(resolvedUser -> (resolvedUser.created()
+                        ? creditService.initializeAccount(resolvedUser.user().getId())
+                                .then(inviterUserId == null
+                                        ? Mono.empty()
+                                        : creditService.grantInvitationReward(inviterUserId, resolvedUser.user().getId()))
+                        : Mono.<Void>empty())
                         .thenReturn(resolvedUser.user()))
                 .flatMap(candidateUser -> identityRepository.upsertBinding(candidateUser.getId(), identity)
                         .flatMap(authoritativeUserId -> authoritativeUserId.equals(candidateUser.getId())

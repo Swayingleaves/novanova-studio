@@ -16,6 +16,7 @@ import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.CreditDtos;
 import com.novanovastudio.dto.UserDtos;
 import com.novanovastudio.entity.User;
+import com.novanovastudio.entity.EmailVerificationCode;
 import com.novanovastudio.repository.UserRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.PasswordLoginLockService;
@@ -44,6 +45,58 @@ import java.util.stream.Stream;
  * @date     2026-07-16 00:00
  */
 class UserServiceTest {
+
+    /**
+     * 有效邀请码注册应记录邀请关系并在同一注册流程发放邀请奖励。
+     */
+    @Test
+    @DisplayName("有效邀请码完成邮箱注册并发放邀请奖励")
+    void shouldRegisterWithInvitationReward() {
+        TestContext context = testContext();
+        EmailVerificationCode emailCode = new EmailVerificationCode();
+        emailCode.setId(3L);
+        emailCode.setCodeHash("code-hash");
+        User createdUser = normalUser(8L);
+        createdUser.setCreditBalance(100);
+        when(context.invitationService.resolveInviterUserId("INVITATIONCODE01")).thenReturn(Mono.just(5L));
+        when(context.userRepository.findByEmail("new@example.com")).thenReturn(Mono.empty());
+        when(context.userRepository.latestValidEmailCode("new@example.com", "register")).thenReturn(Mono.just(emailCode));
+        when(context.passwordEncoder.matches("123456", "code-hash")).thenReturn(true);
+        when(context.passwordEncoder.encode("password123")).thenReturn("password-hash");
+        when(context.invitationService.generateInvitationCode()).thenReturn("NEWINVITATION001");
+        when(context.userRepository.registerUserWithEmailCode(argThat(user -> user.getInvitedByUserId().equals(5L)
+                && "NEWINVITATION001".equals(user.getInvitationCode())), eq(3L))).thenReturn(Mono.just(8L));
+        when(context.creditService.initializeAccount(8L)).thenReturn(Mono.empty());
+        when(context.creditService.grantInvitationReward(5L, 8L)).thenReturn(Mono.empty());
+        when(context.userRepository.findById(8L)).thenReturn(Mono.just(createdUser));
+        when(context.tokenService.sign(8L, UserService.ROLE_USER))
+                .thenReturn(new TokenService.SignedToken("token", OffsetDateTime.now().plusHours(1)));
+
+        StepVerifier.create(context.service.register(new UserDtos.RegisterRequest(
+                        "new@example.com", "123456", "password123", "新用户", "INVITATIONCODE01")))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        verify(context.creditService).grantInvitationReward(5L, 8L);
+    }
+
+    /**
+     * 无效邀请码应在读取验证码和创建用户前阻止邮箱注册。
+     */
+    @Test
+    @DisplayName("无效邀请码阻止邮箱注册")
+    void shouldRejectInvalidInvitationCodeBeforeRegistration() {
+        TestContext context = testContext();
+        when(context.invitationService.resolveInviterUserId("INVALIDCODE"))
+                .thenReturn(Mono.error(new BusinessException(com.novanovastudio.common.ErrorCode.BUSINESS_ERROR, "邀请码无效")));
+
+        StepVerifier.create(context.service.register(new UserDtos.RegisterRequest(
+                        "new@example.com", "123456", "password123", "新用户", "INVALIDCODE")))
+                .expectError(BusinessException.class)
+                .verify();
+
+        verify(context.userRepository, never()).findByEmail(any());
+    }
 
     /**
      * 验证用户资料准确反映欢迎引导已读状态。
@@ -342,10 +395,13 @@ class UserServiceTest {
         NovanovaProperties properties = mock(NovanovaProperties.class);
         JavaMailSender mailSender = mock(JavaMailSender.class);
         CreditService creditService = mock(CreditService.class);
+        InvitationService invitationService = mock(InvitationService.class);
         AiTaskEventPublisher eventPublisher = mock(AiTaskEventPublisher.class);
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
-        UserService service = new UserService(userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, properties, mailSender, creditService, eventPublisher, transactionalOperator);
-        return new TestContext(service, userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, creditService, eventPublisher);
+        when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        UserService service = new UserService(userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, properties, mailSender, creditService, invitationService, eventPublisher, transactionalOperator);
+        return new TestContext(service, userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, creditService, invitationService, eventPublisher);
     }
 
     /**
@@ -379,6 +435,7 @@ class UserServiceTest {
                                CurrentUserProvider currentUserProvider,
                                PasswordLoginLockService passwordLoginLockService,
                                CreditService creditService,
+                               InvitationService invitationService,
                                AiTaskEventPublisher eventPublisher) {
     }
 }
