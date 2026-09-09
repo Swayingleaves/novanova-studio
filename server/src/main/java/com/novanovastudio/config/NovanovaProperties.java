@@ -1,6 +1,9 @@
 package com.novanovastudio.config;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.validation.annotation.Validated;
 
 /**
  * @title        NovanovaProperties.java
@@ -8,6 +11,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @description  Novanova服务端配置属性
  * @createTime   2026-06-24 10:42:00
  */
+@Validated
 @ConfigurationProperties(prefix = "novanova")
 public class NovanovaProperties {
 
@@ -28,6 +32,10 @@ public class NovanovaProperties {
 
     /** ai */
     private Ai ai = new Ai();
+
+    /** 对象存储配置 */
+    @Valid
+    private ObjectStorage objectStorage = new ObjectStorage();
 
     /**
      * 获取应用配置
@@ -135,6 +143,24 @@ public class NovanovaProperties {
      */
     public void setAi(Ai ai) {
         this.ai = ai;
+    }
+
+    /**
+     * 获取对象存储配置。
+     *
+     * @return ObjectStorage 对象存储配置
+     */
+    public ObjectStorage getObjectStorage() {
+        return objectStorage;
+    }
+
+    /**
+     * 设置对象存储配置。
+     *
+     * @param objectStorage ObjectStorage 对象存储配置
+     */
+    public void setObjectStorage(ObjectStorage objectStorage) {
+        this.objectStorage = objectStorage;
     }
 
     /**
@@ -553,6 +579,84 @@ public class NovanovaProperties {
              */
             public void setRedirectUri(String redirectUri) {
                 this.redirectUri = redirectUri;
+            }
+        }
+    }
+
+    /**
+     * 对象存储配置。
+     */
+    public static class ObjectStorage {
+
+        /** 腾讯云COS配置 */
+        @Valid
+        private TencentCos tencentCos = new TencentCos();
+
+        /**
+         * 获取腾讯云COS配置。
+         *
+         * @return TencentCos 腾讯云COS配置
+         */
+        public TencentCos getTencentCos() {
+            return tencentCos;
+        }
+
+        /**
+         * 设置腾讯云COS配置。
+         *
+         * @param tencentCos TencentCos 腾讯云COS配置
+         */
+        public void setTencentCos(TencentCos tencentCos) {
+            this.tencentCos = tencentCos;
+        }
+
+        /**
+         * 腾讯云COS客户端配置。
+         */
+        public static class TencentCos {
+
+            /** 单个请求失败后的最大额外重试次数 */
+            @Min(value = 0, message = "腾讯云COS最大重试次数不能小于0")
+            private int maxErrorRetry = 3;
+
+            /** 单次请求读取超时时间，单位为毫秒 */
+            @Min(value = 1, message = "腾讯云COS读取超时时间必须大于0")
+            private int socketTimeoutMilliseconds = 120_000;
+
+            /**
+             * 获取单个请求失败后的最大额外重试次数。
+             *
+             * @return int 最大额外重试次数
+             */
+            public int getMaxErrorRetry() {
+                return maxErrorRetry;
+            }
+
+            /**
+             * 设置单个请求失败后的最大额外重试次数。
+             *
+             * @param maxErrorRetry int 最大额外重试次数
+             */
+            public void setMaxErrorRetry(int maxErrorRetry) {
+                this.maxErrorRetry = maxErrorRetry;
+            }
+
+            /**
+             * 获取单次请求读取超时时间。
+             *
+             * @return int 读取超时时间，单位为毫秒
+             */
+            public int getSocketTimeoutMilliseconds() {
+                return socketTimeoutMilliseconds;
+            }
+
+            /**
+             * 设置单次请求读取超时时间。
+             *
+             * @param socketTimeoutMilliseconds int 读取超时时间，单位为毫秒
+             */
+            public void setSocketTimeoutMilliseconds(int socketTimeoutMilliseconds) {
+                this.socketTimeoutMilliseconds = socketTimeoutMilliseconds;
             }
         }
     }

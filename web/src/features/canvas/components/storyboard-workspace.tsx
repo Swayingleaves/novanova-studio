@@ -489,7 +489,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                     <Tabs
                         activeKey={activeAssetKind}
                         destroyOnHidden
-                        className="flex min-h-0 flex-1 flex-col [&_.ant-tabs-content]:h-full [&_.ant-tabs-content-holder]:min-h-0 [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-tabpane]:h-full [&_.ant-tabs-tabpane]:min-h-0"
+                        className="flex min-h-0 flex-1 flex-col [&_.ant-tabs-body-holder]:min-h-0 [&_.ant-tabs-body-holder]:min-w-0 [&_.ant-tabs-body-holder]:flex-1 [&_.ant-tabs-body]:h-full [&_.ant-tabs-content]:h-full [&_.ant-tabs-tabpane]:h-full [&_.ant-tabs-tabpane]:min-h-0"
                         onChange={(key) => setActiveAssetKind(key as CanvasStoryboardAssetKind)}
                         items={ASSET_KINDS.map((kind) => {
                             const kindAssets = storyboardAssets.filter((asset) => asset.kind === kind);

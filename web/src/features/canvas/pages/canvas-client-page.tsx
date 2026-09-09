@@ -184,6 +184,7 @@ const NODE_STATUS_SUCCESS = "success" as const;
 const NODE_STATUS_ERROR = "error" as const;
 /** 引用生成节点与源节点之间的统一画布间距。 */
 const CONNECTED_NODE_GAP = 144;
+const REFERENCE_IMAGE_UPLOAD_MESSAGE_KEY = "canvas-reference-image-upload";
 
 export default function CanvasPage() {
     const [mounted, setMounted] = useState(false);
@@ -525,6 +526,12 @@ function CanvasWorkspacePage() {
             if (!missing.length) return referenceImages;
             const confirmed = await confirmUploadReferenceImages(missing.length);
             if (!confirmed) return null;
+            message.open({
+                key: REFERENCE_IMAGE_UPLOAD_MESSAGE_KEY,
+                type: "loading",
+                content: `正在将 ${missing.length} 张参考图上传到云储存，请稍候...`,
+                duration: 0,
+            });
             try {
                 const nextReferenceImages = await uploadMissingReferenceImagesToObjectStorage(referenceImages);
                 const objectStorageById = new Map(nextReferenceImages.map((image) => [image.id, image.objectStorage]));
@@ -534,10 +541,14 @@ function CanvasWorkspacePage() {
                         return objectStorageFile?.url ? applyCanvasNodeAttributes(node, { objectStorage: objectStorageFile }) : node;
                     }),
                 );
-                message.success("参考图已上传到云储存");
+                message.success({ key: REFERENCE_IMAGE_UPLOAD_MESSAGE_KEY, content: "参考图已上传到云储存", duration: 3 });
                 return nextReferenceImages;
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "参考图上传到云储存失败");
+                message.error({
+                    key: REFERENCE_IMAGE_UPLOAD_MESSAGE_KEY,
+                    content: error instanceof Error ? error.message : "参考图上传到云储存失败",
+                    duration: 4,
+                });
                 return null;
             }
         },

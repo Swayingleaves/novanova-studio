@@ -34,16 +34,6 @@ import reactor.core.publisher.Mono;
 public class AgnesProviderAdapter implements AiProviderAdapter {
 
     /**
-     * Agnes 视频关键帧允许的最大参考图片数量
-     */
-    private static final int AGNES_VIDEO_KEYFRAME_MAX_REFERENCE_IMAGE_COUNT = 3;
-
-    /**
-     * Agnes 视频参考图片超过关键帧上限时的错误信息
-     */
-    private static final String AGNES_VIDEO_REFERENCE_IMAGE_LIMIT_MESSAGE = "Agnes 视频最多支持3张参考图片，请调整镜头资产关联或切换视频模型";
-
-    /**
      * AI HTTP客户端
      */
     private final AiHttpClient aiHttpClient;
@@ -248,9 +238,6 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "Agnes 调用格式暂不支持参考视频，请移除参考素材"));
         }
         var imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
-        if (imageReferences.size() > AGNES_VIDEO_KEYFRAME_MAX_REFERENCE_IMAGE_COUNT) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, AGNES_VIDEO_REFERENCE_IMAGE_LIMIT_MESSAGE));
-        }
         return Flux.fromIterable(imageReferences)
                 .concatMap(reference -> mediaSupport.resolveReferenceUrl(context.task().getUserId(), reference))
                 .collectList()
@@ -310,12 +297,8 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
      *
      * @param payload Map<String, Object> Agnes 视频请求载荷
      * @param referenceUrls List<String> 保持关联顺序的参考图片公网地址
-     * @throws BusinessException 当参考图片超过 Agnes 关键帧上限时抛出
      */
     private static void applyAgnesVideoReferenceImages(Map<String, Object> payload, List<String> referenceUrls) {
-        if (referenceUrls.size() > AGNES_VIDEO_KEYFRAME_MAX_REFERENCE_IMAGE_COUNT) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, AGNES_VIDEO_REFERENCE_IMAGE_LIMIT_MESSAGE);
-        }
         if (referenceUrls.isEmpty()) {
             return;
         }
