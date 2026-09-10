@@ -1,9 +1,9 @@
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/features/generation/lib/seedance-video";
 import type { CanvasConnection, CanvasNode } from "../types";
-import { isImageNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
+import { isAudioNode, isImageNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
 
-export type CanvasResourceKind = "image" | "video" | "text";
+export type CanvasResourceKind = "image" | "video" | "text" | "audio";
 
 export type CanvasResourceReference = {
     id: string;
@@ -11,6 +11,7 @@ export type CanvasResourceReference = {
     kind: CanvasResourceKind;
     label: string;
     title: string;
+    durationMs?: number;
     previewUrl?: string;
     text?: string;
     active: boolean;
@@ -44,7 +45,7 @@ export function buildNodeGenerationReferences(node: CanvasNode): CanvasResourceR
         ...node.generation.references.map((reference) => ({ reference, objectStorage: findObjectStorage(node.generation.referenceObjectStorages, reference) })),
         ...(isVideoNode(node) ? (node.generation.videoReferences || []).map((reference) => ({ reference, objectStorage: findObjectStorage(node.generation.videoReferenceObjectStorages || [], reference), forcedKind: "video" as const })) : []),
     ];
-    return persistedReferences.flatMap(({ reference, objectStorage, forcedKind }, index) => {
+    const mediaReferences: CanvasResourceReference[] = persistedReferences.flatMap(({ reference, objectStorage, forcedKind }, index) => {
         const previewUrl = objectStorage?.url || (reference.startsWith("http") || reference.startsWith("data:") ? reference : "");
         if (!previewUrl) return [];
 
@@ -63,6 +64,7 @@ export function buildNodeGenerationReferences(node: CanvasNode): CanvasResourceR
             },
         ];
     });
+    return [...mediaReferences, ...(isVideoNode(node) ? (node.generation.audioReferences || []).map((audio, index) => ({ id: audio.id, nodeId: `${node.id}-audio-reference-${index}`, kind: "audio" as const, label: `音频${index + 1}`, title: audio.name, previewUrl: audio.url, durationMs: audio.durationMs, active: true })) : [])];
 }
 
 function findObjectStorage(files: Array<{ url: string; key: string; mimeType: string }>, reference: string) {
@@ -79,6 +81,7 @@ export function getGenerationResourceNodes(nodeId: string, nodes: CanvasNode[], 
 }
 
 export function labelForKind(kind: CanvasResourceKind, index: number) {
+    if (kind === "audio") return `音频${index + 1}`;
     if (kind === "image") return imageReferenceLabel(index);
     if (kind === "video") return seedanceReferenceLabel("video", index);
     return `文本${index + 1}`;
@@ -105,12 +108,18 @@ function readDirectResourceInputs(nodeId: string, graph: GraphIndex): CanvasNode
 }
 
 function mapReferences(nodes: CanvasNode[], active: boolean | ((node: CanvasNode) => boolean) = false): CanvasResourceReference[] {
-    const countByKind: Record<CanvasResourceKind, number> = { image: 0, video: 0, text: 0 };
+    const countByKind: Record<CanvasResourceKind, number> = { image: 0, video: 0, text: 0, audio: 0 };
     const references: CanvasResourceReference[] = [];
+    const audioKeys = new Set<string>();
 
     uniqueNodes(nodes).forEach((node) => {
         const kind = resolveResourceKind(node);
         if (!kind) return;
+        if (isAudioNode(node)) {
+            const keys = [node.content.storageKey, node.content.source].filter((key): key is string => Boolean(key));
+            if (keys.some((key) => audioKeys.has(key))) return;
+            keys.forEach((key) => audioKeys.add(key));
+        }
 
         const label = labelForKind(kind, countByKind[kind]);
         countByKind[kind] += 1;
@@ -121,6 +130,7 @@ function mapReferences(nodes: CanvasNode[], active: boolean | ((node: CanvasNode
             label,
             title: node.title || label,
             previewUrl: readPreviewUrl(node),
+            durationMs: isAudioNode(node) ? node.content.durationMilliseconds : undefined,
             text: kind === "text" ? readTextContent(node) : undefined,
             active: typeof active === "function" ? active(node) : active,
         });
@@ -152,6 +162,7 @@ function appendLinkedNode(targetMap: Map<string, CanvasNode[]>, key: string, nod
 }
 
 function resolveResourceKind(node: CanvasNode): CanvasResourceKind | null {
+    if (isAudioNode(node) && node.content.source) return "audio";
     if (isImageNode(node) && node.content.source) return "image";
     if (isVideoNode(node) && node.content.source) return "video";
     if (isTextNode(node) && readTextContent(node)) return "text";
@@ -159,7 +170,7 @@ function resolveResourceKind(node: CanvasNode): CanvasResourceKind | null {
 }
 
 function readPreviewUrl(node: CanvasNode): string | undefined {
-    return isImageNode(node) || isVideoNode(node) ? node.content.source : undefined;
+    return isAudioNode(node) || isImageNode(node) || isVideoNode(node) ? node.content.source : undefined;
 }
 
 function readTextContent(node: CanvasNode): string {

@@ -424,3 +424,18 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 ## 8、附录说明
 
 - 文档状态：已实现。
+
+
+## 画布音频与模型输入能力
+
+本次复用现有字段，不新增表、字段或 Flyway 迁移。
+
+| 存储位置 | 约定 |
+| --- | --- |
+| `platform_ai_model_configs.capabilities` | JSON 数组可包含 `audio-input`，表示音频输入能力；默认未开启，必须同时包含 `reference-to-video`，且仅允许 MiniMax、Evolink 的原生视频模型。 |
+| 视频分档计费配置 | `audio-input` 不是生成模式，不作为价格映射的键；继续按全能参考的视频价格计算积分。 |
+| 媒体记录 | 音频 `kind` 为 `audio`、存储标识前缀为 `audio:`；保存 MIME 类型、实际字节数、上传时解析的毫秒时长及对象存储信息。 |
+| 画布文档 JSON | `audio` 节点保存媒体信息与 128 段波形采样，不保存播放进度；视频节点的 `audioReferences` 保存音频引用。 |
+| AI 任务请求 JSON | `audioReferences` 保存有序音频引用，贯通任务快照、恢复和重试。 |
+
+参考音频在扣费前校验归属及存储元数据：MP3/WAV，单文件不超过 15 MB，最多 3 段，每段 2～15 秒，合计不超过 15 秒。普通画布播放只受文件大小约束。

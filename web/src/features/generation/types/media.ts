@@ -14,6 +14,9 @@ type ReferenceVideoLocation = {
     objectStorage?: ObjectStorageFile;
 };
 
+/** 上传音频的媒体定位和播放元数据。 */
+export type ReferenceAudio = ReferenceMediaIdentity & ReferenceVideoLocation & { durationMs?: number; bytes?: number };
+
 export type ReferenceVideo = ReferenceMediaIdentity & ReferenceVideoDimensions & ReferenceVideoLocation;
 
 export type ReferenceVideoSource =

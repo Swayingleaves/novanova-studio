@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Empty, Modal, Tabs, Tag, Tooltip } from "antd";
-import { Boxes, ChevronsLeft, CircleCheck, CircleDashed, CircleX, Clapperboard, FileText, FolderOpen, Image as ImageIcon, PanelLeftClose, PanelLeftOpen, UserRound, Video } from "lucide-react";
+import { Boxes, ChevronsLeft, CircleCheck, CircleDashed, CircleX, Clapperboard, FileText, FolderOpen, Image as ImageIcon, PanelLeftClose, PanelLeftOpen, UserRound, AudioLines, Video } from "lucide-react";
 
 import type { Asset } from "@/features/assets/stores/use-asset-store";
 import { isBackgroundNode, isImageNode, isVideoNode } from "../domain/canvas-node";
@@ -229,7 +229,7 @@ function NodeStatus({ phase }: { phase: CanvasNode["execution"]["phase"] }) {
 }
 
 function NodeKindIcon({ kind, className }: { kind: CanvasNode["kind"]; className?: string }) {
-    const Icon = kind === "image" ? ImageIcon : kind === "text" ? FileText : kind === "video" ? Video : kind === "storyboard" ? Clapperboard : Boxes;
+    const Icon = kind === "audio" ? AudioLines : kind === "image" ? ImageIcon : kind === "text" ? FileText : kind === "video" ? Video : kind === "storyboard" ? Clapperboard : Boxes;
     return <Icon className={className} />;
 }
 
@@ -241,7 +241,7 @@ function AssetKindIcon({ asset, className }: { asset: CanvasNavigationAsset; cla
 }
 
 function nodeKindLabel(kind: CanvasNode["kind"]) {
-    return kind === "image" ? "图片" : kind === "text" ? "文本" : kind === "video" ? "视频" : kind === "storyboard" ? "分镜" : kind === "videoComposition" ? "视频合成" : "背景板";
+    return kind === "audio" ? "音频" : kind === "image" ? "图片" : kind === "text" ? "文本" : kind === "video" ? "视频" : kind === "storyboard" ? "分镜" : kind === "videoComposition" ? "视频合成" : "背景板";
 }
 
 function assetTitle(asset: CanvasNavigationAsset) {

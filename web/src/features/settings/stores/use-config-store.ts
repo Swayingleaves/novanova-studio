@@ -54,6 +54,7 @@ export const MODEL_CAPABILITY_OPTIONS: Record<ModelCapability, Array<{ value: st
         { value: "image-to-image", label: "图生图" },
     ],
     video: [
+        { value: "audio-input", label: "支持音频输入" },
         { value: "text-to-video", label: "文生视频" },
         { value: "image-to-video", label: "图生视频" },
         { value: "reference-to-video", label: "全能参考" },

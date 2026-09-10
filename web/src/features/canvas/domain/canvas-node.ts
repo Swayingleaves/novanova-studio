@@ -1,4 +1,5 @@
 import type {
+    CanvasAudioNode,
     CanvasBackgroundNode,
     CanvasExecutionState,
     CanvasImageContent,
@@ -60,6 +61,8 @@ export type CanvasNodeAttributes = {
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
+    waveformPeaks?: number[];
+    audioReferences?: import("@/features/generation/types/media").ReferenceAudio[];
     objectStorage?: ObjectStorageFile;
     generationStyleIds?: number[];
     generationStyleSnapshots?: GenerationStyleSnapshot[];
@@ -76,6 +79,11 @@ export function isImageNode(node: CanvasNode): node is CanvasImageNode {
 
 export function isTextNode(node: CanvasNode): node is CanvasTextNode {
     return node.kind === "text";
+}
+
+/** 判断是否为音频节点。 */
+export function isAudioNode(node: CanvasNode): node is CanvasAudioNode {
+    return node.kind === "audio";
 }
 
 export function isVideoNode(node: CanvasNode): node is CanvasVideoNode {
@@ -223,6 +231,9 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
         freeResize: attributes.freeResize,
     });
 
+    if (isAudioNode(framed)) {
+        return { ...framed, content: mergeDefined(framed.content, { source: attributes.content, storageKey: attributes.storageKey, mimeType: attributes.mimeType, bytes: attributes.bytes, durationMilliseconds: attributes.durationMs, objectStorage: attributes.objectStorage, waveformPeaks: attributes.waveformPeaks }) };
+    }
     if (isTextNode(framed)) {
         return updateTextNodeContent(framed, {
             text: attributes.content ?? framed.content.text,
@@ -296,6 +307,7 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
         count: attributes.count,
         references: attributes.references,
         referenceObjectStorages: attributes.referenceObjectStorages,
+        audioReferences: attributes.audioReferences,
         videoReferences: attributes.videoReferences,
         videoReferenceObjectStorages: attributes.videoReferenceObjectStorages,
         generationStyleIds: attributes.generationStyleIds,

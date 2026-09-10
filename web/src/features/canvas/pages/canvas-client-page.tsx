@@ -17,6 +17,10 @@ import { normalizeVideoGenerationCount } from "@/features/generation/components/
 import { quoteVideoGeneration } from "@/features/generation/lib/video-billing";
 import { defaultConfig, normalizeModelOptionValue, type AiConfig, useConfigStore, useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { getImageBlob, resolveImageUrl, reuseOrUploadImage, uploadImage, type UploadedImage } from "@/features/storage/services/image-storage";
+import { stopCanvasAudio } from "../services/canvas-audio-playback";
+import { mergeAudioReferences } from "../utils/audio-references";
+import { downloadMedia } from "@/features/storage/services/media-download";
+import { isAudioFile, uploadAudioFile } from "@/features/storage/services/audio-storage";
 import { getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/features/storage/services/file-storage";
 import { uploadObjectToStorage } from "@/features/storage/services/object-storage";
 import { findMissingReferenceObjectStorageImages, uploadMissingReferenceImagesToObjectStorage } from "@/features/storage/services/reference-object-storage";
@@ -40,6 +44,7 @@ import {
     isStoryboardNode,
     isTextNode,
     isVideoCompositionNode,
+    isAudioNode,
     isVideoNode,
     updateCanvasNodeExecution,
     updateCanvasNodeFrame,
@@ -155,7 +160,7 @@ import {
     type CanvasViewTransform,
 } from "../types";
 import type { ReferenceImage } from "@/features/generation/types/image";
-import type { ReferenceVideo } from "@/features/generation/types/media";
+import type { ReferenceAudio, ReferenceVideo } from "@/features/generation/types/media";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 
 const VIDEO_NODE_MAX_WIDTH = 630;
@@ -218,6 +223,8 @@ function CanvasWorkspacePage() {
     const params = useParams<{ id: string }>();
     const router = useRouter();
     const projectId = params.id;
+    const audioUploadScope = useRef<object>({});
+    useEffect(() => () => { audioUploadScope.current = {}; stopCanvasAudio(); }, [projectId]);
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: CanvasPoint } | null>(null);
@@ -1026,7 +1033,7 @@ function CanvasWorkspacePage() {
     const splitNode = splitNodeId ? nodeById.get(splitNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const dialogNode = dialogNodeId ? nodeById.get(dialogNodeId) || null : null;
-    const promptPanelNode = dialogNode && !selectionBox && !isStoryboardNode(dialogNode) && !isVideoCompositionNode(dialogNode) ? dialogNode : null;
+    const promptPanelNode = dialogNode && !selectionBox && !isAudioNode(dialogNode) && !isStoryboardNode(dialogNode) && !isVideoCompositionNode(dialogNode) ? dialogNode : null;
     const promptPanelCanGenerateWithoutPrompt = useMemo(() => {
         if (!promptPanelNode || !isImageNode(promptPanelNode) || !promptPanelNode.generation.settingGraph) return false;
         return hasNodeGenerationInputs(promptPanelNode.id, nodes, connections);
@@ -1844,6 +1851,38 @@ function CanvasWorkspacePage() {
         [message, requestFocusNodes],
     );
 
+    /** 上传音频时保留节点占位，并防止切换画布或删除节点后异步写回。 */
+    const createAudioFileNode = useCallback(async (file: File, position: CanvasPoint, nodeId?: string) => {
+        const scope = audioUploadScope.current;
+        const template = getCanvasNodeTemplate("audio");
+        const placeholderPosition = nodeId ? position : { x: position.x - template.width / 2, y: position.y - template.height / 2 };
+        const placeholder = { ...createCanvasNode("audio", placeholderPosition), title: file.name };
+        const targetId = nodeId || placeholder.id;
+        const { beginNodeUpload, finishNodeUpload } = useCanvasUiStore.getState();
+        if (!beginNodeUpload(targetId)) return;
+        if (!nodeId) {
+            setNodes((previous) => [...previous, placeholder]);
+            requestFocusNodes([targetId]);
+            setSelectedNodeIds(new Set([targetId]));
+            setSelectedConnectionId(null);
+        }
+        try {
+            const audio = await uploadAudioFile(file);
+            if (scope !== audioUploadScope.current) return;
+            const attributes = { content: audio.url, storageKey: audio.storageKey, mimeType: audio.mimeType, bytes: audio.bytes, durationMs: audio.durationMs, waveformPeaks: audio.waveformPeaks, objectStorage: audio.objectStorage, status: "success" as const };
+            setNodes((previous) => previous.map((node) => node.id === targetId ? { ...applyCanvasNodeAttributes(placeholder, attributes), id: targetId, frame: node.frame } : node));
+            if (nodesRef.current.some((node) => node.id === targetId)) setSelectedNodeIds(new Set([targetId]));
+            setSelectedConnectionId(null);
+        } catch (error) {
+            if (scope !== audioUploadScope.current) return;
+            const errorMessage = error instanceof Error ? error.message : "上传音频失败";
+            if (!nodeId) setNodes((previous) => previous.map((node) => node.id === targetId ? updateCanvasNodeExecution(node, { phase: "failed", errorMessage }) : node));
+            message.error(errorMessage);
+        } finally {
+            finishNodeUpload(targetId);
+        }
+    }, [message, requestFocusNodes]);
+
     const createVideoFileNode = useCallback(
         async (file: File, position: CanvasPoint) => {
             try {
@@ -2619,9 +2658,13 @@ function CanvasWorkspacePage() {
     );
 
     const downloadNodeImage = useCallback((node: CanvasDomainNode) => {
+        if (isAudioNode(node) && node.content.source) {
+            void downloadMedia({ storageKey: node.content.storageKey, url: node.content.source }, `${node.title.replace(/\.(mp3|wav)$/i, "")}.${node.content.mimeType?.includes("wav") ? "wav" : "mp3"}`).catch((error) => message.error(error instanceof Error ? error.message : "下载音频失败"));
+            return;
+        }
         if ((!isImageNode(node) && !isVideoNode(node)) || !node.content.source) return;
         saveAs(node.content.source, `canvas-${node.kind}-${node.id}.${isVideoNode(node) ? "mp4" : imageExtension(node.content.source)}`);
-    }, []);
+    }, [message]);
 
     const uploadNodeObjectStorage = useCallback(
         async (node: CanvasDomainNode) => {
@@ -2798,6 +2841,7 @@ function CanvasWorkspacePage() {
     const handleUploadRequest = useCallback((nodeId?: string, position?: CanvasPoint) => {
         if (nodeId && useCanvasUiStore.getState().uploadingNodeIds.has(nodeId)) return;
         uploadTargetRef.current = { nodeId, position };
+        if (imageInputRef.current) imageInputRef.current.accept = nodeId && nodesRef.current.some((node) => node.id === nodeId && isAudioNode(node)) ? ".mp3,.wav,audio/mpeg,audio/wav" : "image/*,video/*,.mp3,.wav";
         imageInputRef.current?.click();
     }, []);
 
@@ -2808,6 +2852,14 @@ function CanvasWorkspacePage() {
             // 选中文件后立即释放选择器，避免并行上传时清空其他节点的新选择。
             uploadTargetRef.current = null;
             event.target.value = "";
+            if (file && target?.nodeId && nodesRef.current.some((node) => node.id === target.nodeId && isAudioNode(node)) && !isAudioFile(file)) {
+                message.error("音频节点仅支持 MP3、WAV 文件");
+                return;
+            }
+            if (file && isAudioFile(file)) {
+                void createAudioFileNode(file, target?.position || getCanvasCenter(), target?.nodeId);
+                return;
+            }
             if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/"))) return;
 
             if (target?.nodeId) {
@@ -2853,19 +2905,19 @@ function CanvasWorkspacePage() {
                 void (file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
             }
         },
-        [createImageFileNode, createVideoFileNode, message, screenToCanvas, size.height, size.width],
+        [createAudioFileNode, createImageFileNode, createVideoFileNode, getCanvasCenter, message, screenToCanvas, size.height, size.width],
     );
 
     const handleDrop = useCallback(
         (event: ReactDragEvent<HTMLDivElement>) => {
             event.preventDefault();
-            const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/") || item.type.startsWith("video/"));
+            const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item));
             if (!file) return;
 
             const pos = screenToCanvas(event.clientX, event.clientY);
-            void (file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos));
+            void (isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos));
         },
-        [createImageFileNode, createVideoFileNode, screenToCanvas],
+        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas],
     );
 
     const pasteAssistantImage = useCallback(
@@ -3156,14 +3208,23 @@ function CanvasWorkspacePage() {
                 return failedCanvasGenerationResult(nodeId, readAiTaskError(error));
             }
             if (externalSignal?.aborted) return canceledCanvasGenerationResult();
+            if (mode !== "video" && generationContext.referenceAudios.length) {
+                message.error("音频输入仅支持视频节点");
+                return failedCanvasGenerationResult(nodeId, canvasError("configuration", "音频输入仅支持视频节点"));
+            }
             // 合并视频节点上手动上传/上次生成持久化的参考素材（与连线引用按地址去重）
             if (mode === "video" && sourceNode && isVideoNode(sourceNode)) {
                 const savedReferences = await resolveVideoGenerationReferences(sourceNode.generation);
-                if (savedReferences && !savedReferences.incomplete) {
+                if (savedReferences?.incomplete) {
+                    message.error("参考素材恢复失败，请重新上传");
+                    return failedCanvasGenerationResult(nodeId, canvasError("configuration", "参考素材恢复失败，请重新上传"));
+                }
+                if (savedReferences) {
                     generationContext = {
                         ...generationContext,
                         referenceImages: mergeUniqueReferences(generationContext.referenceImages, savedReferences.referenceImages),
                         referenceVideos: mergeUniqueReferences(generationContext.referenceVideos, savedReferences.referenceVideos),
+                        referenceAudios: mergeAudioReferences(generationContext.referenceAudios, savedReferences.referenceAudios),
                     };
                 }
             }
@@ -3176,6 +3237,7 @@ function CanvasWorkspacePage() {
                     seconds: generationConfig.videoSeconds,
                     imageReferenceCount: generationContext.referenceImages.length,
                     videoReferenceCount: generationContext.referenceVideos.length,
+                    audioReferenceCount: generationContext.referenceAudios.length,
                     taskCount: normalizeVideoGenerationCount(generationConfig.count),
                 });
                 if (!videoQuote.available) {
@@ -3466,6 +3528,7 @@ function CanvasWorkspacePage() {
                         videoIds.map(async (videoId): Promise<CanvasNodeGenerationOutcome> => {
                             try {
                                 const generatedVideo = await requestVideoGeneration({ ...generationConfig, count: "1" }, effectivePrompt, videoGenerationContext.referenceImages, videoGenerationContext.referenceVideos, "canvas", {
+                                    audioReferences: videoGenerationContext.referenceAudios,
                                     signal: runController.signal,
                                     generationStyleIds: styleSnapshots.length ? undefined : styleIds,
                                     generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined,
@@ -3680,7 +3743,12 @@ function CanvasWorkspacePage() {
                 return failedCanvasGenerationResult(node.id, canvasError("configuration", "模型配置不完整"));
             }
 
-            const context = hasSavedImageGeneration ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, readCanvasNodePrompt(sourceNode)), retryMode);
+            const retryContext = buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, readCanvasNodePrompt(sourceNode));
+            if (retryMode !== "video" && retryContext.referenceAudios.length) {
+                message.error("音频输入仅支持视频节点");
+                return failedCanvasGenerationResult(node.id, canvasError("configuration", "音频输入仅支持视频节点"));
+            }
+            const context = hasSavedImageGeneration ? null : await hydrateNodeGenerationContext(retryContext, retryMode);
             const prompt = (savedImageGeneration?.prompt || savedVideoGeneration?.prompt || context?.prompt || "").trim();
             if (!prompt) {
                 message.warning("找不到提示词，无法重试");
@@ -3703,6 +3771,7 @@ function CanvasWorkspacePage() {
             }
             const retryImages = retryReferenceImages || [];
             let retryVideoImages = retryImages;
+            let retryAudioReferences: ReferenceAudio[] = context?.referenceAudios || [];
             let retryVideoReferences: ReferenceVideo[] = context?.referenceVideos || [];
             if (isVideoNode(node)) {
                 const savedVideoReferences = await resolveVideoGenerationReferences(savedVideoGeneration);
@@ -3713,6 +3782,7 @@ function CanvasWorkspacePage() {
                 if (savedVideoReferences) {
                     retryVideoImages = savedVideoReferences.referenceImages;
                     retryVideoReferences = savedVideoReferences.referenceVideos;
+                    retryAudioReferences = savedVideoReferences.referenceAudios;
                 }
             }
             if (isVideoNode(node)) {
@@ -3724,6 +3794,7 @@ function CanvasWorkspacePage() {
                     seconds: generationConfig.videoSeconds,
                     imageReferenceCount: retryVideoImages.length,
                     videoReferenceCount: retryVideoReferences.length,
+                    audioReferenceCount: retryAudioReferences.length,
                     taskCount: 1,
                 });
                 if (!videoQuote.available) {
@@ -3764,6 +3835,7 @@ function CanvasWorkspacePage() {
                         return canceledCanvasGenerationResult();
                     }
                     const generatedVideo = await requestVideoGeneration(generationConfig, prompt, videoReferenceImages, retryVideoReferences, "canvas", {
+                        audioReferences: retryAudioReferences,
                         signal: controller.signal,
                         generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds,
                         generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined,
@@ -3793,7 +3865,7 @@ function CanvasWorkspacePage() {
                                     vquality: generationConfig.vquality,
                                     videoGenerationMode: generationConfig.videoGenerationMode,
                                     watermark: generationConfig.videoWatermark,
-                                    ...generationVideoReferenceAttributes({ referenceImages: videoReferenceImages, referenceVideos: retryVideoReferences }),
+                                    ...generationVideoReferenceAttributes({ referenceImages: videoReferenceImages, referenceVideos: retryVideoReferences, referenceAudios: retryAudioReferences }),
                                     generationStyleIds: savedStyleIds,
                                     generationStyleSnapshots: completedStyleSnapshots,
                                 }),
@@ -4523,6 +4595,7 @@ function CanvasWorkspacePage() {
                     canUndo={historyState.canUndo}
                     canRedo={historyState.canRedo}
                     onAddImage={() => createNode("image")}
+                    onAddAudio={() => createNode("audio")}
                     onAddVideo={() => createNode("video")}
                     onAddText={() => createNode("text")}
                     onAddBackground={() => createNode("background")}
@@ -4843,10 +4916,11 @@ function referenceUrl(image: ReferenceImage) {
     return image.objectStorage?.url || image.storageKey || image.url || (!image.dataUrl.startsWith("data:") ? image.dataUrl : undefined);
 }
 
-function generationVideoReferenceAttributes(context: { referenceImages: ReferenceImage[]; referenceVideos: ReferenceVideo[] }) {
+function generationVideoReferenceAttributes(context: { referenceImages: ReferenceImage[]; referenceVideos: ReferenceVideo[]; referenceAudios?: ReferenceAudio[] }) {
     return {
         references: context.referenceImages.map(referenceUrl).filter((url): url is string => Boolean(url)),
         referenceObjectStorages: context.referenceImages.map((reference) => reference.objectStorage).filter((file): file is NonNullable<typeof file> => Boolean(file?.url)),
+        audioReferences: context.referenceAudios || [],
         videoReferences: context.referenceVideos.map(videoReferenceUrl).filter((url): url is string => Boolean(url)),
         videoReferenceObjectStorages: context.referenceVideos.map((video) => video.objectStorage).filter((file): file is NonNullable<typeof file> => Boolean(file?.url)),
     };
@@ -4881,13 +4955,13 @@ async function resolveGenerationReferences(generation: CanvasImageGenerationSett
     return references.every(Boolean) ? (references as ReferenceImage[]) : null;
 }
 
-async function resolveVideoGenerationReferences(generation: CanvasVideoGenerationSettings | null): Promise<{ referenceImages: ReferenceImage[]; referenceVideos: ReferenceVideo[]; incomplete: boolean } | null> {
+async function resolveVideoGenerationReferences(generation: CanvasVideoGenerationSettings | null): Promise<{ referenceImages: ReferenceImage[]; referenceVideos: ReferenceVideo[]; referenceAudios: ReferenceAudio[]; incomplete: boolean } | null> {
     if (!generation) return null;
     const imageReferences = Array.isArray(generation.references) ? generation.references : [];
     const imageObjectStorages = Array.isArray(generation.referenceObjectStorages) ? generation.referenceObjectStorages : [];
     const videoReferences = Array.isArray(generation.videoReferences) ? generation.videoReferences : [];
     const videoObjectStorages = Array.isArray(generation.videoReferenceObjectStorages) ? generation.videoReferenceObjectStorages : [];
-    const hasPersistedReferenceState = Array.isArray(generation.videoReferences) || Array.isArray(generation.videoReferenceObjectStorages) || imageReferences.length > 0;
+    const hasPersistedReferenceState = Boolean(generation.audioReferences?.length) || Array.isArray(generation.videoReferences) || Array.isArray(generation.videoReferenceObjectStorages) || imageReferences.length > 0;
     if (!hasPersistedReferenceState) return null;
 
     const legacyImageEntries = imageReferences.map((reference) => ({ reference, objectStorage: findGenerationObjectStorage(imageObjectStorages, reference) })).filter(({ reference, objectStorage }) => !isVideoReferenceValue(reference, objectStorage));
@@ -4924,11 +4998,18 @@ async function resolveVideoGenerationReferences(generation: CanvasVideoGeneratio
             };
         }),
     );
+    const referenceAudios = await resolveAudioReferences(generation.audioReferences || []);
     return {
         referenceImages: imageEntries.filter((reference): reference is ReferenceImage => Boolean(reference)),
+        referenceAudios,
         referenceVideos: resolvedVideos.filter((reference): reference is ReferenceVideo => Boolean(reference)),
-        incomplete: imageEntries.some((reference) => !reference) || resolvedVideos.some((reference) => !reference),
+        incomplete: referenceAudios.some((audio) => !audio.url || !audio.storageKey) || imageEntries.some((reference) => !reference) || resolvedVideos.some((reference) => !reference),
     };
+}
+
+/** 重新解析音频地址，避免归档导入后继续使用旧对象存储地址。 */
+async function resolveAudioReferences(references: ReferenceAudio[]) {
+    return Promise.all(mergeAudioReferences(references).map(async (audio) => ({ ...audio, url: audio.storageKey ? await resolveMediaUrl(audio.storageKey, "") : audio.url })));
 }
 
 function findGenerationObjectStorage(files: ObjectStorageFile[], reference: string) {
@@ -5001,8 +5082,9 @@ async function hydrateCanvasImages(nodes: CanvasDomainNode[]) {
             continue;
         }
         const source = node.content.source;
-        if (isVideoNode(node)) {
-            hydratedNodes.push(node.content.storageKey ? applyCanvasNodeAttributes(node, { content: await resolveMediaUrl(node.content.storageKey, source) }) : node);
+        if (isVideoNode(node) || isAudioNode(node)) {
+            const mediaNode = node.content.storageKey ? applyCanvasNodeAttributes(node, { content: await resolveMediaUrl(node.content.storageKey, source) }) : node;
+            hydratedNodes.push(isVideoNode(mediaNode) && mediaNode.generation.audioReferences?.length ? applyCanvasNodeAttributes(mediaNode, { audioReferences: await resolveAudioReferences(mediaNode.generation.audioReferences) }) : mediaNode);
             continue;
         }
         if (!source) {

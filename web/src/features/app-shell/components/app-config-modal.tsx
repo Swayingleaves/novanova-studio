@@ -1198,6 +1198,10 @@ export function AppConfigModal() {
                                 </span>
                             </div>
                             <div className="space-y-4">
+                                <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] p-4">
+                                    <div><div className="font-medium">支持音频输入</div><p className="text-xs text-[var(--studio-muted)]">全能参考模式可使用音频素材，仅支持 MiniMax H3、Evolink Seedance</p></div>
+                                    <Switch aria-label="支持音频输入" checked={editingModelConfig.capabilities.includes("audio-input")} disabled={isSaving || !editingModelConfig.capabilities.includes("audio-input") && (editingModelConfig.isCustomModel || !editingModelConfig.capabilities.includes("reference-to-video") || !["minimax", "evolink"].includes(draftChannels.find((channel) => channel.id === editingModelConfig.channelId)?.apiFormat || ""))} onChange={(checked) => setEditingModelConfig({ ...editingModelConfig, capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, "audio-input"]) : editingModelConfig.capabilities.filter((value) => value !== "audio-input") })} />
+                                </div>
                                 {VIDEO_GENERATION_CAPABILITY_OPTIONS.map((mode, index) => {
                                     const prices = editingModelConfig.videoBillingConfiguration?.modePrices?.[mode.value] || {};
                                     const modeEnabled = editingModelConfig.capabilities.includes(mode.value);
@@ -1453,13 +1457,13 @@ function normalizeModelConfigForSave(config: ServerModelConfig): ServerModelConf
         ? {
               ...config.videoBillingConfiguration,
               modePrices: Object.fromEntries(
-                  Object.entries(config.videoBillingConfiguration.modePrices || {}).filter(([mode]) => supportedCapabilities.has(mode) && capabilities.includes(mode)),
+                  Object.entries(config.videoBillingConfiguration.modePrices || {}).filter(([mode]) => mode !== "audio-input" && supportedCapabilities.has(mode) && capabilities.includes(mode)),
               ) as VideoBillingConfiguration["modePrices"],
           }
         : config.videoBillingConfiguration;
     // 自定义模型配置只保留已勾选能力的键，避免残留未启用能力的模板。
     const customModelConfig = config.isCustomModel
-        ? Object.fromEntries(Object.entries(config.customModelConfig || {}).filter(([mode]) => supportedCapabilities.has(mode) && capabilities.includes(mode)))
+        ? Object.fromEntries(Object.entries(config.customModelConfig || {}).filter(([mode]) => mode !== "audio-input" && supportedCapabilities.has(mode) && capabilities.includes(mode)))
         : {};
     return {
         ...config,

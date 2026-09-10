@@ -3,6 +3,7 @@ package com.novanovastudio.service;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import com.novanovastudio.ai.AudioInputSupport;
 import com.alibaba.fastjson2.TypeReference;
 import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.ai.VideoGenerationMode;
@@ -196,6 +197,7 @@ public class PersistenceService {
                     VideoBillingConfiguration videoBillingConfiguration = normalizeVideoBillingConfiguration(
                             request.modelType(), capabilities, request.videoBillingConfiguration());
                     record.setCapabilities(JSON.toJSONString(capabilities));
+                    AudioInputSupport.validateCapability(request.modelType(), Boolean.TRUE.equals(request.isCustomModel()) ? "custom" : channel.getApiFormat(), capabilities);
                     record.setDefaultModel(false);
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
                     record.setCreditCost("video".equals(request.modelType()) ? 0 : request.creditCost() == null ? 0 : request.creditCost());
@@ -255,7 +257,10 @@ public class PersistenceService {
                     record.setDisplayName(normalizeDisplayName(request.displayName(), record.getModelName()));
                     record.setModelIcon(normalizeModelIcon(request.modelIcon()));
                     PersistenceDtos.ModelConfig modelConfig = modelConfigDto(record);
-                    return repository.updatePlatformAiModelConfig(record)
+                    return (capabilities.contains(AudioInputSupport.CAPABILITY) ? repository.getPlatformAiChannel(record.getChannelId())
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "所属渠道不存在")))
+                            .doOnNext(channel -> AudioInputSupport.validateCapability(request.modelType(), Boolean.TRUE.equals(request.isCustomModel()) ? "custom" : channel.getApiFormat(), capabilities)).then() : Mono.<Void>empty())
+                            .then(repository.updatePlatformAiModelConfig(record))
                             .then(isModelQueueType(modelConfig.modelType())
                                     ? modelTaskExecutionDispatcher.refresh(record.getModelConfigId())
                                     : Mono.empty())
@@ -416,7 +421,7 @@ public class PersistenceService {
         if (!"video".equals(modelType)) {
             return normalized;
         }
-        if (normalized.stream().anyMatch(capability -> !VideoGenerationMode.isSupported(capability))) {
+        if (normalized.stream().anyMatch(capability -> !VideoGenerationMode.isSupported(capability) && !AudioInputSupport.CAPABILITY.equals(capability))) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "视频模型能力包含不支持的生成模式");
         }
         return normalized;
@@ -1531,6 +1536,8 @@ public class PersistenceService {
             case "video/webm" -> ".webm";
             case "video/quicktime" -> ".mov";
             case "video/mp4" -> ".mp4";
+            case "audio/mpeg", "audio/mp3" -> ".mp3";
+            case "audio/wav", "audio/x-wav", "audio/wave" -> ".wav";
             default -> ".bin";
         };
     }

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Button, Tooltip } from "antd";
-import { Eraser, FolderOpen, Frame, Hand, Image as ImageIcon, Redo2, Trash2, Type, Undo2, Upload, Video } from "lucide-react";
+import { Eraser, FolderOpen, Frame, Hand, Image as ImageIcon, Redo2, Trash2, Type, Undo2, Upload, AudioLines, Video } from "lucide-react";
 
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import type { CanvasBackgroundNode } from "../types";
@@ -18,6 +18,7 @@ type CanvasToolbarProps = {
     canRedo: boolean;
     onAddImage: () => void;
     onAddVideo: () => void;
+    onAddAudio: () => void;
     onAddText: () => void;
     onAddBackground: () => void;
     onUndo: () => void;
@@ -88,6 +89,7 @@ function buildToolbarActions(props: CanvasToolbarProps): ToolbarAction[] {
         { key: "redo", label: "重做", icon: <Redo2 className="size-4" />, disabled: !props.canRedo, onClick: props.onRedo, dividerBefore: false },
         { key: "text", label: "文本", icon: <Type className="size-4" />, dividerBefore: true, onClick: props.onAddText },
         { key: "image", label: "图片", icon: <ImageIcon className="size-4" />, onClick: props.onAddImage },
+        { key: "audio", label: "音频", icon: <AudioLines className="size-4" />, onClick: props.onAddAudio },
         { key: "video", label: "视频", icon: <Video className="size-4" />, onClick: props.onAddVideo },
         { key: "background", label: "背景板", icon: <Frame className="size-4" />, onClick: props.onAddBackground },
         { key: "upload", label: "上传素材", icon: <Upload className="size-4" />, onClick: props.onUpload },

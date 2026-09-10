@@ -95,6 +95,7 @@ export type ServerAiTaskCreateInput = {
     model?: string;
     parameters?: Record<string, unknown>;
     references?: ServerAiTaskMediaReference[];
+    audioReferences?: ServerAiTaskMediaReference[];
     videoReferences?: ServerAiTaskMediaReference[];
     generationSource?: ServerGenerationSource;
     generationStyleIds?: number[];

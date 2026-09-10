@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { ArrowUp, BookOpenText, ChevronDown, FileText, Image as ImageIcon, LoaderCircle, Plus, Search, Sparkles, Square, Video, X } from "lucide-react";
+import { ArrowUp, BookOpenText, ChevronDown, FileText, Image as ImageIcon, LoaderCircle, Plus, Search, Sparkles, Square, AudioLines, Video, X } from "lucide-react";
 import { App, Button, Modal, Tooltip } from "antd";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
@@ -12,6 +12,9 @@ import { normalizeVideoGenerationCount } from "@/features/generation/components/
 import { CreditCostDisplay, requestCreditCost } from "@/features/generation/constants/credits";
 import { availableVideoModelsForMode, quoteVideoGeneration } from "@/features/generation/lib/video-billing";
 import { uploadImage } from "@/features/storage/services/image-storage";
+import { isAudioFile, uploadAudioFile } from "@/features/storage/services/audio-storage";
+import { activateCanvasAudio, releaseCanvasAudio } from "../services/canvas-audio-playback";
+import { formatAudioTime } from "@/features/storage/utils/audio-waveform";
 import { uploadMediaFile } from "@/features/storage/services/file-storage";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { CanvasImageSettingsPopover } from "./canvas-image-settings-popover";
@@ -106,6 +109,7 @@ export function CanvasNodePromptPanel({
         mentionReferences
             .filter((reference) => reference.active && reference.kind !== "text")
             .forEach((reference) => {
+                if (reference.kind === "audio" && reference.previewUrl && previewUrls.has(reference.previewUrl)) return;
                 references.push({ reference, canInsert: true });
                 if (reference.previewUrl) previewUrls.add(reference.previewUrl);
             });
@@ -114,7 +118,8 @@ export function CanvasNodePromptPanel({
             references.push({ reference, canInsert: false });
             if (reference.previewUrl) previewUrls.add(reference.previewUrl);
         });
-        return references;
+        let audioIndex = 0;
+        return references.map((item) => item.reference.kind === "audio" ? { ...item, reference: { ...item.reference, label: `音频${++audioIndex}` } } : item);
     }, [mentionReferences, node]);
     const [prompt, setPrompt] = useState(nodePrompt);
     const filteredMentionCandidates = useMemo(() => {
@@ -126,10 +131,11 @@ export function CanvasNodePromptPanel({
     const videoReferenceCounts = displayReferences.reduce(
         (counts, item) => {
             if (item.reference.kind === "image") counts.images += 1;
+            if (item.reference.kind === "audio") counts.audios += 1;
             if (item.reference.kind === "video") counts.videos += 1;
             return counts;
         },
-        { images: 0, videos: 0 },
+        { images: 0, videos: 0, audios: 0 },
     );
     const videoQuote =
         mode === "video"
@@ -141,9 +147,16 @@ export function CanvasNodePromptPanel({
                   seconds: config.videoSeconds,
                   imageReferenceCount: videoReferenceCounts.images,
                   videoReferenceCount: videoReferenceCounts.videos,
+                  audioReferenceCount: videoReferenceCounts.audios,
                   taskCount: normalizeVideoGenerationCount(config.count),
               })
             : null;
+    const audioPreviewRef = useRef<HTMLAudioElement>(null);
+    useEffect(() => {
+        const audio = audioPreviewRef.current;
+        return () => { if (audio) releaseCanvasAudio(audio); };
+    }, [referencePreview?.previewUrl]);
+    const supportsAudio = config.videoGenerationMode === "reference-to-video" && Boolean(config.modelCapabilities.find((item) => item.model === config.model)?.capabilities.includes("audio-input"));
     const creditCost =
         mode === "video"
             ? videoQuote?.available
@@ -188,12 +201,13 @@ export function CanvasNodePromptPanel({
 
     // 从连线引用中提取非文本类型标签，用于点击缩略图后生成引用芯片
     const editorReferences = useMemo(() => {
-        if (!pendingMentionReference) return mentionReferences;
-        const hasReference = mentionReferences.some((reference) => reference.nodeId === pendingMentionReference.nodeId);
-        if (!hasReference) return [...mentionReferences, pendingMentionReference];
+        const references = [...mentionReferences.filter((reference) => reference.kind !== "audio"), ...displayReferences.filter((item) => item.reference.kind === "audio").map((item) => item.reference)];
+        if (!pendingMentionReference) return references;
+        const hasReference = references.some((reference) => reference.nodeId === pendingMentionReference.nodeId);
+        if (!hasReference) return [...references, pendingMentionReference];
         // 连线刷新后可能重新计算编号，暂时保留用户刚插入的标签，避免芯片退化为普通文本。
-        return mentionReferences.map((reference) => reference.nodeId === pendingMentionReference.nodeId ? { ...reference, label: pendingMentionReference.label, active: true } : reference);
-    }, [mentionReferences, pendingMentionReference]);
+        return references.map((reference) => reference.nodeId === pendingMentionReference.nodeId ? { ...reference, label: pendingMentionReference.label, active: true } : reference);
+    }, [mentionReferences, displayReferences, pendingMentionReference]);
     useEffect(() => {
         if (pendingMentionReference && !prompt.includes(pendingMentionReference.label)) setPendingMentionReference(null);
     }, [pendingMentionReference, prompt]);
@@ -274,10 +288,15 @@ export function CanvasNodePromptPanel({
             const generation = node.generation;
             const imageReferences = [...generation.references];
             const imageStorages = [...generation.referenceObjectStorages];
+            const audioReferences = [...(generation.audioReferences || [])];
             const videoReferences = [...(generation.videoReferences || [])];
             const videoStorages = [...(generation.videoReferenceObjectStorages || [])];
             for (const file of Array.from(files)) {
-                if (file.type.startsWith("video/")) {
+                if (isAudioFile(file)) {
+                    if (!supportsAudio) throw new Error("当前模型或生成模式不支持音频输入");
+                    const audio = await uploadAudioFile(file);
+                    audioReferences.push({ id: audio.storageKey, name: file.name, type: audio.mimeType, url: audio.url, storageKey: audio.storageKey, durationMs: audio.durationMs, bytes: audio.bytes, objectStorage: audio.objectStorage });
+                } else if (file.type.startsWith("video/")) {
                     const uploaded = await uploadMediaFile(file, "video");
                     videoReferences.push(persistedReferenceValue(uploaded.objectStorage?.url, uploaded.url, uploaded.storageKey));
                     if (uploaded.objectStorage) videoStorages.push(uploaded.objectStorage);
@@ -287,7 +306,7 @@ export function CanvasNodePromptPanel({
                     if (uploaded.objectStorage) imageStorages.push(uploaded.objectStorage);
                 }
             }
-            onConfigChange(node.id, { references: imageReferences, referenceObjectStorages: imageStorages, videoReferences, videoReferenceObjectStorages: videoStorages });
+            onConfigChange(node.id, { references: imageReferences, referenceObjectStorages: imageStorages, videoReferences, videoReferenceObjectStorages: videoStorages, audioReferences });
         } catch (error) {
             message.error(error instanceof Error ? error.message : "参考素材上传失败");
         } finally {
@@ -304,6 +323,7 @@ export function CanvasNodePromptPanel({
         const videoStorages = generation.videoReferenceObjectStorages || [];
         const entryUrl = (entry: string, files: ObjectStorageFile[]) => files.find((file) => file.url === entry || file.key === entry.replace(/^(?:image|video):/, ""))?.url || entry;
         onConfigChange(node.id, {
+            audioReferences: (generation.audioReferences || []).filter((audio) => audio.url !== url),
             references: generation.references.filter((entry) => entryUrl(entry, imageStorages) !== url),
             referenceObjectStorages: imageStorages.filter((file) => file.url !== url),
             videoReferences: (generation.videoReferences || []).filter((entry) => entryUrl(entry, videoStorages) !== url),
@@ -325,7 +345,7 @@ export function CanvasNodePromptPanel({
             <input
                 ref={referenceInputRef}
                 type="file"
-                accept="image/*,video/*"
+                accept={supportsAudio ? "image/*,video/*,.mp3,.wav" : "image/*,video/*"}
                 multiple
                 className="hidden"
                 onChange={(event) => {
@@ -350,7 +370,11 @@ export function CanvasNodePromptPanel({
                                 theme={theme}
                                 onPreview={() => setReferencePreview(reference)}
                                 onInsert={() => promptEditorRef.current?.insertAtCursor(reference.label)}
-                                onRemove={() => (canInsert ? onRemoveReference(reference) : removePersistedReference(reference))}
+                                onRemove={() => {
+                                    if (reference.kind === "audio") removePersistedReference(reference);
+                                    if (canInsert) onRemoveReference(reference);
+                                    else if (reference.kind !== "audio") removePersistedReference(reference);
+                                }}
                             />
                         ))}
                         {mode === "video" && (config.videoGenerationMode === "image-to-video" || config.videoGenerationMode === "reference-to-video") ? (
@@ -507,7 +531,7 @@ export function CanvasNodePromptPanel({
             {mode === "video" && videoQuote && !videoQuote.available ? (
                 <p className="mt-2 text-xs text-red-500">
                     {videoQuote.reason}
-                    {videoQuote.reason.includes("至少需要") ? "，可点击上方加号卡片上传参考素材，或在画布中连接图片/视频节点" : ""}
+                    {videoQuote.reason.includes("至少需要") ? "，可点击上方加号卡片上传参考素材，或在画布中连接图片、视频或音频节点" : ""}
                 </p>
             ) : null}
 
@@ -594,7 +618,7 @@ export function CanvasNodePromptPanel({
                         type="primary"
                         className="!h-10 !min-w-[88px] shrink-0 !justify-center !rounded-full !px-3"
                         danger={isRunning}
-                        disabled={isPromptGenerating || (!isRunning && (!canSubmit || (mode === "video" && !videoQuote?.available)))}
+                        disabled={isPromptGenerating || uploadingReference || (!isRunning && (!canSubmit || (mode === "video" && !videoQuote?.available)))}
                         onClick={() => (isRunning ? onStop(node.id) : submit())}
                         aria-label={isRunning ? "停止生成" : creditCost === null ? "当前视频配置无法报价" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
                     >
@@ -616,7 +640,7 @@ export function CanvasNodePromptPanel({
                 </div>
             </div>
             <Modal title={referencePreview?.title || "参考图"} open={Boolean(referencePreview?.previewUrl)} centered footer={null} width="auto" destroyOnHidden onCancel={() => setReferencePreview(null)}>
-                {referencePreview?.previewUrl ? <img src={referencePreview.previewUrl} alt={referencePreview.title || "参考图"} className="max-h-[80vh] max-w-full object-contain" /> : null}
+                {referencePreview?.kind === "audio" ? <audio ref={audioPreviewRef} controls src={referencePreview.previewUrl} onPlay={(event) => activateCanvasAudio(event.currentTarget)} /> : referencePreview?.previewUrl ? <img src={referencePreview.previewUrl} alt={referencePreview.title || "参考图"} className="max-h-[80vh] max-w-full object-contain" /> : null}
             </Modal>
         </div>
     );
@@ -749,6 +773,7 @@ function MentionAssetMenu({ query, candidates, highlightedIndex, theme, onSelect
     const availableGroups = [
         { title: "图片", kind: "image" as const },
         { title: "视频", kind: "video" as const },
+        { title: "音频", kind: "audio" as const },
         { title: "文本", kind: "text" as const },
     ].map((group) => ({ ...group, items: available.filter((reference) => reference.kind === group.kind) })).filter((group) => group.items.length);
     const flatItems = [...referenced, ...availableGroups.flatMap((group) => group.items)];
@@ -835,7 +860,7 @@ function MentionAssetGroup({ title, items, flatItems, activeIndex, theme, onSele
 // @Param              onHighlight Function 更新高亮索引
 // @Return             JSX.Element 资产选项
 function MentionAssetOption({ reference, selected, highlighted, theme, onSelect, onHighlight }: { reference: CanvasResourceReference; selected: boolean; highlighted: boolean; theme: CanvasTheme; onSelect: () => void; onHighlight: () => void }) {
-    const Icon = reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
+    const Icon = reference.kind === "audio" ? AudioLines : reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
     return (
         <button type="button" role="option" aria-selected={selected} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition" style={{ background: highlighted ? theme.node.fill : "transparent", color: theme.node.text, opacity: selected ? 0.65 : 1 }} onMouseEnter={onHighlight} onClick={(event) => { event.preventDefault(); event.stopPropagation(); onSelect(); }}>
             <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-md border" style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.muted }}>
@@ -866,15 +891,15 @@ type ReferenceContentItemProps = {
 };
 
 function ReferenceContentItem({ reference, index, canInsert, canRemove, theme, onPreview, onInsert, onRemove }: ReferenceContentItemProps) {
-    const canPreview = !canInsert && reference.kind === "image" && Boolean(reference.previewUrl);
-    const Icon = reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
-    const actionLabel = canPreview ? `放大查看${reference.label}` : canInsert ? `在提示词中插入${reference.label}` : reference.label;
+    const canPreview = !canInsert && (reference.kind === "image" || reference.kind === "audio") && Boolean(reference.previewUrl);
+    const Icon = reference.kind === "audio" ? AudioLines : reference.kind === "video" ? Video : reference.kind === "image" ? ImageIcon : FileText;
+    const actionLabel = canPreview ? reference.kind === "audio" ? `播放${reference.label}` : `放大查看${reference.label}` : canInsert ? `在提示词中插入${reference.label}` : reference.label;
 
     return (
         <div className="group relative size-14 shrink-0">
             <button
                 type="button"
-                title={actionLabel}
+                title={reference.kind === "audio" ? `${reference.title} · ${reference.label} · ${formatAudioTime((reference.durationMs || 0) / 1000)}` : actionLabel}
                 aria-label={actionLabel}
                 className="grid size-full overflow-hidden rounded-xl border transition hover:brightness-110 active:scale-95"
                 style={{ borderColor: theme.node.stroke, background: theme.node.fill, color: theme.node.muted, borderRadius: 12, overflow: "hidden" }}
@@ -889,6 +914,8 @@ function ReferenceContentItem({ reference, index, canInsert, canRemove, theme, o
                     <img src={reference.previewUrl} alt={reference.title} className="block size-full rounded-xl object-cover" style={{ borderRadius: 12 }} draggable={false} />
                 ) : reference.kind === "video" && reference.previewUrl ? (
                     <video src={reference.previewUrl} aria-label={reference.title} className="block size-full rounded-xl bg-black object-cover" style={{ borderRadius: 12 }} muted preload="metadata" />
+                ) : reference.kind === "audio" ? (
+                    <span className="flex w-full flex-col items-center gap-0.5 px-1 text-[9px]"><AudioLines className="size-4" /><span className="w-full truncate">{reference.title}</span><span>{formatAudioTime((reference.durationMs || 0) / 1000)}</span></span>
                 ) : reference.kind === "text" ? (
                     <span className="line-clamp-3 px-1.5 text-left text-[10px] leading-4">{reference.text || reference.title}</span>
                 ) : (
@@ -901,7 +928,7 @@ function ReferenceContentItem({ reference, index, canInsert, canRemove, theme, o
                 </span>
             ) : null}
             <span className={`pointer-events-none absolute right-1 top-1 grid size-4 place-items-center rounded-sm text-[10px] font-medium transition-opacity ${canRemove ? "group-hover:opacity-0" : ""}`} style={{ background: theme.node.panel, color: theme.node.muted }}>
-                {index}
+                {reference.kind === "audio" ? reference.label.replace("音频", "") : index}
             </span>
             {canRemove ? (
                 <button
@@ -1400,6 +1427,7 @@ function refChipThumbHTML(ref: CanvasResourceReference) {
     if (ref.kind === "image" && ref.previewUrl) {
         return `<img src="${escapeAttr(ref.previewUrl)}" alt="" style="width:16px;height:16px;border-radius:3px;object-fit:cover;pointer-events:none;" draggable="false" />`;
     }
+    if (ref.kind === "audio") return `<span style="font-size:10px;flex-shrink:0">音</span>`;
     // SVG icons as inline data for reliability
     if (ref.kind === "video")
         return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2f80ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>`;

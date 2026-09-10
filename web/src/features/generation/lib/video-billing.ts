@@ -45,6 +45,7 @@ type VideoGenerationQuoteInput = {
     resolution: string;
     seconds: string | number;
     imageReferenceCount?: number;
+    audioReferenceCount?: number;
     videoReferenceCount?: number;
     taskCount?: number;
     /** 是否把参考素材缺失视为不可报价。预览报价传 false，纯计费预览不受素材影响；真实生成触发默认 true。 */
@@ -79,7 +80,8 @@ export function quoteVideoGeneration(input: VideoGenerationQuoteInput): VideoGen
     if (configuration.billingUnit !== "generation" && configuration.billingUnit !== "second") {
         return { available: false, reason: "当前模型视频计费方式配置无效" };
     }
-    const materialIssue = videoGenerationReferenceIssue(input.mode, input.imageReferenceCount || 0, input.videoReferenceCount || 0);
+    if (input.audioReferenceCount && !input.config.modelCapabilities.find((item) => item.model === input.model)?.capabilities.includes("audio-input")) return { available: false, reason: "当前模型未开启音频输入能力" };
+    const materialIssue = videoGenerationReferenceIssue(input.mode, input.imageReferenceCount || 0, input.videoReferenceCount || 0, input.audioReferenceCount || 0);
     if (input.requireReferences !== false && materialIssue) return { available: false, reason: materialIssue };
     const resolution = input.resolution.trim().toLowerCase() as VideoResolution;
     if (!VIDEO_RESOLUTION_OPTIONS.some((option) => option.value === resolution)) {
@@ -116,11 +118,12 @@ export function createVideoBillingConfiguration(): VideoBillingConfiguration {
 }
 
 /** 返回视频生成模式与参考素材不匹配的原因；空字符串表示可提交。 */
-export function videoGenerationReferenceIssue(mode: VideoGenerationMode, imageReferenceCount: number, videoReferenceCount: number) {
+export function videoGenerationReferenceIssue(mode: VideoGenerationMode, imageReferenceCount: number, videoReferenceCount: number, audioReferenceCount = 0) {
+    if (audioReferenceCount && mode !== "reference-to-video") return "音频输入仅支持全能参考模式";
     if (mode === "text-to-video" && (imageReferenceCount || videoReferenceCount)) return "文生视频不能携带参考素材";
     if (mode === "image-to-video" && imageReferenceCount < 1) return "图生视频至少需要一张图片参考素材";
     if (mode === "image-to-video" && videoReferenceCount) return "图生视频不能携带视频参考素材";
-    if (mode === "reference-to-video" && imageReferenceCount + videoReferenceCount < 1) return "全能参考至少需要一个参考素材";
+    if (mode === "reference-to-video" && imageReferenceCount + videoReferenceCount + audioReferenceCount < 1) return "全能参考至少需要一个参考素材";
     return "";
 }
 

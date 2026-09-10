@@ -3,9 +3,10 @@ import { boolConfig } from "@/features/generation/lib/seedance-video";
 import { createAiTask, getAiTaskInfo, waitAiTask, type GenerationStyleSnapshot, type ServerAiTask, type ServerAiTaskMediaReference, type ServerGenerationSource } from "@/services/api/server";
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
 import type { ReferenceImage } from "@/features/generation/types/image";
-import type { ReferenceVideo } from "@/features/generation/types/media";
+import type { ReferenceAudio, ReferenceVideo } from "@/features/generation/types/media";
 
 type RequestOptions = {
+    audioReferences?: ReferenceAudio[];
     signal?: AbortSignal;
     onProgress?: (progress: number) => void;
     onTaskCreated?: (taskId: string) => void;
@@ -104,6 +105,7 @@ async function createServerVideoTask(config: AiConfig, prompt: string, reference
             watermark: boolConfig(config.videoWatermark, false),
         },
         references: references.map(toServerImageReference),
+        audioReferences: (options?.audioReferences || []).map(toServerMediaReference),
         videoReferences: videoReferences.map(toServerMediaReference),
         generationSource,
         generationStyleIds: options?.generationStyleIds,
@@ -148,7 +150,7 @@ function toServerImageReference(image: ReferenceImage): ServerAiTaskMediaReferen
     };
 }
 
-function toServerMediaReference(item: ReferenceVideo): ServerAiTaskMediaReference {
+function toServerMediaReference(item: ReferenceVideo | ReferenceAudio): ServerAiTaskMediaReference {
     return {
         id: item.id,
         name: item.name,

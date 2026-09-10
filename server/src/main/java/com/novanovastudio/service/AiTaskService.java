@@ -2,6 +2,7 @@ package com.novanovastudio.service;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
+import com.novanovastudio.ai.AudioInputSupport;
 import com.novanovastudio.agent.AgentTaskOrchestrator;
 import com.novanovastudio.ai.AiProviderAdapter;
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
@@ -339,6 +340,7 @@ public class AiTaskService {
             Long userId,
             AiTaskDtos.CreateAiTaskRequest request,
             Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
+        if (!TYPE_VIDEO.equals(request.taskType()) && request.audioReferences() != null && !request.audioReferences().isEmpty()) return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "音频输入仅支持视频生成任务"));
         AiTaskDtos.CreateAiTaskRequest normalizedRequest = normalizeVideoGenerationMode(request);
         Mono<Void> videoPreflight = TYPE_VIDEO.equals(normalizedRequest.taskType())
                 ? resolveModel(normalizedRequest.taskType(), normalizedRequest.model())
@@ -404,7 +406,7 @@ public class AiTaskService {
         if (mode.equals(request.videoGenerationMode())) return request;
         return new AiTaskDtos.CreateAiTaskRequest(request.taskType(), request.prompt(), request.model(), request.parameters(),
                 request.references(), request.videoReferences(), request.generationSource(), request.generationStyleIds(),
-                request.generationStyleSnapshots(), mode);
+                request.generationStyleSnapshots(), mode, request.audioReferences());
     }
 
     /**
@@ -425,7 +427,7 @@ public class AiTaskService {
                 .flatMap(styles -> promptOptimizationService.optimizeAndWait(userId, request.taskType(), request.prompt(), styles, response -> Mono.empty())
                         .map(optimizedPrompt -> new AiTaskDtos.CreateAiTaskRequest(
                                 request.taskType(), optimizedPrompt, request.model(), request.parameters(), request.references(),
-                                request.videoReferences(), request.generationSource(), null, styles, request.videoGenerationMode())));
+                                request.videoReferences(), request.generationSource(), null, styles, request.videoGenerationMode(), request.audioReferences())));
     }
 
     /**
@@ -1093,6 +1095,15 @@ public class AiTaskService {
         }
         List<AiTaskDtos.AiTaskMediaReference> imageReferences = request.references() == null ? List.of() : request.references();
         List<AiTaskDtos.AiTaskMediaReference> videoReferences = request.videoReferences() == null ? List.of() : request.videoReferences();
+        List<AiTaskDtos.AiTaskMediaReference> audioReferences = request.audioReferences() == null ? List.of() : request.audioReferences();
+        if (!audioReferences.isEmpty()) {
+            if (resolvedModel.capabilities() == null || !resolvedModel.capabilities().contains(AudioInputSupport.CAPABILITY)) throw new BusinessException(ErrorCode.PARAM_INVALID, "当前模型未开启音频输入能力");
+            AudioInputSupport.validateCapability(TYPE_VIDEO, resolvedModel.isCustomModel() ? "custom" : resolvedModel.channel().apiFormat(), resolvedModel.capabilities());
+            if (!VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode)) throw new BusinessException(ErrorCode.PARAM_INVALID, "音频输入仅支持全能参考模式");
+            if (audioReferences.size() > 3) throw new BusinessException(ErrorCode.PARAM_INVALID, "最多支持3段参考音频");
+            if (audioReferences.stream().anyMatch(reference -> reference == null || !AudioInputSupport.isAudioMimeType(reference.mimeType()))) throw new BusinessException(ErrorCode.PARAM_INVALID, "音频参考列表只能包含 MP3、WAV");
+            if ("evolink".equals(resolvedModel.channel().apiFormat()) && imageReferences.isEmpty() && videoReferences.isEmpty()) throw new BusinessException(ErrorCode.PARAM_INVALID, "Evolink 音频参考必须同时提供图片或视频");
+        }
         if (imageReferences.stream().anyMatch(reference -> reference == null || !isImageMimeType(reference.mimeType()))) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "图片参考列表只能包含图片素材");
         }
@@ -1114,8 +1125,8 @@ public class AiTaskService {
                 }
             }
             case VideoGenerationMode.REFERENCE_TO_VIDEO -> {
-                if (imageReferences.isEmpty() && videoReferences.isEmpty()) {
-                    throw new BusinessException(ErrorCode.PARAM_INVALID, "全能参考至少需要一张图片或一个视频参考素材");
+                if (imageReferences.isEmpty() && videoReferences.isEmpty() && audioReferences.isEmpty()) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "全能参考至少需要一个图片、视频或音频参考素材");
                 }
             }
             case VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO -> {
@@ -1171,8 +1182,28 @@ public class AiTaskService {
     private Mono<Void> validateVideoReferences(Long userId, AiTaskDtos.CreateAiTaskRequest request) {
         return Flux.concat(
                         validateVideoReferenceList(userId, request.references(), true),
-                        validateVideoReferenceList(userId, request.videoReferences(), false))
+                        validateVideoReferenceList(userId, request.videoReferences(), false),
+                        validateAudioReferences(userId, request.audioReferences()))
                 .then();
+    }
+
+    /**
+     * 校验音频的用户归属、可访问地址和存储元数据。
+     * @param userId Long 当前用户标识
+     * @param references List 音频参考，必须来自媒体存储
+     * @return Mono<Void> 完成校验的异步信号
+     */
+    private Mono<Void> validateAudioReferences(Long userId, List<AiTaskDtos.AiTaskMediaReference> references) {
+        return Flux.fromIterable(references == null ? List.<AiTaskDtos.AiTaskMediaReference>of() : references)
+                .concatMap(reference -> {
+                    if (reference == null || !StringUtils.hasText(reference.storageKey())) return Mono.<PersistenceDtos.UploadedMediaResponse>error(new BusinessException(ErrorCode.PARAM_INVALID, "参考音频必须先上传并提供存储标识"));
+                    return persistenceService.getMediaInfoForUser(userId, reference.storageKey().trim())
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "参考音频不存在或不属于当前用户")))
+                            .map(media -> {
+                                if (!isHttpReferenceUrl(media.url())) throw new BusinessException(ErrorCode.PARAM_INVALID, "参考音频没有可访问的地址");
+                                return media;
+                            });
+                }).collectList().doOnNext(AudioInputSupport::validateMedia).then();
     }
 
     /**

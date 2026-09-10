@@ -8,7 +8,7 @@ import type { CanvasTheme, CanvasBackgroundMode } from "@/shared/lib/canvas-them
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 import { readCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
 import { formatGroupedGenerationStyleMessage } from "@/features/generation/lib/style-command";
-import { createBackgroundNode, createImageNode, createStoryboardNode, createTextNode, createVideoCompositionNode, createVideoNode, getCanvasNodeTemplate } from "../constants";
+import { createAudioNode, createBackgroundNode, createImageNode, createStoryboardNode, createTextNode, createVideoCompositionNode, createVideoNode, getCanvasNodeTemplate } from "../constants";
 import { applyCanvasNodeAttributes, isBackgroundNode, isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode, updateCanvasNodeFrame, type CanvasNodeAttributes } from "../domain/canvas-node";
 import { MINIMUM_CONTENT_NODE_DIMENSION, nodeSizeFromRatioWithMinimum } from "../utils/canvas-node-size";
 import {
@@ -73,7 +73,7 @@ export function createCanvasNode(kind: CanvasNodeKind, position: CanvasPoint, at
             y: position.y - frameSize.height / 2,
         },
     };
-    const node = kind === "image"
+    const node = kind === "audio" ? createAudioNode(input) : kind === "image"
         ? createImageNode(input)
         : kind === "video"
             ? createVideoNode(input)

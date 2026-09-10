@@ -83,7 +83,7 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
                 />
             ) : null}
 
-            <input ref={props.imageInputRef} type="file" accept="image/*,video/*" hidden onChange={props.onImageInputChange} />
+            <input ref={props.imageInputRef} type="file" accept="image/*,video/*,.mp3,.wav,audio/mpeg,audio/wav" hidden onChange={props.onImageInputChange} />
             <CanvasNodeInfoModal node={props.infoNode} open={Boolean(props.infoNode)} onClose={props.onCloseInfo} />
 
             {cropSource && props.cropNode ? (

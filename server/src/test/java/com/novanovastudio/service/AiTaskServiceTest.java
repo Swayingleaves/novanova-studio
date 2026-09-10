@@ -407,4 +407,65 @@ class AiTaskServiceTest {
         task.setResultData("{}");
         return task;
     }
+    /** 未开启能力时应在创建任务和扣费前拒绝音频。 */
+    @Test
+    void shouldRejectAudioWithoutCapabilityBeforeCharging() {
+        BusinessException error = Assertions.assertThrows(BusinessException.class, () -> service.createTask(audioRequest()).block());
+        Assertions.assertTrue(error.getMessage().contains("未开启音频输入"));
+        verify(repository, never()).createTask(any(AiGenerationTask.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+    }
+
+    /** 非当前用户的音频不能提交给渠道，也不会扣费。 */
+    @Test
+    void shouldRejectUnownedAudioBeforeCharging() {
+        configureAudioModel("minimax");
+        when(persistenceService.getMediaInfoForUser(7L, "audio:reference")).thenReturn(Mono.empty());
+        BusinessException error = Assertions.assertThrows(BusinessException.class, () -> service.createTask(audioRequest()).block());
+        Assertions.assertTrue(error.getMessage().contains("不属于当前用户"));
+        verify(repository, never()).createTask(any(AiGenerationTask.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+    }
+
+    /** Evolink 必须在音频以外提供视觉参考。 */
+    @Test
+    void shouldRejectEvolinkAudioWithoutVisualReference() {
+        configureAudioModel("evolink");
+        BusinessException error = Assertions.assertThrows(BusinessException.class, () -> service.createTask(audioRequest()).block());
+        Assertions.assertTrue(error.getMessage().contains("同时提供图片或视频"));
+        verify(repository, never()).createTask(any(AiGenerationTask.class));
+    }
+
+    /** 音频请求即便声明合法，服务端也必须检查保存的实际媒体类型。 */
+    @Test
+    void shouldRejectStoredAudioTypeMismatch() {
+        configureAudioModel("minimax");
+        when(persistenceService.getMediaInfoForUser(7L, "audio:reference")).thenReturn(Mono.just(
+                new PersistenceDtos.UploadedMediaResponse("audio:reference", "https://example.com/file.mp4", 100L, "video/mp4", null, null, 4000, null)));
+        Assertions.assertThrows(BusinessException.class, () -> service.createTask(audioRequest()).block());
+        verify(repository, never()).createTask(any(AiGenerationTask.class));
+    }
+
+    /**
+     * 为测试启用支持音频输入的全能参考模型。
+     * @param format String 渠道格式
+     */
+    private void configureAudioModel(String format) {
+        when(persistenceService.getPlatformAiChannels()).thenReturn(Mono.just(List.of(new AiTaskDtos.AiChannelConfig(
+                "channel-1", "音频测试渠道", "https://example.com", "key", format, List.of("model-1")))));
+        when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(new PersistenceDtos.ModelConfig(
+                "model-config-2", "channel-1", "model-1", AiTaskTypes.VIDEO, List.of("reference-to-video", "audio-input"), true, 0, 0, true, "high", "generation", 1,
+                new com.alibaba.fastjson2.JSONObject(), new VideoBillingConfiguration("generation", 3, Map.of("reference-to-video", Map.of("720p", 10))), null, null, false, null))));
+    }
+
+    /**
+     * 创建仅含音频的全能参考请求。
+     * @return CreateAiTaskRequest 请求数据
+     */
+    private AiTaskDtos.CreateAiTaskRequest audioRequest() {
+        return new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.VIDEO, "参考音频1", "channel-1::model-1",
+                Map.of("seconds", 5, "resolution", "720p"), List.of(), List.of(), AiTaskSources.VIDEO_PAGE, null, null, "reference-to-video",
+                List.of(new AiTaskDtos.AiTaskMediaReference("audio-1", "配乐", "audio/mpeg", "audio:reference", "https://example.com/audio.mp3")));
+    }
+
 }

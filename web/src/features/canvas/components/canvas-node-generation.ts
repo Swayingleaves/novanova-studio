@@ -2,13 +2,15 @@ import type { AiTextMessage } from "@/features/generation/api/image";
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/features/generation/lib/seedance-video";
 import type { ReferenceImage } from "@/features/generation/types/image";
-import type { ReferenceVideo } from "@/features/generation/types/media";
+import type { ReferenceAudio, ReferenceVideo } from "@/features/generation/types/media";
 import type { CanvasConnection, CanvasGenerationMode, CanvasNode } from "../types";
-import { isImageNode, isStoryboardNode, isTextNode, isVideoNode } from "../domain/canvas-node";
+import { isAudioNode, isImageNode, isStoryboardNode, isTextNode, isVideoNode } from "../domain/canvas-node";
+import { mergeAudioReferences } from "../utils/audio-references";
 import { getGenerationResourceNodes } from "../utils/canvas-resource-references";
 
 type NodeMediaReferences = {
     referenceImages: ReferenceImage[];
+    referenceAudios: ReferenceAudio[];
     referenceVideos: ReferenceVideo[];
 };
 
@@ -16,15 +18,17 @@ export type NodeGenerationContext = NodeMediaReferences & {
     prompt: string;
     textCount: number;
     imageCount: number;
+    audioCount: number;
     videoCount: number;
 };
 
 export type NodeGenerationInput = {
     nodeId: string;
-    type: "text" | "image" | "video";
+    type: "text" | "image" | "video" | "audio";
     title: string;
     text?: string;
     image?: ReferenceImage;
+    audio?: ReferenceAudio;
     video?: ReferenceVideo;
 };
 
@@ -48,6 +52,7 @@ export function resolveNodeGenerationPrompt(nodeId: string, nodes: CanvasNode[],
     const resolvedPrompt = context.prompt.trim();
     const labels = [
         ...context.referenceImages.map((_, index) => imageReferenceLabel(index)),
+        ...context.referenceAudios.map((_, index) => `音频${index + 1}`),
         ...context.referenceVideos.map((_, index) => seedanceReferenceLabel("video", index)),
     ];
     if (!includeMediaReferencePrompt || !labels.length) return resolvedPrompt;
@@ -71,6 +76,10 @@ export function hasNodeGenerationInputs(nodeId: string, nodes: CanvasNode[], con
 export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNode[], connections: CanvasConnection[]): NodeGenerationInput[] {
     const inputs: NodeGenerationInput[] = [];
     for (const node of getGenerationResourceNodes(nodeId, nodes, connections)) {
+        if (isAudioNode(node) && node.content.source) {
+            inputs.push({ nodeId: node.id, type: "audio", title: node.title, audio: { id: node.id, name: node.title, type: node.content.mimeType || "", url: node.content.source, storageKey: node.content.storageKey, objectStorage: node.content.objectStorage, durationMs: node.content.durationMilliseconds, bytes: node.content.bytes } });
+            continue;
+        }
         const image = readReferenceImage(node);
         if (image) {
             inputs.push({ nodeId: node.id, type: "image", title: node.title, image });
@@ -132,6 +141,7 @@ function buildPlainContext(inputs: NodeGenerationInput[], prompt: string): NodeG
         ...references,
         textCount: inputs.filter((input) => input.type === "text").length,
         imageCount: references.referenceImages.length,
+        audioCount: references.referenceAudios.length,
         videoCount: references.referenceVideos.length,
     };
 }
@@ -139,6 +149,7 @@ function buildPlainContext(inputs: NodeGenerationInput[], prompt: string): NodeG
 function collectMediaReferences(inputs: NodeGenerationInput[]): NodeMediaReferences {
     return {
         referenceImages: inputs.map((input) => input.image).filter((image): image is ReferenceImage => Boolean(image)),
+        referenceAudios: mergeAudioReferences(inputs.map((input) => input.audio).filter((audio): audio is ReferenceAudio => Boolean(audio))),
         referenceVideos: inputs.map((input) => input.video).filter((video): video is ReferenceVideo => Boolean(video)),
     };
 }
@@ -150,6 +161,7 @@ function readNodeText(node: CanvasNode) {
 }
 
 function createGenerationLabel(type: NodeGenerationInput["type"], index: number) {
+    if (type === "audio") return `音频${index + 1}`;
     if (type === "image") return imageReferenceLabel(index);
     if (type === "video") return seedanceReferenceLabel("video", index);
     return `文本${index + 1}`;

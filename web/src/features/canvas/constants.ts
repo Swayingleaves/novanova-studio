@@ -1,4 +1,4 @@
-import { type CanvasBackgroundNode, type CanvasExecutionState, type CanvasImageNode, type CanvasNodeFrame, type CanvasNodeKind, type CanvasPoint, type CanvasStoryboardNode, type CanvasTextNode, type CanvasVideoCompositionNode, type CanvasVideoNode } from "./types.ts";
+import { type CanvasAudioNode, type CanvasBackgroundNode, type CanvasExecutionState, type CanvasImageNode, type CanvasNodeFrame, type CanvasNodeKind, type CanvasPoint, type CanvasStoryboardNode, type CanvasTextNode, type CanvasVideoCompositionNode, type CanvasVideoNode } from "./types.ts";
 
 export interface CreateCanvasNodeInput {
     id: string;
@@ -51,6 +51,7 @@ const BACKGROUND_NODE_TEMPLATE: CanvasNodeTemplate = {
 };
 
 const CANVAS_NODE_TEMPLATES: Record<CanvasNodeKind, CanvasNodeTemplate> = {
+    audio: { title: "音频", width: 480, height: 200 },
     image: IMAGE_NODE_TEMPLATE,
     text: TEXT_NODE_TEMPLATE,
     video: VIDEO_NODE_TEMPLATE,
@@ -63,6 +64,11 @@ export const CANVAS_BACKGROUND_MIN_WIDTH = 320;
 export const CANVAS_BACKGROUND_MIN_HEIGHT = 220;
 export const CANVAS_BACKGROUND_PADDING = 32;
 export const CANVAS_BACKGROUND_DEFAULT_COLOR = "var(--studio-surface-raised)";
+
+/** 创建空音频节点。 */
+export function createAudioNode(input: CreateCanvasNodeInput): CanvasAudioNode {
+    return { id: input.id, kind: "audio", title: input.title?.trim() || "音频", frame: createNodeFrame(CANVAS_NODE_TEMPLATES.audio, input.position), execution: createIdleExecution(), content: { source: "", waveformPeaks: [] } };
+}
 
 export function createImageNode(input: CreateCanvasNodeInput): CanvasImageNode {
     return {

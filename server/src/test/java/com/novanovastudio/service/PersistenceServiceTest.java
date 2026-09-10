@@ -9,6 +9,7 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentActivityService;
+import com.novanovastudio.ai.AudioInputSupport;
 import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.ai.AiHttpClient;
@@ -605,6 +606,42 @@ class PersistenceServiceTest {
 
         Assertions.assertNotNull(updated);
         Assertions.assertEquals("second", updated.creditUnit());
+    }
+
+    /** 音频输入能力应通过已有能力列表保存，且不能成为分档计费模式。 */
+    @Test
+    void shouldSaveAudioInputCapabilityWithoutBillingMode() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"MiniMax-H3\"]");
+        channel.setApiFormat("minimax");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
+        VideoBillingConfiguration configuration = new VideoBillingConfiguration("generation", 3,
+                java.util.Map.of(VideoGenerationMode.REFERENCE_TO_VIDEO, java.util.Map.of("720p", 10)));
+
+        PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "MiniMax-H3", "video", List.of(VideoGenerationMode.REFERENCE_TO_VIDEO, AudioInputSupport.CAPABILITY), 0, 0,
+                true, "high", "generation", 1, new JSONObject(), configuration, null, null, false, null)).block();
+
+        Assertions.assertNotNull(created);
+        Assertions.assertEquals(List.of(VideoGenerationMode.REFERENCE_TO_VIDEO, AudioInputSupport.CAPABILITY), created.capabilities());
+        Assertions.assertEquals(java.util.Set.of(VideoGenerationMode.REFERENCE_TO_VIDEO), created.videoBillingConfiguration().modePrices().keySet());
+    }
+
+    /** 未开启全能参考或渠道未实现协议时，服务端必须拒绝音频能力配置。 */
+    @Test
+    void shouldRejectUnsupportedAudioInputCapability() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"video-model\"]");
+        channel.setApiFormat("openai");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        VideoBillingConfiguration configuration = new VideoBillingConfiguration("generation", 3,
+                java.util.Map.of(VideoGenerationMode.REFERENCE_TO_VIDEO, java.util.Map.of("720p", 10)));
+
+        Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "video-model", "video", List.of(VideoGenerationMode.REFERENCE_TO_VIDEO, AudioInputSupport.CAPABILITY), 0, 0,
+                true, "high", "generation", 1, new JSONObject(), configuration, null, null, false, null)).block());
+        verify(repository, times(0)).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
     }
 
     /** 从视频模型切换为非视频模型时应清空旧视频分档计费配置。 */

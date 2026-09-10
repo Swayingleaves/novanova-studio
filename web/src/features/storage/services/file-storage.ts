@@ -10,7 +10,7 @@ export type UploadedFile = { url: string; storageKey: string; bytes: number; mim
 
 const resolvedUrls = new Map<string, string>();
 
-export async function uploadMediaFile(input: string | Blob, prefix = "file", options: { mimeType?: string } = {}): Promise<UploadedFile> {
+export async function uploadMediaFile(input: string | Blob, prefix = "file", options: { mimeType?: string; durationMs?: number } = {}): Promise<UploadedFile> {
     if (typeof input === "string" && /^https?:\/\//i.test(input)) {
         const media = await registerRemoteMedia({ kind: prefix, sourceUrl: input, storageKey: `${prefix}:${nanoid()}`, mimeType: options.mimeType });
         return { url: media.url || input, storageKey: media.storageKey, bytes: media.bytes || 0, mimeType: media.mimeType || options.mimeType || "application/octet-stream", width: media.width, height: media.height, durationMs: media.durationMs, objectStorage: media.objectStorage };
@@ -27,11 +27,12 @@ export async function uploadMediaFile(input: string | Blob, prefix = "file", opt
             storageKey,
             mimeType: options.mimeType || blob.type || "application/octet-stream",
             ...meta,
+            ...(options.durationMs === undefined ? {} : { durationMs: options.durationMs }),
         },
         input instanceof File ? input.name : `${prefix}.bin`,
     );
     resolvedUrls.set(media.storageKey, media.url);
-    return { url: media.url, storageKey: media.storageKey, bytes: media.bytes || blob.size, mimeType: media.mimeType || options.mimeType || blob.type || "application/octet-stream", width: media.width || meta.width, height: media.height || meta.height, durationMs: media.durationMs || meta.durationMs, objectStorage: media.objectStorage };
+    return { url: media.url, storageKey: media.storageKey, bytes: media.bytes || blob.size, mimeType: media.mimeType || options.mimeType || blob.type || "application/octet-stream", width: media.width || meta.width, height: media.height || meta.height, durationMs: media.durationMs || options.durationMs || meta.durationMs, objectStorage: media.objectStorage };
 }
 
 export async function resolveMediaUrl(storageKey?: string, fallback = "") {
@@ -65,8 +66,9 @@ export async function getMediaBlob(storageKey: string) {
 }
 
 export async function setMediaBlob(storageKey: string, blob: Blob) {
+    const audioMeta = blob.type.startsWith("audio/") ? await (await import("./audio-storage")).readAudioMetadata(blob) : null;
     const localUrl = URL.createObjectURL(blob);
-    const meta = blob.type.startsWith("video/") ? await readVideoMeta(localUrl) : {};
+    const meta = audioMeta ? { durationMs: audioMeta.durationMs } : blob.type.startsWith("video/") ? await readVideoMeta(localUrl) : {};
     URL.revokeObjectURL(localUrl);
     const media = await uploadServerMedia(blob, { kind: storageKey.split(":", 1)[0] || "file", storageKey, mimeType: blob.type || "application/octet-stream", ...meta }, "media.bin");
     resolvedUrls.set(storageKey, media.url);
