@@ -10,6 +10,7 @@ import type { CanvasNode, CanvasNodeKind, CanvasViewTransform } from "../types";
 import { isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
 import { buildImageToolbarTools } from "./canvas-image-toolbar-tools";
 import { useCanvasTheme } from "./canvas-theme-provider";
+import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
 
 type ToolbarAction = {
@@ -68,6 +69,7 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
     const { message } = App.useApp();
     const copyText = useCopyText();
     const theme = useCanvasTheme();
+    const uploading = useCanvasUiStore((state) => Boolean(props.node && state.uploadingNodeIds.has(props.node.id)));
 
     if (!props.node) return null;
 
@@ -122,7 +124,7 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
         active: tool.active,
         onClick: tool.onClick,
     }));
-    const allActions = hasImage ? [...baseActions, ...imageActions] : baseActions;
+    const allActions: ToolbarAction[] = hasImage ? [...baseActions, ...imageActions] : baseActions;
 
     const left = props.viewport.x + (node.frame.position.x + node.frame.width / 2) * props.viewport.k;
     // 工具栏上移，为节点外侧左上角的浮动名称预留独立间距，避免两者重叠。
@@ -139,7 +141,7 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
             onPointerDown={(event) => event.stopPropagation()}
         >
             {allActions.map((action) => (
-                <ToolbarActionButton key={action.id} {...action} showLabel />
+                <ToolbarActionButton key={action.id} {...action} disabled={uploading || action.disabled} showLabel />
             ))}
         </div>
     );

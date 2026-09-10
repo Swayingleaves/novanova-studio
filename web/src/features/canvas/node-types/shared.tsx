@@ -7,6 +7,7 @@ import { CANVAS_CONNECTION_HANDLE_SIZE } from "../constants";
 import type { CanvasNode } from "../types";
 import { useNodeActions } from "./node-action-context";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
+import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
 
 /** 共享加载状态组件 */
 export function NodeLoading() {
@@ -215,12 +216,15 @@ type NodeHoverSurfaceProps = {
 
 export const NodeHoverSurface = forwardRef<HTMLDivElement, NodeHoverSurfaceProps>(function NodeHoverSurface({ nodeId, className, style, onMouseEnter, onMouseLeave, onDoubleClick, children }, ref) {
     const actions = useNodeActions();
+    const theme = useCanvasTheme();
+    const uploading = useCanvasUiStore((state) => state.uploadingNodeIds.has(nodeId));
 
     return (
         <div
             ref={ref}
             className={`group ${className ?? ""}`}
             style={style}
+            aria-busy={uploading}
             onMouseEnter={(event) => {
                 actions.onKeepToolbar?.(nodeId);
                 onMouseEnter?.(event);
@@ -232,6 +236,19 @@ export const NodeHoverSurface = forwardRef<HTMLDivElement, NodeHoverSurfaceProps
             onDoubleClick={onDoubleClick}
         >
             {children}
+            {uploading ? (
+                <div
+                    role="status"
+                    className="nodrag nopan absolute inset-0 z-[60] flex items-center justify-center gap-2 rounded-[inherit]"
+                    style={{ background: theme.node.fill, color: theme.node.muted }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                >
+                    <LoaderCircle className="size-5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                    <span className="text-sm">上传中…</span>
+                </div>
+            ) : null}
         </div>
     );
 });

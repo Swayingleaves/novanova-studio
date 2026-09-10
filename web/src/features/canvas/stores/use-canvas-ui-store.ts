@@ -12,6 +12,9 @@ type CanvasRenameDraft = {
 };
 
 type CanvasUiState = {
+    uploadingNodeIds: Set<string>;
+    beginNodeUpload: (nodeId: string) => boolean;
+    finishNodeUpload: (nodeId: string) => void;
     renameDraft: CanvasRenameDraft | null;
     selectedDocumentIds: string[];
     pendingDeleteDocumentIds: string[];
@@ -23,7 +26,20 @@ type CanvasUiState = {
     applyDeletedDocuments: (documentIds: readonly string[]) => void;
 };
 
-export const useCanvasUiStore = create<CanvasUiState>()((set) => ({
+export const useCanvasUiStore = create<CanvasUiState>()((set, get) => ({
+    uploadingNodeIds: new Set(),
+    // 上传状态仅保存在内存中，避免写入画布文档或撤销历史。
+    beginNodeUpload: (nodeId) => {
+        if (get().uploadingNodeIds.has(nodeId)) return false;
+        set((state) => ({ uploadingNodeIds: new Set(state.uploadingNodeIds).add(nodeId) }));
+        return true;
+    },
+    finishNodeUpload: (nodeId) =>
+        set((state) => {
+            const uploadingNodeIds = new Set(state.uploadingNodeIds);
+            uploadingNodeIds.delete(nodeId);
+            return { uploadingNodeIds };
+        }),
     renameDraft: null,
     selectedDocumentIds: [],
     pendingDeleteDocumentIds: [],

@@ -1,7 +1,8 @@
 "use client";
 
 import { App, Button, Image, Modal } from "antd";
-import { Copy, Download, Link2 } from "lucide-react";
+import { Copy, Download, Link2, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { cloneElement, useId, useRef, useState, type CSSProperties, type ReactElement } from "react";
 
 import { formatBytes, formatDuration } from "@/features/generation/lib/image-utils";
 import type { ReferenceImage } from "@/features/generation/types/image";
@@ -27,16 +28,23 @@ export type ResultDetail = {
     generationPrompt?: string;
     references?: ReferenceImage[];
     videoReferences?: ReferenceVideo[];
-    /** 下载当前结果，未提供时不展示下载按钮 */
-    onDownload?: () => void;
+    /** 下载当前结果，返回下载任务以跟踪加载状态；未提供时不展示下载按钮 */
+    onDownload?: () => Promise<void>;
 };
 
 /** 生成结果详情弹窗：左侧媒体本体，右侧提示词与引用 */
 export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail | null; onClose: () => void }) {
     const { message } = App.useApp();
+    const activeDownloads = useRef(new Set<string>());
+    const [downloadingMedia, setDownloadingMedia] = useState(new Set<string>());
+    const [detailsCollapsed, setDetailsCollapsed] = useState(false);
+    const [originalSize, setOriginalSize] = useState(false);
+    const detailsId = useId();
     if (!detail) return null;
 
     const { media } = detail;
+    const downloadKey = `${media.kind}:${media.url}`;
+    const isDownloading = downloadingMedia.has(downloadKey);
     const hasSize = (media.width || 0) > 0 && (media.height || 0) > 0;
     const hasBytes = (media.bytes || 0) > 0;
     const hasDuration = media.kind === "video" && (media.durationMs || 0) > 0;
@@ -44,6 +52,24 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
     const visibleVideoReferences = (detail.videoReferences || []).filter((reference) => Boolean(reference.url?.trim()));
     const showGenerationPrompt = Boolean(detail.generationPrompt?.trim()) && detail.generationPrompt !== detail.prompt;
     const hasRightContent = Boolean(detail.prompt?.trim()) || showGenerationPrompt || visibleReferences.length > 0 || visibleVideoReferences.length > 0;
+    const showDetails = hasRightContent && !detailsCollapsed;
+    // 为弹窗标题与下载操作预留空间，短屏也能完整看到媒体。
+    const mediaHeight = "min(80dvh, calc(100dvh - 180px))";
+
+    /** 按媒体跟踪下载，避免重复请求，并在切换或重新打开详情时保留正确状态。 */
+    const downloadResult = async () => {
+        if (!detail.onDownload || activeDownloads.current.has(downloadKey)) return;
+        activeDownloads.current.add(downloadKey);
+        setDownloadingMedia(new Set(activeDownloads.current));
+        try {
+            await detail.onDownload();
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "下载失败");
+        } finally {
+            activeDownloads.current.delete(downloadKey);
+            setDownloadingMedia(new Set(activeDownloads.current));
+        }
+    };
 
     const copyText = async (text: string, successText = "已复制") => {
         try {
@@ -55,13 +81,59 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
     };
 
     return (
-        <Modal title="结果详情" open centered footer={null} width={980} onCancel={onClose} destroyOnHidden>
-            <div className="grid gap-5 pt-1 md:grid-cols-[minmax(0,1fr)_320px]">
+        <Modal
+            title={
+                <div className="flex flex-wrap items-center justify-between gap-2 pr-8">
+                    <span>结果详情</span>
+                    {hasRightContent ? (
+                        <Button type="text" size="small" icon={detailsCollapsed ? <PanelRightOpen className="size-4" /> : <PanelRightClose className="size-4" />} aria-expanded={showDetails} aria-controls={detailsId} onClick={() => setDetailsCollapsed((current) => !current)}>
+                            {detailsCollapsed ? "展开信息" : "收起信息"}
+                        </Button>
+                    ) : null}
+                </div>
+            }
+            open
+            centered
+            footer={null}
+            width="min(1600px, 92vw)"
+            styles={{ body: { maxHeight: "calc(100dvh - 112px)", overflowY: "auto" } }}
+            onCancel={onClose}
+            destroyOnHidden
+        >
+            <div className={`grid gap-5 pt-1 ${showDetails ? "lg:grid-cols-[minmax(0,1fr)_300px]" : "grid-cols-1"}`}>
                 <div className="min-w-0 space-y-2.5">
                     {media.kind === "image" ? (
-                        <img src={media.url} alt="结果详情" className="max-h-[64vh] w-full rounded-lg bg-[var(--studio-media)] object-contain" />
+                        <Image
+                            key={media.url}
+                            src={media.url}
+                            alt="生成图片，点击查看大图"
+                            styles={{ root: { width: "100%", height: mediaHeight }, image: { width: "100%", height: "100%", objectFit: "contain" } }}
+                            classNames={{ root: "overflow-hidden rounded-lg bg-[var(--studio-media)]" }}
+                            preview={{
+                                cover: "查看大图",
+                                onOpenChange: () => setOriginalSize(false),
+                                imageRender: (node) => {
+                                    // 保留组件的缩放、拖动与事件，只切换图片的显示尺寸约束。
+                                    const imageNode = node as ReactElement<{ style?: CSSProperties }>;
+                                    return cloneElement(imageNode, {
+                                        style: { ...imageNode.props.style, flexShrink: 0, width: "auto", height: "auto", maxWidth: originalSize ? "none" : "100%", maxHeight: originalSize ? "none" : "80dvh" },
+                                    });
+                                },
+                                actionsRender: (actionsNode, { actions }) => (
+                                    <div className="flex flex-wrap items-center justify-center gap-2">
+                                        {actionsNode}
+                                        <Button onClick={() => {
+                                            actions.onReset();
+                                            setOriginalSize((current) => !current);
+                                        }}>
+                                            {originalSize ? "适应窗口" : "原始尺寸（100%）"}
+                                        </Button>
+                                    </div>
+                                ),
+                            }}
+                        />
                     ) : (
-                        <video src={media.url} controls autoPlay className="max-h-[64vh] w-full rounded-lg bg-black" />
+                        <video src={media.url} controls autoPlay className="w-full rounded-lg bg-[var(--studio-media)] object-contain" style={{ height: mediaHeight }} />
                     )}
                     <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
                         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-[var(--studio-muted)]">
@@ -79,15 +151,14 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
                                 拷贝链接
                             </Button>
                             {detail.onDownload ? (
-                                <Button size="small" icon={<Download className="size-3.5" />} onClick={detail.onDownload}>
-                                    下载{media.kind === "video" ? "视频" : "图片"}
+                                <Button size="small" icon={<Download className="size-3.5" />} loading={isDownloading} disabled={isDownloading} aria-busy={isDownloading} onClick={() => void downloadResult()}>
+                                    {isDownloading ? "下载中…" : `下载${media.kind === "video" ? "视频" : "图片"}`}
                                 </Button>
                             ) : null}
                         </div>
                     </div>
                 </div>
-                <div className="max-h-[64vh] space-y-5 overflow-y-auto">
-                    {hasRightContent ? null : <p className="studio-subtitle text-sm">暂无提示词与引用信息</p>}
+                <div id={detailsId} hidden={!showDetails} className="min-w-0 space-y-5 overflow-y-auto" style={{ maxHeight: mediaHeight }}>
                     {detail.prompt?.trim() ? (
                         <section className="space-y-2">
                             <div className="flex items-center justify-between">

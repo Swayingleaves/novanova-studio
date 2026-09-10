@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BookOpenText, ChevronRight, Clapperboard, ImageIcon, List, LoaderCircle, Video } from "lucide-react";
+import { BookOpenText, ChevronRight, Clapperboard, GripVertical, ImageIcon, List, LoaderCircle, Video } from "lucide-react";
 import { listSkills, type SkillOption } from "@/services/api/server";
 
 import type { CanvasTheme, CanvasBackgroundMode } from "@/shared/lib/canvas-theme";
@@ -145,24 +145,42 @@ export function CanvasLoadingShell() {
 export function ConnectionCreateMenu({
     pending,
     sourceNode,
+    onPositionChange,
     onCreate,
     onCreateSettingGraph,
     onClose,
 }: {
     pending: PendingConnectionCreate;
     sourceNode: CanvasNode | null;
+    onPositionChange: (position: CanvasPoint) => void;
     onCreate: (type: PendingConnectionCreateNodeType) => void;
     onCreateSettingGraph: (skill: SkillOption) => void;
     onClose: () => void;
 }) {
     const theme = useCanvasTheme();
+    const menuRef = useRef<HTMLDivElement>(null);
+    const dragRef = useRef<{ pointerId: number; startX: number; startY: number; position: CanvasPoint } | null>(null);
+    const menuPosition = pending.menuPosition ?? pending.position;
+
+    /** 将菜单限制在画布可见区域，保留标题栏可操作。 */
+    const moveMenu = (x: number, y: number) => {
+        const menu = menuRef.current;
+        const container = menu?.offsetParent;
+        if (!menu || !(container instanceof HTMLElement)) return;
+        onPositionChange({
+            x: Math.max(0, Math.min(x, container.clientWidth - menu.offsetWidth)),
+            y: Math.max(0, Math.min(y, container.clientHeight - menu.offsetHeight)),
+        });
+    };
+
     return (
         <div
+            ref={menuRef}
             className="absolute z-[120] rounded-[18px] border p-3 shadow-2xl"
             data-connection-create-menu
             style={{
-                left: pending.menuPosition?.x ?? pending.position.x,
-                top: pending.menuPosition?.y ?? pending.position.y,
+                left: menuPosition.x,
+                top: menuPosition.y,
                 width: CONNECTION_CREATE_MENU_WIDTH,
                 background: theme.node.panel,
                 borderColor: theme.node.stroke,
@@ -172,9 +190,43 @@ export function ConnectionCreateMenu({
             onPointerDown={(event) => event.stopPropagation()}
         >
             <div className="mb-2 flex items-center justify-between px-1">
-                <span className="text-sm font-medium" style={{ color: theme.node.muted }}>
+                <button
+                    type="button"
+                    className="flex min-h-7 flex-1 cursor-grab touch-none select-none items-center gap-1.5 rounded text-left text-sm font-medium active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]"
+                    style={{ color: theme.node.muted }}
+                    aria-label="移动引用生成面板"
+                    title="拖动移动面板"
+                    onPointerDown={(event) => {
+                        if (event.button !== 0 || !event.isPrimary) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, position: menuPosition };
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                    }}
+                    onPointerMove={(event) => {
+                        const drag = dragRef.current;
+                        if (!drag || drag.pointerId !== event.pointerId) return;
+                        event.stopPropagation();
+                        moveMenu(drag.position.x + event.clientX - drag.startX, drag.position.y + event.clientY - drag.startY);
+                    }}
+                    onPointerUp={(event) => {
+                        if (dragRef.current?.pointerId !== event.pointerId) return;
+                        dragRef.current = null;
+                        event.currentTarget.releasePointerCapture(event.pointerId);
+                    }}
+                    onPointerCancel={() => { dragRef.current = null; }}
+                    onLostPointerCapture={() => { dragRef.current = null; }}
+                    onKeyDown={(event) => {
+                        const direction = ({ ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] } as Record<string, number[]>)[event.key];
+                        if (!direction) return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        moveMenu(menuPosition.x + direction[0] * 10, menuPosition.y + direction[1] * 10);
+                    }}
+                >
+                    <GripVertical className="size-4 shrink-0" aria-hidden="true" />
                     引用该节点生成
-                </span>
+                </button>
                 <button type="button" className="grid size-7 place-items-center rounded-lg text-base opacity-55 transition hover:bg-black/5 hover:opacity-100" onClick={onClose} aria-label="关闭">
                     ×
                 </button>

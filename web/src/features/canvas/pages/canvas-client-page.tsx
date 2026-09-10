@@ -106,6 +106,7 @@ import {
     type PendingConnectionCreateNodeType,
 } from "./canvas-client-page-helpers";
 import { useCanvasStore } from "../stores/use-canvas-store";
+import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
 import { readCanvasSystemClipboard } from "../services/canvas-system-clipboard";
 import { saveCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
@@ -2795,6 +2796,7 @@ function CanvasWorkspacePage() {
     }, []);
 
     const handleUploadRequest = useCallback((nodeId?: string, position?: CanvasPoint) => {
+        if (nodeId && useCanvasUiStore.getState().uploadingNodeIds.has(nodeId)) return;
         uploadTargetRef.current = { nodeId, position };
         imageInputRef.current?.click();
     }, []);
@@ -2803,9 +2805,14 @@ function CanvasWorkspacePage() {
         async (event: ReactChangeEvent<HTMLInputElement>) => {
             const file = event.target.files?.[0];
             const target = uploadTargetRef.current;
+            // 选中文件后立即释放选择器，避免并行上传时清空其他节点的新选择。
+            uploadTargetRef.current = null;
+            event.target.value = "";
             if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/"))) return;
 
             if (target?.nodeId) {
+                const { beginNodeUpload, finishNodeUpload } = useCanvasUiStore.getState();
+                if (!beginNodeUpload(target.nodeId)) return;
                 try {
                     if (file.type.startsWith("video/")) {
                         const video = await uploadMediaFile(file, "video");
@@ -2839,16 +2846,12 @@ function CanvasWorkspacePage() {
                 } catch (error) {
                     message.error(error instanceof Error ? error.message : "上传媒体失败");
                 } finally {
-                    uploadTargetRef.current = null;
-                    event.target.value = "";
+                    finishNodeUpload(target.nodeId);
                 }
             } else {
                 const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
                 void (file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
             }
-
-            uploadTargetRef.current = null;
-            event.target.value = "";
         },
         [createImageFileNode, createVideoFileNode, message, screenToCanvas, size.height, size.width],
     );
@@ -4434,6 +4437,7 @@ function CanvasWorkspacePage() {
                         <ConnectionCreateMenu
                             pending={pendingConnectionCreate}
                             sourceNode={nodeById.get(pendingConnectionCreate.connection.nodeId) || null}
+                            onPositionChange={(menuPosition) => setPendingConnectionCreate((current) => current ? { ...current, menuPosition } : null)}
                             onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)}
                             onCreateSettingGraph={(skill) => createConnectedNode("image", pendingConnectionCreate, skill)}
                             onClose={cancelPendingConnectionCreate}

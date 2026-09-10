@@ -1257,7 +1257,7 @@ export default function VideoPage() {
             generationPrompt: round.generationPrompt,
             references: round.references,
             videoReferences: round.videoReferences,
-            onDownload: () => void downloadVideo(video),
+            onDownload: () => downloadVideo(video),
         });
     };
 
@@ -1590,7 +1590,7 @@ export default function VideoPage() {
                         prompt: round?.userText || prompt,
                         references: workflowReferences.length ? workflowReferences : roundReferences.images.length ? roundReferences.images : references,
                         videoReferences: roundReferences.videos.length ? roundReferences.videos : videoReferences,
-                        onDownload: () => void downloadVideo(video),
+                        onDownload: () => downloadVideo(video),
                     }),
             });
         },
