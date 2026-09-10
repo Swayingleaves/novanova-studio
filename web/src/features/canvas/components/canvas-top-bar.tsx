@@ -6,6 +6,7 @@ import { Button, Modal, Tooltip } from "antd";
 
 import { UserStatusActions } from "@/features/app-shell/components/user-status-actions";
 import { UserCreditMenu } from "@/features/app-shell/components/user-credit-menu";
+import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
 type CanvasTopBarProps = {
@@ -107,6 +108,7 @@ export function CanvasTopBar(props: CanvasTopBarProps) {
                         </Tooltip>
                     ) : null}
                     <UserStatusActions variant="canvas" onOpenShortcuts={() => setShortcutsOpen(true)} />
+                    <ThemePreferenceMenu variant="toolbar" />
                     <UserCreditMenu />
                     <Button
                         type="text"
