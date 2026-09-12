@@ -171,6 +171,7 @@ export function AppConfigModal() {
     const [draftInvitationRewardCredits, setDraftInvitationRewardCredits] = useState(0);
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
+    const [collapsedEditingCapabilities, setCollapsedEditingCapabilities] = useState<string[]>([]);
     const initializedRef = useRef(false);
     const editingModelIsMedia = Boolean(editingModelConfig && (editingModelConfig.modelType === "image" || editingModelConfig.modelType === "video"));
 
@@ -364,6 +365,11 @@ export function AppConfigModal() {
     const openModelConfigEditor = (configItem: ServerModelConfig) => {
         setEditingModelConfig(cloneModelConfig(configItem));
         setEditingCustomBodyParameters(JSON.stringify(configItem.customBodyParameters || {}, null, 2));
+        setCollapsedEditingCapabilities([]);
+    };
+
+    const toggleEditingCapabilityCollapsed = (capability: string) => {
+        setCollapsedEditingCapabilities((capabilities) => (capabilities.includes(capability) ? capabilities.filter((item) => item !== capability) : [...capabilities, capability]));
     };
 
     const updateEditingModelConfig = (patch: Partial<ServerModelConfig>) => {
@@ -1205,13 +1211,14 @@ export function AppConfigModal() {
                                 {VIDEO_GENERATION_CAPABILITY_OPTIONS.map((mode, index) => {
                                     const prices = editingModelConfig.videoBillingConfiguration?.modePrices?.[mode.value] || {};
                                     const modeEnabled = editingModelConfig.capabilities.includes(mode.value);
+                                    const modeCollapsed = collapsedEditingCapabilities.includes(`video:${mode.value}`);
                                     const modeIcon = index === 0 ? <TextCursorInput className="size-5" /> : index === 1 ? <Image className="size-5" /> : <Sparkles className="size-5" />;
                                     const modeColor = index === 0 ? "border-violet-500/50 bg-violet-500/5" : index === 1 ? "border-blue-500/50 bg-blue-500/5" : "border-emerald-500/50 bg-emerald-500/5";
                                     const iconColor = index === 0 ? "bg-violet-500/15 text-violet-500" : index === 1 ? "bg-blue-500/15 text-blue-500" : "bg-emerald-500/15 text-emerald-500";
                                     const description = index === 0 ? "根据文本描述生成视频" : index === 1 ? "根据图片生成视频" : "支持文本、图片及多模态参考生成视频";
                                     return (
                                         <div key={mode.value} className={`rounded-lg border p-4 transition-colors ${modeEnabled ? modeColor : "border-[var(--studio-line)] opacity-70"}`}>
-                                            <div className="flex items-start justify-between gap-4 border-b border-[var(--studio-line)] pb-3">
+                                            <div className={modeCollapsed ? "flex items-start justify-between gap-4" : "flex items-start justify-between gap-4 border-b border-[var(--studio-line)] pb-3"}>
                                                 <div className="flex min-w-0 items-center gap-3">
                                                     <span className={`flex size-10 shrink-0 items-center justify-center rounded-md ${iconColor}`}>{modeIcon}</span>
                                                     <div>
@@ -1226,17 +1233,28 @@ export function AppConfigModal() {
                                                         <p className="mt-1 text-xs text-[var(--studio-muted)]">{description}</p>
                                                     </div>
                                                 </div>
-                                                <Switch
-                                                    checked={modeEnabled}
-                                                    onChange={(checked) =>
-                                                        updateEditingModelConfig({
-                                                            capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, mode.value]) : editingModelConfig.capabilities.filter((value) => value !== mode.value),
-                                                            ...(!checked ? { videoBillingConfiguration: clearVideoModePrices(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value) } : {}),
-                                                        })
-                                                    }
-                                                />
+                                                <div className="flex shrink-0 items-center gap-2">
+                                                    <Button
+                                                        type="text"
+                                                        size="small"
+                                                        aria-label={`${mode.label}${modeCollapsed ? "展开" : "收起"}`}
+                                                        aria-expanded={!modeCollapsed}
+                                                        title={`${modeCollapsed ? "展开" : "收起"}${mode.label}配置`}
+                                                        icon={modeCollapsed ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
+                                                        onClick={() => toggleEditingCapabilityCollapsed(`video:${mode.value}`)}
+                                                    />
+                                                    <Switch
+                                                        checked={modeEnabled}
+                                                        onChange={(checked) =>
+                                                            updateEditingModelConfig({
+                                                                capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, mode.value]) : editingModelConfig.capabilities.filter((value) => value !== mode.value),
+                                                                ...(!checked ? { videoBillingConfiguration: clearVideoModePrices(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value) } : {}),
+                                                            })
+                                                        }
+                                                    />
+                                                </div>
                                             </div>
-                                            <div className="pt-3">
+                                            {modeCollapsed ? null : <div className="pt-3">
                                                 <div className="mb-2 text-xs font-medium text-[var(--studio-muted)]">分辨率价格（{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? "积分/秒" : "积分/次"}）</div>
                                                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                                                     {VIDEO_RESOLUTION_OPTIONS.filter((resolution) => resolution.value !== "auto").map((resolution) => (
@@ -1266,8 +1284,8 @@ export function AppConfigModal() {
                                                         </label>
                                                     ))}
                                                 </div>
-                                            </div>
-                                            {editingModelConfig.isCustomModel ? (
+                                            </div>}
+                                            {modeCollapsed ? null : editingModelConfig.isCustomModel ? (
                                                 <CustomModelGroupEditor
                                                     label={mode.label}
                                                     group={editingModelConfig.customModelConfig?.[mode.value]}
@@ -1360,17 +1378,28 @@ export function AppConfigModal() {
                                 <div className="space-y-3">
                                     {MODEL_CAPABILITY_OPTIONS.image.map((option) => (
                                         <div key={option.value} className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
-                                            <Checkbox
-                                                checked={editingModelConfig.capabilities.includes(option.value)}
-                                                onChange={(event) =>
-                                                    updateEditingModelConfig({
-                                                        capabilities: event.target.checked ? uniqueModels([...editingModelConfig.capabilities, option.value]) : editingModelConfig.capabilities.filter((value) => value !== option.value),
-                                                    })
-                                                }
-                                            >
-                                                {option.label}
-                                            </Checkbox>
-                                            {editingModelConfig.capabilities.includes(option.value) ? (
+                                            <div className="flex items-center justify-between gap-3">
+                                                <Checkbox
+                                                    checked={editingModelConfig.capabilities.includes(option.value)}
+                                                    onChange={(event) =>
+                                                        updateEditingModelConfig({
+                                                            capabilities: event.target.checked ? uniqueModels([...editingModelConfig.capabilities, option.value]) : editingModelConfig.capabilities.filter((value) => value !== option.value),
+                                                        })
+                                                    }
+                                                >
+                                                    {option.label}
+                                                </Checkbox>
+                                                <Button
+                                                    type="text"
+                                                    size="small"
+                                                    aria-label={`${option.label}${collapsedEditingCapabilities.includes(`image:${option.value}`) ? "展开" : "收起"}`}
+                                                    aria-expanded={!collapsedEditingCapabilities.includes(`image:${option.value}`)}
+                                                    title={`${collapsedEditingCapabilities.includes(`image:${option.value}`) ? "展开" : "收起"}${option.label}配置`}
+                                                    icon={collapsedEditingCapabilities.includes(`image:${option.value}`) ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
+                                                    onClick={() => toggleEditingCapabilityCollapsed(`image:${option.value}`)}
+                                                />
+                                            </div>
+                                            {editingModelConfig.capabilities.includes(option.value) && !collapsedEditingCapabilities.includes(`image:${option.value}`) ? (
                                                 <CustomModelGroupEditor
                                                     label={option.label}
                                                     group={editingModelConfig.customModelConfig?.[option.value]}
