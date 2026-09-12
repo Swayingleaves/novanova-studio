@@ -75,7 +75,7 @@ public class SecurityConfiguration {
                 .securityContextRepository(NoOpServerSecurityContextRepository.getInstance())
                 .authorizeExchange(auth -> auth
                         .pathMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .pathMatchers("/api/v1/health", "/api/v1/auth/sendEmailCode", "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/oauth/**", "/swagger/**", "/swagger-ui/**", "/v3/api-docs/**", "/actuator/health").permitAll()
+                        .pathMatchers("/api/v1/health", "/api/v1/auth/sendEmailCode", "/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/requestPasswordReset", "/api/v1/auth/resetPassword", "/api/v1/auth/oauth/**", "/swagger/**", "/swagger-ui/**", "/v3/api-docs/**", "/actuator/health").permitAll()
                         .anyExchange().permitAll());
 
         configureOAuth2Login(http, clientRegistrationRepository, successHandler, failureHandler, authorizedClientRepository, oidcSessionRegistry);

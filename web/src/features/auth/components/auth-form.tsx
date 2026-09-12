@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { App, Button, Form, Input, Tabs } from "antd";
 import { ArrowRight } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import { loginByEmail, registerByEmail, sendEmailCode } from "@/services/api/server";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -34,6 +35,7 @@ type AuthFormProps = {
 
 export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormProps) {
     const { message } = App.useApp();
+    const router = useRouter();
     const [activeKey, setActiveKey] = useState(invitationCode ? "register" : "login");
     const [sendingCode, setSendingCode] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -41,6 +43,7 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
     const [loginForm] = Form.useForm<LoginForm>();
     const [registerForm] = Form.useForm<RegisterForm>();
     const setSession = useUserStore((state) => state.setSession);
+    const closeAuthModal = useUserStore((state) => state.closeAuthModal);
 
     useEffect(() => {
         const updateCountdown = () => {
@@ -112,6 +115,11 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
         }
     };
 
+    const goToForgotPassword = () => {
+        closeAuthModal();
+        router.push("/auth/forgotPassword");
+    };
+
     return (
         <>
             <Tabs
@@ -129,6 +137,11 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
                             <Form.Item name="password" label="密码" rules={[{ required: true, message: "请输入密码" }]}>
                                 <Input.Password size="large" autoComplete="current-password" placeholder="请输入密码" />
                             </Form.Item>
+                            <div className="-mt-2 mb-2 flex justify-end">
+                                <Button type="link" className="min-h-11 px-0" onClick={goToForgotPassword}>
+                                    忘记密码
+                                </Button>
+                            </div>
                             <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<ArrowRight className="size-4" />} iconPlacement="end">
                                 登录
                             </Button>

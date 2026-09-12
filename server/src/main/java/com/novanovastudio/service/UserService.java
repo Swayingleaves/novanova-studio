@@ -7,6 +7,7 @@ import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.CreditDtos;
 import com.novanovastudio.dto.UserDtos;
 import com.novanovastudio.entity.EmailVerificationCode;
+import com.novanovastudio.entity.PasswordResetToken;
 import com.novanovastudio.entity.User;
 import com.novanovastudio.repository.UserRepository;
 import com.novanovastudio.security.CurrentUserProvider;
@@ -15,6 +16,10 @@ import com.novanovastudio.security.TokenService;
 import com.novanovastudio.task.AiTaskEventPublisher;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -24,6 +29,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Optional;
 import java.util.Locale;
+import java.util.Base64;
+import java.util.HexFormat;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -35,6 +42,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import org.springframework.util.StringUtils;
+import org.springframework.web.util.UriComponentsBuilder;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
@@ -72,6 +80,12 @@ public class UserService {
 
     /** 邮箱验证码过期分钟数 */
     private static final int EMAIL_CODE_EXPIRE_MINUTES = 10;
+
+    /** 密码重置链接过期分钟数 */
+    private static final int PASSWORD_RESET_TOKEN_EXPIRE_MINUTES = 15;
+
+    /** 密码重置令牌随机字节数 */
+    private static final int PASSWORD_RESET_TOKEN_RANDOM_BYTES = 32;
 
     /** 用户统计业务时区 */
     private static final ZoneId USER_STATISTICS_TIME_ZONE = ZoneId.of("Asia/Shanghai");
@@ -256,6 +270,52 @@ public class UserService {
     }
 
     /**
+     * 请求发送密码重置邮件。
+     * <p>
+     * 无论邮箱是否存在或账号是否可用，均保持成功响应，避免泄露账号状态。
+     *
+     * @param request RequestPasswordResetRequest 重置邮件请求
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> requestPasswordReset(UserDtos.RequestPasswordResetRequest request) {
+        return Mono.defer(() -> {
+            String email = normalizeEmail(request.email());
+            log.info("请求发送密码重置邮件: email={}", email);
+            validateFrontendBaseUrl();
+            return userRepository.findByEmail(email)
+                    .filter(this::isNormalUser)
+                    .flatMap(this::createPasswordResetToken)
+                    .then();
+        });
+    }
+
+    /**
+     * 使用密码重置链接设置新密码。
+     *
+     * @param request ResetPasswordRequest 重置密码请求
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> resetPassword(UserDtos.ResetPasswordRequest request) {
+        return Mono.defer(() -> {
+            validatePassword(request.newPassword());
+            String tokenHash = passwordResetTokenHash(request.token().trim());
+            return userRepository.findActivePasswordResetToken(tokenHash)
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "重置链接已失效或已使用")))
+                    .flatMap(resetToken -> userRepository.findById(resetToken.getUserId())
+                            .filter(this::isNormalUser)
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "重置链接已失效或已使用")))
+                            .flatMap(user -> encodePassword(request.newPassword())
+                                    .flatMap(encodedPassword -> userRepository.consumePasswordResetToken(tokenHash)
+                                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "重置链接已失效或已使用")))
+                                            .flatMap(userId -> userRepository.updatePasswordAfterReset(userId, encodedPassword))
+                                            .thenReturn(user))))
+                    .as(transactionalOperator::transactional)
+                    .flatMap(user -> passwordLoginLockService.clear(user.getId())
+                            .doOnSuccess(ignored -> log.info("用户密码重置成功: userId={}", user.getId())));
+        });
+    }
+
+    /**
      * 使用本地用户ID完成登录。
      *
      * @param userId Long 本地用户ID
@@ -313,19 +373,21 @@ public class UserService {
      * @return Mono<Void> 操作结果
      */
     public Mono<Void> changeCurrentUserPassword(UserDtos.ChangeCurrentUserPasswordRequest request) {
-        validatePassword(request.newPassword());
-        return currentUserProvider.currentUserId()
-                .flatMap(userId -> userRepository.findById(userId)
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "用户不存在")))
-                        .flatMap(user -> matchesPassword(request.currentPassword(), user.getPassword())
-                                .flatMap(matches -> {
-                                    if (!matches) {
-                                        return Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "原密码错误"));
-                                    }
-                                    return encodePassword(request.newPassword())
-                                            .flatMap(encodedPassword -> userRepository.updateCurrentUserPassword(userId, encodedPassword));
-                                }))
-                        .doOnSuccess(ignored -> log.info("用户密码已修改: userId={}", userId)));
+        return Mono.defer(() -> {
+            validatePassword(request.newPassword());
+            return currentUserProvider.currentUserId()
+                    .flatMap(userId -> userRepository.findById(userId)
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "用户不存在")))
+                            .flatMap(user -> matchesPassword(request.currentPassword(), user.getPassword())
+                                    .flatMap(matches -> {
+                                        if (!matches) {
+                                            return Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "原密码错误"));
+                                        }
+                                        return encodePassword(request.newPassword())
+                                                .flatMap(encodedPassword -> userRepository.updateCurrentUserPassword(userId, encodedPassword));
+                                    }))
+                            .doOnSuccess(ignored -> log.info("用户密码已修改: userId={}", userId)));
+        });
     }
 
     /**
@@ -489,7 +551,7 @@ public class UserService {
      */
     private UserDtos.AuthResponse buildAuthResponse(User user) {
         // 使用当前用户ID和角色签发令牌，再拼装前端依赖的登录响应结构。
-        TokenService.SignedToken signedToken = tokenService.sign(user.getId(), user.getRole());
+        TokenService.SignedToken signedToken = tokenService.sign(user.getId(), user.getRole(), user.getTokenVersion());
         return new UserDtos.AuthResponse(signedToken.token(), TOKEN_TYPE_BEARER, formatTime(signedToken.expiresAt()), userProfile(user));
     }
 
@@ -611,6 +673,198 @@ public class UserService {
         // 使用安全随机数生成固定6位数字验证码。
         int value = secureRandom.nextInt(1_000_000);
         return "%06d".formatted(value);
+    }
+
+    /**
+     * 判断用户是否处于正常状态。
+     *
+     * @param user User 用户
+     * @return boolean 是否正常
+     */
+    private boolean isNormalUser(User user) {
+        return user.getStatus() != null && user.getStatus() == STATUS_NORMAL;
+    }
+
+    /**
+     * 创建并发送密码重置令牌。
+     *
+     * @param user User 用户
+     * @return Mono<Void> 操作结果
+     */
+    private Mono<Void> createPasswordResetToken(User user) {
+        String token = randomPasswordResetToken();
+        String tokenHash = passwordResetTokenHash(token);
+        String resetUrl = passwordResetUrl(token);
+        PasswordResetToken resetToken = new PasswordResetToken();
+        resetToken.setUserId(user.getId());
+        resetToken.setTokenHash(tokenHash);
+        resetToken.setExpiresAt(OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(PASSWORD_RESET_TOKEN_EXPIRE_MINUTES));
+        return userRepository.upsertPasswordResetToken(resetToken)
+                .then(sendPasswordResetEmail(user.getEmail(), resetUrl)
+                        .onErrorResume(exception -> userRepository.invalidatePasswordResetToken(tokenHash)
+                                .then(Mono.error(exception))));
+    }
+
+    /**
+     * 生成密码重置令牌。
+     *
+     * @return String URL安全的一次性令牌
+     */
+    private String randomPasswordResetToken() {
+        byte[] randomBytes = new byte[PASSWORD_RESET_TOKEN_RANDOM_BYTES];
+        secureRandom.nextBytes(randomBytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
+    }
+
+    /**
+     * 计算密码重置令牌哈希。
+     *
+     * @param token String 原始令牌
+     * @return String SHA-256十六进制哈希
+     */
+    private String passwordResetTokenHash(String token) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("当前Java运行时不支持SHA-256", exception);
+        }
+    }
+
+    /**
+     * 构建密码重置链接。
+     *
+     * @param token String 原始令牌
+     * @return String 密码重置链接
+     */
+    private String passwordResetUrl(String token) {
+        URI frontendUri = validateFrontendBaseUrl();
+        return UriComponentsBuilder.newInstance()
+                .scheme(frontendUri.getScheme())
+                .host(frontendUri.getHost())
+                .port(frontendUri.getPort())
+                .path("/auth/resetPassword")
+                .queryParam("token", token)
+                .build()
+                .encode()
+                .toUriString();
+    }
+
+    /**
+     * 校验前端公开地址配置。
+     *
+     * @return URI 合法的前端公开地址
+     */
+    private URI validateFrontendBaseUrl() {
+        String frontendBaseUrl = properties.getApp().getFrontendBaseUrl();
+        if (!StringUtils.hasText(frontendBaseUrl)) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "FRONTEND_BASE_URL未配置，无法发送密码重置邮件");
+        }
+        try {
+            URI frontendUri = URI.create(frontendBaseUrl.trim());
+            String scheme = frontendUri.getScheme();
+            String path = frontendUri.getPath();
+            if ((!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)))
+                    || !StringUtils.hasText(frontendUri.getHost())
+                    || StringUtils.hasText(frontendUri.getRawUserInfo())
+                    || StringUtils.hasText(frontendUri.getRawQuery())
+                    || StringUtils.hasText(frontendUri.getRawFragment())
+                    || (StringUtils.hasText(path) && !"/".equals(path))) {
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "FRONTEND_BASE_URL必须是无路径、无参数的HTTP(S)公开地址");
+            }
+            return frontendUri;
+        } catch (IllegalArgumentException exception) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "FRONTEND_BASE_URL格式不正确");
+        }
+    }
+
+    /**
+     * 发送密码重置邮件。
+     *
+     * @param email String 收件邮箱
+     * @param resetUrl String 密码重置链接
+     * @return Mono<Void> 发送结果
+     */
+    private Mono<Void> sendPasswordResetEmail(String email, String resetUrl) {
+        return Mono.fromRunnable(() -> {
+            if (!StringUtils.hasText(properties.getEmail().getFrom())) {
+                throw new IllegalStateException("邮箱服务未配置，无法发送密码重置邮件");
+            }
+            try {
+                MimeMessage message = mailSender.createMimeMessage();
+                MimeMessageHelper helper = new MimeMessageHelper(message, false, "UTF-8");
+                helper.setFrom(properties.getEmail().getFrom());
+                helper.setTo(email);
+                helper.setSubject(MAIL_BRAND_NAME + " 重置密码");
+                helper.setText(buildPasswordResetEmailHtml(resetUrl), true);
+                mailSender.send(message);
+            } catch (MessagingException | RuntimeException exception) {
+                log.error("发送密码重置邮件失败，邮箱={}, 异常类型={}", email, exception.getClass().getName());
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "发送密码重置邮件失败");
+            }
+        }).subscribeOn(Schedulers.boundedElastic()).then();
+    }
+
+    /**
+     * 构建密码重置邮件HTML内容。
+     *
+     * @param resetUrl String 密码重置链接
+     * @return String HTML邮件正文
+     */
+    private String buildPasswordResetEmailHtml(String resetUrl) {
+        return """
+                <!DOCTYPE html>
+                <html lang="zh-CN">
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <title>%s 重置密码</title>
+                </head>
+                <body style="margin:0;padding:0;background-color:#f5f7fb;font-family:'PingFang SC','Microsoft YaHei',Arial,sans-serif;color:#2f3a4a;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%%" style="background-color:#f5f7fb;margin:0;padding:0;width:100%%;">
+                        <tr>
+                            <td align="center" style="padding:40px 16px;">
+                                <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%%" style="max-width:640px;background-color:#f3f5f8;border-radius:12px;overflow:hidden;">
+                                    <tr>
+                                        <td align="center" style="padding:28px 24px 20px;font-size:18px;font-weight:700;color:#223046;">
+                                            %s 重置密码
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding:0 22px 28px;">
+                                            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%%" style="background-color:#ffffff;border-radius:12px;">
+                                                <tr>
+                                                    <td style="padding:34px 22px 18px;font-size:15px;line-height:1.9;color:#314056;">
+                                                        <div style="margin-bottom:8px;">您好！</div>
+                                                        <div>我们收到了您为 %s 账号重置密码的请求。</div>
+                                                    </td>
+                                                </tr>
+                                                <tr>
+                                                    <td align="center" style="padding:6px 22px 28px;">
+                                                        <a href="%s" style="display:inline-block;padding:12px 22px;border-radius:8px;background-color:#526F1E;color:#ffffff;font-size:15px;font-weight:700;text-decoration:none;">重置密码</a>
+                                                    </td>
+                                                </tr>
+                                                <tr>
+                                                    <td style="padding:0 22px 34px;font-size:14px;line-height:1.9;color:#314056;">
+                                                        <div>此链接将在 %d 分钟后失效，且仅可使用一次。</div>
+                                                        <div>如果您没有进行此操作，请忽略此邮件。</div>
+                                                    </td>
+                                                </tr>
+                                            </table>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td align="center" style="padding:0 24px 40px;font-size:12px;line-height:1.8;color:#8a94a6;">
+                                            <div>此邮件由系统自动发送，请勿回复</div>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                    </table>
+                </body>
+                </html>
+                """.formatted(MAIL_BRAND_NAME, MAIL_BRAND_NAME, MAIL_BRAND_NAME, resetUrl, PASSWORD_RESET_TOKEN_EXPIRE_MINUTES);
     }
 
     /**

@@ -3,6 +3,7 @@ package com.novanovastudio.repository;
 import com.novanovastudio.entity.AiGenerationTask;
 import com.novanovastudio.entity.ApiAccessLog;
 import com.novanovastudio.entity.EmailVerificationCode;
+import com.novanovastudio.entity.PasswordResetToken;
 import com.novanovastudio.entity.PersistenceRecords;
 import com.novanovastudio.entity.User;
 import com.novanovastudio.entity.UserIdentityBinding;
@@ -42,6 +43,7 @@ public final class RowMappers {
         user.setAvatar(row.get("avatar", String.class));
         user.setRole(row.get("role", String.class));
         user.setStatus(row.get("status", Integer.class));
+        user.setTokenVersion(row.get("token_version", Integer.class));
         user.setCreditBalance(row.get("credit_balance", Integer.class));
         user.setInvitationCode(row.get("invitation_code", String.class));
         user.setInvitedByUserId(row.get("invited_by_user_id", Long.class));
@@ -88,6 +90,23 @@ public final class RowMappers {
         record.setPurpose(row.get("purpose", String.class));
         record.setSendCount(row.get("send_count", Integer.class));
         record.setStatus(row.get("status", Integer.class));
+        record.setExpiresAt(row.get("expires_at", OffsetDateTime.class));
+        record.setUsedAt(row.get("used_at", OffsetDateTime.class));
+        record.setCreatedAt(row.get("created_at", OffsetDateTime.class));
+        record.setUpdatedAt(row.get("updated_at", OffsetDateTime.class));
+        return record;
+    }
+
+    /**
+     * 映射密码重置令牌行。
+     *
+     * @param row Row 数据库行
+     * @return PasswordResetToken 密码重置令牌
+     */
+    public static PasswordResetToken passwordResetToken(Row row) {
+        PasswordResetToken record = new PasswordResetToken();
+        record.setUserId(row.get("user_id", Long.class));
+        record.setTokenHash(row.get("token_hash", String.class));
         record.setExpiresAt(row.get("expires_at", OffsetDateTime.class));
         record.setUsedAt(row.get("used_at", OffsetDateTime.class));
         record.setCreatedAt(row.get("created_at", OffsetDateTime.class));

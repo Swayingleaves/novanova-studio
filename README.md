@@ -218,7 +218,7 @@ Agent 不只是一次性调用模型，而是贯穿需求理解、工具选择�
 
 - [Docker 完整部署指南](deploy_docs/docker-deploy.md)
 
-Docker 部署会由 Flyway 自动执行数据库迁移，当前分支需执行至 `V23__Workflow_Image_Stage.sql`。生产环境还应配置 `APP_SECRET_KEY`、可信代理地址 `TRUSTED_PROXY_ADDRESSES`，并按需调整统一 AI 任务轮询间隔 `AI_TASK_POLLING_INTERVAL_SECONDS`，具体说明见 [Docker 部署指南](deploy_docs/docker-deploy.md)。
+Docker 部署会由 Flyway 自动执行数据库迁移，当前分支需执行至 `V28__Add_Password_Reset.sql`。生产环境还应配置 `APP_SECRET_KEY`、`FRONTEND_BASE_URL`、可信代理地址 `TRUSTED_PROXY_ADDRESSES`，并按需调整统一 AI 任务轮询间隔 `AI_TASK_POLLING_INTERVAL_SECONDS`，具体说明见 [Docker 部署指南](deploy_docs/docker-deploy.md)。
 
 ## 📝 Agent 提示词配置
 

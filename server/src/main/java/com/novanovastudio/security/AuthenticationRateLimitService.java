@@ -90,6 +90,19 @@ public class AuthenticationRateLimitService {
     }
 
     /**
+     * 校验请求密码重置邮件的频率。
+     *
+     * @param request ServerHttpRequest HTTP请求
+     * @param email String 接收邮件的邮箱
+     * @return Mono<Void> 限流通过时完成信号
+     */
+    public Mono<Void> checkPasswordReset(ServerHttpRequest request, String email) {
+        String sourceAddress = resolveClientAddress(request);
+        return checkLimit("password-reset:address", sourceAddress, EMAIL_CODE_ADDRESS_MAX_REQUESTS, EMAIL_CODE_ADDRESS_WINDOW)
+                .then(checkLimit("password-reset:email", normalizeEmail(email), EMAIL_CODE_EMAIL_MAX_REQUESTS, EMAIL_CODE_EMAIL_WINDOW));
+    }
+
+    /**
      * 对固定窗口内的指定维度执行原子限流。
      *
      * @param scope String 业务限流范围

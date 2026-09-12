@@ -65,6 +65,7 @@ if (!(Test-Path -LiteralPath .env)) {
 | 配置项 | 说明 |
 | --- | --- |
 | `APP_SECRET_KEY` | 必填，设置为至少 32 字节的高强度随机值。 |
+| `FRONTEND_BASE_URL` | 必填，前端公开地址；本地 Next.js 开发服务通常为 `http://localhost:3000`。 |
 | `SERVER_PORT` | 保持为 `8080`，与前端默认代理地址一致。 |
 | `POSTGRES_HOST` / `POSTGRES_PORT` | 本机 PostgreSQL 的地址和端口。 |
 | `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | PostgreSQL 登录凭据。 |

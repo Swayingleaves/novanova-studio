@@ -439,6 +439,14 @@ export function loginByEmail(input: { email: string; password: string }) {
     return serverPost<AuthResponse>("/auth/login", input, { auth: false });
 }
 
+export function requestPasswordReset(email: string) {
+    return serverPost("/auth/requestPasswordReset", { email }, { auth: false });
+}
+
+export function resetPassword(input: { token: string; newPassword: string }) {
+    return serverPost("/auth/resetPassword", input, { auth: false });
+}
+
 export function listOAuth2Providers() {
     return serverGet<OAuth2ProviderListResponse>("/auth/oauth/listProviders", { auth: false });
 }

@@ -1,5 +1,26 @@
 # 后端数据库说明（已实现）
 
+## 密码重置
+
+### `users`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `token_version` | `INTEGER` | 登录令牌版本；密码重置成功后递增，令牌版本不一致的既有登录令牌将失效。 |
+
+### `password_reset_tokens`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `user_id` | `BIGINT` | 用户 ID，同时为主键，每名用户仅保留最新一条密码重置令牌。 |
+| `token_hash` | `VARCHAR(64)` | 一次性重置令牌的 SHA-256 哈希，唯一且不保存明文。 |
+| `expires_at` | `TIMESTAMPTZ` | 重置链接过期时间。 |
+| `used_at` | `TIMESTAMPTZ` | 链接使用或因邮件发送失败而失效的时间。 |
+| `created_at` | `TIMESTAMPTZ` | 最新重置链接创建时间。 |
+| `updated_at` | `TIMESTAMPTZ` | 记录更新时间。 |
+
+---
+
 ## 邀请注册奖励
 
 ### `users`

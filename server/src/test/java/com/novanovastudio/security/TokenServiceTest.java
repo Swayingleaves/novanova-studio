@@ -22,7 +22,7 @@ class TokenServiceTest {
         properties.getApp().setSecretKey("short-secret-key");
         TokenService service = new TokenService(properties);
 
-        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.sign(1L, "user"));
+        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.sign(1L, "user", 0));
 
         Assertions.assertTrue(exception.getMessage().contains("至少需要32字节"));
     }
@@ -36,10 +36,11 @@ class TokenServiceTest {
         properties.getApp().setSecretKey("a".repeat(32));
         TokenService service = new TokenService(properties);
 
-        TokenService.SignedToken signedToken = service.sign(1L, "user");
+        TokenService.SignedToken signedToken = service.sign(1L, "user", 0);
         TokenService.TokenClaims claims = service.parse(signedToken.token());
 
         Assertions.assertEquals(1L, claims.userId());
         Assertions.assertEquals("user", claims.role());
+        Assertions.assertEquals(0, claims.tokenVersion());
     }
 }

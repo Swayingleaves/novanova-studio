@@ -171,6 +171,9 @@ public class NovanovaProperties {
         /** 应用密钥 */
         private String secretKey = "";
 
+        /** 前端公开地址 */
+        private String frontendBaseUrl = "";
+
         /** Token过期小时数 */
         private int tokenExpireHours = 24;
 
@@ -193,6 +196,24 @@ public class NovanovaProperties {
          */
         public void setSecretKey(String secretKey) {
             this.secretKey = secretKey;
+        }
+
+        /**
+         * 获取前端公开地址。
+         *
+         * @return String 前端公开地址
+         */
+        public String getFrontendBaseUrl() {
+            return frontendBaseUrl;
+        }
+
+        /**
+         * 设置前端公开地址。
+         *
+         * @param frontendBaseUrl String 前端公开地址
+         */
+        public void setFrontendBaseUrl(String frontendBaseUrl) {
+            this.frontendBaseUrl = frontendBaseUrl;
         }
 
         /**

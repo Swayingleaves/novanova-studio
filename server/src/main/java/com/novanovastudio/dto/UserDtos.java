@@ -54,6 +54,24 @@ public final class UserDtos {
     }
 
     /**
+     * 请求重置密码邮件。
+     *
+     * @param email String 邮箱
+     */
+    public record RequestPasswordResetRequest(@NotBlank(message = "邮箱不能为空") String email) {
+    }
+
+    /**
+     * 使用重置链接设置新密码。
+     *
+     * @param token String 一次性重置令牌
+     * @param newPassword String 新密码，至少8位
+     */
+    public record ResetPasswordRequest(@NotBlank(message = "重置链接不能为空") String token,
+                                       @NotBlank(message = "请输入新密码") @Size(min = 8, message = "新密码至少8位") String newPassword) {
+    }
+
+    /**
      * 用户公开资料
      *
      * @param id Long 用户ID

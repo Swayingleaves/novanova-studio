@@ -36,6 +36,9 @@ public class User {
     /** 状态 */
     private Integer status;
 
+    /** 登录令牌版本 */
+    private Integer tokenVersion;
+
     /** 可用积分 */
     private Integer creditBalance;
 

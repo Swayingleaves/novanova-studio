@@ -192,7 +192,7 @@ The first/last-frame skill workflow contains three default stages: **Generate fi
 
 - [Complete Docker Deployment Guide](deploy_docs/docker-deploy.md)
 
-Docker deployments run Flyway migrations automatically; the current branch must migrate through `V23__Workflow_Image_Stage.sql`. Production deployments should also configure `APP_SECRET_KEY`, trusted proxy addresses via `TRUSTED_PROXY_ADDRESSES`, and the unified AI-task polling interval `AI_TASK_POLLING_INTERVAL_SECONDS`. See the [Docker Deployment Guide](deploy_docs/docker-deploy.md) for details.
+Docker deployments run Flyway migrations automatically; the current branch must migrate through `V28__Add_Password_Reset.sql`. Production deployments should also configure `APP_SECRET_KEY`, `FRONTEND_BASE_URL`, trusted proxy addresses via `TRUSTED_PROXY_ADDRESSES`, and the unified AI-task polling interval `AI_TASK_POLLING_INTERVAL_SECONDS`. See the [Docker Deployment Guide](deploy_docs/docker-deploy.md) for details.
 
 ## 📝 Agent Prompt Configuration
 

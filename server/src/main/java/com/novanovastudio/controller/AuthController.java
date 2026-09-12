@@ -71,6 +71,31 @@ public class AuthController {
     }
 
     /**
+     * 请求发送密码重置邮件。
+     *
+     * @param request RequestPasswordResetRequest 请求
+     * @param httpRequest ServerHttpRequest HTTP请求
+     * @return Mono<ApiResponse<String>> 响应
+     */
+    @PostMapping("/requestPasswordReset")
+    public Mono<ApiResponse<String>> requestPasswordReset(@Valid @RequestBody UserDtos.RequestPasswordResetRequest request, ServerHttpRequest httpRequest) {
+        return authenticationRateLimitService.checkPasswordReset(httpRequest, request.email())
+                .then(userService.requestPasswordReset(request))
+                .thenReturn(ApiResponse.ok("ok"));
+    }
+
+    /**
+     * 使用重置链接设置新密码。
+     *
+     * @param request ResetPasswordRequest 重置请求
+     * @return Mono<ApiResponse<String>> 响应
+     */
+    @PostMapping("/resetPassword")
+    public Mono<ApiResponse<String>> resetPassword(@Valid @RequestBody UserDtos.ResetPasswordRequest request) {
+        return userService.resetPassword(request).thenReturn(ApiResponse.ok("ok"));
+    }
+
+    /**
      * 退出登录
      *
      * @return Mono<ApiResponse<String>> 响应
