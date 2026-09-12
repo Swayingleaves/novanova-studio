@@ -27,6 +27,15 @@ public interface AiProviderAdapter {
     boolean supports(String taskType);
 
     /**
+     * 判断当前适配器是否实现视频音频输入协议。
+     *
+     * @return boolean 是否可以接收音频参考素材
+     */
+    default boolean supportsAudioInput() {
+        return false;
+    }
+
+    /**
      * 执行AI任务
      *
      * @param context AiTaskExecutionContext AI任务执行上下文

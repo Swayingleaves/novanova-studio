@@ -123,7 +123,7 @@ flowchart TB
 | `display_name` | `VARCHAR(255)` | 模型展示名称，为空或与真实模型名相同时展示真实模型名，仅影响展示不影响调用。 |
 | `model_icon` | `VARCHAR(64)` | 模型展示图标标识，为空时按模型名或渠道自动匹配，仅影响展示不影响调用。 |
 | `is_custom_model` | `BOOLEAN` | 是否启用自定义模型调用，独立于渠道调用格式，仅图片/视频模型支持，默认 `false`。 |
-| `custom_model_config` | `JSONB` | 自定义模型配置，按图片能力（`text-to-image`、`image-to-image`）或视频模式（`text-to-video`、`image-to-video`、`reference-to-video`）分组；每组含请求路径（以 `/` 开头，与渠道 Base URL 拼接，支持 `{{taskId}}` 占位符）、请求方法（`GET`/`POST`，默认 POST）、请求模型名称、请求示例 JSON 模板（支持 `{{prompt}}`、`{{model}}`、`{{references}}`、`{{size}}` 等占位符）、AI 构造请求体提示词（可选，配置后由 Agent 按提示词与本次参数生成请求体，替代模板拼接）、响应示例、结果路径（如 `data.image.url`）；视频模式额外含查询路径（支持 `{{taskId}}`）、查询方法、查询请求示例、AI 构造查询请求体提示词、查询响应示例、查询结果路径，用于异步任务轮询，轮询间隔统一使用 `AI_TASK_POLLING_INTERVAL_SECONDS` 配置。 |
+| `custom_model_config` | `JSONB` | 自定义模型配置，按图片能力（`text-to-image`、`image-to-image`）或视频模式（`text-to-video`、`image-to-video`、`reference-to-video`）分组；每组含请求路径（以 `/` 开头，与渠道 Base URL 拼接，支持 `{{taskId}}` 占位符）、请求方法（`GET`/`POST`，默认 POST）、请求模型名称、请求示例 JSON 模板（支持 `{{prompt}}`、`{{model}}`、`{{references}}`、`{{videoReferences}}`、`{{audioReferences}}`、`{{size}}` 等占位符）、AI 构造请求体提示词（可选，配置后由 Agent 按提示词与本次参数生成请求体，替代模板拼接）、响应示例、结果路径（如 `data.image.url`）；视频模式额外含查询路径（支持 `{{taskId}}`）、查询方法、查询请求示例、AI 构造查询请求体提示词、查询响应示例、查询结果路径，用于异步任务轮询，轮询间隔统一使用 `AI_TASK_POLLING_INTERVAL_SECONDS` 配置。 |
 
 ### `ai_generation_tasks`
 
@@ -453,7 +453,7 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 
 | 存储位置 | 约定 |
 | --- | --- |
-| `platform_ai_model_configs.capabilities` | JSON 数组可包含 `audio-input`，表示音频输入能力；默认未开启，必须同时包含 `reference-to-video`，且仅允许 MiniMax、Evolink 的原生视频模型。 |
+| `platform_ai_model_configs.capabilities` | JSON 数组可包含 `audio-input`，表示音频输入能力；默认未开启，管理员可为任意视频模型配置，但必须同时包含 `reference-to-video`。 |
 | 视频分档计费配置 | `audio-input` 不是生成模式，不作为价格映射的键；继续按全能参考的视频价格计算积分。 |
 | 媒体记录 | 音频 `kind` 为 `audio`、存储标识前缀为 `audio:`；保存 MIME 类型、实际字节数、上传时解析的毫秒时长及对象存储信息。 |
 | 画布文档 JSON | `audio` 节点保存媒体信息与 128 段波形采样，不保存播放进度；视频节点的 `audioReferences` 保存音频引用。 |

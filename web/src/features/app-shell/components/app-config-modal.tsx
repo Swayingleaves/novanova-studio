@@ -1199,8 +1199,8 @@ export function AppConfigModal() {
                             </div>
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] p-4">
-                                    <div><div className="font-medium">支持音频输入</div><p className="text-xs text-[var(--studio-muted)]">全能参考模式可使用音频素材，仅支持 MiniMax H3、Evolink Seedance</p></div>
-                                    <Switch aria-label="支持音频输入" checked={editingModelConfig.capabilities.includes("audio-input")} disabled={isSaving || !editingModelConfig.capabilities.includes("audio-input") && (editingModelConfig.isCustomModel || !editingModelConfig.capabilities.includes("reference-to-video") || !["minimax", "evolink"].includes(draftChannels.find((channel) => channel.id === editingModelConfig.channelId)?.apiFormat || ""))} onChange={(checked) => setEditingModelConfig({ ...editingModelConfig, capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, "audio-input"]) : editingModelConfig.capabilities.filter((value) => value !== "audio-input") })} />
+                                    <div><div className="font-medium">支持音频输入</div><p className="text-xs text-[var(--studio-muted)]">开启后允许该视频模型接收音频参考素材，需同时启用全能参考模式</p></div>
+                                    <Switch aria-label="支持音频输入" checked={editingModelConfig.capabilities.includes("audio-input")} disabled={isSaving || !editingModelConfig.capabilities.includes("audio-input") && !editingModelConfig.capabilities.includes("reference-to-video")} onChange={(checked) => setEditingModelConfig({ ...editingModelConfig, capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, "audio-input"]) : editingModelConfig.capabilities.filter((value) => value !== "audio-input") })} />
                                 </div>
                                 {VIDEO_GENERATION_CAPABILITY_OPTIONS.map((mode, index) => {
                                     const prices = editingModelConfig.videoBillingConfiguration?.modePrices?.[mode.value] || {};
@@ -1585,6 +1585,7 @@ const customTemplatePlaceholderOptions = [
     { label: "{{model}}", value: "{{model}}" },
     { label: "{{references}}", value: "{{references}}" },
     { label: "{{videoReferences}}", value: "{{videoReferences}}" },
+    { label: "{{audioReferences}}", value: "{{audioReferences}}" },
     { label: "{{size}}", value: "{{size}}" },
     { label: "{{resolution}}", value: "{{resolution}}" },
     { label: "{{seconds}}", value: "{{seconds}}" },

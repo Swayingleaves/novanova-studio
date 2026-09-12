@@ -108,6 +108,16 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
     }
 
     /**
+     * 判断是否实现视频音频输入协议。
+     *
+     * @return boolean 始终支持
+     */
+    @Override
+    public boolean supportsAudioInput() {
+        return true;
+    }
+
+    /**
      * 执行 MiniMax H3 视频生成任务。
      *
      * @param context AiTaskExecutionContext AI 任务执行上下文

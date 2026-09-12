@@ -12,15 +12,14 @@ import org.junit.jupiter.api.Test;
  * @date 2026-09-10 15:00
  */
 class AudioInputSupportTest {
-    /** 开启输入能力必须同时满足视频类型、已实现渠道和全能参考模式。 */
+    /** 开启输入能力必须同时满足视频类型和全能参考模式，渠道由管理员自行配置。 */
     @Test
     void shouldValidateConfiguredCapability() {
         List<String> capabilities = List.of("reference-to-video", "audio-input");
-        Assertions.assertDoesNotThrow(() -> AudioInputSupport.validateCapability("video", "minimax", capabilities));
-        Assertions.assertDoesNotThrow(() -> AudioInputSupport.validateCapability("video", "evolink", capabilities));
-        Assertions.assertThrows(BusinessException.class, () -> AudioInputSupport.validateCapability("video", "openai", capabilities));
-        Assertions.assertThrows(BusinessException.class, () -> AudioInputSupport.validateCapability("text", "minimax", capabilities));
-        Assertions.assertThrows(BusinessException.class, () -> AudioInputSupport.validateCapability("video", "minimax", List.of("audio-input")));
+        Assertions.assertDoesNotThrow(() -> AudioInputSupport.validateCapability("video", capabilities));
+        Assertions.assertDoesNotThrow(() -> AudioInputSupport.validateCapability("video", List.of("reference-to-video", "audio-input", "custom-capability")));
+        Assertions.assertThrows(BusinessException.class, () -> AudioInputSupport.validateCapability("text", capabilities));
+        Assertions.assertThrows(BusinessException.class, () -> AudioInputSupport.validateCapability("video", List.of("audio-input")));
     }
 
     /** 数量、文件大小、每段和合计时长边界均使用媒体记录校验。 */

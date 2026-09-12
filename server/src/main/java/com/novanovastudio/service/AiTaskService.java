@@ -1098,8 +1098,13 @@ public class AiTaskService {
         List<AiTaskDtos.AiTaskMediaReference> audioReferences = request.audioReferences() == null ? List.of() : request.audioReferences();
         if (!audioReferences.isEmpty()) {
             if (resolvedModel.capabilities() == null || !resolvedModel.capabilities().contains(AudioInputSupport.CAPABILITY)) throw new BusinessException(ErrorCode.PARAM_INVALID, "当前模型未开启音频输入能力");
-            AudioInputSupport.validateCapability(TYPE_VIDEO, resolvedModel.isCustomModel() ? "custom" : resolvedModel.channel().apiFormat(), resolvedModel.capabilities());
+            AudioInputSupport.validateCapability(TYPE_VIDEO, resolvedModel.capabilities());
             if (!VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode)) throw new BusinessException(ErrorCode.PARAM_INVALID, "音频输入仅支持全能参考模式");
+            AiProviderAdapter audioAdapter = resolvedModel.isCustomModel()
+                    ? customProviderAdapter : adapterRegistry.resolve(resolvedModel.channel(), TYPE_VIDEO);
+            if (!audioAdapter.supportsAudioInput()) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "当前渠道适配器未实现音频输入协议，请检查模型配置");
+            }
             if (audioReferences.size() > 3) throw new BusinessException(ErrorCode.PARAM_INVALID, "最多支持3段参考音频");
             if (audioReferences.stream().anyMatch(reference -> reference == null || !AudioInputSupport.isAudioMimeType(reference.mimeType()))) throw new BusinessException(ErrorCode.PARAM_INVALID, "音频参考列表只能包含 MP3、WAV");
             if ("evolink".equals(resolvedModel.channel().apiFormat()) && imageReferences.isEmpty() && videoReferences.isEmpty()) throw new BusinessException(ErrorCode.PARAM_INVALID, "Evolink 音频参考必须同时提供图片或视频");

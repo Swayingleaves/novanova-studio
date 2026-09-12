@@ -76,6 +76,16 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
     }
 
     /**
+     * 判断是否实现视频音频输入协议。
+     *
+     * @return boolean 始终支持
+     */
+    @Override
+    public boolean supportsAudioInput() {
+        return true;
+    }
+
+    /**
      * 创建并等待Evolink视频任务。
      *
      * @param context AiTaskExecutionContext 当前AI任务上下文

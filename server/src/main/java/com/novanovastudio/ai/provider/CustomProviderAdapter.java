@@ -116,6 +116,16 @@ public class CustomProviderAdapter implements AiProviderAdapter {
     }
 
     /**
+     * 判断是否支持音频输入占位符。
+     *
+     * @return boolean 自定义模板支持通过占位符传递音频地址
+     */
+    @Override
+    public boolean supportsAudioInput() {
+        return true;
+    }
+
+    /**
      * 执行自定义模型任务
      *
      * @param context AiTaskExecutionContext AI任务执行上下文
@@ -141,8 +151,8 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         String mode = AiTaskParameterReader.safeReferences(context.request().references()).isEmpty()
                 ? "text-to-image" : "image-to-image";
         PersistenceDtos.CustomModelGroupConfig group = requireGroup(context, mode);
-        return resolveReferenceUrls(context, context.request().references())
-                .flatMap(referenceUrls -> submitAndResolveUrl(context, group, mode, AiTaskTypes.IMAGE, referenceUrls, List.of()))
+        return resolveReferenceUrls(context, AiTaskParameterReader.safeReferences(context.request().references()))
+                .flatMap(referenceUrls -> submitAndResolveUrl(context, group, mode, AiTaskTypes.IMAGE, referenceUrls, List.of(), List.of()))
                 .flatMap(url -> registerMedia(context, AiTaskTypes.IMAGE, url));
     }
 
@@ -156,9 +166,10 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         String mode = resolveVideoMode(context);
         PersistenceDtos.CustomModelGroupConfig group = requireGroup(context, mode);
         return Mono.zip(
-                        resolveReferenceUrls(context, context.request().references()),
-                        resolveReferenceUrls(context, context.request().videoReferences()))
-                .flatMap(tuple -> submitAndResolveUrl(context, group, mode, AiTaskTypes.VIDEO, tuple.getT1(), tuple.getT2()))
+                        resolveReferenceUrls(context, AiTaskParameterReader.safeReferences(context.request().references())),
+                        resolveReferenceUrls(context, AiTaskParameterReader.safeReferences(context.request().videoReferences())),
+                        resolveReferenceUrls(context, AiTaskParameterReader.safeReferences(context.request().audioReferences())))
+                .flatMap(tuple -> submitAndResolveUrl(context, group, mode, AiTaskTypes.VIDEO, tuple.getT1(), tuple.getT2(), tuple.getT3()))
                 .flatMap(url -> registerMedia(context, AiTaskTypes.VIDEO, url));
     }
 
@@ -174,16 +185,18 @@ public class CustomProviderAdapter implements AiProviderAdapter {
      * @param taskKind          String 任务类型
      * @param referenceUrls     List<String> 参考图片URL列表
      * @param videoReferenceUrls List<String> 参考视频URL列表
+     * @param audioReferenceUrls List<String> 参考音频URL列表
      * @return Mono<String> 媒体URL
      */
     private Mono<String> submitAndResolveUrl(AiTaskExecutionContext context, PersistenceDtos.CustomModelGroupConfig group,
-                                             String mode, String taskKind, List<String> referenceUrls, List<String> videoReferenceUrls) {
+                                             String mode, String taskKind, List<String> referenceUrls, List<String> videoReferenceUrls,
+                                             List<String> audioReferenceUrls) {
         if (!StringUtils.hasText(group.requestPath())) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "自定义模型未配置请求路径"));
         }
         String method = normalizeMethod(group.requestMethod());
         String url = AiHttpClient.buildAiUrl(context.channel().baseUrl(), renderUrlPath(group.requestPath(), null));
-        Mono<JSONObject> bodyMono = resolveSubmitBody(context, group, referenceUrls, videoReferenceUrls);
+        Mono<JSONObject> bodyMono = resolveSubmitBody(context, group, referenceUrls, videoReferenceUrls, audioReferenceUrls);
         return bodyMono.flatMap(body -> {
                     log.info("自定义模型提交请求: taskId={}, taskType={}, mode={}, method={}, url={}, body={}", context.task().getId(), taskKind,
                             mode, method, url, abbreviate(body == null ? "" : body.toJSONString()));
@@ -217,20 +230,22 @@ public class CustomProviderAdapter implements AiProviderAdapter {
      * @param group             PersistenceDtos.CustomModelGroupConfig 当前能力或模式配置
      * @param referenceUrls     List<String> 参考图片URL列表
      * @param videoReferenceUrls List<String> 参考视频URL列表
+     * @param audioReferenceUrls List<String> 参考音频URL列表
      * @return Mono<JSONObject> 请求体，GET时为空对象
      */
     private Mono<JSONObject> resolveSubmitBody(AiTaskExecutionContext context, PersistenceDtos.CustomModelGroupConfig group,
-                                               List<String> referenceUrls, List<String> videoReferenceUrls) {
+                                               List<String> referenceUrls, List<String> videoReferenceUrls,
+                                               List<String> audioReferenceUrls) {
         String method = normalizeMethod(group.requestMethod());
         if ("GET".equals(method)) {
             // Mono.just不允许null；GET时HTTP客户端忽略请求体，返回空对象即可
             return Mono.just(new JSONObject());
         }
         if (StringUtils.hasText(group.aiRequestPrompt())) {
-            return buildBodyWithAgent(context, group, group.aiRequestPrompt(), "请求体", referenceUrls, videoReferenceUrls, null);
+            return buildBodyWithAgent(context, group, group.aiRequestPrompt(), "请求体", referenceUrls, videoReferenceUrls, audioReferenceUrls, null);
         }
         return Mono.fromCallable(() -> parseRenderedBody(
-                renderTemplate(group.requestTemplate(), buildPlaceholders(context, group, referenceUrls, videoReferenceUrls, null)), "请求示例"));
+                renderTemplate(group.requestTemplate(), buildPlaceholders(context, group, referenceUrls, videoReferenceUrls, audioReferenceUrls, null)), "请求示例"));
     }
 
     /**
@@ -302,10 +317,10 @@ public class CustomProviderAdapter implements AiProviderAdapter {
             return Mono.just(new JSONObject());
         }
         if (StringUtils.hasText(group.aiQueryPrompt())) {
-            return buildBodyWithAgent(context, group, group.aiQueryPrompt(), "查询请求体", List.of(), List.of(), taskId);
+            return buildBodyWithAgent(context, group, group.aiQueryPrompt(), "查询请求体", List.of(), List.of(), List.of(), taskId);
         }
         return Mono.fromCallable(() -> parseRenderedBody(
-                renderTemplate(group.queryRequestTemplate(), buildPlaceholders(context, group, List.of(), List.of(), taskId)), "查询请求示例"));
+                renderTemplate(group.queryRequestTemplate(), buildPlaceholders(context, group, List.of(), List.of(), List.of(), taskId)), "查询请求示例"));
     }
 
     /**
@@ -317,15 +332,16 @@ public class CustomProviderAdapter implements AiProviderAdapter {
      * @param purpose           String 构造用途（请求体/查询请求体），用于错误提示
      * @param referenceUrls     List<String> 参考图片URL列表
      * @param videoReferenceUrls List<String> 参考视频URL列表
+     * @param audioReferenceUrls List<String> 参考音频URL列表
      * @param taskId            String 轮询任务ID，提交阶段为null
      * @return Mono<JSONObject> AI构造的请求体
      */
     private Mono<JSONObject> buildBodyWithAgent(AiTaskExecutionContext context, PersistenceDtos.CustomModelGroupConfig group,
                                                 String userPrompt, String purpose, List<String> referenceUrls,
-                                                List<String> videoReferenceUrls, String taskId) {
+                                                List<String> videoReferenceUrls, List<String> audioReferenceUrls, String taskId) {
         String prompt = "你是AI请求体构造助手。请严格按用户要求构造JSON请求体对象。\n\n"
                 + "用户构造要求：\n" + userPrompt + "\n\n"
-                + "本次请求信息：\n" + describeRequestParameters(context, group, referenceUrls, videoReferenceUrls, taskId) + "\n\n"
+                + "本次请求信息：\n" + describeRequestParameters(context, group, referenceUrls, videoReferenceUrls, audioReferenceUrls, taskId) + "\n\n"
                 + "只返回请求体JSON对象，不要返回解释、Markdown代码块或任何其他内容。";
         log.info("AI构造请求体请求: taskId={}, purpose={}, prompt={}", context.task().getId(), purpose, abbreviate(prompt));
         AtomicReference<String> agentOutput = new AtomicReference<>();
@@ -360,11 +376,13 @@ public class CustomProviderAdapter implements AiProviderAdapter {
      * @param group             PersistenceDtos.CustomModelGroupConfig 当前能力或模式配置
      * @param referenceUrls     List<String> 参考图片URL列表
      * @param videoReferenceUrls List<String> 参考视频URL列表
+     * @param audioReferenceUrls List<String> 参考音频URL列表
      * @param taskId            String 轮询任务ID，可为null
      * @return String 参数描述文本
      */
     private String describeRequestParameters(AiTaskExecutionContext context, PersistenceDtos.CustomModelGroupConfig group,
-                                             List<String> referenceUrls, List<String> videoReferenceUrls, String taskId) {
+                                             List<String> referenceUrls, List<String> videoReferenceUrls,
+                                             List<String> audioReferenceUrls, String taskId) {
         StringBuilder builder = new StringBuilder();
         builder.append("- 用户提示词: ").append(context.request().prompt()).append('\n');
         if (StringUtils.hasText(group.requestModelName())) {
@@ -377,6 +395,9 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         }
         if (videoReferenceUrls != null && !videoReferenceUrls.isEmpty()) {
             builder.append("- 参考视频: ").append(videoReferenceUrls).append('\n');
+        }
+        if (audioReferenceUrls != null && !audioReferenceUrls.isEmpty()) {
+            builder.append("- 参考音频: ").append(audioReferenceUrls).append('\n');
         }
         Map<String, Object> parameters = context.request().parameters() == null ? Map.of() : context.request().parameters();
         String size = AiTaskParameterReader.stringParameter(parameters, "size", "");
@@ -500,11 +521,13 @@ public class CustomProviderAdapter implements AiProviderAdapter {
      * @param group             PersistenceDtos.CustomModelGroupConfig 当前分组配置
      * @param referenceUrls     List<String> 参考图片URL列表
      * @param videoReferenceUrls List<String> 参考视频URL列表
+     * @param audioReferenceUrls List<String> 参考音频URL列表
      * @param taskId            String 轮询任务ID，提交阶段为null
      * @return Map<String, Object> 占位符值表
      */
     private Map<String, Object> buildPlaceholders(AiTaskExecutionContext context, PersistenceDtos.CustomModelGroupConfig group,
-                                                  List<String> referenceUrls, List<String> videoReferenceUrls, String taskId) {
+                                                  List<String> referenceUrls, List<String> videoReferenceUrls,
+                                                  List<String> audioReferenceUrls, String taskId) {
         Map<String, Object> placeholders = new LinkedHashMap<>();
         placeholders.put("prompt", context.request().prompt());
         placeholders.put("model", group.requestModelName());
@@ -513,6 +536,9 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         }
         if (videoReferenceUrls != null && !videoReferenceUrls.isEmpty()) {
             placeholders.put("videoReferences", videoReferenceUrls);
+        }
+        if (audioReferenceUrls != null && !audioReferenceUrls.isEmpty()) {
+            placeholders.put("audioReferences", audioReferenceUrls);
         }
         Map<String, Object> parameters = context.request().parameters() == null ? Map.of() : context.request().parameters();
         String size = AiTaskParameterReader.stringParameter(parameters, "size", "");

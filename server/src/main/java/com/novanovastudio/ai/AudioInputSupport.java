@@ -15,8 +15,6 @@ import java.util.Set;
 public final class AudioInputSupport {
     /** 独立于视频生成模式的音频输入能力标识。 */
     public static final String CAPABILITY = "audio-input";
-    /** 已接通音频输入协议的渠道。 */
-    private static final Set<String> FORMATS = Set.of("minimax", "evolink");
     /** 支持的音频媒体类型。 */
     private static final Set<String> MIME_TYPES = Set.of("audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/wave");
 
@@ -24,17 +22,15 @@ public final class AudioInputSupport {
     private AudioInputSupport() { }
 
     /**
-     * 校验管理员配置的输入能力与渠道、模式是否一致。
+     * 校验管理员配置的输入能力与模型类型、参考模式是否一致。
      * @param modelType String 模型类型
-     * @param format String 渠道调用格式
      * @param capabilities List 模型能力
      * @throws BusinessException 配置不满足音频输入条件
      */
-    public static void validateCapability(String modelType, String format, List<String> capabilities) {
-        if (!capabilities.contains(CAPABILITY)) return;
-        if (!"video".equals(modelType) || !FORMATS.contains(format)
-                || !capabilities.contains(VideoGenerationMode.REFERENCE_TO_VIDEO)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "音频输入仅支持已开启全能参考的 MiniMax、Evolink 视频模型");
+    public static void validateCapability(String modelType, List<String> capabilities) {
+        if (capabilities == null || !capabilities.contains(CAPABILITY)) return;
+        if (!"video".equals(modelType) || !capabilities.contains(VideoGenerationMode.REFERENCE_TO_VIDEO)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "音频输入仅支持已开启全能参考的视频模型");
         }
     }
 

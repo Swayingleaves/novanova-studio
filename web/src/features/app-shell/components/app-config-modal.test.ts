@@ -23,10 +23,12 @@ test("模型配置通过编辑弹窗维护自定义 JSON 参数", () => {
     assert.equal((source.match(/customBodyParameters: normalizedConfig\.customBodyParameters/g) || []).length, 2);
 });
 
-test("视频模型音频输入能力独立保存且受渠道和全能参考约束", () => {
+test("视频模型音频输入能力由管理员配置且仅受全能参考约束", () => {
     assert.match(source, /支持音频输入/);
     assert.match(source, /capabilities\.includes\("audio-input"\)/);
     assert.match(source, /capabilities\.includes\("reference-to-video"\)/);
-    assert.match(source, /\["minimax", "evolink"\]\.includes/);
+    assert.doesNotMatch(source, /\["minimax", "evolink"\]\.includes/);
+    assert.match(source, /disabled=\{isSaving \|\| !editingModelConfig\.capabilities\.includes\("audio-input"\) && !editingModelConfig\.capabilities\.includes\("reference-to-video"\)\}/);
+    assert.match(source, /\{ label: "\{\{audioReferences\}\}", value: "\{\{audioReferences\}\}" \}/);
     assert.match(source, /mode !== "audio-input" && supportedCapabilities\.has\(mode\)/);
 });

@@ -134,6 +134,7 @@ class AiTaskServiceTest {
                 new PersistenceDtos.ModelConfig("model-config-3", "channel-1", "model-1", AiTaskTypes.TEXT, List.of(), true, 0, 0, true, "high")
         )));
         providerAdapter = mock(AiProviderAdapter.class);
+        when(providerAdapter.supportsAudioInput()).thenReturn(true);
         when(adapterRegistry.resolve(any(AiTaskDtos.AiChannelConfig.class), eq(AiTaskTypes.IMAGE)))
                 .thenReturn(providerAdapter);
         when(adapterRegistry.resolve(any(AiTaskDtos.AiChannelConfig.class), eq(AiTaskTypes.VIDEO)))
@@ -412,6 +413,17 @@ class AiTaskServiceTest {
     void shouldRejectAudioWithoutCapabilityBeforeCharging() {
         BusinessException error = Assertions.assertThrows(BusinessException.class, () -> service.createTask(audioRequest()).block());
         Assertions.assertTrue(error.getMessage().contains("未开启音频输入"));
+        verify(repository, never()).createTask(any(AiGenerationTask.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+    }
+
+    /** 适配器未实现音频协议时，应在创建任务和扣费前明确拒绝。 */
+    @Test
+    void shouldRejectAudioWhenAdapterDoesNotSupportProtocol() {
+        configureAudioModel("openai");
+        when(providerAdapter.supportsAudioInput()).thenReturn(false);
+        BusinessException error = Assertions.assertThrows(BusinessException.class, () -> service.createTask(audioRequest()).block());
+        Assertions.assertTrue(error.getMessage().contains("未实现音频输入协议"));
         verify(repository, never()).createTask(any(AiGenerationTask.class));
         verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
     }

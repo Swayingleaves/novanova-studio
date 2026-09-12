@@ -197,7 +197,7 @@ public class PersistenceService {
                     VideoBillingConfiguration videoBillingConfiguration = normalizeVideoBillingConfiguration(
                             request.modelType(), capabilities, request.videoBillingConfiguration());
                     record.setCapabilities(JSON.toJSONString(capabilities));
-                    AudioInputSupport.validateCapability(request.modelType(), Boolean.TRUE.equals(request.isCustomModel()) ? "custom" : channel.getApiFormat(), capabilities);
+                    AudioInputSupport.validateCapability(request.modelType(), capabilities);
                     record.setDefaultModel(false);
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
                     record.setCreditCost("video".equals(request.modelType()) ? 0 : request.creditCost() == null ? 0 : request.creditCost());
@@ -235,6 +235,7 @@ public class PersistenceService {
                             : request.videoBillingConfiguration();
                     VideoBillingConfiguration videoBillingConfiguration = normalizeVideoBillingConfiguration(
                             request.modelType(), capabilities, requestedVideoBillingConfiguration);
+                    AudioInputSupport.validateCapability(request.modelType(), capabilities);
                     record.setModelType(request.modelType());
                     record.setCapabilities(JSON.toJSONString(capabilities));
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
@@ -257,10 +258,7 @@ public class PersistenceService {
                     record.setDisplayName(normalizeDisplayName(request.displayName(), record.getModelName()));
                     record.setModelIcon(normalizeModelIcon(request.modelIcon()));
                     PersistenceDtos.ModelConfig modelConfig = modelConfigDto(record);
-                    return (capabilities.contains(AudioInputSupport.CAPABILITY) ? repository.getPlatformAiChannel(record.getChannelId())
-                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "所属渠道不存在")))
-                            .doOnNext(channel -> AudioInputSupport.validateCapability(request.modelType(), Boolean.TRUE.equals(request.isCustomModel()) ? "custom" : channel.getApiFormat(), capabilities)).then() : Mono.<Void>empty())
-                            .then(repository.updatePlatformAiModelConfig(record))
+                    return repository.updatePlatformAiModelConfig(record)
                             .then(isModelQueueType(modelConfig.modelType())
                                     ? modelTaskExecutionDispatcher.refresh(record.getModelConfigId())
                                     : Mono.empty())
