@@ -301,9 +301,8 @@ export function CanvasNodePromptPanel({
         const styleIds = selectedStyles.map((style) => style.id);
         const styleSnapshots = persistedSnapshots?.filter((snapshot) => styleIds.includes(snapshot.id)) || [];
         const usesHistoricalSnapshots = styleSnapshots.length === styleIds.length;
+        // 提交后保留编辑器内容：面板展示的始终是节点上的提示词与风格，避免清空后切换节点又被节点数据回填。
         onGenerate(node.id, mode, formatPromptReferenceLabels(text, requiredLabels), usesHistoricalSnapshots ? undefined : styleIds, usesHistoricalSnapshots && styleSnapshots.length ? styleSnapshots : undefined);
-        setPrompt("");
-        setSelectedStyles([]);
     };
 
     const addReferenceFiles = async (files: FileList | null) => {

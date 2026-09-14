@@ -13,6 +13,9 @@ import { audioNodeTrimRange } from "../utils/audio-trim";
 
 import { activateCanvasAudio, releaseCanvasAudio } from "../services/canvas-audio-playback";
 
+/** 进度滑块自己消费的按键；其余按键（如 Delete）要放行给画布快捷键。 */
+const AUDIO_SEEK_KEYS = ["ArrowLeft", "ArrowRight", "Home", "End"];
+
 /** 在画布内部播放音频，播放状态不写入文档，卸载时释放媒体资源。 */
 export const AudioNode = memo(function AudioNode({ data, selected }: NodeProps<Node<CanvasAudioNode>>) {
     const theme = useCanvasTheme();
@@ -72,7 +75,7 @@ export const AudioNode = memo(function AudioNode({ data, selected }: NodeProps<N
     }, []);
 
     const handleSeekKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
-        if (!selected || !duration || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        if (!selected || !duration || !AUDIO_SEEK_KEYS.includes(event.key)) return;
         event.preventDefault();
         const step = event.shiftKey ? 1 : 0.1;
         const nextTime = event.key === "Home" ? trimStart : event.key === "End" ? trimEnd : currentTime + (event.key === "ArrowRight" ? step : -step);
@@ -125,7 +128,7 @@ export const AudioNode = memo(function AudioNode({ data, selected }: NodeProps<N
         <NodeResizer minWidth={280} minHeight={150} isVisible={selected} lineStyle={{ borderColor: theme.node.activeStroke }} handleStyle={{ borderColor: theme.node.activeStroke, backgroundColor: theme.node.panel }} onResizeEnd={(_, frame) => actions.onResize?.(data.id, frame.width, frame.height, { x: frame.x, y: frame.y })} />
         <NodeHoverSurface nodeId={data.id} className="relative flex h-full w-full select-none flex-col rounded-lg border p-3" style={{ background: theme.node.fill, borderColor: selected ? theme.node.activeStroke : theme.node.stroke, color: theme.node.text }}>
             <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle="音频" onTitleChange={actions.onTitleChange} />
-            {data.content.source ? <div className="nopan nowheel flex min-h-0 flex-1 flex-col gap-2" data-canvas-no-zoom onDoubleClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+            {data.content.source ? <div className="nopan nowheel flex min-h-0 flex-1 flex-col gap-2" data-canvas-no-zoom onDoubleClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (AUDIO_SEEK_KEYS.includes(event.key)) event.stopPropagation(); }}>
                 <audio ref={audioRef} src={data.content.source} preload="metadata" onLoadedMetadata={(event) => { event.currentTarget.currentTime = trimStart; setCurrentTime(trimStart); }} onPlay={(event) => { if (!playbackRequestRef.current) { event.currentTarget.pause(); return; } playbackRequestRef.current = false; activateCanvasAudio(event.currentTarget); setPlaying(true); }} onPause={() => { playbackRequestRef.current = false; setPlaying(false); }} onEnded={() => { playbackRequestRef.current = false; setPlaying(false); setCurrentTime(trimEnd); }} onError={() => setFailed(true)} onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; if (time >= trimEnd) { event.currentTarget.pause(); event.currentTarget.currentTime = trimEnd; } setCurrentTime(Math.min(trimEnd, Math.max(trimStart, time))); }} />
                 <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg focus-within:outline focus-within:outline-2 focus-within:outline-offset-2" style={{ background: theme.node.panel }}>
                     <svg className="absolute inset-0 h-full w-full p-4" viewBox="0 0 512 100" preserveAspectRatio="none" aria-hidden="true">

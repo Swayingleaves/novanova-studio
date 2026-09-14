@@ -431,7 +431,7 @@ export function CanvasFlow({
 }
 
 function CanvasFlowGraphSync({ nodes, edges, onNodesInitializedChange }: { nodes: Node<any>[]; edges: Edge[]; onNodesInitializedChange: (nodesInitialized: boolean) => void }) {
-  const { setNodes, setEdges } = useReactFlow();
+  const { getNodes, setNodes, setEdges } = useReactFlow();
   const nodesInitialized = useNodesInitialized();
 
   useEffect(() => {
@@ -439,8 +439,18 @@ function CanvasFlowGraphSync({ nodes, edges, onNodesInitializedChange }: { nodes
   }, [nodesInitialized, onNodesInitializedChange]);
 
   useEffect(() => {
-    setNodes(nodes);
-  }, [nodes, setNodes]);
+    // React Flow 只在节点对象引用不变时复用内部节点，整批替换会丢掉已测量尺寸和连接点范围，
+    // 导致节点短暂 visibility:hidden、连线锚点丢失而闪烁。这里复用未变化的节点并补回 measured。
+    const previousById = new Map(getNodes().map((node) => [node.id, node]));
+    setNodes(
+      nodes.map((node) => {
+        const previous = previousById.get(node.id);
+        if (!previous) return node;
+        if (previous.data === node.data && previous.selected === node.selected && previous.hidden === node.hidden) return previous;
+        return previous.measured && !node.measured ? { ...node, measured: previous.measured } : node;
+      }),
+    );
+  }, [getNodes, nodes, setNodes]);
 
   useEffect(() => {
     setEdges(edges);

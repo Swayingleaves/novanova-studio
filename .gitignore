@@ -26,3 +26,4 @@ CLAUDE.md
 skills-lock.json
 volume/
 .agnes/
+/server/logs/
