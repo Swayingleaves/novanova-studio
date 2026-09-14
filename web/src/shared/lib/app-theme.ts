@@ -5,11 +5,13 @@ import type { ResolvedTheme } from "@/shared/lib/theme-preference";
 
 const CSS_VAR_KEY_LIGHT = "novanova-studio-light";
 const CSS_VAR_KEY_DARK = "novanova-studio-dark";
+const CSS_VAR_KEY_PURPLE = "novanova-studio-purple";
 
 /** Logo 品牌色 */
 const BRAND = {
     light: { primary: "#526f1e", hover: "#648625", active: "#405718", foreground: "#ffffff", soft: "rgba(82,111,30,0.10)", border: "rgba(82,111,30,0.22)" },
     dark: { primary: "#c7f36b", hover: "#d6ff82", active: "#afda54", foreground: "#11170a", soft: "rgba(199,243,107,0.14)", border: "rgba(199,243,107,0.28)" },
+    purple: { primary: "#b85cf6", hover: "#a78bfa", active: "#6d28d9", foreground: "#ffffff", soft: "rgba(184,92,246,0.16)", border: "rgba(184,92,246,0.30)" },
 };
 
 interface Palette {
@@ -27,6 +29,10 @@ interface Palette {
     tagDefaultBg: string;
     tagDefaultBorder: string;
     tagDefaultText: string;
+    layout: string;
+    modal: string;
+    hoverBg: string;
+    shadow: string;
 }
 
 const lightPalette: Palette = {
@@ -44,6 +50,10 @@ const lightPalette: Palette = {
     tagDefaultBg: "#f4f5f2",
     tagDefaultBorder: "#dce1da",
     tagDefaultText: "#394037",
+    layout: "#f4f5f2",
+    modal: "#ffffff",
+    hoverBg: "rgba(255,255,255,0.92)",
+    shadow: "0 8px 24px rgba(30,41,59,0.06)",
 };
 
 const darkPalette: Palette = {
@@ -61,6 +71,43 @@ const darkPalette: Palette = {
     tagDefaultBg: "#121512",
     tagDefaultBorder: "#363c36",
     tagDefaultText: "#c2c9c0",
+    layout: "#050606",
+    modal: "#0c0e0d",
+    hoverBg: "rgba(17,24,39,0.96)",
+    shadow: "0 16px 36px rgba(2,6,23,0.36)",
+};
+
+const purplePalette: Palette = {
+    bg: "rgba(255,255,255,0.86)",
+    bgElevated: "#ffffff",
+    border: "#e8dff0",
+    borderLight: "#f0eaf5",
+    text: "#1a1525",
+    textSecondary: "#3d3548",
+    textMuted: "#6b5f7a",
+    fill: "rgba(184,92,246,0.10)",
+    fillSecondary: "#f5f0fa",
+    tableSelected: "rgba(184,92,246,0.12)",
+    tableSelectedHover: "rgba(184,92,246,0.20)",
+    tagDefaultBg: "#f5f0fa",
+    tagDefaultBorder: "#e0d4f0",
+    tagDefaultText: "#3d3548",
+    layout: "#f5f0fa",
+    modal: "#ffffff",
+    hoverBg: "rgba(245,240,250,0.94)",
+    shadow: "0 8px 24px rgba(100,60,180,0.08)",
+};
+
+const PALETTES: Record<ResolvedTheme, Palette> = {
+    light: lightPalette,
+    dark: darkPalette,
+    purple: purplePalette,
+};
+
+const CSS_VAR_KEYS: Record<ResolvedTheme, string> = {
+    light: CSS_VAR_KEY_LIGHT,
+    dark: CSS_VAR_KEY_DARK,
+    purple: CSS_VAR_KEY_PURPLE,
 };
 
 /**
@@ -71,13 +118,12 @@ const darkPalette: Palette = {
  */
 export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
     const isDark = resolvedTheme === "dark";
-    const p = isDark ? darkPalette : lightPalette;
-    const brand = isDark ? BRAND.dark : BRAND.light;
-    const modalBackground = isDark ? "#0c0e0d" : "#ffffff";
+    const p = PALETTES[resolvedTheme];
+    const brand = BRAND[resolvedTheme];
 
     return {
         algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-        cssVar: { key: isDark ? CSS_VAR_KEY_DARK : CSS_VAR_KEY_LIGHT },
+        cssVar: { key: CSS_VAR_KEYS[resolvedTheme] },
         token: {
             colorPrimary: brand.primary,
             colorInfo: isDark ? "#75b7f5" : "#28679b",
@@ -88,7 +134,7 @@ export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
             colorLinkHover: brand.hover,
             colorLinkActive: brand.active,
             colorTextLightSolid: "#ffffff",
-            colorBgLayout: isDark ? "#050606" : "#f4f5f2",
+            colorBgLayout: p.layout,
             colorBgContainer: p.bg,
             colorBgElevated: p.bgElevated,
             colorBorder: p.border,
@@ -100,7 +146,7 @@ export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
             colorFillTertiary: p.fillSecondary,
             colorSplit: p.borderLight,
             borderRadius: 8,
-            boxShadow: isDark ? "0 16px 36px rgba(2,6,23,0.36)" : "0 8px 24px rgba(30,41,59,0.06)",
+            boxShadow: p.shadow,
         },
         components: {
             Button: {
@@ -109,7 +155,7 @@ export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
                 defaultBg: p.bg,
                 defaultBorderColor: p.border,
                 defaultColor: p.textSecondary,
-                defaultHoverBg: isDark ? "rgba(17,24,39,0.96)" : "rgba(255,255,255,0.92)",
+                defaultHoverBg: p.hoverBg,
                 defaultHoverColor: p.text,
                 defaultHoverBorderColor: brand.border,
                 borderRadius: 8,
@@ -123,9 +169,9 @@ export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
                 colorBgContainer: p.bg,
             },
             Modal: {
-                contentBg: modalBackground,
-                headerBg: modalBackground,
-                footerBg: modalBackground,
+                contentBg: p.modal,
+                headerBg: p.modal,
+                footerBg: p.modal,
                 borderRadiusLG: 12,
             },
             Table: {
