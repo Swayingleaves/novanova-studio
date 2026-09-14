@@ -446,6 +446,9 @@ function CanvasFlowGraphSync({ nodes, edges, onNodesInitializedChange }: { nodes
       nodes.map((node) => {
         const previous = previousById.get(node.id);
         if (!previous) return node;
+        // 拖动过程中 React Flow 已在内部逐帧更新 position；此时父组件的同步状态可能仍是上一帧，
+        // 直接替换节点对象会重置拖动节点的测量信息和 DOM 层，背景板拖动时会表现为整张画布闪烁。
+        if (previous.dragging) return previous;
         if (previous.data === node.data && previous.selected === node.selected && previous.hidden === node.hidden) return previous;
         return previous.measured && !node.measured ? { ...node, measured: previous.measured } : node;
       }),
