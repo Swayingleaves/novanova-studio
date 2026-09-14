@@ -1,20 +1,41 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { Empty, Modal, Tabs, Tag, Tooltip } from "antd";
-import { Boxes, ChevronsLeft, CircleCheck, CircleDashed, CircleX, Clapperboard, FileText, FolderOpen, Image as ImageIcon, PanelLeftClose, PanelLeftOpen, UserRound, AudioLines, Video } from "lucide-react";
+import { useMemo, useState } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
+import type { MenuProps } from "antd";
+import { Button, Dropdown, Empty, Input, Modal, Tabs, Tag, Tooltip } from "antd";
+import { AudioLines, Boxes, Check, ChevronDown, ChevronsLeft, ChevronRight, Clapperboard, FileText, FolderOpen, Image as ImageIcon, ListFilter, PanelLeftClose, PanelLeftOpen, Search, UserRound, Video, X } from "lucide-react";
 
-import type { Asset } from "@/features/assets/stores/use-asset-store";
 import { isBackgroundNode, isImageNode, isVideoNode } from "../domain/canvas-node";
-import type { CanvasNode, CanvasStoryboardAsset, CanvasStoryboardAssetKind } from "../types";
+import type { CanvasBackgroundNode, CanvasNode, CanvasStoryboardAssetKind } from "../types";
+import {
+    CANVAS_NAVIGATION_ASSET_CATEGORY_OPTIONS,
+    CANVAS_NAVIGATION_NODE_CATEGORY_OPTIONS,
+    canvasNavigationAssetKindLabel,
+    canvasNavigationAssetTitle,
+    canvasNavigationCategoryLabel,
+    canvasNavigationNodeKindLabel,
+    queryCanvasNavigationAssets,
+    queryCanvasNavigationNodes,
+    type CanvasNavigationAsset,
+    type CanvasNavigationAssetCategory,
+    type CanvasNavigationCategoryOption,
+    type CanvasNavigationNodeCategory,
+    type CanvasNavigationNodeResult,
+    type CanvasNavigationStoryboardAsset,
+} from "./canvas-navigation-query";
 import { useCanvasTheme } from "./canvas-theme-provider";
+
+export type { CanvasNavigationAsset, CanvasNavigationStoryboardAsset } from "./canvas-navigation-query";
 
 export type CanvasNavigationPanelState = "expanded" | "collapsed";
 export type CanvasNavigationTab = "nodes" | "assets";
-export type CanvasNavigationAsset =
-    | { id: string; source: "library"; asset: Asset }
-    | { id: string; source: "storyboard"; asset: CanvasStoryboardAsset; storyboardNodeTitle: string };
-export type CanvasNavigationStoryboardAsset = Extract<CanvasNavigationAsset, { source: "storyboard" }>;
+
+type NavigationQueryState<Category extends string> = {
+    searchOpen: boolean;
+    keyword: string;
+    category: Category;
+};
 
 type CanvasNavigationPanelProps = {
     state: CanvasNavigationPanelState;
@@ -32,6 +53,10 @@ type CanvasNavigationPanelProps = {
 
 export function CanvasNavigationPanel(props: CanvasNavigationPanelProps) {
     const theme = useCanvasTheme();
+    const [nodeQuery, setNodeQuery] = useState<NavigationQueryState<CanvasNavigationNodeCategory>>({ searchOpen: false, keyword: "", category: "all" });
+    const [assetQuery, setAssetQuery] = useState<NavigationQueryState<CanvasNavigationAssetCategory>>({ searchOpen: false, keyword: "", category: "all" });
+    const nodeResults = useMemo(() => queryCanvasNavigationNodes(props.nodes, nodeQuery.keyword, nodeQuery.category), [nodeQuery.category, nodeQuery.keyword, props.nodes]);
+    const assetResults = useMemo(() => queryCanvasNavigationAssets(props.assets, assetQuery.keyword, assetQuery.category), [assetQuery.category, assetQuery.keyword, props.assets]);
 
     if (props.state === "collapsed") {
         return (
@@ -72,18 +97,51 @@ export function CanvasNavigationPanel(props: CanvasNavigationPanelProps) {
             </header>
             <Tabs
                 activeKey={props.activeTab}
-                className="flex h-full min-h-0 flex-1 flex-col px-2 [&_.ant-tabs-nav]:pl-2 [&_.ant-tabs-content-holder]:min-h-0 [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-content]:h-full [&_.ant-tabs-tabpane]:h-full"
+                className="flex h-full min-h-0 flex-1 flex-col px-2 [&_.ant-tabs-nav]:pl-2 [&_.ant-tabs-body-holder]:min-h-0 [&_.ant-tabs-body-holder]:min-w-0 [&_.ant-tabs-body-holder]:flex-1 [&_.ant-tabs-body]:h-full [&_.ant-tabs-content]:h-full [&_.ant-tabs-content]:min-h-0"
                 onChange={(tab) => props.onTabChange(tab as CanvasNavigationTab)}
                 items={[
                     {
                         key: "nodes",
                         label: <TabLabel icon={<Boxes className="size-3.5" />} label="节点" count={props.nodes.length} />,
-                        children: <NodeList nodes={props.nodes} selectedNodeIds={props.selectedNodeIds} onLocateNode={props.onLocateNode} />,
+                        children: (
+                            <div className="flex h-full min-h-0 flex-col">
+                                <NavigationQueryToolbar
+                                    resourceLabel="节点"
+                                    placeholder="搜索节点"
+                                    query={nodeQuery}
+                                    options={CANVAS_NAVIGATION_NODE_CATEGORY_OPTIONS}
+                                    onChange={setNodeQuery}
+                                />
+                                <NodeList
+                                    nodes={props.nodes}
+                                    results={nodeResults}
+                                    selectedNodeIds={props.selectedNodeIds}
+                                    onLocateNode={props.onLocateNode}
+                                    onClearQuery={() => setNodeQuery((current) => ({ ...current, keyword: "", category: "all" }))}
+                                />
+                            </div>
+                        ),
                     },
                     {
                         key: "assets",
                         label: <TabLabel icon={<FolderOpen className="size-3.5" />} label="画布资产" count={props.assets.length} />,
-                        children: <AssetList assets={props.assets} onPreviewAsset={props.onPreviewAsset} />,
+                        children: (
+                            <div className="flex h-full min-h-0 flex-col">
+                                <NavigationQueryToolbar
+                                    resourceLabel="资产"
+                                    placeholder="搜索资产"
+                                    query={assetQuery}
+                                    options={CANVAS_NAVIGATION_ASSET_CATEGORY_OPTIONS}
+                                    onChange={setAssetQuery}
+                                />
+                                <AssetList
+                                    assets={props.assets}
+                                    results={assetResults}
+                                    onPreviewAsset={props.onPreviewAsset}
+                                    onClearQuery={() => setAssetQuery((current) => ({ ...current, keyword: "", category: "all" }))}
+                                />
+                            </div>
+                        ),
                     },
                 ]}
             />
@@ -118,52 +176,180 @@ function TabLabel({ icon, label, count }: { icon: ReactNode; label: string; coun
     return <span className="inline-flex items-center gap-1.5">{icon}{label}<span className="text-xs opacity-60">{count}</span></span>;
 }
 
-function NodeList({ nodes, selectedNodeIds, onLocateNode }: { nodes: CanvasNode[]; selectedNodeIds: Set<string>; onLocateNode: (nodeId: string) => void }) {
+function NavigationQueryToolbar<Category extends string>({ resourceLabel, placeholder, query, options, onChange }: { resourceLabel: string; placeholder: string; query: NavigationQueryState<Category>; options: ReadonlyArray<CanvasNavigationCategoryOption<Category>>; onChange: Dispatch<SetStateAction<NavigationQueryState<Category>>> }) {
     const theme = useCanvasTheme();
-    if (!nodes.length) return <PanelEmpty description="暂无节点" />;
+    const categoryLabel = canvasNavigationCategoryLabel(options, query.category);
+    const categoryActive = query.category !== "all";
+    const closeSearch = () => onChange((current) => (current.searchOpen || current.keyword ? { ...current, searchOpen: false, keyword: "" } : current));
+    const menu: MenuProps = {
+        items: options.map((option) => ({
+            key: option.value,
+            label: option.label,
+            icon: option.value === query.category ? <Check className="size-3.5" /> : <span className="inline-block size-3.5" />,
+            style: option.value === query.category ? { background: theme.toolbar.activeBg, color: theme.toolbar.activeText } : undefined,
+        })),
+        onClick: ({ key }) => onChange((current) => ({ ...current, category: key as Category })),
+    };
     return (
-        <div className="thin-scrollbar h-full overflow-y-auto px-2 pb-2">
+        <div className="flex shrink-0 items-center gap-1 px-2 pt-2">
+            {query.searchOpen ? (
+                <Input
+                    autoFocus
+                    size="small"
+                    value={query.keyword}
+                    placeholder={placeholder}
+                    aria-label={placeholder}
+                    className="h-8 min-w-0 flex-1 text-xs placeholder:text-inherit placeholder:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1"
+                    style={{ background: theme.node.fill, borderColor: theme.toolbar.border, color: theme.node.text, outlineColor: theme.node.activeStroke }}
+                    onChange={(event) => onChange((current) => ({ ...current, keyword: event.target.value }))}
+                    onKeyDown={(event) => {
+                        if (event.key !== "Escape") return;
+                        event.preventDefault();
+                        closeSearch();
+                    }}
+                />
+            ) : (
+                <QueryIconButton label={`搜索${resourceLabel}`} onClick={() => onChange((current) => ({ ...current, searchOpen: true }))}><Search className="size-4" /></QueryIconButton>
+            )}
+            <Dropdown menu={menu} trigger={["click"]} placement="bottomLeft">
+                <button
+                    type="button"
+                    aria-label={`筛选${resourceLabel}分类，当前${categoryLabel}`}
+                    className="flex h-8 max-w-36 shrink-0 items-center gap-1 rounded-md px-2 text-xs transition-colors motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1"
+                    style={{ background: categoryActive ? theme.toolbar.activeBg : "transparent", color: categoryActive ? theme.toolbar.activeText : theme.node.muted, outlineColor: theme.node.activeStroke }}
+                    onMouseEnter={(event) => {
+                        if (!categoryActive) event.currentTarget.style.background = theme.toolbar.itemHover;
+                    }}
+                    onMouseLeave={(event) => {
+                        if (!categoryActive) event.currentTarget.style.background = "transparent";
+                    }}
+                >
+                    <ListFilter className="size-3.5 shrink-0" />
+                    <span className="truncate">{categoryLabel}</span>
+                    <ChevronDown className="size-3.5 shrink-0" />
+                </button>
+            </Dropdown>
+            {query.searchOpen ? <QueryIconButton label="关闭搜索" onClick={closeSearch}><X className="size-4" /></QueryIconButton> : null}
+        </div>
+    );
+}
+
+function QueryIconButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
+    const theme = useCanvasTheme();
+    return (
+        <Tooltip title={label} mouseEnterDelay={0.4}>
+            <button
+                type="button"
+                aria-label={label}
+                className="grid size-8 shrink-0 place-items-center rounded-md transition-colors motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1"
+                style={{ color: theme.node.muted, outlineColor: theme.node.activeStroke }}
+                onMouseEnter={(event) => { event.currentTarget.style.background = theme.toolbar.itemHover; }}
+                onMouseLeave={(event) => { event.currentTarget.style.background = "transparent"; }}
+                onClick={onClick}
+            >
+                {children}
+            </button>
+        </Tooltip>
+    );
+}
+
+function NodeList({ nodes, results, selectedNodeIds, onLocateNode, onClearQuery }: { nodes: CanvasNode[]; results: CanvasNavigationNodeResult[]; selectedNodeIds: Set<string>; onLocateNode: (nodeId: string) => void; onClearQuery: () => void }) {
+    const [collapsedBoards, setCollapsedBoards] = useState<Set<string>>(() => new Set());
+    const toggleBoard = (boardId: string) => setCollapsedBoards((prev) => {
+        const next = new Set(prev);
+        if (next.has(boardId)) next.delete(boardId);
+        else next.add(boardId);
+        return next;
+    });
+    if (!nodes.length) return <PanelEmpty description="暂无节点" />;
+    if (!results.length) return <NavigationNoResult description="未找到符合条件的节点" onClearQuery={onClearQuery} />;
+    return (
+        <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto px-2 pb-2">
             <div className="space-y-1">
-                {nodes.map((node) => {
-                    const selected = selectedNodeIds.has(node.id);
-                    const batchCount = isImageNode(node) && node.grouping.isRoot ? node.grouping.childIds.length : 0;
-                    const backgroundCount = isBackgroundNode(node) ? node.memberNodeIds.length : 0;
-                    return (
-                        <button
-                            key={node.id}
-                            type="button"
-                            aria-pressed={selected}
-                            className="flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors motion-reduce:transition-none"
-                            style={{ background: selected ? theme.toolbar.itemHover : "transparent", borderColor: selected ? theme.node.activeStroke : "transparent", color: theme.node.text }}
-                            onMouseEnter={(event) => {
-                                if (!selected) event.currentTarget.style.background = theme.toolbar.itemHover;
-                            }}
-                            onMouseLeave={(event) => {
-                                if (!selected) event.currentTarget.style.background = "transparent";
-                            }}
-                            onClick={() => onLocateNode(node.id)}
-                        >
-                            <NodePreview node={node} />
-                            <span className="min-w-0 flex-1">
-                                <span className="block truncate text-xs font-medium">{node.title || "未命名节点"}</span>
-                                <span className="mt-0.5 flex items-center gap-1 text-[11px]" style={{ color: theme.node.muted }}><NodeKindIcon kind={node.kind} className="size-3" />{nodeKindLabel(node.kind)}<NodeStatus phase={node.execution.phase} /></span>
-                            </span>
-                            {batchCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{batchCount} 张</span> : backgroundCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{backgroundCount} 个节点</span> : null}
-                        </button>
-                    );
-                })}
+                {results.map((result) => result.type === "background" ? (
+                    <BackgroundBoardGroup
+                        key={result.board.id}
+                        board={result.board}
+                        members={result.members}
+                        collapsed={collapsedBoards.has(result.board.id)}
+                        onToggle={() => toggleBoard(result.board.id)}
+                        selectedNodeIds={selectedNodeIds}
+                        onLocateNode={onLocateNode}
+                    />
+                ) : (
+                    <NodeRow key={result.node.id} node={result.node} selected={selectedNodeIds.has(result.node.id)} onLocateNode={onLocateNode} />
+                ))}
             </div>
         </div>
     );
 }
 
-function AssetList({ assets, onPreviewAsset }: { assets: CanvasNavigationAsset[]; onPreviewAsset: (asset: CanvasNavigationAsset) => void }) {
+function BackgroundBoardGroup({ board, members, collapsed, onToggle, selectedNodeIds, onLocateNode }: { board: CanvasBackgroundNode; members: CanvasNode[]; collapsed: boolean; onToggle: () => void; selectedNodeIds: Set<string>; onLocateNode: (nodeId: string) => void }) {
+    const theme = useCanvasTheme();
+    return (
+        <div className="space-y-1">
+            <button
+                type="button"
+                aria-expanded={!collapsed}
+                className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors motion-reduce:transition-none"
+                style={{ color: theme.node.text }}
+                onMouseEnter={(event) => { event.currentTarget.style.background = theme.toolbar.itemHover; }}
+                onMouseLeave={(event) => { event.currentTarget.style.background = "transparent"; }}
+                onClick={onToggle}
+            >
+                <span className="grid size-4 shrink-0 place-items-center" style={{ color: theme.node.muted }}>
+                    {collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                </span>
+                <NodePreview node={board} />
+                <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium">{board.title || "未命名背景板"}</span>
+                    <span className="mt-0.5 flex items-center gap-1 text-[11px]" style={{ color: theme.node.muted }}><NodeKindIcon kind={board.kind} className="size-3" />{canvasNavigationNodeKindLabel(board.kind)}</span>
+                </span>
+                {members.length > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{members.length} 个节点</span> : null}
+            </button>
+            {!collapsed && members.length > 0 ? (
+                <div className="ml-[38px] space-y-1 border-l pl-2" style={{ borderColor: theme.toolbar.border }}>
+                    {members.map((member) => <NodeRow key={member.id} node={member} selected={selectedNodeIds.has(member.id)} onLocateNode={onLocateNode} />)}
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+function NodeRow({ node, selected, onLocateNode }: { node: CanvasNode; selected: boolean; onLocateNode: (nodeId: string) => void }) {
+    const theme = useCanvasTheme();
+    const batchCount = isImageNode(node) && node.grouping.isRoot ? node.grouping.childIds.length : 0;
+    return (
+        <button
+            type="button"
+            aria-pressed={selected}
+            className="flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors motion-reduce:transition-none"
+            style={{ background: selected ? theme.toolbar.itemHover : "transparent", borderColor: selected ? theme.node.activeStroke : "transparent", color: theme.node.text }}
+            onMouseEnter={(event) => {
+                if (!selected) event.currentTarget.style.background = theme.toolbar.itemHover;
+            }}
+            onMouseLeave={(event) => {
+                if (!selected) event.currentTarget.style.background = "transparent";
+            }}
+            onClick={() => onLocateNode(node.id)}
+        >
+            <NodePreview node={node} />
+            <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium">{node.title || "未命名节点"}</span>
+                <span className="mt-0.5 flex items-center gap-1 text-[11px]" style={{ color: theme.node.muted }}><NodeKindIcon kind={node.kind} className="size-3" />{canvasNavigationNodeKindLabel(node.kind)}</span>
+            </span>
+            {batchCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{batchCount} 张</span> : null}
+        </button>
+    );
+}
+function AssetList({ assets, results, onPreviewAsset, onClearQuery }: { assets: CanvasNavigationAsset[]; results: CanvasNavigationAsset[]; onPreviewAsset: (asset: CanvasNavigationAsset) => void; onClearQuery: () => void }) {
     const theme = useCanvasTheme();
     if (!assets.length) return <PanelEmpty description="暂无画布资产" />;
+    if (!results.length) return <NavigationNoResult description="未找到符合条件的资产" onClearQuery={onClearQuery} />;
     return (
-        <div className="thin-scrollbar h-full overflow-y-auto pb-2">
+        <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto px-2 pb-2">
             <div className="space-y-1">
-                {assets.map((asset) => (
+                {results.map((asset) => (
                     <button
                         key={asset.id}
                         type="button"
@@ -179,8 +365,8 @@ function AssetList({ assets, onPreviewAsset }: { assets: CanvasNavigationAsset[]
                     >
                         <AssetPreview asset={asset} />
                         <span className="min-w-0 flex-1">
-                            <span className="block truncate text-xs font-medium">{assetTitle(asset)}</span>
-                            <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px]" style={{ color: theme.node.muted }}><AssetKindIcon asset={asset} className="size-3" /><span className="truncate">{assetKindLabel(asset)}</span></span>
+                            <span className="block truncate text-xs font-medium">{canvasNavigationAssetTitle(asset)}</span>
+                            <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[11px]" style={{ color: theme.node.muted }}><AssetKindIcon asset={asset} className="size-3" /><span className="truncate">{canvasNavigationAssetKindLabel(asset)}</span></span>
                         </span>
                     </button>
                 ))}
@@ -191,6 +377,15 @@ function AssetList({ assets, onPreviewAsset }: { assets: CanvasNavigationAsset[]
 
 function PanelEmpty({ description }: { description: string }) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={description} className="py-12" />;
+}
+
+function NavigationNoResult({ description, onClearQuery }: { description: string; onClearQuery: () => void }) {
+    return (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 py-12">
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={description} />
+            <Button size="small" onClick={onClearQuery}>清除搜索和筛选</Button>
+        </div>
+    );
 }
 
 function NodePreview({ node }: { node: CanvasNode }) {
@@ -222,12 +417,6 @@ function AssetPreview({ asset }: { asset: CanvasNavigationAsset }) {
     );
 }
 
-function NodeStatus({ phase }: { phase: CanvasNode["execution"]["phase"] }) {
-    const label = phase === "running" ? "生成中" : phase === "succeeded" ? "已完成" : phase === "failed" ? "失败" : "待编辑";
-    const Icon = phase === "running" ? CircleDashed : phase === "succeeded" ? CircleCheck : phase === "failed" ? CircleX : CircleDashed;
-    return <span className="ml-auto inline-flex shrink-0 items-center gap-0.5"><Icon className={phase === "running" ? "size-3 animate-spin motion-reduce:animate-none" : "size-3"} />{label}</span>;
-}
-
 function NodeKindIcon({ kind, className }: { kind: CanvasNode["kind"]; className?: string }) {
     const Icon = kind === "audio" ? AudioLines : kind === "image" ? ImageIcon : kind === "text" ? FileText : kind === "video" ? Video : kind === "storyboard" ? Clapperboard : Boxes;
     return <Icon className={className} />;
@@ -238,19 +427,6 @@ function AssetKindIcon({ asset, className }: { asset: CanvasNavigationAsset; cla
         ? asset.asset.kind === "image" ? ImageIcon : asset.asset.kind === "video" ? Video : FileText
         : asset.asset.kind === "character" ? UserRound : asset.asset.kind === "scene" ? ImageIcon : Boxes;
     return <Icon className={className} />;
-}
-
-function nodeKindLabel(kind: CanvasNode["kind"]) {
-    return kind === "audio" ? "音频" : kind === "image" ? "图片" : kind === "text" ? "文本" : kind === "video" ? "视频" : kind === "storyboard" ? "分镜" : kind === "videoComposition" ? "视频合成" : "背景板";
-}
-
-function assetTitle(asset: CanvasNavigationAsset) {
-    return asset.source === "library" ? asset.asset.title || "未命名资产" : asset.asset.name || "未命名分镜资产";
-}
-
-function assetKindLabel(asset: CanvasNavigationAsset) {
-    if (asset.source === "library") return asset.asset.kind === "image" ? "图片" : asset.asset.kind === "video" ? "视频" : "文本";
-    return `${storyboardAssetKindLabel(asset.asset.kind)} · ${asset.storyboardNodeTitle || "分镜脚本"}`;
 }
 
 function storyboardAssetKindLabel(kind: CanvasStoryboardAssetKind) {
