@@ -58,6 +58,34 @@ public final class StoryboardDtos {
     }
 
     /**
+     * 分镜资产图片生成任务请求。
+     * <p>提示词由服务端按资产类别模板渲染，前端只提交结构化字段。</p>
+     *
+     * @param nodeId String 分镜节点标识
+     * @param asset StoryboardAsset 待生成的资产
+     * @param visualStyle String 分镜整体视觉风格
+     * @param model String 选择的channelId::model图片模型
+     * @param settings AssetImageSettings 图片生成参数
+     */
+    public record CreateAssetImageTaskRequest(
+            @NotBlank(message = "分镜节点标识不能为空") @Size(max = 128, message = "分镜节点标识长度不合法") String nodeId,
+            @NotNull(message = "资产不能为空") @Valid StoryboardAsset asset,
+            @NotBlank(message = "视觉风格不能为空") @Size(max = 8000, message = "视觉风格不能超过8000字") String visualStyle,
+            @NotBlank(message = "图片模型不能为空") @Size(max = 256, message = "图片模型长度不合法") String model,
+            @NotNull(message = "图片生成参数不能为空") @Valid AssetImageSettings settings) {
+    }
+
+    /**
+     * 分镜资产图片生成参数，直接透传给图片生成渠道。
+     *
+     * @param quality String 图片质量
+     * @param resolution String 图片分辨率
+     * @param size String 图片尺寸
+     */
+    public record AssetImageSettings(String quality, String resolution, String size) {
+    }
+
+    /**
      * 画布持久化的分镜镜头。
      *
      * @param id String 稳定镜头标识

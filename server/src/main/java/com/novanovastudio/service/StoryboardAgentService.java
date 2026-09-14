@@ -3,9 +3,12 @@ package com.novanovastudio.service;
 import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.agent.AgentScopeAgentFactory;
 import com.novanovastudio.agent.AgentScopeModelFactory;
+import com.novanovastudio.ai.AiTaskSources;
+import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
+import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.StoryboardDtos;
 import com.novanovastudio.security.CurrentUserProvider;
 import io.agentscope.core.ReActAgent;
@@ -53,6 +56,12 @@ public class StoryboardAgentService {
     /** 前七个固定段落之间的分隔符，允许空白字符但不影响最后的多行视觉风格。 */
     private static final Pattern PROMPT_SECTION_SEPARATOR = Pattern.compile("\\n[ \\t]*\\n");
 
+    /** 资产图片提示词模板的类别段落标记，形如“# character”。 */
+    private static final Pattern ASSET_PROMPT_SECTION = Pattern.compile("^#\\s*(\\S+)\\s*$");
+
+    /** 资产图片提示词模板的占位符，形如“{{name}}”。 */
+    private static final Pattern ASSET_PROMPT_PLACEHOLDER = Pattern.compile("\\{\\{\\s*(\\w+)\\s*\\}\\}");
+
     /** 当前用户提供器。 */
     private final CurrentUserProvider currentUserProvider;
 
@@ -67,6 +76,12 @@ public class StoryboardAgentService {
 
     /** 积分服务。 */
     private final CreditService creditService;
+
+    /** 系统提示词模板服务。 */
+    private final SystemPromptTemplateService promptTemplateService;
+
+    /** AI任务服务。 */
+    private final AiTaskService aiTaskService;
 
     /**
      * 根据剧本文本和用户描述生成分镜与资产清单。
@@ -92,6 +107,26 @@ public class StoryboardAgentService {
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> modelFactory.resolveTextModel(request.model())
                         .flatMap(model -> composeWithModel(userId, model, request)));
+    }
+
+    /**
+     * 为分镜资产创建图片生成任务，提示词由服务端按资产类别模板渲染。
+     *
+     * @param request CreateAssetImageTaskRequest 资产图片任务请求
+     * @return Mono<AiGenerationTaskResponse> 已入队的AI任务
+     */
+    public Mono<AiTaskDtos.AiGenerationTaskResponse> createAssetImageTask(StoryboardDtos.CreateAssetImageTaskRequest request) {
+        validateAssetImageRequest(request);
+        Map<String, Object> parameters = new LinkedHashMap<>();
+        parameters.put("count", 1);
+        parameters.put("quality", request.settings().quality());
+        parameters.put("resolution", request.settings().resolution());
+        parameters.put("size", request.settings().size());
+        parameters.put("storyboardNodeId", request.nodeId().trim());
+        parameters.put("storyboardAssetId", request.asset().id().trim());
+        AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(
+                AiTaskTypes.IMAGE, renderAssetImagePrompt(request), request.model().trim(), parameters, null, null, AiTaskSources.STORYBOARD);
+        return aiTaskService.createTask(taskRequest);
     }
 
     /**
@@ -462,6 +497,100 @@ public class StoryboardAgentService {
                 }
             }
         }
+    }
+
+    /**
+     * 校验资产图片任务请求。
+     *
+     * @param request CreateAssetImageTaskRequest 资产图片任务请求
+     * @return void 无返回值
+     */
+    private void validateAssetImageRequest(StoryboardDtos.CreateAssetImageTaskRequest request) {
+        if (request == null) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "资产图片任务请求不能为空");
+        }
+        normalizeRequiredText(request.nodeId(), "分镜节点标识");
+        normalizeRequiredText(request.visualStyle(), "视觉风格");
+        normalizeRequiredText(request.model(), "图片模型");
+        if (request.asset() == null || request.settings() == null) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "资产与图片生成参数不能为空");
+        }
+        if (!ASSET_KINDS.contains(normalizeRequiredText(request.asset().kind(), "资产类别"))) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "资产类别仅支持character、scene、prop");
+        }
+        normalizeRequiredText(request.asset().id(), "资产标识");
+        normalizeRequiredText(request.asset().name(), "资产名称");
+    }
+
+    /**
+     * 按资产类别渲染资产图片提示词。
+     * <p>模板中整行占位符都取不到值时省略该行，避免留下“描述：”这类空标签行。</p>
+     *
+     * @param request CreateAssetImageTaskRequest 资产图片任务请求
+     * @return String 渲染后的提示词
+     */
+    private String renderAssetImagePrompt(StoryboardDtos.CreateAssetImageTaskRequest request) {
+        StoryboardDtos.StoryboardAsset asset = request.asset();
+        Map<String, String> values = Map.of(
+                "name", asset.name().trim(),
+                "description", asset.description() == null ? "" : asset.description().trim(),
+                "visualStyle", request.visualStyle().trim());
+        List<String> rendered = new ArrayList<>();
+        for (String line : readAssetImagePromptSection(asset.kind().trim()).split("\n", -1)) {
+            Matcher matcher = ASSET_PROMPT_PLACEHOLDER.matcher(line);
+            StringBuilder text = new StringBuilder();
+            boolean hasPlaceholder = false;
+            boolean hasValue = false;
+            while (matcher.find()) {
+                hasPlaceholder = true;
+                String value = values.get(matcher.group(1));
+                if (value == null) {
+                    log.warn("分镜资产图片提示词模板存在未知占位符: placeholder={}", matcher.group(1));
+                    value = "";
+                } else if (!value.isEmpty()) {
+                    hasValue = true;
+                }
+                matcher.appendReplacement(text, Matcher.quoteReplacement(value));
+            }
+            matcher.appendTail(text);
+            if (hasPlaceholder && !hasValue) {
+                continue;
+            }
+            rendered.add(text.toString());
+        }
+        if (rendered.isEmpty()) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "分镜资产图片提示词模板段落内容为空: " + asset.kind());
+        }
+        return String.join("\n", rendered).trim();
+    }
+
+    /**
+     * 从模板中截取指定资产类别的提示词段落。
+     *
+     * @param kind String 资产类别
+     * @return String 该类别对应的提示词段落
+     */
+    private String readAssetImagePromptSection(String kind) {
+        String currentKind = "";
+        List<String> lines = new ArrayList<>();
+        for (String line : promptTemplateService.get(PromptTemplateType.IMAGE_STORYBOARD_ASSET).split("\n", -1)) {
+            Matcher matcher = ASSET_PROMPT_SECTION.matcher(line);
+            if (matcher.matches()) {
+                if (kind.equals(currentKind)) {
+                    return String.join("\n", lines).trim();
+                }
+                currentKind = matcher.group(1);
+                lines.clear();
+                continue;
+            }
+            if (!currentKind.isEmpty()) {
+                lines.add(line);
+            }
+        }
+        if (kind.equals(currentKind)) {
+            return String.join("\n", lines).trim();
+        }
+        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "分镜资产图片提示词模板缺少类别段落: " + kind);
     }
 
     /**

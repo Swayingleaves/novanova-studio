@@ -2732,6 +2732,7 @@ function CanvasWorkspacePage() {
                     ),
                 );
                 applyStoryboardCreditCharge(result.chargedCredits, setCreditBalance);
+                setStoryboardWorkspaceNodeId(currentNode.id);
                 message.success(`分镜脚本已生成，消耗 ${result.chargedCredits} 积分`);
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : "分镜脚本生成失败";
