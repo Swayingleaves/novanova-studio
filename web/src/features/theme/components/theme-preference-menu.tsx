@@ -6,7 +6,7 @@ import { Check, SunMoon } from "lucide-react";
 
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { cn } from "@/shared/lib/utils";
-import type { ThemePreference } from "@/shared/lib/theme-preference";
+import { THEME_PREFERENCES, type ThemePreference } from "@/shared/lib/theme-preference";
 
 type ThemePreferenceMenuProps = {
     variant?: "icon" | "drawer" | "toolbar";
@@ -18,11 +18,13 @@ const THEME_LABELS: Record<ThemePreference, string> = {
     system: "跟随系统",
     light: "浅色模式",
     dark: "暗色模式",
+    purple: "紫色模式",
 };
 
 const RESOLVED_THEME_LABELS = {
     light: "浅色",
     dark: "暗色",
+    purple: "紫色",
 } as const;
 
 /**
@@ -36,13 +38,13 @@ export function ThemePreferenceMenu({ variant = "icon", className, onAfterSelect
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
     const setThemePreference = useThemeStore((state) => state.setThemePreference);
 
-    const items: MenuProps["items"] = (["system", "light", "dark"] as ThemePreference[]).map((item) => ({
+    const items: MenuProps["items"] = THEME_PREFERENCES.map((item) => ({
         key: item,
         icon: preference === item ? <Check className="size-4" /> : <span className="block size-4" aria-hidden="true" />,
         label: (
             <div className="flex min-w-40 items-center justify-between gap-3">
                 <span>{THEME_LABELS[item]}</span>
-                {item === "system" ? <span className="text-xs text-[var(--studio-faint)]">当前：{RESOLVED_THEME_LABELS[resolvedTheme]}</span> : null}
+                {item === "system" && preference === "system" ? <span className="text-xs text-[var(--studio-faint)]">当前：{RESOLVED_THEME_LABELS[resolvedTheme]}</span> : null}
             </div>
         ),
     }));

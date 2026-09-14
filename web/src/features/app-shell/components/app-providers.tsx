@@ -10,7 +10,7 @@ import zhCN from "antd/locale/zh_CN";
 import { ClientRootInit } from "@/features/app-shell/components/client-root-init";
 import { getAntThemeConfig } from "@/shared/lib/app-theme";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
-import type { ResolvedTheme, ThemePreference } from "@/shared/lib/theme-preference";
+import { isDarkResolvedTheme, type ResolvedTheme, type ThemePreference } from "@/shared/lib/theme-preference";
 
 const queryClient = new QueryClient({
     defaultOptions: {
@@ -59,7 +59,7 @@ export function AppProviders({
 
     return (
         <ConfigProvider locale={zhCN} theme={getAntThemeConfig(effectiveResolvedTheme)}>
-            <ProConfigProvider dark={effectiveResolvedTheme === "dark"}>
+            <ProConfigProvider dark={isDarkResolvedTheme(effectiveResolvedTheme)}>
                 <App>
                     <QueryClientProvider client={queryClient}>
                         <ClientRootInit>{children}</ClientRootInit>

@@ -1,8 +1,11 @@
-/** 主题偏好：跟随系统、浅色、暗色。 */
-export type ThemePreference = "system" | "light" | "dark";
+/** 主题偏好：跟随系统、浅色、暗色、紫色。 */
+export type ThemePreference = "system" | "light" | "dark" | "purple";
 
-/** 实际生效主题：仅允许浅色或暗色。 */
-export type ResolvedTheme = "light" | "dark";
+/** 实际生效主题：浅色、暗色或紫色。 */
+export type ResolvedTheme = "light" | "dark" | "purple";
+
+/** 所有生效主题，供主题菜单等按固定顺序遍历。 */
+export const THEME_PREFERENCES: readonly ThemePreference[] = ["system", "light", "dark", "purple"];
 
 /** 主题偏好本地存储键。 */
 export const THEME_STORAGE_KEY = "novanova:theme";
@@ -24,8 +27,18 @@ type CookieStoreLike = {
  * @return ThemePreference | null 合法主题偏好
  */
 export function normalizeThemePreference(value: string | null | undefined): ThemePreference | null {
-    if (value === "system" || value === "light" || value === "dark") return value;
+    if (value === "system" || value === "light" || value === "dark" || value === "purple") return value;
     return null;
+}
+
+/**
+ * 判断生效主题是否属于暗色系（紫色主题为浅色背景，仅暗色主题为暗色系）。
+ *
+ * @param resolvedTheme ResolvedTheme 生效主题
+ * @return boolean 是否为暗色系主题
+ */
+export function isDarkResolvedTheme(resolvedTheme: ResolvedTheme): boolean {
+    return resolvedTheme === "dark";
 }
 
 /**
@@ -38,6 +51,7 @@ export function normalizeThemePreference(value: string | null | undefined): Them
 export function resolveThemePreference(preference: ThemePreference, systemPrefersDark: boolean): ResolvedTheme {
     if (preference === "dark") return "dark";
     if (preference === "light") return "light";
+    if (preference === "purple") return "purple";
     return systemPrefersDark ? "dark" : "light";
 }
 
@@ -71,13 +85,14 @@ export function readThemePreferenceFromCookieStore(cookieStore: CookieStoreLike)
 /**
  * 为 SSR 首屏选择一个稳定的初始主题。
  * <p>
- * 服务端无法直接获知系统主题，因此只有显式 dark 才首屏输出暗色，其余统一回浅色，随后再由 beforeInteractive 脚本修正。
+ * 服务端无法直接获知系统主题，因此只有显式 dark、purple 才首屏输出对应主题，其余统一回浅色，随后再由 beforeInteractive 脚本修正。
  *
  * @param preference ThemePreference | null | undefined 主题偏好
  * @return ResolvedTheme 初始主题
  */
 export function getInitialResolvedTheme(preference: ThemePreference | null | undefined): ResolvedTheme {
-    return preference === "dark" ? "dark" : "light";
+    if (preference === "dark" || preference === "purple") return preference;
+    return "light";
 }
 
 /**
@@ -135,10 +150,11 @@ export function applyResolvedThemeToDocument(resolvedTheme: ResolvedTheme, prefe
     if (typeof document === "undefined") return;
 
     const root = document.documentElement;
+    const isDark = isDarkResolvedTheme(resolvedTheme);
     root.setAttribute("data-theme", resolvedTheme);
     if (preference) root.setAttribute("data-theme-preference", preference);
-    root.classList.toggle("dark", resolvedTheme === "dark");
-    root.style.colorScheme = resolvedTheme;
+    root.classList.toggle("dark", isDark);
+    root.style.colorScheme = isDark ? "dark" : "light";
 }
 
 /**
@@ -148,5 +164,5 @@ export function applyResolvedThemeToDocument(resolvedTheme: ResolvedTheme, prefe
  * @return string 可直接注入到 beforeInteractive 的脚本
  */
 export function buildThemeBootstrapScript(defaultPreference: ThemePreference = "dark"): string {
-    return `(()=>{try{var storageKey=${JSON.stringify(THEME_STORAGE_KEY)};var cookieKey=${JSON.stringify(THEME_COOKIE_KEY)};var defaultPreference=${JSON.stringify(defaultPreference)};var normalize=function(value){return value==="system"||value==="light"||value==="dark"?value:null;};var readCookie=function(){var target=document.cookie.split(";").map(function(item){return item.trim();}).find(function(item){return item.indexOf(cookieKey+"=")===0;});if(!target)return null;return normalize(decodeURIComponent(target.slice(cookieKey.length+1)));};var preference=normalize(window.localStorage.getItem(storageKey))||readCookie()||defaultPreference;var resolved=preference==="dark"?"dark":preference==="light"?"light":(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");var root=document.documentElement;root.setAttribute("data-theme",resolved);root.setAttribute("data-theme-preference",preference);root.classList.toggle("dark",resolved==="dark");root.style.colorScheme=resolved;}catch(error){var root=document.documentElement;root.setAttribute("data-theme","dark");root.setAttribute("data-theme-preference","dark");root.classList.add("dark");root.style.colorScheme="dark";}})();`;
+    return `(()=>{try{var storageKey=${JSON.stringify(THEME_STORAGE_KEY)};var cookieKey=${JSON.stringify(THEME_COOKIE_KEY)};var defaultPreference=${JSON.stringify(defaultPreference)};var normalize=function(value){return value==="system"||value==="light"||value==="dark"||value==="purple"?value:null;};var readCookie=function(){var target=document.cookie.split(";").map(function(item){return item.trim();}).find(function(item){return item.indexOf(cookieKey+"=")===0;});if(!target)return null;return normalize(decodeURIComponent(target.slice(cookieKey.length+1)));};var preference=normalize(window.localStorage.getItem(storageKey))||readCookie()||defaultPreference;var resolved=preference==="dark"?"dark":preference==="light"?"light":preference==="purple"?"purple":(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");var root=document.documentElement;root.setAttribute("data-theme",resolved);root.setAttribute("data-theme-preference",preference);root.classList.toggle("dark",resolved==="dark");root.style.colorScheme=resolved==="dark"?"dark":"light";}catch(error){var root=document.documentElement;root.setAttribute("data-theme","dark");root.setAttribute("data-theme-preference","dark");root.classList.add("dark");root.style.colorScheme="dark";}})();`;
 }
