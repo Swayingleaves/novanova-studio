@@ -48,7 +48,7 @@ class StoryboardAgentServiceTest {
         creditService = mock(CreditService.class);
         storyboardAgentService = new StoryboardAgentService(
                 mock(CurrentUserProvider.class), mock(AgentScopeModelFactory.class), mock(AgentScopeAgentFactory.class),
-                new NovanovaProperties(), creditService);
+                new NovanovaProperties(), creditService, mock(SystemPromptTemplateService.class), mock(AiTaskService.class));
     }
 
     /**
