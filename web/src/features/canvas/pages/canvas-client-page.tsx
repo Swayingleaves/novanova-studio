@@ -1435,6 +1435,21 @@ function CanvasWorkspacePage() {
         setContextMenu((current) => (current?.type === "connection" && current.connectionId === connectionId ? null : current));
     }, []);
 
+    const confirmDeleteConnection = useCallback(
+        (connectionId: string) => {
+            if (!connectionsRef.current.some((connection) => connection.id === connectionId)) return;
+            modal.confirm({
+                title: "删除连线？",
+                content: "删除后可通过撤销恢复。",
+                okText: "删除",
+                cancelText: "取消",
+                okButtonProps: { danger: true },
+                onOk: () => deleteConnection(connectionId),
+            });
+        },
+        [deleteConnection, modal],
+    );
+
     const removeNodeReferenceConnection = useCallback(
         (targetNodeId: string, referenceNodeId: string) => {
             connections.filter((connection) => connection.target.nodeId === targetNodeId && connection.source.nodeId === referenceNodeId).forEach((connection) => deleteConnection(connection.id));
@@ -2114,7 +2129,7 @@ function CanvasWorkspacePage() {
             },
             delete: () => {
                 if (selectedNodeIdsRef.current.size) confirmDeleteNodes(new Set(selectedNodeIdsRef.current));
-                else if (selectedConnectionId) deleteConnection(selectedConnectionId);
+                else if (selectedConnectionId) confirmDeleteConnection(selectedConnectionId);
             },
             cancel: () => {
                 deselectCanvas();
@@ -2125,7 +2140,7 @@ function CanvasWorkspacePage() {
                 setPendingConnectionCreate(null);
             },
         }),
-        [copySelectedNodes, confirmDeleteNodes, deleteConnection, deselectCanvas, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, selectedConnectionId, setConnecting, undoCanvas],
+        [copySelectedNodes, confirmDeleteConnection, confirmDeleteNodes, deselectCanvas, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, selectedConnectionId, setConnecting, undoCanvas],
     );
     useCanvasKeyboardShortcuts(keyboardHandlers);
 
@@ -4749,7 +4764,7 @@ function CanvasWorkspacePage() {
                                 event.currentTarget.style.background = "transparent";
                                 event.currentTarget.style.color = theme.node.muted;
                             }}
-                            onClick={() => deleteConnection(edgeDeletePopover.connectionId)}
+                            onClick={() => confirmDeleteConnection(edgeDeletePopover.connectionId)}
                         >
                             <Trash2 className="size-4" />
                         </button>
@@ -4900,7 +4915,7 @@ function CanvasWorkspacePage() {
                     onAddToBackground={addToBackgroundBoard}
                     onDeleteNodes={confirmDeleteNodes}
                     onDeleteBackgroundOnly={confirmDeleteBackgroundOnly}
-                    onDeleteConnection={deleteConnection}
+                    onDeleteConnection={confirmDeleteConnection}
                     onImageInputChange={handleImageInputChange}
                     onCloseInfo={() => setInfoNodeId(null)}
                     onCloseCrop={() => {

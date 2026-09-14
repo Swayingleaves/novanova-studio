@@ -223,6 +223,81 @@ html[data-theme="dark"] {
     --studio-scrollbar-track: rgba(148, 163, 184, 0.12);
 }
 
+html[data-theme="purple"] {
+    --background: oklch(0.189 0.01 285.4);
+    --foreground: oklch(0.97 0 0);
+    --border: oklch(0.267 0.009 285.8);
+    --ring: oklch(0.653 0.227 308.9);
+    --card: oklch(0.16 0.004 285.9 / 84%);
+    --card-foreground: oklch(0.97 0 0);
+    --popover: oklch(0.189 0.01 285.4);
+    --popover-foreground: oklch(0.97 0 0);
+    --primary: oklch(0.653 0.227 308.9);
+    --primary-foreground: oklch(0.98 0 0);
+    --secondary: oklch(0.22 0.012 285.4);
+    --secondary-foreground: oklch(0.922 0.003 286.3);
+    --muted: oklch(0.22 0.012 285.4);
+    --muted-foreground: oklch(0.783 0.001 286.4);
+    --accent: oklch(0.302 0.094 307.4);
+    --accent-foreground: oklch(0.97 0 0);
+    --input: oklch(0.267 0.009 285.8);
+    --sidebar: oklch(0.16 0.004 285.9 / 74%);
+    --sidebar-foreground: oklch(0.922 0.003 286.3);
+    --sidebar-primary: oklch(0.653 0.227 308.9);
+    --sidebar-primary-foreground: oklch(0.98 0 0);
+    --sidebar-accent: oklch(0.22 0.012 285.4);
+    --sidebar-accent-foreground: oklch(0.922 0.003 286.3);
+    --sidebar-border: oklch(0.267 0.009 285.8 / 76%);
+    --sidebar-ring: oklch(0.653 0.227 308.9);
+    --studio-bg: #050505;
+    --studio-bg-soft: #0d0d0f;
+    --studio-bg-depth: #141418;
+    --studio-shell-gradient: #050505;
+    --studio-page: #050505;
+    --studio-rail: #0a0a0c;
+    --studio-surface: #0d0d0f;
+    --studio-surface-raised: #141418;
+    --studio-ink: #f5f5f5;
+    --studio-text: #d4d4d6;
+    --studio-muted: #b8b8b9;
+    --studio-faint: #8a8a90;
+    --studio-line: #25252a;
+    --studio-line-strong: #35353c;
+    --studio-glass: #0d0d0f;
+    --studio-glass-strong: #141418;
+    --studio-panel: #0d0d0f;
+    --studio-panel-solid: #0d0d0f;
+    --studio-action: #b85cf6;
+    --studio-action-hover: #a78bfa;
+    --studio-action-foreground: #ffffff;
+    --studio-action-emphasis: #6d28d9;
+    --studio-primary: var(--studio-action);
+    --studio-primary-hover: var(--studio-action-hover);
+    --studio-primary-active: #6d28d9;
+    --studio-primary-soft: color-mix(in srgb, var(--studio-action) 18%, transparent);
+    --studio-primary-line: color-mix(in srgb, var(--studio-action) 38%, transparent);
+    --studio-accent: #ec4899;
+    --studio-accent-soft: color-mix(in srgb, var(--studio-accent) 18%, transparent);
+    --studio-accent-line: color-mix(in srgb, var(--studio-accent) 34%, transparent);
+    --studio-brand-start: #a78bfa;
+    --studio-brand-middle: #b85cf6;
+    --studio-brand-end: #ec4899;
+    --studio-brand-glow: rgba(184, 92, 246, 0.3);
+    --studio-brand-shine: rgba(255, 255, 255, 0.96);
+    --studio-brand-shine-soft: rgba(255, 255, 255, 0.22);
+    --studio-media: #141418;
+    --studio-shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
+    --studio-surface-soft: #141418;
+    --studio-surface-hover: #1a1a20;
+    --studio-composer-surface: #17171b;
+    --studio-composer-border: #33333a;
+    --studio-composer-submit: #a3a3a3;
+    --studio-composer-submit-foreground: #202020;
+    --studio-sidebar-active: color-mix(in srgb, var(--studio-action) 20%, transparent);
+    --studio-scrollbar: rgba(184, 146, 240, 0.45);
+    --studio-scrollbar-track: rgba(184, 146, 240, 0.12);
+}
+
 @layer base {
     * {
         @apply border-border outline-ring/50;
@@ -256,12 +331,12 @@ html[data-theme="dark"] {
         color: var(--studio-text);
     }
 
-    html[data-theme="dark"] .model-picker-icon-monochrome {
+    :is(html[data-theme="dark"], html[data-theme="purple"]) .model-picker-icon-monochrome {
         background: color-mix(in srgb, var(--background) 78%, transparent);
         box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent);
     }
 
-    html[data-theme="dark"] .model-picker-icon-monochrome img {
+    :is(html[data-theme="dark"], html[data-theme="purple"]) .model-picker-icon-monochrome img {
         filter: invert(1);
     }
 

@@ -58,7 +58,7 @@ Novanova Studio 是面向视觉创作者的 AI Agent 创作工作台。整体设
 
 ### 3.1 单一主题源
 
-重构后只有一个主题状态源：`useThemeStore`。主题偏好继续支持 `system | light | dark`，由 `AppProviders` 同步到根节点 `data-theme`。
+重构后只有一个主题状态源：`useThemeStore`。主题偏好继续支持 `system | light | dark | purple`，由 `AppProviders` 同步到根节点 `data-theme`。
 
 颜色定义采用三层 Token：
 
@@ -438,13 +438,14 @@ CSS / Tailwind / Ant Design / Canvas
 
 ## 11. 主题切换规范
 
-- 默认偏好为 `dark`，服务器端根据 Cookie 输出初始 `data-theme`；用户仍可在侧栏切换浅色或跟随系统。
+- 默认偏好为 `dark`，服务器端根据 Cookie 输出初始 `data-theme`；用户仍可在侧栏切换浅色、紫色或跟随系统。
 - 桌面主题入口位于左侧菜单下方操作区；移动端位于导航 Drawer 底部。
-- 菜单提供：跟随系统、浅色模式、暗色模式，并标明跟随系统时的当前解析结果。
+- 菜单提供：跟随系统、浅色模式、暗色模式、紫色模式，并标明跟随系统时的当前解析结果。
 - 主题切换只过渡颜色、边框和轻量阴影，持续 `150ms` 至 `220ms`。
 - 不在主题切换时播放页面级过场动画。
 - 同步浏览器 `theme-color`、Ant Design、Pro Components、XYFlow 与画布主题。
 - 所有新功能提交前必须在两个主题下独立检查，不允许从单主题推断另一个主题。
+- 新增主题时必须同时补齐 `theme-preference.ts` 的类型与解析、`globals.css` 的 `html[data-theme]` 变量块、`app-theme.ts` 色板与画布色板，并显式声明该主题是否属于暗色系（`isDarkResolvedTheme`）。
 
 ## 12. 动效规范
 
