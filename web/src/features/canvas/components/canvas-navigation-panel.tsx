@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { Empty, Modal, Tabs, Tag, Tooltip } from "antd";
-import { Boxes, ChevronsLeft, CircleCheck, CircleDashed, CircleX, Clapperboard, FileText, FolderOpen, Image as ImageIcon, PanelLeftClose, PanelLeftOpen, UserRound, AudioLines, Video } from "lucide-react";
+import { Boxes, ChevronsLeft, Clapperboard, FileText, FolderOpen, Image as ImageIcon, PanelLeftClose, PanelLeftOpen, UserRound, AudioLines, Video } from "lucide-react";
 
 import type { Asset } from "@/features/assets/stores/use-asset-store";
 import { isBackgroundNode, isImageNode, isVideoNode } from "../domain/canvas-node";
@@ -72,7 +72,7 @@ export function CanvasNavigationPanel(props: CanvasNavigationPanelProps) {
             </header>
             <Tabs
                 activeKey={props.activeTab}
-                className="flex h-full min-h-0 flex-1 flex-col px-2 [&_.ant-tabs-nav]:pl-2 [&_.ant-tabs-content-holder]:min-h-0 [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-content]:h-full [&_.ant-tabs-tabpane]:h-full"
+                className="flex h-full min-h-0 flex-1 flex-col px-2 [&_.ant-tabs-nav]:pl-2 [&_.ant-tabs-body-holder]:min-h-0 [&_.ant-tabs-body-holder]:min-w-0 [&_.ant-tabs-body-holder]:flex-1 [&_.ant-tabs-body]:h-full [&_.ant-tabs-content]:h-full [&_.ant-tabs-content]:min-h-0"
                 onChange={(tab) => props.onTabChange(tab as CanvasNavigationTab)}
                 items={[
                     {
@@ -146,7 +146,7 @@ function NodeList({ nodes, selectedNodeIds, onLocateNode }: { nodes: CanvasNode[
                             <NodePreview node={node} />
                             <span className="min-w-0 flex-1">
                                 <span className="block truncate text-xs font-medium">{node.title || "未命名节点"}</span>
-                                <span className="mt-0.5 flex items-center gap-1 text-[11px]" style={{ color: theme.node.muted }}><NodeKindIcon kind={node.kind} className="size-3" />{nodeKindLabel(node.kind)}<NodeStatus phase={node.execution.phase} /></span>
+                                <span className="mt-0.5 flex items-center gap-1 text-[11px]" style={{ color: theme.node.muted }}><NodeKindIcon kind={node.kind} className="size-3" />{nodeKindLabel(node.kind)}</span>
                             </span>
                             {batchCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{batchCount} 张</span> : backgroundCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{backgroundCount} 个节点</span> : null}
                         </button>
@@ -220,12 +220,6 @@ function AssetPreview({ asset }: { asset: CanvasNavigationAsset }) {
             {cover ? <img src={cover} alt="" loading="lazy" className="size-full object-cover" /> : <AssetKindIcon asset={asset} className="size-4" />}
         </span>
     );
-}
-
-function NodeStatus({ phase }: { phase: CanvasNode["execution"]["phase"] }) {
-    const label = phase === "running" ? "生成中" : phase === "succeeded" ? "已完成" : phase === "failed" ? "失败" : "待编辑";
-    const Icon = phase === "running" ? CircleDashed : phase === "succeeded" ? CircleCheck : phase === "failed" ? CircleX : CircleDashed;
-    return <span className="ml-auto inline-flex shrink-0 items-center gap-0.5"><Icon className={phase === "running" ? "size-3 animate-spin motion-reduce:animate-none" : "size-3"} />{label}</span>;
 }
 
 function NodeKindIcon({ kind, className }: { kind: CanvasNode["kind"]; className?: string }) {
