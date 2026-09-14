@@ -1,12 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import type { ReactNode } from "react";
 import { Empty, Modal, Tabs, Tag, Tooltip } from "antd";
-import { Boxes, ChevronsLeft, Clapperboard, FileText, FolderOpen, Image as ImageIcon, PanelLeftClose, PanelLeftOpen, UserRound, AudioLines, Video } from "lucide-react";
+import { Boxes, ChevronDown, ChevronsLeft, ChevronRight, Clapperboard, FileText, FolderOpen, Image as ImageIcon, PanelLeftClose, PanelLeftOpen, UserRound, AudioLines, Video } from "lucide-react";
 
 import type { Asset } from "@/features/assets/stores/use-asset-store";
 import { isBackgroundNode, isImageNode, isVideoNode } from "../domain/canvas-node";
-import type { CanvasNode, CanvasStoryboardAsset, CanvasStoryboardAssetKind } from "../types";
+import type { CanvasBackgroundNode, CanvasNode, CanvasStoryboardAsset, CanvasStoryboardAssetKind } from "../types";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
 export type CanvasNavigationPanelState = "expanded" | "collapsed";
@@ -119,44 +120,97 @@ function TabLabel({ icon, label, count }: { icon: ReactNode; label: string; coun
 }
 
 function NodeList({ nodes, selectedNodeIds, onLocateNode }: { nodes: CanvasNode[]; selectedNodeIds: Set<string>; onLocateNode: (nodeId: string) => void }) {
-    const theme = useCanvasTheme();
     if (!nodes.length) return <PanelEmpty description="暂无节点" />;
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const memberIds = new Set(nodes.filter(isBackgroundNode).flatMap((node) => node.memberNodeIds));
+    const [collapsedBoards, setCollapsedBoards] = useState<Set<string>>(() => new Set());
+    const toggleBoard = (boardId: string) => setCollapsedBoards((prev) => {
+        const next = new Set(prev);
+        if (next.has(boardId)) next.delete(boardId);
+        else next.add(boardId);
+        return next;
+    });
     return (
         <div className="thin-scrollbar h-full overflow-y-auto px-2 pb-2">
             <div className="space-y-1">
-                {nodes.map((node) => {
-                    const selected = selectedNodeIds.has(node.id);
-                    const batchCount = isImageNode(node) && node.grouping.isRoot ? node.grouping.childIds.length : 0;
-                    const backgroundCount = isBackgroundNode(node) ? node.memberNodeIds.length : 0;
-                    return (
-                        <button
+                {nodes.filter((node) => isBackgroundNode(node) || !memberIds.has(node.id)).map((node) => {
+                    if (isBackgroundNode(node)) {
+                        return <BackgroundBoardGroup
                             key={node.id}
-                            type="button"
-                            aria-pressed={selected}
-                            className="flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors motion-reduce:transition-none"
-                            style={{ background: selected ? theme.toolbar.itemHover : "transparent", borderColor: selected ? theme.node.activeStroke : "transparent", color: theme.node.text }}
-                            onMouseEnter={(event) => {
-                                if (!selected) event.currentTarget.style.background = theme.toolbar.itemHover;
-                            }}
-                            onMouseLeave={(event) => {
-                                if (!selected) event.currentTarget.style.background = "transparent";
-                            }}
-                            onClick={() => onLocateNode(node.id)}
-                        >
-                            <NodePreview node={node} />
-                            <span className="min-w-0 flex-1">
-                                <span className="block truncate text-xs font-medium">{node.title || "未命名节点"}</span>
-                                <span className="mt-0.5 flex items-center gap-1 text-[11px]" style={{ color: theme.node.muted }}><NodeKindIcon kind={node.kind} className="size-3" />{nodeKindLabel(node.kind)}</span>
-                            </span>
-                            {batchCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{batchCount} 张</span> : backgroundCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{backgroundCount} 个节点</span> : null}
-                        </button>
-                    );
+                            board={node}
+                            nodeById={nodeById}
+                            collapsed={collapsedBoards.has(node.id)}
+                            onToggle={() => toggleBoard(node.id)}
+                            selectedNodeIds={selectedNodeIds}
+                            onLocateNode={onLocateNode}
+                        />;
+                    }
+                    return <NodeRow key={node.id} node={node} selected={selectedNodeIds.has(node.id)} onLocateNode={onLocateNode} />;
                 })}
             </div>
         </div>
     );
 }
 
+function BackgroundBoardGroup({ board, nodeById, collapsed, onToggle, selectedNodeIds, onLocateNode }: { board: CanvasBackgroundNode; nodeById: Map<string, CanvasNode>; collapsed: boolean; onToggle: () => void; selectedNodeIds: Set<string>; onLocateNode: (nodeId: string) => void }) {
+    const theme = useCanvasTheme();
+    const members = board.memberNodeIds.map((id) => nodeById.get(id)).filter((node): node is CanvasNode => Boolean(node));
+    return (
+        <div className="space-y-1">
+            <button
+                type="button"
+                aria-expanded={!collapsed}
+                className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors motion-reduce:transition-none"
+                style={{ color: theme.node.text }}
+                onMouseEnter={(event) => { event.currentTarget.style.background = theme.toolbar.itemHover; }}
+                onMouseLeave={(event) => { event.currentTarget.style.background = "transparent"; }}
+                onClick={onToggle}
+            >
+                <span className="grid size-4 shrink-0 place-items-center" style={{ color: theme.node.muted }}>
+                    {collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                </span>
+                <NodePreview node={board} />
+                <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium">{board.title || "未命名背景板"}</span>
+                    <span className="mt-0.5 flex items-center gap-1 text-[11px]" style={{ color: theme.node.muted }}><NodeKindIcon kind={board.kind} className="size-3" />{nodeKindLabel(board.kind)}</span>
+                </span>
+                {members.length > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{members.length} 个节点</span> : null}
+            </button>
+            {!collapsed && members.length > 0 ? (
+                <div className="ml-[38px] space-y-1 border-l pl-2" style={{ borderColor: theme.toolbar.border }}>
+                    {members.map((member) => <NodeRow key={member.id} node={member} selected={selectedNodeIds.has(member.id)} onLocateNode={onLocateNode} />)}
+                </div>
+            ) : null}
+        </div>
+    );
+}
+
+function NodeRow({ node, selected, onLocateNode }: { node: CanvasNode; selected: boolean; onLocateNode: (nodeId: string) => void }) {
+    const theme = useCanvasTheme();
+    const batchCount = isImageNode(node) && node.grouping.isRoot ? node.grouping.childIds.length : 0;
+    return (
+        <button
+            type="button"
+            aria-pressed={selected}
+            className="flex w-full items-center gap-2 rounded-md border px-2 py-1.5 text-left transition-colors motion-reduce:transition-none"
+            style={{ background: selected ? theme.toolbar.itemHover : "transparent", borderColor: selected ? theme.node.activeStroke : "transparent", color: theme.node.text }}
+            onMouseEnter={(event) => {
+                if (!selected) event.currentTarget.style.background = theme.toolbar.itemHover;
+            }}
+            onMouseLeave={(event) => {
+                if (!selected) event.currentTarget.style.background = "transparent";
+            }}
+            onClick={() => onLocateNode(node.id)}
+        >
+            <NodePreview node={node} />
+            <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium">{node.title || "未命名节点"}</span>
+                <span className="mt-0.5 flex items-center gap-1 text-[11px]" style={{ color: theme.node.muted }}><NodeKindIcon kind={node.kind} className="size-3" />{nodeKindLabel(node.kind)}</span>
+            </span>
+            {batchCount > 0 ? <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>{batchCount} 张</span> : null}
+        </button>
+    );
+}
 function AssetList({ assets, onPreviewAsset }: { assets: CanvasNavigationAsset[]; onPreviewAsset: (asset: CanvasNavigationAsset) => void }) {
     const theme = useCanvasTheme();
     if (!assets.length) return <PanelEmpty description="暂无画布资产" />;

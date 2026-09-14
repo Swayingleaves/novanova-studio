@@ -36,7 +36,7 @@ import { cropDataUrl, splitDataUrl } from "../utils/canvas-image-data";
 import { fitNodeSize, nodeSizeFromRatio } from "../utils/canvas-node-size";
 import { App } from "antd";
 import type { OnConnectEnd, OnConnectStartParams } from "@xyflow/react";
-import { getCanvasNodeTemplate } from "../constants";
+import { CANVAS_BACKGROUND_MIN_HEIGHT, CANVAS_BACKGROUND_MIN_WIDTH, CANVAS_BACKGROUND_PADDING, createBackgroundNode, getCanvasNodeTemplate } from "../constants";
 import {
     applyCanvasNodeAttributes,
     isBackgroundNode,
@@ -1268,6 +1268,34 @@ function CanvasWorkspacePage() {
             setDialogNodeId(type === "background" ? null : positionedNode.id);
         },
         [effectiveConfig.canvasImageCount, effectiveConfig.count, effectiveConfig.imageModel, effectiveConfig.model, effectiveConfig.size, getCanvasCenter, requestFocusNodes],
+    );
+
+    const addToBackgroundBoard = useCallback(
+        (nodeIds: string[]) => {
+            const targets = nodesRef.current.filter((node) => nodeIds.includes(node.id) && !isBackgroundNode(node));
+            if (!targets.length) return;
+            const left = Math.min(...targets.map((node) => node.frame.position.x)) - CANVAS_BACKGROUND_PADDING;
+            const top = Math.min(...targets.map((node) => node.frame.position.y)) - CANVAS_BACKGROUND_PADDING;
+            const right = Math.max(...targets.map((node) => node.frame.position.x + node.frame.width)) + CANVAS_BACKGROUND_PADDING;
+            const bottom = Math.max(...targets.map((node) => node.frame.position.y + node.frame.height)) + CANVAS_BACKGROUND_PADDING;
+            const board = createBackgroundNode({
+                id: `background-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                position: { x: left, y: top },
+                memberNodeIds: targets.map((node) => node.id),
+            });
+            const positionedBoard = updateCanvasNodeFrame(board, {
+                position: { x: left, y: top },
+                width: Math.max(CANVAS_BACKGROUND_MIN_WIDTH, right - left),
+                height: Math.max(CANVAS_BACKGROUND_MIN_HEIGHT, bottom - top),
+            });
+
+            setNodes((prev) => expandBackgroundBoardsToMembers([...prev, positionedBoard]));
+            requestFocusNodes([positionedBoard.id]);
+            setSelectedNodeIds(new Set([positionedBoard.id]));
+            setSelectedConnectionId(null);
+            setDialogNodeId(null);
+        },
+        [requestFocusNodes],
     );
 
     const performDeleteNodes = useCallback(
@@ -4831,6 +4859,7 @@ function CanvasWorkspacePage() {
                     onCloseContextMenu={() => setContextMenu(null)}
                     onCreateNode={createNode}
                     onDuplicateNode={duplicateNode}
+                    onAddToBackground={addToBackgroundBoard}
                     onDeleteNodes={confirmDeleteNodes}
                     onDeleteBackgroundOnly={confirmDeleteBackgroundOnly}
                     onDeleteConnection={deleteConnection}
