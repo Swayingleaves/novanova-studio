@@ -76,16 +76,16 @@ test("节点参考内容按顺序显示序号并支持移除连线引用", () =>
     assert.ok(canvasPageSource.includes("removeNodeReferenceConnection(promptPanelNode.id, reference.nodeId)"), "节点参考删除未删除对应连线");
 });
 
-test("视频节点参考图支持放大预览", () => {
-    assert.ok(promptPanelSource.includes('const canPreview = !canInsert && reference.kind === "image"'), "视频节点未识别可预览的参考图");
-    assert.ok(promptPanelSource.includes("const actionLabel = canPreview ? `放大查看${reference.label}`"), "参考图缺少放大查看入口");
+test("视频节点参考图和音频支持预览", () => {
+    assert.match(promptPanelSource, /const canPreview = !canInsert && \(reference\.kind === "image" \|\| reference\.kind === "audio"\)/, "视频节点未识别可预览的参考图或音频");
+    assert.ok(promptPanelSource.includes("`放大查看${reference.label}`") && promptPanelSource.includes("`播放${reference.label}`"), "参考图或音频缺少预览入口");
     assert.ok(promptPanelSource.includes("setReferencePreview(reference)"), "参考图点击后未打开预览");
 });
 
 test("图片和视频节点提供AI提示词优化入口", () => {
     assert.ok(promptPanelSource.includes('title="AI优化提示词"'), "提示面板缺少AI提示词优化说明");
     assert.ok(promptPanelSource.includes("<Sparkles"), "提示面板缺少Sparkles图标");
-    assert.ok(promptPanelSource.includes("onGeneratePrompt(\n                                        node.id") && promptPanelSource.includes("updatePrompt,"), "优化结果未回填当前节点输入框");
+    assert.match(promptPanelSource, /onGeneratePrompt\(\s*node\.id,\s*mode,\s*prompt\.trim\(\),\s*updatePrompt,/, "优化结果未回填当前节点输入框");
 });
 
 test("文本图片和视频节点的发送按钮显示积分消耗", () => {
@@ -117,7 +117,7 @@ test("设定图请求提交前合并上游内容并拒绝完全空提示词", ()
     assert.ok(canvasPageSource.includes("resolveNodeGenerationPrompt(nodeId, nodesRef.current, connectionsRef.current, prompt, true)"), "设定图请求未解析节点自身输入和上游内容");
     assert.ok(canvasPageSource.includes("resolveNodeGenerationPrompt(nodeId, nodesRef.current, connectionsRef.current, prompt, true)"), "设定图请求未使用图片引用提示词解析能力");
     assert.ok(canvasPageSource.includes('message.warning("请输入生成描述或连接有内容的上游节点")'), "完全空的设定图请求缺少明确提示");
-    assert.ok(canvasPageSource.includes("sendAgentMessage(\n                    effectivePrompt"), "设定图请求未使用合并后的最终提示词");
+    assert.match(canvasPageSource, /sendAgentMessage\(\s*effectivePrompt,/, "设定图请求未使用合并后的最终提示词");
 });
 
 test("切换节点时提示面板按节点隔离编辑器状态", () => {

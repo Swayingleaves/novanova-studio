@@ -3,9 +3,10 @@ import { boolConfig } from "@/features/generation/lib/seedance-video";
 import { createAiTask, getAiTaskInfo, waitAiTask, type GenerationStyleSnapshot, type ServerAiTask, type ServerAiTaskMediaReference, type ServerGenerationSource } from "@/services/api/server";
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
 import type { ReferenceImage } from "@/features/generation/types/image";
-import type { ReferenceVideo } from "@/features/generation/types/media";
+import type { ReferenceAudio, ReferenceVideo } from "@/features/generation/types/media";
 
 type RequestOptions = {
+    audioReferences?: ReferenceAudio[];
     signal?: AbortSignal;
     onProgress?: (progress: number) => void;
     onTaskCreated?: (taskId: string) => void;
@@ -93,6 +94,13 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 
 async function createServerVideoTask(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], generationSource: ServerGenerationSource, options?: RequestOptions): Promise<ServerAiTask> {
     const selectedModel = (config.model || config.videoModel).trim();
+    const audioReferences = (options?.audioReferences || []).map(toServerMediaReference);
+    console.info("[视频生成] 组装参考素材", {
+        图片数量: references.length,
+        视频数量: videoReferences.length,
+        音频数量: audioReferences.length,
+        音频存储键: audioReferences.map((reference) => reference.storageKey || "未提供"),
+    });
     return createAiTask({
         taskType: "video",
         prompt,
@@ -104,11 +112,13 @@ async function createServerVideoTask(config: AiConfig, prompt: string, reference
             watermark: boolConfig(config.videoWatermark, false),
         },
         references: references.map(toServerImageReference),
+        audioReferences,
         videoReferences: videoReferences.map(toServerMediaReference),
         generationSource,
         generationStyleIds: options?.generationStyleIds,
         generationStyleSnapshots: options?.generationStyleSnapshots,
-        videoGenerationMode: config.videoGenerationMode || "text-to-video",
+        // 空模式交由服务端按引用素材归一化，携带音频时默认进入全能参考。
+        videoGenerationMode: config.videoGenerationMode || undefined,
     });
 }
 
@@ -148,13 +158,15 @@ function toServerImageReference(image: ReferenceImage): ServerAiTaskMediaReferen
     };
 }
 
-function toServerMediaReference(item: ReferenceVideo): ServerAiTaskMediaReference {
+function toServerMediaReference(item: ReferenceVideo | ReferenceAudio): ServerAiTaskMediaReference {
     return {
         id: item.id,
         name: item.name,
         mimeType: item.type,
         storageKey: item.storageKey,
         url: item.objectStorage?.url || item.url,
+        ...("trimStartMs" in item && item.trimStartMs !== undefined ? { trimStartMs: item.trimStartMs } : {}),
+        ...("trimEndMs" in item && item.trimEndMs !== undefined ? { trimEndMs: item.trimEndMs } : {}),
     };
 }
 

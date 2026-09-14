@@ -115,8 +115,8 @@ public class AgentToolRegistry {
 
     private void registerFrontendTools() {
         register(new AgentTool("canvas_create_node",
-            "创建任意类型节点：text、image、video。",
-            JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"nodeType\":{\"type\":\"string\",\"enum\":[\"text\",\"image\",\"video\"]},\"title\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"width\":{\"type\":\"number\"},\"height\":{\"type\":\"number\"},\"metadata\":{\"type\":\"object\",\"additionalProperties\":true}},\"additionalProperties\":false}"),
+            "创建任意类型节点：text、image、video、audio。",
+            JSONObject.parseObject("{\"type\":\"object\",\"properties\":{\"nodeType\":{\"type\":\"string\",\"enum\":[\"text\",\"image\",\"video\",\"audio\"]},\"title\":{\"type\":\"string\"},\"x\":{\"type\":\"number\"},\"y\":{\"type\":\"number\"},\"width\":{\"type\":\"number\"},\"height\":{\"type\":\"number\"},\"metadata\":{\"type\":\"object\",\"additionalProperties\":true}},\"additionalProperties\":false}"),
             true));
         register(new AgentTool("canvas_create_text_node",
             "在当前画布创建单个文本节点。",

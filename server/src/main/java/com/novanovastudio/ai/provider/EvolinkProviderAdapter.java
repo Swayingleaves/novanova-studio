@@ -91,8 +91,8 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
         if (imageReferences.size() > 9 || videoReferences.size() > 3) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "Evolink最多支持9张参考图和3个参考视频"));
         }
-        return resolveUrls(context, imageReferences).zipWith(resolveUrls(context, videoReferences))
-                .flatMap(urls -> createTask(context, urls.getT1(), urls.getT2()));
+        return Mono.zip(resolveUrls(context, imageReferences), resolveUrls(context, videoReferences), resolveUrls(context, AiTaskParameterReader.safeReferences(context.request().audioReferences())))
+                .flatMap(urls -> createTask(context, urls.getT1(), urls.getT2(), urls.getT3()));
     }
 
     /**
@@ -114,12 +114,14 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
      * @param context AiTaskExecutionContext 当前AI任务上下文
      * @param imageUrls List<String> 参考图片地址
      * @param videoUrls List<String> 参考视频地址
+     * @param audioUrls List<String> 按提示词编号排列的参考音频地址
      * @return Mono<JSONObject> 已保存的视频媒体结果
      */
-    private Mono<JSONObject> createTask(AiTaskExecutionContext context, List<String> imageUrls, List<String> videoUrls) {
+    private Mono<JSONObject> createTask(AiTaskExecutionContext context, List<String> imageUrls, List<String> videoUrls, List<String> audioUrls) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", context.model());
-        payload.put("prompt", context.request().prompt());
+        payload.put("prompt", audioReferencePrompt(context.request().prompt(), audioUrls.size()));
+        if (!audioUrls.isEmpty()) payload.put("audio_urls", audioUrls);
         if (!imageUrls.isEmpty()) payload.put("image_urls", imageUrls);
         if (!videoUrls.isEmpty()) payload.put("video_urls", videoUrls);
         payload.put("duration", parameterInt(context, "seconds", 5));
@@ -127,7 +129,7 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
         payload.put("aspect_ratio", normalizeAspectRatio(parameterText(context, "size", "adaptive")));
         payload.put("generate_audio", true);
         payload.put("content_filter", true);
-        log.info("创建Evolink视频任务: taskId={}, model={}", context.task().getId(), context.model());
+        log.info("创建Evolink视频任务: taskId={}, model={}, audioCount={}", context.task().getId(), context.model(), audioUrls.size());
         return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_GENERATION_PATH, com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .map(AiJsonUtils::responsePayload)
                 .flatMap(created -> {
@@ -257,4 +259,22 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
         String[] parts = ratio.split(":");
         return Double.parseDouble(parts[0]) / Double.parseDouble(parts[1]);
     }
+    /**
+     * 将界面中的音频编号转换成渠道显式引用标签。
+     * @param prompt String 用户提示词
+     * @param count int 实际音频数量
+     * @return String 与音频数组顺序一致的提示词
+     */
+    static String audioReferencePrompt(String prompt, int count) {
+        String result = prompt;
+        for (int index = count; index >= 1; index--) result = result.replaceAll("`?音频" + index + "(?![0-9])`?", "@audio" + index);
+        List<String> missingLabels = new java.util.ArrayList<>();
+        for (int index = 1; index <= count; index++) {
+            String label = "@audio" + index;
+            if (!result.matches("(?s).*" + java.util.regex.Pattern.quote(label) + "(?![0-9]).*")) missingLabels.add(label);
+        }
+        if (!missingLabels.isEmpty()) result = result + "\n\n参考音频：" + String.join("、", missingLabels);
+        return result;
+    }
+
 }

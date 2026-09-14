@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 
-import { createImageNode, createTextNode, createVideoNode } from "../constants.ts";
+import { createAudioNode, createImageNode, createTextNode, createVideoNode } from "../constants.ts";
 import {
     applyCanvasNodeAttributes,
     updateCanvasNodeFrame,
@@ -20,12 +20,14 @@ type CanvasAgentNodePatch = {
     height?: number;
 };
 
+type CanvasAgentNodeType = CanvasGenerationMode | "audio";
+
 type CanvasAgentCommonFields = {
     id?: string;
     ids?: string[];
     nodeId?: string;
     /** 通用 Agent 只允许创建普通生成节点，分镜脚本由专属工作流创建。 */
-    nodeType?: CanvasGenerationMode;
+    nodeType?: CanvasAgentNodeType;
     title?: string;
     position?: { x: number; y: number };
     x?: number;
@@ -113,7 +115,7 @@ function reduceAddNode(snapshot: CanvasAgentSnapshot, op: CanvasAgentOp, index: 
     if (!kind) return snapshot;
     const position = readPosition(op, index);
     const input = { id: op.id || `${kind}-${Date.now()}-${index}`, title: op.title, position };
-    const created = kind === "image" ? createImageNode(input) : kind === "video" ? createVideoNode(input) : createTextNode(input);
+    const created = kind === "audio" ? createAudioNode(input) : kind === "image" ? createImageNode(input) : kind === "video" ? createVideoNode(input) : createTextNode(input);
     const framed = updateCanvasNodeFrame(created, {
         width: readDimension(op.width, created.frame.width),
         height: readDimension(op.height, created.frame.height),
@@ -197,8 +199,8 @@ function resolveDeletedNodeIds(nodes: CanvasNode[], op: CanvasAgentOp): Set<stri
     return removedNodeIds;
 }
 
-function readNodeKind(nodeType?: unknown): CanvasGenerationMode | null {
-    return nodeType === "image" || nodeType === "text" || nodeType === "video" ? nodeType : null;
+function readNodeKind(nodeType?: unknown): CanvasAgentNodeType | null {
+    return nodeType === "audio" || nodeType === "image" || nodeType === "text" || nodeType === "video" ? nodeType : null;
 }
 
 function readPosition(op: CanvasAgentOp, index: number): { x: number; y: number } {

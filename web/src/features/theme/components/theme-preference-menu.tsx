@@ -9,7 +9,7 @@ import { cn } from "@/shared/lib/utils";
 import type { ThemePreference } from "@/shared/lib/theme-preference";
 
 type ThemePreferenceMenuProps = {
-    variant?: "icon" | "drawer";
+    variant?: "icon" | "drawer" | "toolbar";
     className?: string;
     onAfterSelect?: () => void;
 };
@@ -50,7 +50,7 @@ export function ThemePreferenceMenu({ variant = "icon", className, onAfterSelect
     return (
         <Dropdown
             trigger={["click"]}
-            placement={variant === "drawer" ? "bottomRight" : "topLeft"}
+            placement={variant === "icon" ? "topLeft" : "bottomRight"}
             arrow={false}
             menu={{
                 items,
@@ -84,7 +84,17 @@ export function ThemePreferenceMenu({ variant = "icon", className, onAfterSelect
                     <span className="text-xs text-[var(--studio-muted)]">切换</span>
                 </button>
             ) : (
-                <button type="button" className={cn("sidebar-rail-action sidebar-rail-action-emphasis", className)} aria-label="切换主题" title="切换主题">
+                <button
+                    type="button"
+                    className={cn(
+                        variant === "toolbar"
+                            ? "inline-flex size-8 shrink-0 items-center justify-center rounded-md text-[var(--studio-ink)] transition-colors hover:bg-[var(--studio-surface-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)] motion-reduce:transition-none [&_svg]:size-4"
+                            : "sidebar-rail-action sidebar-rail-action-emphasis",
+                        className,
+                    )}
+                    aria-label="切换主题"
+                    title="切换主题"
+                >
                     <SunMoon className="size-4.5" />
                 </button>
             )}

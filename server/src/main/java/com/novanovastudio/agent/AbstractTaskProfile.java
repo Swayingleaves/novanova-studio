@@ -24,6 +24,7 @@ import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.ai.AiErrorDetails;
 import com.novanovastudio.ai.AiErrorSupport;
 import com.novanovastudio.ai.AiTaskPollingSupport;
+import com.novanovastudio.ai.AudioInputSupport;
 import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -181,7 +182,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
 
         if (executionRegistry.isCancelRequested(sessionId)) {
             return saveCanceledRound(userId, sessionId, callId, "", originalPrompt, generationPrompt,
-                    model, params, List.of(), List.of(), System.currentTimeMillis())
+                    model, params, List.of(), List.of(), List.of(), System.currentTimeMillis())
                     .thenReturn(canceledResult(""));
         }
 
@@ -201,6 +202,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                                 validatedAttachments.imageReferences(), effectiveLegacyReferences.imageReferences());
                                         List<AiTaskDtos.AiTaskMediaReference> effectiveVideoReferences = mergeReferences(
                                                 validatedAttachments.videoReferences(), effectiveLegacyReferences.videoReferences());
+                                        List<AiTaskDtos.AiTaskMediaReference> effectiveAudioReferences = mergeReferences(
+                                                validatedAttachments.audioReferences(), effectiveLegacyReferences.audioReferences());
                                         String effectiveGenerationSource = String.valueOf(args.getOrDefault("entrySource", generationSource()));
                                         if (!AiTaskSources.isSupported(effectiveGenerationSource)
                                                 || (AiTaskTypes.IMAGE.equals(taskType()) && AiTaskSources.VIDEO_PAGE.equals(effectiveGenerationSource))
@@ -213,14 +216,14 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                         AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(
                                                 taskType(), generationPrompt, model.isBlank() ? null : model, providerParameters,
                                                 effectiveReferences, effectiveVideoReferences, effectiveGenerationSource,
-                                                null, null, videoGenerationMode);
+                                                null, null, videoGenerationMode, effectiveAudioReferences);
                                         long createdAt = System.currentTimeMillis();
                                         return Mono.defer(() -> {
                                             executionRegistry.beginTaskCreation(sessionId);
                                             return aiTaskService.createTaskForUser(userId, taskRequest, response -> {
                                                     JSONObject canceledRound = buildGenerationRound(callId, response.id(), originalPrompt,
                                                             generationPrompt, model, params, effectiveReferences,
-                                                            effectiveVideoReferences, 100, createdAt, "canceled");
+                                                            effectiveVideoReferences, effectiveAudioReferences, 100, createdAt, "canceled");
                                                     String title = originalPrompt.length() > 30
                                                             ? originalPrompt.substring(0, 30) : originalPrompt;
                                                     return executionRegistry.registerTaskAndPersist(sessionId,
@@ -230,18 +233,18 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                                                     return aiTaskService.cancelTaskForUser(userId, response.id())
                                                                             .then(saveCanceledRound(userId, sessionId, callId, response.id(),
                                                                                     originalPrompt, generationPrompt, model, params,
-                                                                                    effectiveReferences, effectiveVideoReferences, createdAt));
+                                                                                    effectiveReferences, effectiveVideoReferences, effectiveAudioReferences, createdAt));
                                                                 }
                                                                 return savePendingRound(userId, sessionId, callId, response.id(),
                                                                         originalPrompt, generationPrompt, model, params,
-                                                                        effectiveReferences, effectiveVideoReferences,
+                                                                        effectiveReferences, effectiveVideoReferences, effectiveAudioReferences,
                                                                         response.progress() != null ? response.progress() : 0, createdAt);
                                                             });
                                                 })
                                                 .doFinally(signal -> executionRegistry.completeTaskCreation(sessionId))
                                                 .flatMap(response -> pollUntilComplete(userId, response, emitter, sessionId, callId,
                                                         originalPrompt, generationPrompt, model, params,
-                                                        effectiveReferences, effectiveVideoReferences, createdAt)
+                                                        effectiveReferences, effectiveVideoReferences, effectiveAudioReferences, createdAt)
                                                         .doFinally(signal -> executionRegistry.removeTask(sessionId, response.id())));
                                         });
                                     }));
@@ -272,14 +275,15 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                 .map(url -> {
                     String mimeType = inferReferenceMimeType(url);
                     if (!StringUtils.hasText(mimeType)) {
-                        throw new BusinessException(ErrorCode.PARAM_INVALID, "无法识别历史参考素材类型，请重新上传图片或视频素材");
+                        throw new BusinessException(ErrorCode.PARAM_INVALID, "无法识别历史参考素材类型，请重新上传图片、视频或MP3/WAV音频");
                     }
                     return new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), "reference", mimeType, "", url);
                 })
                 .toList();
         return new ReferenceGroups(
                 references.stream().filter(reference -> reference.mimeType().startsWith("image/")).toList(),
-                references.stream().filter(reference -> reference.mimeType().startsWith("video/")).toList());
+                references.stream().filter(reference -> reference.mimeType().startsWith("video/")).toList(),
+                references.stream().filter(reference -> com.novanovastudio.ai.AudioInputSupport.isAudioMimeType(reference.mimeType())).toList());
     }
 
     /**
@@ -302,18 +306,21 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                         }
                         String mimeType = attachment.type();
                         if (!StringUtils.hasText(mimeType)
-                                || (!mimeType.startsWith("image/") && !mimeType.startsWith("video/"))) {
-                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考素材必须是图片或视频"));
+                                || (!mimeType.startsWith("image/") && !mimeType.startsWith("video/")
+                                && !com.novanovastudio.ai.AudioInputSupport.isAudioMimeType(mimeType))) {
+                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考素材必须是图片、视频或MP3/WAV音频"));
                         }
                         String name = StringUtils.hasText(attachment.name()) ? attachment.name() : "reference";
                             return Mono.just(new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, "", referenceUrl, attachment.role()));
                     }
                     return persistenceService.getMediaInfoForUser(userId, attachment.storageKey())
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "参考素材不存在或不属于当前用户")))
                             .map(media -> {
                                 String mimeType = StringUtils.hasText(media.mimeType()) ? media.mimeType() : attachment.type();
                                 if (!StringUtils.hasText(mimeType)
-                                        || (!mimeType.startsWith("image/") && !mimeType.startsWith("video/"))) {
-                                    throw new BusinessException(ErrorCode.PARAM_INVALID, "参考素材必须是图片或视频");
+                                        || (!mimeType.startsWith("image/") && !mimeType.startsWith("video/")
+                                        && !com.novanovastudio.ai.AudioInputSupport.isAudioMimeType(mimeType))) {
+                                    throw new BusinessException(ErrorCode.PARAM_INVALID, "参考素材必须是图片、视频或MP3/WAV音频");
                                 }
                                 String name = StringUtils.hasText(attachment.name()) ? attachment.name() : "reference";
                                 return new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, media.storageKey(), media.url(), attachment.role());
@@ -322,7 +329,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                 .collectList()
                 .map(references -> new ReferenceGroups(
                         references.stream().filter(reference -> reference.mimeType().startsWith("image/")).toList(),
-                        references.stream().filter(reference -> reference.mimeType().startsWith("video/")).toList()));
+                        references.stream().filter(reference -> reference.mimeType().startsWith("video/")).toList(),
+                        references.stream().filter(reference -> com.novanovastudio.ai.AudioInputSupport.isAudioMimeType(reference.mimeType())).toList()));
     }
 
     /**
@@ -348,6 +356,13 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                     if (!capabilities.contains(mode)) {
                         return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
                                 "当前模型未配置" + videoModeLabel(mode) + "能力，请切换支持" + videoModeLabel(mode) + "的模型"));
+                    }
+                    if (!attachments.audioReferences().isEmpty()) {
+                        if (!VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode)
+                                || !capabilities.contains(AudioInputSupport.CAPABILITY)) {
+                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
+                                    "当前模型或生成模式不支持音频输入，请开启音频输入和全能参考能力"));
+                        }
                     }
                     return Mono.just(attachments);
                 });
@@ -436,7 +451,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                         .filter(task -> "image".equals(task.taskType()))
                         .flatMap(task -> extractMediaReferences(task.resultData(), "image/png", "最近生成图片").stream())
                         .findFirst()
-                        .map(reference -> new ReferenceGroups(List.of(reference), List.of()))
+                        .map(reference -> new ReferenceGroups(List.of(reference), List.of(), List.of()))
                         .orElseGet(ReferenceGroups::empty));
     }
 
@@ -485,7 +500,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                                   String originalPrompt, String generationPrompt, String model,
                                                   Map<String, Object> parameters,
                                                   List<AiTaskDtos.AiTaskMediaReference> references,
-                                                  List<AiTaskDtos.AiTaskMediaReference> videoReferences, long createdAt) {
+                                                  List<AiTaskDtos.AiTaskMediaReference> videoReferences,
+                                                  List<AiTaskDtos.AiTaskMediaReference> audioReferences, long createdAt) {
         String taskId = initialTask.id();
         int initialProgress = initialTask.progress() != null ? initialTask.progress() : 0;
         return Mono.deferContextual(ctx -> {
@@ -505,12 +521,12 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                         task.progress() != null ? task.progress() : 0, task.status()));
                 return persistChangedProgress(userId, sessionId, callId, originalPrompt,
                         generationPrompt, model,
-                        parameters, references, videoReferences, createdAt, previousSnapshot, task);
+                        parameters, references, videoReferences, audioReferences, createdAt, previousSnapshot, task);
             })
             .takeUntil(task -> isTerminal(task.status()))
             .last()
             .flatMap(task -> saveTerminalRound(userId, sessionId, callId, originalPrompt,
-                    generationPrompt, model, parameters, references, videoReferences,
+                    generationPrompt, model, parameters, references, videoReferences, audioReferences,
                     createdAt, task).thenReturn(task))
             .map(task -> buildResult(taskId, task))
             .defaultIfEmpty(timeoutResult(taskId))
@@ -539,9 +555,10 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                          String model, Map<String, Object> parameters,
                                          List<AiTaskDtos.AiTaskMediaReference> references,
                                          List<AiTaskDtos.AiTaskMediaReference> videoReferences,
+                                         List<AiTaskDtos.AiTaskMediaReference> audioReferences,
                                          long createdAt, AiTaskDtos.AiGenerationTaskResponse task) {
         JSONObject round = buildGenerationRound(callId, task.id(), originalPrompt, generationPrompt,
-                model, parameters, references, videoReferences, 100, createdAt, task.status());
+                model, parameters, references, videoReferences, audioReferences, 100, createdAt, task.status());
         round.put("results", terminalResults(callId, task));
         String title = originalPrompt.length() > 30 ? originalPrompt.substring(0, 30) : originalPrompt;
         return persistenceService.saveOrUpdateGenerationRound(userId, sessionId, logType(), title, round);
@@ -625,6 +642,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
             String generationPrompt, String model,
             Map<String, Object> parameters, List<AiTaskDtos.AiTaskMediaReference> references,
             List<AiTaskDtos.AiTaskMediaReference> videoReferences,
+            List<AiTaskDtos.AiTaskMediaReference> audioReferences,
             long createdAt, AtomicReference<TaskProgressSnapshot> previousSnapshot,
             AiTaskDtos.AiGenerationTaskResponse task) {
         int progress = task.progress() != null ? task.progress() : 0;
@@ -635,7 +653,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         }
         // 页面只识别 pending，服务端 running 状态通过 progress 表达执行进度。
         return savePendingRound(userId, sessionId, callId, task.id(), originalPrompt,
-                generationPrompt, model, parameters, references, videoReferences,
+                generationPrompt, model, parameters, references, videoReferences, audioReferences,
                 progress, createdAt).thenReturn(task);
     }
 
@@ -660,10 +678,11 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                         String originalPrompt, String generationPrompt, String model,
                                         Map<String, Object> parameters,
                                         List<AiTaskDtos.AiTaskMediaReference> references,
-                                        List<AiTaskDtos.AiTaskMediaReference> videoReferences, int progress,
+                                        List<AiTaskDtos.AiTaskMediaReference> videoReferences,
+                                        List<AiTaskDtos.AiTaskMediaReference> audioReferences, int progress,
                                         long createdAt) {
         JSONObject round = buildGenerationRound(callId, taskId, originalPrompt, generationPrompt,
-                model, parameters, references, videoReferences, progress, createdAt, "pending");
+                model, parameters, references, videoReferences, audioReferences, progress, createdAt, "pending");
         String title = originalPrompt.length() > 30 ? originalPrompt.substring(0, 30) : originalPrompt;
         return persistenceService.saveOrUpdateGenerationRound(userId, sessionId, logType(), title, round);
     }
@@ -688,9 +707,10 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                          String originalPrompt, String generationPrompt, String model,
                                          Map<String, Object> parameters,
                                          List<AiTaskDtos.AiTaskMediaReference> references,
-                                         List<AiTaskDtos.AiTaskMediaReference> videoReferences, long createdAt) {
+                                         List<AiTaskDtos.AiTaskMediaReference> videoReferences,
+                                         List<AiTaskDtos.AiTaskMediaReference> audioReferences, long createdAt) {
         JSONObject round = buildGenerationRound(callId, taskId, originalPrompt, generationPrompt,
-                model, parameters, references, videoReferences, 100, createdAt, "canceled");
+                model, parameters, references, videoReferences, audioReferences, 100, createdAt, "canceled");
         String title = originalPrompt.length() > 30 ? originalPrompt.substring(0, 30) : originalPrompt;
         return persistenceService.saveOrUpdateGenerationRound(userId, sessionId, logType(), title, round);
     }
@@ -714,7 +734,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                             String generationPrompt, String model,
                                             Map<String, Object> parameters,
                                             List<AiTaskDtos.AiTaskMediaReference> references,
-                                            List<AiTaskDtos.AiTaskMediaReference> videoReferences, int progress,
+                                            List<AiTaskDtos.AiTaskMediaReference> videoReferences,
+                                            List<AiTaskDtos.AiTaskMediaReference> audioReferences, int progress,
                                             long createdAt, String status) {
         JSONObject result = new JSONObject();
         result.put("id", callId);
@@ -744,6 +765,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         round.put("results", List.of(result));
         round.put("references", JSON.toJSON(references));
         round.put("videoReferences", JSON.toJSON(videoReferences));
+        round.put("audioReferences", JSON.toJSON(audioReferences));
         if (!styleSnapshots.isEmpty()) {
             round.put(INTERNAL_STYLE_SNAPSHOTS, JSON.toJSON(styleSnapshots));
         }
@@ -979,6 +1001,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                     (path.substring(extensionStart + 1).equalsIgnoreCase("jpg") ? "jpeg" : path.substring(extensionStart + 1).toLowerCase(Locale.ROOT));
             case "mp4", "mov", "webm", "m4v", "avi", "mkv", "mpeg", "mpg" -> "video/" +
                     (path.substring(extensionStart + 1).equalsIgnoreCase("mp4") ? "mp4" : path.substring(extensionStart + 1).toLowerCase(Locale.ROOT));
+            case "mp3" -> "audio/mpeg";
+            case "wav" -> "audio/wav";
             default -> null;
         };
     }
@@ -999,7 +1023,8 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @param videoReferences List<AiTaskMediaReference> 视频参考引用
      */
     private record ReferenceGroups(List<AiTaskDtos.AiTaskMediaReference> imageReferences,
-                                   List<AiTaskDtos.AiTaskMediaReference> videoReferences) {
+                                   List<AiTaskDtos.AiTaskMediaReference> videoReferences,
+                                   List<AiTaskDtos.AiTaskMediaReference> audioReferences) {
 
         /**
          * 创建空参考分组。
@@ -1007,7 +1032,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
          * @return ReferenceGroups 空参考分组
          */
         private static ReferenceGroups empty() {
-            return new ReferenceGroups(List.of(), List.of());
+            return new ReferenceGroups(List.of(), List.of(), List.of());
         }
 
         /**
@@ -1016,7 +1041,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
          * @return boolean 没有任何引用时返回true
          */
         private boolean isEmpty() {
-            return imageReferences.isEmpty() && videoReferences.isEmpty();
+            return imageReferences.isEmpty() && videoReferences.isEmpty() && audioReferences.isEmpty();
         }
     }
 

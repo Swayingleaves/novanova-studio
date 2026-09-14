@@ -87,6 +87,8 @@ function buildArchivePath(documentId: string, storageKey: string, mimeType: stri
 
 function resolveFileExtension(mimeType: string, storageKey: string): string {
     const matchedExtension = [
+        ["audio/mpeg", "mp3"],
+        ["wav", "wav"],
         ["png", "png"],
         ["jpeg", "jpg"],
         ["webp", "webp"],

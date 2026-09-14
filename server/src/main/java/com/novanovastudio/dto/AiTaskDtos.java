@@ -27,8 +27,12 @@ public final class AiTaskDtos {
      * @param mimeType String MIME类型
      * @param storageKey String 后端媒体存储键
      * @param url String 公网URL或远程URL
+     * @param role String 媒体角色
+     * @param trimStartMs Integer 裁剪开始时间（毫秒）
+     * @param trimEndMs Integer 裁剪结束时间（毫秒）
      */
-    public record AiTaskMediaReference(String id, String name, String mimeType, String storageKey, String url, String role) {
+    public record AiTaskMediaReference(String id, String name, String mimeType, String storageKey, String url, String role,
+                                       Integer trimStartMs, Integer trimEndMs) {
 
         /**
          * 保留媒体角色扩展前的构造方式。
@@ -40,7 +44,12 @@ public final class AiTaskDtos {
          * @param url String 访问地址
          */
         public AiTaskMediaReference(String id, String name, String mimeType, String storageKey, String url) {
-            this(id, name, mimeType, storageKey, url, null);
+            this(id, name, mimeType, storageKey, url, null, null, null);
+        }
+
+        /** 保留带媒体角色的构造方式。 */
+        public AiTaskMediaReference(String id, String name, String mimeType, String storageKey, String url, String role) {
+            this(id, name, mimeType, storageKey, url, role, null, null);
         }
     }
 
@@ -52,6 +61,7 @@ public final class AiTaskDtos {
      * @param model String 模型名称
      * @param parameters Map<String, Object> 参数
      * @param references List<AiTaskMediaReference> 图片引用
+     * @param audioReferences List<AiTaskMediaReference> 音频引用
      * @param videoReferences List<AiTaskMediaReference> 视频引用
      * @param generationSource String 生成来源
      * @param videoGenerationMode String 视频生成模式
@@ -65,7 +75,27 @@ public final class AiTaskDtos {
                                       String generationSource,
                                       List<Long> generationStyleIds,
                                       List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots,
-                                      String videoGenerationMode) {
+                                      String videoGenerationMode,
+                                      List<AiTaskMediaReference> audioReferences) {
+        /**
+         * 为不携带音频的内部调用创建任务请求。
+         * @param taskType String 任务类型
+         * @param prompt String 用户提示词
+         * @param model String 模型标识
+         * @param parameters Map 生成参数
+         * @param references List 图片引用
+         * @param videoReferences List 视频引用
+         * @param generationSource String 生成来源
+         * @param generationStyleIds List 风格标识
+         * @param generationStyleSnapshots List 风格快照
+         * @param videoGenerationMode String 视频生成模式
+         */
+        public CreateAiTaskRequest(String taskType, String prompt, String model, Map<String, Object> parameters,
+                                   List<AiTaskMediaReference> references, List<AiTaskMediaReference> videoReferences,
+                                   String generationSource, List<Long> generationStyleIds,
+                                   List<GenerationStyleDtos.GenerationStyleSnapshot> generationStyleSnapshots, String videoGenerationMode) {
+            this(taskType, prompt, model, parameters, references, videoReferences, generationSource, generationStyleIds, generationStyleSnapshots, videoGenerationMode, null);
+        }
         /** 保持既有调用方不指定视频生成模式。 */
         public CreateAiTaskRequest(String taskType, String prompt, String model, Map<String, Object> parameters,
                                    List<AiTaskMediaReference> references, List<AiTaskMediaReference> videoReferences,

@@ -710,7 +710,7 @@ export default function ImagePage() {
             prompt: round.prompt,
             generationPrompt: round.generationPrompt,
             references: round.references,
-            onDownload: () => void downloadImage(image, index),
+            onDownload: () => downloadImage(image, index),
         });
     };
 
@@ -961,7 +961,7 @@ export default function ImagePage() {
                         media: { kind: "image", url: image.dataUrl, ossUrl: image.objectStorage?.url, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
                         prompt: round?.userText || prompt,
                         references: roundReferences.length ? roundReferences : references,
-                        onDownload: () => void downloadImage(image, index),
+                        onDownload: () => downloadImage(image, index),
                     });
                 },
             }),

@@ -180,6 +180,8 @@ export function createConnectHandler(
       source: { nodeId: connection.source, portId: connection.sourceHandle },
       target: { nodeId: connection.target, portId: connection.targetHandle },
     };
+    // 立即更新引用，保证刚完成连线后立刻生成时不会读到上一帧的连接快照。
+    connectionsRef.current = [...connectionsRef.current, newConn];
     setConnections((prev) => [...prev, newConn]);
   };
 }

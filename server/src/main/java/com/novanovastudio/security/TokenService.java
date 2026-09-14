@@ -39,13 +39,17 @@ public class TokenService {
      *
      * @param userId Long 用户ID
      * @param role String 用户角色
+     * @param tokenVersion Integer 登录令牌版本
      * @return SignedToken 签名令牌
      */
-    public SignedToken sign(Long userId, String role) {
+    public SignedToken sign(Long userId, String role, Integer tokenVersion) {
+        if (tokenVersion == null || tokenVersion < 0) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "登录令牌版本不合法");
+        }
         // 根据配置计算签发时间和过期时间。
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         OffsetDateTime expiresAt = now.plusHours(Math.max(1, properties.getApp().getTokenExpireHours()));
-        TokenClaims claims = new TokenClaims(userId, role, now.toEpochSecond(), expiresAt.toEpochSecond());
+        TokenClaims claims = new TokenClaims(userId, role, tokenVersion, now.toEpochSecond(), expiresAt.toEpochSecond());
         try {
             // 将声明JSON进行URL安全Base64编码，再拼接HMAC签名。
             String payload = JSON.toJSONString(claims);
@@ -80,7 +84,7 @@ public class TokenService {
             // 解码payload并校验用户ID和过期时间。
             byte[] payload = Base64.getUrlDecoder().decode(parts[0]);
             TokenClaims claims = JSON.parseObject(payload, TokenClaims.class);
-            if (claims.userId() == null || claims.userId() <= 0 || claims.expiresAt() <= 0) {
+            if (claims.userId() == null || claims.userId() <= 0 || claims.tokenVersion() == null || claims.tokenVersion() < 0 || claims.expiresAt() <= 0) {
                 throw new BusinessException(ErrorCode.TOKEN_INVALID, "登录令牌内容不合法");
             }
             if (OffsetDateTime.now(ZoneOffset.UTC).toEpochSecond() > claims.expiresAt()) {
@@ -143,10 +147,11 @@ public class TokenService {
      *
      * @param userId Long 用户ID
      * @param role String 用户角色
+     * @param tokenVersion Integer 登录令牌版本
      * @param issuedAt long 签发时间
      * @param expiresAt long 过期时间
      */
-    public record TokenClaims(Long userId, String role, long issuedAt, long expiresAt) {
+    public record TokenClaims(Long userId, String role, Integer tokenVersion, long issuedAt, long expiresAt) {
     }
 
     /**

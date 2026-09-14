@@ -1,6 +1,7 @@
 package com.novanovastudio.security.oauth2;
 
 import com.novanovastudio.service.OAuth2LoginCodeService;
+import com.novanovastudio.service.OAuth2InvitationContextService;
 import com.novanovastudio.service.ThirdPartyAuthenticationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +30,9 @@ public class OAuth2LoginSuccessHandler implements ServerAuthenticationSuccessHan
     /** OAuth2一次性登录码服务 */
     private final OAuth2LoginCodeService loginCodeService;
 
+    /** OAuth2邀请上下文服务 */
+    private final OAuth2InvitationContextService invitationContextService;
+
     /** OAuth2回调重定向器 */
     private final OAuth2CallbackRedirector redirector;
 
@@ -45,7 +49,10 @@ public class OAuth2LoginSuccessHandler implements ServerAuthenticationSuccessHan
                 || !(oauth2Authentication.getPrincipal() instanceof OidcUser oidcUser)) {
             return redirector.redirectFailure(webFilterExchange, "providerIdentityUnavailable");
         }
-        return authenticationService.authenticate(oauth2Authentication.getAuthorizedClientRegistrationId(), oidcUser)
+        String providerId = oauth2Authentication.getAuthorizedClientRegistrationId();
+        return webFilterExchange.getExchange().getSession()
+                .flatMap(session -> invitationContextService.consume(providerId, session))
+                .flatMap(inviterUserId -> authenticationService.authenticate(providerId, oidcUser, inviterUserId.orElse(null)))
                 .flatMap(user -> loginCodeService.create(user.getId()))
                 .flatMap(loginCode -> redirector.redirectSuccess(webFilterExchange, loginCode))
                 .onErrorResume(OAuth2LoginException.class, exception -> {

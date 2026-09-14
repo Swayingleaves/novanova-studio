@@ -33,6 +33,34 @@ test("Agent 新增图片节点使用新领域模型", () => {
     assert.equal(node.kind === "image" ? node.generation.count : 0, 1);
 });
 
+test("Agent 新增音频节点使用音频领域模型和默认尺寸", () => {
+    const next = applyCanvasAgentOps(emptySnapshot(), [
+        {
+            type: "add_node",
+            nodeType: "audio",
+            id: "audio-1",
+            title: "配乐",
+            x: 20,
+            y: 30,
+            attributes: {
+                content: "https://example.com/music.mp3",
+                storageKey: "audio:music",
+                mimeType: "audio/mpeg",
+                durationMs: 4000,
+                waveformPeaks: [0.2, 0.8],
+                status: "success",
+            },
+        },
+    ]);
+
+    const node = next.nodes[0];
+    assert.equal(node.kind, "audio");
+    assert.equal(node.frame.width, 480);
+    assert.equal(node.frame.height, 200);
+    assert.equal(node.kind === "audio" ? node.content.storageKey : "", "audio:music");
+    assert.equal(node.execution.phase, "succeeded");
+});
+
 test("Agent 更新文本节点只修改文本内容和标题", () => {
     const created = applyCanvasAgentOps(emptySnapshot(), [
         { type: "add_node", nodeType: "text", id: "text-1", attributes: { content: "旧文本" } },

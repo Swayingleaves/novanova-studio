@@ -35,6 +35,7 @@ test("积分流水类型映射为中文文案", () => {
     assert.equal(creditTransactionTypeLabel("admin_adjustment"), "管理员调整");
     assert.equal(creditTransactionTypeLabel("card_redeem"), "卡密兑换");
     assert.equal(creditTransactionTypeLabel("initial_grant"), "初始发放");
+    assert.equal(creditTransactionTypeLabel("invitation_reward"), "邀请奖励");
 });
 
 test("积分变动格式化保留正负号", () => {
@@ -57,4 +58,5 @@ test("任务流水详情显示生成类型与模型", () => {
 test("非任务流水详情显示变动原因", () => {
     assert.equal(creditTransactionDetail("card_redeem", null, null, "兑换积分卡密"), "兑换积分卡密");
     assert.equal(creditTransactionDetail("admin_adjustment", null, null, "活动补偿"), "活动补偿");
+    assert.equal(creditTransactionDetail("invitation_reward", null, null, "邀请新用户注册奖励"), "邀请新用户注册奖励");
 });

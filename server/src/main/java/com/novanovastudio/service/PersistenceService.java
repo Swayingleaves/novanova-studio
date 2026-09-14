@@ -3,7 +3,9 @@ package com.novanovastudio.service;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
+import com.novanovastudio.ai.AudioInputSupport;
 import com.alibaba.fastjson2.TypeReference;
+import com.novanovastudio.ai.AudioMediaProbe;
 import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.ai.VideoResolution;
@@ -196,6 +198,7 @@ public class PersistenceService {
                     VideoBillingConfiguration videoBillingConfiguration = normalizeVideoBillingConfiguration(
                             request.modelType(), capabilities, request.videoBillingConfiguration());
                     record.setCapabilities(JSON.toJSONString(capabilities));
+                    AudioInputSupport.validateCapability(request.modelType(), capabilities);
                     record.setDefaultModel(false);
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
                     record.setCreditCost("video".equals(request.modelType()) ? 0 : request.creditCost() == null ? 0 : request.creditCost());
@@ -233,6 +236,7 @@ public class PersistenceService {
                             : request.videoBillingConfiguration();
                     VideoBillingConfiguration videoBillingConfiguration = normalizeVideoBillingConfiguration(
                             request.modelType(), capabilities, requestedVideoBillingConfiguration);
+                    AudioInputSupport.validateCapability(request.modelType(), capabilities);
                     record.setModelType(request.modelType());
                     record.setCapabilities(JSON.toJSONString(capabilities));
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
@@ -416,7 +420,7 @@ public class PersistenceService {
         if (!"video".equals(modelType)) {
             return normalized;
         }
-        if (normalized.stream().anyMatch(capability -> !VideoGenerationMode.isSupported(capability))) {
+        if (normalized.stream().anyMatch(capability -> !VideoGenerationMode.isSupported(capability) && !AudioInputSupport.CAPABILITY.equals(capability))) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "视频模型能力包含不支持的生成模式");
         }
         return normalized;
@@ -1201,13 +1205,27 @@ public class PersistenceService {
                             }
                             return getPlatformObjectStorageConfig().flatMap(objectStorageConfig -> {
                                 String mimeType = firstNonEmpty(input.mimeType(), file.headers().getContentType() == null ? null : file.headers().getContentType().toString(), URLConnection.guessContentTypeFromName(file.filename()), "application/octet-stream");
+                                if ("audio".equals(kind)) {
+                                    if (fileBytes.length < 1 || fileBytes.length > 15L * 1024 * 1024) {
+                                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "音频不能为空，且单文件不能超过15 MB"));
+                                    }
+                                }
                                 String storageKey = firstNonEmpty(input.storageKey(), kind + ":" + newId());
-                                String objectKey = buildObjectKey(objectStorageConfig, kind, file.filename(), mimeType);
-                                return putObject(objectStorageConfig, objectKey, fileBytes, mimeType)
-                                        .flatMap(publicUrl -> {
-                                            PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, kind, null, publicUrl, objectKey, objectStorageConfig, mimeType, (long) fileBytes.length, input.width(), input.height(), input.durationMs(), input.metadata());
-                                            return repository.saveMedia(record).thenReturn(mediaResponse(record));
-                                        });
+                                Mono<AudioMediaProbe.ProbeResult> probe = "audio".equals(kind)
+                                        ? Mono.fromCallable(() -> AudioMediaProbe.probe(fileBytes, file.filename(), properties))
+                                        .subscribeOn(Schedulers.boundedElastic())
+                                        : Mono.just(new AudioMediaProbe.ProbeResult(input.durationMs() == null ? -1 : input.durationMs(), mimeType));
+                                return probe.flatMap(probeResult -> {
+                                    String storedMimeType = "audio".equals(kind) ? probeResult.mimeType() : mimeType;
+                                    String objectKey = buildObjectKey(objectStorageConfig, kind, file.filename(), storedMimeType);
+                                    Integer actualDuration = probeResult.durationMs();
+                                    return putObject(objectStorageConfig, objectKey, fileBytes, storedMimeType)
+                                            .flatMap(publicUrl -> {
+                                                Integer storedDuration = actualDuration < 0 ? null : actualDuration;
+                                                PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, kind, null, publicUrl, objectKey, objectStorageConfig, storedMimeType, (long) fileBytes.length, input.width(), input.height(), storedDuration, input.metadata());
+                                                return repository.saveMedia(record).thenReturn(mediaResponse(record));
+                                            });
+                                });
                             });
                         }));
     }
@@ -1244,6 +1262,9 @@ public class PersistenceService {
         if (!StringUtils.hasText(input.sourceUrl())) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "远程URL不能为空"));
         }
+        if ("audio".equalsIgnoreCase(input.kind())) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "音频必须通过上传接口校验真实格式和时长"));
+        }
         return currentUserProvider.currentUserId().flatMap(userId -> registerRemoteMediaForUser(userId, input));
     }
 
@@ -1258,6 +1279,9 @@ public class PersistenceService {
         // AI异步任务没有请求上下文时，通过显式用户ID登记第三方返回的原始媒体URL，不上传对象存储。
         if (!StringUtils.hasText(input.sourceUrl())) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "远程URL不能为空"));
+        }
+        if ("audio".equalsIgnoreCase(input.kind())) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "音频必须通过上传接口校验真实格式和时长"));
         }
         String sourceUrl = input.sourceUrl().trim();
         return aiHttpClient.validateRemoteMediaUrl(sourceUrl)
@@ -1353,6 +1377,37 @@ public class PersistenceService {
                                 PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, null, publicUrl, objectKey,
                                         objectStorageConfig, mimeType, bytes, width, height, durationMs, null);
                                 return repository.saveMedia(record).thenReturn(mediaResponse(record));
+                            });
+                }));
+    }
+
+    /**
+     * 为指定用户保存带固定存储键的派生媒体。
+     * @param userId Long 媒体所属用户
+     * @param storageKey String 稳定派生存储键
+     * @param kind String 媒体类型
+     * @param fileName String 文件名
+     * @param mimeType String MIME类型
+     * @param file Path 本地媒体文件
+     * @param durationMs Integer 媒体时长
+     * @return Mono<UploadedMediaResponse> 媒体响应
+     */
+    public Mono<PersistenceDtos.UploadedMediaResponse> storeDerivedMediaFileForUser(
+            Long userId, String storageKey, String kind, String fileName, String mimeType, Path file, Integer durationMs) {
+        return getPlatformObjectStorageConfig().flatMap(objectStorageConfig -> Mono.fromCallable(() -> Files.size(file))
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMap(bytes -> {
+                    String normalizedKind = normalizeMediaKind(kind);
+                    String objectKey = buildObjectKey(objectStorageConfig, normalizedKind, fileName, mimeType);
+                    log.info("保存派生媒体到对象存储: userId={}, storageKey={}, objectKey={}, bytes={}, mimeType={}",
+                            userId, storageKey, objectKey, bytes, mimeType);
+                    return putObject(objectStorageConfig, objectKey, file, firstNonEmpty(mimeType, "application/octet-stream"))
+                            .flatMap(publicUrl -> {
+                                PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, null, publicUrl, objectKey,
+                                        objectStorageConfig, mimeType, bytes, null, null, durationMs, null);
+                                return repository.saveMedia(record)
+                                        .doOnSuccess(ignored -> log.info("派生媒体记录保存成功: userId={}, storageKey={}, objectKey={}", userId, storageKey, objectKey))
+                                        .thenReturn(mediaResponse(record));
                             });
                 }));
     }
@@ -1531,6 +1586,8 @@ public class PersistenceService {
             case "video/webm" -> ".webm";
             case "video/quicktime" -> ".mov";
             case "video/mp4" -> ".mp4";
+            case "audio/mpeg", "audio/mp3" -> ".mp3";
+            case "audio/wav", "audio/x-wav", "audio/wave" -> ".wav";
             default -> ".bin";
         };
     }
@@ -1610,7 +1667,9 @@ public class PersistenceService {
     private Mono<String> putObject(PersistenceDtos.ObjectStorageConfig config, String key, byte[] data, String mimeType) {
         // COS上传使用阻塞HttpClient，放入boundedElastic执行。
         return Mono.fromCallable(() -> objectStorageService.putObject(config, key, new java.io.ByteArrayInputStream(data), data.length, mimeType))
-                .subscribeOn(Schedulers.boundedElastic());
+                .subscribeOn(Schedulers.boundedElastic())
+                .switchIfEmpty(Mono.defer(() -> uploadedObjectUrlMissing(key)))
+                .flatMap(url -> requireUploadedObjectUrl(url, key));
     }
 
     /**
@@ -1628,7 +1687,25 @@ public class PersistenceService {
             try (InputStream inputStream = Files.newInputStream(file)) {
                 return objectStorageService.putObject(config, key, inputStream, bytes, mimeType);
             }
-        }).subscribeOn(Schedulers.boundedElastic());
+        }).subscribeOn(Schedulers.boundedElastic())
+                .switchIfEmpty(Mono.defer(() -> uploadedObjectUrlMissing(key)))
+                .flatMap(url -> requireUploadedObjectUrl(url, key));
+    }
+
+    /** 创建对象存储空地址错误，避免上传适配器返回null时静默结束响应式链路。 */
+    private <T> Mono<T> uploadedObjectUrlMissing(String objectKey) {
+        log.error("对象存储上传未返回公开访问地址: key={}", objectKey);
+        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "对象存储上传成功但未返回公开访问地址"));
+    }
+
+    /** 校验对象存储上传结果，避免空地址被响应式链路转换为空信号。 */
+    private Mono<String> requireUploadedObjectUrl(String url, String objectKey) {
+        if (!StringUtils.hasText(url)) {
+            return uploadedObjectUrlMissing(objectKey);
+        }
+        String normalizedUrl = url.trim();
+        log.info("对象存储上传成功: key={}, url={}", objectKey, normalizedUrl);
+        return Mono.just(normalizedUrl);
     }
 
     /**

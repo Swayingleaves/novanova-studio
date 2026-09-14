@@ -109,7 +109,8 @@ public class AiTaskController {
      */
     @PostMapping("/image/generate")
     public Mono<ApiResponse<AiTaskDtos.AiGenerationTaskResponse>> generateImage(@RequestBody AiTaskDtos.CreateAiTaskRequest request) {
-        return aiTaskService.createTask(new AiTaskDtos.CreateAiTaskRequest("image", request.prompt(), request.model(), request.parameters(), request.references(), request.videoReferences(), AiTaskSources.IMAGE_PAGE)).map(ApiResponse::ok);
+        return aiTaskService.createTask(new AiTaskDtos.CreateAiTaskRequest("image", request.prompt(), request.model(), request.parameters(),
+                request.references(), request.videoReferences(), AiTaskSources.IMAGE_PAGE, null, null, null, request.audioReferences())).map(ApiResponse::ok);
     }
 
     /**
@@ -121,7 +122,7 @@ public class AiTaskController {
     @PostMapping("/video/generate")
     public Mono<ApiResponse<AiTaskDtos.AiGenerationTaskResponse>> generateVideo(@RequestBody AiTaskDtos.CreateAiTaskRequest request) {
         return aiTaskService.createTask(new AiTaskDtos.CreateAiTaskRequest("video", request.prompt(), request.model(), request.parameters(),
-                request.references(), request.videoReferences(), AiTaskSources.VIDEO_PAGE, null, null, request.videoGenerationMode())).map(ApiResponse::ok);
+                request.references(), request.videoReferences(), AiTaskSources.VIDEO_PAGE, null, null, request.videoGenerationMode(), request.audioReferences())).map(ApiResponse::ok);
     }
 
     /**

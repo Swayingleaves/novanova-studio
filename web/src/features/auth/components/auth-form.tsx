@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { App, Button, Form, Input, Tabs } from "antd";
 import { ArrowRight } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import { loginByEmail, registerByEmail, sendEmailCode } from "@/services/api/server";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -28,17 +29,21 @@ type AuthFormProps = {
     onSuccess?: () => void;
     /** OAuth2登录成功后的站内跳转目标 */
     redirectPath?: string;
+    /** 邀请链接携带的邀请码 */
+    invitationCode?: string;
 };
 
-export function AuthForm({ onSuccess, redirectPath }: AuthFormProps) {
+export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormProps) {
     const { message } = App.useApp();
-    const [activeKey, setActiveKey] = useState("login");
+    const router = useRouter();
+    const [activeKey, setActiveKey] = useState(invitationCode ? "register" : "login");
     const [sendingCode, setSendingCode] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [codeCooldownSeconds, setCodeCooldownSeconds] = useState(0);
     const [loginForm] = Form.useForm<LoginForm>();
     const [registerForm] = Form.useForm<RegisterForm>();
     const setSession = useUserStore((state) => state.setSession);
+    const closeAuthModal = useUserStore((state) => state.closeAuthModal);
 
     useEffect(() => {
         const updateCountdown = () => {
@@ -99,7 +104,7 @@ export function AuthForm({ onSuccess, redirectPath }: AuthFormProps) {
     const register = async (values: RegisterForm) => {
         setSubmitting(true);
         try {
-            const result = await registerByEmail(values);
+            const result = await registerByEmail({ ...values, invitationCode });
             setSession(result);
             message.success("注册成功");
             onSuccess?.();
@@ -108,6 +113,11 @@ export function AuthForm({ onSuccess, redirectPath }: AuthFormProps) {
         } finally {
             setSubmitting(false);
         }
+    };
+
+    const goToForgotPassword = () => {
+        closeAuthModal();
+        router.push("/auth/forgotPassword");
     };
 
     return (
@@ -127,10 +137,15 @@ export function AuthForm({ onSuccess, redirectPath }: AuthFormProps) {
                             <Form.Item name="password" label="密码" rules={[{ required: true, message: "请输入密码" }]}>
                                 <Input.Password size="large" autoComplete="current-password" placeholder="请输入密码" />
                             </Form.Item>
+                            <div className="-mt-2 mb-2 flex justify-end">
+                                <Button type="link" className="min-h-11 px-0" onClick={goToForgotPassword}>
+                                    忘记密码
+                                </Button>
+                            </div>
                             <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<ArrowRight className="size-4" />} iconPlacement="end">
                                 登录
                             </Button>
-                            <OAuth2LoginOptions redirectPath={redirectPath} />
+                            <OAuth2LoginOptions redirectPath={redirectPath} invitationCode={invitationCode} />
                         </Form>
                     ),
                 },
@@ -161,6 +176,7 @@ export function AuthForm({ onSuccess, redirectPath }: AuthFormProps) {
                             <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<ArrowRight className="size-4" />} iconPlacement="end">
                                 注册并登录
                             </Button>
+                            <OAuth2LoginOptions redirectPath={redirectPath} invitationCode={invitationCode} />
                         </Form>
                     ),
                 },

@@ -62,7 +62,7 @@ export function resetInterruptedCanvasNodes(nodes: CanvasNode[]): CanvasNode[] {
 export function readCanvasNodeContent(node: CanvasNode): string {
     if (isTextNode(node)) return node.content.text;
     if (isStoryboardNode(node)) return node.content.instruction;
-    return isImageNode(node) || node.kind === "video" ? node.content.source : "";
+    return isImageNode(node) || node.kind === "video" || node.kind === "audio" ? node.content.source : "";
 }
 
 export function readCanvasNodePrompt(node: CanvasNode): string {

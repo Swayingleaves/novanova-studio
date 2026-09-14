@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiErrorDetails;
 import com.novanovastudio.ai.AiErrorSupport;
 import com.novanovastudio.ai.AiProviderException;
+import com.novanovastudio.ai.AudioInputSupport;
 import com.novanovastudio.ai.VideoGenerationMode;
 import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentEvent;
@@ -1156,6 +1157,7 @@ public class CreationPlanExecutor {
                                                             List<AgentChatRequest.Attachment> attachments,
                                                             int recoveryAttempt) {
         String toolName = toolName(task);
+        String callId = buildExecutionCallId(plan, task, recoveryAttempt);
         Map<String, Object> effectiveArguments = new LinkedHashMap<>(arguments == null ? Map.of() : arguments);
         return resolveWorkflowVideoMode(plan, task)
                 .flatMap(videoMode -> {
@@ -1165,10 +1167,10 @@ public class CreationPlanExecutor {
                     // 视频工作流的图片阶段按图片任务执行，来源标记为图片页以满足任务类型与入口校验
                     effectiveArguments.put("entrySource", workflowDefinition(plan).map(definition -> definition.usesWorkflowImageModel(task))
                             .orElse(false) ? AiTaskSources.IMAGE_PAGE : plan.entrySource());
-                    emit(userId, AgentEvent.toolExecute(sessionId, task.taskId(), toolName, effectiveArguments));
+                    emit(userId, AgentEvent.toolExecute(sessionId, callId, toolName, effectiveArguments));
                     AgentLoopProfile profile = resolveProfile(task.taskType());
                     return profile.executeTool(userId, toolName, effectiveArguments, request.message(), attachments,
-                                    eventEmitter, sessionId, task.taskId());
+                                    eventEmitter, sessionId, callId);
                 })
                 .flatMap(result -> {
                     if (executionRegistry.isCancelRequested(sessionId)) {
@@ -1181,14 +1183,14 @@ public class CreationPlanExecutor {
                         // 首尾帧由工作流上下文注入，必须随最终视频工具结果保存，供详情弹窗回放真实引用图。
                         data.put("workflowReferences", workflowReferences);
                     }
-                    emit(userId, AgentEvent.toolResult(sessionId, task.taskId(), result.ok(), result.message(), data));
+                    emit(userId, AgentEvent.toolResult(sessionId, callId, result.ok(), result.message(), data));
                     emit(userId, AgentEvent.planTaskStatus(sessionId, plan.planId(), task.taskId(), status, result.message()));
                     AiErrorDetails error = "failed".equals(status)
                             ? result.error() != null ? result.error() : toolError(data, result.message(), "task", "execution")
                             : null;
                     return planRepository.updateTask(plan.planId(), task.taskId(), status, promptStrategy, actualPrompt,
                                     result.data(), "success".equals(status) ? "" : result.message())
-                            .then(eventEmitter.persistRoundActivities(userId, sessionId, task.taskId(), status))
+                            .then(eventEmitter.persistRoundActivities(userId, sessionId, callId, status))
                             .thenReturn(new TaskExecutionResult(task.taskId(), status, result.message(), data,
                                     promptStrategy, actualPrompt, effectiveArguments, error, recoveryAttempt));
                 });
@@ -1323,7 +1325,7 @@ public class CreationPlanExecutor {
         }
         applyCanvasVideoSettings(arguments, plan.creationSettings(), task);
         if (skillSnapshot != null && !skillSnapshot.isEmpty()) arguments.put("internal_skill_snapshot", skillSnapshot);
-        String toolCallId = recoveryAttempt == 0 ? task.taskId() : task.taskId() + ":recovery:" + recoveryAttempt;
+        String toolCallId = buildExecutionCallId(plan, task, recoveryAttempt);
         return resolveCanvasStyleSnapshots(plan.creationSettings(), task)
                 .map(styles -> {
                     if (!styles.isEmpty()) arguments.put("generationStyleSnapshots", styles);
@@ -1349,6 +1351,19 @@ public class CreationPlanExecutor {
                             .thenReturn(new TaskExecutionResult(task.taskId(), status, result.message(), data,
                                     promptStrategy, submittedPrompt, actualArguments, error, recoveryAttempt));
                 });
+    }
+
+    /**
+     * 构造跨创作计划唯一的工具调用标识，避免不同对话轮次复用同一个任务编号。
+     *
+     * @param plan CreationPlan 当前创作计划
+     * @param task CreationTask 当前计划任务
+     * @param recoveryAttempt int 当前任务恢复次数
+     * @return String 跨计划唯一的工具调用标识
+     */
+    private String buildExecutionCallId(CreationPlan plan, CreationTask task, int recoveryAttempt) {
+        String callId = plan.planId() + ":" + task.taskId();
+        return recoveryAttempt == 0 ? callId : callId + ":recovery:" + recoveryAttempt;
     }
 
     /**
@@ -1763,6 +1778,7 @@ public class CreationPlanExecutor {
         round.put("workflowStatus", workflowStatus);
         round.put("references", workflowResultReferences(plan, resultByTaskId));
         round.put("videoReferences", List.of());
+        round.put("audioReferences", workflowAudioReferences(request == null ? List.of() : request.attachments()));
         round.put("createdAt", System.currentTimeMillis());
         if (StringUtils.hasText(error)) {
             round.put("error", error);
@@ -1868,6 +1884,34 @@ public class CreationPlanExecutor {
             reference.put("storageKey", attachment.storageKey());
             reference.put("url", attachment.url());
             reference.put("role", attachment.role());
+            references.add(reference);
+        }
+        return List.copyOf(references);
+    }
+
+    /**
+     * 将工作流请求中的音频附件转换为可恢复的生成记录引用。
+     *
+     * @param attachments List<Attachment> 当前工作流的全部附件
+     * @return List<Map<String, Object>> 音频引用列表
+     */
+    private List<Map<String, Object>> workflowAudioReferences(List<AgentChatRequest.Attachment> attachments) {
+        if (attachments == null || attachments.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> references = new ArrayList<>();
+        for (AgentChatRequest.Attachment attachment : attachments) {
+            if (attachment == null || !AudioInputSupport.isAudioMimeType(attachment.type())
+                    || !StringUtils.hasText(attachment.storageKey())) {
+                continue;
+            }
+            Map<String, Object> reference = new LinkedHashMap<>();
+            reference.put("id", StringUtils.hasText(attachment.storageKey()) ? attachment.storageKey() : attachment.url());
+            reference.put("name", StringUtils.hasText(attachment.name()) ? attachment.name() : "参考音频");
+            reference.put("mimeType", attachment.type());
+            reference.put("storageKey", attachment.storageKey());
+            // 恢复时始终按存储键重新解析地址，不持久化或信任客户端远程地址。
+            reference.put("url", "");
             references.add(reference);
         }
         return List.copyOf(references);

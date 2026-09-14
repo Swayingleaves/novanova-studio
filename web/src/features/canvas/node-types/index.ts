@@ -1,3 +1,4 @@
+import { AudioNode } from "./audio-node";
 import { ImageNode } from "./image-node";
 import { VideoNode } from "./video-node";
 import { TextNode } from "./text-node";
@@ -6,6 +7,7 @@ import { VideoCompositionNode } from "./video-composition-node";
 import { BackgroundNode } from "./background-node";
 
 export const nodeTypes = {
+  audio: AudioNode,
   image: ImageNode,
   video: VideoNode,
   text: TextNode,

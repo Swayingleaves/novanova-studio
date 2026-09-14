@@ -342,8 +342,8 @@ export function CanvasFlow({
     const preventWheel = (e: WheelEvent) => {
       const target = e.target as Element | null;
       if (target?.closest(canvasWheelIgnoreSelector)) {
+        // 阻止滚轮触发画布缩放，保留输入框和浮层自身的原生滚动。
         e.stopPropagation();
-        e.preventDefault();
       }
     };
     el.addEventListener("wheel", preventWheel, { passive: false, capture: true } as AddEventListenerOptions);

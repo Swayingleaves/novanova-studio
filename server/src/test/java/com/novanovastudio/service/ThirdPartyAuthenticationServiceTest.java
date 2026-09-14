@@ -1,7 +1,11 @@
 package com.novanovastudio.service;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -56,7 +60,7 @@ class ThirdPartyAuthenticationServiceTest {
         TestContext context = testContext();
         User user = normalUser(8L);
         when(context.identityRepository.findBinding("linuxDo", "12345")).thenReturn(Mono.empty());
-        when(context.identityRepository.resolveUserByTrustedEmail(context.identity)).thenReturn(Mono.just(new OAuth2IdentityRepository.ResolvedOAuthUser(user, true)));
+        when(context.identityRepository.resolveUserByTrustedEmail(eq(context.identity), anyString(), isNull())).thenReturn(Mono.just(new OAuth2IdentityRepository.ResolvedOAuthUser(user, true)));
         when(context.identityRepository.upsertBinding(8L, context.identity)).thenReturn(Mono.just(8L));
         when(context.creditService.initializeAccount(8L)).thenReturn(Mono.empty());
         when(context.transactionalOperator.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -64,6 +68,47 @@ class ThirdPartyAuthenticationServiceTest {
         StepVerifier.create(context.service.authenticate("linuxDo", context.oidcUser)).expectNext(user).verifyComplete();
 
         verify(context.identityRepository).upsertBinding(8L, context.identity);
+    }
+
+    /**
+     * 验证邀请奖励只在第三方首次创建本地用户时发放。
+     */
+    @Test
+    @DisplayName("第三方首次创建本地用户时向邀请人发放奖励")
+    void shouldGrantInvitationRewardOnlyForCreatedUser() {
+        TestContext context = testContext();
+        User user = normalUser(8L);
+        when(context.identityRepository.findBinding("linuxDo", "12345")).thenReturn(Mono.empty());
+        when(context.identityRepository.resolveUserByTrustedEmail(eq(context.identity), anyString(), eq(5L)))
+                .thenReturn(Mono.just(new OAuth2IdentityRepository.ResolvedOAuthUser(user, true)));
+        when(context.identityRepository.upsertBinding(8L, context.identity)).thenReturn(Mono.just(8L));
+        when(context.creditService.initializeAccount(8L)).thenReturn(Mono.empty());
+        when(context.creditService.grantInvitationReward(5L, 8L)).thenReturn(Mono.empty());
+        when(context.transactionalOperator.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        StepVerifier.create(context.service.authenticate("linuxDo", context.oidcUser, 5L)).expectNext(user).verifyComplete();
+
+        verify(context.creditService).grantInvitationReward(5L, 8L);
+    }
+
+    /**
+     * 可信邮箱已经存在时只绑定第三方身份，不记录邀请关系或发放奖励。
+     */
+    @Test
+    @DisplayName("已有本地账号首次绑定第三方身份时不发邀请奖励")
+    void shouldNotGrantInvitationRewardForExistingEmail() {
+        TestContext context = testContext();
+        User user = normalUser(8L);
+        when(context.identityRepository.findBinding("linuxDo", "12345")).thenReturn(Mono.empty());
+        when(context.identityRepository.resolveUserByTrustedEmail(eq(context.identity), anyString(), eq(5L)))
+                .thenReturn(Mono.just(new OAuth2IdentityRepository.ResolvedOAuthUser(user, false)));
+        when(context.identityRepository.upsertBinding(8L, context.identity)).thenReturn(Mono.just(8L));
+        when(context.transactionalOperator.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        StepVerifier.create(context.service.authenticate("linuxDo", context.oidcUser, 5L)).expectNext(user).verifyComplete();
+
+        verify(context.creditService, never()).initializeAccount(8L);
+        verify(context.creditService, never()).grantInvitationReward(5L, 8L);
     }
 
     /**
@@ -77,12 +122,14 @@ class ThirdPartyAuthenticationServiceTest {
         OAuth2IdentityRepository identityRepository = mock(OAuth2IdentityRepository.class);
         UserRepository userRepository = mock(UserRepository.class);
         CreditService creditService = mock(CreditService.class);
+        InvitationService invitationService = mock(InvitationService.class);
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
         OidcUser oidcUser = mock(OidcUser.class);
         ThirdPartyUserIdentity identity = new ThirdPartyUserIdentity("linuxDo", "12345", "user@example.com", "tester", "");
         when(registry.requireEnabled("linuxDo")).thenReturn(provider);
         when(provider.resolveIdentity(oidcUser)).thenReturn(identity);
-        ThirdPartyAuthenticationService service = new ThirdPartyAuthenticationService(registry, identityRepository, userRepository, creditService, transactionalOperator);
+        when(invitationService.generateInvitationCode()).thenReturn("INVITATIONCODE01");
+        ThirdPartyAuthenticationService service = new ThirdPartyAuthenticationService(registry, identityRepository, userRepository, creditService, invitationService, transactionalOperator);
         return new TestContext(service, identityRepository, userRepository, creditService, transactionalOperator, oidcUser, identity);
     }
 

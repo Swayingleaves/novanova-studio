@@ -14,6 +14,14 @@ type ReferenceVideoLocation = {
     objectStorage?: ObjectStorageFile;
 };
 
+/** 上传音频的媒体定位、播放元数据和非破坏性裁剪区间。 */
+export type ReferenceAudio = ReferenceMediaIdentity & ReferenceVideoLocation & {
+    durationMs?: number;
+    bytes?: number;
+    trimStartMs?: number;
+    trimEndMs?: number;
+};
+
 export type ReferenceVideo = ReferenceMediaIdentity & ReferenceVideoDimensions & ReferenceVideoLocation;
 
 export type ReferenceVideoSource =

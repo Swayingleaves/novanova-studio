@@ -235,6 +235,7 @@ public class AgentTaskOrchestrator {
         round.put("result", result);
         round.put("references", attachmentReferences(request.attachments(), "image/"));
         round.put("videoReferences", attachmentReferences(request.attachments(), "video/"));
+        round.put("audioReferences", attachmentReferences(request.attachments(), "audio/"));
         round.put("createdAt", System.currentTimeMillis());
 
         String title = prompt.length() > 30 ? prompt.substring(0, 30) : prompt;
@@ -802,6 +803,7 @@ public class AgentTaskOrchestrator {
         round.put("results", resultArray);
         round.put("references", attachmentReferences(attachments, "image/"));
         round.put("videoReferences", attachmentReferences(attachments, "video/"));
+        round.put("audioReferences", attachmentReferences(attachments, "audio/"));
         round.put("createdAt", System.currentTimeMillis());
 
         String title = prompt.length() > 30 ? prompt.substring(0, 30) : prompt;

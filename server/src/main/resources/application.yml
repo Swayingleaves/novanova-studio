@@ -174,6 +174,8 @@ novanova:
   app:
     # JWT 签名密钥，生产环境必须配置
     secret-key: ${APP_SECRET_KEY:}
+    # 前端公开地址，用于生成密码重置链接
+    frontend-base-url: ${FRONTEND_BASE_URL:}
     # 用户登录 Token 过期时间（小时）
     token-expire-hours: ${TOKEN_EXPIRE_HOURS:24}
     # 可信代理地址列表，用于获取真实客户端 IP（逗号分隔）

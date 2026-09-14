@@ -1,6 +1,7 @@
 package com.novanovastudio.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 
 /**
@@ -33,6 +34,24 @@ public final class OAuth2Dtos {
      * @param providers 已启用渠道
      */
     public record ProviderListResponse(List<ProviderInfo> providers) {
+    }
+
+    /**
+     * OAuth2授权准备请求。
+     *
+     * @param providerId 渠道唯一标识
+     * @param invitationCode 可选邀请码
+     */
+    public record PrepareAuthorizationRequest(@NotBlank(message = "第三方登录渠道不能为空") String providerId,
+                                              @Size(max = 16, message = "邀请码不能超过16个字符") String invitationCode) {
+    }
+
+    /**
+     * OAuth2授权准备响应。
+     *
+     * @param authorizationPath 已验证的授权入口路径
+     */
+    public record PrepareAuthorizationResponse(String authorizationPath) {
     }
 
     /**

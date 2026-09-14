@@ -38,11 +38,13 @@ import {
     deleteModelConfig,
     deleteObjectStorage as deleteServerObjectStorage,
     getCreditSettings,
+    getInvitationRewardSettings,
     refreshChannelModels as refreshServerChannelModels,
     setDefaultModel,
     setDefaultObjectStorage as setServerDefaultObjectStorage,
     updateChannel as updateServerChannel,
     updateCreditSettings,
+    updateInvitationRewardSettings,
     updateModelConfig,
     updateObjectStorage as updateServerObjectStorage,
     type ServerModelConfig,
@@ -165,8 +167,11 @@ export function AppConfigModal() {
     const [draftObjectStorages, setDraftObjectStorages] = useState<ObjectStorageConfig[]>([]);
     const [creditBaseline, setCreditBaseline] = useState(100);
     const [draftInitialCredits, setDraftInitialCredits] = useState(100);
+    const [invitationRewardBaseline, setInvitationRewardBaseline] = useState(0);
+    const [draftInvitationRewardCredits, setDraftInvitationRewardCredits] = useState(0);
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
+    const [collapsedEditingCapabilities, setCollapsedEditingCapabilities] = useState<string[]>([]);
     const initializedRef = useRef(false);
     const editingModelIsMedia = Boolean(editingModelConfig && (editingModelConfig.modelType === "image" || editingModelConfig.modelType === "video"));
 
@@ -213,12 +218,14 @@ export function AppConfigModal() {
         initializedRef.current = true;
         setDraftsReady(false);
         let active = true;
-        void Promise.all([refreshModelConfiguration(), refreshObjectStorages(), getCreditSettings()])
-            .then(([, , creditSettings]) => {
+        void Promise.all([refreshModelConfiguration(), refreshObjectStorages(), getCreditSettings(), getInvitationRewardSettings()])
+            .then(([, , creditSettings, invitationRewardSettings]) => {
                 if (!active) return;
                 resetAllDrafts();
                 setCreditBaseline(creditSettings.initialCredits);
                 setDraftInitialCredits(creditSettings.initialCredits);
+                setInvitationRewardBaseline(invitationRewardSettings.invitationRewardCredits);
+                setDraftInvitationRewardCredits(invitationRewardSettings.invitationRewardCredits);
                 setDraftsReady(true);
             })
             .catch(() => {
@@ -241,7 +248,8 @@ export function AppConfigModal() {
     const modelConfigsDirty = !sameValue(draftModelConfigs, modelConfigBaseline);
     const objectStoragesDirty = !sameValue(draftObjectStorages, objectStorageBaseline);
     const creditsDirty = draftInitialCredits !== creditBaseline;
-    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty;
+    const invitationRewardDirty = draftInvitationRewardCredits !== invitationRewardBaseline;
+    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty;
     const isSaving = Boolean(savingTab);
 
     const updateDraftChannel = (id: string, patch: Partial<ModelChannel>) => {
@@ -357,6 +365,11 @@ export function AppConfigModal() {
     const openModelConfigEditor = (configItem: ServerModelConfig) => {
         setEditingModelConfig(cloneModelConfig(configItem));
         setEditingCustomBodyParameters(JSON.stringify(configItem.customBodyParameters || {}, null, 2));
+        setCollapsedEditingCapabilities([]);
+    };
+
+    const toggleEditingCapabilityCollapsed = (capability: string) => {
+        setCollapsedEditingCapabilities((capabilities) => (capabilities.includes(capability) ? capabilities.filter((item) => item !== capability) : [...capabilities, capability]));
     };
 
     const updateEditingModelConfig = (patch: Partial<ServerModelConfig>) => {
@@ -500,6 +513,20 @@ export function AppConfigModal() {
             message.success("积分设置已保存");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "保存积分设置失败");
+        } finally {
+            setSavingTab("");
+        }
+    };
+
+    const saveInvitationRewardSettings = async () => {
+        setSavingTab("invitationReward");
+        try {
+            const settings = await updateInvitationRewardSettings(draftInvitationRewardCredits);
+            setInvitationRewardBaseline(settings.invitationRewardCredits);
+            setDraftInvitationRewardCredits(settings.invitationRewardCredits);
+            message.success("邀请奖励设置已保存");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "保存邀请奖励设置失败");
         } finally {
             setSavingTab("");
         }
@@ -874,6 +901,40 @@ export function AppConfigModal() {
                             ),
                         },
                         {
+                            key: "invitationReward",
+                            label: "邀请奖励",
+                            children: (
+                                <Form layout="vertical" requiredMark={false} className="max-w-xl">
+                                    <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                        <div className="text-sm font-semibold">邀请注册奖励积分</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">
+                                            新用户通过有效邀请链接完成邮箱注册或首次第三方登录后，奖励发放给邀请人。设置为 0 表示暂停发放；只影响之后注册的用户，不追溯历史邀请。
+                                        </div>
+                                        <div className="mt-5 flex flex-wrap items-end gap-3">
+                                            <Form.Item label="每名新用户奖励积分" className="mb-0">
+                                                <InputNumber
+                                                    min={0}
+                                                    precision={0}
+                                                    value={draftInvitationRewardCredits}
+                                                    disabled={isSaving}
+                                                    className="w-48"
+                                                    onChange={(value) => setDraftInvitationRewardCredits(Math.max(0, Number(value) || 0))}
+                                                />
+                                            </Form.Item>
+                                            <Button
+                                                type="primary"
+                                                disabled={!invitationRewardDirty || isSaving}
+                                                loading={savingTab === "invitationReward"}
+                                                onClick={() => void saveInvitationRewardSettings()}
+                                            >
+                                                保存
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </Form>
+                            ),
+                        },
+                        {
                             key: "objectStorage",
                             label: "对象存储",
                             children: (
@@ -1143,16 +1204,21 @@ export function AppConfigModal() {
                                 </span>
                             </div>
                             <div className="space-y-4">
+                                <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] p-4">
+                                    <div><div className="font-medium">支持音频输入</div><p className="text-xs text-[var(--studio-muted)]">开启后允许该视频模型接收音频参考素材，需同时启用全能参考模式</p></div>
+                                    <Switch aria-label="支持音频输入" checked={editingModelConfig.capabilities.includes("audio-input")} disabled={isSaving || !editingModelConfig.capabilities.includes("audio-input") && !editingModelConfig.capabilities.includes("reference-to-video")} onChange={(checked) => setEditingModelConfig({ ...editingModelConfig, capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, "audio-input"]) : editingModelConfig.capabilities.filter((value) => value !== "audio-input") })} />
+                                </div>
                                 {VIDEO_GENERATION_CAPABILITY_OPTIONS.map((mode, index) => {
                                     const prices = editingModelConfig.videoBillingConfiguration?.modePrices?.[mode.value] || {};
                                     const modeEnabled = editingModelConfig.capabilities.includes(mode.value);
+                                    const modeCollapsed = collapsedEditingCapabilities.includes(`video:${mode.value}`);
                                     const modeIcon = index === 0 ? <TextCursorInput className="size-5" /> : index === 1 ? <Image className="size-5" /> : <Sparkles className="size-5" />;
                                     const modeColor = index === 0 ? "border-violet-500/50 bg-violet-500/5" : index === 1 ? "border-blue-500/50 bg-blue-500/5" : "border-emerald-500/50 bg-emerald-500/5";
                                     const iconColor = index === 0 ? "bg-violet-500/15 text-violet-500" : index === 1 ? "bg-blue-500/15 text-blue-500" : "bg-emerald-500/15 text-emerald-500";
                                     const description = index === 0 ? "根据文本描述生成视频" : index === 1 ? "根据图片生成视频" : "支持文本、图片及多模态参考生成视频";
                                     return (
                                         <div key={mode.value} className={`rounded-lg border p-4 transition-colors ${modeEnabled ? modeColor : "border-[var(--studio-line)] opacity-70"}`}>
-                                            <div className="flex items-start justify-between gap-4 border-b border-[var(--studio-line)] pb-3">
+                                            <div className={modeCollapsed ? "flex items-start justify-between gap-4" : "flex items-start justify-between gap-4 border-b border-[var(--studio-line)] pb-3"}>
                                                 <div className="flex min-w-0 items-center gap-3">
                                                     <span className={`flex size-10 shrink-0 items-center justify-center rounded-md ${iconColor}`}>{modeIcon}</span>
                                                     <div>
@@ -1167,17 +1233,28 @@ export function AppConfigModal() {
                                                         <p className="mt-1 text-xs text-[var(--studio-muted)]">{description}</p>
                                                     </div>
                                                 </div>
-                                                <Switch
-                                                    checked={modeEnabled}
-                                                    onChange={(checked) =>
-                                                        updateEditingModelConfig({
-                                                            capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, mode.value]) : editingModelConfig.capabilities.filter((value) => value !== mode.value),
-                                                            ...(!checked ? { videoBillingConfiguration: clearVideoModePrices(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value) } : {}),
-                                                        })
-                                                    }
-                                                />
+                                                <div className="flex shrink-0 items-center gap-2">
+                                                    <Button
+                                                        type="text"
+                                                        size="small"
+                                                        aria-label={`${mode.label}${modeCollapsed ? "展开" : "收起"}`}
+                                                        aria-expanded={!modeCollapsed}
+                                                        title={`${modeCollapsed ? "展开" : "收起"}${mode.label}配置`}
+                                                        icon={modeCollapsed ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
+                                                        onClick={() => toggleEditingCapabilityCollapsed(`video:${mode.value}`)}
+                                                    />
+                                                    <Switch
+                                                        checked={modeEnabled}
+                                                        onChange={(checked) =>
+                                                            updateEditingModelConfig({
+                                                                capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, mode.value]) : editingModelConfig.capabilities.filter((value) => value !== mode.value),
+                                                                ...(!checked ? { videoBillingConfiguration: clearVideoModePrices(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value) } : {}),
+                                                            })
+                                                        }
+                                                    />
+                                                </div>
                                             </div>
-                                            <div className="pt-3">
+                                            {modeCollapsed ? null : <div className="pt-3">
                                                 <div className="mb-2 text-xs font-medium text-[var(--studio-muted)]">分辨率价格（{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? "积分/秒" : "积分/次"}）</div>
                                                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                                                     {VIDEO_RESOLUTION_OPTIONS.filter((resolution) => resolution.value !== "auto").map((resolution) => (
@@ -1207,8 +1284,8 @@ export function AppConfigModal() {
                                                         </label>
                                                     ))}
                                                 </div>
-                                            </div>
-                                            {editingModelConfig.isCustomModel ? (
+                                            </div>}
+                                            {modeCollapsed ? null : editingModelConfig.isCustomModel ? (
                                                 <CustomModelGroupEditor
                                                     label={mode.label}
                                                     group={editingModelConfig.customModelConfig?.[mode.value]}
@@ -1239,7 +1316,7 @@ export function AppConfigModal() {
                             <section>
                                 <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">模型能力</div>
                                 <div className="flex flex-wrap gap-2">
-                                    {VIDEO_GENERATION_CAPABILITY_OPTIONS.filter((option) => editingModelConfig.capabilities.includes(option.value)).map((option) => (
+                                    {MODEL_CAPABILITY_OPTIONS.video.filter((option) => editingModelConfig.capabilities.includes(option.value)).map((option) => (
                                         <span key={option.value} className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
                                             <CheckCircle2 className="size-3.5" />
                                             {option.label}
@@ -1301,17 +1378,28 @@ export function AppConfigModal() {
                                 <div className="space-y-3">
                                     {MODEL_CAPABILITY_OPTIONS.image.map((option) => (
                                         <div key={option.value} className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
-                                            <Checkbox
-                                                checked={editingModelConfig.capabilities.includes(option.value)}
-                                                onChange={(event) =>
-                                                    updateEditingModelConfig({
-                                                        capabilities: event.target.checked ? uniqueModels([...editingModelConfig.capabilities, option.value]) : editingModelConfig.capabilities.filter((value) => value !== option.value),
-                                                    })
-                                                }
-                                            >
-                                                {option.label}
-                                            </Checkbox>
-                                            {editingModelConfig.capabilities.includes(option.value) ? (
+                                            <div className="flex items-center justify-between gap-3">
+                                                <Checkbox
+                                                    checked={editingModelConfig.capabilities.includes(option.value)}
+                                                    onChange={(event) =>
+                                                        updateEditingModelConfig({
+                                                            capabilities: event.target.checked ? uniqueModels([...editingModelConfig.capabilities, option.value]) : editingModelConfig.capabilities.filter((value) => value !== option.value),
+                                                        })
+                                                    }
+                                                >
+                                                    {option.label}
+                                                </Checkbox>
+                                                <Button
+                                                    type="text"
+                                                    size="small"
+                                                    aria-label={`${option.label}${collapsedEditingCapabilities.includes(`image:${option.value}`) ? "展开" : "收起"}`}
+                                                    aria-expanded={!collapsedEditingCapabilities.includes(`image:${option.value}`)}
+                                                    title={`${collapsedEditingCapabilities.includes(`image:${option.value}`) ? "展开" : "收起"}${option.label}配置`}
+                                                    icon={collapsedEditingCapabilities.includes(`image:${option.value}`) ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
+                                                    onClick={() => toggleEditingCapabilityCollapsed(`image:${option.value}`)}
+                                                />
+                                            </div>
+                                            {editingModelConfig.capabilities.includes(option.value) && !collapsedEditingCapabilities.includes(`image:${option.value}`) ? (
                                                 <CustomModelGroupEditor
                                                     label={option.label}
                                                     group={editingModelConfig.customModelConfig?.[option.value]}
@@ -1398,13 +1486,13 @@ function normalizeModelConfigForSave(config: ServerModelConfig): ServerModelConf
         ? {
               ...config.videoBillingConfiguration,
               modePrices: Object.fromEntries(
-                  Object.entries(config.videoBillingConfiguration.modePrices || {}).filter(([mode]) => supportedCapabilities.has(mode) && capabilities.includes(mode)),
+                  Object.entries(config.videoBillingConfiguration.modePrices || {}).filter(([mode]) => mode !== "audio-input" && supportedCapabilities.has(mode) && capabilities.includes(mode)),
               ) as VideoBillingConfiguration["modePrices"],
           }
         : config.videoBillingConfiguration;
     // 自定义模型配置只保留已勾选能力的键，避免残留未启用能力的模板。
     const customModelConfig = config.isCustomModel
-        ? Object.fromEntries(Object.entries(config.customModelConfig || {}).filter(([mode]) => supportedCapabilities.has(mode) && capabilities.includes(mode)))
+        ? Object.fromEntries(Object.entries(config.customModelConfig || {}).filter(([mode]) => mode !== "audio-input" && supportedCapabilities.has(mode) && capabilities.includes(mode)))
         : {};
     return {
         ...config,
@@ -1526,6 +1614,7 @@ const customTemplatePlaceholderOptions = [
     { label: "{{model}}", value: "{{model}}" },
     { label: "{{references}}", value: "{{references}}" },
     { label: "{{videoReferences}}", value: "{{videoReferences}}" },
+    { label: "{{audioReferences}}", value: "{{audioReferences}}" },
     { label: "{{size}}", value: "{{size}}" },
     { label: "{{resolution}}", value: "{{resolution}}" },
     { label: "{{seconds}}", value: "{{seconds}}" },

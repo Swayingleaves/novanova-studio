@@ -130,6 +130,9 @@ function PreviewDots({ color }: { color: string }) {
 
 function PreviewNodeShape({ node, theme }: { node: PreviewNode; theme: CanvasTheme }) {
     const label = nodeLabel(node);
+
+    if (node.kind === "audio") return <rect x={node.previewX} y={node.previewY} width={node.previewWidth} height={node.previewHeight} rx="6" fill={theme.node.panel} stroke={theme.node.stroke} />;
+
     const content = isTextNode(node)
         ? node.content.text
         : isStoryboardNode(node)

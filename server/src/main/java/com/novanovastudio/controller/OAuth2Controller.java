@@ -6,6 +6,7 @@ import com.novanovastudio.dto.UserDtos;
 import com.novanovastudio.security.oauth2.ThirdPartyOAuth2Provider;
 import com.novanovastudio.security.oauth2.ThirdPartyOAuth2ProviderRegistry;
 import com.novanovastudio.service.OAuth2LoginCodeService;
+import com.novanovastudio.service.OAuth2InvitationContextService;
 import com.novanovastudio.service.UserService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.WebSession;
 import reactor.core.publisher.Mono;
 
 /**
@@ -34,6 +36,9 @@ public class OAuth2Controller {
     /** OAuth2一次性登录码服务 */
     private final OAuth2LoginCodeService loginCodeService;
 
+    /** OAuth2邀请上下文服务 */
+    private final OAuth2InvitationContextService invitationContextService;
+
     /** 用户服务 */
     private final UserService userService;
 
@@ -48,6 +53,21 @@ public class OAuth2Controller {
                 .map(this::providerInfo)
                 .toList();
         return ApiResponse.ok(new OAuth2Dtos.ProviderListResponse(providers));
+    }
+
+    /**
+     * 验证邀请码并准备OAuth2授权跳转上下文。
+     *
+     * @param request 授权准备请求
+     * @param session OAuth2握手WebSession
+     * @return 已验证的授权入口路径
+     */
+    @PostMapping("/prepareAuthorization")
+    public Mono<ApiResponse<OAuth2Dtos.PrepareAuthorizationResponse>> prepareAuthorization(
+            @Valid @RequestBody OAuth2Dtos.PrepareAuthorizationRequest request,
+            WebSession session) {
+        return invitationContextService.prepareAuthorization(request.providerId(), request.invitationCode(), session)
+                .map(path -> ApiResponse.ok(new OAuth2Dtos.PrepareAuthorizationResponse(path)));
     }
 
     /**

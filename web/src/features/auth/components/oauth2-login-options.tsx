@@ -2,15 +2,18 @@
 
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { App, Button, Divider, Skeleton } from "antd";
 import { LogIn } from "lucide-react";
 
 import { storeOAuth2Redirect } from "@/features/auth/lib/oauth2-login";
-import { listOAuth2Providers, type OAuth2ProviderInfo } from "@/services/api/server";
+import { listOAuth2Providers, prepareOAuth2Authorization, type OAuth2ProviderInfo } from "@/services/api/server";
 
 type OAuth2LoginOptionsProps = {
     /** OAuth2登录成功后的站内跳转目标 */
     redirectPath?: string;
+    /** 首次第三方登录时使用的邀请码 */
+    invitationCode?: string;
 };
 
 const PROVIDER_ICON_PATHS: Record<string, string> = {
@@ -23,8 +26,9 @@ const PROVIDER_DISPLAY_ORDER: Record<string, number> = {
     linuxDo: 1,
 };
 
-export function OAuth2LoginOptions({ redirectPath }: OAuth2LoginOptionsProps) {
+export function OAuth2LoginOptions({ redirectPath, invitationCode }: OAuth2LoginOptionsProps) {
     const { message } = App.useApp();
+    const [preparingProviderId, setPreparingProviderId] = useState("");
     const providerQuery = useQuery({
         queryKey: ["oauth2Providers"],
         queryFn: listOAuth2Providers,
@@ -34,12 +38,19 @@ export function OAuth2LoginOptions({ redirectPath }: OAuth2LoginOptionsProps) {
         .sort((left, right) => (PROVIDER_DISPLAY_ORDER[left.providerId] ?? Number.MAX_SAFE_INTEGER)
             - (PROVIDER_DISPLAY_ORDER[right.providerId] ?? Number.MAX_SAFE_INTEGER));
 
-    const startLogin = (provider: OAuth2ProviderInfo) => {
+    const startLogin = async (provider: OAuth2ProviderInfo) => {
         if (!storeOAuth2Redirect(redirectPath)) {
             message.error("浏览器会话存储不可用，无法发起第三方登录");
             return;
         }
-        window.location.assign(provider.authorizationPath);
+        setPreparingProviderId(provider.providerId);
+        try {
+            const preparation = await prepareOAuth2Authorization(provider.providerId, invitationCode);
+            window.location.assign(preparation.authorizationPath);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "第三方授权准备失败");
+            setPreparingProviderId("");
+        }
     };
 
     if (providerQuery.isPending) {
@@ -64,7 +75,9 @@ export function OAuth2LoginOptions({ redirectPath }: OAuth2LoginOptionsProps) {
                             block
                             className={`h-11 min-w-0 border-[var(--studio-line)] bg-[var(--studio-panel-solid)] px-2 text-[var(--studio-text)] shadow-none hover:!border-[var(--studio-primary-line)] hover:!bg-[var(--studio-surface-hover)] hover:!text-[var(--studio-ink)] focus-visible:!outline-2 focus-visible:!outline-offset-2 focus-visible:!outline-[var(--studio-primary-line)] ${providers.length === 1 ? "col-span-2" : ""}`}
                             icon={providerIcon(provider)}
-                            onClick={() => startLogin(provider)}
+                            loading={preparingProviderId === provider.providerId}
+                            disabled={Boolean(preparingProviderId)}
+                            onClick={() => void startLogin(provider)}
                         >
                             <span className="truncate">{provider.displayName}</span>
                         </Button>
@@ -80,7 +93,7 @@ export function OAuth2LoginOptions({ redirectPath }: OAuth2LoginOptionsProps) {
 function OAuth2LoginSection({ children }: { children: ReactNode }) {
     return (
         <div className="mt-5">
-            <Divider plain className="!my-4 !text-xs !text-[var(--studio-muted)]">或使用以下方式登录</Divider>
+            <Divider plain className="!my-4 !text-xs !text-[var(--studio-muted)]">或使用第三方账号继续</Divider>
             {children}
         </div>
     );

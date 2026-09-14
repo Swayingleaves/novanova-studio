@@ -15,12 +15,16 @@ import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.CreditDtos;
 import com.novanovastudio.dto.UserDtos;
+import com.novanovastudio.entity.PasswordResetToken;
 import com.novanovastudio.entity.User;
+import com.novanovastudio.entity.EmailVerificationCode;
 import com.novanovastudio.repository.UserRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.PasswordLoginLockService;
 import com.novanovastudio.security.TokenService;
 import com.novanovastudio.task.AiTaskEventPublisher;
+import jakarta.mail.Session;
+import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -34,7 +38,9 @@ import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.Map;
+import java.util.Properties;
 import java.util.stream.Stream;
 
 /**
@@ -44,6 +50,181 @@ import java.util.stream.Stream;
  * @date     2026-07-16 00:00
  */
 class UserServiceTest {
+
+    /**
+     * 有效邀请码注册应记录邀请关系并在同一注册流程发放邀请奖励。
+     */
+    @Test
+    @DisplayName("有效邀请码完成邮箱注册并发放邀请奖励")
+    void shouldRegisterWithInvitationReward() {
+        TestContext context = testContext();
+        EmailVerificationCode emailCode = new EmailVerificationCode();
+        emailCode.setId(3L);
+        emailCode.setCodeHash("code-hash");
+        User createdUser = normalUser(8L);
+        createdUser.setCreditBalance(100);
+        when(context.invitationService.resolveInviterUserId("INVITATIONCODE01")).thenReturn(Mono.just(5L));
+        when(context.userRepository.findByEmail("new@example.com")).thenReturn(Mono.empty());
+        when(context.userRepository.latestValidEmailCode("new@example.com", "register")).thenReturn(Mono.just(emailCode));
+        when(context.passwordEncoder.matches("123456", "code-hash")).thenReturn(true);
+        when(context.passwordEncoder.encode("password123")).thenReturn("password-hash");
+        when(context.invitationService.generateInvitationCode()).thenReturn("NEWINVITATION001");
+        when(context.userRepository.registerUserWithEmailCode(argThat(user -> user.getInvitedByUserId().equals(5L)
+                && "NEWINVITATION001".equals(user.getInvitationCode())), eq(3L))).thenReturn(Mono.just(8L));
+        when(context.creditService.initializeAccount(8L)).thenReturn(Mono.empty());
+        when(context.creditService.grantInvitationReward(5L, 8L)).thenReturn(Mono.empty());
+        when(context.userRepository.findById(8L)).thenReturn(Mono.just(createdUser));
+        when(context.tokenService.sign(8L, UserService.ROLE_USER, 0))
+                .thenReturn(new TokenService.SignedToken("token", OffsetDateTime.now().plusHours(1)));
+
+        StepVerifier.create(context.service.register(new UserDtos.RegisterRequest(
+                        "new@example.com", "123456", "password123", "新用户", "INVITATIONCODE01")))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        verify(context.creditService).grantInvitationReward(5L, 8L);
+    }
+
+    /**
+     * 无效邀请码应在读取验证码和创建用户前阻止邮箱注册。
+     */
+    @Test
+    @DisplayName("无效邀请码阻止邮箱注册")
+    void shouldRejectInvalidInvitationCodeBeforeRegistration() {
+        TestContext context = testContext();
+        when(context.invitationService.resolveInviterUserId("INVALIDCODE"))
+                .thenReturn(Mono.error(new BusinessException(com.novanovastudio.common.ErrorCode.BUSINESS_ERROR, "邀请码无效")));
+
+        StepVerifier.create(context.service.register(new UserDtos.RegisterRequest(
+                        "new@example.com", "123456", "password123", "新用户", "INVALIDCODE")))
+                .expectError(BusinessException.class)
+                .verify();
+
+        verify(context.userRepository, never()).findByEmail(any());
+    }
+
+    /**
+     * 验证正常用户请求找回密码时保存令牌并发送邮件。
+     */
+    @Test
+    @DisplayName("正常用户可接收密码重置邮件")
+    void shouldSendPasswordResetEmailForNormalUser() {
+        TestContext context = testContext();
+        User user = normalUser(8L);
+        context.properties.getApp().setFrontendBaseUrl("https://www.novanovastudio.cn");
+        context.properties.getEmail().setFrom("noreply@novanovastudio.cn");
+        when(context.userRepository.findByEmail("user@example.com")).thenReturn(Mono.just(user));
+        when(context.userRepository.upsertPasswordResetToken(argThat(token -> token.getUserId().equals(8L)
+                && token.getTokenHash().length() == 64))).thenReturn(Mono.empty());
+        when(context.mailSender.createMimeMessage()).thenReturn(new MimeMessage(Session.getInstance(new Properties())));
+
+        StepVerifier.create(context.service.requestPasswordReset(new UserDtos.RequestPasswordResetRequest("user@example.com")))
+                .verifyComplete();
+
+        verify(context.mailSender).send(any(MimeMessage.class));
+    }
+
+    /**
+     * 验证邮件发送失败时立即使本次令牌失效并返回明确错误。
+     */
+    @Test
+    @DisplayName("密码重置邮件发送失败时令牌失效")
+    void shouldInvalidatePasswordResetTokenWhenEmailFails() {
+        TestContext context = testContext();
+        User user = normalUser(8L);
+        when(context.userRepository.findByEmail("user@example.com")).thenReturn(Mono.just(user));
+        when(context.userRepository.upsertPasswordResetToken(any())).thenReturn(Mono.empty());
+        when(context.mailSender.createMimeMessage()).thenThrow(new IllegalStateException("SMTP不可用"));
+        when(context.userRepository.invalidatePasswordResetToken(any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(context.service.requestPasswordReset(new UserDtos.RequestPasswordResetRequest("user@example.com")))
+                .expectErrorMatches(error -> error instanceof BusinessException && "发送密码重置邮件失败".equals(error.getMessage()))
+                .verify();
+
+        verify(context.userRepository).invalidatePasswordResetToken(any());
+    }
+
+    /**
+     * 验证前端地址缺失或非法时不会查询账号或创建令牌。
+     */
+    @Test
+    @DisplayName("前端地址非法时拒绝生成重置链接")
+    void shouldRejectInvalidFrontendBaseUrl() {
+        TestContext context = testContext();
+        context.properties.getApp().setFrontendBaseUrl("ftp://example.com");
+
+        StepVerifier.create(context.service.requestPasswordReset(new UserDtos.RequestPasswordResetRequest("user@example.com")))
+                .expectErrorMatches(error -> error instanceof BusinessException && error.getMessage().contains("FRONTEND_BASE_URL"))
+                .verify();
+
+        verify(context.userRepository, never()).findByEmail(any());
+    }
+
+    /**
+     * 验证未知或禁用用户不会得到可用重置令牌。
+     */
+    @Test
+    @DisplayName("未知或禁用邮箱保持统一重置响应")
+    void shouldKeepPasswordResetResponseForUnknownOrDisabledUser() {
+        TestContext unknownContext = testContext();
+        when(unknownContext.userRepository.findByEmail("unknown@example.com")).thenReturn(Mono.empty());
+
+        StepVerifier.create(unknownContext.service.requestPasswordReset(new UserDtos.RequestPasswordResetRequest("unknown@example.com")))
+                .verifyComplete();
+
+        verify(unknownContext.userRepository, never()).upsertPasswordResetToken(any());
+
+        TestContext disabledContext = testContext();
+        User disabledUser = normalUser(9L);
+        disabledUser.setStatus(UserService.STATUS_DISABLED);
+        when(disabledContext.userRepository.findByEmail("user@example.com")).thenReturn(Mono.just(disabledUser));
+
+        StepVerifier.create(disabledContext.service.requestPasswordReset(new UserDtos.RequestPasswordResetRequest("user@example.com")))
+                .verifyComplete();
+
+        verify(disabledContext.userRepository, never()).upsertPasswordResetToken(any());
+    }
+
+    /**
+     * 验证有效重置令牌更新密码、递增令牌版本并清除登录锁定。
+     */
+    @Test
+    @DisplayName("有效重置令牌修改密码并使旧令牌失效")
+    void shouldResetPasswordAndIncrementTokenVersion() {
+        TestContext context = testContext();
+        User user = normalUser(8L);
+        PasswordResetToken resetToken = new PasswordResetToken();
+        resetToken.setUserId(8L);
+        when(context.userRepository.findActivePasswordResetToken(any())).thenReturn(Mono.just(resetToken));
+        when(context.userRepository.findById(8L)).thenReturn(Mono.just(user));
+        when(context.passwordLoginLockService.clear(8L)).thenReturn(Mono.empty());
+        when(context.passwordEncoder.encode("new-password")).thenReturn("encoded-new-password");
+        when(context.userRepository.consumePasswordResetToken(any())).thenReturn(Mono.just(8L));
+        when(context.userRepository.updatePasswordAfterReset(8L, "encoded-new-password")).thenReturn(Mono.empty());
+
+        StepVerifier.create(context.service.resetPassword(new UserDtos.ResetPasswordRequest("reset-token", "new-password")))
+                .verifyComplete();
+
+        verify(context.passwordLoginLockService).clear(8L);
+        verify(context.userRepository).updatePasswordAfterReset(8L, "encoded-new-password");
+    }
+
+    /**
+     * 验证失效重置令牌不会修改密码。
+     */
+    @Test
+    @DisplayName("失效重置令牌拒绝修改密码")
+    void shouldRejectExpiredPasswordResetToken() {
+        TestContext context = testContext();
+        when(context.userRepository.findActivePasswordResetToken(any())).thenReturn(Mono.empty());
+
+        StepVerifier.create(context.service.resetPassword(new UserDtos.ResetPasswordRequest("expired-token", "new-password")))
+                .expectErrorMatches(error -> error instanceof BusinessException && "重置链接已失效或已使用".equals(error.getMessage()))
+                .verify();
+
+        verify(context.passwordEncoder, never()).encode(any());
+        verify(context.userRepository, never()).updatePasswordAfterReset(any(), any());
+    }
 
     /**
      * 验证用户资料准确反映欢迎引导已读状态。
@@ -281,7 +462,7 @@ class UserServiceTest {
         when(context.passwordEncoder.matches("correct-password", "encoded-password")).thenReturn(true);
         when(context.passwordLoginLockService.clear(8L)).thenReturn(Mono.empty());
         when(context.userRepository.updateLastLoginAt(8L)).thenReturn(Mono.empty());
-        when(context.tokenService.sign(8L, UserService.ROLE_USER)).thenReturn(new TokenService.SignedToken("token", OffsetDateTime.now().plusHours(1)));
+        when(context.tokenService.sign(8L, UserService.ROLE_USER, 0)).thenReturn(new TokenService.SignedToken("token", OffsetDateTime.now().plusHours(1)));
 
         StepVerifier.create(context.service.login(new com.novanovastudio.dto.UserDtos.LoginRequest("user@example.com", "correct-password")))
                 .expectNextCount(1)
@@ -321,7 +502,7 @@ class UserServiceTest {
         when(context.passwordLoginLockService.lockedUntilByUserIds(java.util.List.of(8L))).thenReturn(Mono.just(Map.of(8L, lockedUntil)));
 
         StepVerifier.create(context.service.listUsers(1, 20, null, 8L, null, null, null, null))
-                .assertNext(response -> assertTrue(lockedUntil.toString().equals(response.users().getFirst().passwordLockedUntil())))
+                .assertNext(response -> assertTrue(DateTimeFormatter.ISO_OFFSET_DATE_TIME.format(lockedUntil).equals(response.users().getFirst().passwordLockedUntil())))
                 .verifyComplete();
 
         verify(context.userRepository).listUsers(1, 20, null, 8L, null, null, null, null);
@@ -339,13 +520,18 @@ class UserServiceTest {
         TokenService tokenService = mock(TokenService.class);
         CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
         PasswordLoginLockService passwordLoginLockService = mock(PasswordLoginLockService.class);
-        NovanovaProperties properties = mock(NovanovaProperties.class);
+        NovanovaProperties properties = new NovanovaProperties();
+        properties.getApp().setFrontendBaseUrl("https://www.novanovastudio.cn");
+        properties.getEmail().setFrom("noreply@novanovastudio.cn");
         JavaMailSender mailSender = mock(JavaMailSender.class);
         CreditService creditService = mock(CreditService.class);
+        InvitationService invitationService = mock(InvitationService.class);
         AiTaskEventPublisher eventPublisher = mock(AiTaskEventPublisher.class);
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
-        UserService service = new UserService(userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, properties, mailSender, creditService, eventPublisher, transactionalOperator);
-        return new TestContext(service, userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, creditService, eventPublisher);
+        when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        UserService service = new UserService(userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, properties, mailSender, creditService, invitationService, eventPublisher, transactionalOperator);
+        return new TestContext(service, userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, properties, mailSender, creditService, invitationService, eventPublisher);
     }
 
     /**
@@ -362,6 +548,7 @@ class UserServiceTest {
         user.setNickname("用户");
         user.setRole(UserService.ROLE_USER);
         user.setStatus(UserService.STATUS_NORMAL);
+        user.setTokenVersion(0);
         return user;
     }
 
@@ -378,7 +565,10 @@ class UserServiceTest {
                                TokenService tokenService,
                                CurrentUserProvider currentUserProvider,
                                PasswordLoginLockService passwordLoginLockService,
+                               NovanovaProperties properties,
+                               JavaMailSender mailSender,
                                CreditService creditService,
+                               InvitationService invitationService,
                                AiTaskEventPublisher eventPublisher) {
     }
 }

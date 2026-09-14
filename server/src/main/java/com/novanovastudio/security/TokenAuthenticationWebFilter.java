@@ -9,6 +9,7 @@ import com.novanovastudio.logging.MappedDiagnosticContext;
 import com.novanovastudio.repository.UserRepository;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
@@ -45,6 +46,8 @@ public class TokenAuthenticationWebFilter implements WebFilter {
             PathPatternParser.defaultInstance.parse("/api/v1/auth/sendEmailCode"),
             PathPatternParser.defaultInstance.parse("/api/v1/auth/register"),
             PathPatternParser.defaultInstance.parse("/api/v1/auth/login"),
+            PathPatternParser.defaultInstance.parse("/api/v1/auth/requestPasswordReset"),
+            PathPatternParser.defaultInstance.parse("/api/v1/auth/resetPassword"),
             PathPatternParser.defaultInstance.parse("/api/v1/auth/oauth/**"),
             PathPatternParser.defaultInstance.parse("/api/v1/ai/model/listModels"),
             PathPatternParser.defaultInstance.parse("/api/v1/config/getRuntimeConfig"),
@@ -87,7 +90,7 @@ public class TokenAuthenticationWebFilter implements WebFilter {
             TokenService.TokenClaims claims = tokenService.parse(token);
             return userRepository.findById(claims.userId())
                     .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, "用户不存在")))
-                    .flatMap(user -> authenticateUser(exchange, chain, user))
+                    .flatMap(user -> authenticateUser(exchange, chain, user, claims))
                     .onErrorResume(BusinessException.class, exception -> writeAuthError(exchange, exception));
         } catch (BusinessException exception) {
             return writeAuthError(exchange, exception);
@@ -100,12 +103,16 @@ public class TokenAuthenticationWebFilter implements WebFilter {
      * @param exchange ServerWebExchange 当前请求交换对象
      * @param chain WebFilterChain 过滤器链
      * @param user User 用户实体
+     * @param claims TokenClaims 登录令牌声明
      * @return Mono<Void> 过滤执行结果
      */
-    private Mono<Void> authenticateUser(ServerWebExchange exchange, WebFilterChain chain, User user) {
+    private Mono<Void> authenticateUser(ServerWebExchange exchange, WebFilterChain chain, User user, TokenService.TokenClaims claims) {
         // 确认账号仍处于启用状态，再把当前用户写入Reactor上下文。
         if (user.getStatus() == null || user.getStatus() != 1) {
             return Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, "账号已被禁用"));
+        }
+        if (!Objects.equals(claims.tokenVersion(), user.getTokenVersion())) {
+            return Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, "登录已失效，请重新登录"));
         }
         CurrentUser currentUser = new CurrentUser(user.getId(), user.getEmail(), user.getRole(), user.getStatus());
         return chain.filter(exchange).contextWrite(context -> MappedDiagnosticContext.put(

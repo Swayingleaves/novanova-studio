@@ -72,19 +72,23 @@ public class OAuth2IdentityRepository {
      * 按可信邮箱解析本地用户，不存在时创建普通用户。
      *
      * @param identity ThirdPartyUserIdentity 第三方用户身份
+     * @param invitationCode 新用户自己的邀请码
+     * @param inviterUserId 可选邀请人用户ID
      * @return Mono<ResolvedOAuthUser> 本地用户及创建状态
      */
-    public Mono<ResolvedOAuthUser> resolveUserByTrustedEmail(ThirdPartyUserIdentity identity) {
+    public Mono<ResolvedOAuthUser> resolveUserByTrustedEmail(ThirdPartyUserIdentity identity, String invitationCode, Long inviterUserId) {
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                        INSERT INTO users(username, password, email, nickname, avatar, role, status, registered_at)
-                        VALUES (:username, '', :email, :nickname, :avatar, 'user', 1, CURRENT_TIMESTAMP)
+                        INSERT INTO users(username, password, email, nickname, avatar, role, status, invitation_code, invited_by_user_id, registered_at)
+                        VALUES (:username, '', :email, :nickname, :avatar, 'user', 1, :invitationCode, :inviterUserId, CURRENT_TIMESTAMP)
                         ON CONFLICT (email) DO UPDATE SET email = users.email
                         RETURNING users.*, 0::INTEGER AS credit_balance, (xmax = 0) AS created
                         """)
                 .bind("username", buildLocalUsername(identity))
                 .bind("email", identity.email())
-                .bind("nickname", identity.nickname());
-        return R2dbcBindings.bindNullable(spec, "avatar", nullableText(identity.avatar()), String.class)
+                .bind("nickname", identity.nickname())
+                .bind("invitationCode", invitationCode);
+        spec = R2dbcBindings.bindNullable(spec, "avatar", nullableText(identity.avatar()), String.class);
+        return R2dbcBindings.bindNullable(spec, "inviterUserId", inviterUserId, Long.class)
                 .map((row, metadata) -> new ResolvedOAuthUser(RowMappers.user(row), Boolean.TRUE.equals(row.get("created", Boolean.class))))
                 .one();
     }

@@ -39,6 +39,7 @@ openssl rand -base64 48
 | 配置项 | 说明 |
 | --- | --- |
 | `APP_SECRET_KEY` | 必填，上一步生成的随机值。 |
+| `FRONTEND_BASE_URL` | 必填，浏览器公开访问的前端根地址，例如 `https://www.example.com`；仅允许 HTTP(S)，不能包含路径、查询参数或片段。 |
 | `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | 初始管理员账号，**部署到公网前必须修改默认密码**。 |
 | `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | PostgreSQL 凭据，部署到公网前必须修改默认密码。 |
 | `REDIS_PASSWORD` | Redis 密码，公网环境建议设置。 |

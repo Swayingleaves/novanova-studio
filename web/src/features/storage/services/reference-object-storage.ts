@@ -3,6 +3,7 @@
 import { getImageBlob } from "@/features/storage/services/image-storage";
 import { uploadObjectToStorage, uploadRemoteObjectToStorage } from "@/features/storage/services/object-storage";
 import type { ReferenceImage } from "@/features/generation/types/image";
+import type { ReferenceAudio } from "@/features/generation/types/media";
 
 export function findMissingReferenceObjectStorageImages(references: ReferenceImage[]) {
     return references.filter((image) => !image.objectStorage?.url);
@@ -35,6 +36,27 @@ export async function uploadMissingReferenceImagesToObjectStorage(references: Re
         }),
     );
     return references.map((image) => uploadedById.get(image.id) || image);
+}
+
+/** 查找未上传到对象存储的参考音频。 */
+export function findMissingReferenceObjectStorageAudios(references: ReferenceAudio[]) {
+    return references.filter((audio) => !/^https?:\/\//i.test(audio.objectStorage?.url || ""));
+}
+
+/** 将缺少对象存储地址的参考音频转存，并保留裁剪区间。 */
+export async function uploadMissingReferenceAudiosToObjectStorage(references: ReferenceAudio[]) {
+    const missing = findMissingReferenceObjectStorageAudios(references);
+    const uploadedById = new Map<string, ReferenceAudio>();
+    await Promise.all(
+        missing.map(async (audio, index) => {
+            if (!audio.storageKey || !audio.url) {
+                throw new Error(`${audio.name || `参考音频${index + 1}`}缺少已上传媒体，无法转存到云储存`);
+            }
+            const objectStorage = await uploadRemoteObjectToStorage({ storageKey: audio.storageKey, sourceUrl: audio.url, kind: "audio", mimeType: audio.type });
+            uploadedById.set(audio.id, { ...audio, objectStorage });
+        }),
+    );
+    return references.map((audio) => uploadedById.get(audio.id) || audio);
 }
 
 function resolveRemoteReferenceSource(image: ReferenceImage) {

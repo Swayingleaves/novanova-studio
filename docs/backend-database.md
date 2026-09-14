@@ -1,5 +1,52 @@
 # 后端数据库说明（已实现）
 
+## 密码重置
+
+### `users`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `token_version` | `INTEGER` | 登录令牌版本；密码重置成功后递增，令牌版本不一致的既有登录令牌将失效。 |
+
+### `password_reset_tokens`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `user_id` | `BIGINT` | 用户 ID，同时为主键，每名用户仅保留最新一条密码重置令牌。 |
+| `token_hash` | `VARCHAR(64)` | 一次性重置令牌的 SHA-256 哈希，唯一且不保存明文。 |
+| `expires_at` | `TIMESTAMPTZ` | 重置链接过期时间。 |
+| `used_at` | `TIMESTAMPTZ` | 链接使用或因邮件发送失败而失效的时间。 |
+| `created_at` | `TIMESTAMPTZ` | 最新重置链接创建时间。 |
+| `updated_at` | `TIMESTAMPTZ` | 记录更新时间。 |
+
+---
+
+## 邀请注册奖励
+
+### `users`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `invitation_code` | `VARCHAR(16)` | 用户唯一邀请码，创建用户时由服务端安全随机生成，长期有效并建立唯一约束。 |
+| `invited_by_user_id` | `BIGINT` | 邀请人用户 ID，关联 `users.id`；无邀请注册时为空。 |
+
+### `platform_credit_settings`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `invitation_reward_credits` | `INTEGER` | 每名受邀请新用户注册后发给邀请人的积分，默认 `0` 且不得小于 `0`。 |
+
+### `user_credit_transactions`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `transaction_type` | `VARCHAR(30)` | 新增 `invitation_reward` 邀请奖励类型。 |
+| `invited_user_id` | `BIGINT` | 邀请奖励关联的被邀请新用户 ID；通过部分唯一索引保证每名新用户最多产生一条邀请奖励流水。 |
+
+配置为 `0` 时仅保留 `users.invited_by_user_id` 邀请关系，不修改余额，也不创建零金额积分流水。
+
+---
+
 ## 1、设计目标
 
 - 目标：支持图像、视频模型按全站同一模型配置同时执行请求数量，并保证超额任务顺序排队。
@@ -76,7 +123,7 @@ flowchart TB
 | `display_name` | `VARCHAR(255)` | 模型展示名称，为空或与真实模型名相同时展示真实模型名，仅影响展示不影响调用。 |
 | `model_icon` | `VARCHAR(64)` | 模型展示图标标识，为空时按模型名或渠道自动匹配，仅影响展示不影响调用。 |
 | `is_custom_model` | `BOOLEAN` | 是否启用自定义模型调用，独立于渠道调用格式，仅图片/视频模型支持，默认 `false`。 |
-| `custom_model_config` | `JSONB` | 自定义模型配置，按图片能力（`text-to-image`、`image-to-image`）或视频模式（`text-to-video`、`image-to-video`、`reference-to-video`）分组；每组含请求路径（以 `/` 开头，与渠道 Base URL 拼接，支持 `{{taskId}}` 占位符）、请求方法（`GET`/`POST`，默认 POST）、请求模型名称、请求示例 JSON 模板（支持 `{{prompt}}`、`{{model}}`、`{{references}}`、`{{size}}` 等占位符）、AI 构造请求体提示词（可选，配置后由 Agent 按提示词与本次参数生成请求体，替代模板拼接）、响应示例、结果路径（如 `data.image.url`）；视频模式额外含查询路径（支持 `{{taskId}}`）、查询方法、查询请求示例、AI 构造查询请求体提示词、查询响应示例、查询结果路径，用于异步任务轮询，轮询间隔统一使用 `AI_TASK_POLLING_INTERVAL_SECONDS` 配置。 |
+| `custom_model_config` | `JSONB` | 自定义模型配置，按图片能力（`text-to-image`、`image-to-image`）或视频模式（`text-to-video`、`image-to-video`、`reference-to-video`）分组；每组含请求路径（以 `/` 开头，与渠道 Base URL 拼接，支持 `{{taskId}}` 占位符）、请求方法（`GET`/`POST`，默认 POST）、请求模型名称、请求示例 JSON 模板（支持 `{{prompt}}`、`{{model}}`、`{{references}}`、`{{videoReferences}}`、`{{audioReferences}}`、`{{size}}` 等占位符）、AI 构造请求体提示词（可选，配置后由 Agent 按提示词与本次参数生成请求体，替代模板拼接）、响应示例、结果路径（如 `data.image.url`）；视频模式额外含查询路径（支持 `{{taskId}}`）、查询方法、查询请求示例、AI 构造查询请求体提示词、查询响应示例、查询结果路径，用于异步任务轮询，轮询间隔统一使用 `AI_TASK_POLLING_INTERVAL_SECONDS` 配置。 |
 
 ### `ai_generation_tasks`
 
@@ -398,3 +445,18 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 ## 8、附录说明
 
 - 文档状态：已实现。
+
+
+## 画布音频与模型输入能力
+
+本次复用现有字段，不新增表、字段或 Flyway 迁移。
+
+| 存储位置 | 约定 |
+| --- | --- |
+| `platform_ai_model_configs.capabilities` | JSON 数组可包含 `audio-input`，表示音频输入能力；默认未开启，管理员可为任意视频模型配置，但必须同时包含 `reference-to-video`。 |
+| 视频分档计费配置 | `audio-input` 不是生成模式，不作为价格映射的键；继续按全能参考的视频价格计算积分。 |
+| 媒体记录 | 音频 `kind` 为 `audio`、存储标识前缀为 `audio:`；保存 MIME 类型、实际字节数、上传时解析的毫秒时长及对象存储信息。 |
+| 画布文档 JSON | `audio` 节点保存媒体信息与 128 段波形采样，不保存播放进度；视频节点的 `audioReferences` 保存音频引用。 |
+| AI 任务请求 JSON | `audioReferences` 保存有序音频引用，贯通任务快照、恢复和重试。 |
+
+参考音频在扣费前校验归属及存储元数据：MP3/WAV，单文件不超过 15 MB，最多 3 段，每段 2～15 秒，合计不超过 15 秒。普通画布播放只受文件大小约束。

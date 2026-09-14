@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createImageNode, createTextNode, createVideoNode } from "../constants.ts";
+import { createAudioNode, createImageNode, createTextNode, createVideoNode } from "../constants.ts";
 import { createCanvasConnection } from "../domain/canvas-page-node.ts";
 import { buildNodeGenerationContext, hasNodeGenerationInputs, resolveNodeGenerationPrompt } from "./canvas-node-generation.ts";
 
@@ -38,10 +38,7 @@ test("多个上游文本逐条去重并保持原有顺序", () => {
     const target = createImageNode({ id: "image-target", position: { x: 800, y: 0 } });
     const connections = [createCanvasConnection("connection-1", firstSource.id, target.id), createCanvasConnection("connection-2", secondSource.id, target.id)];
 
-    assert.equal(
-        resolveNodeGenerationPrompt(target.id, [firstSource, secondSource, target], connections, "补充雨景\n\n夜晚的古镇街道"),
-        "补充雨景\n\n夜晚的古镇街道\n\n细雨中的石板路",
-    );
+    assert.equal(resolveNodeGenerationPrompt(target.id, [firstSource, secondSource, target], connections, "补充雨景\n\n夜晚的古镇街道"), "补充雨景\n\n夜晚的古镇街道\n\n细雨中的石板路");
 });
 
 test("上游图片和视频仍保留在生成上下文引用中", () => {
@@ -58,6 +55,24 @@ test("上游图片和视频仍保留在生成上下文引用中", () => {
     assert.equal(context.referenceImages.length, 1);
     assert.equal(context.referenceVideos.length, 1);
     assert.equal(hasNodeGenerationInputs(target.id, [image, video, target], connections), true);
+});
+
+test("视频生成只读取直接连接的裁剪音频节点", () => {
+    const originalAudio = createAudioNode({ id: "audio-original", position: { x: 0, y: 0 } });
+    originalAudio.content.source = "https://example.com/original.mp3";
+    originalAudio.content.storageKey = "audio:original";
+    originalAudio.content.durationMilliseconds = 11000;
+    const clippedAudio = createAudioNode({ id: "audio-clipped", position: { x: 300, y: 0 } });
+    clippedAudio.content = { ...originalAudio.content, source: "https://example.com/original.mp3", trimStartMilliseconds: 5000, trimEndMilliseconds: 11000 };
+    const target = createVideoNode({ id: "video-target", position: { x: 600, y: 0 } });
+    const connections = [createCanvasConnection("audio-chain", originalAudio.id, clippedAudio.id), createCanvasConnection("audio-target", clippedAudio.id, target.id)];
+
+    const context = buildNodeGenerationContext(target.id, [originalAudio, clippedAudio, target], connections, "跟随音频生成视频");
+
+    assert.deepEqual(
+        context.referenceAudios.map((audio) => ({ id: audio.id, trimStartMs: audio.trimStartMs, trimEndMs: audio.trimEndMs })),
+        [{ id: clippedAudio.id, trimStartMs: 5000, trimEndMs: 11000 }],
+    );
 });
 
 test("上游图片只作为引用，不继承图片节点历史提示词", () => {

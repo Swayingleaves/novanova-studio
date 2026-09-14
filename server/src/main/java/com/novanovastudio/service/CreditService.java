@@ -3,6 +3,7 @@ package com.novanovastudio.service;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.CreditDtos;
+import com.novanovastudio.dto.InvitationDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.repository.CreditRepository;
 import com.novanovastudio.security.CurrentUserProvider;
@@ -14,6 +15,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;
@@ -26,6 +28,7 @@ import reactor.core.publisher.Mono;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class CreditService {
 
     /** 积分统计业务时区 */
@@ -48,6 +51,9 @@ public class CreditService {
 
     /** 管理员调整流水类型 */
     public static final String TRANSACTION_ADMIN_ADJUSTMENT = "admin_adjustment";
+
+    /** 邀请注册奖励流水类型 */
+    public static final String TRANSACTION_INVITATION_REWARD = "invitation_reward";
 
     /** 积分仓储 */
     private final CreditRepository creditRepository;
@@ -82,6 +88,28 @@ public class CreditService {
     }
 
     /**
+     * 查询邀请奖励设置。
+     *
+     * @return 邀请奖励设置
+     */
+    public Mono<InvitationDtos.InvitationRewardSettingsResponse> getInvitationRewardSettings() {
+        return creditRepository.getInvitationRewardCredits()
+                .map(InvitationDtos.InvitationRewardSettingsResponse::new);
+    }
+
+    /**
+     * 独立更新邀请奖励设置。
+     *
+     * @param request 邀请奖励设置请求
+     * @return 保存后的邀请奖励设置
+     */
+    public Mono<InvitationDtos.InvitationRewardSettingsResponse> updateInvitationRewardSettings(
+            InvitationDtos.UpdateInvitationRewardSettingsRequest request) {
+        return creditRepository.updateInvitationRewardCredits(request.invitationRewardCredits())
+                .thenReturn(new InvitationDtos.InvitationRewardSettingsResponse(request.invitationRewardCredits()));
+    }
+
+    /**
      * 为新用户创建积分账户并记录初始发放流水。
      *
      * @param userId Long 新用户ID
@@ -93,6 +121,33 @@ public class CreditService {
                         .then(initialCredits == 0
                                 ? Mono.empty()
                                 : creditRepository.createTransaction(userId, TRANSACTION_INITIAL_GRANT, null, initialCredits, initialCredits, "新用户初始发放")));
+    }
+
+    /**
+     * 为邀请人发放新用户注册奖励。
+     * <p>
+     * 奖励配置为0时不修改余额、不创建流水；正数奖励由被邀请用户唯一索引保证最多发放一次。
+     *
+     * @param inviterUserId 邀请人用户ID
+     * @param invitedUserId 被邀请新用户ID
+     * @return 操作完成信号
+     */
+    public Mono<Void> grantInvitationReward(Long inviterUserId, Long invitedUserId) {
+        return creditRepository.getInvitationRewardCredits()
+                .flatMap(rewardCredits -> {
+                    if (rewardCredits == 0) {
+                        return Mono.empty();
+                    }
+                    return creditRepository.claimInvitationRewardTransaction(
+                                    inviterUserId, invitedUserId, rewardCredits, "邀请新用户注册奖励")
+                            .flatMap(transactionId -> creditRepository.changeBalance(inviterUserId, rewardCredits)
+                                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邀请人积分账户不存在")))
+                                    .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)
+                                            .doOnSuccess(ignored -> log.info("邀请注册奖励已发放: inviterUserId={}, invitedUserId={}, credits={}, balanceAfter={}",
+                                                    inviterUserId, invitedUserId, rewardCredits, balance))))
+                            .then();
+                })
+                .as(transactionalOperator::transactional);
     }
 
     /**
@@ -237,7 +292,7 @@ public class CreditService {
      * @param startDate LocalDate 筛选起始日期
      * @param endDate LocalDate 筛选结束日期
      * @param direction String 变动方向：all 全部 / add 增加 / spend 消耗，可为空默认全部
-     * @param source String 来源筛选：image/video/task_refund/card_redeem/admin_adjustment/initial_grant，可为空
+     * @param source String 来源筛选：image/video/task_refund/card_redeem/admin_adjustment/initial_grant/invitation_reward，可为空
      * @param page int 页码
      * @param pageSize int 每页数量
      * @return Mono<UserCreditTransactionListResponse> 积分明细
@@ -257,7 +312,7 @@ public class CreditService {
                                 .map(item -> new CreditDtos.UserCreditTransactionItem(item.id(), item.transactionType(), item.direction(),
                                         item.generationType(),
                                         resolveModelDisplayName(result.getT1(), item.generationType(), item.model()),
-                                        item.generationSource(), item.changeAmount(), item.reason(), item.balanceAfter(), item.createdAt()))
+                                        item.generationSource(), item.changeAmount(), item.reason(), item.balanceAfter(), item.invitedUserId(), item.createdAt()))
                                 .toList();
                         return new CreditDtos.UserCreditTransactionListResponse(transactions, result.getT3());
                     });
@@ -349,7 +404,7 @@ public class CreditService {
         if (direction != null && !List.of("all", "add", "spend").contains(direction)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "积分方向仅支持all、add或spend");
         }
-        if (source != null && !List.of("image", "video", "task_refund", "card_redeem", "admin_adjustment", "initial_grant").contains(source)) {
+        if (source != null && !List.of("image", "video", "task_refund", "card_redeem", "admin_adjustment", "initial_grant", "invitation_reward").contains(source)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "积分来源筛选不合法");
         }
         OffsetDateTime startAt = startDate.atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime();

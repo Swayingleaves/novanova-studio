@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { defaultConfig } from "@/features/settings/stores/use-config-store";
+import { configFromModelConfigs, normalizeServerModelConfig, defaultConfig } from "@/features/settings/stores/use-config-store";
 import { availableVideoResolutions, quoteVideoGeneration, videoGenerationReferenceIssue, videoModelSupportsMode } from "./video-billing";
 
 function configFor(billingUnit: "generation" | "second" = "generation") {
@@ -91,3 +91,29 @@ function assertQuoteCredits(quote: ReturnType<typeof quoteVideoGeneration>, cred
     assert.equal(quote.available, true);
     if (quote.available) assert.equal(quote.credits, credits);
 }
+
+
+test("音频输入能力不新增计费模式，切换能力或模式会阻止提交", () => {
+    const config = configFor();
+    config.modelCapabilities = [{ model: "video-model", capabilities: ["reference-to-video", "audio-input"] }];
+    const input = { config, model: "video-model", mode: "reference-to-video" as const, resolution: "720p", seconds: 4, audioReferenceCount: 1 };
+    assertQuoteCredits(quoteVideoGeneration(input), 20);
+    assert.deepEqual(quoteVideoGeneration({ ...input, mode: "text-to-video" }), { available: false, reason: "音频输入仅支持全能参考模式" });
+    config.modelCapabilities[0].capabilities = ["reference-to-video"];
+    assert.deepEqual(quoteVideoGeneration(input), { available: false, reason: "当前模型未开启音频输入能力" });
+    assert.equal(input.audioReferenceCount, 1);
+});
+
+
+test("服务端音频能力下发到画布配置时保留能力，价格维度不变", () => {
+    const serverConfig = normalizeServerModelConfig({
+        id: "model-config", channelId: "channel", modelName: "MiniMax-H3", modelType: "video", capabilities: ["reference-to-video", "audio-input"], defaultModel: true,
+        sortOrder: 0, creditCost: 0, creditUnit: "generation", thinkingEnabled: false, reasoningEffort: "high", requestConcurrency: 1,
+        customBodyParameters: {}, videoBillingConfiguration: { billingUnit: "generation", minimumDurationSeconds: 3, modePrices: { "reference-to-video": { "720p": 20 } } }, displayName: null, modelIcon: null, isCustomModel: false, customModelConfig: {},
+    });
+    const config = configFromModelConfigs([{ id: "channel", name: "测试", baseUrl: "https://example.com", apiKey: "", apiFormat: "minimax", models: ["MiniMax-H3"] }], [serverConfig]);
+    assert.deepEqual(config.modelCapabilities, [{ model: "channel::MiniMax-H3", capabilities: ["reference-to-video", "audio-input"] }]);
+    assert.deepEqual(Object.keys(config.videoModelBillingConfigurations[0].videoBillingConfiguration!.modePrices), ["reference-to-video"]);
+    serverConfig.capabilities = ["reference-to-video"];
+    assert.equal(configFromModelConfigs(config.channels, [serverConfig]).modelCapabilities[0].capabilities.includes("audio-input"), false);
+});

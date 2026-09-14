@@ -3,7 +3,7 @@
 import { registerRemoteMedia, testObjectStorage, uploadRemoteMediaToObjectStorage, uploadServerMedia } from "@/services/api/server";
 import type { ObjectStorageConfig, ObjectStorageFile } from "@/shared/types/object-storage";
 
-type ObjectStorageUploadKind = "image" | "video";
+type ObjectStorageUploadKind = "image" | "video" | "audio";
 type UploadObjectInput = {
     body: Blob;
     kind: ObjectStorageUploadKind;
@@ -22,20 +22,16 @@ export async function uploadObjectToStorage(input: UploadObjectInput): Promise<O
         input.body,
         {
             kind: input.kind,
-            mimeType: input.mimeType || input.body.type || (input.kind === "image" ? "image/png" : "video/mp4"),
+            mimeType: input.mimeType || input.body.type || (input.kind === "image" ? "image/png" : input.kind === "audio" ? "audio/mpeg" : "video/mp4"),
         },
-        input.fileName || (input.kind === "image" ? "image.png" : "video.mp4"),
+        input.fileName || (input.kind === "image" ? "image.png" : input.kind === "audio" ? "audio.mp3" : "video.mp4"),
     );
     if (!media.objectStorage) throw new Error("后端没有返回对象存储文件信息");
     return media.objectStorage;
 }
 
-export async function uploadRemoteObjectToStorage(
-    input: { storageKey?: string; sourceUrl: string; kind: ObjectStorageUploadKind; mimeType?: string },
-): Promise<ObjectStorageFile> {
-    const storageKey = input.storageKey?.trim()
-        ? input.storageKey.trim()
-        : (await registerRemoteMedia({ kind: input.kind, sourceUrl: input.sourceUrl, mimeType: input.mimeType })).storageKey;
+export async function uploadRemoteObjectToStorage(input: { storageKey?: string; sourceUrl: string; kind: ObjectStorageUploadKind; mimeType?: string }): Promise<ObjectStorageFile> {
+    const storageKey = input.storageKey?.trim() ? input.storageKey.trim() : (await registerRemoteMedia({ kind: input.kind, sourceUrl: input.sourceUrl, mimeType: input.mimeType })).storageKey;
     const media = await uploadRemoteMediaToObjectStorage(storageKey);
     if (!media.objectStorage) throw new Error("后端没有返回对象存储文件信息");
     return media.objectStorage;

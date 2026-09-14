@@ -57,6 +57,29 @@ public class CreditRepository {
     }
 
     /**
+     * 查询邀请注册奖励积分。
+     *
+     * @return 邀请奖励积分
+     */
+    public Mono<Integer> getInvitationRewardCredits() {
+        return databaseClient.sql("SELECT invitation_reward_credits FROM platform_credit_settings WHERE id = 1")
+                .map((row, metadata) -> row.get("invitation_reward_credits", Integer.class))
+                .one();
+    }
+
+    /**
+     * 更新邀请注册奖励积分。
+     *
+     * @param invitationRewardCredits 邀请奖励积分
+     * @return 操作完成信号
+     */
+    public Mono<Void> updateInvitationRewardCredits(int invitationRewardCredits) {
+        return databaseClient.sql("UPDATE platform_credit_settings SET invitation_reward_credits = :credits, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
+                .bind("credits", invitationRewardCredits)
+                .fetch().rowsUpdated().then();
+    }
+
+    /**
      * 更新新用户初始积分。
      *
      * @param initialCredits int 新用户初始积分
@@ -128,6 +151,30 @@ public class CreditRepository {
                 .bind("balanceAfter", balanceAfter)
                 .bind("reason", reason);
         return R2dbcBindings.bindNullable(spec, "operatorUserId", operatorUserId, Long.class).fetch().rowsUpdated().then();
+    }
+
+    /**
+     * 创建邀请奖励流水并抢占被邀请用户幂等键。
+     *
+     * @param inviterUserId 邀请人用户ID
+     * @param invitedUserId 被邀请新用户ID
+     * @param changeAmount 奖励积分
+     * @param reason 奖励原因
+     * @return 新流水ID，已经发放时为空
+     */
+    public Mono<Long> claimInvitationRewardTransaction(Long inviterUserId, Long invitedUserId, int changeAmount, String reason) {
+        return databaseClient.sql("""
+                INSERT INTO user_credit_transactions(user_id, transaction_type, invited_user_id, change_amount, balance_after, reason)
+                VALUES (:inviterUserId, 'invitation_reward', :invitedUserId, :changeAmount, 0, :reason)
+                ON CONFLICT (invited_user_id) WHERE transaction_type = 'invitation_reward' DO NOTHING
+                RETURNING id
+                """)
+                .bind("inviterUserId", inviterUserId)
+                .bind("invitedUserId", invitedUserId)
+                .bind("changeAmount", changeAmount)
+                .bind("reason", reason)
+                .map((row, metadata) -> row.get("id", Long.class))
+                .one();
     }
 
     /**
@@ -547,6 +594,7 @@ public class CreditRepository {
                        credit_transactions.change_amount,
                        credit_transactions.balance_after,
                        credit_transactions.reason,
+                       credit_transactions.invited_user_id,
                        credit_transactions.created_at,
                        tasks.task_type AS generation_type,
                        tasks.model AS model
@@ -569,6 +617,7 @@ public class CreditRepository {
                             (long) changeAmount,
                             row.get("reason", String.class),
                             (long) row.get("balance_after", Integer.class),
+                            row.get("invited_user_id", Long.class),
                             row.get("created_at", OffsetDateTime.class).toString());
                 })
                 .all();

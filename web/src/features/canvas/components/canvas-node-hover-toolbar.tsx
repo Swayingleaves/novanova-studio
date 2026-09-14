@@ -2,15 +2,18 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Clapperboard, CloudUpload, Copy, Download, FolderPlus, ImagePlus, Info, Minus, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
+import { Clapperboard, CloudUpload, Copy, Download, FolderPlus, ImagePlus, Info, Minus, Plus, RefreshCw, Scissors, Trash2, Upload, Video } from "lucide-react";
 
+import { formatAudioTime } from "@/features/storage/utils/audio-waveform";
 import { formatBytes, getDataUrlByteSize } from "@/features/generation/lib/image-utils";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { CanvasNode, CanvasNodeKind, CanvasViewTransform } from "../types";
-import { isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
+import { isAudioNode, isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
 import { buildImageToolbarTools } from "./canvas-image-toolbar-tools";
 import { useCanvasTheme } from "./canvas-theme-provider";
+import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
+import { audioNodeTrimRange } from "../utils/audio-trim";
 
 type ToolbarAction = {
     id: string;
@@ -40,6 +43,7 @@ type ToolbarActionFactoryContext = {
     onIncreaseFont: (node: CanvasNode) => void;
     onUpload: (node: CanvasNode) => void;
     onGenerateStoryboardVideos: (node: CanvasNode) => void;
+    onTrim: (node: CanvasNode) => void;
 };
 
 type CanvasNodeHoverToolbarProps = {
@@ -62,12 +66,14 @@ type CanvasNodeHoverToolbarProps = {
     onToggleFreeResize: (node: CanvasNode) => void;
     onDelete: (node: CanvasNode) => void;
     onGenerateStoryboardVideos: (node: CanvasNode) => void;
+    onTrim: (node: CanvasNode) => void;
 };
 
 export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
     const { message } = App.useApp();
     const copyText = useCopyText();
     const theme = useCanvasTheme();
+    const uploading = useCanvasUiStore((state) => Boolean(props.node && state.uploadingNodeIds.has(props.node.id)));
 
     if (!props.node) return null;
 
@@ -75,7 +81,7 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
     const hasImage = isImageNode(node) && Boolean(node.content.source);
     const hasVideo = isVideoNode(node) && Boolean(node.content.source);
     const isText = isTextNode(node);
-    const canRetry = node.execution.phase === "failed" && !isVideoCompositionNode(node);
+    const canRetry = node.execution.phase === "failed" && !isAudioNode(node) && !isVideoCompositionNode(node);
 
     const copyImagePrompt = (targetNode: CanvasNode) => {
         const prompt = isImageNode(targetNode) || isVideoNode(targetNode) ? targetNode.generation.prompt.trim() : "";
@@ -113,6 +119,7 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
         onIncreaseFont: props.onIncreaseFont,
         onUpload: props.onUpload,
         onGenerateStoryboardVideos: props.onGenerateStoryboardVideos,
+        onTrim: props.onTrim,
     });
     const imageActions = imageToolbarTools.map((tool) => ({
         id: tool.id,
@@ -122,7 +129,7 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
         active: tool.active,
         onClick: tool.onClick,
     }));
-    const allActions = hasImage ? [...baseActions, ...imageActions] : baseActions;
+    const allActions: ToolbarAction[] = hasImage ? [...baseActions, ...imageActions] : baseActions;
 
     const left = props.viewport.x + (node.frame.position.x + node.frame.width / 2) * props.viewport.k;
     // 工具栏上移，为节点外侧左上角的浮动名称预留独立间距，避免两者重叠。
@@ -139,7 +146,7 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
             onPointerDown={(event) => event.stopPropagation()}
         >
             {allActions.map((action) => (
-                <ToolbarActionButton key={action.id} {...action} showLabel />
+                <ToolbarActionButton key={action.id} {...action} disabled={uploading || action.disabled} showLabel />
             ))}
         </div>
     );
@@ -231,8 +238,9 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNode 
                                     }
                                 />
                             ) : null}
+                            {isAudioNode(node) ? <><InfoRow label="音频时长" value={formatAudioTime(audioNodeTrimRange(node.content).durationMs / 1000)} /><InfoRow label="音频大小" value={formatBytes(node.content.bytes || 0)} /><InfoRow label="音频格式" value={node.content.mimeType || "尚未上传"} /></> : null}
                             {imageBytes ? <InfoRow label="图片大小" value={formatBytes(imageBytes)} /> : null}
-                            {(isImageNode(node) || isVideoNode(node)) && node.content.objectStorage?.url ? (
+                            {(isImageNode(node) || isVideoNode(node) || isAudioNode(node)) && node.content.objectStorage?.url ? (
                                 <InfoRow
                                     label="云储存地址"
                                     value={
@@ -347,6 +355,11 @@ function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarA
             onClick: () => context.onUpload(context.node),
         });
     }
+    if (isAudioNode(context.node)) {
+        actions.push({ id: "uploadAudio", title: "上传或替换音频", label: "上传音频", icon: <Upload className="size-4" />, onClick: () => context.onUpload(context.node) });
+        if (context.node.content.source) actions.push({ id: "downloadAudio", title: "下载音频", label: "下载", icon: <Download className="size-4" />, onClick: () => context.onDownload(context.node) });
+        if (context.node.content.source) actions.push({ id: "trimAudio", title: "裁剪为新音频节点", label: "裁剪", icon: <Scissors className="size-4" />, onClick: () => context.onTrim(context.node) });
+    }
     if (isVideoNode(context.node)) {
         actions.push({
             id: "uploadVideo",
@@ -375,6 +388,7 @@ function buildNodeInfoJson(node: CanvasNode | null) {
 }
 
 function readNodeTypeLabel(type: CanvasNodeKind) {
+    if (type === "audio") return "音频";
     if (type === "text") return "文本";
     if (type === "image") return "图片";
     if (type === "storyboard") return "分镜脚本";

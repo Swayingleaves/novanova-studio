@@ -1,6 +1,7 @@
 package com.novanovastudio.repository;
 
 import com.novanovastudio.entity.EmailVerificationCode;
+import com.novanovastudio.entity.PasswordResetToken;
 import com.novanovastudio.entity.User;
 import java.time.OffsetDateTime;
 import lombok.RequiredArgsConstructor;
@@ -74,8 +75,8 @@ public class UserRepository {
     public Mono<Long> createUser(User user) {
         // 插入用户并通过RETURNING直接取回数据库生成的主键ID。
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                INSERT INTO users(username, password, email, nickname, avatar, role, status, registered_at)
-                VALUES (:username, :password, :email, :nickname, :avatar, :role, :status, :registeredAt)
+                INSERT INTO users(username, password, email, nickname, avatar, role, status, invitation_code, invited_by_user_id, registered_at)
+                VALUES (:username, :password, :email, :nickname, :avatar, :role, :status, :invitationCode, :invitedByUserId, :registeredAt)
                 RETURNING id
                 """)
                 .bind("username", user.getUsername())
@@ -85,6 +86,8 @@ public class UserRepository {
         spec = R2dbcBindings.bindNullable(spec, "avatar", user.getAvatar(), String.class)
                 .bind("role", user.getRole())
                 .bind("status", user.getStatus())
+                .bind("invitationCode", user.getInvitationCode());
+        spec = R2dbcBindings.bindNullable(spec, "invitedByUserId", user.getInvitedByUserId(), Long.class)
                 .bind("registeredAt", user.getRegisteredAt());
         return spec
                 .map((row, metadata) -> row.get("id", Long.class))
@@ -100,8 +103,8 @@ public class UserRepository {
     public Mono<Long> createInitialAdminIfAbsent(User user) {
         // 利用唯一约束原子创建，账号已存在时绝不更新其密码、角色或状态。
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                INSERT INTO users(username, password, email, nickname, avatar, role, status, registered_at)
-                VALUES (:username, :password, :email, :nickname, :avatar, :role, :status, :registeredAt)
+                INSERT INTO users(username, password, email, nickname, avatar, role, status, invitation_code, invited_by_user_id, registered_at)
+                VALUES (:username, :password, :email, :nickname, :avatar, :role, :status, :invitationCode, NULL, :registeredAt)
                 ON CONFLICT DO NOTHING
                 RETURNING id
                 """)
@@ -112,6 +115,7 @@ public class UserRepository {
         spec = R2dbcBindings.bindNullable(spec, "avatar", user.getAvatar(), String.class)
                 .bind("role", user.getRole())
                 .bind("status", user.getStatus())
+                .bind("invitationCode", user.getInvitationCode())
                 .bind("registeredAt", user.getRegisteredAt());
         return spec.map((row, metadata) -> row.get("id", Long.class)).one();
     }
@@ -173,6 +177,85 @@ public class UserRepository {
                 SET status = 1, used_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id AND status = 0 AND expires_at > CURRENT_TIMESTAMP
                 """).bind("id", id).fetch().rowsUpdated();
+    }
+
+    /**
+     * 保存密码重置令牌。
+     * <p>
+     * 同一用户始终只保留最新的一个有效链接，新请求会立即覆盖旧令牌。
+     *
+     * @param token PasswordResetToken 密码重置令牌
+     * @return Mono<Void> 保存结果
+     */
+    public Mono<Void> upsertPasswordResetToken(PasswordResetToken token) {
+        return databaseClient.sql("""
+                INSERT INTO password_reset_tokens(user_id, token_hash, expires_at)
+                VALUES (:userId, :tokenHash, :expiresAt)
+                ON CONFLICT (user_id) DO UPDATE
+                SET token_hash = EXCLUDED.token_hash,
+                    expires_at = EXCLUDED.expires_at,
+                    used_at = NULL,
+                    created_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                """)
+                .bind("userId", token.getUserId())
+                .bind("tokenHash", token.getTokenHash())
+                .bind("expiresAt", token.getExpiresAt())
+                .fetch()
+                .rowsUpdated()
+                .then();
+    }
+
+    /**
+     * 使指定密码重置令牌失效。
+     *
+     * @param tokenHash String 重置令牌哈希
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> invalidatePasswordResetToken(String tokenHash) {
+        return databaseClient.sql("""
+                UPDATE password_reset_tokens
+                SET used_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE token_hash = :tokenHash AND used_at IS NULL
+                """)
+                .bind("tokenHash", tokenHash)
+                .fetch()
+                .rowsUpdated()
+                .then();
+    }
+
+    /**
+     * 查询有效的密码重置令牌。
+     *
+     * @param tokenHash String 重置令牌哈希
+     * @return Mono<PasswordResetToken> 有效令牌
+     */
+    public Mono<PasswordResetToken> findActivePasswordResetToken(String tokenHash) {
+        return databaseClient.sql("""
+                SELECT * FROM password_reset_tokens
+                WHERE token_hash = :tokenHash AND used_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+                """)
+                .bind("tokenHash", tokenHash)
+                .map((row, metadata) -> RowMappers.passwordResetToken(row))
+                .one();
+    }
+
+    /**
+     * 原子消费密码重置令牌。
+     *
+     * @param tokenHash String 重置令牌哈希
+     * @return Mono<Long> 令牌关联的用户ID
+     */
+    public Mono<Long> consumePasswordResetToken(String tokenHash) {
+        return databaseClient.sql("""
+                UPDATE password_reset_tokens
+                SET used_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE token_hash = :tokenHash AND used_at IS NULL AND expires_at > CURRENT_TIMESTAMP
+                RETURNING user_id
+                """)
+                .bind("tokenHash", tokenHash)
+                .map((row, metadata) -> row.get("user_id", Long.class))
+                .one();
     }
 
     /**
@@ -400,5 +483,29 @@ public class UserRepository {
                 .fetch()
                 .rowsUpdated()
                 .then();
+    }
+
+    /**
+     * 更新重置后的密码并递增令牌版本。
+     *
+     * @param userId Long 用户ID
+     * @param encodedPassword String 新密码哈希
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> updatePasswordAfterReset(Long userId, String encodedPassword) {
+        return databaseClient.sql("""
+                UPDATE users
+                SET password = :password,
+                    token_version = token_version + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = :userId
+                """)
+                .bind("password", encodedPassword)
+                .bind("userId", userId)
+                .fetch()
+                .rowsUpdated()
+                .flatMap(updatedRows -> updatedRows == 1
+                        ? Mono.<Void>empty()
+                        : Mono.error(new IllegalStateException("密码重置用户不存在")));
     }
 }

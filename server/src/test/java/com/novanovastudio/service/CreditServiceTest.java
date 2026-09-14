@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.dto.CreditDtos;
+import com.novanovastudio.dto.InvitationDtos;
 import com.novanovastudio.repository.CreditRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import java.time.LocalDate;
@@ -68,6 +69,64 @@ class CreditServiceTest {
                 .verify();
 
         verify(creditRepository, org.mockito.Mockito.never()).updateTransactionBalance(anyLong(), anyInt());
+    }
+
+    /**
+     * 正数邀请奖励应增加邀请人余额并回填唯一流水余额快照。
+     */
+    @Test
+    void shouldGrantPositiveInvitationReward() {
+        when(creditRepository.getInvitationRewardCredits()).thenReturn(Mono.just(20));
+        when(creditRepository.claimInvitationRewardTransaction(5L, 8L, 20, "邀请新用户注册奖励")).thenReturn(Mono.just(30L));
+        when(creditRepository.changeBalance(5L, 20)).thenReturn(Mono.just(120));
+        when(creditRepository.updateTransactionBalance(30L, 120)).thenReturn(Mono.empty());
+
+        StepVerifier.create(creditService.grantInvitationReward(5L, 8L)).verifyComplete();
+
+        verify(creditRepository).changeBalance(5L, 20);
+        verify(creditRepository).updateTransactionBalance(30L, 120);
+    }
+
+    /**
+     * 邀请奖励为0时只由注册流程保留邀请关系，不写积分流水。
+     */
+    @Test
+    void shouldSkipZeroInvitationRewardTransaction() {
+        when(creditRepository.getInvitationRewardCredits()).thenReturn(Mono.just(0));
+
+        StepVerifier.create(creditService.grantInvitationReward(5L, 8L)).verifyComplete();
+
+        verify(creditRepository, never()).claimInvitationRewardTransaction(anyLong(), anyLong(), anyInt(), anyString());
+        verify(creditRepository, never()).changeBalance(anyLong(), anyInt());
+    }
+
+    /**
+     * 邀请奖励设置应通过独立字段更新，不修改新用户初始积分。
+     */
+    @Test
+    void shouldUpdateInvitationRewardSettingsIndependently() {
+        when(creditRepository.updateInvitationRewardCredits(30)).thenReturn(Mono.empty());
+
+        StepVerifier.create(creditService.updateInvitationRewardSettings(
+                        new InvitationDtos.UpdateInvitationRewardSettingsRequest(30)))
+                .expectNextMatches(settings -> settings.invitationRewardCredits() == 30)
+                .verifyComplete();
+
+        verify(creditRepository).updateInvitationRewardCredits(30);
+        verify(creditRepository, never()).updateInitialCredits(anyInt());
+    }
+
+    /**
+     * 被邀请用户奖励流水已存在时不得再次增加邀请人余额。
+     */
+    @Test
+    void shouldNotGrantDuplicateInvitationReward() {
+        when(creditRepository.getInvitationRewardCredits()).thenReturn(Mono.just(20));
+        when(creditRepository.claimInvitationRewardTransaction(5L, 8L, 20, "邀请新用户注册奖励")).thenReturn(Mono.empty());
+
+        StepVerifier.create(creditService.grantInvitationReward(5L, 8L)).verifyComplete();
+
+        verify(creditRepository, never()).changeBalance(anyLong(), anyInt());
     }
 
     /**

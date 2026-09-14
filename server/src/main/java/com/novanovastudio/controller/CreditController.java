@@ -58,7 +58,7 @@ public class CreditController {
      * @param startDate LocalDate 筛选起始日期
      * @param endDate LocalDate 筛选结束日期
      * @param direction String 变动方向：all/add/spend，可为空
-     * @param source String 来源筛选：image/video/task_refund/card_redeem/admin_adjustment/initial_grant，可为空
+     * @param source String 来源筛选：image/video/task_refund/card_redeem/admin_adjustment/initial_grant/invitation_reward，可为空
      * @param page int 页码
      * @param pageSize int 每页数量
      * @return Mono<ApiResponse<UserCreditTransactionListResponse>> 积分明细

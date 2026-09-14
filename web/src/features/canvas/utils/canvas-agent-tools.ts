@@ -42,8 +42,8 @@ export function resolveCanvasAgentTool(name: string, args: Record<string, unknow
         case "canvas_run_generation":
             return createRunGenerationExecution(args);
         case "canvas_create_node": {
-            const nodeType = readOptionalGenerationMode(args.nodeType);
-            if (!nodeType) return failureExecution("节点类型仅支持文本、图片或视频，分镜脚本请通过剧本文本节点创建");
+            const nodeType = readOptionalCanvasNodeType(args.nodeType);
+            if (!nodeType) return failureExecution("节点类型仅支持文本、图片、视频或音频，分镜脚本请通过剧本文本节点创建");
             return successExecution(name, [
                 {
                     type: "add_node",
@@ -116,7 +116,7 @@ export function positionCanvasAgentAddNodeOps(ops: CanvasAgentOp[], canvasCenter
             positionedOperations.push(operation);
             continue;
         }
-        const kind = operation.nodeType === undefined ? "text" : readOptionalGenerationMode(operation.nodeType);
+        const kind = operation.nodeType === undefined ? "text" : readOptionalCanvasNodeType(operation.nodeType);
         if (!kind) continue;
         if (operation.position) {
             positionedOperations.push(operation);
@@ -360,6 +360,10 @@ function normalizeAgentOps(value: unknown): CanvasAgentOp[] {
 
 function readOptionalGenerationMode(value: unknown): CanvasGenerationMode | undefined {
     return value === "text" || value === "image" || value === "video" ? value : undefined;
+}
+
+function readOptionalCanvasNodeType(value: unknown): CanvasGenerationMode | "audio" | undefined {
+    return value === "audio" ? value : readOptionalGenerationMode(value);
 }
 
 function generationLabel(mode: "text" | "image" | "video") {

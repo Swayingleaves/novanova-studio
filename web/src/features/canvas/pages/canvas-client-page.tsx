@@ -17,9 +17,13 @@ import { normalizeVideoGenerationCount } from "@/features/generation/components/
 import { quoteVideoGeneration } from "@/features/generation/lib/video-billing";
 import { defaultConfig, normalizeModelOptionValue, type AiConfig, useConfigStore, useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { getImageBlob, resolveImageUrl, reuseOrUploadImage, uploadImage, type UploadedImage } from "@/features/storage/services/image-storage";
+import { stopCanvasAudio } from "../services/canvas-audio-playback";
+import { mergeAudioReferences } from "../utils/audio-references";
+import { downloadMedia } from "@/features/storage/services/media-download";
+import { isAudioFile, uploadAudioFile } from "@/features/storage/services/audio-storage";
 import { getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/features/storage/services/file-storage";
 import { uploadObjectToStorage } from "@/features/storage/services/object-storage";
-import { findMissingReferenceObjectStorageImages, uploadMissingReferenceImagesToObjectStorage } from "@/features/storage/services/reference-object-storage";
+import { findMissingReferenceObjectStorageAudios, findMissingReferenceObjectStorageImages, uploadMissingReferenceAudiosToObjectStorage, uploadMissingReferenceImagesToObjectStorage } from "@/features/storage/services/reference-object-storage";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize } from "@/features/generation/lib/image-utils";
 import { canvasThemes, type CanvasBackgroundMode } from "@/shared/lib/canvas-theme";
@@ -40,6 +44,7 @@ import {
     isStoryboardNode,
     isTextNode,
     isVideoCompositionNode,
+    isAudioNode,
     isVideoNode,
     updateCanvasNodeExecution,
     updateCanvasNodeFrame,
@@ -84,6 +89,7 @@ import { CanvasNodePromptPanel, type CanvasNodeGenerationMode } from "../compone
 import { CanvasToolbar } from "../components/canvas-toolbar";
 import { CanvasTopBar } from "../components/canvas-top-bar";
 import { CanvasWorkspaceOverlays } from "../components/canvas-workspace-overlays";
+import { normalizeAudioTrimRange } from "../utils/audio-trim";
 import type { InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
 import { useAgentSSE } from "../hooks/use-agent-sse";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
@@ -106,6 +112,7 @@ import {
     type PendingConnectionCreateNodeType,
 } from "./canvas-client-page-helpers";
 import { useCanvasStore } from "../stores/use-canvas-store";
+import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
 import { readCanvasSystemClipboard } from "../services/canvas-system-clipboard";
 import { saveCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
@@ -154,7 +161,7 @@ import {
     type CanvasViewTransform,
 } from "../types";
 import type { ReferenceImage } from "@/features/generation/types/image";
-import type { ReferenceVideo } from "@/features/generation/types/media";
+import type { ReferenceAudio, ReferenceVideo } from "@/features/generation/types/media";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 
 const VIDEO_NODE_MAX_WIDTH = 630;
@@ -217,6 +224,16 @@ function CanvasWorkspacePage() {
     const params = useParams<{ id: string }>();
     const router = useRouter();
     const projectId = params.id;
+    const audioUploadScope = useRef(new Map<string, object>());
+    useEffect(
+        () => () => {
+            const { finishNodeUpload } = useCanvasUiStore.getState();
+            audioUploadScope.current.forEach((_, nodeId) => finishNodeUpload(nodeId));
+            audioUploadScope.current.clear();
+            stopCanvasAudio();
+        },
+        [projectId],
+    );
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
     const uploadTargetRef = useRef<{ nodeId?: string; position?: CanvasPoint } | null>(null);
@@ -371,6 +388,7 @@ function CanvasWorkspacePage() {
     const [infoNodeId, setInfoNodeId] = useState<string | null>(null);
     const [cropNodeId, setCropNodeId] = useState<string | null>(null);
     const [croppingNodeId, setCroppingNodeId] = useState<string | null>(null);
+    const [audioTrimNodeId, setAudioTrimNodeId] = useState<string | null>(null);
     const [splitNodeId, setSplitNodeId] = useState<string | null>(null);
     const [splittingNodeId, setSplittingNodeId] = useState<string | null>(null);
     const [previewNodeId, setPreviewNodeId] = useState<string | null>(null);
@@ -555,6 +573,42 @@ function CanvasWorkspacePage() {
         [confirmUploadReferenceImages, message],
     );
 
+    const ensureVideoReferenceAudiosObjectStorage = useCallback(
+        async (referenceAudios: ReferenceAudio[]) => {
+            const missing = findMissingReferenceObjectStorageAudios(referenceAudios);
+            if (!missing.length) return referenceAudios;
+            const confirmed = await new Promise<boolean>((resolve) => {
+                modal.confirm({
+                    title: "上传参考音频到云储存？",
+                    content: `检测到 ${missing.length} 段参考音频未上传到云储存，生成视频需要公开可访问地址，是否现在上传？`,
+                    okText: "上传并生成",
+                    cancelText: "取消",
+                    onOk: () => resolve(true),
+                    onCancel: () => resolve(false),
+                });
+            });
+            if (!confirmed) return null;
+            const messageKey = "canvas-reference-audio-upload";
+            message.open({ key: messageKey, type: "loading", content: `正在将 ${missing.length} 段参考音频上传到云储存，请稍候...`, duration: 0 });
+            try {
+                const nextReferenceAudios = await uploadMissingReferenceAudiosToObjectStorage(referenceAudios);
+                const objectStorageById = new Map(nextReferenceAudios.map((audio) => [audio.id, audio.objectStorage]));
+                setNodes((prev) =>
+                    prev.map((node) => {
+                        const objectStorageFile = objectStorageById.get(node.id);
+                        return objectStorageFile?.url ? applyCanvasNodeAttributes(node, { objectStorage: objectStorageFile }) : node;
+                    }),
+                );
+                message.success({ key: messageKey, content: "参考音频已上传到云储存", duration: 3 });
+                return nextReferenceAudios;
+            } catch (error) {
+                message.error({ key: messageKey, content: error instanceof Error ? error.message : "参考音频上传到云储存失败", duration: 4 });
+                return null;
+            }
+        },
+        [message, modal],
+    );
+
     useEffect(() => {
         if (!hydrated) return;
         setProjectLoaded(false);
@@ -569,7 +623,9 @@ function CanvasWorkspacePage() {
             const restoredSessions = await hydrateAssistantImages(document.conversation.sessions);
             const nodeIdSet = new Set(hydratedNodes.map((node) => node.id));
             const backgroundNodeIdSet = new Set(hydratedNodes.filter(isBackgroundNode).map((node) => node.id));
-            const restoredConnections = document.scene.connections.filter((connection) => nodeIdSet.has(connection.source.nodeId) && nodeIdSet.has(connection.target.nodeId) && !backgroundNodeIdSet.has(connection.source.nodeId) && !backgroundNodeIdSet.has(connection.target.nodeId));
+            const restoredConnections = document.scene.connections.filter(
+                (connection) => nodeIdSet.has(connection.source.nodeId) && nodeIdSet.has(connection.target.nodeId) && !backgroundNodeIdSet.has(connection.source.nodeId) && !backgroundNodeIdSet.has(connection.target.nodeId),
+            );
             const restoredNodes = synchronizeVideoCompositionInputs(hydratedNodes, restoredConnections);
             setNodes(restoredNodes);
             // 过滤掉孤立边（源/目标节点不存在），防止 React Flow 报错。
@@ -757,13 +813,9 @@ function CanvasWorkspacePage() {
             const canvasHeight = containerBounds?.height || size.height;
             const navigation = container?.querySelector<HTMLElement>('[aria-label="画布导航"]');
             const navigationBounds = navigation?.getBoundingClientRect();
-            const navigationRight = navigationBounds && containerBounds
-                ? Math.max(0, Math.min(canvasWidth, navigationBounds.right - containerBounds.left))
-                : 0;
+            const navigationRight = navigationBounds && containerBounds ? Math.max(0, Math.min(canvasWidth, navigationBounds.right - containerBounds.left)) : 0;
             const topToolbar = container?.querySelector<HTMLElement>(":scope > header");
-            const topToolbarHeight = topToolbar && containerBounds
-                ? Math.max(0, Math.min(canvasHeight, topToolbar.getBoundingClientRect().bottom - containerBounds.top))
-                : 56;
+            const topToolbarHeight = topToolbar && containerBounds ? Math.max(0, Math.min(canvasHeight, topToolbar.getBoundingClientRect().bottom - containerBounds.top)) : 56;
             const visibleWidth = Math.max(1, canvasWidth - navigationRight);
             const visibleHeight = Math.max(1, canvasHeight - topToolbarHeight);
             setViewport({
@@ -850,7 +902,9 @@ function CanvasWorkspacePage() {
             }
             const exists = connectionsRef.current.some((item) => item.source.nodeId === connection.source.nodeId && item.target.nodeId === connection.target.nodeId);
             if (!exists) {
-                setConnections((prev) => [...prev, { id: `conn-${Date.now()}`, ...connection }]);
+                const nextConnection = { id: `conn-${Date.now()}`, ...connection };
+                connectionsRef.current = [...connectionsRef.current, nextConnection];
+                setConnections((prev) => [...prev, nextConnection]);
             }
             setContextMenu(null);
         },
@@ -884,7 +938,11 @@ function CanvasWorkspacePage() {
                 return false;
             }
             const exists = connectionsRef.current.some((item) => item.source.nodeId === connection.source.nodeId && item.target.nodeId === connection.target.nodeId);
-            if (!exists) setConnections((prev) => [...prev, { id: `conn-${Date.now()}`, ...connection }]);
+            if (!exists) {
+                const nextConnection = { id: `conn-${Date.now()}`, ...connection };
+                connectionsRef.current = [...connectionsRef.current, nextConnection];
+                setConnections((prev) => [...prev, nextConnection]);
+            }
             return true;
         },
         [message],
@@ -903,7 +961,13 @@ function CanvasWorkspacePage() {
             }
             const defaultStoryboardModel = type === "storyboard" ? normalizeModelOptionValue(effectiveConfig.textModel, effectiveConfig.channels) : "";
             const settingGraph = settingGraphSkill
-                ? ({ id: settingGraphSkill.id, name: settingGraphSkill.name, targetType: "canvasSettingGraph", systemPrompt: settingGraphSkill.systemPrompt || "", aspectRatio: settingGraphSkill.aspectRatio || "16:9" } satisfies CanvasSettingGraphSkillSnapshot)
+                ? ({
+                      id: settingGraphSkill.id,
+                      name: settingGraphSkill.name,
+                      targetType: "canvasSettingGraph",
+                      systemPrompt: settingGraphSkill.systemPrompt || "",
+                      aspectRatio: settingGraphSkill.aspectRatio || "16:9",
+                  } satisfies CanvasSettingGraphSkillSnapshot)
                 : undefined;
             const initialNode = {
                 ...createCanvasNode(type, pending.position, {
@@ -916,10 +980,7 @@ function CanvasWorkspacePage() {
             // 连接菜单的释放点通常紧贴源节点手柄，不能直接作为新节点位置；统一按源节点边缘外侧间距布局。
             const preferredPosition = sourceNode
                 ? {
-                      x:
-                          pending.connection.handleType === "target"
-                              ? sourceNode.frame.position.x - CONNECTED_NODE_GAP - initialNode.frame.width
-                              : sourceNode.frame.position.x + sourceNode.frame.width + CONNECTED_NODE_GAP,
+                      x: pending.connection.handleType === "target" ? sourceNode.frame.position.x - CONNECTED_NODE_GAP - initialNode.frame.width : sourceNode.frame.position.x + sourceNode.frame.width + CONNECTED_NODE_GAP,
                       y: sourceNode.frame.position.y + sourceNode.frame.height / 2 - initialNode.frame.height / 2,
                   }
                 : initialNode.frame.position;
@@ -988,10 +1049,7 @@ function CanvasWorkspacePage() {
     useEffect(() => {
         if (storyboardVideoGenerationNodeId && !openedStoryboardVideoGenerationNode) setStoryboardVideoGenerationNodeId(null);
     }, [openedStoryboardVideoGenerationNode, storyboardVideoGenerationNodeId]);
-    const storyboardReferenceVideos = useMemo(
-        () => (openedStoryboardVideoGenerationNode ? readStoryboardVideoReferences(openedStoryboardVideoGenerationNode.id, nodes, connections) : []),
-        [connections, nodes, openedStoryboardVideoGenerationNode],
-    );
+    const storyboardReferenceVideos = useMemo(() => (openedStoryboardVideoGenerationNode ? readStoryboardVideoReferences(openedStoryboardVideoGenerationNode.id, nodes, connections) : []), [connections, nodes, openedStoryboardVideoGenerationNode]);
 
     const batchCardStacks = useMemo(() => {
         const imagePreviewsByRootId = new Map<string, BatchImagePreview[]>();
@@ -1025,7 +1083,7 @@ function CanvasWorkspacePage() {
     const splitNode = splitNodeId ? nodeById.get(splitNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const dialogNode = dialogNodeId ? nodeById.get(dialogNodeId) || null : null;
-    const promptPanelNode = dialogNode && !selectionBox && !isStoryboardNode(dialogNode) && !isVideoCompositionNode(dialogNode) ? dialogNode : null;
+    const promptPanelNode = dialogNode && !selectionBox && !isAudioNode(dialogNode) && !isStoryboardNode(dialogNode) && !isVideoCompositionNode(dialogNode) ? dialogNode : null;
     const promptPanelCanGenerateWithoutPrompt = useMemo(() => {
         if (!promptPanelNode || !isImageNode(promptPanelNode) || !promptPanelNode.generation.settingGraph) return false;
         return hasNodeGenerationInputs(promptPanelNode.id, nodes, connections);
@@ -1227,6 +1285,14 @@ function CanvasWorkspacePage() {
                 });
             }
             cancelVideoCompositionTasksForDeletedNodes(allIds);
+            if ([...allIds].some((id) => nodesRef.current.some((node) => node.id === id && isAudioNode(node)))) {
+                stopCanvasAudio();
+            }
+            const { finishNodeUpload } = useCanvasUiStore.getState();
+            allIds.forEach((id) => {
+                audioUploadScope.current.delete(id);
+                finishNodeUpload(id);
+            });
             setNodes((prev) => {
                 const next = prev.filter((node) => !allIds.has(node.id));
                 return next.map((node) => {
@@ -1257,6 +1323,7 @@ function CanvasWorkspacePage() {
             setEditingNodeId((current) => (current && allIds.has(current) ? null : current));
             setInfoNodeId((current) => (current && allIds.has(current) ? null : current));
             setCropNodeId((current) => (current && allIds.has(current) ? null : current));
+            setAudioTrimNodeId((current) => (current && allIds.has(current) ? null : current));
             setPreviewNodeId((current) => (current && allIds.has(current) ? null : current));
             setRunningNodeId((current) => (current && allIds.has(current) ? null : current));
             setContextMenu((current) => {
@@ -1290,10 +1357,14 @@ function CanvasWorkspacePage() {
         (nodeId: string) => {
             const target = nodesRef.current.find((node) => node.id === nodeId);
             if (!target || !isBackgroundNode(target)) return;
-            setNodes((prev) => prev.filter((node) => node.id !== nodeId).map((node) => {
-                if (!isBackgroundNode(node) || !node.memberNodeIds.includes(nodeId)) return node;
-                return { ...node, memberNodeIds: node.memberNodeIds.filter((memberId) => memberId !== nodeId) };
-            }));
+            setNodes((prev) =>
+                prev
+                    .filter((node) => node.id !== nodeId)
+                    .map((node) => {
+                        if (!isBackgroundNode(node) || !node.memberNodeIds.includes(nodeId)) return node;
+                        return { ...node, memberNodeIds: node.memberNodeIds.filter((memberId) => memberId !== nodeId) };
+                    }),
+            );
             setConnections((prev) => prev.filter((connection) => connection.source.nodeId !== nodeId && connection.target.nodeId !== nodeId));
             setSelectedNodeIds((current) => new Set([...current].filter((id) => id !== nodeId)));
             setSelectedConnectionId(null);
@@ -1336,9 +1407,7 @@ function CanvasWorkspacePage() {
 
     const removeNodeReferenceConnection = useCallback(
         (targetNodeId: string, referenceNodeId: string) => {
-            connections
-                .filter((connection) => connection.target.nodeId === targetNodeId && connection.source.nodeId === referenceNodeId)
-                .forEach((connection) => deleteConnection(connection.id));
+            connections.filter((connection) => connection.target.nodeId === targetNodeId && connection.source.nodeId === referenceNodeId).forEach((connection) => deleteConnection(connection.id));
         },
         [connections, deleteConnection],
     );
@@ -1357,11 +1426,19 @@ function CanvasWorkspacePage() {
     }, [cancelPendingConnectionCreate]);
 
     const clearCanvas = useCallback(() => {
-        cancelVideoCompositionTasksForDeletedNodes(new Set(nodesRef.current.map((node) => node.id)));
+        const allNodeIds = new Set(nodesRef.current.map((node) => node.id));
+        cancelVideoCompositionTasksForDeletedNodes(allNodeIds);
+        stopCanvasAudio();
+        const { finishNodeUpload } = useCanvasUiStore.getState();
+        allNodeIds.forEach((id) => {
+            audioUploadScope.current.delete(id);
+            finishNodeUpload(id);
+        });
         setNodes([]);
         setConnections([]);
         setInfoNodeId(null);
         setCropNodeId(null);
+        setAudioTrimNodeId(null);
         setPreviewNodeId(null);
         setRunningNodeId(null);
         deselectCanvas();
@@ -1387,7 +1464,12 @@ function CanvasWorkspacePage() {
                 });
                 const nextConnections = connectionsRef.current
                     .filter((connection) => groupIds.has(connection.source.nodeId) && groupIds.has(connection.target.nodeId))
-                    .map((connection, index) => ({ ...structuredClone(connection), id: `conn-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`, source: { ...connection.source, nodeId: idMap.get(connection.source.nodeId) as string }, target: { ...connection.target, nodeId: idMap.get(connection.target.nodeId) as string } }));
+                    .map((connection, index) => ({
+                        ...structuredClone(connection),
+                        id: `conn-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 7)}`,
+                        source: { ...connection.source, nodeId: idMap.get(connection.source.nodeId) as string },
+                        target: { ...connection.target, nodeId: idMap.get(connection.target.nodeId) as string },
+                    }));
                 setNodes((prev) => [...prev, ...nextNodes]);
                 setConnections((prev) => [...prev, ...nextConnections]);
                 requestFocusNodes([idMap.get(source.id) as string]);
@@ -1403,7 +1485,7 @@ function CanvasWorkspacePage() {
                 ? {
                       ...copied,
                       id,
-                      title: `${source.title} Copy`,
+                      title: `${source.title} 副本`,
                       execution: { phase: "idle" },
                       composition: { inputVideoNodeIds: [] },
                       frame: {
@@ -1414,7 +1496,7 @@ function CanvasWorkspacePage() {
                 : {
                       ...copied,
                       id,
-                      title: `${source.title} Copy`,
+                      title: `${source.title} 副本`,
                       frame: {
                           ...source.frame,
                           position: { x: source.frame.position.x + 36, y: source.frame.position.y + 36 },
@@ -1482,7 +1564,7 @@ function CanvasWorkspacePage() {
                 return {
                     ...copied,
                     id: idMap.get(node.id) as string,
-                    title: node.title.endsWith(" Copy") ? node.title : `${node.title} Copy`,
+                    title: node.title.endsWith(" 副本") ? node.title : `${node.title} 副本`,
                     frame,
                     execution: { phase: "idle" as const },
                     composition: {
@@ -1505,7 +1587,7 @@ function CanvasWorkspacePage() {
             return {
                 ...copied,
                 id: idMap.get(node.id) as string,
-                title: node.title.endsWith(" Copy") ? node.title : `${node.title} Copy`,
+                title: node.title.endsWith(" 副本") ? node.title : `${node.title} 副本`,
                 frame,
             };
         });
@@ -1843,6 +1925,55 @@ function CanvasWorkspacePage() {
         [message, requestFocusNodes],
     );
 
+    /** 上传音频时保留节点占位，并防止切换画布或删除节点后异步写回。 */
+    const createAudioFileNode = useCallback(
+        async (file: File, position: CanvasPoint, nodeId?: string) => {
+            const template = getCanvasNodeTemplate("audio");
+            const placeholderPosition = nodeId ? position : { x: position.x - template.width / 2, y: position.y - template.height / 2 };
+            const placeholder = { ...createCanvasNode("audio", placeholderPosition), title: file.name };
+            const targetId = nodeId || placeholder.id;
+            const { beginNodeUpload, finishNodeUpload } = useCanvasUiStore.getState();
+            if (!beginNodeUpload(targetId)) return;
+            if (nodeId) stopCanvasAudio();
+            const scope = {};
+            audioUploadScope.current.set(targetId, scope);
+            if (!nodeId) {
+                setNodes((previous) => [...previous, placeholder]);
+                requestFocusNodes([targetId]);
+                setSelectedNodeIds(new Set([targetId]));
+                setSelectedConnectionId(null);
+            }
+            try {
+                const audio = await uploadAudioFile(file);
+                if (audioUploadScope.current.get(targetId) !== scope) return;
+                const attributes = {
+                    content: audio.url,
+                    storageKey: audio.storageKey,
+                    mimeType: audio.mimeType,
+                    bytes: audio.bytes,
+                    durationMs: audio.durationMs,
+                    waveformPeaks: audio.waveformPeaks,
+                    objectStorage: audio.objectStorage,
+                    status: "success" as const,
+                };
+                setNodes((previous) => previous.map((node) => (node.id === targetId ? { ...applyCanvasNodeAttributes(placeholder, attributes), id: targetId, frame: node.frame } : node)));
+                if (nodesRef.current.some((node) => node.id === targetId)) setSelectedNodeIds(new Set([targetId]));
+                setSelectedConnectionId(null);
+            } catch (error) {
+                if (audioUploadScope.current.get(targetId) !== scope) return;
+                const errorMessage = error instanceof Error ? error.message : "上传音频失败";
+                if (!nodeId) setNodes((previous) => previous.map((node) => (node.id === targetId ? updateCanvasNodeExecution(node, { phase: "failed", errorMessage }) : node)));
+                message.error(errorMessage);
+            } finally {
+                if (audioUploadScope.current.get(targetId) === scope) {
+                    finishNodeUpload(targetId);
+                    audioUploadScope.current.delete(targetId);
+                }
+            }
+        },
+        [message, requestFocusNodes],
+    );
+
     const createVideoFileNode = useCallback(
         async (file: File, position: CanvasPoint) => {
             try {
@@ -1858,6 +1989,40 @@ function CanvasWorkspacePage() {
             } catch (error) {
                 message.error(error instanceof Error ? error.message : "上传视频失败");
             }
+        },
+        [message, requestFocusNodes],
+    );
+
+    /** 将音频裁剪为新节点，并保留原节点的完整媒体与波形。 */
+    const trimAudioNode = useCallback(
+        (node: CanvasDomainNode, startMs: number, endMs: number) => {
+            if (!isAudioNode(node) || !node.content.source) return;
+            const range = normalizeAudioTrimRange(node.content.durationMilliseconds, startMs, endMs);
+            if (range.durationMs < 100) {
+                message.error("音频片段不能小于0.1秒");
+                return;
+            }
+            const childId = nanoid();
+            const position = findNonOverlappingCanvasNodePosition(nodesRef.current, { x: node.frame.position.x + node.frame.width + CONNECTED_NODE_GAP, y: node.frame.position.y }, node.frame.width, node.frame.height);
+            const child: CanvasDomainNode = updateCanvasNodeFrame(
+                {
+                    ...createCanvasNode("audio", position),
+                    id: childId,
+                    title: `${node.title || "音频"}片段`,
+                    content: {
+                        ...node.content,
+                        trimStartMilliseconds: range.startMs,
+                        trimEndMilliseconds: range.endMs,
+                    },
+                },
+                { position, width: node.frame.width, height: node.frame.height },
+            );
+            setNodes((previous) => [...previous, child]);
+            setConnections((previous) => [...previous, createRightToLeftConnection(node.id, childId)]);
+            setSelectedNodeIds(new Set([childId]));
+            setSelectedConnectionId(null);
+            setAudioTrimNodeId(null);
+            requestFocusNodes([childId]);
         },
         [message, requestFocusNodes],
     );
@@ -1959,11 +2124,13 @@ function CanvasWorkspacePage() {
         backgroundDragRef.current = dragState;
         const offsetX = node.position.x - dragState.originX;
         const offsetY = node.position.y - dragState.originY;
-        setNodes((prev) => prev.map((item) => {
-            if (item.id === dragState.boardId) return updateCanvasNodeFrame(item, { position: { x: node.position.x, y: node.position.y } });
-            const origin = dragState.memberOrigins.find((candidate) => candidate.id === item.id);
-            return origin ? updateCanvasNodeFrame(item, { position: { x: origin.x + offsetX, y: origin.y + offsetY } }) : item;
-        }));
+        setNodes((prev) =>
+            prev.map((item) => {
+                if (item.id === dragState.boardId) return updateCanvasNodeFrame(item, { position: { x: node.position.x, y: node.position.y } });
+                const origin = dragState.memberOrigins.find((candidate) => candidate.id === item.id);
+                return origin ? updateCanvasNodeFrame(item, { position: { x: origin.x + offsetX, y: origin.y + offsetY } }) : item;
+            }),
+        );
     }, []);
 
     const handleBackgroundNodeDragStop = useCallback(() => {
@@ -2072,24 +2239,24 @@ function CanvasWorkspacePage() {
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: CanvasNodeAttributes) => {
         const node = nodesRef.current.find((item) => item.id === nodeId);
-        const nextPatch = node && isImageNode(node) && patch.settingGraph?.aspectRatio
-            ? { ...patch, size: patch.settingGraph.aspectRatio }
-            : patch;
+        const nextPatch = node && isImageNode(node) && patch.settingGraph?.aspectRatio ? { ...patch, size: patch.settingGraph.aspectRatio } : patch;
         if (node) saveCanvasLastUsedGenerationSettings(node.kind, nextPatch);
-        setNodes((prev) => prev.map((current) => {
-            if (current.id !== nodeId) return current;
-            const updated = applyCanvasNodeConfig(current, nextPatch);
-            if (!isImageNode(updated) || !nextPatch.settingGraph?.aspectRatio || updated.frame.freeResize) return updated;
-            const nextSize = nodeSizeFromRatio(nextPatch.settingGraph.aspectRatio, updated.frame.width, updated.frame.height);
-            if (!nextSize) return updated;
-            return updateCanvasNodeFrame(updated, {
-                ...nextSize,
-                position: {
-                    x: updated.frame.position.x + (updated.frame.width - nextSize.width) / 2,
-                    y: updated.frame.position.y + (updated.frame.height - nextSize.height) / 2,
-                },
-            });
-        }));
+        setNodes((prev) =>
+            prev.map((current) => {
+                if (current.id !== nodeId) return current;
+                const updated = applyCanvasNodeConfig(current, nextPatch);
+                if (!isImageNode(updated) || !nextPatch.settingGraph?.aspectRatio || updated.frame.freeResize) return updated;
+                const nextSize = nodeSizeFromRatio(nextPatch.settingGraph.aspectRatio, updated.frame.width, updated.frame.height);
+                if (!nextSize) return updated;
+                return updateCanvasNodeFrame(updated, {
+                    ...nextSize,
+                    position: {
+                        x: updated.frame.position.x + (updated.frame.width - nextSize.width) / 2,
+                        y: updated.frame.position.y + (updated.frame.height - nextSize.height) / 2,
+                    },
+                });
+            }),
+        );
     }, []);
 
     const resolveStoryboardRequest = useCallback(
@@ -2617,10 +2784,19 @@ function CanvasWorkspacePage() {
         [composingStoryboardNodeId, composingStoryboardShot, creditBalance, message, resolveStoryboardRequest, setCreditBalance],
     );
 
-    const downloadNodeImage = useCallback((node: CanvasDomainNode) => {
-        if ((!isImageNode(node) && !isVideoNode(node)) || !node.content.source) return;
-        saveAs(node.content.source, `canvas-${node.kind}-${node.id}.${isVideoNode(node) ? "mp4" : imageExtension(node.content.source)}`);
-    }, []);
+    const downloadNodeImage = useCallback(
+        (node: CanvasDomainNode) => {
+            if (isAudioNode(node) && node.content.source) {
+                void downloadMedia({ storageKey: node.content.storageKey, url: node.content.source }, `${node.title.replace(/\.(mp3|wav)$/i, "")}.${node.content.mimeType?.includes("wav") ? "wav" : "mp3"}`).catch((error) =>
+                    message.error(error instanceof Error ? error.message : "下载音频失败"),
+                );
+                return;
+            }
+            if ((!isImageNode(node) && !isVideoNode(node)) || !node.content.source) return;
+            saveAs(node.content.source, `canvas-${node.kind}-${node.id}.${isVideoNode(node) ? "mp4" : imageExtension(node.content.source)}`);
+        },
+        [message],
+    );
 
     const uploadNodeObjectStorage = useCallback(
         async (node: CanvasDomainNode) => {
@@ -2723,10 +2899,7 @@ function CanvasWorkspacePage() {
                 const childId = nanoid();
                 const height = width * (image.height / image.width);
                 const position = findNonOverlappingCanvasNodePosition(nodesRef.current, { x: node.frame.position.x + node.frame.width + 96, y: node.frame.position.y }, width, height);
-                const child = updateCanvasNodeFrame(
-                    { ...createCanvasNode("image", node.frame.position, { ...imageAttributes(image), prompt: node.generation.prompt }), id: childId, title: "裁剪图片" },
-                    { position, width, height },
-                );
+                const child = updateCanvasNodeFrame({ ...createCanvasNode("image", node.frame.position, { ...imageAttributes(image), prompt: node.generation.prompt }), id: childId, title: "裁剪图片" }, { position, width, height });
                 setNodes((prev) => [...prev, child]);
                 requestFocusNodes([childId]);
                 setConnections((prev) => [...prev, createRightToLeftConnection(node.id, childId)]);
@@ -2765,12 +2938,7 @@ function CanvasWorkspacePage() {
                 );
                 const placedChildNodes: CanvasDomainNode[] = [];
                 childNodes.forEach((child) => {
-                    const position = findNonOverlappingCanvasNodePosition(
-                        [...nodesRef.current, ...placedChildNodes],
-                        child.frame.position,
-                        child.frame.width,
-                        child.frame.height,
-                    );
+                    const position = findNonOverlappingCanvasNodePosition([...nodesRef.current, ...placedChildNodes], child.frame.position, child.frame.width, child.frame.height);
                     placedChildNodes.push(updateCanvasNodeFrame(child, { position }));
                 });
                 setNodes((prev) => [...prev, ...placedChildNodes]);
@@ -2795,7 +2963,9 @@ function CanvasWorkspacePage() {
     }, []);
 
     const handleUploadRequest = useCallback((nodeId?: string, position?: CanvasPoint) => {
+        if (nodeId && useCanvasUiStore.getState().uploadingNodeIds.has(nodeId)) return;
         uploadTargetRef.current = { nodeId, position };
+        if (imageInputRef.current) imageInputRef.current.accept = nodeId && nodesRef.current.some((node) => node.id === nodeId && isAudioNode(node)) ? ".mp3,.wav,audio/mpeg,audio/wav" : "image/*,video/*,.mp3,.wav";
         imageInputRef.current?.click();
     }, []);
 
@@ -2803,9 +2973,27 @@ function CanvasWorkspacePage() {
         async (event: ReactChangeEvent<HTMLInputElement>) => {
             const file = event.target.files?.[0];
             const target = uploadTargetRef.current;
+            // 选中文件后立即释放选择器，避免并行上传时清空其他节点的新选择。
+            uploadTargetRef.current = null;
+            event.target.value = "";
+            const targetNode = target?.nodeId ? nodesRef.current.find((node) => node.id === target.nodeId) : undefined;
+            if (file && targetNode && isAudioNode(targetNode) && !isAudioFile(file)) {
+                message.error("音频节点仅支持 MP3、WAV 文件");
+                return;
+            }
+            if (file && isAudioFile(file)) {
+                if (targetNode && !isAudioNode(targetNode)) {
+                    message.error("图片或视频节点不能替换为音频，请先创建音频节点");
+                    return;
+                }
+                void createAudioFileNode(file, target?.position || getCanvasCenter(), targetNode && isAudioNode(targetNode) ? targetNode.id : undefined);
+                return;
+            }
             if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/"))) return;
 
             if (target?.nodeId) {
+                const { beginNodeUpload, finishNodeUpload } = useCanvasUiStore.getState();
+                if (!beginNodeUpload(target.nodeId)) return;
                 try {
                     if (file.type.startsWith("video/")) {
                         const video = await uploadMediaFile(file, "video");
@@ -2839,30 +3027,28 @@ function CanvasWorkspacePage() {
                 } catch (error) {
                     message.error(error instanceof Error ? error.message : "上传媒体失败");
                 } finally {
-                    uploadTargetRef.current = null;
-                    event.target.value = "";
+                    finishNodeUpload(target.nodeId);
                 }
             } else {
                 const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
                 void (file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
             }
-
-            uploadTargetRef.current = null;
-            event.target.value = "";
         },
-        [createImageFileNode, createVideoFileNode, message, screenToCanvas, size.height, size.width],
+        [createAudioFileNode, createImageFileNode, createVideoFileNode, getCanvasCenter, message, screenToCanvas, size.height, size.width],
     );
 
     const handleDrop = useCallback(
         (event: ReactDragEvent<HTMLDivElement>) => {
             event.preventDefault();
-            const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/") || item.type.startsWith("video/"));
+            const target = event.target;
+            if (target instanceof Element && target.closest('[data-canvas-prompt-panel],input,textarea,select,[contenteditable="true"],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown')) return;
+            const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item));
             if (!file) return;
 
             const pos = screenToCanvas(event.clientX, event.clientY);
-            void (file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos));
+            void (isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos));
         },
-        [createImageFileNode, createVideoFileNode, screenToCanvas],
+        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas],
     );
 
     const pasteAssistantImage = useCallback(
@@ -3101,7 +3287,24 @@ function CanvasWorkspacePage() {
                 setAgentRunning(false);
             }
         },
-        [activeChatId, activeSessionMessages, agentQueued, agentRunning, appendAssistantMessage, config.agentModel, config.canvasImageCount, config.count, config.imageResolution, config.quality, config.size, handleAssistantSessionsChange, message, resetTextStream, resetThinkings, sendAgentMessage],
+        [
+            activeChatId,
+            activeSessionMessages,
+            agentQueued,
+            agentRunning,
+            appendAssistantMessage,
+            config.agentModel,
+            config.canvasImageCount,
+            config.count,
+            config.imageResolution,
+            config.quality,
+            config.size,
+            handleAssistantSessionsChange,
+            message,
+            resetTextStream,
+            resetThinkings,
+            sendAgentMessage,
+        ],
     );
 
     const startTitleEditing = useCallback(() => {
@@ -3153,14 +3356,24 @@ function CanvasWorkspacePage() {
                 return failedCanvasGenerationResult(nodeId, readAiTaskError(error));
             }
             if (externalSignal?.aborted) return canceledCanvasGenerationResult();
+            if (mode !== "video" && generationContext.referenceAudios.length) {
+                message.error("音频输入仅支持视频节点");
+                return failedCanvasGenerationResult(nodeId, canvasError("configuration", "音频输入仅支持视频节点"));
+            }
             // 合并视频节点上手动上传/上次生成持久化的参考素材（与连线引用按地址去重）
             if (mode === "video" && sourceNode && isVideoNode(sourceNode)) {
                 const savedReferences = await resolveVideoGenerationReferences(sourceNode.generation);
-                if (savedReferences && !savedReferences.incomplete) {
+                if (savedReferences?.incomplete) {
+                    message.error("参考素材恢复失败，请重新上传");
+                    return failedCanvasGenerationResult(nodeId, canvasError("configuration", "参考素材恢复失败，请重新上传"));
+                }
+                if (savedReferences) {
                     generationContext = {
                         ...generationContext,
+                        // 音频裁剪节点必须以当前直接连线为准，避免上一次生成保存的旧音频再次混入请求。
                         referenceImages: mergeUniqueReferences(generationContext.referenceImages, savedReferences.referenceImages),
                         referenceVideos: mergeUniqueReferences(generationContext.referenceVideos, savedReferences.referenceVideos),
+                        referenceAudios: generationContext.referenceAudios.length ? generationContext.referenceAudios : savedReferences.referenceAudios,
                     };
                 }
             }
@@ -3173,6 +3386,7 @@ function CanvasWorkspacePage() {
                     seconds: generationConfig.videoSeconds,
                     imageReferenceCount: generationContext.referenceImages.length,
                     videoReferenceCount: generationContext.referenceVideos.length,
+                    audioReferenceCount: generationContext.referenceAudios.length,
                     taskCount: normalizeVideoGenerationCount(generationConfig.count),
                 });
                 if (!videoQuote.available) {
@@ -3226,11 +3440,7 @@ function CanvasWorkspacePage() {
                               ]
                             : [];
                     // 设定图节点始终使用上游引用作为参考图，不能把节点自身上一次结果再次作为参考图。
-                    const referenceImages = isSettingGraphNode
-                        ? generationContext.referenceImages
-                        : sourceReference.length
-                          ? sourceReference
-                          : generationContext.referenceImages;
+                    const referenceImages = isSettingGraphNode ? generationContext.referenceImages : sourceReference.length ? sourceReference : generationContext.referenceImages;
                     const generationType = referenceImages.length ? ("edit" as const) : ("generation" as const);
                     const generationAttributes = buildImageGenerationAttributes(generationType, { ...generationConfig, size: generationSize }, count, referenceImages, styleIds, styleSnapshots);
                     const parentConfig = getCanvasNodeTemplate(sourceIsImage ? "image" : "text");
@@ -3253,9 +3463,7 @@ function CanvasWorkspacePage() {
                         y: reuseImageNode ? sourceNode?.frame.position.y || parentPosition.y : parentPosition.y + parentConfig.height / 2 - rootSize.height / 2,
                     };
                     const occupiedNodes = reuseImageNode ? nodesRef.current.filter((node) => node.id !== nodeId) : nodesRef.current;
-                    const rootPosition = reuseImageNode
-                        ? preferredRootPosition
-                        : findNonOverlappingCanvasNodePosition(occupiedNodes, preferredRootPosition, rootSize.width, rootSize.height);
+                    const rootPosition = reuseImageNode ? preferredRootPosition : findNonOverlappingCanvasNodePosition(occupiedNodes, preferredRootPosition, rootSize.width, rootSize.height);
                     const rootNode = updateCanvasNodeFrame(
                         {
                             ...createCanvasNode(
@@ -3267,9 +3475,7 @@ function CanvasWorkspacePage() {
                                     isBatchRoot: count > 1,
                                     batchChildIds: childIds,
                                     batchUsesReferenceImages: referenceImages.length > 0,
-                                    ...(isSettingGraphNode && sourceNode && isImageNode(sourceNode) && sourceNode.generation.settingGraph
-                                        ? { settingGraph: sourceNode.generation.settingGraph }
-                                        : {}),
+                                    ...(isSettingGraphNode && sourceNode && isImageNode(sourceNode) && sourceNode.generation.settingGraph ? { settingGraph: sourceNode.generation.settingGraph } : {}),
                                     ...generationAttributes,
                                     imageBatchExpanded: count > 1,
                                 },
@@ -3290,18 +3496,20 @@ function CanvasWorkspacePage() {
                             y: rootNode.frame.position.y + row * (imageConfig.height + rowGap),
                         };
                         const position = findNonOverlappingCanvasNodePosition([...occupiedNodes, rootNode, ...childNodes], preferredPosition, imageConfig.width, imageConfig.height);
-                        childNodes.push(updateCanvasNodeFrame(
-                            {
-                                ...createCanvasNode("image", { x: 0, y: 0 }, { prompt: effectivePrompt, status: NODE_STATUS_LOADING, batchRootId: rootId, ...generationAttributes }),
-                                id,
-                                title: `${index + 1}/${count}`,
-                            },
-                            {
-                                position,
-                                width: imageConfig.width,
-                                height: imageConfig.height,
-                            },
-                        ));
+                        childNodes.push(
+                            updateCanvasNodeFrame(
+                                {
+                                    ...createCanvasNode("image", { x: 0, y: 0 }, { prompt: effectivePrompt, status: NODE_STATUS_LOADING, batchRootId: rootId, ...generationAttributes }),
+                                    id,
+                                    title: `${index + 1}/${count}`,
+                                },
+                                {
+                                    position,
+                                    width: imageConfig.width,
+                                    height: imageConfig.height,
+                                },
+                            ),
+                        );
                     });
                     const batchConnections = [...(reuseImageNode ? [] : [createRightToLeftConnection(nodeId, rootId)]), ...childIds.map((childId) => createRightToLeftConnection(rootId, childId))];
 
@@ -3400,8 +3608,13 @@ function CanvasWorkspacePage() {
                         if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? updateCanvasNodeExecution(node, { phase: "idle", errorMessage: "" }) : node)));
                         return canceledCanvasGenerationResult();
                     }
+                    const referenceAudios = await ensureVideoReferenceAudiosObjectStorage(generationContext.referenceAudios);
+                    if (!referenceAudios) {
+                        if (markSourceStatus) setNodes((prev) => prev.map((node) => (node.id === nodeId ? updateCanvasNodeExecution(node, { phase: "idle", errorMessage: "" }) : node)));
+                        return canceledCanvasGenerationResult();
+                    }
                     if (runController.signal.aborted) return canceledCanvasGenerationResult();
-                    const videoGenerationContext = { ...generationContext, referenceImages };
+                    const videoGenerationContext = { ...generationContext, referenceImages, referenceAudios };
                     const spec = nodeSizeFromRatio(generationConfig.size, getCanvasNodeTemplate("video").width, getCanvasNodeTemplate("video").height) || getCanvasNodeTemplate("video");
                     const isEmptyVideoNode = Boolean(sourceNode && isVideoNode(sourceNode) && !sourceNode.content.source);
                     const parent = sourceNode?.frame.position || { x: 0, y: 0 };
@@ -3421,9 +3634,7 @@ function CanvasWorkspacePage() {
                                       y: parent.y + row * (spec.height + 54),
                                   };
                         const videoSize = isEmptyVideoNode && index === 0 && sourceNode ? { width: sourceNode.frame.width, height: sourceNode.frame.height } : spec;
-                        const videoPosition = isEmptyVideoNode && index === 0
-                            ? preferredVideoPosition
-                            : findNonOverlappingCanvasNodePosition([...occupiedVideoNodes, ...placedVideoNodes], preferredVideoPosition, videoSize.width, videoSize.height);
+                        const videoPosition = isEmptyVideoNode && index === 0 ? preferredVideoPosition : findNonOverlappingCanvasNodePosition([...occupiedVideoNodes, ...placedVideoNodes], preferredVideoPosition, videoSize.width, videoSize.height);
                         const videoNode = updateCanvasNodeFrame(
                             {
                                 ...createCanvasNode(
@@ -3463,6 +3674,7 @@ function CanvasWorkspacePage() {
                         videoIds.map(async (videoId): Promise<CanvasNodeGenerationOutcome> => {
                             try {
                                 const generatedVideo = await requestVideoGeneration({ ...generationConfig, count: "1" }, effectivePrompt, videoGenerationContext.referenceImages, videoGenerationContext.referenceVideos, "canvas", {
+                                    audioReferences: videoGenerationContext.referenceAudios,
                                     signal: runController.signal,
                                     generationStyleIds: styleSnapshots.length ? undefined : styleIds,
                                     generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined,
@@ -3619,7 +3831,7 @@ function CanvasWorkspacePage() {
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, finishGenerationRequest, isAiConfigReady, isGenerationRunning, message, requestFocusNodes, showMissingAiConfig, startGenerationRequest],
+        [effectiveConfig, ensureVideoReferenceAudiosObjectStorage, ensureVideoReferenceImagesObjectStorage, finishGenerationRequest, isAiConfigReady, isGenerationRunning, message, requestFocusNodes, showMissingAiConfig, startGenerationRequest],
     );
 
     const handleGenerateNodePrompt = useCallback(
@@ -3677,7 +3889,12 @@ function CanvasWorkspacePage() {
                 return failedCanvasGenerationResult(node.id, canvasError("configuration", "模型配置不完整"));
             }
 
-            const context = hasSavedImageGeneration ? null : await hydrateNodeGenerationContext(buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, readCanvasNodePrompt(sourceNode)), retryMode);
+            const retryContext = buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, readCanvasNodePrompt(sourceNode));
+            if (retryMode !== "video" && retryContext.referenceAudios.length) {
+                message.error("音频输入仅支持视频节点");
+                return failedCanvasGenerationResult(node.id, canvasError("configuration", "音频输入仅支持视频节点"));
+            }
+            const context = hasSavedImageGeneration ? null : await hydrateNodeGenerationContext(retryContext, retryMode);
             const prompt = (savedImageGeneration?.prompt || savedVideoGeneration?.prompt || context?.prompt || "").trim();
             if (!prompt) {
                 message.warning("找不到提示词，无法重试");
@@ -3700,6 +3917,7 @@ function CanvasWorkspacePage() {
             }
             const retryImages = retryReferenceImages || [];
             let retryVideoImages = retryImages;
+            let retryAudioReferences: ReferenceAudio[] = context?.referenceAudios || [];
             let retryVideoReferences: ReferenceVideo[] = context?.referenceVideos || [];
             if (isVideoNode(node)) {
                 const savedVideoReferences = await resolveVideoGenerationReferences(savedVideoGeneration);
@@ -3708,8 +3926,10 @@ function CanvasWorkspacePage() {
                     return failedCanvasGenerationResult(node.id, canvasError("configuration", "已保存的参考素材无法恢复，请重新连接参考节点后再试"));
                 }
                 if (savedVideoReferences) {
-                    retryVideoImages = savedVideoReferences.referenceImages;
-                    retryVideoReferences = savedVideoReferences.referenceVideos;
+                    // 重试同样遵循直接连线优先，防止裁剪节点替换后恢复旧的完整音频引用。
+                    retryVideoImages = mergeUniqueReferences(context?.referenceImages || [], savedVideoReferences.referenceImages);
+                    retryVideoReferences = mergeUniqueReferences(context?.referenceVideos || [], savedVideoReferences.referenceVideos);
+                    retryAudioReferences = context?.referenceAudios.length ? context.referenceAudios : savedVideoReferences.referenceAudios;
                 }
             }
             if (isVideoNode(node)) {
@@ -3721,6 +3941,7 @@ function CanvasWorkspacePage() {
                     seconds: generationConfig.videoSeconds,
                     imageReferenceCount: retryVideoImages.length,
                     videoReferenceCount: retryVideoReferences.length,
+                    audioReferenceCount: retryAudioReferences.length,
                     taskCount: 1,
                 });
                 if (!videoQuote.available) {
@@ -3760,7 +3981,13 @@ function CanvasWorkspacePage() {
                         setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "idle", errorMessage: "" }) : item)));
                         return canceledCanvasGenerationResult();
                     }
+                    const videoReferenceAudios = await ensureVideoReferenceAudiosObjectStorage(retryAudioReferences);
+                    if (!videoReferenceAudios) {
+                        setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "idle", errorMessage: "" }) : item)));
+                        return canceledCanvasGenerationResult();
+                    }
                     const generatedVideo = await requestVideoGeneration(generationConfig, prompt, videoReferenceImages, retryVideoReferences, "canvas", {
+                        audioReferences: videoReferenceAudios,
                         signal: controller.signal,
                         generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds,
                         generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined,
@@ -3790,7 +4017,7 @@ function CanvasWorkspacePage() {
                                     vquality: generationConfig.vquality,
                                     videoGenerationMode: generationConfig.videoGenerationMode,
                                     watermark: generationConfig.videoWatermark,
-                                    ...generationVideoReferenceAttributes({ referenceImages: videoReferenceImages, referenceVideos: retryVideoReferences }),
+                                    ...generationVideoReferenceAttributes({ referenceImages: videoReferenceImages, referenceVideos: retryVideoReferences, referenceAudios: videoReferenceAudios }),
                                     generationStyleIds: savedStyleIds,
                                     generationStyleSnapshots: completedStyleSnapshots,
                                 }),
@@ -3859,7 +4086,7 @@ function CanvasWorkspacePage() {
                 setRunningNodeId(null);
             }
         },
-        [effectiveConfig, ensureVideoReferenceImagesObjectStorage, finishGenerationRequest, isAiConfigReady, isGenerationRunning, message, showMissingAiConfig, startGenerationRequest],
+        [effectiveConfig, ensureVideoReferenceAudiosObjectStorage, ensureVideoReferenceImagesObjectStorage, finishGenerationRequest, isAiConfigReady, isGenerationRunning, message, showMissingAiConfig, startGenerationRequest],
     );
 
     useEffect(() => {
@@ -3876,10 +4103,7 @@ function CanvasWorkspacePage() {
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
             const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
             const position = findNonOverlappingCanvasNodePosition(nodesRef.current, { x: center.x - config.width / 2, y: center.y - config.height / 2 }, config.width, config.height);
-            const node = updateCanvasNodeFrame(
-                { ...createCanvasNode("image", center, { ...imageAttributes(storedImage), prompt: image.prompt }), id, title: image.prompt.slice(0, 32) || "生成图片" },
-                { position, ...config },
-            );
+            const node = updateCanvasNodeFrame({ ...createCanvasNode("image", center, { ...imageAttributes(storedImage), prompt: image.prompt }), id, title: image.prompt.slice(0, 32) || "生成图片" }, { position, ...config });
 
             setNodes((prev) => [...prev, node]);
             requestFocusNodes([node.id]);
@@ -3895,10 +4119,13 @@ function CanvasWorkspacePage() {
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
             const template = getCanvasNodeTemplate("text");
             const position = findNonOverlappingCanvasNodePosition(nodesRef.current, { x: center.x - template.width / 2, y: center.y - template.height / 2 }, template.width, template.height);
-            const node = updateCanvasNodeFrame({
-                ...createCanvasNode("text", center, { content: text, status: NODE_STATUS_SUCCESS }),
-                title: text.slice(0, 32) || "Assistant Text",
-            }, { position });
+            const node = updateCanvasNodeFrame(
+                {
+                    ...createCanvasNode("text", center, { content: text, status: NODE_STATUS_SUCCESS }),
+                    title: text.slice(0, 32) || "Assistant Text",
+                },
+                { position },
+            );
 
             setNodes((prev) => [...prev, node]);
             requestFocusNodes([node.id]);
@@ -3937,43 +4164,52 @@ function CanvasWorkspacePage() {
         [insertAssistantImage, insertAssistantText, requestFocusNodes, screenToCanvas, size.height, size.width],
     );
 
-    const handleCanvasAssetSelect = useCallback((asset: CanvasNavigationAsset) => {
-        if (asset.source !== "storyboard" || !asset.asset.image?.source || !canvasAssetReplaceNodeId) return;
-        const targetNodeId = canvasAssetReplaceNodeId;
-        const source = asset.asset.image.source;
-        setNodes((prev) => prev.map((node) => node.id === targetNodeId && isImageNode(node)
-            ? applyCanvasNodeAttributes(node, {
-                content: source,
-                storageKey: asset.asset.image?.storageKey,
-                mimeType: asset.asset.image?.mimeType,
-                objectStorage: asset.asset.image?.objectStorage,
-                status: NODE_STATUS_SUCCESS,
-            })
-            : node));
-        setSelectedNodeIds(new Set([targetNodeId]));
-        setDialogNodeId(targetNodeId);
-        setCanvasAssetReplaceNodeId(null);
-        setCanvasAssetPickerOpen(false);
-        message.success("已使用画布资产替换当前图片");
-        const image = new window.Image();
-        image.onload = () => {
-            if (!image.naturalWidth || !image.naturalHeight) return;
-            setNodes((prev) => prev.map((node) => {
-                if (node.id !== targetNodeId || !isImageNode(node) || node.frame.freeResize) return node;
-                const nextSize = fitNodeSize(image.naturalWidth, image.naturalHeight);
-                return updateCanvasNodeFrame(node, {
-                    ...nextSize,
-                    position: {
-                        x: node.frame.position.x + (node.frame.width - nextSize.width) / 2,
-                        y: node.frame.position.y + (node.frame.height - nextSize.height) / 2,
-                    },
-                    naturalWidth: image.naturalWidth,
-                    naturalHeight: image.naturalHeight,
-                });
-            }));
-        };
-        image.src = source;
-    }, [canvasAssetReplaceNodeId, message]);
+    const handleCanvasAssetSelect = useCallback(
+        (asset: CanvasNavigationAsset) => {
+            if (asset.source !== "storyboard" || !asset.asset.image?.source || !canvasAssetReplaceNodeId) return;
+            const targetNodeId = canvasAssetReplaceNodeId;
+            const source = asset.asset.image.source;
+            setNodes((prev) =>
+                prev.map((node) =>
+                    node.id === targetNodeId && isImageNode(node)
+                        ? applyCanvasNodeAttributes(node, {
+                              content: source,
+                              storageKey: asset.asset.image?.storageKey,
+                              mimeType: asset.asset.image?.mimeType,
+                              objectStorage: asset.asset.image?.objectStorage,
+                              status: NODE_STATUS_SUCCESS,
+                          })
+                        : node,
+                ),
+            );
+            setSelectedNodeIds(new Set([targetNodeId]));
+            setDialogNodeId(targetNodeId);
+            setCanvasAssetReplaceNodeId(null);
+            setCanvasAssetPickerOpen(false);
+            message.success("已使用画布资产替换当前图片");
+            const image = new window.Image();
+            image.onload = () => {
+                if (!image.naturalWidth || !image.naturalHeight) return;
+                setNodes((prev) =>
+                    prev.map((node) => {
+                        if (node.id !== targetNodeId || !isImageNode(node) || node.frame.freeResize) return node;
+                        const nextSize = fitNodeSize(image.naturalWidth, image.naturalHeight);
+                        return updateCanvasNodeFrame(node, {
+                            ...nextSize,
+                            position: {
+                                x: node.frame.position.x + (node.frame.width - nextSize.width) / 2,
+                                y: node.frame.position.y + (node.frame.height - nextSize.height) / 2,
+                            },
+                            naturalWidth: image.naturalWidth,
+                            naturalHeight: image.naturalHeight,
+                        });
+                    }),
+                );
+            };
+            image.src = source;
+        },
+        [canvasAssetReplaceNodeId, message],
+    );
 
     const handleVideoCompositionInputOrderChange = useCallback((nodeId: string, inputVideoNodeIds: string[]) => {
         setNodes((currentNodes) =>
@@ -4011,10 +4247,15 @@ function CanvasWorkspacePage() {
                 }
                 const resultId = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
                 const resultTemplate = getCanvasNodeTemplate("video");
-                const resultPosition = findNonOverlappingCanvasNodePosition(nodesRef.current, {
-                    x: latestNode.frame.position.x + latestNode.frame.width + 144,
-                    y: latestNode.frame.position.y + latestNode.frame.height / 2 - resultTemplate.height / 2,
-                }, resultTemplate.width, resultTemplate.height);
+                const resultPosition = findNonOverlappingCanvasNodePosition(
+                    nodesRef.current,
+                    {
+                        x: latestNode.frame.position.x + latestNode.frame.width + 144,
+                        y: latestNode.frame.position.y + latestNode.frame.height / 2 - resultTemplate.height / 2,
+                    },
+                    resultTemplate.width,
+                    resultTemplate.height,
+                );
                 const resultCenter = {
                     x: resultPosition.x + resultTemplate.width / 2,
                     y: resultPosition.y + resultTemplate.height / 2,
@@ -4103,6 +4344,15 @@ function CanvasWorkspacePage() {
                     setSelectedNodeIds((current) => new Set([...current].filter((id) => !allIds.has(id))));
                 }
                 cancelVideoCompositionTasksForDeletedNodes(allIds);
+                if ([...allIds].some((id) => nodesRef.current.some((node) => node.id === id && isAudioNode(node)))) {
+                    stopCanvasAudio();
+                }
+                const { finishNodeUpload } = useCanvasUiStore.getState();
+                allIds.forEach((id) => {
+                    audioUploadScope.current.delete(id);
+                    finishNodeUpload(id);
+                });
+                setAudioTrimNodeId((current) => (current && allIds.has(current) ? null : current));
                 setConnections((currentConnections) => currentConnections.filter((connection) => !allIds.has(connection.source.nodeId) && !allIds.has(connection.target.nodeId)));
                 return allIds;
             }),
@@ -4133,6 +4383,7 @@ function CanvasWorkspacePage() {
             onDownload: (n) => downloadNodeImage(n),
             onSaveAsset: (n) => saveNodeAsset(n),
             onCrop: (n) => setCropNodeId(n.id),
+            onTrim: (n) => setAudioTrimNodeId(n.id),
             onSplit: (n) => setSplitNodeId(n.id),
             onViewImage: (n) => setPreviewNodeId(n.id),
             onViewVideo: (n) => setPreviewNodeId(n.id),
@@ -4182,6 +4433,7 @@ function CanvasWorkspacePage() {
             handleStoryboardVisualStyleChange,
             handleStoryboardModelChange,
             handleUploadRequest,
+            trimAudioNode,
             hideNodeToolbar,
             handleVideoCompositionInputOrderChange,
             keepNodeToolbar,
@@ -4238,7 +4490,11 @@ function CanvasWorkspacePage() {
         setEdgeDeletePopover(null);
         const selectedNodeIds = selectedNodeIdsRef.current;
         const targetNode = nodesRef.current.find((node) => node.id === nodeId);
-        setContextMenu(selectedNodeIds.size > 1 && selectedNodeIds.has(nodeId) ? { type: "selection", x: event.clientX, y: event.clientY, nodeIds: [...selectedNodeIds] } : { type: "node", x: event.clientX, y: event.clientY, nodeId, nodeKind: targetNode?.kind || "text" });
+        setContextMenu(
+            selectedNodeIds.size > 1 && selectedNodeIds.has(nodeId)
+                ? { type: "selection", x: event.clientX, y: event.clientY, nodeIds: [...selectedNodeIds] }
+                : { type: "node", x: event.clientX, y: event.clientY, nodeId, nodeKind: targetNode?.kind || "text" },
+        );
     }, []);
     const handleSelectionContextMenu = useCallback((event: ReactMouseEvent, nodeIds: string[]) => {
         if (!nodeIds.length) return;
@@ -4333,7 +4589,13 @@ function CanvasWorkspacePage() {
     if (!projectLoaded) return <CanvasLoadingShell />;
 
     return (
-        <main className="flex h-full min-h-0 overflow-hidden" style={{ background: theme.canvas.backgroundGradient, color: theme.node.text }} onPointerDownCapture={handleCanvasRootPointerDownCapture}>
+        <main
+            className="flex h-full min-h-0 overflow-hidden"
+            style={{ background: theme.canvas.backgroundGradient, color: theme.node.text }}
+            onPointerDownCapture={handleCanvasRootPointerDownCapture}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={handleDrop}
+        >
             <section ref={containerRef} className="relative min-w-0 flex-1 overflow-hidden">
                 <CanvasTopBar
                     title={currentDocument?.identity.title || "未命名画布"}
@@ -4434,6 +4696,7 @@ function CanvasWorkspacePage() {
                         <ConnectionCreateMenu
                             pending={pendingConnectionCreate}
                             sourceNode={nodeById.get(pendingConnectionCreate.connection.nodeId) || null}
+                            onPositionChange={(menuPosition) => setPendingConnectionCreate((current) => (current ? { ...current, menuPosition } : null))}
                             onCreate={(type) => createConnectedNode(type, pendingConnectionCreate)}
                             onCreateSettingGraph={(skill) => createConnectedNode("image", pendingConnectionCreate, skill)}
                             onClose={cancelPendingConnectionCreate}
@@ -4504,6 +4767,7 @@ function CanvasWorkspacePage() {
                         setCanvasAssetPickerOpen(true);
                     }}
                     onCrop={(node) => setCropNodeId(node.id)}
+                    onTrim={(node) => setAudioTrimNodeId(node.id)}
                     onSplit={(node) => setSplitNodeId(node.id)}
                     onViewImage={(node) => setPreviewNodeId(node.id)}
                     onRetry={(node) => (isStoryboardNode(node) ? void handleGenerateStoryboard(node) : void handleRetryNode(node))}
@@ -4519,6 +4783,7 @@ function CanvasWorkspacePage() {
                     canUndo={historyState.canUndo}
                     canRedo={historyState.canRedo}
                     onAddImage={() => createNode("image")}
+                    onAddAudio={() => createNode("audio")}
                     onAddVideo={() => createNode("video")}
                     onAddText={() => createNode("text")}
                     onAddBackground={() => createNode("background")}
@@ -4531,9 +4796,22 @@ function CanvasWorkspacePage() {
                     onOpenMyAssets={() => {
                         setAssetPickerOpen(true);
                     }}
-                    selectedBackground={selectedNodeIds.size === 1 ? (() => { const selected = nodes.find((node) => selectedNodeIds.has(node.id)); return selected && isBackgroundNode(selected) ? selected : null; })() : null}
-                    onBackgroundTitleChange={(nodeId, title) => { const node = nodesRef.current.find((item): item is CanvasBackgroundNode => item.id === nodeId && isBackgroundNode(item)); if (node) handleBackgroundTitleChange(node, title); }}
-                    onBackgroundColorChange={(nodeId, color) => { const node = nodesRef.current.find((item): item is CanvasBackgroundNode => item.id === nodeId && isBackgroundNode(item)); if (node) handleBackgroundColorChange(node, color); }}
+                    selectedBackground={
+                        selectedNodeIds.size === 1
+                            ? (() => {
+                                  const selected = nodes.find((node) => selectedNodeIds.has(node.id));
+                                  return selected && isBackgroundNode(selected) ? selected : null;
+                              })()
+                            : null
+                    }
+                    onBackgroundTitleChange={(nodeId, title) => {
+                        const node = nodesRef.current.find((item): item is CanvasBackgroundNode => item.id === nodeId && isBackgroundNode(item));
+                        if (node) handleBackgroundTitleChange(node, title);
+                    }}
+                    onBackgroundColorChange={(nodeId, color) => {
+                        const node = nodesRef.current.find((item): item is CanvasBackgroundNode => item.id === nodeId && isBackgroundNode(item));
+                        if (node) handleBackgroundColorChange(node, color);
+                    }}
                 />
 
                 <CanvasWorkspaceOverlays
@@ -4542,6 +4820,7 @@ function CanvasWorkspacePage() {
                     infoNode={infoNode}
                     cropNode={cropNode}
                     cropLoading={Boolean(cropNodeId && croppingNodeId === cropNodeId)}
+                    audioTrimNode={audioTrimNodeId ? nodes.find((node) => node.id === audioTrimNodeId) || null : null}
                     splitNode={splitNode}
                     splitLoading={Boolean(splitNodeId && splittingNodeId === splitNodeId)}
                     previewNode={previewNode}
@@ -4561,6 +4840,8 @@ function CanvasWorkspacePage() {
                         if (!croppingNodeId) setCropNodeId(null);
                     }}
                     onCrop={(node, crop) => void cropImageNode(node, crop)}
+                    onCloseAudioTrim={() => setAudioTrimNodeId(null)}
+                    onAudioTrim={(node, startMs, endMs) => trimAudioNode(node, startMs, endMs)}
                     onCloseSplit={() => {
                         if (!splittingNodeId) setSplitNodeId(null);
                     }}
@@ -4839,25 +5120,26 @@ function referenceUrl(image: ReferenceImage) {
     return image.objectStorage?.url || image.storageKey || image.url || (!image.dataUrl.startsWith("data:") ? image.dataUrl : undefined);
 }
 
-function generationVideoReferenceAttributes(context: { referenceImages: ReferenceImage[]; referenceVideos: ReferenceVideo[] }) {
-    return {
-        references: context.referenceImages.map(referenceUrl).filter((url): url is string => Boolean(url)),
-        referenceObjectStorages: context.referenceImages.map((reference) => reference.objectStorage).filter((file): file is NonNullable<typeof file> => Boolean(file?.url)),
-        videoReferences: context.referenceVideos.map(videoReferenceUrl).filter((url): url is string => Boolean(url)),
-        videoReferenceObjectStorages: context.referenceVideos.map((video) => video.objectStorage).filter((file): file is NonNullable<typeof file> => Boolean(file?.url)),
-    };
-}
-
 type PersistableReference = { objectStorage?: ObjectStorageFile; url?: string; storageKey?: string; dataUrl?: string };
 
 function referenceIdentityKey(reference: PersistableReference) {
     return reference.objectStorage?.url || reference.url || reference.storageKey || reference.dataUrl || "";
 }
 
-/** 合并两组参考素材，按对象存储地址/URL 去重，连线引用优先。 */
+/** 合并参考素材，保留连线引用顺序并按稳定地址去重。 */
 function mergeUniqueReferences<T extends PersistableReference>(primary: T[], extra: T[]): T[] {
     const seen = new Set(primary.map(referenceIdentityKey));
     return [...primary, ...extra.filter((reference) => !seen.has(referenceIdentityKey(reference)))];
+}
+
+function generationVideoReferenceAttributes(context: { referenceImages: ReferenceImage[]; referenceVideos: ReferenceVideo[]; referenceAudios?: ReferenceAudio[] }) {
+    return {
+        references: context.referenceImages.map(referenceUrl).filter((url): url is string => Boolean(url)),
+        referenceObjectStorages: context.referenceImages.map((reference) => reference.objectStorage).filter((file): file is NonNullable<typeof file> => Boolean(file?.url)),
+        audioReferences: context.referenceAudios || [],
+        videoReferences: context.referenceVideos.map(videoReferenceUrl).filter((url): url is string => Boolean(url)),
+        videoReferenceObjectStorages: context.referenceVideos.map((video) => video.objectStorage).filter((file): file is NonNullable<typeof file> => Boolean(file?.url)),
+    };
 }
 
 function videoReferenceUrl(video: ReferenceVideo) {
@@ -4877,13 +5159,13 @@ async function resolveGenerationReferences(generation: CanvasImageGenerationSett
     return references.every(Boolean) ? (references as ReferenceImage[]) : null;
 }
 
-async function resolveVideoGenerationReferences(generation: CanvasVideoGenerationSettings | null): Promise<{ referenceImages: ReferenceImage[]; referenceVideos: ReferenceVideo[]; incomplete: boolean } | null> {
+async function resolveVideoGenerationReferences(generation: CanvasVideoGenerationSettings | null): Promise<{ referenceImages: ReferenceImage[]; referenceVideos: ReferenceVideo[]; referenceAudios: ReferenceAudio[]; incomplete: boolean } | null> {
     if (!generation) return null;
     const imageReferences = Array.isArray(generation.references) ? generation.references : [];
     const imageObjectStorages = Array.isArray(generation.referenceObjectStorages) ? generation.referenceObjectStorages : [];
     const videoReferences = Array.isArray(generation.videoReferences) ? generation.videoReferences : [];
     const videoObjectStorages = Array.isArray(generation.videoReferenceObjectStorages) ? generation.videoReferenceObjectStorages : [];
-    const hasPersistedReferenceState = Array.isArray(generation.videoReferences) || Array.isArray(generation.videoReferenceObjectStorages) || imageReferences.length > 0;
+    const hasPersistedReferenceState = Boolean(generation.audioReferences?.length) || Array.isArray(generation.videoReferences) || Array.isArray(generation.videoReferenceObjectStorages) || imageReferences.length > 0;
     if (!hasPersistedReferenceState) return null;
 
     const legacyImageEntries = imageReferences.map((reference) => ({ reference, objectStorage: findGenerationObjectStorage(imageObjectStorages, reference) })).filter(({ reference, objectStorage }) => !isVideoReferenceValue(reference, objectStorage));
@@ -4920,11 +5202,24 @@ async function resolveVideoGenerationReferences(generation: CanvasVideoGeneratio
             };
         }),
     );
+    const referenceAudios = await resolveAudioReferences(generation.audioReferences || []);
     return {
         referenceImages: imageEntries.filter((reference): reference is ReferenceImage => Boolean(reference)),
+        referenceAudios,
         referenceVideos: resolvedVideos.filter((reference): reference is ReferenceVideo => Boolean(reference)),
-        incomplete: imageEntries.some((reference) => !reference) || resolvedVideos.some((reference) => !reference),
+        incomplete: referenceAudios.some((audio) => !audio.url || !audio.storageKey) || imageEntries.some((reference) => !reference) || resolvedVideos.some((reference) => !reference),
     };
+}
+
+/** 重新解析音频地址，避免归档导入后继续使用旧对象存储地址。 */
+async function resolveAudioReferences(references: ReferenceAudio[]) {
+    return Promise.all(
+        mergeAudioReferences(references).map(async (audio) => {
+            const persisted = audio as ReferenceAudio & { mimeType?: string };
+            const url = audio.storageKey ? await resolveMediaUrl(audio.storageKey, "") : audio.url;
+            return { ...audio, type: audio.type || persisted.mimeType || "", url };
+        }),
+    );
 }
 
 function findGenerationObjectStorage(files: ObjectStorageFile[], reference: string) {
@@ -4997,8 +5292,9 @@ async function hydrateCanvasImages(nodes: CanvasDomainNode[]) {
             continue;
         }
         const source = node.content.source;
-        if (isVideoNode(node)) {
-            hydratedNodes.push(node.content.storageKey ? applyCanvasNodeAttributes(node, { content: await resolveMediaUrl(node.content.storageKey, source) }) : node);
+        if (isVideoNode(node) || isAudioNode(node)) {
+            const mediaNode = node.content.storageKey ? applyCanvasNodeAttributes(node, { content: await resolveMediaUrl(node.content.storageKey, source) }) : node;
+            hydratedNodes.push(isVideoNode(mediaNode) && mediaNode.generation.audioReferences?.length ? applyCanvasNodeAttributes(mediaNode, { audioReferences: await resolveAudioReferences(mediaNode.generation.audioReferences) }) : mediaNode);
             continue;
         }
         if (!source) {

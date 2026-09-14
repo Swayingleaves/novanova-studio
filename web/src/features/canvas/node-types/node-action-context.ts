@@ -24,6 +24,7 @@ export type NodeActions = {
     onDownload: (node: CanvasNode) => void;
     onSaveAsset: (node: CanvasNode) => void;
     onCrop: (node: CanvasNode) => void;
+    onTrim: (node: CanvasNode) => void;
     onSplit: (node: CanvasNode) => void;
     onViewImage: (node: CanvasNode) => void;
     onViewVideo: (node: CanvasNode) => void;
@@ -65,6 +66,7 @@ const NodeActionContext = createContext<NodeActions>({
     onDownload: noop,
     onSaveAsset: noop,
     onCrop: noop,
+    onTrim: noop,
     onSplit: noop,
     onViewImage: noop,
     onViewVideo: noop,

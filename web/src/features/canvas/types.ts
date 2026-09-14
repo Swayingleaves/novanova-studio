@@ -121,7 +121,7 @@ export interface CanvasViewport {
     zoom: number;
 }
 
-export type CanvasNodeKind = "image" | "text" | "video" | "storyboard" | "videoComposition" | "background";
+export type CanvasNodeKind = "image" | "text" | "video" | "audio" | "storyboard" | "videoComposition" | "background";
 
 export type CanvasExecutionPhase = "idle" | "running" | "succeeded" | "failed";
 
@@ -175,6 +175,17 @@ export interface CanvasImageGrouping {
     expanded: boolean;
 }
 
+/** 音频节点保存真实波形采样，播放状态只保留在组件中。 */
+export interface CanvasAudioNode extends CanvasNodeBase<"audio"> {
+    content: CanvasVideoContent & {
+        waveformPeaks: number[];
+        /** 裁剪片段在原音频中的起始位置，未设置时从0开始。 */
+        trimStartMilliseconds?: number;
+        /** 裁剪片段在原音频中的结束位置，未设置时使用原始时长。 */
+        trimEndMilliseconds?: number;
+    };
+}
+
 export interface CanvasVideoContent {
     source: string;
     storageKey?: string;
@@ -198,6 +209,7 @@ export interface CanvasVideoGenerationSettings {
     references: string[];
     referenceObjectStorages: ObjectStorageFile[];
     /** 新版持久化的参考视频地址；历史数据可能缺失。 */
+    audioReferences?: import("@/features/generation/types/media").ReferenceAudio[];
     videoReferences?: string[];
     /** 新版持久化的参考视频对象存储信息；历史数据可能缺失。 */
     videoReferenceObjectStorages?: ObjectStorageFile[];
@@ -323,7 +335,7 @@ export interface CanvasBackgroundNode extends CanvasNodeBase<"background"> {
     memberNodeIds: string[];
 }
 
-export type CanvasNode = CanvasImageNode | CanvasTextNode | CanvasVideoNode | CanvasStoryboardNode | CanvasVideoCompositionNode | CanvasBackgroundNode;
+export type CanvasNode = CanvasAudioNode | CanvasImageNode | CanvasTextNode | CanvasVideoNode | CanvasStoryboardNode | CanvasVideoCompositionNode | CanvasBackgroundNode;
 
 export interface CanvasConnectionEndpoint {
     nodeId: string;

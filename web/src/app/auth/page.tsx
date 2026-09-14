@@ -22,6 +22,7 @@ function AuthPageContent() {
     const hydrated = useUserStore((state) => state.hydrated);
     const user = useUserStore((state) => state.user);
     const redirect = safeAuthRedirect(searchParams.get("redirect"));
+    const invitationCode = searchParams.get("invitationCode")?.trim() || undefined;
 
     useEffect(() => {
         hydrateSession();
@@ -37,8 +38,9 @@ function AuthPageContent() {
                 <div className="mb-6">
                     <h1 className="studio-title text-2xl font-semibold">Novanova Studio</h1>
                     <p className="studio-subtitle mt-2 text-sm">登录后继续你的 AI 视觉创作工作台。</p>
+                    {invitationCode ? <p className="mt-3 rounded-md bg-[var(--studio-surface-soft)] px-3 py-2 text-sm text-[var(--studio-text)]">你正在通过邀请链接注册，完成注册后邀请人将获得积分奖励。</p> : null}
                 </div>
-                <AuthForm onSuccess={() => router.replace(redirect)} redirectPath={redirect} />
+                <AuthForm onSuccess={() => router.replace(redirect)} redirectPath={redirect} invitationCode={invitationCode} />
             </div>
         </div>
     );

@@ -48,6 +48,8 @@ export type ServerAiTaskMediaReference = {
     storageKey?: string;
     url?: string;
     role?: string;
+    trimStartMs?: number;
+    trimEndMs?: number;
 };
 
 export type ServerAiTask = {
@@ -95,6 +97,7 @@ export type ServerAiTaskCreateInput = {
     model?: string;
     parameters?: Record<string, unknown>;
     references?: ServerAiTaskMediaReference[];
+    audioReferences?: ServerAiTaskMediaReference[];
     videoReferences?: ServerAiTaskMediaReference[];
     generationSource?: ServerGenerationSource;
     generationStyleIds?: number[];
@@ -215,6 +218,18 @@ export type OAuth2ProviderListResponse = {
     providers: OAuth2ProviderInfo[];
 };
 
+export type OAuth2AuthorizationPreparation = {
+    authorizationPath: string;
+};
+
+export type InvitationInfo = {
+    invitationCode: string;
+};
+
+export type InvitationRewardSettings = {
+    invitationRewardCredits: number;
+};
+
 export type UserListResponse = {
     users: ServerUserProfile[];
     total: number;
@@ -305,11 +320,11 @@ export type ServerCreditTransactionList = {
     total: number;
 };
 
-export type ServerCreditTransactionType = "task_charge" | "task_refund" | "admin_adjustment" | "card_redeem" | "initial_grant";
+export type ServerCreditTransactionType = "task_charge" | "task_refund" | "admin_adjustment" | "card_redeem" | "initial_grant" | "invitation_reward";
 
 export type ServerCreditDirection = "add" | "spend";
 
-export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redeem" | "admin_adjustment" | "initial_grant";
+export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redeem" | "admin_adjustment" | "initial_grant" | "invitation_reward";
 
 export type ServerUserCreditTransaction = {
     id: number;
@@ -321,6 +336,7 @@ export type ServerUserCreditTransaction = {
     changeAmount: number;
     reason: string;
     balanceAfter: number;
+    invitedUserId: number | null;
     createdAt: string;
 };
 
@@ -417,7 +433,7 @@ export function sendEmailCode(email: string) {
     return serverPost("/auth/sendEmailCode", { email }, { auth: false });
 }
 
-export function registerByEmail(input: { email: string; code: string; password: string; nickname?: string }) {
+export function registerByEmail(input: { email: string; code: string; password: string; nickname?: string; invitationCode?: string }) {
     return serverPost<AuthResponse>("/auth/register", input, { auth: false });
 }
 
@@ -425,8 +441,20 @@ export function loginByEmail(input: { email: string; password: string }) {
     return serverPost<AuthResponse>("/auth/login", input, { auth: false });
 }
 
+export function requestPasswordReset(email: string) {
+    return serverPost("/auth/requestPasswordReset", { email }, { auth: false });
+}
+
+export function resetPassword(input: { token: string; newPassword: string }) {
+    return serverPost("/auth/resetPassword", input, { auth: false });
+}
+
 export function listOAuth2Providers() {
     return serverGet<OAuth2ProviderListResponse>("/auth/oauth/listProviders", { auth: false });
+}
+
+export function prepareOAuth2Authorization(providerId: string, invitationCode?: string) {
+    return serverPost<OAuth2AuthorizationPreparation>("/auth/oauth/prepareAuthorization", { providerId, invitationCode }, { auth: false });
 }
 
 export function exchangeOAuth2LoginCode(loginCode: string) {
@@ -443,6 +471,10 @@ export function acknowledgeWelcome() {
 
 export function getCurrentUserInfo() {
     return serverGet<ServerUserProfile>("/auth/userInfo");
+}
+
+export function getInvitationInfo() {
+    return serverGet<InvitationInfo>("/invitation/getInvitationInfo");
 }
 
 export function updateCurrentUserProfile(input: Pick<ServerUserProfile, "username" | "nickname" | "avatar">) {
@@ -1015,6 +1047,14 @@ export function updateCreditSettings(initialCredits: number) {
     return serverPost<CreditSettings>("/config/credit/updateCreditSettings", { initialCredits });
 }
 
+export function getInvitationRewardSettings() {
+    return serverGet<InvitationRewardSettings>("/config/invitation/getInvitationRewardSettings");
+}
+
+export function updateInvitationRewardSettings(invitationRewardCredits: number) {
+    return serverPost<InvitationRewardSettings>("/config/invitation/updateInvitationRewardSettings", { invitationRewardCredits });
+}
+
 export function getCreditOverview(params: { startDate: string; endDate: string; generationType?: "image" | "video"; trendUnit: "day" | "month" }) {
     const query = new URLSearchParams({ startDate: params.startDate, endDate: params.endDate, trendUnit: params.trendUnit });
     if (params.generationType) query.set("generationType", params.generationType);
@@ -1243,6 +1283,7 @@ async function requestServer(path: string, init: RequestInit, options: { auth?: 
         ...init,
         headers,
         cache: "no-store",
+        credentials: "include",
     });
     if (response.status === 401) {
         const store = useUserStore.getState();
