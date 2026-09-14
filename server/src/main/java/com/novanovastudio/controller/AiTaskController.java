@@ -109,7 +109,8 @@ public class AiTaskController {
      */
     @PostMapping("/image/generate")
     public Mono<ApiResponse<AiTaskDtos.AiGenerationTaskResponse>> generateImage(@RequestBody AiTaskDtos.CreateAiTaskRequest request) {
-        return aiTaskService.createTask(new AiTaskDtos.CreateAiTaskRequest("image", request.prompt(), request.model(), request.parameters(), request.references(), request.videoReferences(), AiTaskSources.IMAGE_PAGE)).map(ApiResponse::ok);
+        return aiTaskService.createTask(new AiTaskDtos.CreateAiTaskRequest("image", request.prompt(), request.model(), request.parameters(),
+                request.references(), request.videoReferences(), AiTaskSources.IMAGE_PAGE, null, null, null, request.audioReferences())).map(ApiResponse::ok);
     }
 
     /**

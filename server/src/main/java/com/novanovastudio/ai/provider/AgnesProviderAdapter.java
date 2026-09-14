@@ -8,6 +8,7 @@ import com.novanovastudio.ai.*;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
+import com.novanovastudio.dto.AiTaskDtos;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -234,37 +235,55 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
      * @return Mono<JSONObject> 视频结果
      */
     private Mono<JSONObject> executeVideoTask(AiTaskExecutionContext context) {
-        if (!AiTaskParameterReader.safeReferences(context.request().videoReferences()).isEmpty()) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "Agnes 调用格式暂不支持参考视频，请移除参考素材"));
-        }
         var imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
-        return Flux.fromIterable(imageReferences)
-                .concatMap(reference -> mediaSupport.resolveReferenceUrl(context.task().getUserId(), reference))
-                .collectList()
-                .flatMap(referenceUrls -> {
+        var videoReferences = AiTaskParameterReader.safeReferences(context.request().videoReferences());
+        var audioReferences = AiTaskParameterReader.safeReferences(context.request().audioReferences());
+        log.info("解析Agnes视频参考素材: taskId={}, imageReferenceCount={}, videoReferenceCount={}, audioReferenceCount={}, audioStorageKeys={}",
+                context.task().getId(), imageReferences.size(), videoReferences.size(), audioReferences.size(),
+                audioReferences.stream().map(reference -> reference == null ? "空引用" : AiTaskParameterReader.firstNonEmpty(reference.storageKey(), "未提供")).toList());
+        Mono<List<String>> imageUrls = Flux.fromIterable(imageReferences)
+                .concatMap(reference -> resolveRequiredReferenceUrl(context, reference, "图片"))
+                .collectList();
+        Mono<List<String>> videoUrls = Flux.fromIterable(videoReferences)
+                .concatMap(reference -> resolveRequiredReferenceUrl(context, reference, "视频"))
+                .collectList();
+        Mono<List<String>> audioUrls = Flux.fromIterable(audioReferences)
+                .concatMap(reference -> resolveRequiredReferenceUrl(context, reference, "音频"))
+                .collectList();
+        return Mono.zip(imageUrls, videoUrls, audioUrls)
+                .flatMap(urls -> {
+                    List<String> referenceImages = urls.getT1();
+                    List<String> referenceVideos = urls.getT2();
+                    List<String> referenceAudios = urls.getT3();
                     String sizeParam = AiTaskParameterReader.parameterText(context.request().parameters(), "size", "16:9");
                     AgnesVideoDimensions dimensions = agnesVideoDimensions(sizeParam, AiTaskParameterReader.parameterText(context.request().parameters(), "resolution", "720p"));
                     AgnesVideoTiming timing = agnesVideoTiming(AiTaskParameterReader.parameterText(context.request().parameters(), "seconds", "5"), dimensions.resolution());
-                    boolean hasImageReferences = !referenceUrls.isEmpty();
+                    boolean hasReferenceMedia = !referenceImages.isEmpty() || !referenceVideos.isEmpty() || !referenceAudios.isEmpty();
                     Map<String, Object> payload = new java.util.LinkedHashMap<>();
                     payload.put("model", context.model());
-                    payload.put("prompt", context.request().prompt());
-                    // Agnes Video 2.5 必填 mode：纯文生用 text，含参考图用 reference
-                    payload.put("mode", hasImageReferences ? "reference" : "text");
+                    payload.put("prompt", agnesReferencePrompt(context.request().prompt(), referenceImages.size(), referenceVideos.size(), referenceAudios.size()));
+                    // Agnes Video 2.5 必填 mode：纯文生用 text，含参考素材用 reference
+                    payload.put("mode", hasReferenceMedia ? "reference" : "text");
                     // 时长以字符串传入，文档限定 "4"-"12"
                     payload.put("seconds", String.valueOf(timing.seconds()));
                     // size 由前端通过 resolution 参数控制（默认 720p），画幅用 aspect_ratio 表达，禁止直接传 width/height
                     payload.put("size", dimensions.resolution().toUpperCase());
                     payload.put("aspect_ratio", normalizeAgnesVideoRatio(sizeParam));
-                    applyAgnesVideoReferenceImages(payload, referenceUrls);
-                    log.info("创建Agnes视频任务: taskId={}, mode={}, seconds={}, aspectRatio={}, resolution={}",
-                            context.task().getId(), hasImageReferences ? "reference" : "text",
-                            timing.seconds(), normalizeAgnesVideoRatio(sizeParam), dimensions.resolution());
+                    applyAgnesVideoReferenceImages(payload, referenceImages);
+                    applyAgnesVideoReferenceVideos(payload, referenceVideos);
+                    applyAgnesVideoReferenceAudios(payload, referenceAudios);
+                    log.info("创建Agnes视频任务: taskId={}, mode={}, seconds={}, aspectRatio={}, resolution={}, imageCount={}, videoCount={}, audioCount={}",
+                            context.task().getId(), hasReferenceMedia ? "reference" : "text",
+                            timing.seconds(), normalizeAgnesVideoRatio(sizeParam), dimensions.resolution(),
+                            referenceImages.size(), referenceVideos.size(), referenceAudios.size());
                     return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/videos", com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()));
                 })
                 .flatMap(created -> {
                     JSONObject payload = agnesObjectPayload(created);
-                    String videoId = AiTaskParameterReader.firstNonEmpty(payload.getString("video_id"));
+                    String videoId = AiTaskParameterReader.firstNonEmpty(
+                            payload.getString("video_id"),
+                            payload.getString("id"),
+                            payload.getString("task_id"));
                     String providerTaskId = AiTaskParameterReader.firstNonEmpty(payload.getString("task_id"), payload.getString("id"), videoId);
                     if (!StringUtils.hasText(videoId)) {
                         return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "Agnes 接口没有返回 video_id"));
@@ -292,6 +311,15 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                 });
     }
 
+    /** 解析供应商参考素材地址，禁止空结果悄然减少引用数量。 */
+    private Mono<String> resolveRequiredReferenceUrl(AiTaskExecutionContext context,
+                                                      AiTaskDtos.AiTaskMediaReference reference,
+                                                      String mediaType) {
+        return mediaSupport.resolveReferenceUrl(context.task().getUserId(), reference)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
+                        "参考" + mediaType + "地址解析为空")));
+    }
+
     /**
      * 根据参考图片数量写入 Agnes 视频请求参数。
      *
@@ -304,6 +332,92 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
         }
         // 文档：reference 模式使用 images 数组作为参考图片
         payload.put("images", referenceUrls);
+    }
+
+    /**
+     * 根据参考音频数量写入 Agnes 视频请求参数。
+     *
+     * @param payload Map<String, Object> Agnes 视频请求载荷
+     * @param referenceUrls List<String> 保持关联顺序的参考音频公网地址
+     */
+    private static void applyAgnesVideoReferenceAudios(Map<String, Object> payload, List<String> referenceUrls) {
+        if (!referenceUrls.isEmpty()) {
+            // 文档：reference 模式使用 audios 数组作为参考音频
+            payload.put("audios", referenceUrls);
+        }
+    }
+
+    /**
+     * 根据参考视频数量写入 Agnes 视频请求参数。
+     *
+     * @param payload Map<String, Object> Agnes 视频请求载荷
+     * @param referenceUrls List<String> 保持关联顺序的参考视频公网地址
+     */
+    private static void applyAgnesVideoReferenceVideos(Map<String, Object> payload, List<String> referenceUrls) {
+        if (!referenceUrls.isEmpty()) {
+            payload.put("videos", referenceUrls.stream()
+                    .map(url -> Map.of("url", url, "require_audio", false))
+                    .toList());
+        }
+    }
+
+    /**
+     * 将画布音频编号转换为 Agnes 要求的显式引用标签。
+     *
+     * @param prompt String 用户提示词
+     * @param count int 实际音频数量
+     * @return String 与 audios 数组顺序一致的提示词
+     */
+    static String agnesAudioReferencePrompt(String prompt, int count) {
+        String result = prompt == null ? "" : prompt;
+        for (int index = count; index >= 1; index--) {
+            result = result.replaceAll("`?音频" + index + "`?(?![0-9])", "<Audio " + index + ">");
+            result = result.replaceAll("(?i)<\\s*audio\\s+" + index + "\\s*>", "<Audio " + index + ">");
+            result = result.replaceAll("@audio" + index + "(?![0-9])", "<Audio " + index + ">");
+        }
+        if (count <= 0) {
+            return result;
+        }
+        List<String> missingLabels = new java.util.ArrayList<>();
+        for (int index = 1; index <= count; index++) {
+            String label = "<Audio " + index + ">";
+            if (!result.contains(label)) {
+                missingLabels.add(label);
+            }
+        }
+        if (!missingLabels.isEmpty()) {
+            result = (StringUtils.hasText(result) ? result + "\n\n" : "") + "参考音频：" + String.join("、", missingLabels);
+        }
+        return result;
+    }
+
+    /** 将画布图片、视频和音频编号转换成 Agnes 要求的显式引用标签。 */
+    static String agnesReferencePrompt(String prompt, int imageCount, int videoCount, int audioCount) {
+        String result = prompt == null ? "" : prompt;
+        for (int index = imageCount; index >= 1; index--) {
+            result = result.replaceAll("`?图片" + index + "`?(?![0-9])", "<Picture " + index + ">");
+            result = result.replaceAll("(?i)<\\s*picture\\s+" + index + "\\s*>", "<Picture " + index + ">");
+            result = result.replaceAll("@picture" + index + "(?![0-9])", "<Picture " + index + ">");
+        }
+        for (int index = videoCount; index >= 1; index--) {
+            result = result.replaceAll("`?视频" + index + "`?(?![0-9])", "<Video " + index + ">");
+            result = result.replaceAll("(?i)<\\s*video\\s+" + index + "\\s*>", "<Video " + index + ">");
+            result = result.replaceAll("@video" + index + "(?![0-9])", "<Video " + index + ">");
+        }
+        List<String> missingLabels = new java.util.ArrayList<>();
+        for (int index = 1; index <= imageCount; index++) {
+            String label = "<Picture " + index + ">";
+            if (!result.contains(label)) missingLabels.add(label);
+        }
+        for (int index = 1; index <= videoCount; index++) {
+            String label = "<Video " + index + ">";
+            if (!result.contains(label)) missingLabels.add(label);
+        }
+        if (!missingLabels.isEmpty()) {
+            result = (StringUtils.hasText(result) ? result + "\n\n" : "") + "参考素材：" + String.join("、", missingLabels);
+        }
+        result = agnesAudioReferencePrompt(result, audioCount);
+        return result;
     }
 
     /**

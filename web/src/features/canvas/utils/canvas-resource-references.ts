@@ -2,6 +2,9 @@ import { imageReferenceLabel } from "@/features/generation/lib/image-reference-p
 import { seedanceReferenceLabel } from "@/features/generation/lib/seedance-video";
 import type { CanvasConnection, CanvasNode } from "../types";
 import { isAudioNode, isImageNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
+import { audioNodeTrimRange } from "./audio-trim";
+import { audioReferenceIdentityKeys } from "./audio-references";
+import type { ObjectStorageFile } from "@/shared/types/object-storage";
 
 export type CanvasResourceKind = "image" | "video" | "text" | "audio";
 
@@ -13,6 +16,10 @@ export type CanvasResourceReference = {
     title: string;
     durationMs?: number;
     previewUrl?: string;
+    storageKey?: string;
+    objectStorage?: ObjectStorageFile;
+    trimStartMs?: number;
+    trimEndMs?: number;
     text?: string;
     active: boolean;
 };
@@ -64,7 +71,7 @@ export function buildNodeGenerationReferences(node: CanvasNode): CanvasResourceR
             },
         ];
     });
-    return [...mediaReferences, ...(isVideoNode(node) ? (node.generation.audioReferences || []).map((audio, index) => ({ id: audio.id, nodeId: `${node.id}-audio-reference-${index}`, kind: "audio" as const, label: `音频${index + 1}`, title: audio.name, previewUrl: audio.url, durationMs: audio.durationMs, active: true })) : [])];
+    return [...mediaReferences, ...(isVideoNode(node) ? (node.generation.audioReferences || []).map((audio, index) => ({ id: audio.id, nodeId: `${node.id}-audio-reference-${index}`, kind: "audio" as const, label: `音频${index + 1}`, title: audio.name, previewUrl: audio.url, storageKey: audio.storageKey, objectStorage: audio.objectStorage, trimStartMs: audio.trimStartMs, trimEndMs: audio.trimEndMs, durationMs: audio.durationMs, active: true })) : [])];
 }
 
 function findObjectStorage(files: Array<{ url: string; key: string; mimeType: string }>, reference: string) {
@@ -116,7 +123,9 @@ function mapReferences(nodes: CanvasNode[], active: boolean | ((node: CanvasNode
         const kind = resolveResourceKind(node);
         if (!kind) return;
         if (isAudioNode(node)) {
-            const keys = [node.content.storageKey, node.content.source].filter((key): key is string => Boolean(key));
+            const trim = audioNodeTrimRange(node.content);
+            const isTrimmed = trim.startMs > 0 || trim.endMs < trim.originalDurationMs;
+            const keys = audioReferenceIdentityKeys({ id: node.id, storageKey: node.content.storageKey, objectStorage: node.content.objectStorage, previewUrl: node.content.source, trimStartMs: isTrimmed ? trim.startMs : undefined, trimEndMs: isTrimmed ? trim.endMs : undefined, durationMs: trim.durationMs });
             if (keys.some((key) => audioKeys.has(key))) return;
             keys.forEach((key) => audioKeys.add(key));
         }
@@ -130,7 +139,11 @@ function mapReferences(nodes: CanvasNode[], active: boolean | ((node: CanvasNode
             label,
             title: node.title || label,
             previewUrl: readPreviewUrl(node),
-            durationMs: isAudioNode(node) ? node.content.durationMilliseconds : undefined,
+            storageKey: isAudioNode(node) ? node.content.storageKey : undefined,
+            objectStorage: isAudioNode(node) ? node.content.objectStorage : undefined,
+            trimStartMs: isAudioNode(node) && audioNodeTrimRange(node.content).startMs > 0 ? audioNodeTrimRange(node.content).startMs : undefined,
+            trimEndMs: isAudioNode(node) && audioNodeTrimRange(node.content).endMs < audioNodeTrimRange(node.content).originalDurationMs ? audioNodeTrimRange(node.content).endMs : undefined,
+            durationMs: isAudioNode(node) ? audioNodeTrimRange(node.content).durationMs : undefined,
             text: kind === "text" ? readTextContent(node) : undefined,
             active: typeof active === "function" ? active(node) : active,
         });

@@ -15,16 +15,17 @@ export async function uploadAudioFile(file: File) {
     const { durationMs, waveformPeaks } = await readAudioMetadata(file);
     const mimeType = /\.wav$/i.test(file.name) || file.type.includes("wav") ? "audio/wav" : "audio/mpeg";
     const uploaded = await uploadMediaFile(file, "audio", { mimeType, durationMs });
-    return { ...uploaded, durationMs, waveformPeaks };
+    return { ...uploaded, durationMs: uploaded.durationMs || durationMs, waveformPeaks };
 }
 
 /** 使用浏览器解码器读取上传和归档恢复的音频元数据。 */
 export async function readAudioMetadata(file: Blob) {
     if (!file.size || file.size > 15 * 1024 * 1024) throw new Error("音频不能为空，且单文件不能超过 15 MB");
-    const context = new AudioContext();
+    let context: AudioContext | null = null;
     let durationMs: number;
     let waveformPeaks: number[];
     try {
+        context = new AudioContext();
         const buffer = await context.decodeAudioData(await file.arrayBuffer());
         if (!Number.isFinite(buffer.duration) || buffer.duration <= 0) throw new Error("音频时长无效");
         durationMs = Math.round(buffer.duration * 1000);
@@ -32,7 +33,7 @@ export async function readAudioMetadata(file: Blob) {
     } catch {
         throw new Error("音频解析失败，请选择有效的 MP3 或 WAV 文件");
     } finally {
-        await context.close();
+        if (context) await context.close().catch(() => undefined);
     }
     return { durationMs, waveformPeaks };
 }

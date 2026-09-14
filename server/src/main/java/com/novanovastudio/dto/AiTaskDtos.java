@@ -27,8 +27,12 @@ public final class AiTaskDtos {
      * @param mimeType String MIME类型
      * @param storageKey String 后端媒体存储键
      * @param url String 公网URL或远程URL
+     * @param role String 媒体角色
+     * @param trimStartMs Integer 裁剪开始时间（毫秒）
+     * @param trimEndMs Integer 裁剪结束时间（毫秒）
      */
-    public record AiTaskMediaReference(String id, String name, String mimeType, String storageKey, String url, String role) {
+    public record AiTaskMediaReference(String id, String name, String mimeType, String storageKey, String url, String role,
+                                       Integer trimStartMs, Integer trimEndMs) {
 
         /**
          * 保留媒体角色扩展前的构造方式。
@@ -40,7 +44,12 @@ public final class AiTaskDtos {
          * @param url String 访问地址
          */
         public AiTaskMediaReference(String id, String name, String mimeType, String storageKey, String url) {
-            this(id, name, mimeType, storageKey, url, null);
+            this(id, name, mimeType, storageKey, url, null, null, null);
+        }
+
+        /** 保留带媒体角色的构造方式。 */
+        public AiTaskMediaReference(String id, String name, String mimeType, String storageKey, String url, String role) {
+            this(id, name, mimeType, storageKey, url, role, null, null);
         }
     }
 

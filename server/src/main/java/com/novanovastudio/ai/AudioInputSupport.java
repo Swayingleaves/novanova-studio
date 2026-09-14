@@ -49,17 +49,34 @@ public final class AudioInputSupport {
      * @throws BusinessException 超出限制或缺少可信元数据
      */
     public static void validateMedia(List<PersistenceDtos.UploadedMediaResponse> media) {
+        validateMedia(media, List.of());
+    }
+
+    /**
+     * 按媒体记录和请求裁剪区间验证音频限制。
+     * @param media List 当前用户有权访问的音频媒体记录
+     * @param references List 请求中的音频引用，顺序与媒体记录一致
+     * @throws BusinessException 超出限制或裁剪区间不合法
+     */
+    public static void validateMedia(List<PersistenceDtos.UploadedMediaResponse> media,
+                                     List<com.novanovastudio.dto.AiTaskDtos.AiTaskMediaReference> references) {
         if (media.size() > 3) throw new BusinessException(ErrorCode.PARAM_INVALID, "最多支持3段参考音频");
         long totalDuration = 0;
-        for (PersistenceDtos.UploadedMediaResponse item : media) {
+        for (int index = 0; index < media.size(); index++) {
+            PersistenceDtos.UploadedMediaResponse item = media.get(index);
             if (!isAudioMimeType(item.mimeType())) throw new BusinessException(ErrorCode.PARAM_INVALID, "参考音频仅支持 MP3、WAV");
             if (item.bytes() == null || item.bytes() <= 0 || item.bytes() > 15L * 1024 * 1024) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, "参考音频大小无效或超过15 MB");
             }
-            if (item.durationMs() == null || item.durationMs() < 2000 || item.durationMs() > 15000) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "每段参考音频必须为2～15秒");
+            var reference = index < references.size() ? references.get(index) : null;
+            long startMs = reference == null || reference.trimStartMs() == null ? 0 : reference.trimStartMs();
+            long endMs = reference == null || reference.trimEndMs() == null ? item.durationMs() == null ? 0 : item.durationMs() : reference.trimEndMs();
+            if (item.durationMs() == null || item.durationMs() < 1 || startMs < 0 || endMs > item.durationMs() || endMs <= startMs) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "参考音频裁剪区间无效或缺少时长信息");
             }
-            totalDuration += item.durationMs();
+            long effectiveDuration = endMs - startMs;
+            if (effectiveDuration < 2000 || effectiveDuration > 15000) throw new BusinessException(ErrorCode.PARAM_INVALID, "每段参考音频必须为2～15秒");
+            totalDuration += effectiveDuration;
         }
         if (totalDuration > 15000) throw new BusinessException(ErrorCode.PARAM_INVALID, "参考音频总时长不能超过15秒");
     }

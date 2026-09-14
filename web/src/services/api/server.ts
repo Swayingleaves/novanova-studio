@@ -48,6 +48,8 @@ export type ServerAiTaskMediaReference = {
     storageKey?: string;
     url?: string;
     role?: string;
+    trimStartMs?: number;
+    trimEndMs?: number;
 };
 
 export type ServerAiTask = {

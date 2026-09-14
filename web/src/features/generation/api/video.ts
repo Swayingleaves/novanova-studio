@@ -94,6 +94,13 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 
 async function createServerVideoTask(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], generationSource: ServerGenerationSource, options?: RequestOptions): Promise<ServerAiTask> {
     const selectedModel = (config.model || config.videoModel).trim();
+    const audioReferences = (options?.audioReferences || []).map(toServerMediaReference);
+    console.info("[视频生成] 组装参考素材", {
+        图片数量: references.length,
+        视频数量: videoReferences.length,
+        音频数量: audioReferences.length,
+        音频存储键: audioReferences.map((reference) => reference.storageKey || "未提供"),
+    });
     return createAiTask({
         taskType: "video",
         prompt,
@@ -105,7 +112,7 @@ async function createServerVideoTask(config: AiConfig, prompt: string, reference
             watermark: boolConfig(config.videoWatermark, false),
         },
         references: references.map(toServerImageReference),
-        audioReferences: (options?.audioReferences || []).map(toServerMediaReference),
+        audioReferences,
         videoReferences: videoReferences.map(toServerMediaReference),
         generationSource,
         generationStyleIds: options?.generationStyleIds,
@@ -157,6 +164,8 @@ function toServerMediaReference(item: ReferenceVideo | ReferenceAudio): ServerAi
         mimeType: item.type,
         storageKey: item.storageKey,
         url: item.objectStorage?.url || item.url,
+        ...("trimStartMs" in item && item.trimStartMs !== undefined ? { trimStartMs: item.trimStartMs } : {}),
+        ...("trimEndMs" in item && item.trimEndMs !== undefined ? { trimEndMs: item.trimEndMs } : {}),
     };
 }
 

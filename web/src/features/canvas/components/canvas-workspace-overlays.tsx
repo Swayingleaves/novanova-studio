@@ -4,13 +4,14 @@ import type { ChangeEvent, RefObject } from "react";
 import { Empty, Modal } from "antd";
 
 import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
-import { isImageNode, isVideoNode } from "../domain/canvas-node";
+import { isAudioNode, isImageNode, isVideoNode } from "../domain/canvas-node";
 import type { CanvasNode, CanvasNodeKind, CanvasPoint, ContextMenuState } from "../types";
 import type { CanvasNavigationStoryboardAsset } from "./canvas-navigation-panel";
 import { CanvasNodeContextMenu } from "./canvas-context-menu";
 import { CanvasNodeCropDialog, type CanvasImageCropRect } from "./canvas-node-crop-dialog";
 import { CanvasNodeInfoModal } from "./canvas-node-hover-toolbar";
 import { CanvasNodeSplitDialog, type CanvasImageSplitParams } from "./canvas-node-split-dialog";
+import { CanvasNodeAudioTrimDialog } from "./canvas-node-audio-trim-dialog";
 
 type CanvasWorkspaceOverlaysProps = {
     contextMenu: ContextMenuState | null;
@@ -20,6 +21,7 @@ type CanvasWorkspaceOverlaysProps = {
     cropLoading: boolean;
     splitNode: CanvasNode | null;
     splitLoading: boolean;
+    audioTrimNode: CanvasNode | null;
     previewNode: CanvasNode | null;
     clearConfirmOpen: boolean;
     assetPickerOpen: boolean;
@@ -37,6 +39,8 @@ type CanvasWorkspaceOverlaysProps = {
     onCrop: (node: CanvasNode, crop: CanvasImageCropRect) => void;
     onCloseSplit: () => void;
     onSplit: (node: CanvasNode, params: CanvasImageSplitParams) => void;
+    onCloseAudioTrim: () => void;
+    onAudioTrim: (node: CanvasNode, startMs: number, endMs: number) => void;
     onClosePreview: () => void;
     onCloseClearConfirm: () => void;
     onClearCanvas: () => void;
@@ -51,6 +55,7 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
     const splitSource = readImageSource(props.splitNode);
     const previewSource = readMediaSource(props.previewNode);
     const previewIsVideo = Boolean(props.previewNode && isVideoNode(props.previewNode));
+    const audioTrimNode = props.audioTrimNode && isAudioNode(props.audioTrimNode) ? props.audioTrimNode : null;
 
     const deleteContextTarget = () => {
         const menu = props.contextMenu;
@@ -92,6 +97,7 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
             {splitSource && props.splitNode ? (
                 <CanvasNodeSplitDialog dataUrl={splitSource} open loading={props.splitLoading} onClose={props.onCloseSplit} onConfirm={(params) => props.onSplit(props.splitNode!, params)} />
             ) : null}
+            <CanvasNodeAudioTrimDialog node={audioTrimNode} open={Boolean(audioTrimNode)} onClose={props.onCloseAudioTrim} onConfirm={(startMs, endMs) => audioTrimNode && props.onAudioTrim(audioTrimNode, startMs, endMs)} />
 
             <Modal
                 title={props.previewNode?.title || (previewIsVideo ? "视频播放" : "图片详情")}

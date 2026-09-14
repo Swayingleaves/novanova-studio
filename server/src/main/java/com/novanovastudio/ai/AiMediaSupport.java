@@ -8,8 +8,8 @@ import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.service.PersistenceService;
 import java.util.Base64;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Mono;
@@ -21,7 +21,6 @@ import reactor.core.publisher.Mono;
  * @createTime   2026-06-24 20:35:00
  */
 @Component
-@RequiredArgsConstructor
 @Slf4j
 public class AiMediaSupport {
 
@@ -33,6 +32,24 @@ public class AiMediaSupport {
 
     /** 服务配置 */
     private final NovanovaProperties properties;
+
+    /** 音频裁剪派生服务 */
+    private final AudioClipService audioClipService;
+
+    /** 注入媒体解析和音频派生依赖。 */
+    @Autowired
+    public AiMediaSupport(AiHttpClient aiHttpClient, PersistenceService persistenceService, NovanovaProperties properties,
+                          AudioClipService audioClipService) {
+        this.aiHttpClient = aiHttpClient;
+        this.persistenceService = persistenceService;
+        this.properties = properties;
+        this.audioClipService = audioClipService;
+    }
+
+    /** 保留原有测试和内部调用方的三参数构造方式。 */
+    public AiMediaSupport(AiHttpClient aiHttpClient, PersistenceService persistenceService, NovanovaProperties properties) {
+        this(aiHttpClient, persistenceService, properties, new AudioClipService(aiHttpClient, persistenceService, properties));
+    }
 
     /**
      * 从图片接口结果中读取二进制内容
@@ -93,10 +110,13 @@ public class AiMediaSupport {
         if (StringUtils.hasText(reference.storageKey())) {
             return persistenceService.getMediaInfoForUser(userId, reference.storageKey().trim())
                     .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "参考媒体不存在或不属于当前用户")))
-                    .map(PersistenceDtos.UploadedMediaResponse::url)
+                    .flatMap(media -> audioClipService.resolveReferenceUrl(userId, reference, media))
                     .flatMap(this::validateReferenceUrl);
         }
         if (StringUtils.hasText(reference.url())) {
+            if (reference.trimStartMs() != null || reference.trimEndMs() != null) {
+                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "带裁剪区间的参考音频必须提供storageKey"));
+            }
             return validateReferenceUrl(reference.url().trim());
         }
         return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考媒体必须提供storageKey或url"));

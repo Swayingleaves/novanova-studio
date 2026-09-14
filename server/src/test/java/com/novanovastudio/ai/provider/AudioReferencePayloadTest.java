@@ -1,5 +1,6 @@
 package com.novanovastudio.ai.provider;
 
+import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.ai.AiMediaSupport;
 import com.novanovastudio.ai.AiTaskExecutionContext;
@@ -21,6 +22,22 @@ import org.junit.jupiter.api.Test;
  * @date 2026-09-10 15:00
  */
 class AudioReferencePayloadTest {
+    /** 任务快照序列化后必须保留音频引用，确保异步执行阶段不会丢失。 */
+    @Test
+    void shouldKeepAudioReferencesInTaskSnapshot() {
+        AiTaskDtos.CreateAiTaskRequest request = new AiTaskDtos.CreateAiTaskRequest(
+                "video", "参考音频1", "agnes-video-2.5", Map.of(), List.of(), List.of(), "canvas",
+                null, null, "reference-to-video", List.of(new AiTaskDtos.AiTaskMediaReference(
+                        "audio-1", "配乐", "audio/mpeg", "audio:reference", "https://example.com/audio.mp3")));
+
+        String snapshot = JSON.toJSONString(request);
+        AiTaskDtos.CreateAiTaskRequest restored = JSON.parseObject(snapshot, AiTaskDtos.CreateAiTaskRequest.class);
+
+        Assertions.assertNotNull(restored.audioReferences());
+        Assertions.assertEquals(1, restored.audioReferences().size());
+        Assertions.assertEquals("audio:reference", restored.audioReferences().get(0).storageKey());
+    }
+
     /** MiniMax 的音频必须使用独立媒体类型和参考角色，保持输入顺序。 */
     @Test
     void shouldBuildMiniMaxAudioContent() {
@@ -65,6 +82,49 @@ class AudioReferencePayloadTest {
         AiTaskExecutionContext context = new AiTaskExecutionContext(task, channel, request.model(), false, "high", request, () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty());
         StepVerifier.create(new EvolinkProviderAdapter(client, media, new NovanovaProperties()).execute(context))
                 .expectErrorMessage("测试已捕获请求").verify();
+    }
+
+    /** Agnes 视频参考模式必须发送 audios 数组，并将画布音频编号转换为协议标签。 */
+    @Test
+    void shouldSendAgnesAudioUrlsInReferenceMode() {
+        AiHttpClient client = Mockito.mock(AiHttpClient.class);
+        AiMediaSupport media = Mockito.mock(AiMediaSupport.class);
+        AiGenerationTask task = new AiGenerationTask();
+        task.setId("agnes-audio-task");
+        task.setTaskType("video");
+        task.setUserId(7L);
+        AiTaskDtos.AiTaskMediaReference audio = new AiTaskDtos.AiTaskMediaReference(
+                "audio", "配乐", "audio/mpeg", "audio:key", "https://example.com/audio.mp3");
+        Mockito.when(media.resolveReferenceUrl(7L, audio)).thenReturn(Mono.just(audio.url()));
+        AiTaskDtos.CreateAiTaskRequest request = new AiTaskDtos.CreateAiTaskRequest(
+                "video", "跟随音频1的节奏", "agnes-video-2.5",
+                Map.of("resolution", "720p", "seconds", "5", "size", "16:9"),
+                List.of(), List.of(), "canvas", null, null, "reference-to-video", List.of(audio));
+        AiTaskDtos.AiChannelConfig channel = new AiTaskDtos.AiChannelConfig(
+                "channel", "测试", "https://example.com/v1", "key", "agnes", List.of(request.model()));
+        Mockito.when(client.sendJsonRequest(ArgumentMatchers.eq(channel), ArgumentMatchers.eq("POST"),
+                        ArgumentMatchers.eq("/videos"), ArgumentMatchers.any()))
+                .thenAnswer(invocation -> {
+                    Map<?, ?> payload = invocation.getArgument(3);
+                    Assertions.assertEquals("reference", payload.get("mode"));
+                    Assertions.assertEquals(List.of(audio.url()), payload.get("audios"));
+                    Assertions.assertEquals("跟随<Audio 1>的节奏", payload.get("prompt"));
+                    return Mono.error(new IllegalStateException("测试已捕获请求"));
+                });
+        AiTaskExecutionContext context = new AiTaskExecutionContext(task, channel, request.model(), false, "high",
+                request, () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty());
+        StepVerifier.create(new AgnesProviderAdapter(client, media, new NovanovaProperties()).execute(context))
+                .expectErrorMessage("测试已捕获请求").verify();
+    }
+
+    /** Agnes 音频编号转换应避免误改更长编号，并自动补齐未显式引用的音频标签。 */
+    @Test
+    void shouldNormalizeAgnesAudioLabels() {
+        Assertions.assertEquals("根据<Audio 1>与<Audio 2>，保留音频10",
+                AgnesProviderAdapter.agnesAudioReferencePrompt("根据`音频1`与音频2，保留音频10", 2));
+        Assertions.assertEquals("直接描述\n\n参考音频：<Audio 1>、<Audio 2>",
+                AgnesProviderAdapter.agnesAudioReferencePrompt("直接描述", 2));
+        Assertions.assertEquals("直接描述", AgnesProviderAdapter.agnesAudioReferencePrompt("直接描述", 0));
     }
 
 }

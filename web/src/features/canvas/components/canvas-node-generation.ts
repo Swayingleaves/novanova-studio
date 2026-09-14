@@ -6,6 +6,7 @@ import type { ReferenceAudio, ReferenceVideo } from "@/features/generation/types
 import type { CanvasConnection, CanvasGenerationMode, CanvasNode } from "../types";
 import { isAudioNode, isImageNode, isStoryboardNode, isTextNode, isVideoNode } from "../domain/canvas-node";
 import { mergeAudioReferences } from "../utils/audio-references";
+import { audioNodeTrimRange } from "../utils/audio-trim";
 import { getGenerationResourceNodes } from "../utils/canvas-resource-references";
 
 type NodeMediaReferences = {
@@ -77,7 +78,9 @@ export function buildNodeGenerationInputs(nodeId: string, nodes: CanvasNode[], c
     const inputs: NodeGenerationInput[] = [];
     for (const node of getGenerationResourceNodes(nodeId, nodes, connections)) {
         if (isAudioNode(node) && node.content.source) {
-            inputs.push({ nodeId: node.id, type: "audio", title: node.title, audio: { id: node.id, name: node.title, type: node.content.mimeType || "", url: node.content.source, storageKey: node.content.storageKey, objectStorage: node.content.objectStorage, durationMs: node.content.durationMilliseconds, bytes: node.content.bytes } });
+            const trim = audioNodeTrimRange(node.content);
+            const isTrimmed = trim.startMs > 0 || trim.endMs < trim.originalDurationMs;
+            inputs.push({ nodeId: node.id, type: "audio", title: node.title, audio: { id: node.id, name: node.title, type: node.content.mimeType || "", url: node.content.source, storageKey: node.content.storageKey, objectStorage: node.content.objectStorage, durationMs: trim.durationMs, ...(isTrimmed ? { trimStartMs: trim.startMs, trimEndMs: trim.endMs } : {}), bytes: node.content.bytes } });
             continue;
         }
         const image = readReferenceImage(node);

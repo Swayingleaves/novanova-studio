@@ -134,7 +134,6 @@ class AiTaskServiceTest {
                 new PersistenceDtos.ModelConfig("model-config-3", "channel-1", "model-1", AiTaskTypes.TEXT, List.of(), true, 0, 0, true, "high")
         )));
         providerAdapter = mock(AiProviderAdapter.class);
-        when(providerAdapter.supportsAudioInput()).thenReturn(true);
         when(adapterRegistry.resolve(any(AiTaskDtos.AiChannelConfig.class), eq(AiTaskTypes.IMAGE)))
                 .thenReturn(providerAdapter);
         when(adapterRegistry.resolve(any(AiTaskDtos.AiChannelConfig.class), eq(AiTaskTypes.VIDEO)))
@@ -417,15 +416,15 @@ class AiTaskServiceTest {
         verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
     }
 
-    /** 适配器未实现音频协议时，应在创建任务和扣费前明确拒绝。 */
+    /** 音频输入是否可用由模型配置能力决定，不依据适配器预置标记拒绝。 */
     @Test
-    void shouldRejectAudioWhenAdapterDoesNotSupportProtocol() {
+    void shouldUseConfiguredCapabilityInsteadOfAdapterWhitelist() {
         configureAudioModel("openai");
-        when(providerAdapter.supportsAudioInput()).thenReturn(false);
-        BusinessException error = Assertions.assertThrows(BusinessException.class, () -> service.createTask(audioRequest()).block());
-        Assertions.assertTrue(error.getMessage().contains("未实现音频输入协议"));
-        verify(repository, never()).createTask(any(AiGenerationTask.class));
-        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        when(persistenceService.getMediaInfoForUser(7L, "audio:reference")).thenReturn(Mono.just(
+                new PersistenceDtos.UploadedMediaResponse("audio:reference", "https://example.com/audio.mp3", 100L, "audio/mpeg", null, null, 5000, null)));
+        Assertions.assertDoesNotThrow(() -> service.createTask(audioRequest()).block());
+        verify(repository).createTask(any(AiGenerationTask.class));
+        verify(creditService).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
     }
 
     /** 非当前用户的音频不能提交给渠道，也不会扣费。 */

@@ -1316,7 +1316,7 @@ export function AppConfigModal() {
                             <section>
                                 <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">模型能力</div>
                                 <div className="flex flex-wrap gap-2">
-                                    {VIDEO_GENERATION_CAPABILITY_OPTIONS.filter((option) => editingModelConfig.capabilities.includes(option.value)).map((option) => (
+                                    {MODEL_CAPABILITY_OPTIONS.video.filter((option) => editingModelConfig.capabilities.includes(option.value)).map((option) => (
                                         <span key={option.value} className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
                                             <CheckCircle2 className="size-3.5" />
                                             {option.label}

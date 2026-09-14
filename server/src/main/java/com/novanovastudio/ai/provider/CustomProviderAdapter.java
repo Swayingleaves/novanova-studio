@@ -116,16 +116,6 @@ public class CustomProviderAdapter implements AiProviderAdapter {
     }
 
     /**
-     * 判断是否支持音频输入占位符。
-     *
-     * @return boolean 自定义模板支持通过占位符传递音频地址
-     */
-    @Override
-    public boolean supportsAudioInput() {
-        return true;
-    }
-
-    /**
      * 执行自定义模型任务
      *
      * @param context AiTaskExecutionContext AI任务执行上下文

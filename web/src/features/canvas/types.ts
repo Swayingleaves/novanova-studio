@@ -177,7 +177,13 @@ export interface CanvasImageGrouping {
 
 /** 音频节点保存真实波形采样，播放状态只保留在组件中。 */
 export interface CanvasAudioNode extends CanvasNodeBase<"audio"> {
-    content: CanvasVideoContent & { waveformPeaks: number[] };
+    content: CanvasVideoContent & {
+        waveformPeaks: number[];
+        /** 裁剪片段在原音频中的起始位置，未设置时从0开始。 */
+        trimStartMilliseconds?: number;
+        /** 裁剪片段在原音频中的结束位置，未设置时使用原始时长。 */
+        trimEndMilliseconds?: number;
+    };
 }
 
 export interface CanvasVideoContent {

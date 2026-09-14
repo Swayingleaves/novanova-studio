@@ -360,7 +360,14 @@ public class AiTaskService {
                         ? validateVideoTask(preparedRequest, resolvedModel) : null;
                 int creditCost = videoBillingQuote == null
                         ? calculateTaskCredits(preparedRequest, resolvedModel) : videoBillingQuote.chargedCredits();
-                log.info("创建AI生成任务: taskId={}, userId={}, taskType={}, generationSource={}, model={}, channel={}", taskId, userId, preparedRequest.taskType(), preparedRequest.generationSource(), preparedRequest.model(), resolvedModel.channel().name());
+                log.info("创建AI生成任务: taskId={}, userId={}, taskType={}, generationSource={}, model={}, channel={},image={}. imageCount={},video={}. videoCount={},audio={}. audioCount={}",
+                        taskId, userId, preparedRequest.taskType(), preparedRequest.generationSource(), preparedRequest.model(), resolvedModel.channel().name(),
+                        preparedRequest.references(),
+                        preparedRequest.references() == null ? 0 : preparedRequest.references().size(),
+                        preparedRequest.videoReferences(),
+                        preparedRequest.videoReferences() == null ? 0 : preparedRequest.videoReferences().size(),
+                        preparedRequest.audioReferences(),
+                        preparedRequest.audioReferences() == null ? 0 : preparedRequest.audioReferences().size());
                 AiGenerationTask task = new AiGenerationTask();
                 task.setId(taskId);
                 task.setUserId(userId);
@@ -631,8 +638,19 @@ public class AiTaskService {
                                                 return updateTaskState(taskId, STATUS_CANCELED, 100, "任务已取消", null);
                                             }
                                             AiTaskDtos.CreateAiTaskRequest request = JSON.parseObject(task.getRequestData(), AiTaskDtos.CreateAiTaskRequest.class);
+                                            log.info("读取AI任务请求快照: taskId={}, imageCount={}, videoCount={}, audioCount={}",
+                                                    taskId,
+                                                    request.references() == null ? 0 : request.references().size(),
+                                                    request.videoReferences() == null ? 0 : request.videoReferences().size(),
+                                                    request.audioReferences() == null ? 0 : request.audioReferences().size());
                                             return resolveTaskModel(task, request)
                                                     .flatMap(resolvedModel -> {
+                                                        // 任务排队期间模型配置可能被管理员修改，执行前重新校验模式和音频能力，避免绕过最新配置。
+                                                        Mono<Void> executionPreflight = TYPE_VIDEO.equals(task.getTaskType())
+                                                                ? Mono.fromRunnable(() -> validateVideoTask(request, resolvedModel))
+                                                                        .then(validateVideoReferences(task.getUserId(), request))
+                                                                : Mono.empty();
+                                                        return executionPreflight.then(Mono.defer(() -> {
                                                         // 自定义模型任务直接使用自定义适配器，不经过适配器注册表。
                                                         AiProviderAdapter adapter = resolvedModel.isCustomModel()
                                                                 ? customProviderAdapter
@@ -652,6 +670,7 @@ public class AiTaskService {
                                                                 resolvedModel.customModelConfig()
                                                         );
                                                         return adapter.execute(context);
+                                                        }));
                                                     })
                                                     .flatMap(result -> updateTaskState(taskId, STATUS_SUCCESS, 100, "", toJson(result)))
                                                     .doOnSuccess(ignored -> log.info("AI生成任务执行成功: taskId={}", taskId));
@@ -1100,11 +1119,6 @@ public class AiTaskService {
             if (resolvedModel.capabilities() == null || !resolvedModel.capabilities().contains(AudioInputSupport.CAPABILITY)) throw new BusinessException(ErrorCode.PARAM_INVALID, "当前模型未开启音频输入能力");
             AudioInputSupport.validateCapability(TYPE_VIDEO, resolvedModel.capabilities());
             if (!VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode)) throw new BusinessException(ErrorCode.PARAM_INVALID, "音频输入仅支持全能参考模式");
-            AiProviderAdapter audioAdapter = resolvedModel.isCustomModel()
-                    ? customProviderAdapter : adapterRegistry.resolve(resolvedModel.channel(), TYPE_VIDEO);
-            if (!audioAdapter.supportsAudioInput()) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "当前渠道适配器未实现音频输入协议，请检查模型配置");
-            }
             if (audioReferences.size() > 3) throw new BusinessException(ErrorCode.PARAM_INVALID, "最多支持3段参考音频");
             if (audioReferences.stream().anyMatch(reference -> reference == null || !AudioInputSupport.isAudioMimeType(reference.mimeType()))) throw new BusinessException(ErrorCode.PARAM_INVALID, "音频参考列表只能包含 MP3、WAV");
             if ("evolink".equals(resolvedModel.channel().apiFormat()) && imageReferences.isEmpty() && videoReferences.isEmpty()) throw new BusinessException(ErrorCode.PARAM_INVALID, "Evolink 音频参考必须同时提供图片或视频");
@@ -1208,7 +1222,7 @@ public class AiTaskService {
                                 if (!isHttpReferenceUrl(media.url())) throw new BusinessException(ErrorCode.PARAM_INVALID, "参考音频没有可访问的地址");
                                 return media;
                             });
-                }).collectList().doOnNext(AudioInputSupport::validateMedia).then();
+                }).collectList().doOnNext(media -> AudioInputSupport.validateMedia(media, references == null ? List.of() : references)).then();
     }
 
     /**

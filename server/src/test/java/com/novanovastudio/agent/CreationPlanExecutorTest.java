@@ -135,6 +135,29 @@ class CreationPlanExecutorTest {
     }
 
     /**
+     * 连续创作轮次使用相同任务编号时，工具调用标识仍必须保持唯一。
+     *
+     * @throws Exception 反射调用私有方法失败
+     */
+    @Test
+    void shouldBuildUniqueExecutionCallIdAcrossPlans() throws Exception {
+        Method method = CreationPlanExecutor.class.getDeclaredMethod("buildExecutionCallId",
+                CreationPlan.class, CreationTask.class, int.class);
+        method.setAccessible(true);
+        CreationTask task = new CreationTask("task-1", "image", "generate", "生成图片", List.of(), null, Map.of());
+        CreationPlan firstPlan = new CreationPlan("plan-1", "首次生成", CreationEntrySource.IMAGE_PAGE,
+                "首次生成", "", false, null, List.of(task), List.of());
+        CreationPlan secondPlan = new CreationPlan("plan-2", "再次生成", CreationEntrySource.IMAGE_PAGE,
+                "再次生成", "", false, null, List.of(task), List.of());
+
+        String firstCallId = (String) method.invoke(executor, firstPlan, task, 0);
+        String secondCallId = (String) method.invoke(executor, secondPlan, task, 0);
+
+        Assertions.assertNotEquals(firstCallId, secondCallId);
+        Assertions.assertEquals("plan-1:task-1:recovery:1", method.invoke(executor, firstPlan, task, 1));
+    }
+
+    /**
      * 画布生成工具按实际图片类型解析唯一的当前选择风格。
      *
      * @throws Exception 反射调用失败时抛出

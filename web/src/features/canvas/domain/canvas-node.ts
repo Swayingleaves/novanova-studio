@@ -61,6 +61,8 @@ export type CanvasNodeAttributes = {
     mimeType?: string;
     bytes?: number;
     durationMs?: number;
+    trimStartMs?: number;
+    trimEndMs?: number;
     waveformPeaks?: number[];
     audioReferences?: import("@/features/generation/types/media").ReferenceAudio[];
     objectStorage?: ObjectStorageFile;
@@ -232,7 +234,7 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
     });
 
     if (isAudioNode(framed)) {
-        return { ...framed, content: mergeDefined(framed.content, { source: attributes.content, storageKey: attributes.storageKey, mimeType: attributes.mimeType, bytes: attributes.bytes, durationMilliseconds: attributes.durationMs, objectStorage: attributes.objectStorage, waveformPeaks: attributes.waveformPeaks }) };
+        return { ...framed, content: mergeDefined(framed.content, { source: attributes.content, storageKey: attributes.storageKey, mimeType: attributes.mimeType, bytes: attributes.bytes, durationMilliseconds: attributes.durationMs, objectStorage: attributes.objectStorage, waveformPeaks: attributes.waveformPeaks, trimStartMilliseconds: attributes.trimStartMs, trimEndMilliseconds: attributes.trimEndMs }) };
     }
     if (isTextNode(framed)) {
         return updateTextNodeContent(framed, {

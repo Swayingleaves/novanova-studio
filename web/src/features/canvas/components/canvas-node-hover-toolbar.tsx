@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Clapperboard, CloudUpload, Copy, Download, FolderPlus, ImagePlus, Info, Minus, Plus, RefreshCw, Trash2, Upload, Video } from "lucide-react";
+import { Clapperboard, CloudUpload, Copy, Download, FolderPlus, ImagePlus, Info, Minus, Plus, RefreshCw, Scissors, Trash2, Upload, Video } from "lucide-react";
 
 import { formatAudioTime } from "@/features/storage/utils/audio-waveform";
 import { formatBytes, getDataUrlByteSize } from "@/features/generation/lib/image-utils";
@@ -13,6 +13,7 @@ import { buildImageToolbarTools } from "./canvas-image-toolbar-tools";
 import { useCanvasTheme } from "./canvas-theme-provider";
 import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
+import { audioNodeTrimRange } from "../utils/audio-trim";
 
 type ToolbarAction = {
     id: string;
@@ -42,6 +43,7 @@ type ToolbarActionFactoryContext = {
     onIncreaseFont: (node: CanvasNode) => void;
     onUpload: (node: CanvasNode) => void;
     onGenerateStoryboardVideos: (node: CanvasNode) => void;
+    onTrim: (node: CanvasNode) => void;
 };
 
 type CanvasNodeHoverToolbarProps = {
@@ -64,6 +66,7 @@ type CanvasNodeHoverToolbarProps = {
     onToggleFreeResize: (node: CanvasNode) => void;
     onDelete: (node: CanvasNode) => void;
     onGenerateStoryboardVideos: (node: CanvasNode) => void;
+    onTrim: (node: CanvasNode) => void;
 };
 
 export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
@@ -116,6 +119,7 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
         onIncreaseFont: props.onIncreaseFont,
         onUpload: props.onUpload,
         onGenerateStoryboardVideos: props.onGenerateStoryboardVideos,
+        onTrim: props.onTrim,
     });
     const imageActions = imageToolbarTools.map((tool) => ({
         id: tool.id,
@@ -234,7 +238,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNode 
                                     }
                                 />
                             ) : null}
-                            {isAudioNode(node) ? <><InfoRow label="音频时长" value={formatAudioTime((node.content.durationMilliseconds || 0) / 1000)} /><InfoRow label="音频大小" value={formatBytes(node.content.bytes || 0)} /><InfoRow label="音频格式" value={node.content.mimeType || "尚未上传"} /></> : null}
+                            {isAudioNode(node) ? <><InfoRow label="音频时长" value={formatAudioTime(audioNodeTrimRange(node.content).durationMs / 1000)} /><InfoRow label="音频大小" value={formatBytes(node.content.bytes || 0)} /><InfoRow label="音频格式" value={node.content.mimeType || "尚未上传"} /></> : null}
                             {imageBytes ? <InfoRow label="图片大小" value={formatBytes(imageBytes)} /> : null}
                             {(isImageNode(node) || isVideoNode(node) || isAudioNode(node)) && node.content.objectStorage?.url ? (
                                 <InfoRow
@@ -354,6 +358,7 @@ function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarA
     if (isAudioNode(context.node)) {
         actions.push({ id: "uploadAudio", title: "上传或替换音频", label: "上传音频", icon: <Upload className="size-4" />, onClick: () => context.onUpload(context.node) });
         if (context.node.content.source) actions.push({ id: "downloadAudio", title: "下载音频", label: "下载", icon: <Download className="size-4" />, onClick: () => context.onDownload(context.node) });
+        if (context.node.content.source) actions.push({ id: "trimAudio", title: "裁剪为新音频节点", label: "裁剪", icon: <Scissors className="size-4" />, onClick: () => context.onTrim(context.node) });
     }
     if (isVideoNode(context.node)) {
         actions.push({

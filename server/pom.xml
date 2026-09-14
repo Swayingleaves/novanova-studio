@@ -213,6 +213,10 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- 使用项目根目录作为本地运行目录，确保外部提示词路径与Docker挂载约定一致。 -->
+                    <workingDirectory>${project.basedir}/..</workingDirectory>
+                </configuration>
             </plugin>
         </plugins>
     </build>

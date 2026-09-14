@@ -1,6 +1,7 @@
 package com.novanovastudio.ai;
 
 import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import java.util.List;
 import org.junit.jupiter.api.Assertions;
@@ -34,6 +35,19 @@ class AudioInputSupportTest {
         Assertions.assertThrows(BusinessException.class, () -> AudioInputSupport.validateMedia(List.of(media(null, 100L, "audio/mpeg"))));
         Assertions.assertThrows(BusinessException.class, () -> AudioInputSupport.validateMedia(List.of(media(8000, 100L, "audio/mpeg"), media(8000, 100L, "audio/mpeg"))));
         Assertions.assertThrows(BusinessException.class, () -> AudioInputSupport.validateMedia(java.util.Collections.nCopies(4, media(2000, 100L, "audio/mpeg"))));
+    }
+
+    /** 裁剪引用按有效片段时长校验，而不是按原始文件时长校验。 */
+    @Test
+    void shouldValidateTrimmedAudioDuration() {
+        PersistenceDtos.UploadedMediaResponse original = media(12000, 100L, "audio/mpeg");
+        AiTaskDtos.AiTaskMediaReference valid = new AiTaskDtos.AiTaskMediaReference(
+                "audio", "配乐", "audio/mpeg", "audio:test", original.url(), null, 2000, 6000);
+        Assertions.assertDoesNotThrow(() -> AudioInputSupport.validateMedia(List.of(original), List.of(valid)));
+
+        AiTaskDtos.AiTaskMediaReference tooShort = new AiTaskDtos.AiTaskMediaReference(
+                "audio", "配乐", "audio/mpeg", "audio:test", original.url(), null, 0, 1999);
+        Assertions.assertThrows(BusinessException.class, () -> AudioInputSupport.validateMedia(List.of(original), List.of(tooShort)));
     }
 
     /**
