@@ -264,6 +264,8 @@ function CanvasWorkspacePage() {
         originalBackgroundMemberNodeIds: [],
     });
     const backgroundDragRef = useRef<{ boardId: string; originX: number; originY: number; memberOrigins: Array<{ id: string; x: number; y: number }> } | null>(null);
+    const backgroundDragFrameRef = useRef<number | null>(null);
+    const backgroundDragPendingPositionRef = useRef<{ x: number; y: number } | null>(null);
 
     const onNodeDropRef = useRef<((nodeId: string) => void) | null>(null);
     const panelRectRef = useRef<DOMRect | null>(null);
@@ -1747,6 +1749,15 @@ function CanvasWorkspacePage() {
         const groupedChildIds = currentNodes.flatMap((node) => (nextSelected.has(node.id) && isImageNode(node) ? node.grouping.childIds : []));
         const backgroundMemberIds = currentNodes.flatMap((node) => (nextSelected.has(node.id) && isBackgroundNode(node) ? node.memberNodeIds : []));
         const dragIds = new Set([...nextSelected, ...groupedChildIds, ...backgroundMemberIds]);
+
+        // 单节点拖动直接交给 React Flow 原生处理，避免与 document 级拖动循环重复更新。
+        // 只有多选、批量节点或画板成员联动时才需要自定义拖动逻辑。
+        if (dragIds.size <= 1) {
+            dragRef.current.isDraggingNode = false;
+            dragRef.current.hasMoved = false;
+            return;
+        }
+
         const originalBackgroundMemberNodeIds = currentNodes.filter((node) => isBackgroundNode(node)).flatMap((node) => node.memberNodeIds);
         dragRef.current = {
             isDraggingNode: true,
@@ -2150,18 +2161,45 @@ function CanvasWorkspacePage() {
             }),
         };
         backgroundDragRef.current = dragState;
-        const offsetX = node.position.x - dragState.originX;
-        const offsetY = node.position.y - dragState.originY;
-        setNodes((prev) =>
-            prev.map((item) => {
-                if (item.id === dragState.boardId) return updateCanvasNodeFrame(item, { position: { x: node.position.x, y: node.position.y } });
-                const origin = dragState.memberOrigins.find((candidate) => candidate.id === item.id);
-                return origin ? updateCanvasNodeFrame(item, { position: { x: origin.x + offsetX, y: origin.y + offsetY } }) : item;
-            }),
-        );
+        backgroundDragPendingPositionRef.current = node.position;
+        if (backgroundDragFrameRef.current !== null) return;
+        backgroundDragFrameRef.current = requestAnimationFrame(() => {
+            backgroundDragFrameRef.current = null;
+            const position = backgroundDragPendingPositionRef.current;
+            backgroundDragPendingPositionRef.current = null;
+            const currentDrag = backgroundDragRef.current;
+            if (!position || !currentDrag) return;
+            const offsetX = position.x - currentDrag.originX;
+            const offsetY = position.y - currentDrag.originY;
+            setNodes((prev) =>
+                prev.map((item) => {
+                    if (item.id === currentDrag.boardId) return updateCanvasNodeFrame(item, { position });
+                    const origin = currentDrag.memberOrigins.find((candidate) => candidate.id === item.id);
+                    return origin ? updateCanvasNodeFrame(item, { position: { x: origin.x + offsetX, y: origin.y + offsetY } }) : item;
+                }),
+            );
+        });
     }, []);
 
     const handleBackgroundNodeDragStop = useCallback(() => {
+        if (backgroundDragFrameRef.current !== null) {
+            cancelAnimationFrame(backgroundDragFrameRef.current);
+            backgroundDragFrameRef.current = null;
+            const position = backgroundDragPendingPositionRef.current;
+            backgroundDragPendingPositionRef.current = null;
+            const dragState = backgroundDragRef.current;
+            if (position && dragState) {
+                const offsetX = position.x - dragState.originX;
+                const offsetY = position.y - dragState.originY;
+                setNodes((prev) =>
+                    prev.map((item) => {
+                        if (item.id === dragState.boardId) return updateCanvasNodeFrame(item, { position });
+                        const origin = dragState.memberOrigins.find((candidate) => candidate.id === item.id);
+                        return origin ? updateCanvasNodeFrame(item, { position: { x: origin.x + offsetX, y: origin.y + offsetY } }) : item;
+                    }),
+                );
+            }
+        }
         backgroundDragRef.current = null;
     }, []);
 
