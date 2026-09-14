@@ -248,6 +248,8 @@ novanova:
       agent-canvas-file: ${AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE:file:./server/config/prompts/agent-canvas.md}
       # 分镜脚本 Agent 系统提示词文件路径
       agent-storyboard-file: ${AI_SYSTEM_PROMPT_AGENT_STORYBOARD_FILE:file:./server/config/prompts/agent-storyboard.md}
+      # 分镜资产图片提示词模板文件路径
+      image-storyboard-asset-file: ${AI_SYSTEM_PROMPT_IMAGE_STORYBOARD_ASSET_FILE:file:./server/config/prompts/image-storyboard-asset.md}
     storyboard-agent:
       # 分镜 Agent 单次调用超时时间（秒）
       timeout-seconds: ${AI_STORYBOARD_AGENT_TIMEOUT_SECONDS:90}

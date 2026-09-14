@@ -1580,7 +1580,8 @@ public class PersistenceService {
     private String mediaFileExtension(String mimeType) {
         String normalizedMimeType = firstNonEmpty(mimeType).split(";", 2)[0].trim().toLowerCase();
         return switch (normalizedMimeType) {
-            case "image/jpeg" -> ".jpg";
+            case "image/png" -> ".png";
+            case "image/jpeg", "image/jpg" -> ".jpg";
             case "image/webp" -> ".webp";
             case "image/gif" -> ".gif";
             case "video/webm" -> ".webm";

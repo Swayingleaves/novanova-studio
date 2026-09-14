@@ -1,6 +1,7 @@
 package com.novanovastudio.controller;
 
 import com.novanovastudio.common.ApiResponse;
+import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.StoryboardDtos;
 import com.novanovastudio.service.StoryboardAgentService;
 import jakarta.validation.Valid;
@@ -57,6 +58,22 @@ public class StoryboardController {
         log.info("分镜提示词合成请求: url=/api/v1/ai/storyboard/composePrompts, headers={}, request={}", httpRequest.getHeaders(), request);
         return storyboardAgentService.composePrompts(request)
                 .doOnNext(response -> log.info("分镜提示词合成响应: response={}", response))
+                .map(ApiResponse::ok);
+    }
+
+    /**
+     * 为单个分镜资产创建图片生成任务，提示词由服务端按资产类别模板渲染。
+     *
+     * @param request CreateAssetImageTaskRequest 资产图片任务请求
+     * @param httpRequest ServerHttpRequest HTTP请求
+     * @return Mono<ApiResponse<AiGenerationTaskResponse>> 已入队的AI任务
+     */
+    @PostMapping("/createAssetImageTask")
+    public Mono<ApiResponse<AiTaskDtos.AiGenerationTaskResponse>> createAssetImageTask(
+            @Valid @RequestBody StoryboardDtos.CreateAssetImageTaskRequest request, ServerHttpRequest httpRequest) {
+        log.info("分镜资产图片任务请求: url=/api/v1/ai/storyboard/createAssetImageTask, headers={}, request={}", httpRequest.getHeaders(), request);
+        return storyboardAgentService.createAssetImageTask(request)
+                .doOnNext(response -> log.info("分镜资产图片任务响应: response={}", response))
                 .map(ApiResponse::ok);
     }
 }

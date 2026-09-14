@@ -129,7 +129,7 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
                             rows={generated ? 2 : 4}
                             className={`nodrag nopan nowheel block w-full resize-none select-text rounded-md border p-2 text-xs leading-5 outline-none transition focus:ring-2 ${generated ? "min-h-[52px] max-h-24" : "min-h-24"}`}
                             style={{ color: theme.node.text, background: theme.node.fill, borderColor: theme.node.stroke, caretColor: theme.node.text }}
-                            placeholder="描述剧情、片段为你生成分镜脚本"
+                            placeholder="说明希望怎么分镜：取剧本哪段、拆几个镜头、节奏与重点（剧本内容填在上游文本节点）"
                             value={instructionDraft}
                             disabled={running}
                             onChange={(event) => handleInstructionChange(event.target.value)}

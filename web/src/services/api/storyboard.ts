@@ -1,5 +1,5 @@
 import type { CanvasStoryboardAsset, CanvasStoryboardAssetGenerationSettings, CanvasStoryboardAssetImage, CanvasStoryboardShot } from "@/features/canvas/types";
-import { createAiTask, serverPost, type ServerAiTask } from "./server";
+import { serverPost, type ServerAiTask } from "./server";
 
 export type GenerateStoryboardParams = {
     scriptContent: string;
@@ -26,29 +26,19 @@ export type StoryboardPromptCompositionResult = {
     chargedCredits: number;
 };
 
-/** 创建分镜资产图片任务，费用由通用任务服务按所选图片模型计算。 */
+/** 创建分镜资产图片任务，提示词由服务端按资产类别模板渲染。 */
 export function createStoryboardAssetImageTask(
     nodeId: string,
     asset: CanvasStoryboardAsset,
     settings: CanvasStoryboardAssetGenerationSettings,
     visualStyle: string,
 ): Promise<ServerAiTask> {
-    const kindLabel = asset.kind === "character" ? "角色" : asset.kind === "scene" ? "场景" : "道具";
-    const description = asset.description.trim();
-    const prompt = [`${kindLabel}：${asset.name.trim()}`, description && `描述：${description}`, `视觉风格：${visualStyle.trim()}`].filter(Boolean).join("\n");
-    return createAiTask({
-        taskType: "image",
-        prompt,
+    return serverPost<ServerAiTask>("/ai/storyboard/createAssetImageTask", {
+        nodeId,
+        asset: { id: asset.id, kind: asset.kind, name: asset.name.trim(), description: asset.description.trim() },
+        visualStyle: visualStyle.trim(),
         model: settings.model,
-        parameters: {
-            count: 1,
-            quality: settings.quality,
-            resolution: settings.imageResolution,
-            size: settings.size,
-            storyboardNodeId: nodeId,
-            storyboardAssetId: asset.id,
-        },
-        generationSource: "storyboard",
+        settings: { quality: settings.quality, resolution: settings.imageResolution, size: settings.size },
     });
 }
 
