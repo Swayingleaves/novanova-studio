@@ -117,7 +117,8 @@ async function createServerVideoTask(config: AiConfig, prompt: string, reference
         generationSource,
         generationStyleIds: options?.generationStyleIds,
         generationStyleSnapshots: options?.generationStyleSnapshots,
-        videoGenerationMode: config.videoGenerationMode || "text-to-video",
+        // 空模式交由服务端按引用素材归一化，携带音频时默认进入全能参考。
+        videoGenerationMode: config.videoGenerationMode || undefined,
     });
 }
 

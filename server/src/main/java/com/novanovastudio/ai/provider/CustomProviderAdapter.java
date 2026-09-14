@@ -472,7 +472,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
     }
 
     /**
-     * 判定视频生成模式：优先使用请求声明的模式，其次按参考图判定图生视频，否则文生视频。
+     * 判定视频生成模式：优先使用请求声明的模式；音频未声明模式时使用全能参考；其余按参考图判定。
      *
      * @param context AiTaskExecutionContext AI任务执行上下文
      * @return String 视频生成模式
@@ -480,7 +480,14 @@ public class CustomProviderAdapter implements AiProviderAdapter {
     private String resolveVideoMode(AiTaskExecutionContext context) {
         String mode = AiTaskParameterReader.firstNonEmpty(context.request().videoGenerationMode());
         if (StringUtils.hasText(mode)) {
+            if (!VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode)
+                    && !AiTaskParameterReader.safeReferences(context.request().audioReferences()).isEmpty()) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "音频输入仅支持全能参考模式");
+            }
             return mode;
+        }
+        if (!AiTaskParameterReader.safeReferences(context.request().audioReferences()).isEmpty()) {
+            return VideoGenerationMode.REFERENCE_TO_VIDEO;
         }
         if (!AiTaskParameterReader.safeReferences(context.request().references()).isEmpty()) {
             return VideoGenerationMode.IMAGE_TO_VIDEO;

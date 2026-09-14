@@ -402,14 +402,17 @@ public class AiTaskService {
     }
 
     /**
-     * 规范化视频生成模式，缺省时固定使用文生视频。
+     * 规范化视频生成模式；携带音频引用时，未声明模式默认使用全能参考。
      *
      * @param request CreateAiTaskRequest 原始任务请求
      * @return CreateAiTaskRequest 写入默认模式后的任务请求
      */
     private AiTaskDtos.CreateAiTaskRequest normalizeVideoGenerationMode(AiTaskDtos.CreateAiTaskRequest request) {
         if (!TYPE_VIDEO.equals(request.taskType())) return request;
-        String mode = VideoGenerationMode.defaultIfBlank(request.videoGenerationMode());
+        boolean hasAudioReferences = request.audioReferences() != null && !request.audioReferences().isEmpty();
+        String mode = request.videoGenerationMode() == null || request.videoGenerationMode().isBlank()
+                ? (hasAudioReferences ? VideoGenerationMode.REFERENCE_TO_VIDEO : VideoGenerationMode.TEXT_TO_VIDEO)
+                : request.videoGenerationMode().trim();
         if (mode.equals(request.videoGenerationMode())) return request;
         return new AiTaskDtos.CreateAiTaskRequest(request.taskType(), request.prompt(), request.model(), request.parameters(),
                 request.references(), request.videoReferences(), request.generationSource(), request.generationStyleIds(),

@@ -163,7 +163,16 @@ export function CanvasNodePromptPanel({
             if (audio) releaseCanvasAudio(audio);
         };
     }, [referencePreview?.previewUrl]);
-    const supportsAudio = config.videoGenerationMode === "reference-to-video" && Boolean(config.modelCapabilities.find((item) => item.model === config.model)?.capabilities.includes("audio-input"));
+    const modelSupportsAudio = mode === "video" && Boolean(config.modelCapabilities.find((item) => item.model === config.model)?.capabilities.includes("audio-input"));
+    const audioModeAllowed = config.videoGenerationMode === "reference-to-video";
+    const previousAudioCountRef = useRef(0);
+    useEffect(() => {
+        const audioCountIncreased = videoReferenceCounts.audios > previousAudioCountRef.current;
+        previousAudioCountRef.current = videoReferenceCounts.audios;
+        if (mode === "video" && audioCountIncreased && modelSupportsAudio && !audioModeAllowed) {
+            onConfigChange(node.id, { videoGenerationMode: "reference-to-video" });
+        }
+    }, [audioModeAllowed, mode, modelSupportsAudio, node.id, onConfigChange, videoReferenceCounts.audios]);
     const creditCost =
         mode === "video"
             ? videoQuote?.available
@@ -254,7 +263,16 @@ export function CanvasNodePromptPanel({
 
     const chooseMention = (reference: CanvasResourceReference) => {
         if (!mentionRange || !onMentionSelect) return;
+        if (reference.kind === "audio") {
+            if (!modelSupportsAudio) {
+                message.error("当前模型或生成模式不支持音频输入");
+                return;
+            }
+        }
         if (!onMentionSelect(reference)) return;
+        if (reference.kind === "audio" && !audioModeAllowed) {
+            onConfigChange(node.id, { videoGenerationMode: "reference-to-video" });
+        }
         const existingReference = mentionReferences.find((item) => item.nodeId === reference.nodeId);
         const nextKindIndex = mentionReferences.filter((item) => item.active && item.kind === reference.kind).length;
         const label = existingReference?.label || labelForKind(reference.kind, nextKindIndex);
@@ -298,22 +316,33 @@ export function CanvasNodePromptPanel({
             const audioReferences = [...(generation.audioReferences || [])];
             const videoReferences = [...(generation.videoReferences || [])];
             const videoStorages = [...(generation.videoReferenceObjectStorages || [])];
+            let addedAudio = false;
             for (const file of Array.from(files)) {
                 if (isAudioFile(file)) {
-                    if (!supportsAudio) throw new Error("当前模型或生成模式不支持音频输入");
+                    if (!modelSupportsAudio) throw new Error("当前模型或生成模式不支持音频输入");
                     const audio = await uploadAudioFile(file);
                     audioReferences.push({ id: audio.storageKey, name: file.name, type: audio.mimeType, url: audio.url, storageKey: audio.storageKey, durationMs: audio.durationMs, bytes: audio.bytes, objectStorage: audio.objectStorage });
+                    addedAudio = true;
                 } else if (file.type.startsWith("video/")) {
+                    if (config.videoGenerationMode === "text-to-video") throw new Error("文生视频不能携带图片或视频参考素材");
                     const uploaded = await uploadMediaFile(file, "video");
                     videoReferences.push(persistedReferenceValue(uploaded.objectStorage?.url, uploaded.url, uploaded.storageKey));
                     if (uploaded.objectStorage) videoStorages.push(uploaded.objectStorage);
                 } else {
+                    if (config.videoGenerationMode === "text-to-video") throw new Error("文生视频不能携带图片或视频参考素材");
                     const uploaded = await uploadImage(file);
                     imageReferences.push(persistedReferenceValue(uploaded.objectStorage?.url, uploaded.url, uploaded.storageKey));
                     if (uploaded.objectStorage) imageStorages.push(uploaded.objectStorage);
                 }
             }
-            onConfigChange(node.id, { references: imageReferences, referenceObjectStorages: imageStorages, videoReferences, videoReferenceObjectStorages: videoStorages, audioReferences: mergeAudioReferences(audioReferences) });
+            onConfigChange(node.id, {
+                references: imageReferences,
+                referenceObjectStorages: imageStorages,
+                videoReferences,
+                videoReferenceObjectStorages: videoStorages,
+                audioReferences: mergeAudioReferences(audioReferences),
+                ...(addedAudio ? { videoGenerationMode: "reference-to-video" as const } : {}),
+            });
         } catch (error) {
             message.error(error instanceof Error ? error.message : "参考素材上传失败");
         } finally {
@@ -353,7 +382,7 @@ export function CanvasNodePromptPanel({
             <input
                 ref={referenceInputRef}
                 type="file"
-                accept={supportsAudio ? "image/*,video/*,.mp3,.wav" : "image/*,video/*"}
+                accept={modelSupportsAudio && config.videoGenerationMode === "text-to-video" ? ".mp3,.wav" : modelSupportsAudio ? "image/*,video/*,.mp3,.wav" : "image/*,video/*"}
                 multiple
                 className="hidden"
                 onChange={(event) => {
@@ -362,7 +391,7 @@ export function CanvasNodePromptPanel({
                 }}
             />
 
-            {displayReferences.length > 0 || (mode === "video" && (config.videoGenerationMode === "image-to-video" || config.videoGenerationMode === "reference-to-video")) ? (
+            {displayReferences.length > 0 || (mode === "video" && (modelSupportsAudio || config.videoGenerationMode === "image-to-video" || config.videoGenerationMode === "reference-to-video")) ? (
                 <div className="mb-3 min-w-0 border-b pb-3" style={{ borderColor: theme.node.stroke }}>
                     <p className="mb-2 text-xs font-medium" style={{ color: theme.node.muted }}>
                         参考内容
@@ -385,7 +414,7 @@ export function CanvasNodePromptPanel({
                                 }}
                             />
                         ))}
-                        {mode === "video" && (config.videoGenerationMode === "image-to-video" || config.videoGenerationMode === "reference-to-video") ? (
+                        {mode === "video" && (modelSupportsAudio || config.videoGenerationMode === "image-to-video" || config.videoGenerationMode === "reference-to-video") ? (
                             <button
                                 type="button"
                                 title="上传参考素材"
