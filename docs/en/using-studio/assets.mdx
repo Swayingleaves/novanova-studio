@@ -1,0 +1,61 @@
+---
+title: My assets
+description: Manage uploaded media and saved image or video results.
+---
+
+# My assets
+
+My Assets is where reusable material lives: generated results, uploads, and prompt text all land here and can be reused in Image, Video, and Canvas. Assets belong to the current user.
+
+## Page overview
+
+- Top buttons: **导出**, **导入**, and **新增资产**.
+- The search box matches title, content, tags, or source.
+- Type filter: 全部 / 文本 / 图片 / 视频. There is no source, tag, or date filter yet, and no sorting control.
+- Results appear in a responsive grid with 12 / 24 / 48 items per page; the empty state is "没有找到资产".
+
+## Creating and editing
+
+"新增资产" and the card action "编辑" share one dialog:
+
+| Field | Notes |
+| --- | --- |
+| Type | Text or image |
+| Title | The name used for searching |
+| Cover | An image URL, or click "上传" |
+| Tags | Type and press Enter |
+| Source | Defaults to "手动添加" |
+| Notes | Extra description |
+| Content | Body text for text assets; "选择图片" for image assets |
+
+## Cards and actions
+
+A card shows the cover (or "暂无封面", while text assets show an excerpt), the title, the source (or "未标注来源"), the type, a summary, and up to three tags. Image and video summaries show "宽 × 高、大小、格式".
+
+Each card supports:
+
+- **查看**: opens the preview dialog. Images show dimensions, size, and format, videos play inline, and text shows the full body; the footer offers "复制文本" or "下载图片 / 下载视频".
+- **编辑** (not for videos): title, cover, tags, notes, and content.
+- **复制** (text only) and **下载** (images and videos).
+- **删除**: the confirmation reads "「X」将从资产库中移除，此操作无法撤销。" and success reports "资产已删除".
+
+## Where assets come from
+
+| Source label | Created by |
+| --- | --- |
+| 手动添加 | "新增资产" on this page |
+| 生图工作台 | "添加到素材" on an image result card |
+| 视频创作台 | "添加到素材" on a video result card |
+| Canvas | "存资产" on a canvas node toolbar |
+| The prompt category | "存为素材" on a prompt card |
+
+## Export and import
+
+"导出" packages the current assets into `我的资产.zip`; "导入" only accepts `.zip` files and otherwise reports "导入失败，请选择有效的资产压缩包". Handy for moving material between environments.
+
+## Things to watch out for
+
+- Object storage must be configured by an administrator first, otherwise uploads report "请联系管理员配置默认对象存储" or "请联系管理员完整配置默认对象存储".
+- **Deleting an asset only removes the record; the file in object storage stays.** Clean up object storage separately if you need the space back.
+- There is no multi-select or bulk delete yet — remove items one by one.
+- To use assets while creating, see [Image creation](./image-generation), [Video creation](./video-generation), and [Infinite canvas](./canvas).

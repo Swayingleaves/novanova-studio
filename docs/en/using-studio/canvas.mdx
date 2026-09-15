@@ -1,0 +1,103 @@
+---
+title: Infinite canvas
+description: Organize ideas, media, generation tasks, and results in one space.
+---
+
+# Infinite canvas
+
+The canvas fits complex workflows: arrange text, images, videos, audio, storyboards, and results in one zoomable space, express references with connections, and let the canvas Agent keep working from that context.
+
+## Node types
+
+| Node | What it is for |
+| --- | --- |
+| Text | Prompts, scripts, or notes; click the body to edit |
+| Image | Media or results, with actions to copy the prompt, replace, lock the aspect ratio, crop, split, and view large |
+| Video | Playback, video generation, and composition input |
+| Audio | Listening, waveform, and trimming into a new node |
+| Storyboard | A shot list generated from a script; supports 开始生成, 重新生成分镜脚本, 打开分镜脚本 |
+| Video composition | Joins up to 20 video nodes in order |
+| Background | A board under a group of nodes, useful when moving and labelling them together |
+
+Add nodes from the bottom toolbar (move/select, undo, redo, text, image, audio, video, background, upload media, my assets, delete selected, clear canvas) or from the right-click menu on empty space.
+
+## Basic interaction
+
+- **Pan** by dragging empty space; **zoom** with the wheel or the bottom-right slider (0.05–5).
+- **Connect** by dragging from a node handle to another node. Dropping on empty space opens a menu with "引用该节点生成" (text, image, video, setting image, composition, or storyboard).
+- **Marquee select** with `Ctrl/Cmd` + drag; add to the selection with `Shift/Ctrl/Cmd` + click; `Ctrl/Cmd + A` selects all.
+- **Copy and paste** with `Ctrl/Cmd + C` / `V`; copies get a " 副本" suffix.
+- **Delete** with `Delete` / `Backspace`, after a confirmation that also mentions "此操作可通过撤销恢复". Deleting a background deletes its members.
+- **Undo and redo** with `Ctrl/Cmd + Z` and `Ctrl/Cmd + Shift + Z` (or `Y`), up to 50 steps.
+- **Node size**: image nodes keep their aspect ratio by default and can switch to free resizing; images stop at 220×160 and audio nodes at 280×150.
+- **Background boards** carry their members when dragged and grow to contain them when resized; selecting one reveals a name field and six colours in the toolbar.
+
+## Canvas Agent
+
+"画布Agent" in the top bar opens the chat panel. It reads the current nodes, connections, selection, and viewport, and can create, move, resize, delete, connect, and select nodes, adjust the viewport, and start text, image, or video generation.
+
+- When a generation is missing a required parameter it asks first, for example "图片尺寸不能为空，请先向用户确认尺寸".
+- Changes to the canvas arrive as a "等待确认" card and only run after you click "执行".
+- Sending another message while it is working is ignored; the panel supports "新对话" and collapsing, and history is limited to the most recent 12 turns.
+- You can hold `Ctrl/Cmd + Shift` and drag nodes into the panel to add context.
+
+## Referencing media with @
+
+Typing `@` in a node's prompt field opens the "引用画布资产" picker, which searches nodes that already have content on the canvas (images, videos, audio, text, plus prompts stored in image/video nodes). Choosing one connects the source node to the current node and inserts a label such as "参考图1", "视频1", "音频1", or "文本1" into the prompt.
+
+- Referencing audio requires a model with audio input, otherwise it reports "当前模型或生成模式不支持音频输入".
+- The `@` list only covers canvas nodes. For assets from the library, use "从提示词库选择" in the panel or "我的资产" in the toolbar.
+- The Agent panel does not use `@`; use `Ctrl/Cmd + Shift` with a node drag instead.
+
+## Setting images
+
+Setting images are for character and scene design. Two entry points: drag from a text or image node handle and choose "设定图 · 角色与场景设计参考", or switch the "设定图：<skill>" dropdown in an image node's panel.
+
+- The skill's prompt is merged with your description, exactly one image is generated, the ratio comes from the skill (16:9 by default), and the node title becomes "设定图·<skill>".
+- Video, storyboard, background, and composition nodes are not supported and report "暂不支持设定图"; with no description and no upstream node providing content it reports "请输入生成描述或连接有内容的上游节点".
+
+## Audio and audio input for video
+
+Add audio by dragging a file in, using the toolbar's "上传素材", or clicking the empty state of an audio node. Only MP3 and WAV are accepted, up to 15MB per file. Audio nodes offer a waveform, play/pause, and seeking by clicking the waveform or using the arrow keys.
+
+**Trimming**: hover the audio node toolbar and pick "裁剪（裁剪为新音频节点）", adjust the range in the dialog with preview, then click "创建音频节点". The original node keeps the full audio and the new node references the selected range. Ranges that are too short are rejected.
+
+**Audio for video**: only video nodes support it, the model must have audio input enabled, and the mode must be 全能参考 — otherwise the canvas reports that it is unsupported and switches the mode automatically.
+
+## Autosave and projects
+
+- The canvas saves to the server automatically (nodes, connections, viewport, conversation, preferences) about 400ms after a change. There is no manual save button.
+- After a refresh, nodes, connections, the viewport, and the conversation come back. A node that was generating before the task id was returned is marked as failed with "页面刷新后生成已中断，请重新生成。".
+- The project list lives at `/canvas` and supports creating, importing, exporting selected, and deleting selected canvases; each card shows "X 个节点，Y 条连线" and the update time.
+
+## Generation states and hand-offs
+
+- Generating nodes show "生成中..."; multi-image nodes show "生成中 x/N" with a progress bar, then "已完成 N/N", and failures show a red icon with the reason.
+- Hover a node to "重试（重新生成）". If the original prompt or its references are gone you get "找不到提示词，无法重试" or "参考图片已丢失，无法继续重试".
+- **Saving to assets**: hover a node and use "存资产（加入我的资产）"; success reports "已加入我的资产".
+- **Using assets**: the toolbar's "我的资产" inserts assets as nodes; the left panel's "节点" and "画布资产" tabs let you search, filter by type, and locate things; an image node can also be replaced with a canvas asset.
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| Drag empty space | Pan the canvas |
+| Wheel / zoom slider | Zoom |
+| `Ctrl/Cmd` + drag | Marquee select |
+| `Shift/Ctrl/Cmd` + click | Add to selection |
+| `Ctrl/Cmd + A` | Select all |
+| `Ctrl/Cmd + C` / `V` | Copy / paste |
+| `Delete` / `Backspace` | Delete selection |
+| `Esc` | Clear selection and close overlays |
+| `Ctrl/Cmd + Z` | Undo |
+| `Ctrl/Cmd + Shift + Z` or `Y` | Redo |
+| `Ctrl/Cmd + Shift` + drag a node | Send it to the canvas Agent |
+| Drag in an image or video | Upload it as a node |
+
+"画布快捷键" in the top-bar user menu reopens this list at any time.
+
+## Limits
+
+- Audio: MP3 / WAV only, 15MB per file.
+- Video composition: up to 20 video nodes. Storyboards: up to 100 shots and 300 assets.
+- Zoom range 0.05–5; the Agent keeps the most recent 12 conversation turns.

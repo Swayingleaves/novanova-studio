@@ -1,0 +1,180 @@
+﻿diff --git a/web/src/features/canvas/components/canvas-node-prompt-panel.tsx b/web/src/features/canvas/components/canvas-node-prompt-panel.tsx
+index 280c86b..9a88ad1 100644
+--- a/web/src/features/canvas/components/canvas-node-prompt-panel.tsx
++++ b/web/src/features/canvas/components/canvas-node-prompt-panel.tsx
+@@ -54,7 +54,6 @@ type CanvasNodePromptPanelProps = {
+     isPromptGenerating?: boolean;
+     mentionReferences?: CanvasResourceReference[];
+     onImageSettingsOpenChange?: (open: boolean) => void;
+-    onApplyContent?: (nodeId: string, content: string) => void;
+     canGenerateWithoutPrompt?: boolean;
+ };
+ 
+@@ -73,7 +72,6 @@ export function CanvasNodePromptPanel({
+     isPromptGenerating = false,
+     mentionReferences = [],
+     onImageSettingsOpenChange,
+-    onApplyContent,
+     canGenerateWithoutPrompt = false,
+ }: CanvasNodePromptPanelProps) {
+     const globalConfig = useEffectiveConfig();
+@@ -101,9 +99,11 @@ export function CanvasNodePromptPanel({
+     const libraryPromptRef = useRef<string | null>(null);
+     const config = buildNodeConfig(globalConfig, node, mode);
+     const nodePrompt = readNodePrompt(node);
++    // 鏂囨湰鑺傜偣鐨勬鏂囧彧鍦ㄨ妭鐐瑰唴缂栬緫锛岃繖閲屼粎鐢ㄤ簬鎻愮ず鍗犱綅鏂囨
+     const hasTextContent = isTextNode(node) && Boolean(node.content.text.trim());
+     const hasImageContent = isImageNode(node) && Boolean(node.content.source);
+-    const isEditingExistingContent = hasTextContent || hasImageContent;
++    // 宸叉湁鍥剧墖鍐呭鏃讹紝杈撳叆妗嗘槸鈥滀慨鏀规寚浠も€濓紝涓嶅啓鍥炶妭鐐瑰凡鏈夌殑鎻愮ず璇?+    const isEditingExistingContent = hasImageContent;
+     const displayReferences = useMemo<DisplayReference[]>(() => {
+         const references: DisplayReference[] = [];
+         const mediaKeys = new Set<string>();
+@@ -236,7 +236,8 @@ export function CanvasNodePromptPanel({
+ 
+     const updatePrompt = (value: string) => {
+         setPrompt(value);
+-        if (isTextNode(node) || !isEditingExistingContent) onPromptChange(node.id, value);
++        // 鏂囨湰鑺傜偣姝ｆ枃涓嶅啓鍥烇紱宸叉湁鍥剧墖鍐呭鏃惰緭鍏ユ鏄慨鏀规寚浠わ紝鍚屾牱涓嶅啓鍥?+        if (!isTextNode(node) && !isEditingExistingContent) onPromptChange(node.id, value);
+     };
+     const canSubmit = Boolean(prompt.trim()) || canGenerateWithoutPrompt;
+     const filteredStyles = useMemo(() => filterGenerationStyles(styleCatalog.styles, styleQuery), [styleCatalog.styles, styleQuery]);
+@@ -286,9 +287,7 @@ export function CanvasNodePromptPanel({
+     const applyPromptFromLibrary = (value: string) => {
+         libraryPromptRef.current = value;
+         setPrompt(value);
+-        onPromptChange(node.id, value);
+-        // 鏂囨湰鑺傜偣閫夋嫨鎻愮ず璇嶆椂锛屽悓姝ユ洿鏂?AI 杈撳叆妗嗗拰鑺傜偣姝ｆ枃銆?-        if (isTextNode(node)) onApplyContent?.(node.id, value);
++        if (!isTextNode(node) && !isEditingExistingContent) onPromptChange(node.id, value);
+     };
+ 
+     const submit = () => {
+@@ -780,14 +779,19 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNode, mode: CanvasN
+     };
+ }
+ 
++/**
++ * 璇诲彇鑺傜偣涓婃寔涔呭寲鐨勭敓鎴愭彁绀鸿瘝銆?+ * <p>
++ * 鏂囨湰鑺傜偣鐨勬鏂囩敱鑺傜偣鑷韩缂栬緫锛屾彁绀洪潰鏉垮彧浣滀负鎸囦护杈撳叆锛屼笉鍥炴樉姝ｆ枃銆?+ */
+ function readNodePrompt(node: CanvasNode): string {
+-    return isTextNode(node) ? node.content.text : isImageNode(node) || isVideoNode(node) ? node.generation.prompt : "";
++    return isImageNode(node) || isVideoNode(node) ? node.generation.prompt : "";
+ }
+ 
+ function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: boolean, hasTextContent: boolean) {
+     if (mode === "video") return "鎻忚堪瑕佺敓鎴愮殑瑙嗛鍐呭";
+     if (mode === "image") return hasImageContent ? "璇疯緭鍏ヤ綘鎯宠鎶婅繖寮犲浘淇敼鎴愪粈涔? : "鎻忚堪瑕佺敓鎴愮殑鍥剧墖鍐呭";
+-    return hasTextContent ? "璇疯緭鍏ヤ綘鎯宠灏嗘湰娈垫枃鏈慨鏀规垚浠€涔? : "璇疯緭鍏ヤ綘鎯宠鐢熸垚鐨勬枃鏈唴瀹?;
++    return hasTextContent ? "杈撳叆淇敼瑕佹眰锛孉I 浼氭嵁姝ゆ敼鍐欒繖娈垫枃鏈? : "璇疯緭鍏ヤ綘鎯宠鐢熸垚鐨勬枃鏈唴瀹?;
+ }
+ 
+ function videoConfigPatch(key: keyof AiConfig, value: string) {
+diff --git a/web/src/features/canvas/node-types/shared.tsx b/web/src/features/canvas/node-types/shared.tsx
+index 89d9169..2324df6 100644
+--- a/web/src/features/canvas/node-types/shared.tsx
++++ b/web/src/features/canvas/node-types/shared.tsx
+@@ -210,11 +210,10 @@ type NodeHoverSurfaceProps = {
+     style?: CSSProperties;
+     onMouseEnter?: MouseEventHandler<HTMLDivElement>;
+     onMouseLeave?: MouseEventHandler<HTMLDivElement>;
+-    onDoubleClick?: MouseEventHandler<HTMLDivElement>;
+     children: ReactNode;
+ };
+ 
+-export const NodeHoverSurface = forwardRef<HTMLDivElement, NodeHoverSurfaceProps>(function NodeHoverSurface({ nodeId, className, style, onMouseEnter, onMouseLeave, onDoubleClick, children }, ref) {
++export const NodeHoverSurface = forwardRef<HTMLDivElement, NodeHoverSurfaceProps>(function NodeHoverSurface({ nodeId, className, style, onMouseEnter, onMouseLeave, children }, ref) {
+     const actions = useNodeActions();
+     const theme = useCanvasTheme();
+     const uploading = useCanvasUiStore((state) => state.uploadingNodeIds.has(nodeId));
+@@ -233,7 +232,6 @@ export const NodeHoverSurface = forwardRef<HTMLDivElement, NodeHoverSurfaceProps
+                 actions.onHideToolbar?.();
+                 onMouseLeave?.(event);
+             }}
+-            onDoubleClick={onDoubleClick}
+         >
+             {children}
+             {uploading ? (
+@@ -243,7 +241,6 @@ export const NodeHoverSurface = forwardRef<HTMLDivElement, NodeHoverSurfaceProps
+                     style={{ background: theme.node.fill, color: theme.node.muted }}
+                     onPointerDown={(event) => event.stopPropagation()}
+                     onMouseDown={(event) => event.stopPropagation()}
+-                    onDoubleClick={(event) => event.stopPropagation()}
+                 >
+                     <LoaderCircle className="size-5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                     <span className="text-sm">涓婁紶涓€?/span>
+diff --git a/web/src/features/canvas/node-types/text-node.tsx b/web/src/features/canvas/node-types/text-node.tsx
+index 991e1a0..395fd1f 100644
+--- a/web/src/features/canvas/node-types/text-node.tsx
++++ b/web/src/features/canvas/node-types/text-node.tsx
+@@ -12,6 +12,7 @@ export const TextNode = memo(function TextNode({ data, selected }: NodeProps<Nod
+     const theme = useCanvasTheme();
+     const [editing, setEditing] = useState(false);
+     const textareaRef = useRef<HTMLTextAreaElement>(null);
++    const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
+     const fontSize = data.content.fontSize;
+     const borderColor = selected ? theme.node.activeStroke : theme.node.stroke;
+     const [localContent, setLocalContent] = useState(data.content.text);
+@@ -21,8 +22,13 @@ export const TextNode = memo(function TextNode({ data, selected }: NodeProps<Nod
+         if (!editing) setLocalContent(data.content.text);
+     }, [data.content.text, editing]);
+ 
+-    const handleDoubleClick = useCallback(
++    // 鐐瑰嚮鑺傜偣姝ｆ枃鐩存帴杩涘叆缂栬緫锛氭鏂囧彧鍦ㄨ妭鐐瑰唴淇敼锛屼笉涓庝笅鏂?AI 瀵硅瘽妗嗗悓姝?+    const handleContentClick = useCallback(
+         (event: ReactMouseEvent<HTMLDivElement>) => {
++            const origin = pointerDownRef.current;
++            pointerDownRef.current = null;
++            // 鎷栧姩鑺傜偣缁撴潫鍚庢祻瑙堝櫒浠嶄細娲惧彂 click锛屾寜浣嶇Щ闃堝€兼帓闄わ紝閬垮厤鎷栨嫿鍚庤杩涘叆缂栬緫
++            if (origin && (Math.abs(event.clientX - origin.x) > 4 || Math.abs(event.clientY - origin.y) > 4)) return;
+             event.preventDefault();
+             event.stopPropagation();
+             actions.onEditText(data);
+@@ -83,7 +89,6 @@ export const TextNode = memo(function TextNode({ data, selected }: NodeProps<Nod
+                     borderColor,
+                     boxShadow: selected ? `0 0 0 1px ${theme.node.activeStroke}55` : undefined,
+                 }}
+-                onDoubleClick={handleDoubleClick}
+             >
+                 <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle="鏂囨湰" onTitleChange={actions.onTitleChange} />
+                 {editing ? (
+@@ -105,8 +110,16 @@ export const TextNode = memo(function TextNode({ data, selected }: NodeProps<Nod
+                         onPointerDown={(e) => e.stopPropagation()}
+                     />
+                 ) : (
+-                    <div className="h-full w-full overflow-y-auto whitespace-pre-wrap break-words p-4" style={textStyle} onWheel={(e) => e.stopPropagation()}>
+-                        {localContent || <span style={{ color: theme.node.placeholder }}>鍙屽嚮缂栬緫鏂囧瓧</span>}
++                    <div
++                        className="h-full w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words p-4"
++                        style={textStyle}
++                        onPointerDown={(e) => {
++                            pointerDownRef.current = { x: e.clientX, y: e.clientY };
++                        }}
++                        onClick={handleContentClick}
++                        onWheel={(e) => e.stopPropagation()}
++                    >
++                        {localContent || <span style={{ color: theme.node.placeholder }}>鐐瑰嚮缂栬緫鏂囧瓧</span>}
+                     </div>
+                 )}
+                 <CanvasConnectionHandles />
+diff --git a/web/src/features/canvas/pages/canvas-client-page.tsx b/web/src/features/canvas/pages/canvas-client-page.tsx
+index d247755..eac280f 100644
+--- a/web/src/features/canvas/pages/canvas-client-page.tsx
++++ b/web/src/features/canvas/pages/canvas-client-page.tsx
+@@ -2314,8 +2314,9 @@ function CanvasWorkspacePage() {
+         setEditRequestNonce((value) => value + 1);
+     }, []);
+ 
++    /** 鎻愮ず闈㈡澘鍙啓鐢熸垚鎻愮ず璇嶏紱鏂囨湰鑺傜偣姝ｆ枃鐢辫妭鐐硅嚜韬紪杈戯紝涓嶅湪姝ゅ啓鍥炪€?*/
+     const handleNodePromptChange = useCallback((nodeId: string, prompt: string) => {
+-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyCanvasNodeAttributes(node, isTextNode(node) ? { content: prompt } : { prompt }) : node)));
++        setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyCanvasNodeAttributes(node, { prompt }) : node)));
+     }, []);
+ 
+     const handleConfigNodeChange = useCallback((nodeId: string, patch: CanvasNodeAttributes) => {
+@@ -4815,7 +4816,6 @@ function CanvasWorkspacePage() {
+                             onGeneratePrompt={handleGenerateNodePrompt}
+                             onStop={confirmStopGeneration}
+                             onMissingConfig={showMissingAiConfig}
+-                            onApplyContent={handleNodeContentChange}
+                             canGenerateWithoutPrompt={promptPanelCanGenerateWithoutPrompt}
+                             onRemoveReference={(reference) => removeNodeReferenceConnection(promptPanelNode.id, reference.nodeId)}
+                             mentionCandidates={canvasResourceReferences}

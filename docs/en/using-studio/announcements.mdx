@@ -1,0 +1,28 @@
+---
+title: System announcements
+description: Read feature updates, maintenance notices, and important reminders.
+---
+
+# System announcements
+
+Announcements carry feature updates, maintenance notices, and important reminders. Administrators publish them from the console and every user sees them.
+
+## Where to find them
+
+- **Desktop**: the bell at the bottom of the narrow left sidebar. A red dot appears while something is unread.
+- **Canvas page**: the bell in the top-right toolbar, with an unread counter badge.
+- Clicking the bell while signed out opens the sign-in dialog first.
+
+## List and detail
+
+- The list opens as an overlay titled "系统公告": unread entries are highlighted with a dot, and the empty state is "暂无公告". Opening the panel refreshes it immediately.
+- Clicking an entry opens a dialog titled with the announcement title (or "公告详情" when it has none). Empty content shows "暂无内容", and the footer lists the publish and creation times.
+- The dialog buttons are "我已阅读" to mark this announcement as read and close, and "全部已读" to clear every unread item at once. Failures report "标记公告已读失败，请稍后重试".
+
+## When they appear
+
+Once signed in, the client polls for announcements every 30 seconds, so a newly published notice shows up within roughly 30 seconds (opening the panel refreshes immediately). There is no real-time push.
+
+## How administrators publish
+
+In the admin console's "消息管理" tab, create an announcement with a title and content, save it as a draft, then click "发布". The confirmation reads "发布后所有用户将看到此公告，确定发布？". See [Admin console](./admin).

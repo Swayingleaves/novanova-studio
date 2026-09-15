@@ -1,0 +1,47 @@
+---
+title: Project introduction
+description: Understand Novanova Studio's purpose, capabilities, and creative workflow.
+---
+
+# Project introduction
+
+Novanova Studio is an AI Agent-powered visual creation workspace. Images, videos, the infinite canvas, prompts, and assets stay connected in one creative workflow.
+
+## Core capabilities
+
+- **Conversational creation**: Describe an intent in natural language and let the Agent choose tools from context.
+- **Image and video generation**: Use multiple provider channels, reference media, and asynchronous task progress.
+- **Infinite canvas**: Organize ideas, media, generated results, and task relationships in one editable space.
+- **Reusable assets**: Save results, prompts, and uploads for later rounds.
+
+## Typical workflow
+
+1. Configure model channels and object storage.
+2. Enter a creative goal in Image, Video, or Canvas.
+3. Let the Agent ask for missing parameters and submit an asynchronous task.
+4. Review, iterate, and save the result to Assets or Canvas.
+5. Continue the next round with the same context.
+
+## System architecture
+
+The system is arranged in five layers: the browser workspace, the edge layer, the front-end service, the back-end service, and data plus external dependencies. The browser only calls same-origin `/api/v1/**`; AI channel keys and object storage credentials stay on the server and are never shipped to the browser.
+
+![Novanova Studio system architecture](/docs-assets/architecture.en.svg)
+
+| Layer | Stack | Responsibility |
+| --- | --- | --- |
+| Browser workspace | Next.js 16 App Router, React 19, Ant Design 6, Tailwind, Zustand, React Flow | The UI for image, video, the infinite canvas, assets, the prompt library, and the admin console |
+| Edge | Nginx 1.27 | TLS termination and reverse proxy: `/api/*` goes to the back end with buffering off so SSE can stream, everything else goes to the front end on `:5550` |
+| Front-end service | Next.js standalone (Node.js 22) | Page rendering, the `/docs` portal, and static assets |
+| Back-end service | Java 21, Spring Boot 3.5, Spring WebFlux, AgentScope Java, Fastjson2, R2DBC | Reactive APIs, Agent orchestration and tool calls, AI task scheduling and polling, auth, and business services |
+| Data and external dependencies | PostgreSQL 17 + Flyway, Redis 8.6 + Stream, object storage (COS / OSS / Kodo), model providers | Persisting users and creations, async task dispatch and recovery, media storage, and model inference calls |
+
+### The path of a generation request
+
+1. The browser submits a creative goal from the workspace or the canvas.
+2. Nginx forwards `/api/v1/**` to the back end and keeps the SSE response unbuffered.
+3. The Agent picks tools from context (image, video, canvas, storyboard) and fills in missing parameters.
+4. The task is written to PostgreSQL and dispatched through Redis Stream; most providers expose async task APIs, which the server polls at a shared interval.
+5. Results are written back to the database and object storage, and the browser gets them over SSE or polling, so they can land directly on the canvas or in Assets.
+
+A Docker deployment starts PostgreSQL, Redis, Nginx, the front end, and the back end together; see [Start with Docker](./docker-start). API and database design notes live in the `docs-api/` directory.

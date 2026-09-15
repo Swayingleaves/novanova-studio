@@ -1,0 +1,72 @@
+---
+title: Admin console
+description: Manage users, channels, skills, prompts, announcements, and system data.
+---
+
+# Admin console
+
+After signing in, administrators get an extra "管理后台" entry under Settings in the left navigation (at `/admin/system`), plus a "系统管理" item in the user menu. The entry is hidden from creators; opening the URL directly shows "需要管理员权限 / 当前账号无法访问系统管理。", and the API rejects the call with "权限不足".
+
+The page is organised into nine tabs, described below in order.
+
+## User management
+
+- Top statistics: total users, new users this month, new users today.
+- Columns: ID, user (nickname · email), role, status, available credits, password lock, created at, actions.
+- Actions: create a user (email, password of at least 8 characters, nickname, role), change the role (creator or administrator), adjust credits, unlock, disable or enable.
+- **Adjust credits** takes a positive or negative amount and a mandatory reason (up to 200 characters). The reason is written into the user's credit ledger as an administrator adjustment.
+- Guards: you cannot disable the administrator you are signed in as ("不能禁用当前登录管理员"), and you cannot remove your own administrator role ("不能移除当前登录管理员角色"). Disabled accounts are refused at sign-in with "账号已被禁用".
+- Filter by keyword, user ID, role, status, and creation date; 20 rows per page.
+
+## Credit usage
+
+- Filters: user, date range (today, last 7 days, last 30 days, this month), type (all, image, video), and daily or monthly trend.
+- Charts: image versus video split, model split, and consumption trend.
+- Detail columns: user, generation type, model, source, credits, time.
+
+## Credit cards
+
+- **Generate**: set a count (1–1000) and credits per card (at least 1), then click "生成". The result dialog allows "一键复制全部卡密". There is no expiry setting.
+- Batch table: batch, credits per card, stock, creating administrator, created at.
+- Stock table: card (masked by default, with a toggle to reveal it), batch, credits, status (未兑换 / 已兑换), redeeming user, redemption time, and credit ledger entry.
+- Filter by batch, status, card or its last four characters, and redeeming user or email. Users redeem a 20-character card on the "兑换积分" page.
+
+## Announcements
+
+- Columns: title, content, priority, status (已发布 / 草稿), published at, created at, actions.
+- New announcements only need a title (required) and content; editing can change both. Only drafts can be published, with the confirmation "发布后所有用户将看到此公告，确定发布？".
+- Announcements reach users by polling, so they appear within roughly 30 seconds — see [System announcements](./announcements).
+
+## Prompt library
+
+Maintains prompt records: title, content, category, tags, preview content, source URL, sort order, and status, with search, category filtering, and enable/disable. See [Prompt library](./prompt-library).
+
+## Style management
+
+Image and video generation styles. Fields: name, category, cover (required), style prompt, generation type (image or video), sort order, and status. The card grid supports multi-select bulk delete. Disabling reports "停用后新生成不能选择该风格，历史快照不受影响。".
+
+## Skill management
+
+Conversational skills. Columns: name, type (image, video, or canvas setting image), description, default ratio, status, and sort order. The form covers name, type, description, cover, default ratio (16:9 / 9:16 / 1:1 / 4:3 / 3:4), workflow prompt, sort order, and status.
+
+- A marker such as `workflow: first-last-frame` inside the workflow prompt is parsed by the server into a video workflow; only registered workflows take effect. See [Video creation](./video-generation) for the result.
+- After disabling, users can no longer pick the skill ("停用后用户不能继续选择该技能。").
+
+## Homepage showcase
+
+Curates the featured wall on the home page: preview, title, category, creator, media, target, sort order, status, updated at, and actions, with multi-select bulk delete. Fields include title, description, category, creator, media type and URL, thumbnail, target (image, video, canvas, or assets), target path, prompt content, sort order, and status. When the list is empty the home page falls back to built-in samples.
+
+## API logs
+
+The most useful page when diagnosing backend problems.
+
+- Columns: endpoint (method and path), client IP, user ID, status code, success, error content, duration in milliseconds, and time.
+- Filters: keyword (IP, endpoint, or user ID) and result (success or error), with 10 / 20 / 50 / 100 rows per page and draggable column widths.
+- The detail drawer shows method, URL, IP, user ID, status code, success, duration, time, the **request body**, and the **error content** (response bodies are not recorded).
+- Logs are kept for 30 days and older entries are cleaned up at 03:00 daily.
+
+## Maintenance tips
+
+- Test object storage right after configuring it, and use "拉取模型" to verify a channel key before saving it as the default.
+- Credit adjustments and disabling users are visible immediately, so pair them with an announcement.
+- Every configuration field is explained in [System configuration](./system-configuration).

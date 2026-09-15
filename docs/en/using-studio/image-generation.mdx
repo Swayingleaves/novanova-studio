@@ -1,0 +1,60 @@
+---
+title: Image creation
+description: Create and iterate images with natural language and references.
+---
+
+# Image creation
+
+The image page is a two-column layout: the conversation list on the left, and the conversation with the composer and results on the right.
+
+## Describe what you want
+
+Write the subject, setting, composition, lighting, and style in the composer at the bottom. The submit button states how many credits the run will cost; while a run is active the button turns into a stop action ("停止生成", or "取消排队" while queued).
+
+## References
+
+References come from three places: uploading a local image, picking an existing item from "资产库", or choosing one from "最近上传".
+
+- The page supports several references at once. The ceiling comes from the channel (9 for channels using the New API call format); going over fails at submit.
+- References are ordered: state their roles in the description, for example "使用图片 1 的人物身份" or "参考图片 2 的色彩关系". Check the order before submitting.
+- "加入参考图" on a result card turns the previous output into a reference for the next round.
+- The "资产库" dialog only accepts text and image assets; other kinds are rejected with "生图工作台只能使用文本或图片素材".
+
+## Image settings
+
+| Setting | Options | Default |
+| --- | --- | --- |
+| Model | Models marked with the image capability on an active channel and given a price | The default image model chosen by the administrator |
+| Quality | 低画质 / 标准画质 / 高画质 | 标准画质 |
+| Resolution | 1K / 2K / 4K | 2K |
+| Aspect ratio | 13 presets: 1:1, 1:2, 2:1, 3:2, 2:3, 4:3, 3:4, 5:4, 4:5, 16:9, 9:16, 21:9, 9:21 | 1:1 |
+
+The settings are remembered in the browser, so a new conversation starts from your last choices.
+
+## Prompt optimization
+
+"AI优化提示词" asks an Agent to expand your description with concrete visual detail; the result is written back into the composer. It uses the default text model, and failures report "提示词优化失败".
+
+## Running and results
+
+- Status moves from 排队中 to 生成中 to 已完成. Multi-image runs report "已完成 N 张，失败 M 张", and failed cards carry the reason.
+- Result card actions: **拷贝链接**, **上传到云储存** (then 复制云储存地址), **添加到素材**, **加入参考图**, **下载**, and **重新生成**.
+- "添加到素材" saves the result into [My assets](./assets) with the source "生图工作台". To reuse it on the canvas, save it to assets first and then insert it from the canvas toolbar's "我的资产".
+- A run that waits longer than 5 minutes is marked as failed (the administrator can tune `AI_TASK_WAIT_TIMEOUT_SECONDS`).
+
+## Conversation management
+
+Every conversation in the left list is stored on the server, so it follows you across devices. You can "修改标题" or "删除记录"; deleting is blocked while a run is in progress. A conversation keeps the description and results of every round, so you can continue from the previous one.
+
+```text
+Example: Keep the person's identity and clothing, change the setting to a rainy night street, and use cool cinematic lighting.
+
+Example: Use image 1 for the person's identity and image 2 for the color relationship, then re-frame it as a 16:9 poster.
+```
+
+## Troubleshooting
+
+- "请联系管理员配置默认生图模型": no default image model has been chosen, or the channel has no model marked with the image capability.
+- The model dropdown is empty with "请先到配置里添加渠道和模型": the administrator still needs to add a channel and its models.
+- "生成图片缺少媒体存储键" or saving to assets fails: regenerate, and confirm the administrator configured default object storage.
+- "生成连接已关闭，请重新生成": the streaming connection dropped (network blip or server restart); submit again.

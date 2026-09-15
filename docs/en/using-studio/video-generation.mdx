@@ -1,0 +1,59 @@
+---
+title: Video creation
+description: Create text-to-video, image-to-video, and first/last-frame tasks.
+---
+
+# Video creation
+
+The video page uses the same two-column layout as the image page, but with more parameters — and video tasks take much longer, so the server queues them and the page reports live status.
+
+## Generation modes
+
+The "Video Agent" panel offers three modes:
+
+| Mode | What it does |
+| --- | --- |
+| 文生视频 | Generates from a text description alone |
+| 图生视频 | Uses one reference image as the first frame |
+| 全能参考 | Uses images, videos (and audio, on models that support it) as references |
+
+Which modes are available depends on the capabilities the administrator configured for each model, so switching models can reduce the list. Uploading media while in 文生视频 switches the mode to 图生视频 or 全能参考 automatically.
+
+## References
+
+- **Images**: up to 9, 30MB each; larger files are skipped with "已忽略超过 30MB 的参考图".
+- **Videos**: up to 3, MP4 or MOV only, 2–15 seconds each and 15 seconds in total; oversize files report "已忽略超过 50MB 的参考视频".
+- **Audio**: canvas only, and only on models with audio input enabled — see [Infinite canvas](./canvas).
+
+## Video settings
+
+| Setting | Options | Default |
+| --- | --- | --- |
+| Model | Video models that have a price configured for the current mode | The default video model chosen by the administrator |
+| Aspect ratio | Auto, 16:9, 4:3, 1:1, 3:4, 9:16, 21:9 | 16:9 |
+| Resolution | Auto, 480P, 720P, 768P, 1080P, 2K, 4K — **only tiers priced for the current model and mode are listed** | 720P |
+| Duration | Slider plus numeric input, limited to the intersection of the model's capability and the billing minimum | The model default |
+
+## First/last-frame skill workflows
+
+An administrator can split one generation into three stages with a skill (its prompt contains `workflow: first-last-frame`): **生成首帧 → 生成尾帧 → 合成视频**. When you use it:
+
+- The panel first shows the per-stage quote, for example "工作流阶段报价：生成首帧 X 积分，…", before you submit.
+- Each stage reports its own progress, and the final video appears once all stages finish.
+- "请先选择本次生成使用的图片模型与参数" or "请先确认视频比例、清晰度和时长" means prerequisite parameters are still missing.
+- "积分不足，本次工作流需要 X 积分，当前可用 Y 积分" means you need more credits first.
+
+## Task status and results
+
+- Status includes 等待补充信息, 生成中 (with a percentage for video tasks), 工作流已完成, and failure.
+- Video generation is asynchronous: tasks run on the server, and reopening the page re-subscribes to running tasks so progress continues to show.
+- Result actions: **拷贝链接**, **上传到云储存**, **添加到素材** (source "视频创作台"), **下载**, and **重新生成**.
+- **Video editing** (changing shots, swapping audio, and so on) is handled by an Agent tool rather than a dedicated button — just describe the change in the conversation.
+
+## Troubleshooting
+
+- "请联系管理员配置默认生视频模型": no default video model has been configured yet.
+- "所选模型不可用，请联系管理员检查模型配置": the channel or model was disabled, its key expired, or the model name no longer matches.
+- Timeouts: the wait limit for video tasks is 15 minutes by default (`AI_TASK_VIDEO_WAIT_TIMEOUT_SECONDS`); upstream timeouts usually surface as "视频生成超时，请稍后重试".
+- Media validation failures: re-check reference counts, video duration (2–15 seconds each, 15 seconds total), and file formats.
+- More diagnostic steps are in the [FAQ](../troubleshooting/faq).
