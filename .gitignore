@@ -32,3 +32,5 @@ volume/
 /server/logs/
 .agnes/
 /server/logs/
+.test-out*.txt
+.diff-*.txt
