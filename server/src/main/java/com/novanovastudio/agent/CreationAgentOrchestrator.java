@@ -78,6 +78,8 @@ public class CreationAgentOrchestrator {
     private final PersistenceService persistenceService;
     /** Java固定注册的画布工具 */
     private final AgentToolRegistry toolRegistry;
+    /** 画布快照裁剪器，避免完整快照原样发给大模型 */
+    private final CanvasSnapshotCompactor canvasSnapshotCompactor;
     /** 主Agent请求持久化仓储 */
     private final CreationAgentRequestRepository requestRepository;
     /** 主Agent请求分区调度器 */
@@ -1293,7 +1295,16 @@ public class CreationAgentOrchestrator {
                 input.put("retryPrompt", latestRetryPrompt(session));
             }
             input.put("attachmentCount", request.attachments() == null ? 0 : request.attachments().size());
-            input.put("canvasSnapshot", CreationEntrySource.CANVAS.equals(request.entrySource()) ? request.canvasSnapshot() : Map.of());
+            if (CreationEntrySource.CANVAS.equals(request.entrySource())) {
+                Map<String, Object> compactedSnapshot = canvasSnapshotCompactor.compact(request.canvasSnapshot());
+                Object originalNodes = request.canvasSnapshot() == null ? null : request.canvasSnapshot().get("nodes");
+                int originalNodeCount = originalNodes instanceof List<?> nodes ? nodes.size() : 0;
+                log.info("主Agent画布快照裁剪完成: nodeCount={}, retainedFieldCount={}",
+                        originalNodeCount, compactedSnapshot.size());
+                input.put("canvasSnapshot", compactedSnapshot);
+            } else {
+                input.put("canvasSnapshot", Map.of());
+            }
             if (CreationEntrySource.CANVAS.equals(request.entrySource()) && StringUtils.hasText(request.settingGraphNodeId())) {
                 input.put("settingGraphNodeId", request.settingGraphNodeId());
             }
