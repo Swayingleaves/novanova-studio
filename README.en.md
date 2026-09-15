@@ -205,6 +205,7 @@ Agent behavioral prompts are stored as editable files in `server/config/prompts/
 | `agent-video.md` | Tools and behavioral constraints for the video-generation and video-editing Agent. | `AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE` |
 | `agent-canvas.md` | Canvas-state understanding and canvas-operation constraints for the canvas Agent. | `AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE` |
 | `agent-storyboard.md` | Storyboard generation and Chinese prompt-composition constraints. | `AI_SYSTEM_PROMPT_AGENT_STORYBOARD_FILE` |
+| `image-storyboard-asset.md` | Storyboard asset image prompt template, split by `character`, `scene`, and `prop` sections. | `AI_SYSTEM_PROMPT_IMAGE_STORYBOARD_ASSET_FILE` |
 | `optimization-image.md` | Image prompt optimization strategy. | `AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE` |
 | `optimization-video.md` | Video prompt optimization strategy. | `AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE` |
 

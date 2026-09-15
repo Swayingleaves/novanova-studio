@@ -124,6 +124,14 @@ test("切换节点时提示面板按节点隔离编辑器状态", () => {
     assert.ok(canvasPageSource.includes("key={promptPanelNode.id}"), "提示面板未按节点ID重新挂载，可能残留上一个节点的编辑器状态");
 });
 
+test("节点提示词提交后保留编辑器内容", () => {
+    const submitSource = promptPanelSource.slice(promptPanelSource.indexOf("const submit = () =>"), promptPanelSource.indexOf("const addReferenceFiles ="));
+
+    assert.ok(submitSource.length > 0, "未定位到提示面板提交逻辑");
+    assert.ok(!submitSource.includes('setPrompt("")'), "提交生成后仍清空提示词输入框，切换节点后会被节点数据回填，出现提示词消失又出现");
+    assert.ok(!submitSource.includes("setSelectedStyles([])"), "提交生成后仍清空风格选择，切换节点后会被节点数据回填");
+});
+
 test("画布新增和生成节点统一使用避让重叠布局", () => {
     assert.ok(canvasPageSource.includes("findNonOverlappingCanvasNodePosition"), "画布新增节点未接入统一避让重叠布局");
     assert.ok(canvasAgentOpsSource.includes("findNonOverlappingCanvasNodePosition"), "Agent 新增节点未接入统一避让重叠布局");

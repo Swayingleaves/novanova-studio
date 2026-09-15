@@ -23,5 +23,7 @@ public enum PromptTemplateType {
     /** 画布Agent模板 */
     AGENT_CANVAS,
     /** 分镜脚本Agent模板 */
-    AGENT_STORYBOARD
+    AGENT_STORYBOARD,
+    /** 分镜资产图片提示词模板 */
+    IMAGE_STORYBOARD_ASSET
 }

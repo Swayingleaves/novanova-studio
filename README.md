@@ -231,6 +231,7 @@ Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不�
 | `agent-video.md` | 视频生成与编辑 Agent 的工具与行为约束。 | `AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE` |
 | `agent-canvas.md` | 画布 Agent 的状态理解与画布操作约束。 | `AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE` |
 | `agent-storyboard.md` | 分镜脚本与中文提示词合成 Agent 的行为约束。 | `AI_SYSTEM_PROMPT_AGENT_STORYBOARD_FILE` |
+| `image-storyboard-asset.md` | 分镜资产图片提示词模板，按 `character`、`scene`、`prop` 分段。 | `AI_SYSTEM_PROMPT_IMAGE_STORYBOARD_ASSET_FILE` |
 | `optimization-image.md` | 图片提示词优化策略。 | `AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE` |
 | `optimization-video.md` | 视频提示词优化策略。 | `AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE` |
 

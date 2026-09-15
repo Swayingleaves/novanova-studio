@@ -19,6 +19,10 @@ const MODIFIER_COMMANDS: Record<string, CanvasKeyboardCommand> = {
     y: "redo",
 };
 
+/** 画布浮层容器：焦点落在这些面板里时不接管画布快捷键，交给面板自身处理。 */
+const CANVAS_KEYBOARD_PANEL_SELECTOR =
+    "[data-canvas-prompt-panel],[data-canvas-settings-popover],[data-agent-panel],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown";
+
 export function resolveCanvasKeyboardCommand(input: CanvasKeyboardInput): CanvasKeyboardCommand | null {
     const key = input.key.toLowerCase();
     const hasPrimaryModifier = input.control || input.meta;
@@ -54,12 +58,12 @@ export function useCanvasKeyboardShortcuts(handlers: CanvasKeyboardHandlers): vo
 
 function shouldPreserveNativeKeyboardBehavior(event: KeyboardEvent, command: CanvasKeyboardCommand): boolean {
     if (isEditableKeyboardTarget(event.target)) return true;
-    if (event.target instanceof Element && event.target.closest("[data-agent-panel]")) return true;
+    if (event.target instanceof Element && event.target.closest(CANVAS_KEYBOARD_PANEL_SELECTOR)) return true;
     return command === "copy" && Boolean(window.getSelection()?.toString());
 }
 
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
     if (!(target instanceof Element)) return false;
     if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;
-    return Boolean(target.closest("[contenteditable='true'],[data-canvas-no-zoom]"));
+    return Boolean(target.closest("[contenteditable='true']"));
 }

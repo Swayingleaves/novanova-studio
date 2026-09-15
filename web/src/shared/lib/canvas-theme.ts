@@ -1,5 +1,5 @@
 /** 画布主题色板明暗标识。 */
-export type CanvasColorTheme = "light" | "dark";
+export type CanvasColorTheme = "light" | "dark" | "purple";
 
 /** 画布背景渲染模式。 */
 export type CanvasBackgroundMode = "dots" | "blank";
@@ -111,6 +111,36 @@ export const canvasThemes = {
             activeText: "#f3f6f0",
             activeGradient: "#c7f36b",
             activeGradientText: "#11170a",
+        },
+    },
+    purple: {
+        canvas: {
+            background: "#f5f0fa",
+            backgroundGradient: "#f5f0fa",
+            dot: "rgba(184,92,246,.30)",
+            selectionStroke: "#7c3aed",
+            selectionFill: "rgba(124,58,237,.10)",
+        },
+        node: {
+            label: "#6b5f7a",
+            fill: "#ffffff",
+            panel: "#ffffff",
+            stroke: "#e0d4f0",
+            activeStroke: "#7c3aed",
+            placeholder: "#9d8fb3",
+            text: "#1a1525",
+            muted: "#6b5f7a",
+            faint: "#9d8fb3",
+        },
+        toolbar: {
+            panel: "rgba(255,255,255,.94)",
+            border: "#e8dff0",
+            item: "#6b5f7a",
+            itemHover: "#f0eaf5",
+            activeBg: "rgba(124,58,237,.10)",
+            activeText: "#5b21b6",
+            activeGradient: "#7c3aed",
+            activeGradientText: "#ffffff",
         },
     },
 } as const satisfies Record<CanvasColorTheme, CanvasColorPalette>;

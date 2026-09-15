@@ -118,6 +118,7 @@ public class SystemPromptTemplateService {
             case AGENT_VIDEO -> systemPrompt.getAgentVideoFile();
             case AGENT_CANVAS -> systemPrompt.getAgentCanvasFile();
             case AGENT_STORYBOARD -> systemPrompt.getAgentStoryboardFile();
+            case IMAGE_STORYBOARD_ASSET -> systemPrompt.getImageStoryboardAssetFile();
         };
     }
 }

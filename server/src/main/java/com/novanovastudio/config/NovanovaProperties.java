@@ -1306,6 +1306,9 @@ public class NovanovaProperties {
             /** 分镜脚本Agent文件路径 */
             private String agentStoryboardFile = "";
 
+            /** 分镜资产图片提示词模板文件路径 */
+            private String imageStoryboardAssetFile = "";
+
             /**
              * 获取图片提示词优化文件路径。
              *
@@ -1448,6 +1451,24 @@ public class NovanovaProperties {
              */
             public void setAgentStoryboardFile(String agentStoryboardFile) {
                 this.agentStoryboardFile = agentStoryboardFile;
+            }
+
+            /**
+             * 获取分镜资产图片提示词模板文件路径。
+             *
+             * @return String 分镜资产图片提示词模板文件路径
+             */
+            public String getImageStoryboardAssetFile() {
+                return imageStoryboardAssetFile;
+            }
+
+            /**
+             * 设置分镜资产图片提示词模板文件路径。
+             *
+             * @param imageStoryboardAssetFile String 分镜资产图片提示词模板文件路径
+             */
+            public void setImageStoryboardAssetFile(String imageStoryboardAssetFile) {
+                this.imageStoryboardAssetFile = imageStoryboardAssetFile;
             }
 
         }
