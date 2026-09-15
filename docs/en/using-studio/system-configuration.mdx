@@ -1,0 +1,150 @@
+---
+title: System configuration
+description: Administrators configure model channels, capabilities, object storage, starting credits, and invitation rewards.
+---
+
+# System configuration
+
+System configuration is maintained by administrators; creators never need to touch it. The configuration lives on the server, and the workspace never shows channel keys or storage credentials.
+
+## Open the configuration dialog
+
+- **Sidebar gear**: the gear at the bottom of the narrow left sidebar, visible to administrators only.
+- **Canvas toolbar**: the configuration icon in the canvas top-right toolbar.
+- **Missing-model hints**: when the Image, Video, or Canvas page reports no default model, an administrator clicking the hint opens the dialog directly.
+
+The dialog is titled "配置与用户偏好" and has five tabs: **我的渠道, 我的模型, 积分设置, 邀请奖励, 对象存储**. It always opens on the channels tab. Non-administrator accounts do not see the entry point, and the dialog closes itself if the signed-in role is not administrator.
+
+## How saving works: drafts first, then per-tab save
+
+- **There is no global save button.** Every tab has its own "保存", greyed out when nothing changed or while a save is running.
+- Adding a channel or editing a model only writes to a draft; you must click that tab's "保存" to send it to the server. Success reports "渠道配置已保存", "模型配置已保存", "积分设置已保存", and so on; failures show the concrete reason (for example "保存对象存储失败").
+- Closing the dialog with unsaved changes asks first: "放弃未保存修改？" / "关闭后会丢弃所有 Tab 中未保存的修改。", with "放弃修改" and "继续编辑".
+- Saved changes apply **immediately for the administrator**. Creators load configuration when they sign in, so they need a page refresh to see new models and prices.
+- Tasks read configuration when they run (the queue only stores task ids), so new tasks use the latest settings while existing tasks keep their creation-time model snapshot.
+
+## My channels
+
+A channel is an entry point for calling an AI service: one base URL plus one set of credentials.
+
+| Field | Notes |
+| --- | --- |
+| Channel name | A recognisable label; an empty name shows as "未命名渠道" |
+| Call format | OpenAI / New API / Evolink / Gemini / Agnes / Anthropic / Seedance / MiniMax / 自定义 |
+| Base URL | The service address. When you switch call format, an empty value or the previous format's default is replaced with the new format's default |
+| API Key | Masked by default, with an eye icon to reveal it |
+| Model list | Model names available on this channel; type them manually or fetch them |
+
+Default base URLs per call format:
+
+| Call format | Default base URL |
+| --- | --- |
+| OpenAI | `https://api.openai.com/v1` |
+| New API | No default; fill it in yourself |
+| Evolink | `https://api.evolink.ai/v1` |
+| Gemini | An address ending in `/v1beta` |
+| Agnes | No default; fill it in yourself |
+| Anthropic | `https://api.anthropic.com/v1` |
+| Seedance | `https://ark.cn-beijing.volces.com/api/v3` |
+| MiniMax | `https://api.minimaxi.com` |
+| 自定义 | No default; fill it in yourself |
+
+**Fetching models**: after filling in the base URL and API key, click "拉取模型". The result is written into the model list with the hint "<channel> 模型列表已更新，请点击保存"; missing inputs report "请先填写该渠道的 Base URL 和 API Key". For MiniMax and 自定义 the button is disabled ("MiniMax 请手动配置 MiniMax-H3", "自定义格式请手动配置模型列表"), so you maintain the model names yourself.
+
+**Deleting a channel**: the confirmation reads "该渠道会在点击保存后从服务端删除。". If models still reference it you get "请先在“我的模型”中删除关联模型并保存，再删除渠道".
+
+Channels have no enable/disable switch and no standalone connectivity test — the quickest way to validate a key is "拉取模型". The key is masked in the form, but the list API returns it in plain text, so avoid opening this dialog on a shared screen.
+
+## My models
+
+Models come from your channels: first type or fetch the model names in "我的渠道", then come back here to add capabilities and pricing. With no models configured the tab warns "请先在“我的渠道”中添加模型，再配置可选模型".
+
+### 1. Choose which models to configure
+
+The three "可选项" dropdowns at the top select the models you want to configure under image, video, and text. Each model is one row showing its display name and a "默认" marker, with an "编辑" button opening the configuration dialog.
+
+Three default selectors decide what the generation pages start with: the default image model, the default video model, and the default text model.
+
+### 2. Mark capabilities
+
+| Type | Capabilities |
+| --- | --- |
+| Text | 常规聊天, 图像理解 |
+| Image | 文生图, 图生图 |
+| Video | 文生视频, 图生视频, 全能参考, 首尾帧原生生成, 支持音频输入 |
+
+**Capabilities gate the UI**: only models with the matching capability appear on that generation page, and a video model without "支持音频输入" cannot reference audio on the canvas.
+
+### 3. Display name and icon
+
+- **Display name**: what the generation page shows; leave it empty (or identical to the real model name) to use the real name.
+- **Display icon**: 自动匹配, 默认（Clapperboard）, Agnes, Seedance（字节跳动）, Claude, OpenAI, Gemini, DeepSeek, GLM, Grok, or MiniMax. Auto-matching guesses from the model name.
+
+### 4. Billing and pricing
+
+- **Text and image models**: a single "每次积分" field, charged per run.
+- **Video models**: pick a "计费方式" first — per run or per second. Per run only needs an "积分/次" value per resolution tier; per second additionally needs "最短生成时长（秒）" (minimum 1, default 3). Prices are entered per generation mode × resolution (480P / 720P / 768P / 1080P / 2K / 4K); empty tiers show as "未配置" and users cannot pick them.
+- Formulas: per run = unit price × count; per second = unit price × seconds × count. The dialog has no quote preview — quotes appear on the generation pages and the canvas.
+
+### 5. Request and response templates for custom channels
+
+Models on a channel whose call format is "自定义" need custom JSON here (request template and response parsing). Available variables: `{{prompt}}`, `{{model}}`, `{{references}}`, `{{videoReferences}}`, `{{audioReferences}}`, `{{size}}`, `{{resolution}}`, `{{seconds}}`, `{{count}}`, `{{taskId}}`; the request method can be POST or GET. Invalid JSON reports "模型自定义JSON必须是对象" or "模型自定义JSON格式不正确".
+
+### 6. Common blocks
+
+- "模型配置引用了未保存的渠道或模型，请先保存“我的渠道”": save the channels tab first, then save the models.
+- Video billing requires a per-run or per-second choice, prices must be integers no smaller than 0, and only the modes you ticked and resolutions the model supports can be priced — the server rejects anything else.
+
+## Credits
+
+A single field, **初始积分** (default 100), sets the starting balance for users registered, created in the console, or signing in through a third party afterwards. The help text reads "只影响之后注册的用户，已有用户积分不会自动变更".
+
+To adjust an existing user's balance, use "调整积分" in the console's user management, which requires a reason and writes a ledger entry.
+
+Note that **per-task charging is not configured here** — it lives on each model in "我的模型".
+
+## Invitation rewards
+
+A single field, **每名新用户奖励积分**. There is no switch; set it to 0 to pause rewards. The help text reads "新用户通过有效邀请链接完成邮箱注册或首次第三方登录后，奖励发放给邀请人。设置为 0 表示暂停发放；只影响之后注册的用户，不追溯历史邀请。"
+
+- It is independent of 初始积分: the starting balance goes to the new user, the reward goes to the inviter.
+- The invite link lives on the [Personal information](./profile) page under "专属邀请链接".
+
+## Object storage
+
+Object storage holds uploads, avatars, and generated results. You can configure several entries, but one must be the default: saving without a default reports "请设置默认对象存储", and the first storage created on a site becomes the default automatically.
+
+### Shared fields
+
+| Field | Notes |
+| --- | --- |
+| Configuration name | A label for this entry |
+| Provider | 腾讯云COS / 阿里云OSS / 七牛云Kodo |
+| Storage directory | Prefix for upload keys, default `novanova-studio`; keys follow "目录/images 或 videos/日期/文件名" |
+| Bucket | The bucket name |
+| Region | The region |
+| Public base URL | Public prefix used to serve media |
+
+### Provider differences
+
+| Provider | Credentials | Extra requirements |
+| --- | --- | --- |
+| 腾讯云COS | SecretId / SecretKey | An empty public base URL falls back to `https://{bucket}.cos.{region}.myqcloud.com/{key}` |
+| 阿里云OSS | AccessKey ID / AccessKey Secret | **Endpoint is required** (with `http://` or `https://`) along with a region id such as `cn-hangzhou`; an empty public base URL is derived from the bucket and endpoint |
+| 七牛云Kodo | AccessKey / SecretKey | Region comes from a dropdown (华东-浙江 z0, 华东-浙江2 cn-east-2, 华北-河北 z1, 华南-广东 z2, 北美-洛杉矶 na0, 亚太-新加坡 as0); **a CDN or custom domain bound to the bucket is required** |
+
+Switching provider clears the credentials, bucket, region, endpoint, and public base URL you had entered.
+
+### Testing and defaults
+
+- **Test upload**: fill in the required fields and click "测试上传". If you have not saved yet it reports "请先保存对象存储配置，再执行测试上传" — save first, then test. Success writes a small text file and reports "对象存储测试上传成功，请点击保存记录测试时间" with an "打开测试文件" link; failures show the provider message directly, for example "腾讯云COS SecretId不能为空", "阿里云OSS Endpoint必须是HTTP或HTTPS地址", or "七牛云Kodo区域ID不受支持".
+- **Set as default**: an inline "设为默认" button, disabled when the entry already is the default. The title gains a "默认 · " prefix and shows "上次测试 …" or "尚未测试".
+- **Delete**: the default entry cannot be deleted ("默认对象存储不能删除，请先设置其他默认项"), and the last remaining entry reports "至少保留一个对象存储". Non-default entries are deleted physically with no "still referenced" protection, so make sure no assets depend on them first.
+- An incomplete configuration blocks saving with messages such as "请完整填写访问密钥、密钥、Bucket 和 Region", "请填写阿里云OSS Endpoint", or "请填写七牛云Kodo公开访问地址".
+
+## Scope and troubleshooting
+
+- After saving channels or models, the generation pages immediately show the new models and prices; creators see them after a page refresh.
+- If the Image or Video page reports that no model is available, or uploads and saved results fail, come back here and check the default model and default object storage.
+- Never commit channel keys or storage credentials, and never paste them into issues or screenshots.
+- Users, skills, prompts, and announcements are managed in the [Admin console](./admin); how these settings show up in the product is covered by [Image creation](./image-generation), [Video creation](./video-generation), and [Infinite canvas](./canvas).

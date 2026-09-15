@@ -1,0 +1,95 @@
+---
+title: Local development
+description: Run dependencies, the Spring Boot server, and the Next.js web app locally.
+---
+
+# Local development
+
+Local development has three parts: **dependencies** (PostgreSQL and Redis, plus FFmpeg for canvas video composition), the **server** (Spring Boot on `8080`), and the **web app** (Next.js on `5555`). In development the web app proxies `/api/v1/**` to the server, so the two ports must line up.
+
+## 1. Prepare dependencies
+
+| Dependency | Version | Purpose |
+| --- | --- | --- |
+| PostgreSQL | 17 | Business data. The server creates the database and runs migrations on first boot, so the account needs create-database rights |
+| Redis | 8.6 | Sessions, async task dispatch and recovery |
+| JDK | 21 | Server |
+| Maven | 3.9 or later | Server build |
+| Node.js | 22 | Web app |
+| pnpm | 11 (the repository declares `pnpm@11.7.0`) | Web dependencies and scripts |
+| FFmpeg | Stable | Only needed for canvas video composition; without it that feature reports 服务端未安装FFmpeg或FFmpeg路径配置错误 |
+
+If you would rather not install PostgreSQL and Redis locally, start just those two from the repository's Compose file and keep the server and web app on the host:
+
+```bash
+docker compose -f docker-compose-local.yml up -d postgres redis
+```
+
+## 2. Configure environment variables
+
+### Server: `.env` in the repository root
+
+```bash
+cp .env.example .env
+```
+
+The server loads the root `.env` automatically (it tries both the current and the parent directory, and a missing file is fine). Locally, confirm these:
+
+| Variable | Local value | Notes |
+| --- | --- | --- |
+| `APP_SECRET_KEY` | Output of `openssl rand -base64 48` | Required; signs sign-in tokens |
+| `FRONTEND_BASE_URL` | `http://localhost:5555` | Required; used to build password reset links |
+| `SERVER_PORT` | `8080` | **Set it explicitly**: the fallback default in the config is 9080, while the web app expects 8080 |
+| `POSTGRES_*` / `REDIS_*` | Defaults (`127.0.0.1`, `postgres` / `123456`, database `novanova_studio`) | Match your local instance |
+| `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | `admin@admin.com` / `novanovastudio@pwss` | The administrator is created on first boot and never overwritten |
+
+### Web app: `web/.env.local`
+
+```bash
+cp web/.env.example web/.env.local
+```
+
+Next.js does **not** read the repository root `.env`; web variables belong in `web/.env.local` (or `web/.env`). Locally one line is usually enough:
+
+```dotenv
+NEXT_PUBLIC_SERVER_URL=http://127.0.0.1:8080
+```
+
+`web/next.config.ts` rewrites `/api/v1/:path*` to that address in development only, so update it whenever you change the server port.
+
+## 3. Start the server
+
+Run it from the **repository root**, so the root `.env` and the Agent prompts under `server/config/prompts/` are both found:
+
+```powershell
+$env:JAVA_HOME="$env:USERPROFILE\.jabba\jdk\openjdk@21.0.2"
+mvn -f server/pom.xml spring-boot:run
+```
+
+Flyway runs the migrations in `server/src/main/resources/db/migration/` during startup, so there is no manual schema step. For breakpoint debugging, run `NovanovaStudioServerApplication` from your IDE with the repository root as the working directory.
+
+## 4. Start the web app
+
+```powershell
+cd web
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+`pnpm dev` runs `next dev --turbo -H 0.0.0.0 -p 5555`; open `http://localhost:5555`.
+
+## 5. Verify
+
+- Web app: `http://localhost:5555` shows the sign-in page.
+- Server: `http://127.0.0.1:8080/api/v1/health` returns `{"code":200,"data":"OK"}`.
+- API reference: `http://127.0.0.1:8080/swagger/index.html`.
+
+Server logs are written to `logs/current.log`. AI calls leave three lines — `AI请求`, `AI响应 状态码`, and `AI响应` — and model problems usually show up there first.
+
+## Common pitfalls
+
+- **Port mismatch**: without an explicit `SERVER_PORT=8080` the server falls back to `9080`, and every request from the web app fails.
+- **Dependencies not ready**: check with `pg_isready -h 127.0.0.1 -p 5432` and `redis-cli -h 127.0.0.1 -p 6379 ping`.
+- **Agent prompt files not found**: start the server from the repository root, or override the matching `AI_SYSTEM_PROMPT_*_FILE` variable.
+- **FFmpeg error from video composition**: install FFmpeg and point `AI_VIDEO_COMPOSITION_FFMPEG_EXECUTABLE` and `AI_VIDEO_COMPOSITION_FFPROBE_EXECUTABLE` at the binaries.
+- To run everything in containers instead, see [Start with Docker](./docker-start); for error messages after startup, see the [FAQ](../troubleshooting/faq).

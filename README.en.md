@@ -21,6 +21,11 @@
   <img src="github_images/nova-s2.png" alt="Novanova Studio canvas">
 </p>
 
+## 🚀 Docs
+
+[Docs](https://www.novanovastudio.cn/docs/en)
+
+
 ## ✨ What It Is
 
 Novanova Studio is an AI creation workspace for independent creators and visual teams. Rather than separating images, videos, prompts, and generation records across multiple tools, it uses an **infinite canvas** as the creative context and an **AI Agent** as the center for understanding intent, choosing tools, and advancing tasks.
@@ -178,7 +183,8 @@ The first/last-frame skill workflow contains three default stages: **Generate fi
 │   └── src/main/resources/      # Application configuration and Flyway database migrations
 ├── docker-compose.yml           # PostgreSQL, Redis, frontend, backend, and Nginx orchestration
 ├── .env.example                 # Example local and deployment environment variables
-├── docs/                        # Database design, canvas design, and other project documentation
+├── docs/                        # Public Chinese/English user guides (MDX)
+├── docs-api/                    # API, database, ADR, and engineering reference docs
 └── logo/                        # Project brand assets
 ```
 
@@ -228,6 +234,8 @@ Do not commit `.env`, AI provider credentials, object storage credentials, or ce
 
 ## 📚 Related Documentation
 
+- [Novanova Studio documentation portal](/docs)
+- [Engineering and API documentation](docs-api/)
 - [Product Overview](PRODUCT.md)
 - [Open Source License](LICENSE)
 

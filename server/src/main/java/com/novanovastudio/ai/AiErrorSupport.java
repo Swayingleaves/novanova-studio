@@ -146,6 +146,21 @@ public final class AiErrorSupport {
     }
 
     /**
+     * 创建AI响应体不可用的异常。
+     * <p>
+     * 供应商返回成功状态码但响应体不完整或无法解析时（例如长耗时请求被网关截断、
+     * 解析库对大文本抛越界异常），必须显性报错；若静默降级成空响应，
+     * 下游会把"没有结果"当成"成功结果"，例如文本任务会写入空内容，画布文本节点最终表现为空白节点。
+     *
+     * @param stage String 调用阶段
+     * @return AiProviderException 响应不可用的类型化异常
+     */
+    public static AiProviderException malformedResponse(String stage) {
+        return new AiProviderException(new AiErrorDetails("provider", "network", stage, null,
+                null, null, null, "AI 返回内容无法解析，请重试", true, false));
+    }
+
+    /**
      * 分类供应商错误响应。
      *
      * @param httpStatus int HTTP状态码

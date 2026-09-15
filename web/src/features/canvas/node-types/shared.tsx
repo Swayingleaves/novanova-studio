@@ -210,11 +210,10 @@ type NodeHoverSurfaceProps = {
     style?: CSSProperties;
     onMouseEnter?: MouseEventHandler<HTMLDivElement>;
     onMouseLeave?: MouseEventHandler<HTMLDivElement>;
-    onDoubleClick?: MouseEventHandler<HTMLDivElement>;
     children: ReactNode;
 };
 
-export const NodeHoverSurface = forwardRef<HTMLDivElement, NodeHoverSurfaceProps>(function NodeHoverSurface({ nodeId, className, style, onMouseEnter, onMouseLeave, onDoubleClick, children }, ref) {
+export const NodeHoverSurface = forwardRef<HTMLDivElement, NodeHoverSurfaceProps>(function NodeHoverSurface({ nodeId, className, style, onMouseEnter, onMouseLeave, children }, ref) {
     const actions = useNodeActions();
     const theme = useCanvasTheme();
     const uploading = useCanvasUiStore((state) => state.uploadingNodeIds.has(nodeId));
@@ -233,7 +232,6 @@ export const NodeHoverSurface = forwardRef<HTMLDivElement, NodeHoverSurfaceProps
                 actions.onHideToolbar?.();
                 onMouseLeave?.(event);
             }}
-            onDoubleClick={onDoubleClick}
         >
             {children}
             {uploading ? (
@@ -243,7 +241,6 @@ export const NodeHoverSurface = forwardRef<HTMLDivElement, NodeHoverSurfaceProps
                     style={{ background: theme.node.fill, color: theme.node.muted }}
                     onPointerDown={(event) => event.stopPropagation()}
                     onMouseDown={(event) => event.stopPropagation()}
-                    onDoubleClick={(event) => event.stopPropagation()}
                 >
                     <LoaderCircle className="size-5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
                     <span className="text-sm">上传中…</span>

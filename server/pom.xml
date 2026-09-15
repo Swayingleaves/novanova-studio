@@ -20,7 +20,9 @@
     <properties>
         <java.version>21</java.version>
         <agentscope.version>2.0.0-RC4</agentscope.version>
-        <fastjson2.version>2.0.61</fastjson2.version>
+        <!-- 2.0.61 存在大文本解析越界回归（fastjson2 issue #3989 / #4034，JSONReaderUTF16.readString 缓冲区未扩容），
+             会导致 AI 长响应解析失败，必须使用已修复版本 -->
+        <fastjson2.version>2.0.65</fastjson2.version>
         <springdoc.version>2.8.17</springdoc.version>
         <testcontainers.version>1.21.3</testcontainers.version>
         <r2dbc-postgresql.version>1.0.7.RELEASE</r2dbc-postgresql.version>

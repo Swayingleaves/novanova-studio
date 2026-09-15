@@ -1,0 +1,36 @@
+---
+title: Prompt library
+description: Save, search, and reuse common creative prompts.
+---
+
+# Prompt library
+
+The prompt library (titled "提示词中心" in the app) collects proven descriptions that you can reuse in Image, Video, and Canvas. Administrators maintain the records; creators browse, copy, and save them as assets.
+
+## Browsing and filtering
+
+- **Search** matches the prompt title.
+- **Category** is a dropdown built from currently enabled prompts (administrators type them, for example 摄影、海报、角色).
+- **Tags** support multiple selections.
+
+The list is a card grid that loads as you scroll (20 per page) and ends with "已显示全部结果" (or "正在加载更多…" while loading). Order comes from the administrator's sort value; the interface has no sorting control.
+
+Each card shows a cover or a text placeholder, the title, the update time, a ~120-character summary, and up to four tags, with "复制" and "存为素材" actions.
+
+## Viewing and using
+
+- **View details**: clicking a card opens a dialog with the full text, category and tags, and the created and updated timestamps; its buttons are "复制提示词" and "加入我的资产".
+- **Copy** puts the text on the clipboard and reports "提示词已复制".
+- **Save as asset** writes it into [My assets](./assets) as a text asset whose source is the prompt category, reporting "已加入我的资产".
+- **Bring it into generation**: the "提示词库" button in the Image or Video composer opens the "选择提示词" dialog; clicking "使用" fills the composer, and you adjust parameters for the current task. "从提示词库选择" on a canvas node works the same way.
+
+## Administrator maintenance
+
+Administrators maintain records in the "提示词库" tab of the admin console. Fields: title, content, category, tags, preview content, source URL, sort order, and status.
+
+- **Enable / disable**: disabling hides the prompt from users ("停用后用户侧提示词库将不再展示该提示词。"); anything already copied is unaffected.
+- **Sort order**: lower values come first; the default is 1000.
+- **Preview content**: Markdown, used to show reference images and notes in the detail dialog.
+- The source URL is not shown to users yet.
+
+Other console capabilities are described in [Admin console](./admin).

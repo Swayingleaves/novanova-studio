@@ -1,0 +1,95 @@
+---
+title: 本地启动调试
+description: 在本机跑起 PostgreSQL、Redis、Spring Boot 服务端和 Next.js 前端。
+---
+
+# 本地启动调试
+
+本地开发由三部分组成：**依赖服务**（PostgreSQL、Redis，画布合成视频还需要 FFmpeg）、**服务端**（Spring Boot，默认端口 `8080`）、**前端**（Next.js，默认端口 `5555`）。开发模式下前端会把 `/api/v1/**` 请求转发给服务端，所以两个端口必须对齐。
+
+## 1. 准备依赖
+
+| 依赖 | 版本要求 | 用途 |
+| --- | --- | --- |
+| PostgreSQL | 17 | 业务数据。首次启动会自动建库建表，数据库账号需要有建库权限 |
+| Redis | 8.6 | 登录会话、异步任务分发与恢复 |
+| JDK | 21 | 服务端 |
+| Maven | 3.9 或更高 | 服务端构建 |
+| Node.js | 22 | 前端 |
+| pnpm | 11（仓库声明 `pnpm@11.7.0`） | 前端依赖与脚本 |
+| FFmpeg | 稳定版 | 只有画布「合成视频」需要，缺失时该功能会报「服务端未安装FFmpeg或FFmpeg路径配置错误」 |
+
+不想在本机安装 PostgreSQL 和 Redis 时，可以用仓库里的 Compose 只起依赖，服务端和前端仍然在本地跑：
+
+```bash
+docker compose -f docker-compose-local.yml up -d postgres redis
+```
+
+## 2. 配置环境变量
+
+### 服务端：项目根目录的 `.env`
+
+```bash
+cp .env.example .env
+```
+
+服务端启动时会自动读取根目录的 `.env`（同时尝试当前目录与上级目录，文件不存在也能启动）。本地至少确认这几项：
+
+| 变量 | 本地建议值 | 说明 |
+| --- | --- | --- |
+| `APP_SECRET_KEY` | `openssl rand -base64 48` 的输出 | 必填，用于签发登录令牌 |
+| `FRONTEND_BASE_URL` | `http://localhost:5555` | 必填，用于生成密码重置链接 |
+| `SERVER_PORT` | `8080` | **务必显式写成 8080**：配置里的兜底默认值是 9080，而前端默认请求 8080 |
+| `POSTGRES_*` / `REDIS_*` | 保持默认（`127.0.0.1`、`postgres` / `123456`、库名 `novanova_studio`） | 与本机实际账号保持一致 |
+| `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | 默认 `admin@admin.com` / `novanovastudio@pwss` | 首次启动自动创建管理员；同邮箱账号已存在时不会覆盖 |
+
+### 前端：`web/.env.local`
+
+```bash
+cp web/.env.example web/.env.local
+```
+
+Next.js **不会读取仓库根目录的 `.env`**，前端变量要放在 `web/.env.local`（或 `web/.env`）。本地一般只需要一行：
+
+```dotenv
+NEXT_PUBLIC_SERVER_URL=http://127.0.0.1:8080
+```
+
+开发模式下 `web/next.config.ts` 会把 `/api/v1/:path*` 重写到这个地址；改了服务端端口，这里也要跟着改。
+
+## 3. 启动服务端
+
+在**项目根目录**执行，这样才读得到根目录的 `.env`，也能找到 `server/config/prompts/` 下的 Agent 提示词：
+
+```powershell
+$env:JAVA_HOME="$env:USERPROFILE\.jabba\jdk\openjdk@21.0.2"
+mvn -f server/pom.xml spring-boot:run
+```
+
+启动过程中 Flyway 会自动执行 `server/src/main/resources/db/migration/` 下的迁移脚本，不需要手工建库建表。需要断点调试时，可以在 IDE 中直接运行 `NovanovaStudioServerApplication`，把工作目录设为项目根目录。
+
+## 4. 启动前端
+
+```powershell
+cd web
+pnpm install --frozen-lockfile
+pnpm dev
+```
+
+`pnpm dev` 实际执行的是 `next dev --turbo -H 0.0.0.0 -p 5555`，浏览器访问 `http://localhost:5555`。
+
+## 5. 验证
+
+- 前端：`http://localhost:5555` 能正常打开登录页。
+- 服务端：`http://127.0.0.1:8080/api/v1/health` 返回 `{"code":200,"data":"OK"}`。
+- 接口文档：`http://127.0.0.1:8080/swagger/index.html`。
+
+服务端日志写在项目根目录的 `logs/current.log`；其中 AI 调用会留下 `AI请求` / `AI响应 状态码` / `AI响应` 三行，排查模型问题时主要看它。
+
+## 常见坑
+
+- **端口对不上**：没有显式设置 `SERVER_PORT=8080` 时服务端会用配置里的兜底值 `9080`，表现是前端所有接口请求失败。
+- **依赖没起来**：先用 `pg_isready -h 127.0.0.1 -p 5432` 和 `redis-cli -h 127.0.0.1 -p 6379 ping` 确认连接正常。
+- **找不到 Agent 提示词文件**：必须从项目根目录启动服务端；也可以显式覆盖对应的 `AI_SYSTEM_PROMPT_*_FILE` 环境变量。
+- **合成视频报 FFmpeg 错误**：安装 FFmpeg 后，用 `AI_VIDEO_COMPOSITION_FFMPEG_EXECUTABLE` 与 `AI_VIDEO_COMPOSITION_FFPROBE_EXECUTABLE` 指定可执行文件路径。
+- 想在容器里跑整套（而不是前后端各跑一半），见[使用 Docker 启动](./docker-start)；跑起来之后的报错排查见[常见问题](../troubleshooting/faq)。

@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="590" viewBox="0 0 900 590" role="img" aria-labelledby="arch-title arch-desc" font-family="Helvetica,Arial,'PingFang SC','Microsoft YaHei',sans-serif">
+    <title id="arch-title">Novanova Studio 系统架构</title>
+    <desc id="arch-desc">浏览器工作台经 Nginx 接入，分别访问 Next.js 前端服务与 Spring Boot 服务端；服务端包含 API 与业务层、Agent 编排、任务与事件、渠道适配器，并访问 PostgreSQL、Redis、对象存储和 AI 模型渠道。</desc>
+    <defs>
+        <marker id="arch-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </marker>
+    </defs>
+    <rect x="1" y="1" width="898" height="588" rx="20" fill="#F7F8F5" stroke="#DCE1DA" stroke-width="2" />
+
+    <text x="28" y="60" font-size="20" fill="#444441">浏览器端</text>
+    <text x="28" y="84" font-size="14" fill="#5F5E5A">Next.js 16</text>
+
+    <rect x="176" y="32" width="164" height="72" rx="10" fill="#E6F1FB" stroke="#85B7EB" stroke-width="2" />
+    <text x="190" y="60" font-size="19" fill="#0C447C">对话与生成</text>
+    <text x="190" y="84" font-size="15" fill="#185FA5">图片与视频生成</text>
+
+    <rect x="353" y="32" width="164" height="72" rx="10" fill="#E6F1FB" stroke="#85B7EB" stroke-width="2" />
+    <text x="367" y="60" font-size="19" fill="#0C447C">无限画布</text>
+    <text x="367" y="84" font-size="15" fill="#185FA5">节点与连线编排</text>
+
+    <rect x="530" y="32" width="164" height="72" rx="10" fill="#E6F1FB" stroke="#85B7EB" stroke-width="2" />
+    <text x="544" y="60" font-size="19" fill="#0C447C">资产与提示词</text>
+    <text x="544" y="84" font-size="15" fill="#185FA5">素材与生成记录</text>
+
+    <rect x="707" y="32" width="164" height="72" rx="10" fill="#E6F1FB" stroke="#85B7EB" stroke-width="2" />
+    <text x="721" y="60" font-size="19" fill="#0C447C">管理后台</text>
+    <text x="721" y="84" font-size="15" fill="#185FA5">渠道与模型配置</text>
+
+    <line x1="524" y1="104" x2="524" y2="124" fill="none" stroke="#888780" stroke-width="2" marker-end="url(#arch-arrow)" />
+
+    <text x="28" y="150" font-size="20" fill="#444441">接入层</text>
+    <text x="28" y="170" font-size="14" fill="#5F5E5A">Nginx 1.27</text>
+
+    <rect x="176" y="128" width="696" height="56" rx="10" fill="#FAEEDA" stroke="#EF9F27" stroke-width="2" />
+    <text x="192" y="150" font-size="17" fill="#633806">Nginx 1.27 · TLS 终止与反向代理</text>
+    <text x="192" y="170" font-size="14" fill="#854F0B">/api/* → 服务端 :8080 · 其余 → 前端 :5550</text>
+
+    <line x1="442" y1="184" x2="442" y2="204" fill="none" stroke="#888780" stroke-width="2" marker-end="url(#arch-arrow)" />
+    <line x1="790" y1="184" x2="790" y2="284" fill="none" stroke="#888780" stroke-width="2" marker-end="url(#arch-arrow)" />
+
+    <text x="28" y="230" font-size="20" fill="#444441">前端服务</text>
+    <text x="28" y="250" font-size="14" fill="#5F5E5A">Node.js 22</text>
+
+    <rect x="176" y="208" width="532" height="56" rx="10" fill="#E1F5EE" stroke="#5DCAA5" stroke-width="2" />
+    <text x="192" y="230" font-size="17" fill="#085041">前端服务 · Next.js 16 standalone（:5550）</text>
+    <text x="192" y="250" font-size="14" fill="#0F6E56">工作台页面 · 无限画布 · /docs 文档门户</text>
+
+    <text x="28" y="323" font-size="20" fill="#444441">服务端</text>
+    <text x="28" y="345" font-size="14" fill="#5F5E5A">Spring Boot 3.5</text>
+    <text x="28" y="365" font-size="14" fill="#5F5E5A">AgentScope Java</text>
+
+    <rect x="176" y="288" width="696" height="168" rx="12" fill="#F1EFE8" stroke="#D3D1C7" stroke-width="2" />
+
+    <rect x="189" y="301" width="328" height="64" rx="8" fill="#EEEDFE" stroke="#AFA9EC" stroke-width="2" />
+    <text x="203" y="323" font-size="18" fill="#3C3489">API 与业务层</text>
+    <text x="203" y="347" font-size="15" fill="#534AB7">controller → service → repository</text>
+
+    <rect x="530" y="301" width="328" height="64" rx="8" fill="#EEEDFE" stroke="#AFA9EC" stroke-width="2" />
+    <text x="544" y="323" font-size="18" fill="#3C3489">Agent 编排 · AgentScope Java</text>
+    <text x="544" y="347" font-size="15" fill="#534AB7">主 Agent 依上下文选择工具与工作流</text>
+
+    <rect x="189" y="379" width="328" height="64" rx="8" fill="#EEEDFE" stroke="#AFA9EC" stroke-width="2" />
+    <text x="203" y="401" font-size="18" fill="#3C3489">任务与事件</text>
+    <text x="203" y="425" font-size="15" fill="#534AB7">Redis Stream 分发 · 任务落库</text>
+
+    <rect x="530" y="379" width="328" height="64" rx="8" fill="#EEEDFE" stroke="#AFA9EC" stroke-width="2" />
+    <text x="544" y="401" font-size="18" fill="#3C3489">渠道适配器</text>
+    <text x="544" y="425" font-size="15" fill="#534AB7">OpenAI 兼容 · Gemini · Anthropic 等</text>
+
+    <line x1="524" y1="456" x2="524" y2="466" fill="none" stroke="#888780" stroke-width="2" />
+    <line x1="258" y1="466" x2="789" y2="466" fill="none" stroke="#888780" stroke-width="2" />
+    <line x1="258" y1="466" x2="258" y2="482" fill="none" stroke="#888780" stroke-width="2" marker-end="url(#arch-arrow)" />
+    <line x1="435" y1="466" x2="435" y2="482" fill="none" stroke="#888780" stroke-width="2" marker-end="url(#arch-arrow)" />
+    <line x1="612" y1="466" x2="612" y2="482" fill="none" stroke="#888780" stroke-width="2" marker-end="url(#arch-arrow)" />
+    <line x1="789" y1="466" x2="789" y2="482" fill="none" stroke="#888780" stroke-width="2" marker-end="url(#arch-arrow)" />
+
+    <text x="28" y="514" font-size="20" fill="#444441">数据与外部</text>
+    <text x="28" y="538" font-size="14" fill="#5F5E5A">依赖服务</text>
+
+    <rect x="176" y="486" width="164" height="72" rx="10" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="2" />
+    <text x="190" y="514" font-size="19" fill="#2C2C2A">PostgreSQL 17</text>
+    <text x="190" y="538" font-size="15" fill="#5F5E5A">用户与创作数据</text>
+
+    <rect x="353" y="486" width="164" height="72" rx="10" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="2" />
+    <text x="367" y="514" font-size="19" fill="#2C2C2A">Redis 8.6</text>
+    <text x="367" y="538" font-size="15" fill="#5F5E5A">Stream · 任务队列</text>
+
+    <rect x="530" y="486" width="164" height="72" rx="10" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="2" />
+    <text x="544" y="514" font-size="19" fill="#2C2C2A">对象存储</text>
+    <text x="544" y="538" font-size="15" fill="#5F5E5A">COS · OSS · Kodo</text>
+
+    <rect x="707" y="486" width="164" height="72" rx="10" fill="#F1EFE8" stroke="#B4B2A9" stroke-width="2" />
+    <text x="721" y="514" font-size="19" fill="#2C2C2A">AI 模型渠道</text>
+    <text x="721" y="538" font-size="15" fill="#5F5E5A">异步任务 + 轮询</text>
+</svg>

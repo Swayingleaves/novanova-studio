@@ -1,0 +1,179 @@
+---
+title: Start with Docker
+description: Build and start PostgreSQL, Redis, the server, the web app, and Nginx with a minimal Docker Compose setup.
+---
+
+# Start with Docker
+
+Docker Compose brings up PostgreSQL, Redis, the server, the web app, and Nginx together. It suits Linux servers and is also the fastest way to try the whole product on a single machine. **The minimal setup needs only two variables in `.env`**; everything else has a working default.
+
+> This page aims at "get it running". A fuller production checklist and troubleshooting notes live in `deploy_docs/docker-deploy.md` at the repository root.
+
+## 1. Prepare the environment
+
+| Component | Requirement |
+| --- | --- |
+| Operating system | Linux (Ubuntu 22.04+ recommended). Nginx inside Compose uses `network_mode: host` and mounts host directories, so this path does not work on Windows or macOS — use [Local development](./local-development) there |
+| Docker Engine | 24 or later |
+| Docker Compose | v2 (the `docker compose` subcommand) |
+| Source code | Already cloned on the server, with the repository root as the working directory |
+
+## 2. Pick a startup path
+
+| Path | Compose file | Entry point | Good for |
+| --- | --- | --- | --- |
+| Minimal | `docker-compose-local.yml` | `http://127.0.0.1:5550` | Trying it on one machine, using the Nginx config shipped in the repository |
+| Production | `docker-compose.yml` | Your own domain | A Linux server that already has a domain and certificate |
+
+Both paths configure `.env` and build images the same way; only Nginx differs. The minimal path uses `nginx/default.conf` from the repository, which proxies to `server:8080` and `web:5550` inside the Compose network. The production path uses a site config under the host's `/etc/nginx/conf.d` that proxies to `127.0.0.1:8080` and `127.0.0.1:5550`, because Compose publishes the `server` and `web` ports on `127.0.0.1` only.
+
+## 3. Configure `.env`
+
+```bash
+cp .env.example .env
+```
+
+### Required (startup fails without them)
+
+Compose validates these two variables strictly. If either is missing, the command fails immediately and nothing starts:
+
+| Variable | Notes |
+| --- | --- |
+| `APP_SECRET_KEY` | Secret used to sign bearer tokens; generate a high-entropy value of at least 32 bytes with `openssl rand -base64 48` |
+| `FRONTEND_BASE_URL` | Public root URL of the web app, for example `https://www.example.com`. Use an HTTP(S) root URL with no path, query, or fragment |
+
+That is the entire minimal configuration for a single-machine trial:
+
+```dotenv
+APP_SECRET_KEY=<paste the output of openssl rand -base64 48>
+FRONTEND_BASE_URL=http://127.0.0.1:5550
+```
+
+### Worth changing (defaults work, but only for a local trial)
+
+| Variable | Default | Why change it |
+| --- | --- | --- |
+| `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | `admin@admin.com` / `novanovastudio@pwss` | Initial administrator account. **Change the password before exposing the service**; the account is only created when no user with that email exists, so an existing account is never overwritten |
+| `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | `postgres` / `123456` | Database credentials. Port 5432 is published on every host interface by default, so a public machine must change the password or add a firewall rule |
+| `REDIS_PASSWORD` | Empty (no auth) | Port 6379 is published the same way; set a password for any public deployment |
+| `CORS_ALLOWED_ORIGIN_PATTERNS` | Includes `localhost:3000` and `www.novanovastudio.cn` | Replace with your real origins, comma-separated |
+| `TRUSTED_PROXY_ADDRESSES` | Empty | Behind Nginx, set the Docker bridge gateway (usually `172.18.0.1`, or the whole subnet `172.18.0.0/16`). Without it, API logs and login rate limiting only see the gateway address. Do not put `127.0.0.1` here — the peer address inside the container is the gateway, not loopback |
+| `TZ` | `Asia/Shanghai` | Time zone used by the containers and Java logs |
+
+### Leave alone
+
+- `POSTGRES_HOST` / `REDIS_HOST`: Compose pins them to `postgres` / `redis`; the `.env` values only matter when you run the server from source.
+- `POSTGRES_PORT` / `REDIS_PORT` / `SERVER_PORT` / `WEB_PORT`: these are the **host-side** published ports. Container ports are fixed (5432 / 6379 / 8080 / 5550), so only change these on a port conflict.
+- `TOKEN_EXPIRE_HOURS`, `LOG_LEVEL`, `TENCENT_COS_*`, and `AI_*` (polling interval, timeouts, prompt file paths): defaults are fine.
+- Email (`EMAIL_SMTP_*`) and linux.do / Google sign-in (`OAUTH2_*`): optional features, off unless configured.
+- AI channel keys and object storage credentials do **not** belong in `.env`; you enter them in System configuration after signing in — see [System configuration](../using-studio/system-configuration).
+
+### Note: `NEXT_PUBLIC_*` variables are build-time
+
+`NEXT_PUBLIC_CREDIT_STORE_URL`, `NEXT_PUBLIC_ICP_RECORD_NUMBER`, and `NEXT_PUBLIC_GITHUB_URL` are passed as build arguments and baked into the web bundle. After changing them you must **rebuild the image**; `docker compose restart` will not apply them.
+
+In Docker the web app calls the API on the same origin via `/api/v1/**` (Compose sets `NEXT_PUBLIC_SERVER_URL` to empty), so there is no server URL to configure.
+
+## 4. Build
+
+```bash
+docker compose build                             # build the web and server images
+docker compose build server                      # rebuild the server only
+docker compose -f docker-compose-local.yml build # build for the minimal path
+```
+
+- The `server` image uses a Maven 3.9 + JDK 21 multi-stage build (tests skipped) and runs on `eclipse-temurin:21-jre` with FFmpeg bundled for canvas video composition.
+- The `web` image builds the Next.js standalone output on Node.js 22 and validates the documentation first.
+- The first build downloads npm and Maven dependencies, so it takes a while depending on network and machine; later builds reuse the cache.
+- Tag the images with `IMAGE_TAG`: `IMAGE_TAG=v1.0.0 docker compose build`.
+
+## 5. Start
+
+```bash
+# Minimal: open http://127.0.0.1:5550 afterwards
+docker compose -f docker-compose-local.yml up -d --build
+
+# Production: served behind your host Nginx
+docker compose up -d --build
+```
+
+Dependency order is enforced: `server` starts only after PostgreSQL and Redis are healthy, and `web` plus `nginx` start after `server`. **Database migrations run automatically with Flyway when the server boots**, so there is no manual schema step. After editing `.env`, run `docker compose up -d` again so the affected containers are recreated with the new values.
+
+### The host Nginx site config for production
+
+The Nginx service in `docker-compose.yml` uses `network_mode: host` and mounts `${NGINX_CONFIG_DIRECTORY:-/etc/nginx/conf.d}` read-only, so the site config lives on the host and points upstream at `127.0.0.1`:
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    client_max_body_size 100m;
+
+    # API and SSE: keep buffering off and raise the timeouts so streams are not cut short.
+    location ^~ /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # Pages and static assets.
+    location / {
+        proxy_pass http://127.0.0.1:5550;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+The repository's `nginx/default.conf` is the minimal-path version (it points at the container names `server:8080` and `web:5550`) and is a good reference. Every Nginx mount can be overridden from `.env`:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `NGINX_CONFIG_DIRECTORY` | `/etc/nginx/conf.d` | Site config directory, mounted read-only |
+| `NGINX_LOG_DIRECTORY` | `./logs/nginx` | Nginx log directory, mounted read-write |
+| `NGINX_STATIC_DIRECTORY` | `/usr/share/nginx/html` | Static asset directory, mounted read-only |
+| `NGINX_SSL_DIRECTORY` | `/etc/nginx/ssl` | Certificate directory, mounted read-only |
+
+## 6. Verify
+
+```bash
+docker compose ps                        # postgres and redis should be healthy, the rest Up
+curl http://127.0.0.1:8080/api/v1/health # expect {"code":200,"data":"OK"}
+docker compose logs -f server            # follow the server log
+```
+
+Logs are written per service under the repository root: `logs/server/`, `logs/web/`, `logs/nginx/`, `logs/postgres/`, and `logs/redis/`.
+
+## 7. First-time setup
+
+1. Sign in with the initial administrator account from `.env`.
+2. Open the gear button at the bottom of the sidebar and add AI channels, model capabilities, and default models under "Configuration and user preferences".
+3. Configure object storage and mark it as default if you need uploads or persisted results.
+4. Each option is explained in [System configuration](../using-studio/system-configuration).
+
+## 8. Common commands
+
+```bash
+docker compose stop             # stop services, keep containers
+docker compose restart          # restart services
+docker compose logs -f server   # follow one service
+docker compose up -d --build    # rebuild and start after code or NEXT_PUBLIC_* changes
+docker compose down             # remove containers and networks, keep the data under volume/
+```
+
+## Things to watch out for
+
+- Never commit `.env`, AI channel keys, object storage keys, or certificate private keys. Browser-visible `NEXT_PUBLIC_*` variables must not hold secrets.
+- Data persists under `volume/` at the repository root (PostgreSQL and Redis). `docker compose down` keeps it; delete that directory manually to start from scratch.
+- Agent prompt files are mounted read-only from `server/config/prompts/`; restart the `server` container after editing them.
+- Uploads and saved results depend on the default object storage in System configuration, and fail while it is unset.

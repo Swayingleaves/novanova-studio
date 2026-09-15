@@ -1,0 +1,49 @@
+---
+title: Workspace
+description: Learn the navigation, conversations, assets, and theme settings.
+---
+
+# Workspace
+
+The left side of the workspace groups navigation into Create, Resources, and Settings, while the right side hosts the active feature. Global entries live in the top bar and at the bottom of the sidebar.
+
+## Left navigation
+
+Desktop uses a narrow 88px rail; on mobile, open the "创作导航" drawer from the top-left menu. The drawer shows the group headings, while the desktop rail only shows the icons.
+
+| Group | Entry | What it does |
+| --- | --- | --- |
+| Create | Image | Generate, edit, and manage image conversations |
+| Create | Video | Create videos, choose references, and follow async task progress |
+| Create | Infinite canvas | Keep text, images, videos, audio, and results in one editable space |
+| Resources | My assets | Manage uploaded media and saved results |
+| Resources | Prompt library | Reuse common prompts instead of retyping them |
+| Settings | Admin console | **Administrators only**: users, models, skills, prompts, announcements, and API logs |
+
+Opening a specific canvas (`/canvas/<id>`) hides the left navigation to give the canvas the full width.
+
+## The three buttons at the bottom of the sidebar
+
+- **System announcements** (bell): opens the announcement list with a red dot when something is unread. See [System announcements](./announcements).
+- **Configuration** (gear): administrators only; opens "Configuration and user preferences". See [System configuration](./system-configuration).
+- **Theme** (sun and moon): switches between system, light, dark, and purple. See [Switch themes](./theme).
+
+## Top bar and top-right
+
+- **Documentation**: opens this guide.
+- **GitHub**: only rendered when `NEXT_PUBLIC_GITHUB_URL` was set at deploy time.
+- **Credits and user menu**: signed out it shows a "登录" button; signed in it shows the credit balance and avatar, and hovering opens a menu with user info plus the invite link, buy credits, redeem credits, credit history, an extra "系统管理" entry for administrators, and "退出登录".
+
+The canvas page has its own top toolbar, and its user menu adds a "画布快捷键" entry.
+
+## Permission differences
+
+Creators and administrators see almost the same interface. Only three entries differ: the admin console, the configuration gear at the bottom of the sidebar, and "系统管理" in the user menu.
+
+There is also a small difference when no default model is configured yet: an administrator clicking the hint opens the configuration dialog directly, while a creator only sees "请联系管理员配置默认生图模型" or "请联系管理员配置默认生视频模型".
+
+## Related pages
+
+- Creation: [Image creation](./image-generation), [Video creation](./video-generation), [Infinite canvas](./canvas)
+- Resources: [My assets](./assets), [Prompt library](./prompt-library)
+- Settings: [Personal information](./profile), [Switch themes](./theme), [System announcements](./announcements)

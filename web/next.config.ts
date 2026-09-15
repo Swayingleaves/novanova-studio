@@ -1,10 +1,11 @@
 import type { NextConfig } from "next";
 import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
+import { createMDX } from "fumadocs-mdx/next";
 
 const localVersion = process.env.NEXT_PUBLIC_APP_VERSION || "dev";
 const localServerUrl = process.env.NEXT_PUBLIC_SERVER_URL?.trim().replace(/\/+$/, "") || "http://127.0.0.1:8080";
 
-export default function nextConfig(phase: string): NextConfig {
+function nextConfig(phase: string): NextConfig {
     const isDev = phase === PHASE_DEVELOPMENT_SERVER;
 
     return {
@@ -36,4 +37,10 @@ export default function nextConfig(phase: string): NextConfig {
             return [{ source: "/api/v1/:path*", destination: `${localServerUrl}/api/v1/:path*` }];
         },
     };
+}
+
+const withMDX = createMDX();
+
+export default function configuredNextConfig(phase: string): NextConfig {
+    return withMDX(nextConfig(phase));
 }

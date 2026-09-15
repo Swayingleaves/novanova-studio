@@ -12,6 +12,9 @@ data/
 .codegraph
 /.claude/
 /docs/superpowers/
+/docs/.source/
+/docs/.next/
+/web/.source/
 .codex/
 .superpowers/
 .impeccable/
@@ -20,10 +23,12 @@ data/
 /.cursor/
 /deploy.sh
 /.agents/
-!/docs/backend-database.md
+!/docs-api/backend-database.md
 AGENTS.md
 CLAUDE.md
 skills-lock.json
 volume/
+.agnes/
+/server/logs/
 .agnes/
 /server/logs/

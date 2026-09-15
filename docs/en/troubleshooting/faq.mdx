@@ -1,0 +1,84 @@
+---
+title: FAQ
+description: Troubleshoot login, models, uploads, and generation tasks.
+---
+
+# FAQ
+
+Below are the symptoms we see most often, grouped by area. Items marked "administrator" need an administrator to fix them in System configuration.
+
+## Sign-in and accounts
+
+| Symptom | Cause and fix |
+| --- | --- |
+| "邮箱或密码错误" | Re-check the email and password; if it is genuinely forgotten, use "忘记密码" in the sign-in dialog |
+| "账号已被禁用" | An administrator disabled the account; ask them to re-enable it |
+| "账号已锁定，请 X 分钟后再试" | Too many wrong passwords triggered a lock; wait for the countdown |
+| "登录已过期" or "登录已失效，请重新登录" | The token expired or was invalidated server-side; sign in again |
+| "操作过于频繁，请稍后再试" | Rate limiting kicked in; wait a moment and retry |
+| The sign-in page gives no error but nothing happens | Check that `NEXT_PUBLIC_SERVER_URL` points at the server and that the server is running — see Diagnostics below |
+| Forgot the password | Click "忘记密码", enter the registered email, and use the one-time reset link; it stays valid for 15 minutes |
+
+## Models and channels (administrator)
+
+| Symptom | Cause and fix |
+| --- | --- |
+| "请联系管理员配置默认生图模型 / 默认生视频模型" | No default model has been chosen for that type yet |
+| "所选模型不可用，请联系管理员检查模型配置" | The channel or model was disabled, the model name no longer matches, or the channel key expired |
+| "服务端AI渠道未配置API Key" | The channel has no key, or the saved key did not take effect |
+| "服务端任务系统暂不支持 X 调用格式" | That call format is not supported yet; switch to a supported one |
+| "未找到已选择的AI渠道" or "渠道 X 未配置模型" | A task still references a deleted channel or a channel without models |
+| The model dropdown is empty, or shows "请先到配置里添加渠道和模型" | No model in the channel is marked for that capability (text, image, or video); mark it under "我的模型" and pick a default |
+| Upstream returns "内容审核未通过" or "提示词包含敏感" | The provider's content policy rejected the request; adjust the prompt or switch channels |
+
+## Credits
+
+| Symptom | Cause and fix |
+| --- | --- |
+| "积分不足，无法创建生成任务" | The balance is below the cost of this run; redeem or buy credits first |
+| "没有配置发卡网站" | `NEXT_PUBLIC_CREDIT_STORE_URL` was not set at deploy time, so self-service purchase is unavailable and an administrator must adjust credits |
+| A card is rejected with "请输入20位积分卡密" | Cards are 20 characters; paste them without extra text (spaces and dashes are stripped automatically) |
+| Credits were deducted but the task failed | Check the credit history for the entry, then give the administrator the approximate time so they can look at credit usage and the API logs |
+
+## Uploads and object storage (administrator)
+
+| Symptom | Cause and fix |
+| --- | --- |
+| "请联系管理员配置默认对象存储" or "完整配置默认对象存储" | No default object storage is configured, or the configuration is incomplete |
+| "上传腾讯云COS失败" (OSS and Kodo behave the same) | Wrong credentials, a missing bucket, or no write permission; verify and save the default storage again |
+| Avatar upload fails | Avatars must be images and no larger than 2MB |
+| An uploaded asset will not open | Bucket access or CORS settings; make sure the bucket domain is reachable from the public internet |
+
+## Failed generation tasks
+
+| Symptom | Cause and fix |
+| --- | --- |
+| "生成任务等待超时" | The wait limit was exceeded (5 minutes for images, 15 for videos by default), usually because the upstream provider was slow; retry or switch models |
+| "视频生成超时，请稍后重试" | The provider's own timeout; retry a little later |
+| "AI 返回内容无法解析，请重试" | The model returned incomplete or unexpected content; just retry |
+| The task shows as cancelled | You stopped it, or a server restart interrupted it; submit again |
+| A canvas node shows "页面刷新后生成已中断，请重新生成。" | The refresh happened before the task id came back; retry the node |
+| Retrying reports "找不到提示词，无法重试" or "参考图片已丢失，无法继续重试" | The node lost its prompt or references; add them back and generate again |
+| Image or video page says no model is available | Confirm the default model with an administrator account — see [System configuration](../using-studio/system-configuration) |
+
+## Media validation
+
+| Symptom | Cause and fix |
+| --- | --- |
+| "参考音频仅支持 MP3、WAV" | Convert the file |
+| "每段参考音频必须为2～15秒" / "参考音频总时长不能超过15秒" / "最多支持3段参考音频" | Trim the duration or reduce the number of clips as prompted |
+| "参考音频大小无效或超过15 MB" | Compress the audio or use a shorter clip |
+| "音频输入仅支持已开启全能参考的视频模型" | Switch to a model with audio input, or set the mode to 全能参考 |
+| A reference image or video was skipped | Images: 30MB each, up to 9. Videos: MP4 or MOV only, 2–15 seconds each with a 15-second total, 50MB each, up to 3 |
+| "远程媒体文件超过100MB限制" | The referenced remote file is too large; download it and upload it as an asset |
+
+## Diagnostics
+
+1. **Health check**: `/api/v1/health` should return `{"code":200,"data":"OK"}` (locally `http://127.0.0.1:8080/api/v1/health`).
+2. **Server logs**: `logs/current.log` at the repository root (rotated at 50MB, kept for 180 days). AI calls leave `AI请求`, `AI响应 状态码`, and `AI响应` lines — start there for model problems.
+3. **API logs in the console**: administrators can filter by endpoint, IP, user, and success or error, and inspect status codes, durations, request bodies, and error content. Records are kept for 30 days, and an approximate timestamp is the most useful detail in a report.
+4. **Container logs**: with a Docker deployment, `docker compose logs -f server` shows the same output, also written under `logs/server/`.
+
+## Reporting a problem
+
+Include the page URL, the steps you took, the expected result, the actual result, and an approximate time, plus the model and channel you used. Never paste API keys or card codes into logs, screenshots, or issues.

@@ -1,0 +1,179 @@
+---
+title: 使用 Docker 启动
+description: 用 Docker Compose 以最小配置构建并启动 PostgreSQL、Redis、服务端、前端和 Nginx。
+---
+
+# 使用 Docker 启动
+
+Docker Compose 会把 PostgreSQL、Redis、服务端、前端和 Nginx 一起拉起，适合 Linux 服务器部署，也适合在单机上快速跑通整套功能。**最小配置只需要在 `.env` 里填两个变量**，其余都有可用默认值。
+
+> 这篇文档的目标是“先把服务跑起来”。更完整的生产部署清单和排障说明见仓库根目录的 `deploy_docs/docker-deploy.md`。
+
+## 1. 准备环境
+
+| 组件 | 要求 |
+| --- | --- |
+| 操作系统 | Linux（推荐 Ubuntu 22.04+）。Compose 里的 Nginx 使用 `network_mode: host` 并挂载宿主机目录，因此不适用于 Windows / macOS；这两者请走[本地启动调试](./local-development) |
+| Docker Engine | 24 或更高 |
+| Docker Compose | v2（即 `docker compose` 子命令） |
+| 源码 | 已克隆到服务器，并已进入项目根目录 |
+
+## 2. 选择启动方式
+
+| 方式 | Compose 文件 | 访问入口 | 适合场景 |
+| --- | --- | --- | --- |
+| 最小启动 | `docker-compose-local.yml` | `http://127.0.0.1:5550` | 单机试用，用仓库自带的 Nginx 配置 |
+| 生产部署 | `docker-compose.yml` | 你自己的域名 | Linux 服务器 + 已有域名与证书 |
+
+两种方式的 `.env` 配置和构建步骤完全相同，区别只在 Nginx：最小启动用仓库内的 `nginx/default.conf`，在容器网络里反代 `server:8080` 与 `web:5550`；生产部署使用宿主机 `/etc/nginx/conf.d` 下的站点配置，反代 `127.0.0.1:8080` 与 `127.0.0.1:5550`——因为 Compose 里 `server` 和 `web` 的端口只发布在 `127.0.0.1` 上。
+
+## 3. 配置 `.env`
+
+```bash
+cp .env.example .env
+```
+
+### 必填项（不填会直接启动失败）
+
+Compose 对下面两个变量用了强制校验，缺失时命令会立刻报错退出，不会启动任何服务：
+
+| 变量 | 说明 |
+| --- | --- |
+| `APP_SECRET_KEY` | 签发 Bearer Token 的密钥，要求至少 32 字节的高强度随机值。生成命令：`openssl rand -base64 48` |
+| `FRONTEND_BASE_URL` | 浏览器公开访问的前端根地址，例如 `https://www.example.com`；只能是 HTTP(S) 根地址，不要带路径、查询参数或片段 |
+
+最小可用配置（单机试用）就是这样两行：
+
+```dotenv
+APP_SECRET_KEY=<把 openssl rand -base64 48 的输出粘到这里>
+FRONTEND_BASE_URL=http://127.0.0.1:5550
+```
+
+### 建议修改（默认值能跑，但只适合本机）
+
+| 变量 | 默认值 | 为什么要改 |
+| --- | --- | --- |
+| `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | `admin@admin.com` / `novanovastudio@pwss` | 初始管理员账号，**公网部署前必须改密码**；只在不存在同邮箱账号时创建，已有账号不会被覆盖 |
+| `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | `postgres` / `123456` | 数据库凭据。注意 5432 默认发布在宿主机所有网卡上，公网机器必须改密码或加防火墙 |
+| `REDIS_PASSWORD` | 空（不认证） | 6379 同样发布在所有网卡上，公网环境建议设置密码 |
+| `CORS_ALLOWED_ORIGIN_PATTERNS` | 含 `localhost:3000` 与 `www.novanovastudio.cn` | 改成你的实际来源，多个用英文逗号分隔 |
+| `TRUSTED_PROXY_ADDRESSES` | 空 | Nginx 反代场景建议填 Docker bridge 网关（通常 `172.18.0.1`，或直接写网段 `172.18.0.0/16`）；不配置时“接口记录”和登录限流只能看到网关地址。不要把 `127.0.0.1` 填在这里——容器内看到的对端地址是网关，不是它 |
+| `TZ` | `Asia/Shanghai` | 容器与 Java 日志使用的时区 |
+
+### 可以不动的部分
+
+- `POSTGRES_HOST` / `REDIS_HOST`：Compose 已固定为 `postgres` / `redis`，`.env` 里的这两个值只在本地源码启动时生效。
+- `POSTGRES_PORT` / `REDIS_PORT` / `SERVER_PORT` / `WEB_PORT`：填的是**宿主机映射端口**，容器内端口固定（5432 / 6379 / 8080 / 5550），宿主机端口冲突时才需要改。
+- `TOKEN_EXPIRE_HOURS`、`LOG_LEVEL`、`TENCENT_COS_*`、`AI_*`（轮询间隔、各类超时、提示词文件路径）：默认值即可用。
+- 邮件（`EMAIL_SMTP_*`）与 linux.do / Google 登录（`OAUTH2_*`）：可选能力，不配置就是关闭状态。
+- AI 渠道密钥、对象存储凭证**不写在 `.env` 里**，而是登录后在“系统配置”界面填写，见[系统配置](../using-studio/system-configuration)。
+
+### 特别注意：`NEXT_PUBLIC_*` 是构建期变量
+
+`NEXT_PUBLIC_CREDIT_STORE_URL`、`NEXT_PUBLIC_ICP_RECORD_NUMBER`、`NEXT_PUBLIC_GITHUB_URL` 会作为构建参数写进前端产物，所以**改完必须重新构建镜像**，`docker compose restart` 不会生效。
+
+前端在 Docker 里通过同源 `/api/v1/**` 调用后端（Compose 已把 `NEXT_PUBLIC_SERVER_URL` 固定为空），不需要额外配置服务端地址。
+
+## 4. 构建
+
+```bash
+docker compose build                            # 构建 web 与 server 镜像
+docker compose build server                     # 只重建服务端
+docker compose -f docker-compose-local.yml build # 最小启动方式对应的构建
+```
+
+- `server` 镜像：Maven 3.9 + JDK 21 多阶段构建（跳过单元测试），运行镜像基于 `eclipse-temurin:21-jre` 并内置 FFmpeg，供画布视频合成使用。
+- `web` 镜像：Node.js 22 构建 Next.js standalone 产物，构建前会先执行文档校验。
+- 首次构建要下载 npm / Maven 依赖，耗时取决于网络与机器性能；之后命中缓存会快很多。
+- 需要给镜像打版本号时用 `IMAGE_TAG`：`IMAGE_TAG=v1.0.0 docker compose build`。
+
+## 5. 启动
+
+```bash
+# 最小启动：单机试用，启动后访问 http://127.0.0.1:5550
+docker compose -f docker-compose-local.yml up -d --build
+
+# 生产部署：配合宿主机 Nginx 使用
+docker compose up -d --build
+```
+
+启动顺序由依赖关系保证：PostgreSQL 与 Redis 健康检查通过后才启动 `server`，`server` 起来后再启动 `web` 和 `nginx`。**数据库迁移由服务端启动时用 Flyway 自动执行**，不需要手工建表。修改 `.env` 后重新执行 `docker compose up -d` 即可让新变量生效（Compose 会重建相关容器）。
+
+### 生产部署需要准备的宿主机 Nginx 站点配置
+
+`docker-compose.yml` 里的 Nginx 容器使用 `network_mode: host`，只读挂载 `${NGINX_CONFIG_DIRECTORY:-/etc/nginx/conf.d}`，所以站点配置写在宿主机上，上游指向 `127.0.0.1`：
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    client_max_body_size 100m;
+
+    # 接口与 SSE：关闭缓冲，拉长超时，保证流式输出不被截断。
+    location ^~ /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # 前端页面与静态资源。
+    location / {
+        proxy_pass http://127.0.0.1:5550;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+仓库里的 `nginx/default.conf` 是最小启动用的版本（上游写的是容器名 `server:8080` / `web:5550`），可以对照着改。Nginx 的挂载目录都可以用 `.env` 覆盖：
+
+| 变量 | 默认值 | 用途 |
+| --- | --- | --- |
+| `NGINX_CONFIG_DIRECTORY` | `/etc/nginx/conf.d` | 站点配置目录，只读挂载 |
+| `NGINX_LOG_DIRECTORY` | `./logs/nginx` | Nginx 日志目录，读写挂载 |
+| `NGINX_STATIC_DIRECTORY` | `/usr/share/nginx/html` | 静态资源目录，只读挂载 |
+| `NGINX_SSL_DIRECTORY` | `/etc/nginx/ssl` | 证书目录，只读挂载 |
+
+## 6. 验证
+
+```bash
+docker compose ps                        # postgres、redis 应为 healthy，其余为 Up
+curl http://127.0.0.1:8080/api/v1/health # 期望返回 {"code":200,"data":"OK"}
+docker compose logs -f server            # 跟踪服务端日志
+```
+
+日志按服务分别落在项目根目录下：`logs/server/`、`logs/web/`、`logs/nginx/`、`logs/postgres/`、`logs/redis/`。
+
+## 7. 首次配置
+
+1. 用 `.env` 里的初始管理员账号登录。
+2. 点开侧栏底部的齿轮按钮，在“配置与用户偏好”里添加 AI 渠道、配置模型能力，并指定各类任务的默认模型。
+3. 需要上传素材或保存生成结果时，在“对象存储”里配置并设为默认。
+4. 每一项的具体含义见[系统配置](../using-studio/system-configuration)。
+
+## 8. 常用命令
+
+```bash
+docker compose stop             # 停止服务，保留容器
+docker compose restart          # 重启服务
+docker compose logs -f server   # 跟踪某个服务的日志
+docker compose up -d --build    # 代码或 NEXT_PUBLIC_* 变更后重新构建并启动
+docker compose down             # 删除容器与网络，volume/ 下的数据保留
+```
+
+## 注意事项
+
+- `.env`、AI 渠道密钥、对象存储密钥、证书私钥都不要提交到 Git；浏览器可见的 `NEXT_PUBLIC_*` 变量不能用来保存任何密钥。
+- 数据持久化在项目根目录的 `volume/` 下（PostgreSQL 与 Redis），`docker compose down` 不会删除；要彻底清空数据需要手动删除该目录。
+- Agent 提示词文件挂载自 `server/config/prompts/`（只读），修改后重启 `server` 容器即可生效。
+- 上传素材与保存生成结果依赖“系统配置”里的默认对象存储，未配置时相关操作会失败。

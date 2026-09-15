@@ -47,6 +47,11 @@
   </tbody>
 </table>
 
+## 🚀 在线文档
+
+[文档](https://www.novanovastudio.cn/docs/zh-cn)
+
+
 ## ✨ 项目定位
 
 Novanova Studio 是面向独立创作者与视觉团队的 AI 创作工作台。它不是把图片、视频、提示词和生成记录拆散在多个工具中的集合，而是以**无限画布**作为创作上下文，以 **AI Agent** 作为理解意图、选择工具和推进任务的中枢。
@@ -204,7 +209,8 @@ Agent 不只是一次性调用模型，而是贯穿需求理解、工具选择�
 │   └── src/main/resources/      # 应用配置与 Flyway 数据库迁移
 ├── docker-compose.yml           # PostgreSQL、Redis、前后端与 Nginx 编排
 ├── .env.example                 # 本地与部署环境变量样例
-├── docs/                        # 数据库设计、画布设计与其他项目文档
+├── docs/                        # 面向用户的中英文使用指南（MDX）
+├── docs-api/                    # API、数据库设计、ADR 与工程参考文档
 └── logo/                        # 项目品牌资源
 ```
 
@@ -254,6 +260,8 @@ Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不�
 
 ## 📚 相关文档
 
+- [Novanova Studio 文档门户](/docs)
+- [工程与 API 文档](docs-api/)
 - [产品定位](PRODUCT.md)
 - [开源许可证](LICENSE)
 

@@ -83,14 +83,37 @@ public class AiHttpClient {
             applyRequestMethod(builder, normalizedMethod, jsonBody);
             HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
             log.info("AI响应 状态码: {} body:{}", response.statusCode(), response.body().length() > MODEL_RESPONSE_LOG_MAXIMUM_CHARACTERS ? response.body().substring(0, MODEL_RESPONSE_LOG_MAXIMUM_CHARACTERS) + "..." : response.body());
+            String stage = requestStage(normalizedMethod);
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw AiErrorSupport.providerException(response.statusCode(), response.body(), requestStage(normalizedMethod));
+                throw AiErrorSupport.providerException(response.statusCode(), response.body(), stage);
             }
-            JSONObject json = AiJsonUtils.parseJson(response.body());
+            JSONObject json = parseResponseBody(response.body(), stage);
             log.info("AI响应: {}", AiJsonUtils.formatResponseForLog(json));
-            AiJsonUtils.validateEnvelope(json, requestStage(normalizedMethod));
+            AiJsonUtils.validateEnvelope(json, stage);
             return json;
         });
+    }
+
+    /**
+     * 解析AI响应体，非法JSON必须显性报错。
+     * <p>
+     * 不复用AiJsonUtils.parseJson的静默降级：供应商返回成功状态码但响应体不完整或不是合法JSON时，
+     * 降级为空对象会被下游当成"没有内容的成功响应"，最终静默产出空结果
+     * （例如文本任务写入空内容，画布文本节点表现为空白节点）。
+     *
+     * @param body String 响应体
+     * @param stage String 调用阶段
+     * @return JSONObject 响应JSON
+     */
+    private JSONObject parseResponseBody(String body, String stage) {
+        if (!StringUtils.hasText(body)) return new JSONObject();
+        try {
+            JSONObject parsed = JSON.parseObject(body);
+            return parsed == null ? new JSONObject() : parsed;
+        } catch (Exception exception) {
+            log.error("AI响应体解析失败: stage={}, bodyLength={}, 错误={}", stage, body.length(), exception.getMessage());
+            throw AiErrorSupport.malformedResponse(stage);
+        }
     }
 
     /**

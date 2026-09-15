@@ -1,0 +1,35 @@
+﻿ .gitignore                                         |    4 +-
+ README.en.md                                       |    5 +-
+ README.md                                          |    5 +-
+ docker-compose-local.yml                           |    4 +-
+ docker-compose.yml                                 |    4 +-
+ ...270\213\346\226\207\344\274\240\351\200\222.md" |   54 -
+ ...276\223\345\205\245\350\203\275\345\212\233.md" |   60 -
+ ...243\201\345\211\252\346\226\271\346\241\210.md" |   69 -
+ docs/adr/README.md                                 |    7 -
+ docs/api/agens/Agnes 2.5 Flash.md                  |  661 ------
+ docs/api/agens/Agnes 2.5 Pro.md                    |  576 -----
+ docs/api/agens/Agnes 3.0 Flash.md                  |  365 ----
+ docs/api/agens/Agnes Image 2.1 Flash.md            |  509 -----
+ docs/api/agens/Agnes Video 2.5.md                  |  550 -----
+ ...217\202\346\225\260\346\214\207\345\215\227.md" |  614 ------
+ ...273\273\345\212\241\347\212\266\346\200\201.md" |  254 ---
+ ...73\272H3-Context-IR\344\273\273\345\212\241.md" |  532 -----
+ ...224\237\346\210\220\344\273\273\345\212\241.md" |  517 -----
+ ...224\237\346\210\220\344\273\273\345\212\241.md" |  532 -----
+ ...210\240\351\231\244\344\273\273\345\212\241.md" |  186 --
+ ...237\245\350\257\242\344\273\273\345\212\241.md" |  437 ----
+ ...273\273\345\212\241\345\210\227\350\241\250.md" |  395 ----
+ docs/backend-database.md                           |  462 ----
+ docs/canvas-audio-acceptance.md                    |   13 -
+ web/Dockerfile                                     |    5 +-
+ web/next-env.d.ts                                  |    2 +-
+ web/next.config.ts                                 |    9 +-
+ web/package.json                                   |    8 +-
+ web/pnpm-lock.yaml                                 | 2292 +++++++++++++++++++-
+ web/pnpm-workspace.yaml                            |    1 +
+ .../canvas/components/canvas-node-prompt-panel.tsx |   22 +-
+ web/src/features/canvas/node-types/shared.tsx      |    5 +-
+ web/src/features/canvas/node-types/text-node.tsx   |   21 +-
+ .../features/canvas/pages/canvas-client-page.tsx   |    4 +-
+ 34 files changed, 2299 insertions(+), 6885 deletions(-)

@@ -54,7 +54,6 @@ type CanvasNodePromptPanelProps = {
     isPromptGenerating?: boolean;
     mentionReferences?: CanvasResourceReference[];
     onImageSettingsOpenChange?: (open: boolean) => void;
-    onApplyContent?: (nodeId: string, content: string) => void;
     canGenerateWithoutPrompt?: boolean;
 };
 
@@ -73,7 +72,6 @@ export function CanvasNodePromptPanel({
     isPromptGenerating = false,
     mentionReferences = [],
     onImageSettingsOpenChange,
-    onApplyContent,
     canGenerateWithoutPrompt = false,
 }: CanvasNodePromptPanelProps) {
     const globalConfig = useEffectiveConfig();
@@ -101,9 +99,11 @@ export function CanvasNodePromptPanel({
     const libraryPromptRef = useRef<string | null>(null);
     const config = buildNodeConfig(globalConfig, node, mode);
     const nodePrompt = readNodePrompt(node);
+    // 文本节点的正文只在节点内编辑，这里仅用于提示占位文案
     const hasTextContent = isTextNode(node) && Boolean(node.content.text.trim());
     const hasImageContent = isImageNode(node) && Boolean(node.content.source);
-    const isEditingExistingContent = hasTextContent || hasImageContent;
+    // 已有图片内容时，输入框是“修改指令”，不写回节点已有的提示词
+    const isEditingExistingContent = hasImageContent;
     const displayReferences = useMemo<DisplayReference[]>(() => {
         const references: DisplayReference[] = [];
         const mediaKeys = new Set<string>();
@@ -236,7 +236,8 @@ export function CanvasNodePromptPanel({
 
     const updatePrompt = (value: string) => {
         setPrompt(value);
-        if (isTextNode(node) || !isEditingExistingContent) onPromptChange(node.id, value);
+        // 文本节点正文不写回；已有图片内容时输入框是修改指令，同样不写回
+        if (!isTextNode(node) && !isEditingExistingContent) onPromptChange(node.id, value);
     };
     const canSubmit = Boolean(prompt.trim()) || canGenerateWithoutPrompt;
     const filteredStyles = useMemo(() => filterGenerationStyles(styleCatalog.styles, styleQuery), [styleCatalog.styles, styleQuery]);
@@ -286,9 +287,7 @@ export function CanvasNodePromptPanel({
     const applyPromptFromLibrary = (value: string) => {
         libraryPromptRef.current = value;
         setPrompt(value);
-        onPromptChange(node.id, value);
-        // 文本节点选择提示词时，同步更新 AI 输入框和节点正文。
-        if (isTextNode(node)) onApplyContent?.(node.id, value);
+        if (!isTextNode(node) && !isEditingExistingContent) onPromptChange(node.id, value);
     };
 
     const submit = () => {
@@ -780,14 +779,19 @@ function buildNodeConfig(globalConfig: AiConfig, node: CanvasNode, mode: CanvasN
     };
 }
 
+/**
+ * 读取节点上持久化的生成提示词。
+ * <p>
+ * 文本节点的正文由节点自身编辑，提示面板只作为指令输入，不回显正文。
+ */
 function readNodePrompt(node: CanvasNode): string {
-    return isTextNode(node) ? node.content.text : isImageNode(node) || isVideoNode(node) ? node.generation.prompt : "";
+    return isImageNode(node) || isVideoNode(node) ? node.generation.prompt : "";
 }
 
 function promptPlaceholder(mode: CanvasNodeGenerationMode, hasImageContent: boolean, hasTextContent: boolean) {
     if (mode === "video") return "描述要生成的视频内容";
     if (mode === "image") return hasImageContent ? "请输入你想要把这张图修改成什么" : "描述要生成的图片内容";
-    return hasTextContent ? "请输入你想要将本段文本修改成什么" : "请输入你想要生成的文本内容";
+    return hasTextContent ? "输入修改要求，AI 会据此改写这段文本" : "请输入你想要生成的文本内容";
 }
 
 function videoConfigPatch(key: keyof AiConfig, value: string) {
