@@ -47,6 +47,11 @@
   </tbody>
 </table>
 
+## 🚀 在线文档
+
+[文档](https://www.novanovastudio.cn/docs/zh-cn)
+
+
 ## ✨ 项目定位
 
 Novanova Studio 是面向独立创作者与视觉团队的 AI 创作工作台。它不是把图片、视频、提示词和生成记录拆散在多个工具中的集合，而是以**无限画布**作为创作上下文，以 **AI Agent** 作为理解意图、选择工具和推进任务的中枢。

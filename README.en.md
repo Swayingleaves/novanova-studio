@@ -21,6 +21,11 @@
   <img src="github_images/nova-s2.png" alt="Novanova Studio canvas">
 </p>
 
+## 🚀 Docs
+
+[Docs](https://www.novanovastudio.cn/docs/en)
+
+
 ## ✨ What It Is
 
 Novanova Studio is an AI creation workspace for independent creators and visual teams. Rather than separating images, videos, prompts, and generation records across multiple tools, it uses an **infinite canvas** as the creative context and an **AI Agent** as the center for understanding intent, choosing tools, and advancing tasks.
