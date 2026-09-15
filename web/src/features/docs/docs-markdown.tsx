@@ -16,7 +16,8 @@ function createMarkdownComponents(locale: Locale, basePath: string[]): Component
         h1: ({ children }) => <h1 id={String(children).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")}>{children}</h1>,
         h2: ({ children }) => <h2 id={String(children).toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, "-")}>{children}</h2>,
         a: ({ href, children }) => <Link href={resolveMarkdownHref(locale, basePath, href)}>{children}</Link>,
-        pre: ({ children }) => <div className="docs-code-block"><DocsCopyButton code={extractCode(children)} />{children}</div>,
+        // 必须保留真实的 <pre>：只渲染 <code> 会让代码块变成行内元素，多行命令的换行会被折叠成一行
+        pre: ({ children }) => <div className="docs-code-block"><DocsCopyButton code={extractCode(children)} /><pre>{children}</pre></div>,
         code: ({ className, children }) => <code className={className}>{children}</code>,
     };
 }
