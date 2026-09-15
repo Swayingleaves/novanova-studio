@@ -32,3 +32,6 @@ volume/
 /server/logs/
 .agnes/
 /server/logs/
+.test-out.txt*
+.diff-canvas.txt
+.diff-stat.txt
