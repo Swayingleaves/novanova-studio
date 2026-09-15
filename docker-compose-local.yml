@@ -83,8 +83,8 @@ services:
   web:
     image: novanovastudio-web:${IMAGE_TAG:-latest}
     build:
-      context: ./web
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: web/Dockerfile
       args:
         NEXT_PUBLIC_SERVER_URL: ""
         NEXT_PUBLIC_CREDIT_STORE_URL: ${NEXT_PUBLIC_CREDIT_STORE_URL:-}

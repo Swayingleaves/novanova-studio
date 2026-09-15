@@ -2314,8 +2314,9 @@ function CanvasWorkspacePage() {
         setEditRequestNonce((value) => value + 1);
     }, []);
 
+    /** 提示面板只写生成提示词；文本节点正文由节点自身编辑，不在此写回。 */
     const handleNodePromptChange = useCallback((nodeId: string, prompt: string) => {
-        setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyCanvasNodeAttributes(node, isTextNode(node) ? { content: prompt } : { prompt }) : node)));
+        setNodes((prev) => prev.map((node) => (node.id === nodeId ? applyCanvasNodeAttributes(node, { prompt }) : node)));
     }, []);
 
     const handleConfigNodeChange = useCallback((nodeId: string, patch: CanvasNodeAttributes) => {
@@ -4815,7 +4816,6 @@ function CanvasWorkspacePage() {
                             onGeneratePrompt={handleGenerateNodePrompt}
                             onStop={confirmStopGeneration}
                             onMissingConfig={showMissingAiConfig}
-                            onApplyContent={handleNodeContentChange}
                             canGenerateWithoutPrompt={promptPanelCanGenerateWithoutPrompt}
                             onRemoveReference={(reference) => removeNodeReferenceConnection(promptPanelNode.id, reference.nodeId)}
                             mentionCandidates={canvasResourceReferences}

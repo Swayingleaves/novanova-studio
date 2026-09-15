@@ -95,7 +95,7 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
         applyThinkingConfiguration(payload, context);
         return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/chat/completions", AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .map(AiJsonUtils::responsePayload)
-                .map(response -> AiJsonUtils.jsonObject(Map.of("content", readChatCompletionsText(response))));
+                .map(response -> AiJsonUtils.jsonObject(Map.of("content", requireChatCompletionsText(response))));
     }
 
     /**
@@ -288,6 +288,23 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
         if (context.thinkingEnabled()) {
             payload.put("reasoning_effort", context.reasoningEffort());
         }
+    }
+
+    /**
+     * 读取Chat Completions文本结果，空内容按生成失败处理。
+     * <p>
+     * 供应商返回成功状态但内容为空（响应体被截断、choices缺失等）时不能当作成功结果，
+     * 否则文本任务会以空内容标记成功，画布文本节点被写入空文本并显示为空白节点。
+     *
+     * @param response JSONObject 接口响应载荷
+     * @return String 文本内容
+     */
+    private String requireChatCompletionsText(JSONObject response) {
+        String text = readChatCompletionsText(response);
+        if (!StringUtils.hasText(text)) {
+            throw AiErrorSupport.malformedResponse("execution");
+        }
+        return text;
     }
 
     /**

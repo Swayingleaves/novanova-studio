@@ -14,10 +14,11 @@ ENV NEXT_PUBLIC_ICP_RECORD_NUMBER=${NEXT_PUBLIC_ICP_RECORD_NUMBER}
 ENV NEXT_PUBLIC_GITHUB_URL=${NEXT_PUBLIC_GITHUB_URL}
 
 RUN corepack enable
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/.npmrc ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile
 
-COPY . .
+COPY web/ ./
+COPY docs/ /app/docs/
 RUN printf '%s\n' "${NEXT_PUBLIC_APP_VERSION}" > /app/VERSION \
     && printf '# Changelog\n\n## Unreleased\n' > /app/CHANGELOG.md \
     && pnpm run build
@@ -35,6 +36,7 @@ COPY --from=web-build /app/CHANGELOG.md /app/CHANGELOG.md
 COPY --from=web-build /app/web/public ./public
 COPY --from=web-build /app/web/.next/standalone ./
 COPY --from=web-build /app/web/.next/static ./.next/static
+COPY --from=web-build /app/docs /app/docs
 
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
