@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title description">
+  <title id="title">Novanova Studio 开源授权版与企业版价格对比</title>
+  <desc id="description">开源授权版一次性费用19800元，企业版一次性费用98000元，企业版包含一年技术支持，到期后可选12800元每年的维护服务。</desc>
+
+  <defs>
+    <!-- 品牌渐变 -->
+    <linearGradient id="backgroundGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#090914"/>
+      <stop offset="0.55" stop-color="#111020"/>
+      <stop offset="1" stop-color="#17101e"/>
+    </linearGradient>
+    <linearGradient id="brandGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8B5CF6"/>
+      <stop offset="0.52" stop-color="#D36BE8"/>
+      <stop offset="1" stop-color="#FF78B8"/>
+    </linearGradient>
+    <linearGradient id="enterpriseGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8B5CF6"/>
+      <stop offset="0.56" stop-color="#D946EF"/>
+      <stop offset="1" stop-color="#FB7185"/>
+    </linearGradient>
+    <linearGradient id="openSourceGradient" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#64748B"/>
+      <stop offset="1" stop-color="#94A3B8"/>
+    </linearGradient>
+    <radialGradient id="purpleGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#8B5CF6" stop-opacity="0.24"/>
+      <stop offset="1" stop-color="#8B5CF6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="pinkGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#F472B6" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#F472B6" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- 卡片阴影 -->
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="22" stdDeviation="24" flood-color="#000000" flood-opacity="0.32"/>
+    </filter>
+    <filter id="enterpriseShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="26" stdDeviation="30" flood-color="#A855F7" flood-opacity="0.2"/>
+    </filter>
+
+    <style>
+      text {
+        font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", Arial, sans-serif;
+      }
+      .secondary-text { fill: #A9A7B5; }
+      .body-text { fill: #DDDCE6; font-size: 22px; font-weight: 500; }
+      .small-label { fill: #BDBAC9; font-size: 17px; font-weight: 500; letter-spacing: 0.5px; }
+      .check-mark { fill: none; stroke: #FFFFFF; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+  </defs>
+
+  <!-- 深色画布与氛围光 -->
+  <rect width="1600" height="900" fill="url(#backgroundGradient)"/>
+  <ellipse cx="260" cy="210" rx="480" ry="380" fill="url(#purpleGlow)"/>
+  <ellipse cx="1390" cy="700" rx="520" ry="430" fill="url(#pinkGlow)"/>
+  <path d="M0 770 C310 700 470 850 790 786 C1110 722 1280 640 1600 720 L1600 900 L0 900 Z" fill="#FFFFFF" opacity="0.018"/>
+
+  <!-- 顶部品牌标识 -->
+  <g transform="translate(112 62)">
+    <rect width="48" height="48" rx="15" fill="url(#brandGradient)"/>
+    <path d="M13 34V15.5C13 13.6 15.2 12.6 16.7 13.8L34.5 30V14" fill="none" stroke="#FFFFFF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M40 4 L42.7 9.3 L48 12 L42.7 14.7 L40 20 L37.3 14.7 L32 12 L37.3 9.3 Z" fill="#FFD66B"/>
+    <text x="66" y="31" fill="#FFFFFF" font-size="24" font-weight="750" letter-spacing="1.8">NOVANOVA STUDIO</text>
+  </g>
+
+  <!-- 标题区域 -->
+  <text x="800" y="148" fill="#FFFFFF" font-size="48" font-weight="800" text-anchor="middle">选择适合你的授权版本</text>
+  <text x="800" y="192" class="secondary-text" font-size="21" font-weight="500" text-anchor="middle">一次授权，长期使用 · 均支持商业使用与二次开发</text>
+
+  <!-- 开源授权版卡片 -->
+  <g filter="url(#cardShadow)">
+    <rect x="112" y="246" width="650" height="548" rx="32" fill="#151522" stroke="#343342" stroke-width="1.5"/>
+    <rect x="112" y="246" width="650" height="8" rx="4" fill="url(#openSourceGradient)"/>
+  </g>
+
+  <g transform="translate(158 286)">
+    <rect width="148" height="36" rx="18" fill="#272735"/>
+    <circle cx="20" cy="18" r="6" fill="#94A3B8"/>
+    <text x="35" y="24" fill="#D7D6DF" font-size="16" font-weight="650">自主开发之选</text>
+
+    <text x="0" y="92" fill="#FFFFFF" font-size="34" font-weight="780">开源授权版</text>
+    <text x="0" y="127" class="secondary-text" font-size="18">适合拥有开发与运维能力的团队</text>
+
+    <text x="0" y="204" fill="#FFFFFF" font-size="31" font-weight="700">¥</text>
+    <text x="38" y="204" fill="#FFFFFF" font-size="62" font-weight="850" letter-spacing="-2">19,800</text>
+    <text x="260" y="204" class="secondary-text" font-size="18">一次性费用</text>
+
+    <line x1="0" y1="242" x2="558" y2="242" stroke="#343342" stroke-width="1"/>
+
+    <!-- 功能清单 -->
+    <g transform="translate(0 281)">
+      <circle cx="13" cy="0" r="13" fill="#3B3B4D"/>
+      <path class="check-mark" d="M7 -1 L11 3 L19 -5"/>
+      <text x="40" y="7" class="body-text">正式商业使用授权</text>
+
+      <circle cx="13" cy="56" r="13" fill="#3B3B4D"/>
+      <path class="check-mark" d="M7 55 L11 59 L19 51"/>
+      <text x="40" y="63" class="body-text">完整源码，可自由二次开发</text>
+
+      <circle cx="13" cy="112" r="13" fill="#3B3B4D"/>
+      <path class="check-mark" d="M7 111 L11 115 L19 107"/>
+      <text x="40" y="119" class="body-text">提供专属正式授权文件</text>
+
+      <circle cx="13" cy="168" r="13" fill="#3B3B4D"/>
+      <path class="check-mark" d="M7 167 L11 171 L19 163"/>
+      <text x="40" y="175" class="body-text">自主部署、开发与维护</text>
+    </g>
+
+    <rect x="0" y="462" width="558" height="54" rx="15" fill="#20202C"/>
+    <text x="279" y="496" class="small-label" text-anchor="middle">有能力开发的老板 · 灵活自主</text>
+  </g>
+
+  <!-- 中间对比标识 -->
+  <g transform="translate(800 520)">
+    <circle r="31" fill="#211F2B" stroke="#4A4655" stroke-width="1.5"/>
+    <text x="0" y="7" fill="#C8C5D2" font-size="17" font-weight="750" text-anchor="middle">VS</text>
+  </g>
+
+  <!-- 企业版卡片 -->
+  <g filter="url(#enterpriseShadow)">
+    <rect x="838" y="230" width="650" height="580" rx="34" fill="#191523" stroke="url(#enterpriseGradient)" stroke-width="2"/>
+    <rect x="838" y="230" width="650" height="9" rx="4.5" fill="url(#enterpriseGradient)"/>
+  </g>
+
+  <!-- 推荐标签 -->
+  <g transform="translate(1283 211)">
+    <rect width="158" height="39" rx="19.5" fill="url(#enterpriseGradient)"/>
+    <path d="M20 10 L23 16 L29 19 L23 22 L20 28 L17 22 L11 19 L17 16 Z" fill="#FFE483"/>
+    <text x="40" y="26" fill="#FFFFFF" font-size="16" font-weight="750">推荐 · 拿来即用</text>
+  </g>
+
+  <g transform="translate(884 276)">
+    <rect width="153" height="36" rx="18" fill="#35213F" stroke="#794785" stroke-width="1"/>
+    <circle cx="20" cy="18" r="6" fill="#F472B6"/>
+    <text x="35" y="24" fill="#F1D9F5" font-size="16" font-weight="650">企业交付之选</text>
+
+    <text x="0" y="92" fill="#FFFFFF" font-size="34" font-weight="800">企业版</text>
+    <text x="0" y="127" fill="#C8B8CD" font-size="18">适合希望快速部署、直接运营的团队</text>
+
+    <text x="0" y="204" fill="#FFFFFF" font-size="31" font-weight="700">¥</text>
+    <text x="38" y="204" fill="url(#enterpriseGradient)" font-size="62" font-weight="850" letter-spacing="-2">98,000</text>
+    <text x="260" y="204" fill="#C8B8CD" font-size="18">一次性费用</text>
+
+    <line x1="0" y1="242" x2="558" y2="242" stroke="#403248" stroke-width="1"/>
+
+    <!-- 企业版功能清单 -->
+    <g transform="translate(0 281)">
+      <circle cx="13" cy="0" r="13" fill="url(#enterpriseGradient)"/>
+      <path class="check-mark" d="M7 -1 L11 3 L19 -5"/>
+      <text x="40" y="7" class="body-text">包含开源授权版全部能力</text>
+
+      <circle cx="13" cy="52" r="13" fill="url(#enterpriseGradient)"/>
+      <path class="check-mark" d="M7 51 L11 55 L19 47"/>
+      <text x="40" y="59" class="body-text">增强分布式微服务架构</text>
+
+      <circle cx="13" cy="104" r="13" fill="url(#enterpriseGradient)"/>
+      <path class="check-mark" d="M7 103 L11 107 L19 99"/>
+      <text x="40" y="111" class="body-text">增强支付与登录能力</text>
+
+      <circle cx="13" cy="156" r="13" fill="url(#enterpriseGradient)"/>
+      <path class="check-mark" d="M7 155 L11 159 L19 151"/>
+      <text x="40" y="163" class="body-text">商用、二开授权与正式合同</text>
+
+      <circle cx="13" cy="208" r="13" fill="url(#enterpriseGradient)"/>
+      <path class="check-mark" d="M7 207 L11 211 L19 203"/>
+      <text x="40" y="215" class="body-text">包含 1 年技术支持</text>
+    </g>
+
+    <!-- 可选维护服务 -->
+    <rect x="0" y="505" width="558" height="55" rx="16" fill="#2A1C31" stroke="#593661" stroke-width="1"/>
+    <text x="22" y="539" fill="#D9C7DE" font-size="17" font-weight="550">到期后可选维护服务</text>
+    <text x="535" y="540" fill="#FFFFFF" font-size="21" font-weight="780" text-anchor="end">¥12,800 / 年</text>
+  </g>
+
+  <!-- 底部说明 -->
+  <g transform="translate(112 850)">
+    <circle cx="8" cy="-5" r="4" fill="#8B5CF6"/>
+    <text x="24" y="1" fill="#8F8C9B" font-size="16">NOVANOVA STUDIO · AI Agent 驱动的视觉创作工作台</text>
+    <text x="1376" y="1" fill="#8F8C9B" font-size="15" text-anchor="end">具体服务范围以授权文件及正式合同为准</text>
+  </g>
+</svg>

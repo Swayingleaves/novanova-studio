@@ -55,8 +55,17 @@ public class CreditService {
     /** 邀请注册奖励流水类型 */
     public static final String TRANSACTION_INVITATION_REWARD = "invitation_reward";
 
+    /** 每日签到发放流水类型 */
+    public static final String TRANSACTION_DAILY_CHECK_IN = "daily_check_in";
+
+    /** 积分过期作废流水类型 */
+    public static final String TRANSACTION_CREDIT_EXPIRED = "credit_expired";
+
     /** 积分仓储 */
     private final CreditRepository creditRepository;
+
+    /** 会过期的积分发放批次服务 */
+    private final CreditGrantService creditGrantService;
 
     /** 模型配置服务，用于解析用户可见的模型展示名称 */
     private final PersistenceService persistenceService;
@@ -165,7 +174,7 @@ public class CreditService {
             return Mono.empty();
         }
         return creditRepository.claimTaskTransaction(userId, taskId, TRANSACTION_TASK_CHARGE, -credits, taskReason(taskType, "扣费"), generationSource)
-                .flatMap(transactionId -> creditRepository.changeBalance(userId, -credits)
+                .flatMap(transactionId -> creditGrantService.consumeCredits(userId, credits)
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分不足，无法创建生成任务")))
                         .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
                 .then();
@@ -208,7 +217,7 @@ public class CreditService {
         }
         String chargeReason = operationReason(operationName, "扣费", operationId);
         return creditRepository.claimOperationTransaction(userId, operationId, TRANSACTION_TASK_CHARGE, -credits, chargeReason)
-                .flatMap(transactionId -> creditRepository.changeBalance(userId, -credits)
+                .flatMap(transactionId -> creditGrantService.consumeCredits(userId, credits)
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分不足，无法执行" + operationName)))
                         .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
                 .then()
@@ -250,7 +259,10 @@ public class CreditService {
         if (changeAmount == 0) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "积分变动值不能为0"));
         }
-        return creditRepository.changeBalance(userId, changeAmount)
+        Mono<Integer> balanceChange = changeAmount > 0
+                ? creditRepository.changeBalance(userId, changeAmount)
+                : creditGrantService.consumeCredits(userId, -changeAmount);
+        return balanceChange
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分不足，无法完成扣减")))
                 .flatMap(balance -> creditRepository.createTransaction(userId, TRANSACTION_ADMIN_ADJUSTMENT, operatorUserId, changeAmount, balance, reason.trim())
                         .thenReturn(new CreditDtos.CreditBalanceResponse(userId, balance)))
@@ -292,7 +304,7 @@ public class CreditService {
      * @param startDate LocalDate 筛选起始日期
      * @param endDate LocalDate 筛选结束日期
      * @param direction String 变动方向：all 全部 / add 增加 / spend 消耗，可为空默认全部
-     * @param source String 来源筛选：image/video/task_refund/card_redeem/admin_adjustment/initial_grant/invitation_reward，可为空
+     * @param source String 来源筛选：image/video/task_refund/card_redeem/admin_adjustment/initial_grant/invitation_reward/daily_check_in/credit_expired，可为空
      * @param page int 页码
      * @param pageSize int 每页数量
      * @return Mono<UserCreditTransactionListResponse> 积分明细
@@ -320,25 +332,25 @@ public class CreditService {
     }
 
     /**
-     * 分页查询管理员可见的积分消耗明细。
+     * 分页查询管理员可见的积分明细（含增加与消耗）。
      *
      * @param userId Long 用户ID，可为空表示全部用户
      * @param startDate LocalDate 筛选起始日期
      * @param endDate LocalDate 筛选结束日期
-     * @param generationType String 图片或视频任务类型，可为空
+     * @param generationType String 生成类型筛选：image/video 表示只看对应生成任务的流水，可为空表示全部来源
      * @param page int 页码
      * @param pageSize int 每页数量
-     * @return Mono<AdminCreditTransactionListResponse> 积分消耗明细
+     * @return Mono<AdminCreditTransactionListResponse> 积分明细
      */
     public Mono<CreditDtos.AdminCreditTransactionListResponse> listAdminCreditTransactions(Long userId, LocalDate startDate, LocalDate endDate, String generationType, int page, int pageSize) {
         if (page < 1 || pageSize < 1 || pageSize > 100) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "分页参数不合法"));
         }
         return Mono.defer(() -> {
-            CreditRepository.CreditConsumptionQuery query = createConsumptionQuery(userId, startDate, endDate, generationType);
+            CreditRepository.UserCreditQuery query = createUserCreditQuery(userId, startDate, endDate, null, generationType);
             return Mono.zip(
                             creditRepository.listAdminCreditTransactions(query, page, pageSize).collectList(),
-                            creditRepository.countCreditTransactions(query))
+                            creditRepository.countAdminTransactions(query))
                     .map(result -> new CreditDtos.AdminCreditTransactionListResponse(result.getT1(), result.getT2()));
         });
     }
@@ -394,7 +406,7 @@ public class CreditService {
      * @param startDate LocalDate 筛选起始日期
      * @param endDate LocalDate 筛选结束日期
      * @param direction String 变动方向：all/add/spend
-     * @param source String 来源筛选：image/video/task_refund/card_redeem/admin_adjustment/initial_grant
+     * @param source String 来源筛选：image/video/task_refund/card_redeem/admin_adjustment/initial_grant/invitation_reward/daily_check_in/credit_expired
      * @return UserCreditQuery 已校验的查询条件
      */
     private CreditRepository.UserCreditQuery createUserCreditQuery(Long userId, LocalDate startDate, LocalDate endDate, String direction, String source) {
@@ -404,7 +416,7 @@ public class CreditService {
         if (direction != null && !List.of("all", "add", "spend").contains(direction)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "积分方向仅支持all、add或spend");
         }
-        if (source != null && !List.of("image", "video", "task_refund", "card_redeem", "admin_adjustment", "initial_grant", "invitation_reward").contains(source)) {
+        if (source != null && !List.of("image", "video", "task_refund", "card_redeem", "admin_adjustment", "initial_grant", "invitation_reward", TRANSACTION_DAILY_CHECK_IN, TRANSACTION_CREDIT_EXPIRED).contains(source)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "积分来源筛选不合法");
         }
         OffsetDateTime startAt = startDate.atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime();

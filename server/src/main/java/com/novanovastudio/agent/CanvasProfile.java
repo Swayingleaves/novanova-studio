@@ -17,6 +17,7 @@ import com.novanovastudio.service.SystemPromptTemplateService;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
@@ -26,6 +27,7 @@ import reactor.core.publisher.Mono;
  * 工具含画布操作（canvas_get_state、canvas_apply_ops 等）和内容生成工具；
  * 所有画布写入及生成操作均通过 SSE 转发到前端执行。
  */
+@Slf4j
 @Component
 public class CanvasProfile implements AgentLoopProfile {
 
@@ -34,15 +36,21 @@ public class CanvasProfile implements AgentLoopProfile {
     /** 系统提示词模板服务 */
     private final SystemPromptTemplateService systemPromptTemplateService;
 
+    /** 画布快照裁剪器，避免完整快照原样发给大模型 */
+    private final CanvasSnapshotCompactor canvasSnapshotCompactor;
+
     /**
      * 创建画布Agent Profile。
      *
      * @param toolRegistry Agent工具注册表
      * @param systemPromptTemplateService SystemPromptTemplateService 系统提示词模板服务
+     * @param canvasSnapshotCompactor CanvasSnapshotCompactor 画布快照裁剪器
      */
-    public CanvasProfile(AgentToolRegistry toolRegistry, SystemPromptTemplateService systemPromptTemplateService) {
+    public CanvasProfile(AgentToolRegistry toolRegistry, SystemPromptTemplateService systemPromptTemplateService,
+                          CanvasSnapshotCompactor canvasSnapshotCompactor) {
         this.toolRegistry = toolRegistry;
         this.systemPromptTemplateService = systemPromptTemplateService;
+        this.canvasSnapshotCompactor = canvasSnapshotCompactor;
     }
 
     /**
@@ -112,11 +120,16 @@ public class CanvasProfile implements AgentLoopProfile {
                 messages.add(new AiMessage(message.role(), message.text() != null ? message.text() : ""));
             }
         }
-        // 将当前画布快照作为上下文注入用户消息
+        // 将裁剪后的画布快照作为上下文注入用户消息，避免签名URL、存储元数据等大字段消耗token
         String userMsg = request.message();
         if (request.canvasSnapshot() != null && !request.canvasSnapshot().isEmpty()) {
-            userMsg += "\n当前画布JSON:\n" +
-                com.alibaba.fastjson2.JSON.toJSONString(request.canvasSnapshot());
+            Map<String, Object> compactedSnapshot = canvasSnapshotCompactor.compact(request.canvasSnapshot());
+            String compactedSnapshotJson = com.alibaba.fastjson2.JSON.toJSONString(compactedSnapshot);
+            Object originalNodes = request.canvasSnapshot().get("nodes");
+            int originalNodeCount = originalNodes instanceof List<?> nodes ? nodes.size() : 0;
+            log.info("画布Agent画布快照裁剪完成: nodeCount={}, compactedLength={}",
+                    originalNodeCount, compactedSnapshotJson.length());
+            userMsg += "\n当前画布JSON:\n" + compactedSnapshotJson;
         }
         messages.add(new AiMessage("user", userMsg));
         return Mono.just(messages);

@@ -56,7 +56,7 @@ import { CreditCardManagement } from "./components/credit-card-management";
 import { ApiLogsManagement } from "./components/api-logs-management";
 import { GenerationStyleCover } from "@/features/generation/components/generation-style-picker";
 import { uploadImage } from "@/features/storage/services/image-storage";
-import { CREDIT_TRANSACTION_PAGE_SIZE, formatCredits, formatCreditTime, generationSourceLabel, generationTypeLabel, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
+import { CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactionIcon, creditTransactionTypeLabel, formatCreditChange, formatCredits, formatCreditTime, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
 
 const PAGE_SIZE = 20;
 
@@ -95,7 +95,7 @@ export default function AdminSystemPage() {
                     defaultActiveKey="users"
                     items={[
                         { key: "users", label: "用户管理", children: <UserManagement /> },
-                        { key: "credits", label: "积分消耗", children: <CreditConsumptionManagement /> },
+                        { key: "credits", label: "积分明细", children: <CreditConsumptionManagement /> },
                         { key: "creditCards", label: "卡密管理", children: <CreditCardManagement /> },
                         { key: "notifications", label: "消息管理", children: <NotificationManagement /> },
                         { key: "prompts", label: "提示词库", children: <PromptManagement /> },
@@ -122,38 +122,33 @@ const ADMIN_CREDIT_COLUMNS: ColumnsType<ServerAdminCreditTransaction> = [
         ),
     },
     {
-        title: "生成类型",
-        dataIndex: "generationType",
+        title: "类型",
+        dataIndex: "transactionType",
         width: 132,
-        render: (generationType: ServerAdminCreditTransaction["generationType"]) => {
-            const Icon = generationType === "video" ? Video : ImageIcon;
-            return (
-                <span className="inline-flex items-center gap-2 text-[var(--studio-text)]">
-                    <Icon className="size-4 text-[var(--studio-primary)]" />
-                    {generationTypeLabel(generationType)}
-                </span>
-            );
+        render: (transactionType: ServerAdminCreditTransaction["transactionType"], record) => {
+            const Icon = creditTransactionIcon(record);
+            return <span className="inline-flex items-center gap-2 text-[var(--studio-text)]"><Icon className="size-4 text-[var(--studio-primary)]" />{creditTransactionTypeLabel(transactionType)}</span>;
         },
     },
     {
-        title: "模型",
-        dataIndex: "model",
-        width: 220,
+        title: "详情",
+        dataIndex: "reason",
         ellipsis: true,
-        render: (model: string) => <span className="font-mono text-xs text-[var(--studio-text)]">{model}</span>,
+        render: (_, record) => <span className="text-[var(--studio-muted)]">{creditTransactionDetail(record.transactionType, record.generationType, record.model, record.reason)}</span>,
     },
     {
-        title: "来源",
-        dataIndex: "generationSource",
-        width: 128,
-        render: (generationSource: ServerAdminCreditTransaction["generationSource"]) => <span className="text-[var(--studio-muted)]">{generationSourceLabel(generationSource)}</span>,
-    },
-    {
-        title: "消耗积分",
-        dataIndex: "consumedCredits",
+        title: "积分变动",
+        dataIndex: "changeAmount",
         width: 128,
         align: "right",
-        render: (consumedCredits: number) => <span className="font-medium tabular-nums text-[var(--studio-ink)]">-{formatCredits(consumedCredits)}</span>,
+        render: (changeAmount: number) => <span className={`font-medium tabular-nums ${changeAmount > 0 ? "text-[var(--studio-primary)]" : "text-[var(--studio-ink)]"}`}>{formatCreditChange(changeAmount)}</span>,
+    },
+    {
+        title: "余额快照",
+        dataIndex: "balanceAfter",
+        width: 128,
+        align: "right",
+        render: (balanceAfter: number) => <span className="tabular-nums text-[var(--studio-muted)]">{formatCredits(balanceAfter)}</span>,
     },
     {
         title: "时间",
@@ -164,9 +159,9 @@ const ADMIN_CREDIT_COLUMNS: ColumnsType<ServerAdminCreditTransaction> = [
 ];
 
 /**
- * 渲染管理员积分消耗统计与明细。
+ * 渲染管理员积分统计与明细。
  *
- * @return 积分消耗管理内容
+ * @return 积分明细管理内容
  */
 function CreditConsumptionManagement() {
     const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")]);
@@ -329,9 +324,9 @@ function CreditConsumptionManagement() {
                 <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                     <div>
                         <h2 id="admin-credit-transactions-title" className="text-base font-semibold text-[var(--studio-ink)]">
-                            积分消耗明细
+                            积分明细
                         </h2>
-                        <p className="mt-1 text-sm text-[var(--studio-muted)]">{selectedUser ? `${adminCreditUserLabel(selectedUser)}最近使用的积分记录` : "所有用户最近使用的积分记录"}</p>
+                        <p className="mt-1 text-sm text-[var(--studio-muted)]">{selectedUser ? `${adminCreditUserLabel(selectedUser)}的积分记录` : "所有用户的积分记录"}，包含消耗、退款、充值、签到等全部积分变动</p>
                     </div>
                     <span className="text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} 条记录</span>
                 </div>
@@ -342,7 +337,7 @@ function CreditConsumptionManagement() {
                     loading={transactionsQuery.isLoading}
                     pagination={false}
                     scroll={{ x: 1_100 }}
-                    locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="所选范围没有积分消耗记录" /> }}
+                    locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="所选范围没有积分记录" /> }}
                 />
                 {transactions && transactions.total > CREDIT_TRANSACTION_PAGE_SIZE ? (
                     <div className="mt-5 flex justify-end">

@@ -96,6 +96,9 @@ public class UserService {
     /** 邮件品牌名称 */
     private static final String MAIL_BRAND_NAME = "Novanova Studio";
 
+    /** 邮件品牌图标地址，邮件客户端不渲染SVG，必须指向公网可访问的位图 */
+    private static final String MAIL_BRAND_LOGO_URL = "https://www.novanovastudio.cn/logo/novanovastudio-108x108.png";
+
     /** 用户仓储 */
     private final UserRepository userRepository;
 
@@ -826,7 +829,12 @@ public class UserService {
                             <td align="center" style="padding:40px 16px;">
                                 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%%" style="max-width:640px;background-color:#f3f5f8;border-radius:12px;overflow:hidden;">
                                     <tr>
-                                        <td align="center" style="padding:28px 24px 20px;font-size:18px;font-weight:700;color:#223046;">
+                                        <td align="center" style="padding:32px 24px 0;">
+                                            <img src="%s" alt="%s" width="56" height="56" style="display:block;width:56px;height:56px;border:0;outline:none;">
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td align="center" style="padding:16px 24px 20px;font-size:18px;font-weight:700;color:#223046;">
                                             %s 重置密码
                                         </td>
                                     </tr>
@@ -864,7 +872,7 @@ public class UserService {
                     </table>
                 </body>
                 </html>
-                """.formatted(MAIL_BRAND_NAME, MAIL_BRAND_NAME, MAIL_BRAND_NAME, resetUrl, PASSWORD_RESET_TOKEN_EXPIRE_MINUTES);
+                """.formatted(MAIL_BRAND_NAME, MAIL_BRAND_LOGO_URL, MAIL_BRAND_NAME, MAIL_BRAND_NAME, MAIL_BRAND_NAME, resetUrl, PASSWORD_RESET_TOKEN_EXPIRE_MINUTES);
     }
 
     /**
@@ -918,7 +926,12 @@ public class UserService {
                             <td align="center" style="padding:40px 16px;">
                                 <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%%" style="max-width:960px;background-color:#f3f5f8;border-radius:12px;overflow:hidden;">
                                     <tr>
-                                        <td align="center" style="padding:28px 24px 20px;font-size:18px;font-weight:700;color:#223046;">
+                                        <td align="center" style="padding:32px 24px 0;">
+                                            <img src="%s" alt="%s" width="56" height="56" style="display:block;width:56px;height:56px;border:0;outline:none;">
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td align="center" style="padding:16px 24px 20px;font-size:18px;font-weight:700;color:#223046;">
                                             %s 登录验证码
                                         </td>
                                     </tr>
@@ -961,7 +974,7 @@ public class UserService {
                     </table>
                 </body>
                 </html>
-                """.formatted(MAIL_BRAND_NAME, MAIL_BRAND_NAME, MAIL_BRAND_NAME, code, EMAIL_CODE_EXPIRE_MINUTES);
+                """.formatted(MAIL_BRAND_NAME, MAIL_BRAND_LOGO_URL, MAIL_BRAND_NAME, MAIL_BRAND_NAME, MAIL_BRAND_NAME, code, EMAIL_CODE_EXPIRE_MINUTES);
     }
 
     /**

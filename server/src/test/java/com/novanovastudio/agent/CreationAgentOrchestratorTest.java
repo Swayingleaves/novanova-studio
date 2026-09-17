@@ -441,6 +441,7 @@ class CreationAgentOrchestratorTest {
                 mock(SkillService.class),
                 mock(PersistenceService.class),
                 new AgentToolRegistry(),
+                new CanvasSnapshotCompactor(),
                 mock(CreationAgentRequestRepository.class),
                 mock(CreationAgentRequestDispatcher.class),
                 mock(CreationAgentRequestQueue.class));
@@ -478,6 +479,7 @@ class CreationAgentOrchestratorTest {
                 mock(SkillService.class),
                 mock(PersistenceService.class),
                 new AgentToolRegistry(),
+                new CanvasSnapshotCompactor(),
                 requestRepository,
                 requestDispatcher,
                 requestQueue);

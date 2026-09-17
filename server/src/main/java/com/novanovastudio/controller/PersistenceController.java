@@ -5,11 +5,13 @@ import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.ApiResponse;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.dto.CheckInDtos;
 import com.novanovastudio.dto.CreditDtos;
 import com.novanovastudio.dto.InvitationDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.security.RequireRole;
+import com.novanovastudio.service.CheckInService;
 import com.novanovastudio.service.CreditService;
 import com.novanovastudio.service.PersistenceService;
 import jakarta.validation.Valid;
@@ -43,6 +45,9 @@ public class PersistenceController {
 
     /** 积分服务 */
     private final CreditService creditService;
+
+    /** 签到服务 */
+    private final CheckInService checkInService;
 
     /**
      * 查询积分设置。
@@ -89,6 +94,30 @@ public class PersistenceController {
     public Mono<ApiResponse<InvitationDtos.InvitationRewardSettingsResponse>> updateInvitationRewardSettings(
             @Valid @RequestBody InvitationDtos.UpdateInvitationRewardSettingsRequest request) {
         return creditService.updateInvitationRewardSettings(request).map(ApiResponse::ok);
+    }
+
+    /**
+     * 查询签到积分设置。
+     *
+     * @return Mono<ApiResponse<CheckInRewardSettingsResponse>> 签到积分设置
+     */
+    @GetMapping("/config/checkIn/getCheckInRewardSettings")
+    @RequireRole("admin")
+    public Mono<ApiResponse<CheckInDtos.CheckInRewardSettingsResponse>> getCheckInRewardSettings() {
+        return checkInService.getRewardSettings().map(ApiResponse::ok);
+    }
+
+    /**
+     * 更新签到积分设置。
+     *
+     * @param request UpdateCheckInRewardSettingsRequest 签到积分设置请求
+     * @return Mono<ApiResponse<CheckInRewardSettingsResponse>> 保存后的签到积分设置
+     */
+    @PostMapping("/config/checkIn/updateCheckInRewardSettings")
+    @RequireRole("admin")
+    public Mono<ApiResponse<CheckInDtos.CheckInRewardSettingsResponse>> updateCheckInRewardSettings(
+            @Valid @RequestBody CheckInDtos.UpdateCheckInRewardSettingsRequest request) {
+        return checkInService.updateRewardSettings(request).map(ApiResponse::ok);
     }
 
     /**

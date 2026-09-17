@@ -63,15 +63,15 @@ public class AdminCreditController {
     }
 
     /**
-     * 分页查询管理员可见的积分消耗明细。
+     * 分页查询管理员可见的积分明细（含消耗、充值与签到等全部变动）。
      *
      * @param userId Long 用户ID，可为空表示全部用户
      * @param startDate LocalDate 筛选起始日期
      * @param endDate LocalDate 筛选结束日期
-     * @param generationType String 图片或视频任务类型，可为空
+     * @param generationType String 生成类型筛选：image/video 表示只看对应生成任务的流水，可为空表示全部来源
      * @param page int 页码
      * @param pageSize int 每页数量
-     * @return Mono<ApiResponse<AdminCreditTransactionListResponse>> 积分消耗明细
+     * @return Mono<ApiResponse<AdminCreditTransactionListResponse>> 积分明细
      */
     @GetMapping("/listCreditTransactions")
     public Mono<ApiResponse<CreditDtos.AdminCreditTransactionListResponse>> listCreditTransactions(

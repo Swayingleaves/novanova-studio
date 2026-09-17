@@ -80,6 +80,160 @@ public class CreditRepository {
     }
 
     /**
+     * 查询每日签到积分。
+     *
+     * @return Mono<Integer> 每日签到积分
+     */
+    public Mono<Integer> getCheckInCredits() {
+        return databaseClient.sql("SELECT check_in_credits FROM platform_credit_settings WHERE id = 1")
+                .map((row, metadata) -> row.get("check_in_credits", Integer.class))
+                .one();
+    }
+
+    /**
+     * 更新每日签到积分。
+     *
+     * @param checkInCredits int 每日签到积分
+     * @return Mono<Void> 操作完成信号
+     */
+    public Mono<Void> updateCheckInCredits(int checkInCredits) {
+        return databaseClient.sql("UPDATE platform_credit_settings SET check_in_credits = :credits, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
+                .bind("credits", checkInCredits)
+                .fetch().rowsUpdated().then();
+    }
+
+    /**
+     * 查询用户可用积分余额。
+     *
+     * @param userId Long 用户ID
+     * @return Mono<Integer> 可用积分余额，账户不存在时为空
+     */
+    public Mono<Integer> getCreditBalance(Long userId) {
+        return databaseClient.sql("SELECT credit_balance FROM user_credit_accounts WHERE user_id = :userId")
+                .bind("userId", userId)
+                .map((row, metadata) -> row.get("credit_balance", Integer.class))
+                .one();
+    }
+
+    /**
+     * 写入会过期的积分发放批次。
+     *
+     * @param userId Long 用户ID
+     * @param sourceType String 发放来源流水类型
+     * @param sourceRef String 来源业务ID，可为null
+     * @param grantedAmount int 发放积分总数
+     * @param expiresAt OffsetDateTime 过期时间
+     * @return Mono<Long> 新批次ID
+     */
+    public Mono<Long> createExpiringGrant(Long userId, String sourceType, String sourceRef, int grantedAmount, OffsetDateTime expiresAt) {
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
+                INSERT INTO user_credit_grants(user_id, source_type, source_ref, granted_amount, remaining_amount, expires_at)
+                VALUES (:userId, :sourceType, :sourceRef, :grantedAmount, :grantedAmount, :expiresAt)
+                RETURNING id
+                """)
+                .bind("userId", userId)
+                .bind("sourceType", sourceType)
+                .bind("grantedAmount", grantedAmount)
+                .bind("expiresAt", expiresAt);
+        return R2dbcBindings.bindNullable(spec, "sourceRef", sourceRef, String.class)
+                .map((row, metadata) -> row.get("id", Long.class))
+                .one();
+    }
+
+    /**
+     * 加行锁查询用户所有仍有剩余额度的过期批次。
+     * <p>
+     * 必须由调用方在同一事务内使用，持有行锁后再按到期时间顺序扣减或清零。
+     *
+     * @param userId Long 用户ID
+     * @return Flux<ExpiringGrant> 未耗尽的批次，按到期时间升序
+     */
+    public Flux<ExpiringGrant> listActiveGrantsForUpdate(Long userId) {
+        return databaseClient.sql("""
+                SELECT id, remaining_amount, expires_at
+                FROM user_credit_grants
+                WHERE user_id = :userId
+                  AND remaining_amount > 0
+                ORDER BY expires_at ASC, id ASC
+                FOR UPDATE
+                """)
+                .bind("userId", userId)
+                .map((row, metadata) -> new ExpiringGrant(
+                        row.get("id", Long.class),
+                        row.get("remaining_amount", Integer.class),
+                        row.get("expires_at", OffsetDateTime.class)))
+                .all();
+    }
+
+    /**
+     * 扣减指定过期批次的剩余额度。
+     *
+     * @param grantId Long 批次ID
+     * @param amount int 本次扣减额度
+     * @return Mono<Long> 生效行数，额度不足时为0
+     */
+    public Mono<Long> consumeGrant(Long grantId, int amount) {
+        return databaseClient.sql("""
+                UPDATE user_credit_grants
+                SET remaining_amount = remaining_amount - :amount, updated_at = CURRENT_TIMESTAMP
+                WHERE id = :grantId AND remaining_amount >= :amount
+                """)
+                .bind("grantId", grantId)
+                .bind("amount", amount)
+                .fetch().rowsUpdated();
+    }
+
+    /**
+     * 清零指定过期批次的剩余额度。
+     *
+     * @param grantId Long 批次ID
+     * @return Mono<Long> 生效行数
+     */
+    public Mono<Long> clearGrant(Long grantId) {
+        return databaseClient.sql("""
+                UPDATE user_credit_grants
+                SET remaining_amount = 0, updated_at = CURRENT_TIMESTAMP
+                WHERE id = :grantId AND remaining_amount > 0
+                """)
+                .bind("grantId", grantId)
+                .fetch().rowsUpdated();
+    }
+
+    /**
+     * 查询存在已过期且未清零批次的用户ID。
+     * <p>
+     * 供每小时兜底清理使用，按用户维度逐个加锁处理。
+     *
+     * @param now OffsetDateTime 判定时刻
+     * @param limit int 单次处理用户数上限
+     * @return Flux<Long> 用户ID
+     */
+    public Flux<Long> listExpiredGrantUserIds(OffsetDateTime now, int limit) {
+        return databaseClient.sql("""
+                SELECT DISTINCT user_id
+                FROM user_credit_grants
+                WHERE remaining_amount > 0
+                  AND expires_at <= :now
+                ORDER BY user_id
+                LIMIT :limit
+                """)
+                .bind("now", now)
+                .bind("limit", limit)
+                .map((row, metadata) -> row.get("user_id", Long.class))
+                .all();
+    }
+
+    /**
+     * 会过期的积分发放批次。
+     *
+     * @param id Long 批次ID
+     * @param remainingAmount int 剩余可用额度
+     * @param expiresAt OffsetDateTime 过期时间
+     */
+    public record ExpiringGrant(Long id, int remainingAmount, OffsetDateTime expiresAt) {
+    }
+
+    /**
      * 更新新用户初始积分。
      *
      * @param initialCredits int 新用户初始积分
@@ -412,55 +566,67 @@ public class CreditRepository {
     }
 
     /**
-     * 分页查询管理员可见的实际积分消耗明细。
+     * 分页查询管理员可见的统一积分流水明细（含增加与消耗）。
      *
-     * @param query CreditConsumptionQuery 消耗查询条件
+     * @param query UserCreditQuery 查询条件，用户ID为空表示全部用户
      * @param page int 页码
      * @param pageSize int 每页数量
-     * @return Flux<AdminCreditTransactionItem> 当前页积分消耗明细
+     * @return Flux<AdminCreditTransactionItem> 当前页积分明细
      */
-    public Flux<CreditDtos.AdminCreditTransactionItem> listAdminCreditTransactions(CreditConsumptionQuery query, int page, int pageSize) {
+    public Flux<CreditDtos.AdminCreditTransactionItem> listAdminCreditTransactions(UserCreditQuery query, int page, int pageSize) {
         String sql = """
                 SELECT credit_transactions.id,
                        credit_transactions.user_id,
                        users.username,
                        users.nickname,
                        users.email,
-                       tasks.task_type AS generation_type,
-                       COALESCE(NULLIF(tasks.model, ''), '未记录模型') AS model,
+                       credit_transactions.transaction_type,
                        credit_transactions.generation_source,
-                       -credit_transactions.change_amount AS consumed_credits,
-                       credit_transactions.created_at
-                """ + consumptionQuery(query) + """
+                       credit_transactions.change_amount,
+                       credit_transactions.balance_after,
+                       credit_transactions.reason,
+                       credit_transactions.invited_user_id,
+                       credit_transactions.created_at,
+                       tasks.task_type AS generation_type,
+                       tasks.model AS model
+                """ + adminTransactionQuery(query) + """
                 ORDER BY credit_transactions.created_at DESC, credit_transactions.id DESC
                 LIMIT :limit OFFSET :offset
                 """;
-        return bindConsumptionQuery(databaseClient.sql(sql), query)
+        return bindUserTransactionQuery(databaseClient.sql(sql), query)
                 .bind("limit", pageSize)
                 .bind("offset", (page - 1) * pageSize)
-                .map((row, metadata) -> new CreditDtos.AdminCreditTransactionItem(
-                        row.get("id", Long.class),
-                        row.get("user_id", Long.class),
-                        row.get("username", String.class),
-                        row.get("nickname", String.class),
-                        row.get("email", String.class),
-                        row.get("generation_type", String.class),
-                        row.get("model", String.class),
-                        row.get("generation_source", String.class),
-                        row.get("consumed_credits", Long.class),
-                        row.get("created_at", OffsetDateTime.class).toString()))
+                .map((row, metadata) -> {
+                    int changeAmount = row.get("change_amount", Integer.class);
+                    return new CreditDtos.AdminCreditTransactionItem(
+                            row.get("id", Long.class),
+                            row.get("user_id", Long.class),
+                            row.get("username", String.class),
+                            row.get("nickname", String.class),
+                            row.get("email", String.class),
+                            row.get("transaction_type", String.class),
+                            changeAmount > 0 ? "add" : "spend",
+                            row.get("generation_type", String.class),
+                            row.get("model", String.class),
+                            row.get("generation_source", String.class),
+                            (long) changeAmount,
+                            row.get("reason", String.class),
+                            (long) row.get("balance_after", Integer.class),
+                            row.get("invited_user_id", Long.class),
+                            row.get("created_at", OffsetDateTime.class).toString());
+                })
                 .all();
     }
 
     /**
-     * 查询实际积分消耗明细总数。
+     * 查询管理员可见的统一积分流水明细总数。
      *
-     * @param query CreditConsumptionQuery 消耗查询条件
+     * @param query UserCreditQuery 查询条件，用户ID为空表示全部用户
      * @return Mono<Long> 符合条件的明细总数
      */
-    public Mono<Long> countCreditTransactions(CreditConsumptionQuery query) {
-        String sql = "SELECT COUNT(*) AS total " + consumptionQuery(query);
-        return bindConsumptionQuery(databaseClient.sql(sql), query)
+    public Mono<Long> countAdminTransactions(UserCreditQuery query) {
+        String sql = "SELECT COUNT(*) AS total " + adminTransactionQuery(query);
+        return bindUserTransactionQuery(databaseClient.sql(sql), query)
                 .map((row, metadata) -> row.get("total", Long.class))
                 .one();
     }
@@ -536,6 +702,15 @@ public class CreditRepository {
               AND credit_transactions.created_at < :endAt
             """;
 
+    /** 管理员统一积分明细基础查询条件，关联用户信息且不强制指定用户。 */
+    private static final String ADMIN_TRANSACTION_QUERY = """
+            FROM user_credit_transactions credit_transactions
+            LEFT JOIN ai_generation_tasks tasks ON tasks.id = credit_transactions.task_id
+            JOIN users users ON users.id = credit_transactions.user_id
+            WHERE credit_transactions.created_at >= :startAt
+              AND credit_transactions.created_at < :endAt
+            """;
+
     /**
      * 生成用户统一积分明细查询SQL。
      *
@@ -543,7 +718,31 @@ public class CreditRepository {
      * @return String 固定字段与受控筛选组成的SQL
      */
     static String userTransactionQuery(UserCreditQuery query) {
-        StringBuilder sql = new StringBuilder(USER_TRANSACTION_QUERY);
+        return transactionQuery(new StringBuilder(USER_TRANSACTION_QUERY), query);
+    }
+
+    /**
+     * 生成管理员统一积分明细查询SQL。
+     *
+     * @param query UserCreditQuery 查询条件，用户ID为空表示全部用户
+     * @return String 固定字段与受控筛选组成的SQL
+     */
+    static String adminTransactionQuery(UserCreditQuery query) {
+        StringBuilder sql = new StringBuilder(ADMIN_TRANSACTION_QUERY);
+        if (query.userId() != null) {
+            sql.append(" AND credit_transactions.user_id = :userId\n");
+        }
+        return transactionQuery(sql, query);
+    }
+
+    /**
+     * 追加统一积分明细的公共筛选条件。
+     *
+     * @param sql StringBuilder 已包含基础查询条件的SQL
+     * @param query UserCreditQuery 查询条件
+     * @return String 追加筛选后的SQL
+     */
+    private static String transactionQuery(StringBuilder sql, UserCreditQuery query) {
         if ("add".equals(query.direction())) {
             sql.append(" AND credit_transactions.change_amount > 0\n");
         } else if ("spend".equals(query.direction())) {
@@ -572,9 +771,11 @@ public class CreditRepository {
      */
     private DatabaseClient.GenericExecuteSpec bindUserTransactionQuery(DatabaseClient.GenericExecuteSpec spec, UserCreditQuery query) {
         DatabaseClient.GenericExecuteSpec boundSpec = spec
-                .bind("userId", query.userId())
                 .bind("startAt", query.startAt())
                 .bind("endAt", query.endAt());
+        if (query.userId() != null) {
+            boundSpec = boundSpec.bind("userId", query.userId());
+        }
         return query.source() == null ? boundSpec : boundSpec.bind("source", query.source());
     }
 

@@ -38,11 +38,13 @@ import {
     deleteModelConfig,
     deleteObjectStorage as deleteServerObjectStorage,
     getCreditSettings,
+    getCheckInRewardSettings,
     getInvitationRewardSettings,
     refreshChannelModels as refreshServerChannelModels,
     setDefaultModel,
     setDefaultObjectStorage as setServerDefaultObjectStorage,
     updateChannel as updateServerChannel,
+    updateCheckInRewardSettings,
     updateCreditSettings,
     updateInvitationRewardSettings,
     updateModelConfig,
@@ -169,6 +171,8 @@ export function AppConfigModal() {
     const [draftInitialCredits, setDraftInitialCredits] = useState(100);
     const [invitationRewardBaseline, setInvitationRewardBaseline] = useState(0);
     const [draftInvitationRewardCredits, setDraftInvitationRewardCredits] = useState(0);
+    const [checkInBaseline, setCheckInBaseline] = useState(0);
+    const [draftCheckInCredits, setDraftCheckInCredits] = useState(0);
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
     const [collapsedEditingCapabilities, setCollapsedEditingCapabilities] = useState<string[]>([]);
@@ -218,14 +222,16 @@ export function AppConfigModal() {
         initializedRef.current = true;
         setDraftsReady(false);
         let active = true;
-        void Promise.all([refreshModelConfiguration(), refreshObjectStorages(), getCreditSettings(), getInvitationRewardSettings()])
-            .then(([, , creditSettings, invitationRewardSettings]) => {
+        void Promise.all([refreshModelConfiguration(), refreshObjectStorages(), getCreditSettings(), getInvitationRewardSettings(), getCheckInRewardSettings()])
+            .then(([, , creditSettings, invitationRewardSettings, checkInSettings]) => {
                 if (!active) return;
                 resetAllDrafts();
                 setCreditBaseline(creditSettings.initialCredits);
                 setDraftInitialCredits(creditSettings.initialCredits);
                 setInvitationRewardBaseline(invitationRewardSettings.invitationRewardCredits);
                 setDraftInvitationRewardCredits(invitationRewardSettings.invitationRewardCredits);
+                setCheckInBaseline(checkInSettings.checkInCredits);
+                setDraftCheckInCredits(checkInSettings.checkInCredits);
                 setDraftsReady(true);
             })
             .catch(() => {
@@ -249,7 +255,8 @@ export function AppConfigModal() {
     const objectStoragesDirty = !sameValue(draftObjectStorages, objectStorageBaseline);
     const creditsDirty = draftInitialCredits !== creditBaseline;
     const invitationRewardDirty = draftInvitationRewardCredits !== invitationRewardBaseline;
-    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty;
+    const checkInDirty = draftCheckInCredits !== checkInBaseline;
+    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty;
     const isSaving = Boolean(savingTab);
 
     const updateDraftChannel = (id: string, patch: Partial<ModelChannel>) => {
@@ -527,6 +534,20 @@ export function AppConfigModal() {
             message.success("邀请奖励设置已保存");
         } catch (error) {
             message.error(error instanceof Error ? error.message : "保存邀请奖励设置失败");
+        } finally {
+            setSavingTab("");
+        }
+    };
+
+    const saveCheckInRewardSettings = async () => {
+        setSavingTab("checkIn");
+        try {
+            const settings = await updateCheckInRewardSettings({ checkInCredits: draftCheckInCredits });
+            setCheckInBaseline(settings.checkInCredits);
+            setDraftCheckInCredits(settings.checkInCredits);
+            message.success("签到积分设置已保存");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "保存签到积分设置失败");
         } finally {
             setSavingTab("");
         }
@@ -926,6 +947,40 @@ export function AppConfigModal() {
                                                 disabled={!invitationRewardDirty || isSaving}
                                                 loading={savingTab === "invitationReward"}
                                                 onClick={() => void saveInvitationRewardSettings()}
+                                            >
+                                                保存
+                                            </Button>
+                                        </div>
+                                    </div>
+                                </Form>
+                            ),
+                        },
+                        {
+                            key: "checkIn",
+                            label: "签到积分",
+                            children: (
+                                <Form layout="vertical" requiredMark={false} className="max-w-xl">
+                                    <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
+                                        <div className="text-sm font-semibold">每日签到积分</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">
+                                            用户每天签到一次即可获得该积分；签到积分自签到起 24 小时内有效，到期未使用的部分自动作废。设置为 0 表示仍可签到但不发放积分。
+                                        </div>
+                                        <div className="mt-5 flex flex-wrap items-end gap-3">
+                                            <Form.Item label="每日签到积分" className="mb-0">
+                                                <InputNumber
+                                                    min={0}
+                                                    precision={0}
+                                                    value={draftCheckInCredits}
+                                                    disabled={isSaving}
+                                                    className="w-40"
+                                                    onChange={(value) => setDraftCheckInCredits(Math.max(0, Number(value) || 0))}
+                                                />
+                                            </Form.Item>
+                                            <Button
+                                                type="primary"
+                                                disabled={!checkInDirty || isSaving}
+                                                loading={savingTab === "checkIn"}
+                                                onClick={() => void saveCheckInRewardSettings()}
                                             >
                                                 保存
                                             </Button>

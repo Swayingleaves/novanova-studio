@@ -155,4 +155,46 @@ class CreditRepositoryTest {
         Assertions.assertTrue(sql.contains("tasks.task_type = :source"));
         Assertions.assertFalse(sql.contains("credit_transactions.transaction_type = :source"));
     }
+
+    /**
+     * 管理员明细查询未指定用户时应覆盖全部用户并关联用户信息。
+     */
+    @Test
+    void shouldOmitUserConditionForAllUserAdminTransactionQuery() {
+        CreditRepository.UserCreditQuery query = new CreditRepository.UserCreditQuery(
+                null,
+                LocalDate.of(2026, 7, 1),
+                LocalDate.of(2026, 7, 1),
+                OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                OffsetDateTime.of(2026, 7, 2, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                null,
+                null);
+
+        String sql = CreditRepository.adminTransactionQuery(query);
+
+        Assertions.assertTrue(sql.contains("JOIN users users ON users.id = credit_transactions.user_id"));
+        Assertions.assertFalse(sql.contains(":userId"));
+        Assertions.assertFalse(sql.contains("transaction_type = 'task_charge'"));
+    }
+
+    /**
+     * 管理员明细查询指定用户且按签到来源筛选时应限定用户与流水类型。
+     */
+    @Test
+    void shouldLimitAdminTransactionQueryToSelectedUserAndSource() {
+        CreditRepository.UserCreditQuery query = new CreditRepository.UserCreditQuery(
+                8L,
+                LocalDate.of(2026, 7, 1),
+                LocalDate.of(2026, 7, 1),
+                OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                OffsetDateTime.of(2026, 7, 2, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                null,
+                "daily_check_in");
+
+        String sql = CreditRepository.adminTransactionQuery(query);
+
+        Assertions.assertTrue(sql.contains("credit_transactions.user_id = :userId"));
+        Assertions.assertTrue(sql.contains("credit_transactions.transaction_type = :source"));
+        Assertions.assertTrue(sql.endsWith("\n"));
+    }
 }

@@ -273,20 +273,22 @@ class CreditServiceTest {
     }
 
     /**
-     * 管理员查询指定用户明细时应保留用户信息。
+     * 管理员查询指定用户明细时应保留用户信息与积分变动方向。
      */
     @Test
     void shouldListSelectedUserCreditTransactionsForAdministrator() {
         CreditDtos.AdminCreditTransactionItem transaction = new CreditDtos.AdminCreditTransactionItem(
-                10L, 8L, "user-8", "用户八", "user8@example.com", "image", "模型一", "imagePage", 12L, "2026-07-01T08:00:00+08:00");
+                10L, 8L, "user-8", "用户八", "user8@example.com", CreditService.TRANSACTION_TASK_CHARGE, "spend",
+                "image", "模型一", "imagePage", -12L, "图片生成任务扣费", 88L, null, "2026-07-01T08:00:00+08:00");
         when(creditRepository.listAdminCreditTransactions(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(1), org.mockito.ArgumentMatchers.eq(20)))
                 .thenReturn(Flux.just(transaction));
-        when(creditRepository.countCreditTransactions(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.just(1L));
+        when(creditRepository.countAdminTransactions(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.just(1L));
 
         StepVerifier.create(creditService.listAdminCreditTransactions(8L, LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 1), "image", 1, 20))
                 .assertNext(result -> {
                     Assertions.assertEquals(1L, result.total());
                     Assertions.assertEquals("user8@example.com", result.transactions().getFirst().email());
+                    Assertions.assertEquals(-12L, result.transactions().getFirst().changeAmount());
                 })
                 .verifyComplete();
     }

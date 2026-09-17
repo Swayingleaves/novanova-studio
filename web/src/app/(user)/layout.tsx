@@ -16,17 +16,18 @@ export default function UserLayout({ children }: { children: ReactNode }) {
     const hydrateSession = useUserStore((state) => state.hydrateSession);
     const user = useUserStore((state) => state.user);
     const openAuthModal = useUserStore((state) => state.openAuthModal);
+    const publicPath = pathname === "/" || pathname === "/editions";
 
     useEffect(() => {
         hydrateSession();
     }, [hydrateSession]);
 
-    /* 未登录时访问非首页路由 → 回首页并附加 redirect 参数 */
+    /* 未登录时访问非公开路由 → 回首页并附加 redirect 参数 */
     useEffect(() => {
-        if (!hydrated || user || pathname === "/") return;
+        if (!hydrated || user || publicPath) return;
         const target = typeof window === "undefined" ? pathname : `${window.location.pathname}${window.location.search}`;
         router.replace(`/?redirect=${encodeURIComponent(target)}`);
-    }, [hydrated, pathname, router, user]);
+    }, [hydrated, pathname, publicPath, router, user]);
 
     /* 首页检测 ?redirect= 参数 → 弹登录窗 */
     useEffect(() => {
@@ -43,8 +44,8 @@ export default function UserLayout({ children }: { children: ReactNode }) {
         return <UserLoadingFallback />;
     }
 
-    /* 未登录 + 非首页（正在重定向中）→ loading */
-    if (!user && pathname !== "/") {
+    /* 未登录 + 非公开页面（正在重定向中）→ loading */
+    if (!user && !publicPath) {
         return <UserLoadingFallback />;
     }
 

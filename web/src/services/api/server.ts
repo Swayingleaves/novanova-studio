@@ -306,25 +306,11 @@ export type ServerCreditOverview = {
     trend: ServerCreditTrendItem[];
 };
 
-export type ServerCreditTransaction = {
-    id: number;
-    generationType: Exclude<ServerAiTaskType, "text">;
-    model: string;
-    generationSource: ServerGenerationSource | null;
-    consumedCredits: number;
-    createdAt: string;
-};
-
-export type ServerCreditTransactionList = {
-    transactions: ServerCreditTransaction[];
-    total: number;
-};
-
-export type ServerCreditTransactionType = "task_charge" | "task_refund" | "admin_adjustment" | "card_redeem" | "initial_grant" | "invitation_reward";
+export type ServerCreditTransactionType = "task_charge" | "task_refund" | "admin_adjustment" | "card_redeem" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired";
 
 export type ServerCreditDirection = "add" | "spend";
 
-export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redeem" | "admin_adjustment" | "initial_grant" | "invitation_reward";
+export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redeem" | "admin_adjustment" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired";
 
 export type ServerUserCreditTransaction = {
     id: number;
@@ -345,7 +331,7 @@ export type ServerUserCreditTransactionList = {
     total: number;
 };
 
-export type ServerAdminCreditTransaction = ServerCreditTransaction & {
+export type ServerAdminCreditTransaction = ServerUserCreditTransaction & {
     userId: number;
     username: string;
     nickname: string | null;
@@ -355,6 +341,25 @@ export type ServerAdminCreditTransaction = ServerCreditTransaction & {
 export type ServerAdminCreditTransactionList = {
     transactions: ServerAdminCreditTransaction[];
     total: number;
+};
+
+export type ServerCheckInStatus = {
+    today: string;
+    checkedInToday: boolean;
+    monthCheckedCount: number;
+    monthCheckedDates: string[];
+    dailyCredits: number;
+    todayCredits: number;
+};
+
+export type ServerCheckInResult = {
+    checkInDate: string;
+    earnedCredits: number;
+    creditBalance: number;
+};
+
+export type ServerCheckInRewardSettings = {
+    checkInCredits: number;
 };
 
 export type ServerRedeemCreditsResponse = {
@@ -1053,6 +1058,23 @@ export function getInvitationRewardSettings() {
 
 export function updateInvitationRewardSettings(invitationRewardCredits: number) {
     return serverPost<InvitationRewardSettings>("/config/invitation/updateInvitationRewardSettings", { invitationRewardCredits });
+}
+
+export function getCheckInRewardSettings() {
+    return serverGet<ServerCheckInRewardSettings>("/config/checkIn/getCheckInRewardSettings");
+}
+
+export function updateCheckInRewardSettings(settings: ServerCheckInRewardSettings) {
+    return serverPost<ServerCheckInRewardSettings>("/config/checkIn/updateCheckInRewardSettings", settings);
+}
+
+export function getCheckInStatus(month?: string) {
+    const query = month ? `?${new URLSearchParams({ month })}` : "";
+    return serverGet<ServerCheckInStatus>(`/checkIn/getCheckInStatus${query}`);
+}
+
+export function submitCheckIn() {
+    return serverPost<ServerCheckInResult>("/checkIn/checkIn", {});
 }
 
 export function getCreditOverview(params: { startDate: string; endDate: string; generationType?: "image" | "video"; trendUnit: "day" | "month" }) {

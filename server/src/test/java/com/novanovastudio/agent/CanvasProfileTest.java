@@ -29,7 +29,8 @@ class CanvasProfileTest {
      */
     @Test
     void shouldUseFrontendHistoryForMultiTurnGenerationParameters() {
-        CanvasProfile profile = new CanvasProfile(new AgentToolRegistry(), promptTemplateService());
+        CanvasProfile profile = new CanvasProfile(
+                new AgentToolRegistry(), promptTemplateService(), new CanvasSnapshotCompactor());
         AgentSession session = new AgentSession(
                 "session-1",
                 1L,
@@ -65,7 +66,8 @@ class CanvasProfileTest {
      */
     @Test
     void shouldUseServerSessionWhenFrontendHistoryIsEmpty() {
-        CanvasProfile profile = new CanvasProfile(new AgentToolRegistry(), promptTemplateService());
+        CanvasProfile profile = new CanvasProfile(
+                new AgentToolRegistry(), promptTemplateService(), new CanvasSnapshotCompactor());
         AgentSession session = new AgentSession(
                 "session-1",
                 1L,
@@ -90,7 +92,8 @@ class CanvasProfileTest {
     @Test
     void shouldUseCanvasTemplateAsFirstSystemMessage() {
         SystemPromptTemplateService templateService = promptTemplateService();
-        CanvasProfile profile = new CanvasProfile(new AgentToolRegistry(), templateService);
+        CanvasProfile profile = new CanvasProfile(
+                new AgentToolRegistry(), templateService, new CanvasSnapshotCompactor());
         AgentSession session = new AgentSession(
                 "session-1", 1L, "测试会话", "canvas", List.of(), OffsetDateTime.now(), OffsetDateTime.now());
         AgentChatRequest request = new AgentChatRequest(

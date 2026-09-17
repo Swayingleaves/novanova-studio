@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button, DatePicker, Empty, Pagination, Segmented, Select, Skeleton, Table, type TableProps } from "antd";
-import { Coins, Gift, ImageIcon, RotateCcw, UserCog, UserPlus, Video, Zap } from "lucide-react";
+import { Zap } from "lucide-react";
 
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import {
@@ -21,6 +21,7 @@ import {
     CREDIT_SOURCE_OPTIONS,
     CREDIT_TRANSACTION_PAGE_SIZE,
     creditTransactionDetail,
+    creditTransactionIcon,
     creditTransactionTypeLabel,
     formatCreditChange,
     formatCredits,
@@ -37,28 +38,13 @@ const CreditChart = dynamic(() => import("./components/credit-chart").then((modu
 type GenerationTypeFilter = "all" | "image" | "video";
 type TrendUnit = "day" | "month";
 
-/**
- * 根据积分流水类型返回展示图标。
- *
- * @param transaction 积分流水
- * @return lucide 图标组件
- */
-function transactionTypeIcon(transaction: ServerUserCreditTransaction) {
-    if (transaction.transactionType === "task_charge") return transaction.generationType === "video" ? Video : ImageIcon;
-    if (transaction.transactionType === "task_refund") return RotateCcw;
-    if (transaction.transactionType === "card_redeem") return Coins;
-    if (transaction.transactionType === "admin_adjustment") return UserCog;
-    if (transaction.transactionType === "invitation_reward") return UserPlus;
-    return Gift;
-}
-
 const CREDIT_TRANSACTION_COLUMNS: TableProps<ServerUserCreditTransaction>["columns"] = [
     {
         title: "类型",
         dataIndex: "transactionType",
         width: 132,
         render: (transactionType: ServerUserCreditTransaction["transactionType"], record) => {
-            const Icon = transactionTypeIcon(record);
+            const Icon = creditTransactionIcon(record);
             return <span className="inline-flex items-center gap-2 text-[var(--studio-text)]"><Icon className="size-4 text-[var(--studio-primary)]" />{creditTransactionTypeLabel(transactionType)}</span>;
         },
     },
@@ -267,7 +253,7 @@ export default function CreditsPage() {
                     {transactionsQuery.isLoading ? <Skeleton active paragraph={{ rows: 8 }} /> : null}
                     {!transactionsQuery.isLoading && !transactions?.transactions.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="所选范围没有积分记录" /> : null}
                     {transactions?.transactions.map((transaction) => {
-                        const Icon = transactionTypeIcon(transaction);
+                        const Icon = creditTransactionIcon(transaction);
                         return (
                             <article key={transaction.id} className="border-b border-[var(--studio-line)] py-4">
                                 <div className="flex items-start justify-between gap-3">

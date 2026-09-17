@@ -115,33 +115,43 @@ public final class CreditDtos {
     }
 
     /**
-     * 管理员积分消耗明细项。
+     * 管理员积分明细项（含增加与消耗）。
      *
      * @param id Long 流水ID
      * @param userId Long 用户ID
      * @param username String 用户名
      * @param nickname String 用户昵称，可为空
      * @param email String 用户邮箱
-     * @param generationType String 图片或视频任务类型
-     * @param model String 实际使用模型
+     * @param transactionType String 流水类型：task_charge/task_refund/admin_adjustment/card_redeem/initial_grant/invitation_reward/daily_check_in/credit_expired
+     * @param direction String 变动方向：add 增加 / spend 消耗，服务端按 change_amount 符号派生
+     * @param generationType String 生成任务类型：image/video，非任务流水为 null
+     * @param model String 生成任务实际使用模型，非任务流水为 null
      * @param generationSource String 发起生成的页面来源，可为空
-     * @param consumedCredits Long 实际扣除积分
-     * @param createdAt String 扣费时间
+     * @param changeAmount Long 有符号积分变动：正数增加、负数消耗
+     * @param reason String 变动原因
+     * @param balanceAfter Long 变动后余额快照
+     * @param invitedUserId Long 邀请奖励关联的被邀请用户ID
+     * @param createdAt String 变动时间
      */
     public record AdminCreditTransactionItem(Long id,
                                              Long userId,
                                              String username,
                                              String nickname,
                                              String email,
+                                             String transactionType,
+                                             String direction,
                                              String generationType,
                                              String model,
                                              String generationSource,
-                                             Long consumedCredits,
+                                             Long changeAmount,
+                                             String reason,
+                                             Long balanceAfter,
+                                             Long invitedUserId,
                                              String createdAt) {
     }
 
     /**
-     * 管理员积分消耗明细列表响应。
+     * 管理员积分明细列表响应。
      *
      * @param transactions List<AdminCreditTransactionItem> 当前页明细
      * @param total Long 符合筛选条件的总数
