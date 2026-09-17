@@ -79,7 +79,7 @@ docker compose ps
 ## 4. 验证
 
 ```bash
-curl http://127.0.0.1:18080/api/v1/health
+curl http://127.0.0.1:8080/api/v1/health
 ```
 
 返回 `{"code":200,"data":"OK"}` 表示后端正常。

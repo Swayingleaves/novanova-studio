@@ -74,7 +74,7 @@ Below are the symptoms we see most often, grouped by area. Items marked "adminis
 
 ## Diagnostics
 
-1. **Health check**: `/api/v1/health` should return `{"code":200,"data":"OK"}` (locally `http://127.0.0.1:18080/api/v1/health`).
+1. **Health check**: `/api/v1/health` should return `{"code":200,"data":"OK"}` (locally `http://127.0.0.1:8080/api/v1/health`).
 2. **Server logs**: `logs/current.log` at the repository root (rotated at 50MB, kept for 180 days). AI calls leave `AI请求`, `AI响应 状态码`, and `AI响应` lines — start there for model problems.
 3. **API logs in the console**: administrators can filter by endpoint, IP, user, and success or error, and inspect status codes, durations, request bodies, and error content. Records are kept for 30 days, and an approximate timestamp is the most useful detail in a report.
 4. **Container logs**: with a Docker deployment, `docker compose logs -f server` shows the same output, also written under `logs/server/`.

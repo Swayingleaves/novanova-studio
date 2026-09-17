@@ -5,7 +5,7 @@ description: Run dependencies, the Spring Boot server, and the Next.js web app l
 
 # Local development
 
-Local development has three parts: **dependencies** (PostgreSQL and Redis, plus FFmpeg for canvas video composition), the **server** (Spring Boot on `18080`), and the **web app** (Next.js on `15555`). In development the web app proxies `/api/v1/**` to the server, so the two ports must line up.
+Local development has three parts: **dependencies** (PostgreSQL and Redis, plus FFmpeg for canvas video composition), the **server** (Spring Boot on `8080`), and the **web app** (Next.js on `5555`). In development the web app proxies `/api/v1/**` to the server, so the two ports must line up.
 
 ## 1. Prepare dependencies
 
@@ -38,8 +38,8 @@ The server loads the root `.env` automatically (it tries both the current and th
 | Variable | Local value | Notes |
 | --- | --- | --- |
 | `APP_SECRET_KEY` | Output of `openssl rand -base64 48` | Required; signs sign-in tokens |
-| `FRONTEND_BASE_URL` | `http://localhost:15555` | Required; used to build password reset links |
-| `SERVER_PORT` | `18080` | Server listen port; the fallback default in the config is already `18080`, matching what the web app requests |
+| `FRONTEND_BASE_URL` | `http://localhost:5555` | Required; used to build password reset links |
+| `SERVER_PORT` | `8080` | **Set it explicitly**: the fallback default in the config is 9080, while the web app expects 8080 |
 | `POSTGRES_*` / `REDIS_*` | Defaults (`127.0.0.1`, `postgres` / `123456`, database `novanova_studio`) | Match your local instance |
 | `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | `admin@admin.com` / `novanovastudio@pwss` | The administrator is created on first boot and never overwritten |
 
@@ -52,7 +52,7 @@ cp web/.env.example web/.env.local
 Next.js does **not** read the repository root `.env`; web variables belong in `web/.env.local` (or `web/.env`). Locally one line is usually enough:
 
 ```dotenv
-NEXT_PUBLIC_SERVER_URL=http://127.0.0.1:18080
+NEXT_PUBLIC_SERVER_URL=http://127.0.0.1:8080
 ```
 
 `web/next.config.ts` rewrites `/api/v1/:path*` to that address in development only, so update it whenever you change the server port.
@@ -76,20 +76,20 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-`pnpm dev` runs `next dev --turbo -H 0.0.0.0 -p 15555`; open `http://localhost:15555`.
+`pnpm dev` runs `next dev --turbo -H 0.0.0.0 -p 5555`; open `http://localhost:5555`.
 
 ## 5. Verify
 
-- Web app: `http://localhost:15555` shows the sign-in page.
-- Server: `http://127.0.0.1:18080/api/v1/health` returns `{"code":200,"data":"OK"}`.
-- API reference: `http://127.0.0.1:18080/swagger/index.html`.
+- Web app: `http://localhost:5555` shows the sign-in page.
+- Server: `http://127.0.0.1:8080/api/v1/health` returns `{"code":200,"data":"OK"}`.
+- API reference: `http://127.0.0.1:8080/swagger/index.html`.
 
 Server logs are written to `logs/current.log`. AI calls leave three lines — `AI请求`, `AI响应 状态码`, and `AI响应` — and model problems usually show up there first.
 
 ## Common pitfalls
 
-- **Port mismatch**: the server's `SERVER_PORT` and `NEXT_PUBLIC_SERVER_URL` in `web/.env.local` must point at the same port; after changing one, remember to change the other.
-- **Dependencies not ready**: check with `pg_isready -h 127.0.0.1 -p 15432` and `redis-cli -h 127.0.0.1 -p 16379 ping`.
+- **Port mismatch**: without an explicit `SERVER_PORT=8080` the server falls back to `9080`, and every request from the web app fails.
+- **Dependencies not ready**: check with `pg_isready -h 127.0.0.1 -p 5432` and `redis-cli -h 127.0.0.1 -p 6379 ping`.
 - **Agent prompt files not found**: start the server from the repository root, or override the matching `AI_SYSTEM_PROMPT_*_FILE` variable.
 - **FFmpeg error from video composition**: install FFmpeg and point `AI_VIDEO_COMPOSITION_FFMPEG_EXECUTABLE` and `AI_VIDEO_COMPOSITION_FFPROBE_EXECUTABLE` at the binaries.
 - To run everything in containers instead, see [Start with Docker](./docker-start); for error messages after startup, see the [FAQ](../troubleshooting/faq).

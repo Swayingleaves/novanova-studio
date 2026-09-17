@@ -432,7 +432,7 @@ export type ServerObjectStorageList = {
 };
 
 const serverApiPrefix = "/api/v1";
-const defaultServerUrl = "http://127.0.0.1:18080";
+const defaultServerUrl = "http://127.0.0.1:8080";
 
 export function sendEmailCode(email: string) {
     return serverPost("/auth/sendEmailCode", { email }, { auth: false });

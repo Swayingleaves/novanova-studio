@@ -1,13 +1,13 @@
 services:
   postgres:
     image: postgres:17
-    container_name: novanovastudio-pro-postgres
+    container_name: novanovastudio-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USERNAME:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
       POSTGRES_DB: ${POSTGRES_DATABASE:-novanova_studio}
     ports:
-      - "${POSTGRES_PORT:-15432}:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     entrypoint:
       - /bin/sh
       - -c
@@ -43,7 +43,7 @@ services:
 
   redis:
     image: redis:8.6
-    container_name: novanovastudio-pro-redis
+    container_name: novanovastudio-redis
     entrypoint:
       - /bin/sh
       - -c
@@ -53,7 +53,7 @@ services:
       - --
     command: ["redis-server", "--appendonly", "yes", "--logfile", "/var/log/redis/redis.log"]
     ports:
-      - "${REDIS_PORT:-16379}:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./volume/redis_data:/data
@@ -68,7 +68,7 @@ services:
 
   nginx:
     image: nginx:1.27-alpine
-    container_name: novanovastudio-pro-nginx
+    container_name: novanovastudio-nginx
     network_mode: host
     volumes:
       - /etc/localtime:/etc/localtime:ro
@@ -91,10 +91,10 @@ services:
         NEXT_PUBLIC_CREDIT_STORE_URL: ${NEXT_PUBLIC_CREDIT_STORE_URL:-}
         NEXT_PUBLIC_ICP_RECORD_NUMBER: ${NEXT_PUBLIC_ICP_RECORD_NUMBER:-}
         NEXT_PUBLIC_GITHUB_URL: ${NEXT_PUBLIC_GITHUB_URL:-}
-    container_name: novanovastudio-pro-web
+    container_name: novanovastudio-web
     command: ["sh", "-c", "exec node server.js >> /app/logs/web.log 2>&1"]
     ports:
-      - "127.0.0.1:${WEB_PORT:-15555}:5550"
+      - "127.0.0.1:${WEB_PORT:-5550}:5550"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./logs/web:/app/logs
@@ -107,7 +107,7 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
-    container_name: novanovastudio-pro-server
+    container_name: novanovastudio-server
     environment:
       # 显式设置容器和 Java 的默认时区，避免日志按 UTC 输出。
       TZ: ${TZ:-Asia/Shanghai}
@@ -115,7 +115,7 @@ services:
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:?请在.env中配置FRONTEND_BASE_URL}
       TOKEN_EXPIRE_HOURS: ${TOKEN_EXPIRE_HOURS:-24}
       TRUSTED_PROXY_ADDRESSES: ${TRUSTED_PROXY_ADDRESSES:-}
-      CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-http://localhost:15555,http://127.0.0.1:15555,https://www.novanovastudio.cn}
+      CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-http://localhost:3000,http://127.0.0.1:3000,https://www.novanovastudio.cn}
       SERVER_PORT: 8080
       LOG_DIR: /app/logs
       POSTGRES_HOST: postgres
@@ -159,7 +159,7 @@ services:
       TENCENT_COS_MAX_ERROR_RETRY: ${TENCENT_COS_MAX_ERROR_RETRY:-3}
       TENCENT_COS_SOCKET_TIMEOUT_MILLISECONDS: ${TENCENT_COS_SOCKET_TIMEOUT_MILLISECONDS:-120000}
     ports:
-      - "127.0.0.1:${SERVER_PORT:-18080}:8080"
+      - "127.0.0.1:${SERVER_PORT:-8080}:8080"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./server/config/prompts:/app/config/prompts:ro
