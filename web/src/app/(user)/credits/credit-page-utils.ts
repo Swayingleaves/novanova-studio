@@ -1,4 +1,6 @@
-import type { ServerCreditDirection, ServerCreditDistributionItem, ServerCreditSource, ServerCreditTransactionType, ServerGenerationSource } from "@/services/api/server";
+import { CalendarCheck, Coins, Gift, Image as ImageIcon, RotateCcw, TimerOff, UserCog, UserPlus, Video } from "lucide-react";
+
+import type { ServerCreditDirection, ServerCreditDistributionItem, ServerCreditSource, ServerCreditTransactionType, ServerGenerationSource, ServerUserCreditTransaction } from "@/services/api/server";
 
 export const CREDIT_TRANSACTION_PAGE_SIZE = 20;
 
@@ -19,6 +21,8 @@ export const CREDIT_SOURCE_OPTIONS: { label: string; value: "all" | ServerCredit
     { label: "任务退款", value: "task_refund" },
     { label: "初始发放", value: "initial_grant" },
     { label: "邀请奖励", value: "invitation_reward" },
+    { label: "每日签到", value: "daily_check_in" },
+    { label: "积分过期", value: "credit_expired" },
 ];
 
 type ChartDataItem = {
@@ -37,6 +41,23 @@ export function generationTypeLabel(generationType: "image" | "video") {
 }
 
 /**
+ * 获取积分流水类型对应的展示图标。
+ *
+ * @param transaction 积分流水记录
+ * @return 对应的 lucide 图标组件
+ */
+export function creditTransactionIcon(transaction: Pick<ServerUserCreditTransaction, "transactionType" | "generationType">) {
+    if (transaction.transactionType === "task_charge") return transaction.generationType === "video" ? Video : ImageIcon;
+    if (transaction.transactionType === "task_refund") return RotateCcw;
+    if (transaction.transactionType === "card_redeem") return Coins;
+    if (transaction.transactionType === "admin_adjustment") return UserCog;
+    if (transaction.transactionType === "invitation_reward") return UserPlus;
+    if (transaction.transactionType === "daily_check_in") return CalendarCheck;
+    if (transaction.transactionType === "credit_expired") return TimerOff;
+    return Gift;
+}
+
+/**
  * 将积分流水类型转换为中文文案。
  *
  * @param transactionType 积分流水类型
@@ -49,6 +70,8 @@ export function creditTransactionTypeLabel(transactionType: ServerCreditTransact
     if (transactionType === "card_redeem") return "卡密兑换";
     if (transactionType === "initial_grant") return "初始发放";
     if (transactionType === "invitation_reward") return "邀请奖励";
+    if (transactionType === "daily_check_in") return "每日签到";
+    if (transactionType === "credit_expired") return "积分过期";
     return "未知类型";
 }
 

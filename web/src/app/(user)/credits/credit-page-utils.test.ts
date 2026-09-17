@@ -36,6 +36,8 @@ test("积分流水类型映射为中文文案", () => {
     assert.equal(creditTransactionTypeLabel("card_redeem"), "卡密兑换");
     assert.equal(creditTransactionTypeLabel("initial_grant"), "初始发放");
     assert.equal(creditTransactionTypeLabel("invitation_reward"), "邀请奖励");
+    assert.equal(creditTransactionTypeLabel("daily_check_in"), "每日签到");
+    assert.equal(creditTransactionTypeLabel("credit_expired"), "积分过期");
 });
 
 test("积分变动格式化保留正负号", () => {

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { MenuProps } from "antd";
-import { History, LogOut, ShoppingCart, Ticket, UserCircle, Users, Zap } from "lucide-react";
+import { CalendarCheck, History, LogOut, ShoppingCart, Ticket, UserCircle, Users, Zap } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { App, Dropdown } from "antd";
@@ -73,6 +73,34 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
                 >
                     <div className="truncate text-sm font-medium text-[var(--studio-ink)]">{user.displayName}</div>
                     <div className="mt-1 truncate text-xs text-[var(--studio-muted)]">{user.email}</div>
+                </Link>
+            ),
+        },
+        { type: "divider" },
+        {
+            key: "account",
+            icon: <UserCircle className="size-4" />,
+            label: (
+                <Link
+                    href="/profile"
+                    onClick={() => setMenuOpen(false)}
+                    className={cn("text-sm", pathname === "/profile" && "text-[var(--studio-ink)]")}
+                >
+                    个人信息
+                </Link>
+            ),
+        },
+        { type: "divider" },
+        {
+            key: "checkIn",
+            icon: <CalendarCheck className="size-4" />,
+            label: (
+                <Link
+                    href="/check-in"
+                    onClick={() => setMenuOpen(false)}
+                    className={cn("text-sm", pathname === "/check-in" && "text-[var(--studio-ink)]")}
+                >
+                    签到
                 </Link>
             ),
         },

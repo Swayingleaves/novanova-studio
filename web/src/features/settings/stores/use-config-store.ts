@@ -62,7 +62,7 @@ export const MODEL_CAPABILITY_OPTIONS: Record<ModelCapability, Array<{ value: st
     ],
 };
 
-export type ConfigDialogTabKey = "channels" | "models" | "credits" | "invitationReward" | "objectStorage";
+export type ConfigDialogTabKey = "channels" | "models" | "credits" | "invitationReward" | "checkIn" | "objectStorage";
 
 export type ModelChannel = {
     id: string;
