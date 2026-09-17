@@ -65,8 +65,8 @@ if (!(Test-Path -LiteralPath .env)) {
 | 配置项 | 说明 |
 | --- | --- |
 | `APP_SECRET_KEY` | 必填，设置为至少 32 字节的高强度随机值。 |
-| `FRONTEND_BASE_URL` | 必填，前端公开地址；本地 Next.js 开发服务通常为 `http://localhost:3000`。 |
-| `SERVER_PORT` | 保持为 `8080`，与前端默认代理地址一致。 |
+| `FRONTEND_BASE_URL` | 必填，前端公开地址；本地 Next.js 开发服务通常为 `http://localhost:15555`。 |
+| `SERVER_PORT` | 保持为 `18080`，与前端默认代理地址一致。 |
 | `POSTGRES_HOST` / `POSTGRES_PORT` | 本机 PostgreSQL 的地址和端口。 |
 | `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | PostgreSQL 登录凭据。 |
 | `POSTGRES_DATABASE` | 项目使用的数据库名称。 |
@@ -115,7 +115,7 @@ if (!(Test-Path -LiteralPath web/.env.local)) {
 
 | 配置项 | 说明 |
 | --- | --- |
-| `NEXT_PUBLIC_SERVER_URL` | 必填，设置为服务端地址，默认为 `http://127.0.0.1:8080`。 |
+| `NEXT_PUBLIC_SERVER_URL` | 必填，设置为服务端地址，默认为 `http://127.0.0.1:18080`。 |
 | `NEXT_PUBLIC_CREDIT_STORE_URL` | 可选，发卡网站地址；未配置时购买积分页面显示“没有配置发卡网站”。 |
 | `NEXT_PUBLIC_ICP_RECORD_NUMBER` | 可选，前端页脚展示的 ICP 备案号。 |
 | `NEXT_PUBLIC_GITHUB_URL` | 可选，前端展示的项目 GitHub 仓库地址。 |
@@ -127,8 +127,8 @@ if (!(Test-Path -LiteralPath web/.env.local)) {
 启动 PostgreSQL 和 Redis 后，分别执行：
 
 ```bash
-pg_isready -h 127.0.0.1 -p 5432
-redis-cli -h 127.0.0.1 -p 6379 ping
+pg_isready -h 127.0.0.1 -p 15432
+redis-cli -h 127.0.0.1 -p 16379 ping
 ```
 
 PostgreSQL 应返回正在接受连接，Redis 应返回 `PONG`。如果 `.env` 使用了其他地址或端口，检查命令也需要使用对应值。
@@ -160,8 +160,8 @@ Next.js 开发服务会监听源码变化并热更新页面。需要断点调试
 
 | 地址 | 用途 |
 | --- | --- |
-| [http://127.0.0.1:5555](http://127.0.0.1:5555) | 前端开发页面。 |
-| [http://127.0.0.1:8080/api/v1/health](http://127.0.0.1:8080/api/v1/health) | 服务端健康检查。 |
-| [http://127.0.0.1:8080/swagger/index.html](http://127.0.0.1:8080/swagger/index.html) | Swagger API 文档。 |
+| [http://127.0.0.1:15555](http://127.0.0.1:15555) | 前端开发页面。 |
+| [http://127.0.0.1:18080/api/v1/health](http://127.0.0.1:18080/api/v1/health) | 服务端健康检查。 |
+| [http://127.0.0.1:18080/swagger/index.html](http://127.0.0.1:18080/swagger/index.html) | Swagger API 文档。 |
 
 登录时使用 `.env` 中的 `ADMIN_INITIAL_EMAIL` 和 `ADMIN_INITIAL_PASSWORD`。首次启动后，请在“配置与用户偏好”中配置 AI 渠道、模型和对象存储。

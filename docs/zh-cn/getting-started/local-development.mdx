@@ -5,7 +5,7 @@ description: 在本机跑起 PostgreSQL、Redis、Spring Boot 服务端和 Next.
 
 # 本地启动调试
 
-本地开发由三部分组成：**依赖服务**（PostgreSQL、Redis，画布合成视频还需要 FFmpeg）、**服务端**（Spring Boot，默认端口 `8080`）、**前端**（Next.js，默认端口 `5555`）。开发模式下前端会把 `/api/v1/**` 请求转发给服务端，所以两个端口必须对齐。
+本地开发由三部分组成：**依赖服务**（PostgreSQL、Redis，画布合成视频还需要 FFmpeg）、**服务端**（Spring Boot，默认端口 `18080`）、**前端**（Next.js，默认端口 `15555`）。开发模式下前端会把 `/api/v1/**` 请求转发给服务端，所以两个端口必须对齐。
 
 ## 1. 准备依赖
 
@@ -38,8 +38,8 @@ cp .env.example .env
 | 变量 | 本地建议值 | 说明 |
 | --- | --- | --- |
 | `APP_SECRET_KEY` | `openssl rand -base64 48` 的输出 | 必填，用于签发登录令牌 |
-| `FRONTEND_BASE_URL` | `http://localhost:5555` | 必填，用于生成密码重置链接 |
-| `SERVER_PORT` | `8080` | **务必显式写成 8080**：配置里的兜底默认值是 9080，而前端默认请求 8080 |
+| `FRONTEND_BASE_URL` | `http://localhost:15555` | 必填，用于生成密码重置链接 |
+| `SERVER_PORT` | `18080` | 服务端监听端口；配置里的兜底默认值也是 `18080`，与前端默认请求的地址一致 |
 | `POSTGRES_*` / `REDIS_*` | 保持默认（`127.0.0.1`、`postgres` / `123456`、库名 `novanova_studio`） | 与本机实际账号保持一致 |
 | `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | 默认 `admin@admin.com` / `novanovastudio@pwss` | 首次启动自动创建管理员；同邮箱账号已存在时不会覆盖 |
 
@@ -52,7 +52,7 @@ cp web/.env.example web/.env.local
 Next.js **不会读取仓库根目录的 `.env`**，前端变量要放在 `web/.env.local`（或 `web/.env`）。本地一般只需要一行：
 
 ```dotenv
-NEXT_PUBLIC_SERVER_URL=http://127.0.0.1:8080
+NEXT_PUBLIC_SERVER_URL=http://127.0.0.1:18080
 ```
 
 开发模式下 `web/next.config.ts` 会把 `/api/v1/:path*` 重写到这个地址；改了服务端端口，这里也要跟着改。
@@ -76,20 +76,20 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-`pnpm dev` 实际执行的是 `next dev --turbo -H 0.0.0.0 -p 5555`，浏览器访问 `http://localhost:5555`。
+`pnpm dev` 实际执行的是 `next dev --turbo -H 0.0.0.0 -p 15555`，浏览器访问 `http://localhost:15555`。
 
 ## 5. 验证
 
-- 前端：`http://localhost:5555` 能正常打开登录页。
-- 服务端：`http://127.0.0.1:8080/api/v1/health` 返回 `{"code":200,"data":"OK"}`。
-- 接口文档：`http://127.0.0.1:8080/swagger/index.html`。
+- 前端：`http://localhost:15555` 能正常打开登录页。
+- 服务端：`http://127.0.0.1:18080/api/v1/health` 返回 `{"code":200,"data":"OK"}`。
+- 接口文档：`http://127.0.0.1:18080/swagger/index.html`。
 
 服务端日志写在项目根目录的 `logs/current.log`；其中 AI 调用会留下 `AI请求` / `AI响应 状态码` / `AI响应` 三行，排查模型问题时主要看它。
 
 ## 常见坑
 
-- **端口对不上**：没有显式设置 `SERVER_PORT=8080` 时服务端会用配置里的兜底值 `9080`，表现是前端所有接口请求失败。
-- **依赖没起来**：先用 `pg_isready -h 127.0.0.1 -p 5432` 和 `redis-cli -h 127.0.0.1 -p 6379 ping` 确认连接正常。
+- **端口对不上**：服务端 `SERVER_PORT` 与前端 `web/.env.local` 里的 `NEXT_PUBLIC_SERVER_URL` 必须指向同一个端口，改完其中一个记得把另一个也改掉。
+- **依赖没起来**：先用 `pg_isready -h 127.0.0.1 -p 15432` 和 `redis-cli -h 127.0.0.1 -p 16379 ping` 确认连接正常。
 - **找不到 Agent 提示词文件**：必须从项目根目录启动服务端；也可以显式覆盖对应的 `AI_SYSTEM_PROMPT_*_FILE` 环境变量。
 - **合成视频报 FFmpeg 错误**：安装 FFmpeg 后，用 `AI_VIDEO_COMPOSITION_FFMPEG_EXECUTABLE` 与 `AI_VIDEO_COMPOSITION_FFPROBE_EXECUTABLE` 指定可执行文件路径。
 - 想在容器里跑整套（而不是前后端各跑一半），见[使用 Docker 启动](./docker-start)；跑起来之后的报错排查见[常见问题](../troubleshooting/faq)。

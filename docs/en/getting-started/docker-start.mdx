@@ -22,10 +22,10 @@ Docker Compose brings up PostgreSQL, Redis, the server, the web app, and Nginx t
 
 | Path | Compose file | Entry point | Good for |
 | --- | --- | --- | --- |
-| Minimal | `docker-compose-local.yml` | `http://127.0.0.1:5550` | Trying it on one machine, using the Nginx config shipped in the repository |
+| Minimal | `docker-compose-local.yml` | `http://127.0.0.1:15555` | Trying it on one machine, using the Nginx config shipped in the repository |
 | Production | `docker-compose.yml` | Your own domain | A Linux server that already has a domain and certificate |
 
-Both paths configure `.env` and build images the same way; only Nginx differs. The minimal path uses `nginx/default.conf` from the repository, which proxies to `server:8080` and `web:5550` inside the Compose network. The production path uses a site config under the host's `/etc/nginx/conf.d` that proxies to `127.0.0.1:8080` and `127.0.0.1:5550`, because Compose publishes the `server` and `web` ports on `127.0.0.1` only.
+Both paths configure `.env` and build images the same way; only Nginx differs. The minimal path uses `nginx/default.conf` from the repository, which proxies to `server:8080` and `web:5550` inside the Compose network. The production path uses a site config under the host's `/etc/nginx/conf.d` that proxies to `127.0.0.1:18080` and `127.0.0.1:15555`, because Compose publishes the `server` and `web` ports on `127.0.0.1` only.
 
 ## 3. Configure `.env`
 
@@ -46,7 +46,7 @@ That is the entire minimal configuration for a single-machine trial:
 
 ```dotenv
 APP_SECRET_KEY=<paste the output of openssl rand -base64 48>
-FRONTEND_BASE_URL=http://127.0.0.1:5550
+FRONTEND_BASE_URL=http://127.0.0.1:15555
 ```
 
 ### Worth changing (defaults work, but only for a local trial)
@@ -54,16 +54,16 @@ FRONTEND_BASE_URL=http://127.0.0.1:5550
 | Variable | Default | Why change it |
 | --- | --- | --- |
 | `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | `admin@admin.com` / `novanovastudio@pwss` | Initial administrator account. **Change the password before exposing the service**; the account is only created when no user with that email exists, so an existing account is never overwritten |
-| `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | `postgres` / `123456` | Database credentials. Port 5432 is published on every host interface by default, so a public machine must change the password or add a firewall rule |
-| `REDIS_PASSWORD` | Empty (no auth) | Port 6379 is published the same way; set a password for any public deployment |
-| `CORS_ALLOWED_ORIGIN_PATTERNS` | Includes `localhost:3000` and `www.novanovastudio.cn` | Replace with your real origins, comma-separated |
+| `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | `postgres` / `123456` | Database credentials. Port 15432 is published on every host interface by default, so a public machine must change the password or add a firewall rule |
+| `REDIS_PASSWORD` | Empty (no auth) | Port 16379 is published the same way; set a password for any public deployment |
+| `CORS_ALLOWED_ORIGIN_PATTERNS` | Includes `localhost:15555` and `www.novanovastudio.cn` | Replace with your real origins, comma-separated |
 | `TRUSTED_PROXY_ADDRESSES` | Empty | Behind Nginx, set the Docker bridge gateway (usually `172.18.0.1`, or the whole subnet `172.18.0.0/16`). Without it, API logs and login rate limiting only see the gateway address. Do not put `127.0.0.1` here — the peer address inside the container is the gateway, not loopback |
 | `TZ` | `Asia/Shanghai` | Time zone used by the containers and Java logs |
 
 ### Leave alone
 
 - `POSTGRES_HOST` / `REDIS_HOST`: Compose pins them to `postgres` / `redis`; the `.env` values only matter when you run the server from source.
-- `POSTGRES_PORT` / `REDIS_PORT` / `SERVER_PORT` / `WEB_PORT`: these are the **host-side** published ports. Container ports are fixed (5432 / 6379 / 8080 / 5550), so only change these on a port conflict.
+- `POSTGRES_PORT` / `REDIS_PORT` / `SERVER_PORT` / `WEB_PORT`: these are the **host-side** published ports, defaulting to `15432` / `16379` / `18080` / `15555`. Container ports are fixed (5432 / 6379 / 8080 / 5550), so only change these on a port conflict.
 - `TOKEN_EXPIRE_HOURS`, `LOG_LEVEL`, `TENCENT_COS_*`, and `AI_*` (polling interval, timeouts, prompt file paths): defaults are fine.
 - Email (`EMAIL_SMTP_*`) and linux.do / Google sign-in (`OAUTH2_*`): optional features, off unless configured.
 - AI channel keys and object storage credentials do **not** belong in `.env`; you enter them in System configuration after signing in — see [System configuration](../using-studio/system-configuration).
@@ -90,7 +90,7 @@ docker compose -f docker-compose-local.yml build # build for the minimal path
 ## 5. Start
 
 ```bash
-# Minimal: open http://127.0.0.1:5550 afterwards
+# Minimal: open http://127.0.0.1:15555 afterwards
 docker compose -f docker-compose-local.yml up -d --build
 
 # Production: served behind your host Nginx
@@ -111,7 +111,7 @@ server {
 
     # API and SSE: keep buffering off and raise the timeouts so streams are not cut short.
     location ^~ /api/ {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:18080;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -125,7 +125,7 @@ server {
 
     # Pages and static assets.
     location / {
-        proxy_pass http://127.0.0.1:5550;
+        proxy_pass http://127.0.0.1:15555;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -148,7 +148,7 @@ The repository's `nginx/default.conf` is the minimal-path version (it points at 
 
 ```bash
 docker compose ps                        # postgres and redis should be healthy, the rest Up
-curl http://127.0.0.1:8080/api/v1/health # expect {"code":200,"data":"OK"}
+curl http://127.0.0.1:18080/api/v1/health # expect {"code":200,"data":"OK"}
 docker compose logs -f server            # follow the server log
 ```
 

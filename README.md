@@ -4,7 +4,7 @@
   <img src="logo/novanovastudio.png" width="128" alt="Novanova Studio logo">
 </p>
 
-<h1 align="center">Novanova Studio</h1>
+<h1 align="center">Novanova Studio PRO企业版</h1>
 
 <p align="center">
   AI Agent 驱动的视觉创作工作台：在一个持续保留上下文的空间里完成构思、生成、编辑、编排与沉淀。
@@ -251,8 +251,8 @@ Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不�
 
 | 现象 | 检查方向 |
 | --- | --- |
-| `http://127.0.0.1:8080/api/v1/health` 无法访问 | 确认 PostgreSQL、Redis 已启动，`.env` 中连接地址与端口正确，并查看服务端启动日志。 |
-| 前端页面无法请求 API | 确认服务端端口为 `8080`；若改过端口，在启动 `pnpm dev` 前设置 `NEXT_PUBLIC_SERVER_URL`。 |
+| `http://127.0.0.1:18080/api/v1/health` 无法访问 | 确认 PostgreSQL、Redis 已启动，`.env` 中连接地址与端口正确，并查看服务端启动日志。 |
+| 前端页面无法请求 API | 确认服务端端口为 `18080`；若改过端口，在启动 `pnpm dev` 前设置 `NEXT_PUBLIC_SERVER_URL`。 |
 | Agent 或生成页没有可选模型 | 在“配置与用户偏好”中保存 AI 渠道、模型能力和对应默认模型。 |
 | 上传素材或保存生成结果失败 | 检查默认对象存储是否已配置、凭证是否有效，以及存储桶的读写权限。 |
 | 找不到 Agent 提示词文件 | 从项目根目录使用 `mvn -f server/pom.xml spring-boot:run` 启动，或显式覆盖对应 `AI_SYSTEM_PROMPT_*_FILE` 环境变量。 |

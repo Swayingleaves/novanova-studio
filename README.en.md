@@ -225,8 +225,8 @@ Do not commit `.env`, AI provider credentials, object storage credentials, or ce
 
 | Symptom | What to Check |
 | --- | --- |
-| `http://127.0.0.1:8080/api/v1/health` is unavailable | Confirm PostgreSQL and Redis are running, the connection address and port in `.env` are correct, and inspect the server startup logs. |
-| The frontend cannot call the API | Confirm the server uses port `8080`. If you changed it, set `NEXT_PUBLIC_SERVER_URL` before starting `pnpm dev`. |
+| `http://127.0.0.1:18080/api/v1/health` is unavailable | Confirm PostgreSQL and Redis are running, the connection address and port in `.env` are correct, and inspect the server startup logs. |
+| The frontend cannot call the API | Confirm the server uses port `18080`. If you changed it, set `NEXT_PUBLIC_SERVER_URL` before starting `pnpm dev`. |
 | No models are available on the Agent or generation pages | Save the AI provider, model capability configuration, and corresponding default models in Configuration & User Preferences. |
 | Uploading materials or saving generated results fails | Check that default object storage is configured, its credentials are valid, and the bucket has read and write permissions. |
 | Agent prompt files cannot be found | Start from the project root with `mvn -f server/pom.xml spring-boot:run`, or explicitly override the relevant `AI_SYSTEM_PROMPT_*_FILE` environment variable. |

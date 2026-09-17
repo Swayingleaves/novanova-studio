@@ -3,7 +3,7 @@ import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 import { createMDX } from "fumadocs-mdx/next";
 
 const localVersion = process.env.NEXT_PUBLIC_APP_VERSION || "dev";
-const localServerUrl = process.env.NEXT_PUBLIC_SERVER_URL?.trim().replace(/\/+$/, "") || "http://127.0.0.1:8080";
+const localServerUrl = process.env.NEXT_PUBLIC_SERVER_URL?.trim().replace(/\/+$/, "") || "http://127.0.0.1:18080";
 
 function nextConfig(phase: string): NextConfig {
     const isDev = phase === PHASE_DEVELOPMENT_SERVER;

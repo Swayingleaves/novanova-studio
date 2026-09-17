@@ -5,7 +5,7 @@
     "type": "module",
     "packageManager": "pnpm@11.7.0",
     "scripts": {
-        "dev": "next dev --turbo -H 0.0.0.0 -p 5555",
+        "dev": "next dev --turbo -H 0.0.0.0 -p 15555",
         "build": "pnpm docs:validate && next build",
         "docs:validate": "node ./src/features/docs/validate-docs.mjs",
         "start": "node .next/standalone/server.js",
