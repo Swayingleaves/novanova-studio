@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import type { LucideIcon } from "lucide-react";
 import { Check, Code2, Layers3, Minus, Network, Server } from "lucide-react";
 
+import { ContactMe } from "./components/contact-me";
+
 export const metadata: Metadata = {
     title: "版本对比 - Novanova Studio",
     description: "对比 Novanova Studio 开源版、单机企业版与集群企业版的企业增强能力。",
@@ -161,6 +163,8 @@ export default function EditionsPage() {
                     <DesktopComparisonTable />
                     <MobileComparisonList />
                 </section>
+
+                <ContactMe />
             </div>
         </main>
     );
