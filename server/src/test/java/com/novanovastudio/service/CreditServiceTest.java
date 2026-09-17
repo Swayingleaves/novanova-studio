@@ -34,6 +34,9 @@ class CreditServiceTest {
     /** 积分仓储 */
     private CreditRepository creditRepository;
 
+    /** 会过期的积分发放批次服务 */
+    private CreditGrantService creditGrantService;
+
     /** 当前用户提供器 */
     private CurrentUserProvider currentUserProvider;
 
@@ -46,13 +49,14 @@ class CreditServiceTest {
     @BeforeEach
     void setUp() {
         creditRepository = mock(CreditRepository.class);
+        creditGrantService = mock(CreditGrantService.class);
         currentUserProvider = mock(CurrentUserProvider.class);
         PersistenceService persistenceService = mock(PersistenceService.class);
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of()));
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        creditService = new CreditService(creditRepository, persistenceService, currentUserProvider, transactionalOperator);
+        creditService = new CreditService(creditRepository, creditGrantService, persistenceService, currentUserProvider, transactionalOperator);
     }
 
     /**
@@ -62,7 +66,7 @@ class CreditServiceTest {
     void shouldRejectTaskChargeWhenBalanceIsInsufficient() {
         when(creditRepository.claimTaskTransaction(8L, "task-1", CreditService.TRANSACTION_TASK_CHARGE, -12, "图片生成任务扣费", "imagePage"))
                 .thenReturn(Mono.just(9L));
-        when(creditRepository.changeBalance(8L, -12)).thenReturn(Mono.empty());
+        when(creditGrantService.consumeCredits(8L, 12)).thenReturn(Mono.empty());
 
         StepVerifier.create(creditService.chargeTask(8L, "task-1", 12, "image", "imagePage"))
                 .expectError(BusinessException.class)
@@ -154,7 +158,7 @@ class CreditServiceTest {
         String reason = "分镜首次生成扣费（操作ID：" + operationId + "）";
         when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_CHARGE, -6, reason))
                 .thenReturn(Mono.just(11L));
-        when(creditRepository.changeBalance(8L, -6)).thenReturn(Mono.just(94));
+        when(creditGrantService.consumeCredits(8L, 6)).thenReturn(Mono.just(94));
         when(creditRepository.updateTransactionBalance(11L, 94)).thenReturn(Mono.empty());
 
         StepVerifier.create(creditService.chargeOperation(8L, operationId, 6, "分镜首次生成"))
@@ -172,7 +176,7 @@ class CreditServiceTest {
         String reason = "分镜提示词合成扣费（操作ID：" + operationId + "）";
         when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_CHARGE, -18, reason))
                 .thenReturn(Mono.just(12L));
-        when(creditRepository.changeBalance(8L, -18)).thenReturn(Mono.empty());
+        when(creditGrantService.consumeCredits(8L, 18)).thenReturn(Mono.empty());
 
         StepVerifier.create(creditService.chargeOperation(8L, operationId, 18, "分镜提示词合成"))
                 .expectError(BusinessException.class)
