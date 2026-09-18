@@ -245,6 +245,24 @@ public class CreationAgentRequestRepository {
     }
 
     /**
+     * 读取同一用户在指定入口和设定图节点上仍在排队的请求，用于被新请求替换。
+     *
+     * @param userId Long 用户ID
+     * @param entrySource String 入口来源
+     * @param settingGraphNodeId String 设定图目标节点ID
+     * @return Flux<CreationAgentRequest> 待作废的排队请求流
+     */
+    public Flux<CreationAgentRequest> listQueuedSettingGraphRequests(Long userId, String entrySource, String settingGraphNodeId) {
+        return databaseClient.sql(selectSql() + " WHERE user_id = :userId AND entry_source = :entrySource AND status = 'queued'"
+                        + " AND request_data ->> 'settingGraphNodeId' = :settingGraphNodeId ORDER BY created_at ASC, id ASC")
+                .bind("userId", userId)
+                .bind("entrySource", entrySource)
+                .bind("settingGraphNodeId", settingGraphNodeId)
+                .map((row, metadata) -> map(row))
+                .all();
+    }
+
+    /**
      * 使用指定SQL执行带用户条件的终态更新。
      *
      * @param sql String 更新SQL
