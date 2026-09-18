@@ -65,7 +65,15 @@ function AssetChoiceCard({ asset, onChoose }: { asset: Asset; onChoose: () => vo
     const cover = asset.coverUrl || (asset.kind === "image" ? asset.data.dataUrl : "");
     return (
         <button type="button" className="studio-panel-solid overflow-hidden text-left transition hover:-translate-y-0.5 hover:border-[var(--studio-primary-line)]" onClick={onChoose}>
-            {cover ? <img src={cover} alt={asset.title} className="aspect-[4/3] w-full object-cover" /> : <div className="studio-empty flex aspect-[4/3] items-center justify-center p-4 text-center text-xs">{asset.kind === "text" ? asset.data.content : asset.title}</div>}
+            {cover ? (
+                <img src={cover} alt={asset.title} className="aspect-[4/3] w-full object-cover" />
+            ) : (
+                <div className="studio-empty relative aspect-[4/3] overflow-hidden">
+                    <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-xs">
+                        <span className="line-clamp-5 w-full break-words">{asset.kind === "text" ? asset.data.content : asset.title}</span>
+                    </div>
+                </div>
+            )}
             <div className="flex items-center justify-between gap-2 p-3"><span className="truncate text-sm font-medium">{asset.title}</span><Tag className="m-0 shrink-0">{assetKindLabel(asset.kind)}</Tag></div>
         </button>
     );
