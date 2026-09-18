@@ -106,19 +106,6 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
         },
         { type: "divider" },
         {
-            key: "account",
-            icon: <UserCircle className="size-4" />,
-            label: (
-                <Link
-                    href="/profile"
-                    onClick={() => setMenuOpen(false)}
-                    className={cn("text-sm", pathname === "/profile" && "text-[var(--studio-ink)]")}
-                >
-                    个人信息
-                </Link>
-            ),
-        },
-        {
             key: "purchase",
             icon: <ShoppingCart className="size-4" />,
             label: (
