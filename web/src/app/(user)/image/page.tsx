@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, CloudUpload, Download, FolderPlus, ImagePlus, Link2, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, TriangleAlert, Upload } from "lucide-react";
+import { BookOpen, CloudUpload, Download, FolderPlus, Link2, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, TriangleAlert, Upload } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
@@ -13,6 +13,7 @@ import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
 import { RecentReferenceImagePicker } from "@/features/generation/components/recent-reference-image-picker";
 import { ImageSettingsPanel, imageQualityLabel, imageResolutionLabel, imageSizeLabel } from "@/features/generation/components/image-settings-panel";
+import { MEDIA_FALLBACK_IMAGE, MediaPreview, useMediaFallback } from "@/features/generation/components/media-fallback";
 import { requestCreditCost } from "@/features/generation/constants/credits";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
@@ -1231,13 +1232,7 @@ function buildImageConversationItems(conversations: Conversation[], activeId: st
             id: conversation.id,
             title: conversation.title,
             subtitle: `${formatConversationTime(conversation.updatedAt)} · ${conversation.rounds.length} 轮`,
-            preview: latestImage ? (
-                <img src={latestImage.dataUrl} alt="" className="size-10 rounded-xl object-cover" />
-            ) : (
-                <div className="grid size-10 place-items-center rounded-xl bg-[var(--studio-media)]">
-                    <ImagePlus className="size-4 text-[var(--studio-muted)]" />
-                </div>
-            ),
+            preview: <MediaPreview kind="image" src={latestImage?.dataUrl} className="size-10 rounded-xl object-cover" />,
             active: activeId === conversation.id,
             selected: selectedIds.includes(conversation.id),
             status: getGenerationConversationStatus(conversation),
@@ -1438,6 +1433,7 @@ function ResultCard({
     const [loadedMeta, setLoadedMeta] = useState<{ width: number; height: number; bytes: number }>({ width: image.width, height: image.height, bytes: image.bytes });
     const [isDownloading, setIsDownloading] = useState(false);
     const copyText = useCopyText();
+    const preview = useMediaFallback(image.dataUrl);
     const displayWidth = image.width > 0 ? image.width : loadedMeta.width;
     const displayHeight = image.height > 0 ? image.height : loadedMeta.height;
     const displayBytes = image.bytes > 0 ? image.bytes : loadedMeta.bytes;
@@ -1489,9 +1485,9 @@ function ResultCard({
         >
             <div className="relative overflow-hidden bg-[var(--studio-media)]" style={{ aspectRatio: previewAspectRatio }}>
                 {onOpenDetail ? (
-                    <img src={image.dataUrl} alt={`结果 ${index + 1}`} className="block size-full cursor-zoom-in object-contain" onClick={() => onOpenDetail(image, index)} />
+                    <img src={preview.displaySrc} alt={`结果 ${index + 1}`} className="block size-full cursor-zoom-in object-contain" onClick={() => onOpenDetail(image, index)} onError={preview.onError} />
                 ) : (
-                    <Image src={image.dataUrl} alt={`结果 ${index + 1}`} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
+                    <Image src={image.dataUrl} fallback={MEDIA_FALLBACK_IMAGE} alt={`结果 ${index + 1}`} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
                 )}
                 <div className="absolute left-2 top-2 rounded-full bg-black/60 px-2.5 py-0.5 text-xs font-medium text-white">#{index + 1}</div>
             </div>

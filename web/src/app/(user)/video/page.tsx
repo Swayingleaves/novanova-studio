@@ -14,6 +14,7 @@ import type { AgentAttachment } from "@/features/canvas/api/agent";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
 import { RecentReferenceImagePicker } from "@/features/generation/components/recent-reference-image-picker";
 import { ImageSettingsPanel } from "@/features/generation/components/image-settings-panel";
+import { MEDIA_FALLBACK_IMAGE, MediaPreview, useMediaFallback } from "@/features/generation/components/media-fallback";
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/features/generation/components/video-settings-panel";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { seedanceReferenceLabel, SEEDANCE_REFERENCE_LIMITS } from "@/features/generation/lib/seedance-video";
@@ -1930,7 +1931,7 @@ function FrameImagePreview({ url, role }: { url: string; role?: string }) {
     return (
         <div className="relative w-48 shrink-0 overflow-hidden rounded-xl border border-[var(--studio-line)] sm:w-56">
             {label ? <span className="absolute left-2 top-2 z-10 rounded-md bg-black/65 px-2 py-1 text-xs font-semibold text-white backdrop-blur-sm">{label}</span> : null}
-            <Image src={url} alt={label || "工作流图片结果"} className="w-full object-cover" preview={{ mask: "查看大图" }} />
+            <Image src={url} fallback={MEDIA_FALLBACK_IMAGE} alt={label || "工作流图片结果"} className="w-full object-cover" preview={{ mask: "查看大图" }} />
         </div>
     );
 }
@@ -2004,13 +2005,7 @@ function buildVideoConversationItems(conversations: Conversation[], activeId: st
             id: conversation.id,
             title: conversation.title,
             subtitle: `${formatConversationTime(conversation.updatedAt)} · ${conversation.rounds.length} 轮`,
-            preview: latestVideo ? (
-                <video src={latestVideo.url} muted className="size-10 rounded-xl object-cover" />
-            ) : (
-                <div className="grid size-10 place-items-center rounded-xl bg-[var(--studio-media)]">
-                    <VideoIcon className="size-4 text-[var(--studio-muted)]" />
-                </div>
-            ),
+            preview: <MediaPreview kind="video" src={latestVideo?.url} className="size-10 rounded-xl object-cover" />,
             active: activeId === conversation.id,
             selected: selectedIds.includes(conversation.id),
             status: getGenerationConversationStatus(conversation),
@@ -2317,6 +2312,7 @@ function ResultCard({
 }) {
     const [isDownloading, setIsDownloading] = useState(false);
     const copyText = useCopyText();
+    const preview = useMediaFallback(video.url);
     if (!hasPlayableVideoUrl(video.url)) {
         return <FailedCard error="视频地址为空，无法播放" />;
     }
@@ -2337,13 +2333,24 @@ function ResultCard({
 
     return (
         <div className="group overflow-hidden rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] transition hover:-translate-y-0.5 hover:border-[var(--studio-primary-line)]">
-            <div className="relative cursor-pointer bg-black" onClick={() => onOpenDetail(video)}>
-                <video src={video.url} muted preload="metadata" playsInline className="pointer-events-none max-h-96 w-full object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} />
-                <div className="absolute inset-0 grid place-items-center">
-                    <div className="grid size-12 place-items-center rounded-full bg-black/50 text-white backdrop-blur-sm transition group-hover:scale-110">
-                        <Play className="size-5" />
+            <div
+                className={`relative ${preview.missing ? "bg-[var(--studio-media)]" : "cursor-pointer bg-black"}`}
+                onClick={() => {
+                    if (!preview.missing) onOpenDetail(video);
+                }}
+            >
+                {preview.missing ? (
+                    <img src={preview.displaySrc} alt="生成视频无法加载" className="max-h-96 w-full object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} />
+                ) : (
+                    <video src={video.url} muted preload="metadata" playsInline className="pointer-events-none max-h-96 w-full object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} onError={preview.onError} />
+                )}
+                {preview.missing ? null : (
+                    <div className="absolute inset-0 grid place-items-center">
+                        <div className="grid size-12 place-items-center rounded-full bg-black/50 text-white backdrop-blur-sm transition group-hover:scale-110">
+                            <Play className="size-5" />
+                        </div>
                     </div>
-                </div>
+                )}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-[var(--studio-line)] px-3 py-2.5">
                 <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-[var(--studio-muted)]">
