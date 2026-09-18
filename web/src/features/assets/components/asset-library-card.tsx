@@ -20,7 +20,15 @@ export function AssetLibraryCard({ asset, onPreview, onEdit, onCopy, onDownload,
     return (
         <article className="studio-panel-solid overflow-hidden">
             <button type="button" className="block w-full text-left" onClick={onPreview}>
-                {cover ? <img src={cover} alt={asset.title} className="aspect-[4/3] w-full object-cover" /> : <div className="studio-empty flex aspect-[4/3] items-center justify-center p-5 text-center text-sm leading-6">{asset.kind === "text" ? asset.data.content : "暂无封面"}</div>}
+                {cover ? (
+                    <img src={cover} alt={asset.title} className="aspect-[4/3] w-full object-cover" />
+                ) : (
+                    <div className="studio-empty relative aspect-[4/3] overflow-hidden">
+                        <div className="absolute inset-0 flex items-center justify-center p-5 text-center text-sm leading-6">
+                            <span className="line-clamp-6 w-full break-words">{asset.kind === "text" ? asset.data.content : "暂无封面"}</span>
+                        </div>
+                    </div>
+                )}
                 <div className="p-4">
                     <div className="flex items-start justify-between gap-3"><div className="min-w-0"><h2 className="studio-title truncate text-sm font-semibold">{asset.title}</h2><p className="studio-caption mt-1 text-xs">{asset.source || "未标注来源"}</p></div><Tag className="m-0 shrink-0">{assetKindLabel(asset)}</Tag></div>
                     <p className="studio-subtitle mt-2 line-clamp-3 text-xs leading-5">{assetSummary(asset)}</p>
