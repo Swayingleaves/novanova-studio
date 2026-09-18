@@ -16,6 +16,6 @@ export type ResponseFunctionTool = {
 };
 
 export type ToolChoice = "auto" | "required" | { type: "function"; name: string };
-export type ImageRequestOptions = { signal?: AbortSignal; generationStyleIds?: number[]; generationStyleSnapshots?: import("@/services/api/server").GenerationStyleSnapshot[] };
+export type ImageRequestOptions = { signal?: AbortSignal; generationStyleIds?: number[]; generationStyleSnapshots?: import("@/services/api/server").GenerationStyleSnapshot[]; onTaskCreated?: (taskId: string) => void };
 
 export type { ResponseToolCall, ToolResponseResult };

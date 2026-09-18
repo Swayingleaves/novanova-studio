@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
-import { Clapperboard, CloudUpload, Copy, Download, FolderPlus, ImagePlus, Info, Minus, Plus, RefreshCw, Scissors, Trash2, Upload, Video } from "lucide-react";
+import { Clapperboard, CloudUpload, Copy, Download, FolderPlus, ImagePlus, Info, LoaderCircle, Minus, Plus, RefreshCw, Scissors, Trash2, Upload, Video } from "lucide-react";
 
 import { formatAudioTime } from "@/features/storage/utils/audio-waveform";
 import { formatBytes, getDataUrlByteSize } from "@/features/generation/lib/image-utils";
@@ -146,7 +146,13 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
             onPointerDown={(event) => event.stopPropagation()}
         >
             {allActions.map((action) => (
-                <ToolbarActionButton key={action.id} {...action} disabled={uploading || action.disabled} showLabel />
+                <ToolbarActionButton
+                    key={action.id}
+                    {...action}
+                    icon={uploading && action.id === "uploadObjectStorage" ? <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" /> : action.icon}
+                    disabled={uploading || action.disabled}
+                    showLabel
+                />
             ))}
         </div>
     );

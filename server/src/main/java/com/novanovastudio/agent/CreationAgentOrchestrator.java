@@ -170,7 +170,8 @@ public class CreationAgentOrchestrator {
                     queuedRequest.setRequestData(JSON.toJSONString(snapshot));
                     queuedRequest.setStatus("queued");
                     queuedRequest.setCreatedAt(OffsetDateTime.now());
-                    return ensureGenerationLogForRequest(userId, session.id(), snapshot)
+                    return cancelSupersededQueuedRequests(userId, snapshot)
+                            .then(ensureGenerationLogForRequest(userId, session.id(), snapshot))
                             .then(requestRepository.create(queuedRequest))
                             .then(Mono.fromRunnable(() -> eventEmitter.emit(userId,
                                     AgentEvent.queueStatus(session.id(), queuedRequest.getId(), "queued", "排队中"))))
@@ -179,6 +180,35 @@ public class CreationAgentOrchestrator {
                                     .defaultIfEmpty("queued")
                                     .map(status -> new CreationAgentChatResponse(session.id(), queuedRequest.getId(), status)));
                 });
+    }
+
+    /**
+     * 作废同一画布、同一设定图节点上仍在排队的旧请求。
+     * <p>
+     * 页面刷新后重复点击会为同一次设定图生成堆叠出多个排队请求，最终表现为长时间"排队中"。
+     * 这里让新请求替换旧排队项：只处理 status=queued 的请求，已在执行的请求不做抢占。
+     *
+     * @param userId Long 用户ID
+     * @param request AgentChatRequest 新提交的请求快照
+     * @return Mono<Void> 作废完成信号
+     */
+    private Mono<Void> cancelSupersededQueuedRequests(Long userId, AgentChatRequest request) {
+        String targetNodeId = request.settingGraphNodeId();
+        if (!StringUtils.hasText(targetNodeId)) {
+            return Mono.empty();
+        }
+        return requestRepository.listQueuedSettingGraphRequests(userId, request.entrySource(), targetNodeId)
+                .concatMap(queued -> requestRepository.cancelQueuedIfQueued(userId, queued.getId(),
+                                "同一设定图节点已提交新请求，旧请求不再执行")
+                        .flatMap(canceled -> {
+                            if (!Boolean.TRUE.equals(canceled)) {
+                                return Mono.empty();
+                            }
+                            log.info("作废被新请求替换的排队设定图请求: userId={}, requestId={}, settingGraphNodeId={}",
+                                    userId, queued.getId(), targetNodeId);
+                            return requestQueue.removeQueuedRequest(userId, queued.getEntrySource(), queued.getId());
+                        }))
+                .then();
     }
 
     /**

@@ -95,6 +95,9 @@ public class AgentTaskOrchestrator {
     /** sessionId → callId → MonoSink，用于阻塞等待前端工具结果 */
     private final ConcurrentHashMap<String, ConcurrentHashMap<String, MonoSink<ToolResult>>> pendingResults = new ConcurrentHashMap<>();
 
+    /** sessionId → callId → 已下发但尚未回传的前端工具调用，供页面刷新后重放 */
+    private final ConcurrentHashMap<String, ConcurrentHashMap<String, PendingFrontendCall>> pendingFrontendCalls = new ConcurrentHashMap<>();
+
     /** userId → 当前活跃的 sessionId，防止同一用户并发启动多个 Agent Loop */
     private final ConcurrentHashMap<Long, String> activeLoops = new ConcurrentHashMap<>();
 
@@ -989,10 +992,13 @@ public class AgentTaskOrchestrator {
      */
     private Mono<ToolResult> waitForFrontendResult(Long userId, String sessionId, String callId,
                                                     String toolName, Map<String, Object> args) {
+        AgentEvent toolExecuteEvent = AgentEvent.toolExecute(sessionId, callId, toolName, args);
         return Mono.<ToolResult>create(sink -> {
             pendingResults.computeIfAbsent(sessionId, k -> new ConcurrentHashMap<>()).put(callId, sink);
+            pendingFrontendCalls.computeIfAbsent(sessionId, k -> new ConcurrentHashMap<>())
+                    .put(callId, new PendingFrontendCall(userId, toolExecuteEvent));
             // 先登记等待项再发送事件，避免前端快速回传时找不到session或callId。
-            eventEmitter.emit(userId, AgentEvent.toolExecute(sessionId, callId, toolName, args));
+            eventEmitter.emit(userId, toolExecuteEvent);
             // 超时或取消时清理 pendingResults 映射
             sink.onDispose(() -> {
                 ConcurrentHashMap<String, MonoSink<ToolResult>> sessionResults = pendingResults.get(sessionId);
@@ -1000,6 +1006,13 @@ public class AgentTaskOrchestrator {
                     sessionResults.remove(callId);
                     if (sessionResults.isEmpty()) {
                         pendingResults.remove(sessionId, sessionResults);
+                    }
+                }
+                ConcurrentHashMap<String, PendingFrontendCall> sessionCalls = pendingFrontendCalls.get(sessionId);
+                if (sessionCalls != null) {
+                    sessionCalls.remove(callId);
+                    if (sessionCalls.isEmpty()) {
+                        pendingFrontendCalls.remove(sessionId, sessionCalls);
                     }
                 }
             });
@@ -1011,6 +1024,40 @@ public class AgentTaskOrchestrator {
                       null, null, null, message, true, false);
               return Mono.just(new ToolResult(false, message, Map.of("error", error.toMap())));
           });
+    }
+
+    /**
+     * 重放尚未回传、且当前页面未在执行的前端工具调用。
+     * <p>
+     * 页面刷新会丢掉内存中的工具调用上下文，等待中的主Agent请求只能等到工具超时。新页面接入后调用本方法，
+     * 重放这些调用即可让请求继续执行，并尽快释放所在分区队列名额。
+     *
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param activeCallIds Set<String> 当前页面仍在执行的工具调用ID，命中的不重放
+     * @return int 重放数量
+     */
+    public int replayPendingFrontendCalls(Long userId, String sessionId, Set<String> activeCallIds) {
+        ConcurrentHashMap<String, PendingFrontendCall> sessionCalls = pendingFrontendCalls.get(sessionId);
+        if (sessionCalls == null || sessionCalls.isEmpty()) {
+            return 0;
+        }
+        Set<String> claimedCallIds = activeCallIds == null ? Set.of() : activeCallIds;
+        int replayed = 0;
+        for (Map.Entry<String, PendingFrontendCall> entry : sessionCalls.entrySet()) {
+            PendingFrontendCall pending = entry.getValue();
+            if (!userId.equals(pending.userId()) || claimedCallIds.contains(entry.getKey())) {
+                continue;
+            }
+            // 先取消旧页面上可能仍在执行的同一次调用，避免两个页面重复执行同一个生成。
+            eventEmitter.emit(userId, AgentEvent.toolCancel(sessionId, entry.getKey(), "页面刷新后由当前页面接续执行"));
+            eventEmitter.emit(userId, pending.event());
+            replayed++;
+        }
+        if (replayed > 0) {
+            log.info("重放前端工具调用: userId={}, sessionId={}, count={}", userId, sessionId, replayed);
+        }
+        return replayed;
     }
 
     /**
@@ -1779,6 +1826,15 @@ public class AgentTaskOrchestrator {
      * @param round JSONObject 初始轮次内容
      */
     private record InitialVideoRound(String id, String title, JSONObject round) {
+    }
+
+    /**
+     * 已下发但尚未回传的前端工具调用。
+     *
+     * @param userId Long 用户ID
+     * @param event AgentEvent 已下发的 tool-execute 事件
+     */
+    private record PendingFrontendCall(Long userId, AgentEvent event) {
     }
 
 }

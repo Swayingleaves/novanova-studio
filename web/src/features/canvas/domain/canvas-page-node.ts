@@ -50,8 +50,11 @@ export function createCanvasConnection(id: string, sourceNodeId: string, targetN
 }
 
 export function resetInterruptedCanvasNodes(nodes: CanvasNode[]): CanvasNode[] {
+    // 批次根节点的相位由子节点派生，只要还有子节点能续跑就保持运行中。
+    const resumableNodeIds = new Set(nodes.filter((node) => node.execution.phase === "running" && Boolean(node.execution.taskId)).map((node) => node.id));
     return nodes.map((node) => {
         if (node.execution.phase !== "running" || node.execution.taskId || (isStoryboardNode(node) && node.storyboard.assetGeneration?.phase === "running")) return node;
+        if (isImageNode(node) && node.grouping.isRoot && node.grouping.childIds.some((childId) => resumableNodeIds.has(childId))) return node;
         return updateCanvasNodeExecution(node, {
             phase: "failed",
             errorMessage: "页面刷新后生成已中断，请重新生成。",

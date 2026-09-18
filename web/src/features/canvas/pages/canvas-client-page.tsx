@@ -22,7 +22,7 @@ import { mergeAudioReferences } from "../utils/audio-references";
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { isAudioFile, uploadAudioFile } from "@/features/storage/services/audio-storage";
 import { getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/features/storage/services/file-storage";
-import { uploadObjectToStorage } from "@/features/storage/services/object-storage";
+import { uploadObjectToStorage, uploadRemoteObjectToStorage } from "@/features/storage/services/object-storage";
 import { findMissingReferenceObjectStorageAudios, findMissingReferenceObjectStorageImages, uploadMissingReferenceAudiosToObjectStorage, uploadMissingReferenceImagesToObjectStorage } from "@/features/storage/services/reference-object-storage";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize } from "@/features/generation/lib/image-utils";
@@ -92,6 +92,7 @@ import { CanvasWorkspaceOverlays } from "../components/canvas-workspace-overlays
 import { normalizeAudioTrimRange } from "../utils/audio-trim";
 import type { InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
 import { useAgentSSE } from "../hooks/use-agent-sse";
+import { agentActiveRequest, agentReplayPendingTools } from "../api/agent";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import { useAssistantMessageStream } from "../hooks/use-assistant-message-stream";
 import { useCanvasKeyboardShortcuts } from "../hooks/canvas-keyboard-shortcuts";
@@ -192,6 +193,8 @@ const NODE_STATUS_ERROR = "error" as const;
 /** 引用生成节点与源节点之间的统一画布间距。 */
 const CONNECTED_NODE_GAP = 144;
 const REFERENCE_IMAGE_UPLOAD_MESSAGE_KEY = "canvas-reference-image-upload";
+/** 忙状态下与服务端对账主Agent请求的间隔，用于收敛丢失终态事件后的残留状态 */
+const AGENT_REQUEST_RECONCILE_INTERVAL_MS = 30000;
 
 export default function CanvasPage() {
     const [mounted, setMounted] = useState(false);
@@ -400,6 +403,7 @@ function CanvasWorkspacePage() {
     const [agentUndoSnapshot, setAgentUndoSnapshot] = useState<CanvasAgentSnapshot | null>(null);
     const [agentRunning, setAgentRunning] = useState(false);
     const [agentQueued, setAgentQueued] = useState(false);
+    const agentResumeAttemptedRef = useRef(false);
     const { completedThinkings, activeThinking, onThoughtDelta, onThoughtComplete, resetThinkings } = useAgentThinking();
     const [titleEditing, setTitleEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState("");
@@ -614,6 +618,7 @@ function CanvasWorkspacePage() {
     useEffect(() => {
         if (!hydrated) return;
         setProjectLoaded(false);
+        agentResumeAttemptedRef.current = false;
         const document = findDocument(projectId);
         if (!document) {
             router.replace("/canvas");
@@ -674,34 +679,41 @@ function CanvasWorkspacePage() {
                 }
                 monitorVideoCompositionTask(node.id, resultVideoNodeId, taskId);
             });
-            // 恢复进行中的服务端任务：查询后端运行中任务，匹配存储的 taskId 后重新绑定进度回调。
+            // 恢复进行中的服务端任务：按节点上保存的任务号续订进度，任务已完成则直接回写结果。
             const loadingNodes = restoredNodes.filter(
                 (node) => !(isStoryboardNode(node) && node.storyboard.assetGeneration?.phase === "running") && !isVideoCompositionNode(node) && !compositionResultNodeIds.has(node.id) && node.execution.phase === "running" && node.execution.taskId,
             );
             if (!loadingNodes.length) return;
-            const { listAiTasks, waitAiTask } = await import("@/services/api/server");
-            const runningTasks = await listAiTasks(["pending", "running"]).catch(() => []);
+            const { listAiTasks } = await import("@/services/api/server");
+            // 列表请求失败时不做任何判定，避免把仍在运行的任务误判为中断。
+            const runningTasks = await listAiTasks(["pending", "running"]).catch(() => null);
+            if (!runningTasks) return;
             for (const node of loadingNodes) {
                 const taskId = node.execution.taskId as string;
-                const matched = runningTasks.find((t) => t.id === taskId);
-                if (!matched) {
-                    setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage: "页面刷新后生成已中断，请重新生成。" }) : item)));
+                // 列表只包含运行中的任务，没命中时再按任务号查一次，区分“已完成 / 已失败 / 任务不存在”。
+                const task = runningTasks.find((item) => item.id === taskId) ?? (await getAiTaskInfo(taskId).catch(() => null));
+                if (!task) {
+                    setNodes((prev) => markTaskNodeFailed(prev, node.id, "页面刷新后生成已中断，请重新生成。"));
                     continue;
                 }
-                if (matched.status === "success") {
-                    setNodes((prev) => updateNodeWithTaskResult(prev, node.id, matched));
+                if (task.status === "success") {
+                    setNodes((prev) => updateNodeWithTaskResult(prev, node.id, task));
+                    continue;
+                }
+                if (task.status !== "pending" && task.status !== "running") {
+                    setNodes((prev) => markTaskNodeFailed(prev, node.id, task.errorMessage || "生成失败"));
                     continue;
                 }
                 // 任务仍在运行，重新订阅进度。
                 waitAiTask(taskId, {
                     signal: new AbortController().signal,
-                    onProgress: (task) => setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { progress: task.progress || 0 }) : item))),
+                    onProgress: (current) => setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { progress: current.progress || 0 }) : item))),
                 })
                     .then((completed) => {
                         setNodes((prev) => updateNodeWithTaskResult(prev, node.id, completed));
                     })
                     .catch((error) => {
-                        setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage: error instanceof Error ? error.message : "生成恢复失败" }) : item)));
+                        setNodes((prev) => markTaskNodeFailed(prev, node.id, error instanceof Error ? error.message : "生成恢复失败"));
                     });
             }
         });
@@ -2897,19 +2909,16 @@ function CanvasWorkspacePage() {
                 }
                 return;
             }
+            const { beginNodeUpload, finishNodeUpload } = useCanvasUiStore.getState();
+            if (!beginNodeUpload(node.id)) return;
             try {
-                const blob = await readNodeObjectStorageBlob(node);
-                if (!blob) throw new Error(isImageNode(node) ? "图片文件读取失败" : "视频文件读取失败");
-                const objectStorageFile = await uploadObjectToStorage({
-                    body: blob,
-                    kind: node.kind,
-                    fileName: `${node.title || node.id}.${isImageNode(node) ? imageExtension(node.content.source) : "mp4"}`,
-                    mimeType: node.content.mimeType || blob.type || (isImageNode(node) ? "image/png" : "video/mp4"),
-                });
+                const objectStorageFile = await uploadNodeMediaToObjectStorage(node);
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? applyCanvasNodeAttributes(item, { objectStorage: objectStorageFile }) : item)));
                 message.success("已上传到云储存，地址已保存到节点");
             } catch (error) {
                 message.error(error instanceof Error ? error.message : "上传到云储存失败");
+            } finally {
+                finishNodeUpload(node.id);
             }
         },
         [message],
@@ -3204,6 +3213,10 @@ function CanvasWorkspacePage() {
         sendMessage: sendAgentMessage,
         cancelMessage: cancelAgentMessage,
         resetSession: resetAgentSession,
+        attachRequest: attachAgentRequest,
+        detachRequest: detachAgentRequest,
+        readActiveToolCallIds,
+        readAttachedRequestId,
     } = useAgentSSE({
         snapshot: agentSnapshot,
         onApplyOps: applyAgentOps,
@@ -3295,6 +3308,52 @@ function CanvasWorkspacePage() {
         },
     });
 
+    /** 与服务端对账当前画布的主Agent请求：需要时接管并重放未完成的前端工具调用。 */
+    const syncActiveAgentRequest = useCallback(
+        async (notify: boolean) => {
+            const active = await agentActiveRequest("canvas").catch(() => null);
+            if (!active || active.projectId !== projectId || (active.status !== "queued" && active.status !== "running")) {
+                if (notify) return;
+                // 服务端已经没有本画布的进行中请求，清掉可能残留的忙态。
+                detachAgentRequest();
+                setAgentRunning(false);
+                setAgentQueued(false);
+                return;
+            }
+            if (active.requestId === readAttachedRequestId()) return;
+            attachAgentRequest(active.sessionId, active.requestId, active.status);
+            setAssistantMounted(true);
+            setAgentQueued(active.status === "queued");
+            setAgentRunning(active.status === "running");
+            const replayed = await agentReplayPendingTools({
+                sessionId: active.sessionId,
+                requestId: active.requestId,
+                activeToolCallIds: readActiveToolCallIds(),
+            }).catch(() => 0);
+            if (notify || replayed > 0) {
+                message.info(replayed > 0 ? "已接续上一次未完成的画布任务" : "已接入仍在运行的上一次画布任务");
+            }
+        },
+        [attachAgentRequest, detachAgentRequest, message, projectId, readActiveToolCallIds, readAttachedRequestId],
+    );
+    // 定时器只依赖同步函数的最新实现，避免画布高频重渲染把对账间隔无限顺延。
+    const syncActiveAgentRequestRef = useRef(syncActiveAgentRequest);
+    syncActiveAgentRequestRef.current = syncActiveAgentRequest;
+
+    /** 刷新后重新接入仍在执行的主Agent请求，每个画布加载只尝试一次。 */
+    useEffect(() => {
+        if (!projectLoaded || agentResumeAttemptedRef.current) return;
+        agentResumeAttemptedRef.current = true;
+        void syncActiveAgentRequestRef.current(true);
+    }, [projectLoaded]);
+
+    /** 忙状态下定期与服务端对账，避免终态事件丢失或请求被替换后一直停留在“排队中/生成中”。 */
+    useEffect(() => {
+        if (!projectLoaded || (!agentRunning && !agentQueued)) return;
+        const timer = window.setInterval(() => void syncActiveAgentRequestRef.current(false), AGENT_REQUEST_RECONCILE_INTERVAL_MS);
+        return () => window.clearInterval(timer);
+    }, [agentQueued, agentRunning, projectLoaded]);
+
     const handleCreateAgentSession = useCallback(() => {
         if (agentRunning || agentQueued) return;
         resetThinkings();
@@ -3339,6 +3398,8 @@ function CanvasWorkspacePage() {
             resetThinkings();
             resetTextStream(false);
             setAgentQueued(true);
+            // 设定图走主Agent，节点自身不会有进度，必须把助手面板打开，用户才能看到排队/生成和停止。
+            setAssistantMounted(true);
             const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text: effectivePrompt };
             if (!activeChatId) {
                 const now = new Date().toISOString();
@@ -3347,7 +3408,7 @@ function CanvasWorkspacePage() {
                 appendAssistantMessage(sessionId, userMessage);
             }
             try {
-                await sendAgentMessage(
+                const submitted = await sendAgentMessage(
                     effectivePrompt,
                     [],
                     config.agentModel || undefined,
@@ -3364,6 +3425,11 @@ function CanvasWorkspacePage() {
                     },
                     String(skill.id),
                 );
+                if (!submitted) {
+                    setAgentQueued(false);
+                    setAgentRunning(false);
+                    message.warning("上一次画布Agent任务仍在运行，请等它结束后再试");
+                }
             } catch (error) {
                 message.error(error instanceof Error ? error.message : "设定图生成失败");
                 setAgentQueued(false);
@@ -3420,6 +3486,10 @@ function CanvasWorkspacePage() {
                 return failedCanvasGenerationResult(nodeId, canvasError("configuration", "当前节点正在生成，请等待任务完成"));
             }
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
+            // 刷新恢复出来的节点仍在等待服务端任务结果，避免接续工具调用时重复发起一次生成。
+            if (sourceNode?.execution.phase === "running" && sourceNode.execution.taskId) {
+                return failedCanvasGenerationResult(nodeId, canvasError("configuration", "当前节点正在生成，请等待任务完成"));
+            }
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 showMissingAiConfig(mode);
@@ -3621,16 +3691,21 @@ function CanvasWorkspacePage() {
                     const outcomes = await Promise.all(
                         targetIds.map(async (targetId): Promise<CanvasNodeGenerationOutcome> => {
                             try {
+                                // 任务号写回节点，刷新后可以按任务号续订进度。
+                                const markTaskCreated = (taskId: string) =>
+                                    setNodes((prev) => prev.map((node) => (node.id === targetId ? updateCanvasNodeExecution(node, { taskId }) : node)));
                                 const generationRequest = referenceImages.length
                                     ? requestEdit({ ...generationConfig, size: generationSize, count: "1" }, effectivePrompt, referenceImages, undefined, "canvas", {
                                           signal: controller.signal,
                                           generationStyleIds: styleSnapshots.length ? undefined : styleIds,
                                           generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined,
+                                          onTaskCreated: markTaskCreated,
                                       })
                                     : requestGeneration({ ...generationConfig, size: generationSize, count: "1" }, effectivePrompt, "canvas", {
                                           signal: controller.signal,
                                           generationStyleIds: styleSnapshots.length ? undefined : styleIds,
                                           generationStyleSnapshots: styleSnapshots.length ? styleSnapshots : undefined,
+                                          onTaskCreated: markTaskCreated,
                                       });
                                 const [image] = await generationRequest;
                                 if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
@@ -3859,7 +3934,11 @@ function CanvasWorkspacePage() {
                         }
                         // 后端任务体系下，每个目标节点创建一个文本任务，订阅text-delta增量回写节点内容。
                         return createAiTask({ taskType: "text", prompt: effectivePrompt, model: textModel, references: textReferences })
-                            .then((task) => ({ targetNodeId, taskId: task.id }))
+                            .then((task) => {
+                                // 任务号写回节点，刷新后可以按任务号续订进度。
+                                setNodes((prev) => prev.map((node) => (node.id === targetNodeId ? updateCanvasNodeExecution(node, { taskId: task.id }) : node)));
+                                return { targetNodeId, taskId: task.id };
+                            })
                             .then(async ({ targetNodeId, taskId }) => {
                                 let localStreamed = "";
                                 const unsubscribe = subscribeAiTaskDeltas((deltaTaskId, delta) => {
@@ -4111,16 +4190,20 @@ function CanvasWorkspacePage() {
                     return canvasGenerationResult([node.id], [], actualToolArguments);
                 }
 
+                // 任务号写回节点，刷新后可以按任务号续订进度。
+                const markRetryTaskCreated = (taskId: string) => setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { taskId }) : item)));
                 const image = useReferenceImages
                     ? await requestEdit(generationConfig, prompt, retryImages, undefined, "canvas", {
                           signal: controller.signal,
                           generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds,
                           generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined,
+                          onTaskCreated: markRetryTaskCreated,
                       }).then((items) => items[0])
                     : await requestGeneration(generationConfig, prompt, "canvas", {
                           signal: controller.signal,
                           generationStyleIds: savedStyleSnapshots.length ? undefined : savedStyleIds,
                           generationStyleSnapshots: savedStyleSnapshots.length ? savedStyleSnapshots : undefined,
+                          onTaskCreated: markRetryTaskCreated,
                       }).then((items) => items[0]);
                 if (controller.signal.aborted) throw new DOMException("Aborted", "AbortError");
                 const completedStyleSnapshots = image.generationStyleSnapshots?.length ? image.generationStyleSnapshots : savedStyleSnapshots;
@@ -5015,7 +5098,7 @@ function CanvasWorkspacePage() {
                         }
 
                         try {
-                            await sendAgentMessage(
+                            const submitted = await sendAgentMessage(
                                 text,
                                 references.map((reference) => ({ title: reference.title, text: reference.text || "" })),
                                 config.agentModel || undefined,
@@ -5035,6 +5118,11 @@ function CanvasWorkspacePage() {
                                     videoModel: config.videoModel || undefined,
                                 },
                             );
+                            if (!submitted) {
+                                setAgentRunning(false);
+                                setAgentQueued(false);
+                                appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: "上一次画布Agent任务仍在运行，请等它结束后再试" });
+                            }
                         } catch (error) {
                             resetThinkings();
                             appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
@@ -5326,6 +5414,38 @@ async function readNodeObjectStorageBlob(node: CanvasDomainNode) {
     return (await fetch(node.content.source)).blob();
 }
 
+/** 读取节点本地媒体内容；仅用于没有服务端媒体记录的节点做回退上传。 */
+async function requireNodeObjectStorageBlob(node: CanvasDomainNode) {
+    const blob = await readNodeObjectStorageBlob(node);
+    if (!blob) throw new Error(isImageNode(node) ? "图片文件读取失败" : "视频文件读取失败");
+    return blob;
+}
+
+/**
+ * 转存节点媒体到对象存储。
+ * <p>
+ * 节点媒体已登记在服务端时交给服务端转存，一次请求完成，既不重复生成媒体记录，也不用把大视频搬到浏览器再传回来；
+ * 没有媒体记录的节点才回退为浏览器上传。
+ */
+async function uploadNodeMediaToObjectStorage(node: CanvasDomainNode) {
+    if (!isImageNode(node) && !isVideoNode(node)) throw new Error("当前节点不支持上传到云储存");
+    if (node.content.storageKey) {
+        return uploadRemoteObjectToStorage({
+            storageKey: node.content.storageKey,
+            sourceUrl: node.content.source,
+            kind: node.kind,
+            mimeType: node.content.mimeType,
+        });
+    }
+    const blob = await requireNodeObjectStorageBlob(node);
+    return uploadObjectToStorage({
+        body: blob,
+        kind: node.kind,
+        fileName: `${node.title || node.id}.${isImageNode(node) ? imageExtension(node.content.source) : "mp4"}`,
+        mimeType: node.content.mimeType || blob.type || (isImageNode(node) ? "image/png" : "video/mp4"),
+    });
+}
+
 async function withNodeImageObjectUrl<Result>(node: CanvasDomainNode, process: (sourceUrl: string) => Promise<Result>): Promise<Result> {
     const blob = await readNodeObjectStorageBlob(node);
     if (!blob) throw new Error("图片文件读取失败");
@@ -5470,32 +5590,50 @@ function replaceStoryboardGenerationResult(node: CanvasStoryboardNode, shots: Ca
     return { ...node, storyboard: { ...storyboard, shots, assets } };
 }
 
+/** 标记节点的服务端任务失败；图片批次子节点同时同步批次根相位。 */
+function markTaskNodeFailed(nodes: CanvasDomainNode[], nodeId: string, errorMessage: string): CanvasDomainNode[] {
+    const target = nodes.find((node) => node.id === nodeId);
+    const updated = nodes.map((node) => (node.id === nodeId ? updateCanvasNodeExecution(node, { phase: "failed", errorMessage }) : node));
+    return target && isImageNode(target) && target.grouping.rootId ? synchronizeImageBatchRootExecution(updated, target.grouping.rootId) : updated;
+}
+
+/** 把已完成任务的结果回写到节点：文本写正文，图片/视频写媒体信息。 */
 function updateNodeWithTaskResult(nodes: CanvasDomainNode[], nodeId: string, completed: import("@/services/api/server").ServerAiTask): CanvasDomainNode[] {
-    const item =
-        completed.resultData && typeof completed.resultData === "object"
-            ? (((completed.resultData as Record<string, unknown>).item as Record<string, unknown> | undefined) ?? ((completed.resultData as Record<string, unknown>).items as Array<Record<string, unknown>> | undefined)?.[0])
-            : undefined;
+    const target = nodes.find((node) => node.id === nodeId);
+    if (!target) return nodes;
+    if (isTextNode(target)) {
+        const data = completed.resultData && typeof completed.resultData === "object" ? (completed.resultData as { content?: unknown }) : null;
+        const content = typeof data?.content === "string" ? data.content : "";
+        if (!content) return markTaskNodeFailed(nodes, nodeId, "生成完成但没有返回内容");
+        return nodes.map((node) => (node.id === nodeId ? replaceCanvasNodeWithText(node, content, node.title, "succeeded") : node));
+    }
+    const result = completed.resultData && typeof completed.resultData === "object" ? (completed.resultData as Record<string, unknown>) : null;
+    const item = (result?.item as Record<string, unknown> | undefined) ?? (result?.items as Array<Record<string, unknown>> | undefined)?.[0];
     const url = item && typeof item.url === "string" ? item.url : "";
-    if (!url) return nodes.map((node) => (node.id === nodeId ? updateCanvasNodeExecution(node, { phase: "failed", errorMessage: "生成完成但没有返回结果 URL" }) : node));
-    const type = nodeId.startsWith("video") ? "video" : "image";
-    return nodes.map((node) => {
+    if (!url) return markTaskNodeFailed(nodes, nodeId, "生成完成但没有返回结果地址");
+    const type = isVideoNode(target) ? "video" : "image";
+    const width = (typeof item?.width === "number" && item.width) || target.frame.width;
+    const height = (typeof item?.height === "number" && item.height) || target.frame.height;
+    const attributes: CanvasNodeAttributes = {
+        content: url,
+        storageKey: typeof item?.storageKey === "string" ? item.storageKey : undefined,
+        mimeType: (typeof item?.mimeType === "string" ? item.mimeType : undefined) || (type === "video" ? "video/mp4" : "image/png"),
+        bytes: typeof item?.bytes === "number" ? item.bytes : undefined,
+        durationMs: type === "video" && typeof item?.durationMs === "number" ? item.durationMs : undefined,
+        objectStorage: item?.objectStorage && typeof item.objectStorage === "object" ? (item.objectStorage as CanvasNodeAttributes["objectStorage"]) : undefined,
+        status: "success",
+        progress: 100,
+    };
+    const updated = nodes.map((node) => {
         if (node.id !== nodeId) return node;
         const center = { x: node.frame.position.x + node.frame.width / 2, y: node.frame.position.y + node.frame.height / 2 };
-        const width = (item?.width as number) || node.frame.width;
-        const height = (item?.height as number) || node.frame.height;
-        const replacement = node.kind === type ? node : { ...createCanvasNode(type, center), id: node.id, title: node.title };
         return updateCanvasNodeFrame(
-            applyCanvasNodeAttributes(replacement, {
-                content: url,
-                mimeType: (item?.mimeType as string) || (type === "video" ? "video/mp4" : "image/png"),
-                status: "success",
-                progress: 100,
-                bytes: (item?.bytes as number) || 0,
-                durationMs: type === "video" ? (item?.durationMs as number) || undefined : undefined,
-            }),
+            applyCanvasNodeAttributes(node, attributes),
             { position: { x: center.x - width / 2, y: center.y - height / 2 }, width, height, naturalWidth: width, naturalHeight: height },
         );
     });
+    // 图片批次子节点回写后同步批次根节点相位。
+    return isImageNode(target) && target.grouping.rootId ? synchronizeImageBatchRootExecution(updated, target.grouping.rootId) : updated;
 }
 
 function canvasError(category: string, errorMessage: string, parameter?: string): AiTaskErrorDetails {
