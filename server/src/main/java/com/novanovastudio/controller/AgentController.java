@@ -9,11 +9,14 @@ package com.novanovastudio.controller;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentEventEmitter;
+import com.novanovastudio.agent.AgentTaskOrchestrator;
 import com.novanovastudio.agent.CreationAgentOrchestrator;
 import com.novanovastudio.agent.CreationEntrySource;
 import com.novanovastudio.agent.AgentToolResultRelay;
+import com.novanovastudio.agent.dto.AgentActiveRequestResponse;
 import com.novanovastudio.agent.dto.AgentCancelRequest;
 import com.novanovastudio.agent.dto.AgentChatRequest;
+import com.novanovastudio.agent.dto.AgentReplayToolsRequest;
 import com.novanovastudio.agent.dto.AgentRequestStatusResponse;
 import com.novanovastudio.agent.dto.CreationAgentChatResponse;
 import com.novanovastudio.agent.dto.AgentEvent;
@@ -24,8 +27,11 @@ import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.repository.CreationAgentRequestRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import jakarta.validation.Valid;
+import java.util.HashSet;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -51,6 +57,8 @@ public class AgentController {
     private final AgentToolResultRelay toolResultRelay;
     private final CreationAgentRequestRepository creationAgentRequestRepository;
     private final CurrentUserProvider currentUserProvider;
+    /** AgentScope任务编排器，延迟获取避免与CreationAgentOrchestrator形成构造器循环 */
+    private final ObjectProvider<AgentTaskOrchestrator> agentTaskOrchestratorProvider;
 
     /**
      * 发起对话。接收用户消息、入口来源和生成设置，创建主Agent请求并进入对应分区队列。
@@ -98,6 +106,87 @@ public class AgentController {
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求不存在")))
                 .map(request -> ApiResponse.ok(new AgentRequestStatusResponse(
                         request.getStatus(), request.getErrorMessage() == null ? "" : request.getErrorMessage())));
+    }
+
+    /**
+     * 查询当前用户在指定入口分区内仍在执行的主Agent请求，供页面刷新后重新接入。
+     *
+     * @param entrySource String 入口来源
+     * @return Mono<ApiResponse<AgentActiveRequestResponse>> 进行中请求；没有时data为null
+     */
+    @GetMapping("/activeRequest")
+    public Mono<ApiResponse<AgentActiveRequestResponse>> activeRequest(@RequestParam String entrySource) {
+        if (!CreationEntrySource.supported(entrySource)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "Agent入口来源不合法"));
+        }
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> Flux.concat(creationAgentRequestRepository.listRunningRequests(),
+                                creationAgentRequestRepository.listQueuedRequests())
+                        .filter(request -> userId.equals(request.getUserId()) && entrySource.equals(request.getEntrySource()))
+                        .next()
+                        .map(request -> ApiResponse.ok(new AgentActiveRequestResponse(request.getId(),
+                                request.getSessionId(), request.getStatus(),
+                                request.getErrorMessage() == null ? "" : request.getErrorMessage(),
+                                readSnapshotProjectId(request.getRequestData()))))
+                        .defaultIfEmpty(ApiResponse.<AgentActiveRequestResponse>ok(null)));
+    }
+
+    /**
+     * 读取请求快照中的画布项目ID，供前端判断该请求是否属于当前画布。
+     *
+     * @param requestData String 主Agent请求快照JSON
+     * @return String 画布项目ID；非画布请求或解析失败时返回空串
+     */
+    private static String readSnapshotProjectId(String requestData) {
+        if (requestData == null || requestData.isBlank()) {
+            return "";
+        }
+        try {
+            JSONObject snapshot = JSON.parseObject(requestData);
+            JSONObject canvasSnapshot = snapshot == null ? null : snapshot.getJSONObject("canvasSnapshot");
+            String projectId = canvasSnapshot == null ? null : canvasSnapshot.getString("projectId");
+            return projectId == null ? "" : projectId;
+        } catch (Exception exception) {
+            log.warn("解析主Agent请求快照项目ID失败", exception);
+            return "";
+        }
+    }
+
+    /**
+     * 重放等待前端执行、且当前页面未在执行的前端工具调用。
+     *
+     * @param request AgentReplayToolsRequest 会话、请求和当前页面在执行的工具调用ID
+     * @return Mono<ApiResponse<Integer>> 重放数量
+     */
+    @PostMapping("/replayPendingTools")
+    public Mono<ApiResponse<Integer>> replayPendingTools(@Valid @RequestBody AgentReplayToolsRequest request) {
+        log.info("重放前端工具调用请求: sessionId={}, requestId={}, activeCallIds={}",
+                request.sessionId(), request.requestId(), request.activeToolCallIds());
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> creationAgentRequestRepository.findByIdForUser(userId, request.requestId())
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求不存在")))
+                        .flatMap(current -> {
+                            if (current.getSessionId() == null || !current.getSessionId().equals(request.sessionId())) {
+                                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "会话与主Agent请求不匹配"));
+                            }
+                            if (!isExecutingRequestStatus(current.getStatus())) {
+                                return Mono.just(0);
+                            }
+                            List<String> activeCallIds = request.activeToolCallIds() == null ? List.of() : request.activeToolCallIds();
+                            return Mono.just(agentTaskOrchestratorProvider.getObject()
+                                    .replayPendingFrontendCalls(userId, request.sessionId(), new HashSet<>(activeCallIds)));
+                        }))
+                .map(ApiResponse::ok);
+    }
+
+    /**
+     * 判断主Agent请求是否仍在执行（排队或运行）。
+     *
+     * @param status String 请求状态
+     * @return boolean 是否仍在执行
+     */
+    private static boolean isExecutingRequestStatus(String status) {
+        return "queued".equals(status) || "running".equals(status);
     }
 
     /**

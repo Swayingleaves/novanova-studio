@@ -320,7 +320,7 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
       generationSettings?: Omit<CreationSettings, "model" | "generationStyleIdsByType">,
       skillId?: string,
     ) => {
-      if (sendingRef.current || activeRequestRef.current) return;
+      if (sendingRef.current || activeRequestRef.current) return false;
       sendingRef.current = true;
       activeRequestRef.current = true;
       cancelRequestedRef.current = false;
@@ -380,6 +380,7 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
       } finally {
         sendingRef.current = false;
       }
+      return true;
     },
     [finishCanceledRequest, flushPendingEvents, markRequestTerminal],
   );
@@ -418,6 +419,50 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
     }
   }, [finishCanceledRequest]);
 
+  /**
+   * 接管一个已在服务端执行的请求：写入会话和请求ID，让后续SSE事件重新匹配本页面。
+   * 页面刷新后用它恢复对进行中任务的订阅。
+   *
+   * @param sessionId String Agent会话ID
+   * @param requestId String 主Agent请求ID
+   * @param status AgentQueueStatus 服务端请求状态
+   */
+  const attachRequest = useCallback((sessionId: string, requestId: string, status: AgentQueueStatus) => {
+    sessionIdRef.current = sessionId;
+    requestIdRef.current = requestId;
+    pendingEventsRef.current = [];
+    queueStatusRef.current = status;
+    activeRequestRef.current = true;
+    cancelRequestedRef.current = false;
+    canceledHandledRef.current = false;
+  }, []);
+
+  /**
+   * 释放已结束请求的接管状态，避免新请求被提交锁拒绝。
+   */
+  const detachRequest = useCallback(() => {
+    activeRequestRef.current = false;
+    queueStatusRef.current = null;
+    pendingEventsRef.current = [];
+    requestIdRef.current = undefined;
+    cancelRequestedRef.current = false;
+    canceledHandledRef.current = false;
+  }, []);
+
+  /**
+   * 读取当前页面正在执行的前端工具调用ID，接管请求时用它避免同一调用被执行两次。
+   *
+   * @return string[] 正在执行的工具调用ID
+   */
+  const readActiveToolCallIds = useCallback(() => Array.from(activeToolControllersRef.current.keys()), []);
+
+  /**
+   * 读取当前页面已接管的请求ID，用于切换接管新请求。
+   *
+   * @return string | undefined 已接管的请求ID
+   */
+  const readAttachedRequestId = useCallback(() => requestIdRef.current, []);
+
   const token = useUserStore((s) => s.token);
 
   // 仅登录后建立 SSE 连接，token 变化时自动重连
@@ -440,7 +485,7 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
     };
   }, [token, clearReconnectTimer, connectSSE]);
 
-  return { sendMessage, cancelMessage, resetSession };
+  return { sendMessage, cancelMessage, resetSession, attachRequest, detachRequest, readActiveToolCallIds, readAttachedRequestId };
 }
 
 /** 设定图生成只向 Agent 发送目标节点及其直接引用节点，避免把整张大型画布历史注入模型导致请求超时。 */

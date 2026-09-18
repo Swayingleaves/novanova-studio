@@ -168,6 +168,41 @@ export async function agentRequestStatus(requestId: string): Promise<{ status: A
 }
 
 /**
+ * 查询指定入口分区内仍在执行的主Agent请求，供页面刷新后重新接入。
+ */
+export async function agentActiveRequest(entrySource: string): Promise<{ requestId: string; sessionId: string; status: AgentRequestStatus; message: string; projectId: string } | null> {
+    const token = getAuthToken();
+    const res = await fetch(`${serverBaseUrl()}/ai/agent/activeRequest?entrySource=${encodeURIComponent(entrySource)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        cache: "no-store",
+    });
+    const payload = (await res.json().catch(() => null)) as ApiResponse<{ requestId: string; sessionId: string; status: AgentRequestStatus; message: string; projectId: string } | null> | null;
+    if (!res.ok || !payload) throw new Error(payload?.msg || `Agent 进行中请求查询失败: ${res.status}`);
+    if (payload.code !== 0) throw new Error(payload.msg || "Agent 进行中请求查询失败");
+    return payload.data || null;
+}
+
+/**
+ * 让服务端重放当前页面未在执行的前端工具调用，避免刷新后主Agent请求一直等到工具超时。
+ */
+export async function agentReplayPendingTools(params: { sessionId: string; requestId: string; activeToolCallIds: string[] }): Promise<number> {
+    const token = getAuthToken();
+    const res = await fetch(`${serverBaseUrl()}/ai/agent/replayPendingTools`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        cache: "no-store",
+        body: JSON.stringify(params),
+    });
+    const payload = (await res.json().catch(() => null)) as ApiResponse<number> | null;
+    if (!res.ok || !payload) throw new Error(payload?.msg || `Agent 工具重放失败: ${res.status}`);
+    if (payload.code !== 0) throw new Error(payload.msg || "Agent 工具重放失败");
+    return payload.data || 0;
+}
+
+/**
  * 订阅 SSE 事件流。EventSource 无法设置自定义头，通过 query token 传递鉴权令牌。
  */
 export function agentSubscribeEvents(): EventSource {

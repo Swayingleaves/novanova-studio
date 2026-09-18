@@ -92,6 +92,7 @@ import { CanvasWorkspaceOverlays } from "../components/canvas-workspace-overlays
 import { normalizeAudioTrimRange } from "../utils/audio-trim";
 import type { InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
 import { useAgentSSE } from "../hooks/use-agent-sse";
+import { agentActiveRequest, agentReplayPendingTools } from "../api/agent";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import { useAssistantMessageStream } from "../hooks/use-assistant-message-stream";
 import { useCanvasKeyboardShortcuts } from "../hooks/canvas-keyboard-shortcuts";
@@ -192,6 +193,8 @@ const NODE_STATUS_ERROR = "error" as const;
 /** 引用生成节点与源节点之间的统一画布间距。 */
 const CONNECTED_NODE_GAP = 144;
 const REFERENCE_IMAGE_UPLOAD_MESSAGE_KEY = "canvas-reference-image-upload";
+/** 忙状态下与服务端对账主Agent请求的间隔，用于收敛丢失终态事件后的残留状态 */
+const AGENT_REQUEST_RECONCILE_INTERVAL_MS = 30000;
 
 export default function CanvasPage() {
     const [mounted, setMounted] = useState(false);
@@ -400,6 +403,7 @@ function CanvasWorkspacePage() {
     const [agentUndoSnapshot, setAgentUndoSnapshot] = useState<CanvasAgentSnapshot | null>(null);
     const [agentRunning, setAgentRunning] = useState(false);
     const [agentQueued, setAgentQueued] = useState(false);
+    const agentResumeAttemptedRef = useRef(false);
     const { completedThinkings, activeThinking, onThoughtDelta, onThoughtComplete, resetThinkings } = useAgentThinking();
     const [titleEditing, setTitleEditing] = useState(false);
     const [titleDraft, setTitleDraft] = useState("");
@@ -614,6 +618,7 @@ function CanvasWorkspacePage() {
     useEffect(() => {
         if (!hydrated) return;
         setProjectLoaded(false);
+        agentResumeAttemptedRef.current = false;
         const document = findDocument(projectId);
         if (!document) {
             router.replace("/canvas");
@@ -3208,6 +3213,10 @@ function CanvasWorkspacePage() {
         sendMessage: sendAgentMessage,
         cancelMessage: cancelAgentMessage,
         resetSession: resetAgentSession,
+        attachRequest: attachAgentRequest,
+        detachRequest: detachAgentRequest,
+        readActiveToolCallIds,
+        readAttachedRequestId,
     } = useAgentSSE({
         snapshot: agentSnapshot,
         onApplyOps: applyAgentOps,
@@ -3299,6 +3308,52 @@ function CanvasWorkspacePage() {
         },
     });
 
+    /** 与服务端对账当前画布的主Agent请求：需要时接管并重放未完成的前端工具调用。 */
+    const syncActiveAgentRequest = useCallback(
+        async (notify: boolean) => {
+            const active = await agentActiveRequest("canvas").catch(() => null);
+            if (!active || active.projectId !== projectId || (active.status !== "queued" && active.status !== "running")) {
+                if (notify) return;
+                // 服务端已经没有本画布的进行中请求，清掉可能残留的忙态。
+                detachAgentRequest();
+                setAgentRunning(false);
+                setAgentQueued(false);
+                return;
+            }
+            if (active.requestId === readAttachedRequestId()) return;
+            attachAgentRequest(active.sessionId, active.requestId, active.status);
+            setAssistantMounted(true);
+            setAgentQueued(active.status === "queued");
+            setAgentRunning(active.status === "running");
+            const replayed = await agentReplayPendingTools({
+                sessionId: active.sessionId,
+                requestId: active.requestId,
+                activeToolCallIds: readActiveToolCallIds(),
+            }).catch(() => 0);
+            if (notify || replayed > 0) {
+                message.info(replayed > 0 ? "已接续上一次未完成的画布任务" : "已接入仍在运行的上一次画布任务");
+            }
+        },
+        [attachAgentRequest, detachAgentRequest, message, projectId, readActiveToolCallIds, readAttachedRequestId],
+    );
+    // 定时器只依赖同步函数的最新实现，避免画布高频重渲染把对账间隔无限顺延。
+    const syncActiveAgentRequestRef = useRef(syncActiveAgentRequest);
+    syncActiveAgentRequestRef.current = syncActiveAgentRequest;
+
+    /** 刷新后重新接入仍在执行的主Agent请求，每个画布加载只尝试一次。 */
+    useEffect(() => {
+        if (!projectLoaded || agentResumeAttemptedRef.current) return;
+        agentResumeAttemptedRef.current = true;
+        void syncActiveAgentRequestRef.current(true);
+    }, [projectLoaded]);
+
+    /** 忙状态下定期与服务端对账，避免终态事件丢失或请求被替换后一直停留在“排队中/生成中”。 */
+    useEffect(() => {
+        if (!projectLoaded || (!agentRunning && !agentQueued)) return;
+        const timer = window.setInterval(() => void syncActiveAgentRequestRef.current(false), AGENT_REQUEST_RECONCILE_INTERVAL_MS);
+        return () => window.clearInterval(timer);
+    }, [agentQueued, agentRunning, projectLoaded]);
+
     const handleCreateAgentSession = useCallback(() => {
         if (agentRunning || agentQueued) return;
         resetThinkings();
@@ -3343,6 +3398,8 @@ function CanvasWorkspacePage() {
             resetThinkings();
             resetTextStream(false);
             setAgentQueued(true);
+            // 设定图走主Agent，节点自身不会有进度，必须把助手面板打开，用户才能看到排队/生成和停止。
+            setAssistantMounted(true);
             const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text: effectivePrompt };
             if (!activeChatId) {
                 const now = new Date().toISOString();
@@ -3351,7 +3408,7 @@ function CanvasWorkspacePage() {
                 appendAssistantMessage(sessionId, userMessage);
             }
             try {
-                await sendAgentMessage(
+                const submitted = await sendAgentMessage(
                     effectivePrompt,
                     [],
                     config.agentModel || undefined,
@@ -3368,6 +3425,11 @@ function CanvasWorkspacePage() {
                     },
                     String(skill.id),
                 );
+                if (!submitted) {
+                    setAgentQueued(false);
+                    setAgentRunning(false);
+                    message.warning("上一次画布Agent任务仍在运行，请等它结束后再试");
+                }
             } catch (error) {
                 message.error(error instanceof Error ? error.message : "设定图生成失败");
                 setAgentQueued(false);
@@ -3424,6 +3486,10 @@ function CanvasWorkspacePage() {
                 return failedCanvasGenerationResult(nodeId, canvasError("configuration", "当前节点正在生成，请等待任务完成"));
             }
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
+            // 刷新恢复出来的节点仍在等待服务端任务结果，避免接续工具调用时重复发起一次生成。
+            if (sourceNode?.execution.phase === "running" && sourceNode.execution.taskId) {
+                return failedCanvasGenerationResult(nodeId, canvasError("configuration", "当前节点正在生成，请等待任务完成"));
+            }
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 showMissingAiConfig(mode);
@@ -5032,7 +5098,7 @@ function CanvasWorkspacePage() {
                         }
 
                         try {
-                            await sendAgentMessage(
+                            const submitted = await sendAgentMessage(
                                 text,
                                 references.map((reference) => ({ title: reference.title, text: reference.text || "" })),
                                 config.agentModel || undefined,
@@ -5052,6 +5118,11 @@ function CanvasWorkspacePage() {
                                     videoModel: config.videoModel || undefined,
                                 },
                             );
+                            if (!submitted) {
+                                setAgentRunning(false);
+                                setAgentQueued(false);
+                                appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: "上一次画布Agent任务仍在运行，请等它结束后再试" });
+                            }
                         } catch (error) {
                             resetThinkings();
                             appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
