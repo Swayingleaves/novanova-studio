@@ -5,7 +5,7 @@ import { NodeResizer, useUpdateNodeInternals, type NodeProps, type Node } from "
 import { AlertTriangle, ChevronRight, Image as ImageIcon, Images, LoaderCircle, Sparkles } from "lucide-react";
 import type { CanvasImageNode } from "../types";
 import { type BatchImagePreview, useNodeActions } from "./node-action-context";
-import { CanvasConnectionHandles, CanvasNodeTitle, MediaDownloadHint, NodeHoverSurface } from "./shared";
+import { CanvasConnectionHandles, CanvasNodeTitle, MediaDownloadHint, NodeHoverSurface, NodeMediaUnavailable } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 
 const BATCH_COLLAPSE_TRANSITION_MS = 260;
@@ -25,6 +25,9 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
     const batchSurfaceRef = useRef<HTMLDivElement>(null);
     const previousBatchExpandedRef = useRef(data.grouping.expanded);
     const [showCollapsedBatchStack, setShowCollapsedBatchStack] = useState(() => !data.grouping.expanded);
+    // 记录加载失败的媒体地址，地址变化（重新生成/替换）后自动恢复显示。
+    const [failedSource, setFailedSource] = useState<string | null>(null);
+    const isMediaUnavailable = hasContent && failedSource === data.content.source;
 
     useLayoutEffect(() => {
         const wasExpanded = previousBatchExpandedRef.current;
@@ -204,7 +207,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                     ref={batchSurfaceRef}
                     className="relative flex h-full w-full flex-col rounded-3xl border-2"
                     style={{
-                        background: hasContent ? "transparent" : theme.node.fill,
+                        background: hasContent && !isMediaUnavailable ? "transparent" : theme.node.fill,
                         borderColor,
                         transformOrigin: "center center",
                         boxShadow: selected ? `0 0 0 1px ${theme.node.activeStroke}55` : undefined,
@@ -222,9 +225,11 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                                 <AlertTriangle className="size-6 text-red-400" />
                                 <span className="text-xs text-red-400">{data.execution.errorMessage || "生成失败"}</span>
                             </div>
+                        ) : isMediaUnavailable ? (
+                            <NodeMediaUnavailable kind="image" />
                         ) : hasContent ? (
                             <div className="relative h-full w-full">
-                                <img src={data.content.source} alt={data.title || ""} className="h-full w-full object-contain" draggable={false} />
+                                <img src={data.content.source} alt={data.title || ""} className="h-full w-full object-contain" draggable={false} onError={() => setFailedSource(data.content.source)} />
                                 <MediaDownloadHint />
                             </div>
                         ) : (
@@ -274,9 +279,17 @@ function CollapsedBatchImageStack({ previews, theme }: { previews: BatchImagePre
                         borderColor: theme.node.stroke,
                     }}
                 >
-                    <img src={preview.source} alt="" className="h-full w-full object-contain" draggable={false} />
+                    <CollapsedBatchImagePreview preview={preview} />
                 </span>
             ))}
         </div>
     );
+}
+
+/** 折叠批次里的单张预览图；加载失败时退化为默认图标。 */
+function CollapsedBatchImagePreview({ preview }: { preview: BatchImagePreview }) {
+    const [failed, setFailed] = useState(false);
+
+    if (failed) return <NodeMediaUnavailable kind="image" compact />;
+    return <img src={preview.source} alt="" className="h-full w-full object-contain" draggable={false} onError={() => setFailed(true)} />;
 }

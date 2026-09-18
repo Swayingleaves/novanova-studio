@@ -1,7 +1,7 @@
 "use client";
 
 import { Handle, Position } from "@xyflow/react";
-import { LoaderCircle, AlertTriangle, TriangleAlert } from "lucide-react";
+import { LoaderCircle, AlertTriangle, TriangleAlert, ImageOff, VideoOff } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type MouseEventHandler, type PointerEvent, type ReactNode, type WheelEvent } from "react";
 import { CANVAS_CONNECTION_HANDLE_SIZE } from "../constants";
 import type { CanvasNode } from "../types";
@@ -32,6 +32,30 @@ export function NodeError({ node, onRetry }: { node: CanvasNode; onRetry?: (node
                     重试
                 </button>
             ) : null}
+        </div>
+    );
+}
+
+/**
+ * 媒体失效占位。
+ * <p>
+ * 图片或视频已经加载不出来时，用默认图标替换原始内容。
+ */
+export function NodeMediaUnavailable({ kind, compact = false }: { kind: "image" | "video"; compact?: boolean }) {
+    const t = useCanvasTheme();
+    const Icon = kind === "image" ? ImageOff : VideoOff;
+    const label = kind === "image" ? "图片加载失败" : "视频加载失败";
+    if (compact) {
+        return (
+            <span role="img" aria-label={label} title={label} className="grid h-full w-full place-items-center" style={{ color: t.node.placeholder }}>
+                <Icon className="size-4 opacity-70" aria-hidden="true" />
+            </span>
+        );
+    }
+    return (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-sm" style={{ color: t.node.placeholder }}>
+            <Icon className="size-7 opacity-60" aria-hidden="true" />
+            <span>{label}</span>
         </div>
     );
 }

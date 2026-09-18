@@ -5,7 +5,7 @@ import { NodeResizer, type NodeProps, type Node } from "@xyflow/react";
 import { Play, Video } from "lucide-react";
 import type { CanvasVideoNode } from "../types";
 import { useNodeActions } from "./node-action-context";
-import { CanvasConnectionHandles, CanvasNodeTitle, MediaDownloadHint, NodeError, NodeHoverSurface, NodeLoading } from "./shared";
+import { CanvasConnectionHandles, CanvasNodeTitle, MediaDownloadHint, NodeError, NodeHoverSurface, NodeLoading, NodeMediaUnavailable } from "./shared";
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 
 export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<Node<CanvasVideoNode>>) {
@@ -15,6 +15,9 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
     const isLoading = data.execution.phase === "running";
     const isError = data.execution.phase === "failed";
     const [hovered, setHovered] = useState(false);
+    // 记录加载失败的媒体地址，地址变化（重新生成/替换）后自动恢复显示。
+    const [failedSource, setFailedSource] = useState<string | null>(null);
+    const isMediaUnavailable = hasContent && failedSource === data.content.source;
     const borderColor = selected ? theme.node.activeStroke : isError ? "#ef4444" : theme.node.stroke;
 
     return (
@@ -36,7 +39,7 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
                 style={{
                     width: "100%",
                     height: "100%",
-                    background: hasContent ? theme.canvas.background : theme.node.fill,
+                    background: hasContent && !isMediaUnavailable ? theme.canvas.background : theme.node.fill,
                     borderColor,
                     boxShadow: selected ? `0 0 0 1px ${theme.node.activeStroke}55` : undefined,
                 }}
@@ -48,9 +51,11 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
                     <NodeLoading />
                 ) : isError ? (
                     <NodeError node={data} />
+                ) : isMediaUnavailable ? (
+                    <NodeMediaUnavailable kind="video" />
                 ) : hasContent ? (
                     <div className="relative h-full min-h-0 w-full min-w-0 overflow-hidden rounded-[inherit]">
-                        <video src={data.content.source} className="pointer-events-none block h-full w-full object-contain" data-canvas-no-zoom muted preload="metadata" />
+                        <video src={data.content.source} className="pointer-events-none block h-full w-full object-contain" data-canvas-no-zoom muted preload="metadata" onError={() => setFailedSource(data.content.source)} />
                         <MediaDownloadHint />
                         {hovered ? (
                             <div className="pointer-events-auto absolute inset-0 flex items-center justify-center" style={{ background: "rgba(2,6,23,0.22)" }}>
