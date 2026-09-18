@@ -1,7 +1,7 @@
 import type { ThemeConfig } from "antd";
 import { theme as antdTheme } from "antd";
 
-import type { ResolvedTheme } from "@/shared/lib/theme-preference";
+import { isDarkResolvedTheme, type ResolvedTheme } from "@/shared/lib/theme-preference";
 
 const CSS_VAR_KEY_LIGHT = "novanova-studio-light";
 const CSS_VAR_KEY_DARK = "novanova-studio-dark";
@@ -77,25 +77,26 @@ const darkPalette: Palette = {
     shadow: "0 16px 36px rgba(2,6,23,0.36)",
 };
 
+/** 紫色主题为暗色系，色值与 globals.css 的 `html[data-theme="purple"]` 变量保持一致。 */
 const purplePalette: Palette = {
-    bg: "rgba(255,255,255,0.86)",
-    bgElevated: "#ffffff",
-    border: "#e8dff0",
-    borderLight: "#f0eaf5",
-    text: "#1a1525",
-    textSecondary: "#3d3548",
-    textMuted: "#6b5f7a",
-    fill: "rgba(184,92,246,0.10)",
-    fillSecondary: "#f5f0fa",
-    tableSelected: "rgba(184,92,246,0.12)",
-    tableSelectedHover: "rgba(184,92,246,0.20)",
-    tagDefaultBg: "#f5f0fa",
-    tagDefaultBorder: "#e0d4f0",
-    tagDefaultText: "#3d3548",
-    layout: "#f5f0fa",
-    modal: "#ffffff",
-    hoverBg: "rgba(245,240,250,0.94)",
-    shadow: "0 8px 24px rgba(100,60,180,0.08)",
+    bg: "#0d0d0f",
+    bgElevated: "#141418",
+    border: "#35353c",
+    borderLight: "#25252a",
+    text: "#f5f5f5",
+    textSecondary: "#d4d4d6",
+    textMuted: "#b8b8b9",
+    fill: "rgba(184,92,246,0.16)",
+    fillSecondary: "#141418",
+    tableSelected: "rgba(184,92,246,0.18)",
+    tableSelectedHover: "rgba(184,92,246,0.26)",
+    tagDefaultBg: "#141418",
+    tagDefaultBorder: "#35353c",
+    tagDefaultText: "#d4d4d6",
+    layout: "#050505",
+    modal: "#0d0d0f",
+    hoverBg: "rgba(26,26,32,0.96)",
+    shadow: "0 18px 42px rgba(0,0,0,0.42)",
 };
 
 const PALETTES: Record<ResolvedTheme, Palette> = {
@@ -117,7 +118,7 @@ const CSS_VAR_KEYS: Record<ResolvedTheme, string> = {
  * @return antd ThemeConfig
  */
 export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
-    const isDark = resolvedTheme === "dark";
+    const isDark = isDarkResolvedTheme(resolvedTheme);
     const p = PALETTES[resolvedTheme];
     const brand = BRAND[resolvedTheme];
 

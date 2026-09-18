@@ -32,13 +32,13 @@ export function normalizeThemePreference(value: string | null | undefined): Them
 }
 
 /**
- * 判断生效主题是否属于暗色系（紫色主题为浅色背景，仅暗色主题为暗色系）。
+ * 判断生效主题是否属于暗色系（暗色与紫色主题均为深色底，仅浅色主题为浅色系）。
  *
  * @param resolvedTheme ResolvedTheme 生效主题
  * @return boolean 是否为暗色系主题
  */
 export function isDarkResolvedTheme(resolvedTheme: ResolvedTheme): boolean {
-    return resolvedTheme === "dark";
+    return resolvedTheme !== "light";
 }
 
 /**
@@ -164,5 +164,5 @@ export function applyResolvedThemeToDocument(resolvedTheme: ResolvedTheme, prefe
  * @return string 可直接注入到 beforeInteractive 的脚本
  */
 export function buildThemeBootstrapScript(defaultPreference: ThemePreference = "dark"): string {
-    return `(()=>{try{var storageKey=${JSON.stringify(THEME_STORAGE_KEY)};var cookieKey=${JSON.stringify(THEME_COOKIE_KEY)};var defaultPreference=${JSON.stringify(defaultPreference)};var normalize=function(value){return value==="system"||value==="light"||value==="dark"||value==="purple"?value:null;};var readCookie=function(){var target=document.cookie.split(";").map(function(item){return item.trim();}).find(function(item){return item.indexOf(cookieKey+"=")===0;});if(!target)return null;return normalize(decodeURIComponent(target.slice(cookieKey.length+1)));};var preference=normalize(window.localStorage.getItem(storageKey))||readCookie()||defaultPreference;var resolved=preference==="dark"?"dark":preference==="light"?"light":preference==="purple"?"purple":(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");var root=document.documentElement;root.setAttribute("data-theme",resolved);root.setAttribute("data-theme-preference",preference);root.classList.toggle("dark",resolved==="dark");root.style.colorScheme=resolved==="dark"?"dark":"light";}catch(error){var root=document.documentElement;root.setAttribute("data-theme","dark");root.setAttribute("data-theme-preference","dark");root.classList.add("dark");root.style.colorScheme="dark";}})();`;
+    return `(()=>{try{var storageKey=${JSON.stringify(THEME_STORAGE_KEY)};var cookieKey=${JSON.stringify(THEME_COOKIE_KEY)};var defaultPreference=${JSON.stringify(defaultPreference)};var normalize=function(value){return value==="system"||value==="light"||value==="dark"||value==="purple"?value:null;};var readCookie=function(){var target=document.cookie.split(";").map(function(item){return item.trim();}).find(function(item){return item.indexOf(cookieKey+"=")===0;});if(!target)return null;return normalize(decodeURIComponent(target.slice(cookieKey.length+1)));};var preference=normalize(window.localStorage.getItem(storageKey))||readCookie()||defaultPreference;var resolved=preference==="dark"?"dark":preference==="light"?"light":preference==="purple"?"purple":(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");var root=document.documentElement;root.setAttribute("data-theme",resolved);root.setAttribute("data-theme-preference",preference);var isDark=resolved!=="light";root.classList.toggle("dark",isDark);root.style.colorScheme=isDark?"dark":"light";}catch(error){var root=document.documentElement;root.setAttribute("data-theme","dark");root.setAttribute("data-theme-preference","dark");root.classList.add("dark");root.style.colorScheme="dark";}})();`;
 }
