@@ -194,7 +194,7 @@ export default function CheckInPage() {
                                                 ? "text-[var(--studio-success)]"
                                                 : claimable
                                                   ? "cursor-pointer text-[var(--studio-primary)] hover:border-[var(--studio-primary)] hover:bg-[var(--studio-primary-soft)]"
-                                                  : "border-[var(--studio-line)] bg-[var(--studio-surface-soft)] text-[var(--studio-faint)]"
+                                                  : "border-[var(--studio-line)] bg-[var(--studio-surface-soft)] text-[var(--studio-muted)]"
                                         } ${isFuture ? "opacity-60" : ""}`}
                                         style={
                                             isCheckedIn
