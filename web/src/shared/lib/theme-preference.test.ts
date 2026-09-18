@@ -43,10 +43,10 @@ test("getInitialResolvedTheme 对显式 dark/purple 返回自身，其余默认�
     assert.equal(getInitialResolvedTheme("system"), "light");
 });
 
-test("isDarkResolvedTheme 仅 dark 为暗色系，light 与 purple 均为浅色", () => {
+test("isDarkResolvedTheme 仅 light 为浅色系，dark 与 purple 均为暗色", () => {
     assert.equal(isDarkResolvedTheme("light"), false);
     assert.equal(isDarkResolvedTheme("dark"), true);
-    assert.equal(isDarkResolvedTheme("purple"), false);
+    assert.equal(isDarkResolvedTheme("purple"), true);
 });
 
 test("buildThemeBootstrapScript 包含本地存储、cookie 和 matchMedia 分支", () => {

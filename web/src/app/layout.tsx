@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
-import Script from "next/script";
 import { cookies } from "next/headers";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
 import { AppProviders } from "@/features/app-shell/components/app-providers";
-import { buildThemeBootstrapScript, getInitialResolvedTheme, isDarkResolvedTheme, readThemePreferenceFromCookieStore } from "@/shared/lib/theme-preference";
+import { ThemeScript } from "@/features/theme/components/theme-script";
+import { getInitialResolvedTheme, isDarkResolvedTheme, readThemePreferenceFromCookieStore } from "@/shared/lib/theme-preference";
 import "antd/dist/reset.css";
 import "./globals.css";
 import React from "react";
@@ -35,7 +35,7 @@ export default async function RootLayout({
                     fontFamily: '"SF Pro Display","SF Pro Text","PingFang SC","Microsoft YaHei","Helvetica Neue",sans-serif',
                 }}
             >
-                <Script id="theme-script" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: buildThemeBootstrapScript(initialThemePreference) }} />
+                <ThemeScript preference={initialThemePreference} />
                 <AntdRegistry>
                     <AppProviders initialThemePreference={initialThemePreference} initialResolvedTheme={initialResolvedTheme}>
                         {children}
