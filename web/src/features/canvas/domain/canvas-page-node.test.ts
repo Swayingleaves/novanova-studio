@@ -133,6 +133,34 @@ test("刷新后会把同步分镜生成标记为可重新生成", () => {
     assert.equal(restored.execution.errorMessage, "页面刷新后生成已中断，请重新生成。");
 });
 
+test("批次根节点跟随子节点判定：子节点可恢复时保持运行中", () => {
+    const root = createImageNode({ id: "image-root", position: { x: 0, y: 0 } });
+    root.execution = { phase: "running" };
+    root.grouping = { ...root.grouping, isRoot: true, childIds: ["image-child-1", "image-child-2"] };
+    const resumableChild = createImageNode({ id: "image-child-1", position: { x: 0, y: 0 } });
+    resumableChild.execution = { phase: "running", taskId: "task-1" };
+    const interruptedChild = createImageNode({ id: "image-child-2", position: { x: 0, y: 0 } });
+    interruptedChild.execution = { phase: "running" };
+
+    const [resumableRoot, , interruptedRootChild] = resetInterruptedCanvasNodes([root, resumableChild, interruptedChild]);
+
+    assert.equal(resumableRoot.execution.phase, "running");
+    assert.equal(interruptedRootChild.execution.phase, "failed");
+});
+
+test("批次根节点没有可恢复子节点时仍然标记失败", () => {
+    const root = createImageNode({ id: "image-root", position: { x: 0, y: 0 } });
+    root.execution = { phase: "running" };
+    root.grouping = { ...root.grouping, isRoot: true, childIds: ["image-child-1"] };
+    const child = createImageNode({ id: "image-child-1", position: { x: 0, y: 0 } });
+    child.execution = { phase: "running" };
+
+    const [restoredRoot] = resetInterruptedCanvasNodes([root, child]);
+
+    assert.equal(restoredRoot.execution.phase, "failed");
+    assert.equal(restoredRoot.execution.errorMessage, "页面刷新后生成已中断，请重新生成。");
+});
+
 test("框选只返回与矩形相交的节点标识", () => {
     const first = createTextNode({ id: "text-1", position: { x: 10, y: 10 } });
     const second = createImageNode({ id: "image-1", position: { x: 500, y: 500 } });
