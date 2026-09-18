@@ -4,6 +4,7 @@ import { App, Button, Image, Modal } from "antd";
 import { Copy, Download, Link2, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { cloneElement, useId, useRef, useState, type CSSProperties, type ReactElement } from "react";
 
+import { MEDIA_FALLBACK_IMAGE, useMediaFallback } from "@/features/generation/components/media-fallback";
 import { formatBytes, formatDuration } from "@/features/generation/lib/image-utils";
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceVideo } from "@/features/generation/types/media";
@@ -40,6 +41,8 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
     const [detailsCollapsed, setDetailsCollapsed] = useState(false);
     const [originalSize, setOriginalSize] = useState(false);
     const detailsId = useId();
+    // 生成结果地址过期或加载失败时回落到默认占位图
+    const mediaFallback = useMediaFallback(detail?.media.url);
     if (!detail) return null;
 
     const { media } = detail;
@@ -132,8 +135,10 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
                                 ),
                             }}
                         />
+                    ) : mediaFallback.missing ? (
+                        <img src={mediaFallback.displaySrc} alt="生成视频无法加载" className="w-full rounded-lg bg-[var(--studio-media)] object-contain" style={{ height: mediaHeight }} />
                     ) : (
-                        <video src={media.url} controls autoPlay className="w-full rounded-lg bg-[var(--studio-media)] object-contain" style={{ height: mediaHeight }} />
+                        <video src={media.url} controls autoPlay className="w-full rounded-lg bg-[var(--studio-media)] object-contain" style={{ height: mediaHeight }} onError={mediaFallback.onError} />
                     )}
                     <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5">
                         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-[var(--studio-muted)]">
