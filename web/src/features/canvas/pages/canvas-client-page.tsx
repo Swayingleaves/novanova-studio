@@ -22,7 +22,7 @@ import { mergeAudioReferences } from "../utils/audio-references";
 import { downloadMedia } from "@/features/storage/services/media-download";
 import { isAudioFile, uploadAudioFile } from "@/features/storage/services/audio-storage";
 import { getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/features/storage/services/file-storage";
-import { uploadObjectToStorage } from "@/features/storage/services/object-storage";
+import { uploadObjectToStorage, uploadRemoteObjectToStorage } from "@/features/storage/services/object-storage";
 import { findMissingReferenceObjectStorageAudios, findMissingReferenceObjectStorageImages, uploadMissingReferenceAudiosToObjectStorage, uploadMissingReferenceImagesToObjectStorage } from "@/features/storage/services/reference-object-storage";
 import { nanoid } from "nanoid";
 import { getDataUrlByteSize } from "@/features/generation/lib/image-utils";
@@ -2897,19 +2897,16 @@ function CanvasWorkspacePage() {
                 }
                 return;
             }
+            const { beginNodeUpload, finishNodeUpload } = useCanvasUiStore.getState();
+            if (!beginNodeUpload(node.id)) return;
             try {
-                const blob = await readNodeObjectStorageBlob(node);
-                if (!blob) throw new Error(isImageNode(node) ? "图片文件读取失败" : "视频文件读取失败");
-                const objectStorageFile = await uploadObjectToStorage({
-                    body: blob,
-                    kind: node.kind,
-                    fileName: `${node.title || node.id}.${isImageNode(node) ? imageExtension(node.content.source) : "mp4"}`,
-                    mimeType: node.content.mimeType || blob.type || (isImageNode(node) ? "image/png" : "video/mp4"),
-                });
+                const objectStorageFile = await uploadNodeMediaToObjectStorage(node);
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? applyCanvasNodeAttributes(item, { objectStorage: objectStorageFile }) : item)));
                 message.success("已上传到云储存，地址已保存到节点");
             } catch (error) {
                 message.error(error instanceof Error ? error.message : "上传到云储存失败");
+            } finally {
+                finishNodeUpload(node.id);
             }
         },
         [message],
@@ -5324,6 +5321,38 @@ async function readNodeObjectStorageBlob(node: CanvasDomainNode) {
         return getMediaBlob(node.content.storageKey);
     }
     return (await fetch(node.content.source)).blob();
+}
+
+/** 读取节点本地媒体内容；仅用于没有服务端媒体记录的节点做回退上传。 */
+async function requireNodeObjectStorageBlob(node: CanvasDomainNode) {
+    const blob = await readNodeObjectStorageBlob(node);
+    if (!blob) throw new Error(isImageNode(node) ? "图片文件读取失败" : "视频文件读取失败");
+    return blob;
+}
+
+/**
+ * 转存节点媒体到对象存储。
+ * <p>
+ * 节点媒体已登记在服务端时交给服务端转存，一次请求完成，既不重复生成媒体记录，也不用把大视频搬到浏览器再传回来；
+ * 没有媒体记录的节点才回退为浏览器上传。
+ */
+async function uploadNodeMediaToObjectStorage(node: CanvasDomainNode) {
+    if (!isImageNode(node) && !isVideoNode(node)) throw new Error("当前节点不支持上传到云储存");
+    if (node.content.storageKey) {
+        return uploadRemoteObjectToStorage({
+            storageKey: node.content.storageKey,
+            sourceUrl: node.content.source,
+            kind: node.kind,
+            mimeType: node.content.mimeType,
+        });
+    }
+    const blob = await requireNodeObjectStorageBlob(node);
+    return uploadObjectToStorage({
+        body: blob,
+        kind: node.kind,
+        fileName: `${node.title || node.id}.${isImageNode(node) ? imageExtension(node.content.source) : "mp4"}`,
+        mimeType: node.content.mimeType || blob.type || (isImageNode(node) ? "image/png" : "video/mp4"),
+    });
 }
 
 async function withNodeImageObjectUrl<Result>(node: CanvasDomainNode, process: (sourceUrl: string) => Promise<Result>): Promise<Result> {
