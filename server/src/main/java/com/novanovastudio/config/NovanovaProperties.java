@@ -357,6 +357,9 @@ public class NovanovaProperties {
         /** 邮件发件人 */
         private String from = "";
 
+        /** 允许注册的邮箱后缀列表（英文逗号分隔），配置为空或包含 * 表示不限制 */
+        private String allowedSuffixes = "qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,foxmail.com,icloud.com,sina.com,aliyun.com";
+
         /**
          * 获取发件人邮箱
          *
@@ -373,6 +376,24 @@ public class NovanovaProperties {
          */
         public void setFrom(String from) {
             this.from = from;
+        }
+
+        /**
+         * 获取允许注册的邮箱后缀列表
+         *
+         * @return String 允许注册的邮箱后缀列表
+         */
+        public String getAllowedSuffixes() {
+            return allowedSuffixes;
+        }
+
+        /**
+         * 设置允许注册的邮箱后缀列表
+         *
+         * @param allowedSuffixes String 允许注册的邮箱后缀列表
+         */
+        public void setAllowedSuffixes(String allowedSuffixes) {
+            this.allowedSuffixes = allowedSuffixes;
         }
     }
 

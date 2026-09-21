@@ -193,6 +193,8 @@ novanova:
   email:
     # 发件人显示地址
     from: ${EMAIL_SMTP_FROM:}
+    # 允许注册的邮箱后缀列表（逗号分隔，为空或包含 * 表示不限制）
+    allowed-suffixes: ${EMAIL_ALLOWED_SUFFIXES:qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,foxmail.com,icloud.com,sina.com,aliyun.com}
 
   # ----------------------------------------------------------
   # 对象存储配置
