@@ -19,7 +19,7 @@
 
     <properties>
         <java.version>21</java.version>
-        <agentscope.version>2.0.0-RC4</agentscope.version>
+        <agentscope.version>2.0.3</agentscope.version>
         <!-- 2.0.61 存在大文本解析越界回归（fastjson2 issue #3989 / #4034，JSONReaderUTF16.readString 缓冲区未扩容），
              会导致 AI 长响应解析失败，必须使用已修复版本 -->
         <fastjson2.version>2.0.65</fastjson2.version>
