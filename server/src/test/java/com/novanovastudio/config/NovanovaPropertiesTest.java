@@ -77,4 +77,19 @@ class NovanovaPropertiesTest {
 
         Assertions.assertEquals(180, properties.getAi().getStoryboardAgent().getTimeoutSeconds());
     }
+
+    /**
+     * 测试邮箱注册允许后缀配置默认值与修改能力。
+     */
+    @Test
+    void shouldConfigureEmailAllowedSuffixes() {
+        NovanovaProperties properties = new NovanovaProperties();
+        NovanovaProperties.Email email = properties.getEmail();
+
+        Assertions.assertTrue(email.getAllowedSuffixes().contains("qq.com"));
+        Assertions.assertTrue(email.getAllowedSuffixes().contains("gmail.com"));
+
+        email.setAllowedSuffixes("custom.com,example.com");
+        Assertions.assertEquals("custom.com,example.com", email.getAllowedSuffixes());
+    }
 }

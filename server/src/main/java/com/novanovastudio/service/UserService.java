@@ -26,11 +26,13 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Locale;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -181,6 +183,7 @@ public class UserService {
     public Mono<Void> sendEmailCode(UserDtos.SendEmailCodeRequest request) {
         // 标准化并校验邮箱，避免同一邮箱大小写重复注册。
         String email = normalizeEmail(request.email());
+        validateEmailAllowedForRegistration(email);
         log.info("发送邮箱验证码: email={}, purpose={}", email, CODE_PURPOSE_REGISTER);
         return userRepository.findByEmail(email)
                 .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱已注册")))
@@ -213,6 +216,7 @@ public class UserService {
     public Mono<UserDtos.AuthResponse> register(UserDtos.RegisterRequest request) {
         // 注册前统一校验邮箱、密码和邮箱占用状态。
         String email = normalizeEmail(request.email());
+        validateEmailAllowedForRegistration(email);
         log.info("用户注册: email={}", email);
         validatePassword(request.password());
         return invitationService.resolveInviterUserId(request.invitationCode())
@@ -653,6 +657,49 @@ public class UserService {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "邮箱格式不正确");
         }
         return email;
+    }
+
+    /**
+     * 校验邮箱是否属于允许注册的后缀白名单。
+     *
+     * @param email String 标准化后的邮箱
+     */
+    private void validateEmailAllowedForRegistration(String email) {
+        if (properties == null || properties.getEmail() == null) {
+            return;
+        }
+        String allowedSuffixesConfig = properties.getEmail().getAllowedSuffixes();
+        if (!StringUtils.hasText(allowedSuffixesConfig)) {
+            return;
+        }
+        List<String> allowedSuffixes = Arrays.stream(allowedSuffixesConfig.split(","))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .map(suffix -> suffix.replaceAll("^[.@]+", ""))
+                .map(suffix -> suffix.toLowerCase(Locale.ROOT))
+                .toList();
+
+        if (allowedSuffixes.isEmpty() || allowedSuffixes.contains("*")) {
+            return;
+        }
+
+        int atIndex = email.lastIndexOf('@');
+        if (atIndex < 0 || atIndex >= email.length() - 1) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "邮箱格式不正确");
+        }
+        String domain = email.substring(atIndex + 1).toLowerCase(Locale.ROOT);
+
+        boolean matched = allowedSuffixes.stream().anyMatch(allowed ->
+                domain.equals(allowed) || domain.endsWith("." + allowed)
+        );
+
+        if (!matched) {
+            if (allowedSuffixes.size() <= 4) {
+                String examples = allowedSuffixes.stream().map(s -> "@" + s).collect(Collectors.joining("、"));
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "当前邮箱后缀不支持注册，仅支持：" + examples);
+            }
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "当前邮箱后缀不支持注册，仅支持常用邮箱（如 @qq.com、@gmail.com 等）");
+        }
     }
 
     /**

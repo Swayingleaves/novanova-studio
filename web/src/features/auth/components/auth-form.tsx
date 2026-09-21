@@ -155,7 +155,7 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
                     children: (
                         <Form form={registerForm} layout="vertical" requiredMark={false} onFinish={register} className="pt-2">
                             <Form.Item name="email" label="邮箱" rules={[{ required: true, message: "请输入邮箱" }, { type: "email", message: "邮箱格式不正确" }]}>
-                                <Input size="large" autoComplete="email" placeholder="name@example.com" />
+                                <Input size="large" autoComplete="email" placeholder="name@qq.com / name@gmail.com" />
                             </Form.Item>
                             <Form.Item label="验证码" required>
                                 <div className="grid grid-cols-[1fr_auto] gap-2">

@@ -104,6 +104,62 @@ class UserServiceTest {
     }
 
     /**
+     * 不在允许后缀白名单中的邮箱在注册时应直接被拦截并返回参数错误。
+     */
+    @Test
+    @DisplayName("不在白名单中的邮箱后缀阻止注册")
+    void shouldRejectUnconfiguredEmailSuffixOnRegister() {
+        TestContext context = testContext();
+        context.properties.getEmail().setAllowedSuffixes("qq.com,gmail.com");
+
+        StepVerifier.create(context.service.register(new UserDtos.RegisterRequest(
+                        "evil@unsupported.com", "123456", "password123", "非法后缀用户", null)))
+                .expectErrorMatches(error -> error instanceof BusinessException be
+                        && be.getCode() == com.novanovastudio.common.ErrorCode.PARAM_INVALID
+                        && be.getMessage().contains("当前邮箱后缀不支持注册"))
+                .verify();
+
+        verify(context.userRepository, never()).findByEmail(any());
+    }
+
+    /**
+     * 不在允许后缀白名单中的邮箱在发送注册验证码时应直接被拦截并返回参数错误。
+     */
+    @Test
+    @DisplayName("不在白名单中的邮箱后缀阻止发送验证码")
+    void shouldRejectUnconfiguredEmailSuffixOnSendEmailCode() {
+        TestContext context = testContext();
+        context.properties.getEmail().setAllowedSuffixes("qq.com,gmail.com");
+
+        StepVerifier.create(context.service.sendEmailCode(new UserDtos.SendEmailCodeRequest("evil@unsupported.com")))
+                .expectErrorMatches(error -> error instanceof BusinessException be
+                        && be.getCode() == com.novanovastudio.common.ErrorCode.PARAM_INVALID
+                        && be.getMessage().contains("当前邮箱后缀不支持注册"))
+                .verify();
+
+        verify(context.userRepository, never()).findByEmail(any());
+    }
+
+    /**
+     * 配置带 @ 前缀的后缀白名单时应能正常支持白名单邮箱发送验证码。
+     */
+    @Test
+    @DisplayName("支持带@前缀配置的邮箱后缀发送验证码")
+    void shouldSupportConfiguredSuffixWithAtPrefix() {
+        TestContext context = testContext();
+        context.properties.getEmail().setAllowedSuffixes("@qq.com, @gmail.com");
+        when(context.userRepository.findByEmail("test@qq.com")).thenReturn(Mono.empty());
+        when(context.passwordEncoder.encode(any())).thenReturn("encoded-code");
+        when(context.userRepository.createEmailCode(any())).thenReturn(Mono.just(1L));
+        when(context.mailSender.createMimeMessage()).thenReturn(new MimeMessage(Session.getInstance(new Properties())));
+
+        StepVerifier.create(context.service.sendEmailCode(new UserDtos.SendEmailCodeRequest("test@qq.com")))
+                .verifyComplete();
+
+        verify(context.userRepository).findByEmail("test@qq.com");
+    }
+
+    /**
      * 验证正常用户请求找回密码时保存令牌并发送邮件。
      */
     @Test
@@ -523,6 +579,7 @@ class UserServiceTest {
         NovanovaProperties properties = new NovanovaProperties();
         properties.getApp().setFrontendBaseUrl("https://www.novanovastudio.cn");
         properties.getEmail().setFrom("noreply@novanovastudio.cn");
+        properties.getEmail().setAllowedSuffixes("example.com,qq.com,gmail.com");
         JavaMailSender mailSender = mock(JavaMailSender.class);
         CreditService creditService = mock(CreditService.class);
         InvitationService invitationService = mock(InvitationService.class);
