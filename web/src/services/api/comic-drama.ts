@@ -17,6 +17,8 @@ import type {
     ComicDramaShotDraft,
     ComicDramaVoiceTrack,
     ComicDramaVoiceTrackInput,
+    ComicDramaTimelineText,
+    ComicDramaTimelineTextInput,
     ComicDramaPromptVersion,
     ComicDramaWorkspace,
 } from "@/features/comic-drama/types";
@@ -137,6 +139,26 @@ export function listComicDramaVoiceTracks(projectId: string, shotId?: string) {
 
 export function saveComicDramaVoiceTrack(projectId: string, expectedRevision: number, voiceTrack: ComicDramaVoiceTrackInput) {
     return serverPost<ComicDramaVoiceTrack>(`${COMIC_DRAMA_PATH}/saveVoiceTrack`, { projectId, expectedRevision, voiceTrack });
+}
+
+export function listComicDramaTimelineTexts(projectId: string) {
+    return serverPost<ComicDramaTimelineText[]>(`${COMIC_DRAMA_PATH}/listTimelineTexts`, { projectId });
+}
+
+export function saveComicDramaTimelineText(projectId: string, expectedRevision: number, timelineText: ComicDramaTimelineTextInput) {
+    return serverPost<ComicDramaTimelineText>(`${COMIC_DRAMA_PATH}/saveTimelineText`, { projectId, expectedRevision, timelineText });
+}
+
+export function reorderComicDramaTimelineTexts(projectId: string, expectedRevision: number, timelineTexts: ComicDramaTimelineTextInput[]) {
+    return serverPost<ComicDramaTimelineText[]>(`${COMIC_DRAMA_PATH}/reorderTimelineTexts`, { projectId, expectedRevision, timelineTexts });
+}
+
+export function deleteComicDramaTimelineText(projectId: string, expectedRevision: number, timelineTextId: string) {
+    return serverPost<ComicDramaMutationResult>(`${COMIC_DRAMA_PATH}/deleteTimelineText`, { projectId, expectedRevision, timelineTextId });
+}
+
+export function deleteComicDramaTextTrack(projectId: string, expectedRevision: number, trackNumber: number) {
+    return serverPost<ComicDramaMutationResult>(`${COMIC_DRAMA_PATH}/deleteTextTrack`, { projectId, expectedRevision, trackNumber });
 }
 
 export function listComicDramaBatchTasks(projectId: string) {

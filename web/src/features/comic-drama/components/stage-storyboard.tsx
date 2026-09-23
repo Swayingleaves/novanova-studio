@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Empty, Form, Image, Input, InputNumber, Modal, Select, Space, Spin, Tag, Tooltip } from "antd";
+import { App, Button, Checkbox, Empty, Form, Image, Input, InputNumber, Modal, Select, Space, Spin, Tag, Tooltip } from "antd";
 import {
     AlertCircle,
     Check,
@@ -26,6 +26,10 @@ import {
     SkipForward,
     Sliders,
     Sparkles,
+    Type,
+    Music2,
+    Plus,
+    Trash2,
     Video,
     Volume2,
     VolumeX,
@@ -34,11 +38,15 @@ import {
 } from "lucide-react";
 
 import { listComicDramaAssetVersions, readComicDramaMediaUrl } from "@/services/api/comic-drama";
+import { getServerMediaInfo } from "@/services/api/server";
+import { readAudioMetadata, uploadAudioFile } from "@/features/storage/services/audio-storage";
+import { nanoid } from "nanoid";
 import { useMediaAutoRefresh } from "../hooks/use-media-auto-refresh";
 import { usePendingImpactTargets } from "../hooks/use-pending-impact-targets";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
-import type { ComicDramaAssetVersion, ComicDramaMediaResult, ComicDramaShot, ComicDramaShotInput } from "../types";
+import type { ComicDramaAssetVersion, ComicDramaMediaResult, ComicDramaShot, ComicDramaShotInput, ComicDramaTimelineText, ComicDramaTimelineTextInput, ComicDramaVoiceTrack, ComicDramaVoiceTrackInput } from "../types";
 import { ShotGenerationModal } from "./shot-generation-modal";
+import { availableTextTrackPlacement, buildShotIntervals, clampPreviewPosition, clampTimelineStart, reorderTimelineTexts, timelineTextOverlaps, visibleTimelineTexts, voiceTrackEndMs, voiceTrackSourceTimeMs } from "./storyboard-timeline";
 
 const CAMERA_MOVEMENT_OPTIONS = [
     "固定",
@@ -85,6 +93,10 @@ const VARIANT_TYPE_LABELS: Record<string, string> = {
 
 const PPS_MIN = 16;
 const PPS_MAX = 130;
+const EMPTY_VOICE_TRACKS: ComicDramaVoiceTrack[] = [];
+const EMPTY_TIMELINE_TEXTS: ComicDramaTimelineText[] = [];
+type TimelineClipDraft = { kind: "text"; item: ComicDramaTimelineTextInput } | { kind: "audio"; item: ComicDramaVoiceTrackInput };
+type TimelineClipDrag = { id: string; kind: TimelineClipDraft["kind"]; mode: "move" | "left" | "right"; pointerX: number; original: TimelineClipDraft; latest: TimelineClipDraft; reorder?: ComicDramaTimelineText[] };
 
 function pad2(n: number) {
     return String(n).padStart(2, "0");
@@ -244,12 +256,27 @@ function TimelineClipThumbnail({
 const ACTIVE_STYLE = { background: "var(--studio-action)", color: "var(--studio-action-foreground)" };
 
 /** 分镜板组件：支持 3D 翻转卡片工作台与可左右交互擦洗的时间轴轨道。 */
-export function StageStoryboard() {
-    const { message } = App.useApp();
+export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boolean }) {
+    const { message, modal } = App.useApp();
     const pendingImpactTargets = usePendingImpactTargets();
     const workspace = useComicDramaStore((state) => state.workspace);
     const setActiveStage = useComicDramaStore((state) => state.setActiveStage);
     const saveShot = useComicDramaStore((state) => state.saveShot);
+    const saveTimelineText = useComicDramaStore((state) => state.saveTimelineText);
+    const deleteTimelineText = useComicDramaStore((state) => state.deleteTimelineText);
+    const deleteTextTrack = useComicDramaStore((state) => state.deleteTextTrack);
+    const saveVoiceTrack = useComicDramaStore((state) => state.saveVoiceTrack);
+    const pendingTimelineTexts = useComicDramaStore((state) => state.pendingTimelineTexts);
+    const pendingTimelineVoices = useComicDramaStore((state) => state.pendingTimelineVoices);
+    const queueTimelineText = useComicDramaStore((state) => state.queueTimelineText);
+    const queueTimelineTextReorder = useComicDramaStore((state) => state.queueTimelineTextReorder);
+    const queueTimelineVoice = useComicDramaStore((state) => state.queueTimelineVoice);
+    const clearPendingTimelineText = useComicDramaStore((state) => state.clearPendingTimelineText);
+    const clearPendingTimelineVoice = useComicDramaStore((state) => state.clearPendingTimelineVoice);
+    const savePendingTimelineChanges = useComicDramaStore((state) => state.savePendingTimelineChanges);
+    const timelineSaving = useComicDramaStore((state) => state.timelineSaving);
+    const timelineSaveError = useComicDramaStore((state) => state.timelineSaveError);
+    const pendingStage = useComicDramaStore((state) => state.pendingStage);
 
     // Filters & View Mode
     const [selectedEpisodeId, setSelectedEpisodeId] = useState<string>("all");
@@ -259,16 +286,64 @@ export function StageStoryboard() {
     // Timeline state
     const [pps, setPps] = useState<number>(46);
     const [currentTime, setCurrentTime] = useState<number>(0);
+    const [selectedShotId, setSelectedShotId] = useState<string | null>(null);
+    const [selectedPreviewTimeMs, setSelectedPreviewTimeMs] = useState<number | null>(null);
     const [isPlaying, setIsPlaying] = useState<boolean>(false);
     const [isMuted, setIsMuted] = useState<boolean>(false);
     const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
     const [previewVideoProgress, setPreviewVideoProgress] = useState({ sourceKey: "", currentTime: 0, duration: 0 });
+    const [textDraft, setTextDraft] = useState<ComicDramaTimelineTextInput | null>(null);
+    const [audioDraft, setAudioDraft] = useState<ComicDramaVoiceTrackInput | null>(null);
+    const [audioFile, setAudioFile] = useState<File | null>(null);
+    const [savingTrack, setSavingTrack] = useState(false);
+    const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
+    const [audioErrors, setAudioErrors] = useState<Record<string, string>>({});
+    const [previewRatio, setPreviewRatio] = useState(0);
+    const [previewBounds, setPreviewBounds] = useState({ width: 0, height: 0 });
+    const [textPositions, setTextPositions] = useState<Record<string, { x: number; y: number }>>({});
+    const [selectedPreviewTextId, setSelectedPreviewTextId] = useState<string | null>(null);
+    const [selectedTimelineNode, setSelectedTimelineNode] = useState<{ kind: "video" | "text" | "audio"; id: string } | null>(null);
+    const [draggingPreviewTextId, setDraggingPreviewTextId] = useState<string | null>(null);
+    const [clipDraft, setClipDraft] = useState<TimelineClipDraft | null>(null);
+    const [textReorderDraft, setTextReorderDraft] = useState<ComicDramaTimelineText[]>([]);
+    const clipDragRef = useRef<TimelineClipDrag | null>(null);
+    const clearClipDragListenersRef = useRef<(() => void) | null>(null);
+    const clipWasDraggedRef = useRef(false);
+
+    useEffect(() => () => clearClipDragListenersRef.current?.(), []);
 
     // Project and assets
     const projectId = workspace?.projectId;
     const episodes = workspace?.scriptProject.episodes || [];
     const shots = workspace?.shots || [];
     const mediaList = workspace?.media || [];
+    const savedTimelineTexts = workspace?.timelineTexts || EMPTY_TIMELINE_TEXTS;
+    const savedVoiceTracks = workspace?.voiceTracks || EMPTY_VOICE_TRACKS;
+    const timelineTexts = useMemo(() => {
+        // V36 将原有片段归入默认轨道；旧工作区响应尚未返回轨道编号时保持相同语义。
+        const trackNumberOf = (item: ComicDramaTimelineText) => Number.isInteger(item.trackNumber) && item.trackNumber >= 0 && item.trackNumber <= 2 ? item.trackNumber : 0;
+        const items = new Map<string, ComicDramaTimelineText>(savedTimelineTexts.map((item) => [
+            item.id,
+            { ...item, trackNumber: trackNumberOf(item) },
+        ]));
+        Object.values(pendingTimelineTexts).forEach((item) => items.set(item.id, { ...item, trackNumber: trackNumberOf(item) }));
+        return [...items.values()];
+    }, [savedTimelineTexts, pendingTimelineTexts]);
+    const savedTextTrackCount = workspace?.textTrackCount;
+    const textTrackCount = Math.min(3, Math.max(1,
+        typeof savedTextTrackCount === "number" && Number.isInteger(savedTextTrackCount) ? savedTextTrackCount : 1,
+        ...timelineTexts.map((item) => item.trackNumber + 1),
+    ));
+    const voiceTracks = useMemo(() => savedVoiceTracks.map((item) => pendingTimelineVoices[item.id] || item), [savedVoiceTracks, pendingTimelineVoices]);
+    const pendingTimelineCount = Object.keys(pendingTimelineTexts).length + Object.keys(pendingTimelineVoices).length;
+
+    useEffect(() => {
+        if (!pendingTimelineCount || pauseAutoSave || pendingStage || textDraft || audioDraft || savingTrack || timelineSaveError) return;
+        const interval = window.setInterval(() => {
+            if (!clipDragRef.current && !textDragRef.current) void savePendingTimelineChanges();
+        }, 15000);
+        return () => window.clearInterval(interval);
+    }, [pendingTimelineCount, pauseAutoSave, pendingStage, textDraft, audioDraft, savingTrack, timelineSaveError, savePendingTimelineChanges]);
     const assets = workspace?.assets || [];
     const promptVersions = workspace?.promptVersions || [];
 
@@ -301,10 +376,16 @@ export function StageStoryboard() {
 
     // Refs
     const stageRef = useRef<HTMLDivElement>(null);
+    const previewSurfaceRef = useRef<HTMLDivElement>(null);
+    const previewFrameRef = useRef<HTMLDivElement>(null);
+    const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
+    const textDragRef = useRef<{ id: string; x: number; y: number } | null>(null);
+    const textWasDraggedRef = useRef(false);
     const tlBodyRef = useRef<HTMLDivElement>(null);
     const tlContentRef = useRef<HTMLDivElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
     const isScrubbingRef = useRef<boolean>(false);
+    const scrubStartRef = useRef({ clientX: 0, time: 0 });
 
     const filteredShots = useMemo(() => {
         return shots
@@ -314,6 +395,7 @@ export function StageStoryboard() {
             })
             .sort((a, b) => a.sortOrder - b.sortOrder);
     }, [shots, selectedEpisodeId]);
+    const timelineShots = useMemo(() => [...shots].sort((first, second) => first.sortOrder - second.sortOrder), [shots]);
 
     // Real probed video durations (cached by shotId)
     const [realVideoDurations, setRealVideoDurations] = useState<Record<string, number>>({});
@@ -330,8 +412,9 @@ export function StageStoryboard() {
 
     // Find keyframe/image media for a given shot to serve as poster
     const getShotImagePoster = useCallback((shotId: string): string => {
+        // needsUpdate 只代表上游有变更，历史结果仍要展示给用户。
         const imageMedia = mediaList.find(
-            (m) => m.targetType === "shot" && m.targetId === shotId && m.mediaType === "image" && (m.adopted || m.status === "completed")
+            (m) => m.targetType === "shot" && m.targetId === shotId && m.mediaType === "image" && (m.adopted || m.status === "completed" || m.status === "needsUpdate")
         );
         if (imageMedia) {
             return readComicDramaMediaUrl(imageMedia.resultData);
@@ -357,7 +440,7 @@ export function StageStoryboard() {
 
     // Proactively probe real video metadata for all shots with video
     useEffect(() => {
-        filteredShots.forEach((shot) => {
+        timelineShots.forEach((shot) => {
             const media = getShotMedia(shot.id);
             const url = media ? readComicDramaMediaUrl(media.resultData) : "";
             const isVid = isVideoMedia(media, url);
@@ -376,21 +459,22 @@ export function StageStoryboard() {
                 };
             }
         });
-    }, [filteredShots, getShotMedia, realVideoDurations]);
+    }, [timelineShots, getShotMedia, realVideoDurations]);
 
     const totalDuration = useMemo(() => {
-        return filteredShots.reduce((acc, shot) => acc + getShotDuration(shot), 0);
-    }, [filteredShots, getShotDuration]);
+        return timelineShots.reduce((acc, shot) => acc + getShotDuration(shot), 0);
+    }, [timelineShots, getShotDuration]);
+    const shotIntervals = useMemo(() => buildShotIntervals(timelineShots, getShotDuration), [timelineShots, getShotDuration]);
 
     // Locate active shot and local offset at time t
     const locate = useCallback(
         (t: number) => {
-            if (filteredShots.length === 0) return { index: 0, local: 0, shot: null };
+            if (timelineShots.length === 0) return { index: 0, local: 0, shot: null };
             let acc = 0;
-            for (let i = 0; i < filteredShots.length; i++) {
-                const s = filteredShots[i];
+            for (let i = 0; i < timelineShots.length; i++) {
+                const s = timelineShots[i];
                 const dur = getShotDuration(s);
-                if (t < acc + dur || i === filteredShots.length - 1) {
+                if (t < acc + dur || i === timelineShots.length - 1) {
                     return {
                         index: i,
                         local: Math.min(Math.max(t - acc, 0), dur),
@@ -399,20 +483,363 @@ export function StageStoryboard() {
                 }
                 acc += dur;
             }
-            const last = filteredShots[filteredShots.length - 1];
+            const last = timelineShots[timelineShots.length - 1];
             return {
-                index: filteredShots.length - 1,
+                index: timelineShots.length - 1,
                 local: last ? getShotDuration(last) : 0,
                 shot: last,
             };
         },
-        [filteredShots, getShotDuration]
+        [timelineShots, getShotDuration]
     );
 
-    const { index: activeIndex, local: localTime, shot: activeShot } = useMemo(
+    const { index: playheadIndex, local: playheadLocalTime } = useMemo(
         () => locate(currentTime),
         [locate, currentTime]
     );
+    const selectedIndex = selectedShotId === null ? -1 : timelineShots.findIndex((shot) => shot.id === selectedShotId);
+    const activeIndex = selectedIndex >= 0 ? selectedIndex : playheadIndex;
+    const activeShot = timelineShots[activeIndex] || null;
+    const previewTimeMs = selectedIndex >= 0 ? selectedPreviewTimeMs ?? shotIntervals[selectedIndex].startMs : Math.round(currentTime * 1000);
+    const localTime = selectedIndex >= 0 ? Math.max(0, (previewTimeMs - shotIntervals[selectedIndex].startMs) / 1000) : playheadLocalTime;
+
+    useEffect(() => {
+        if (isPlaying) {
+            setSelectedShotId(null);
+            setSelectedTimelineNode(null);
+        }
+    }, [isPlaying]);
+    const projectDurationMs = Math.round(totalDuration * 1000);
+    const activeTexts = useMemo(() => visibleTimelineTexts(timelineTexts, previewTimeMs), [timelineTexts, previewTimeMs]);
+    const scheduledVoices = useMemo(() => voiceTracks.filter((track) => track.audioStorageKey && voiceTrackEndMs(track) !== null), [voiceTracks]);
+
+    // 媒体 URL 由后端存储标识解析，不把可能过期的下载地址写入项目数据。
+    useEffect(() => {
+        const keys = [...new Set(voiceTracks.map((track) => track.audioStorageKey).filter((key): key is string => Boolean(key)))];
+        let cancelled = false;
+        Promise.all(keys.map(async (key) => {
+            try {
+                const media = await getServerMediaInfo(key);
+                if (!media.url) throw new Error("音频地址不可用");
+                return { key, url: media.url, error: "" };
+            } catch (error) {
+                return { key, url: "", error: error instanceof Error ? error.message : "音频加载失败" };
+            }
+        })).then((items) => {
+            if (cancelled) return;
+            setAudioUrls(Object.fromEntries(items.filter((item) => item.url).map((item) => [item.key, item.url])));
+            setAudioErrors(Object.fromEntries(items.filter((item) => item.error).map((item) => [item.key, item.error])));
+        });
+        return () => { cancelled = true; };
+    }, [voiceTracks]);
+
+    useEffect(() => {
+        const surface = previewSurfaceRef.current;
+        if (!surface) return;
+        const update = () => setPreviewBounds({ width: surface.clientWidth, height: surface.clientHeight });
+        update();
+        const observer = new ResizeObserver(update);
+        observer.observe(surface);
+        return () => observer.disconnect();
+    }, [viewMode, flipSide, workspace?.projectId]);
+
+    useEffect(() => {
+        const [width, height] = (workspace?.settings.aspectRatio || "").split(":").map(Number);
+        setPreviewRatio(width > 0 && height > 0 ? width / height : 0);
+    }, [workspace?.settings.aspectRatio, activeShot?.id]);
+
+    useEffect(() => {
+        const projectTimeMs = Math.round(currentTime * 1000);
+        scheduledVoices.forEach((track) => {
+            const audio = audioRefs.current[track.id];
+            if (!audio) return;
+            const sourceTimeMs = voiceTrackSourceTimeMs(track, projectTimeMs);
+            audio.muted = isMuted;
+            if (sourceTimeMs === null || !isPlaying) {
+                audio.pause();
+                if (sourceTimeMs !== null && Math.abs(audio.currentTime * 1000 - sourceTimeMs) > 50) audio.currentTime = sourceTimeMs / 1000;
+                return;
+            }
+            if (Math.abs(audio.currentTime * 1000 - sourceTimeMs) > 250) audio.currentTime = sourceTimeMs / 1000;
+            if (audio.paused && !audioErrors[track.audioStorageKey!]) audio.play().catch(() => setAudioErrors((current) => current[track.audioStorageKey!] ? current : { ...current, [track.audioStorageKey!]: "浏览器未能播放音频，请检查文件或手动开始播放" }));
+        });
+    }, [currentTime, isPlaying, isMuted, scheduledVoices, audioUrls, audioErrors]);
+
+    const openNewText = () => {
+        const startMs = Math.round(currentTime * 1000);
+        if (projectDurationMs - startMs < 100) { message.warning("播放头距离项目末尾不足 0.1 秒，无法添加文字"); return; }
+        const placement = availableTextTrackPlacement(timelineTexts, startMs, projectDurationMs);
+        if (!placement) { message.warning("三条文字轨道在当前时间均已有片段"); return; }
+        setIsPlaying(false);
+        setFlipSide("preview");
+        const item = { id: nanoid(), content: "文字", startMs, endMs: placement.endMs, trackNumber: placement.trackNumber, positionX: 0.5, positionY: 0.82 - placement.trackNumber * 0.14, fontSize: 36, color: "#ffffff", alignment: "center" as const, backgroundColor: null, revision: 0 };
+        queueTimelineText(item);
+        setSelectedPreviewTextId(item.id);
+        setSelectedTimelineNode({ kind: "text", id: item.id });
+    };
+
+    const saveText = async (value: ComicDramaTimelineTextInput) => {
+        const current = useComicDramaStore.getState().workspace?.timelineTexts.find((item) => item.id === value.id);
+        if (!value.content.trim() || (!current && (value.startMs < 0 || value.endMs <= value.startMs || value.endMs > projectDurationMs
+            || value.trackNumber < 0 || value.trackNumber >= textTrackCount
+            || timelineTexts.some((item) => item.id !== value.id && item.trackNumber === value.trackNumber && timelineTextOverlaps(item, value))))) {
+            message.error("请填写文字内容，且同一文字轨道的片段时间不能重叠");
+            return false;
+        }
+        setSavingTrack(true);
+        try {
+            const editedFields = { content: value.content.trim(), fontSize: value.fontSize, color: value.color,
+                alignment: value.alignment, backgroundColor: value.backgroundColor };
+            const saved = await saveTimelineText({ ...(current || value), ...editedFields });
+            const pending = useComicDramaStore.getState().pendingTimelineTexts[value.id];
+            if (current && pending) queueTimelineText({ ...pending, ...editedFields, revision: saved.revision });
+            else clearPendingTimelineText(value.id);
+            message.success("文字片段已保存");
+            return true;
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "文字片段保存失败");
+            return false;
+        } finally {
+            setSavingTrack(false);
+        }
+    };
+
+    const openNewAudio = () => {
+        setIsPlaying(false);
+        setAudioFile(null);
+        setAudioDraft({ id: `voice_${nanoid()}`, trackType: "music", content: "", voiceModel: "", speechRate: 1, tone: "", emotion: "", status: "ready", revision: 0, audioStorageKey: null, audioDurationMs: null, timelineStartMs: Math.round(currentTime * 1000), trimStartMs: 0, trimEndMs: null });
+    };
+
+    const saveAudio = async (draft: ComicDramaVoiceTrackInput) => {
+        if (!draft.content.trim()) { message.error("请填写声音条目内容"); return false; }
+        setSavingTrack(true);
+        try {
+            let value = draft;
+            if (audioFile) {
+                const uploaded = await uploadAudioFile(audioFile);
+                value = { ...value, audioStorageKey: uploaded.storageKey, audioDurationMs: uploaded.durationMs, trimStartMs: value.trimStartMs ?? 0, trimEndMs: value.trimEndMs ?? uploaded.durationMs, timelineStartMs: value.timelineStartMs ?? Math.round(currentTime * 1000) };
+                setAudioDraft(value);
+                setAudioFile(null);
+            }
+            if (!value.audioStorageKey || !value.audioDurationMs) throw new Error("请上传音频文件");
+            if (value.timelineStartMs == null || value.trimStartMs == null || value.trimEndMs == null) throw new Error("请设置音频排期和裁剪范围");
+            if (value.trimEndMs <= value.trimStartMs || value.trimEndMs > value.audioDurationMs || value.timelineStartMs + value.trimEndMs - value.trimStartMs > projectDurationMs) throw new Error("音频裁剪范围超出文件或项目时长");
+            if (Object.keys(useComicDramaStore.getState().pendingTimelineTexts).length + Object.keys(useComicDramaStore.getState().pendingTimelineVoices).length > 0 && !await savePendingTimelineChanges()) throw new Error("请先解决待保存的时间轴修改");
+            const current = useComicDramaStore.getState().workspace?.voiceTracks.find((item) => item.id === value.id);
+            await saveVoiceTrack({ ...value, revision: current?.revision ?? value.revision, content: value.content.trim() });
+            clearPendingTimelineVoice(value.id);
+            setAudioDraft(null);
+            message.success("音频片段已保存");
+            return true;
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "音频片段保存失败");
+            return false;
+        } finally {
+            setSavingTrack(false);
+        }
+    };
+
+    const movePreviewText = (event: React.PointerEvent<HTMLButtonElement>) => {
+        const dragging = textDragRef.current;
+        const frame = previewFrameRef.current;
+        if (!dragging || !frame) return;
+        const bounds = frame.getBoundingClientRect();
+        const x = clampPreviewPosition((event.clientX - bounds.left) / bounds.width, event.currentTarget.offsetWidth, bounds.width);
+        const y = clampPreviewPosition((event.clientY - bounds.top) / bounds.height, event.currentTarget.offsetHeight, bounds.height);
+        if (Math.abs(x - dragging.x) + Math.abs(y - dragging.y) > 0.002) {
+            textWasDraggedRef.current = true;
+            setDraggingPreviewTextId(dragging.id);
+        }
+        textDragRef.current = { ...dragging, x, y };
+        setTextPositions((current) => ({ ...current, [dragging.id]: { x, y } }));
+    };
+
+    const finishPreviewTextDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+        const dragging = textDragRef.current;
+        textDragRef.current = null;
+        setDraggingPreviewTextId(null);
+        if (!dragging) return;
+        event.currentTarget.releasePointerCapture(event.pointerId);
+        const text = timelineTexts.find((item) => item.id === dragging.id);
+        if (text && (text.positionX !== dragging.x || text.positionY !== dragging.y)) {
+            const updated = { ...text, positionX: dragging.x, positionY: dragging.y };
+            queueTimelineText(updated);
+            setTextPositions((current) => { const next = { ...current }; delete next[updated.id]; return next; });
+        }
+    };
+
+    const startClipDrag = (event: React.PointerEvent<HTMLButtonElement>, original: TimelineClipDraft) => {
+        event.stopPropagation();
+        if (event.button !== 0) return;
+        if (event.pointerType !== "mouse") event.preventDefault();
+        setIsPlaying(false);
+        const mode = (event.target as HTMLElement).dataset.edge as TimelineClipDrag["mode"] | undefined;
+        clipDragRef.current = { id: original.item.id, kind: original.kind, mode: mode || "move", pointerX: event.clientX, original, latest: original };
+        clipWasDraggedRef.current = false;
+        const pointerId = event.pointerId;
+        const onMove = (pointerEvent: PointerEvent) => {
+            if (pointerEvent.pointerId === pointerId) moveClip(pointerEvent.clientX);
+        };
+        const onUp = (pointerEvent: PointerEvent) => {
+            if (pointerEvent.pointerId !== pointerId) return;
+            clearClipDragListenersRef.current?.();
+            finishClipDrag();
+        };
+        const onCancel = (pointerEvent: PointerEvent) => {
+            if (pointerEvent.pointerId !== pointerId) return;
+            clearClipDragListenersRef.current?.();
+            clipDragRef.current = null;
+            clipWasDraggedRef.current = false;
+            setClipDraft(null);
+            setTextReorderDraft([]);
+        };
+        clearClipDragListenersRef.current?.();
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+        window.addEventListener("pointercancel", onCancel);
+        clearClipDragListenersRef.current = () => {
+            window.removeEventListener("pointermove", onMove);
+            window.removeEventListener("pointerup", onUp);
+            window.removeEventListener("pointercancel", onCancel);
+            clearClipDragListenersRef.current = null;
+        };
+    };
+
+    const moveClip = (clientX: number) => {
+        const drag = clipDragRef.current;
+        if (!drag) return;
+        const deltaMs = Math.round((clientX - drag.pointerX) * 1000 / pps);
+        if (Math.abs(deltaMs) < 20) return;
+        clipWasDraggedRef.current = true;
+        let latest: TimelineClipDraft;
+        if (drag.original.kind === "text") {
+            const item = drag.original.item;
+            const durationMs = item.endMs - item.startMs;
+            const startMs = drag.mode === "move" ? clampTimelineStart(item.startMs + deltaMs, durationMs, projectDurationMs)
+                : drag.mode === "left" ? Math.max(0, Math.min(item.endMs - 100, item.startMs + deltaMs)) : item.startMs;
+            const endMs = drag.mode === "right" ? Math.max(item.startMs + 100, Math.min(projectDurationMs, item.endMs + deltaMs))
+                : drag.mode === "move" ? startMs + durationMs : item.endMs;
+            latest = { kind: "text", item: { ...item, startMs, endMs } };
+            if (drag.mode === "move") {
+                const reordered = reorderTimelineTexts(timelineTexts, item.id, startMs);
+                drag.reorder = reordered.length ? reordered : undefined;
+                setTextReorderDraft(reordered);
+            }
+        } else {
+            const item = drag.original.item;
+            const start = item.timelineStartMs || 0;
+            const trimStart = item.trimStartMs || 0;
+            const trimEnd = item.trimEndMs || 0;
+            const durationMs = trimEnd - trimStart;
+            if (drag.mode === "move") latest = { kind: "audio", item: { ...item, timelineStartMs: clampTimelineStart(start + deltaMs, durationMs, projectDurationMs) } };
+            else if (drag.mode === "left") {
+                const nextTrimStart = Math.max(0, Math.min(trimEnd - 100, trimStart + deltaMs));
+                const nextStart = Math.max(0, Math.min(projectDurationMs - (trimEnd - nextTrimStart), start + nextTrimStart - trimStart));
+                latest = { kind: "audio", item: { ...item, timelineStartMs: nextStart, trimStartMs: nextTrimStart } };
+            } else {
+                const nextTrimEnd = Math.max(trimStart + 100, Math.min(item.audioDurationMs || trimEnd, projectDurationMs - start + trimStart, trimEnd + deltaMs));
+                latest = { kind: "audio", item: { ...item, trimEndMs: nextTrimEnd } };
+            }
+        }
+        drag.latest = latest;
+        setClipDraft(latest);
+    };
+
+    const finishClipDrag = () => {
+        const drag = clipDragRef.current;
+        clipDragRef.current = null;
+        if (!drag) return;
+        if (!clipWasDraggedRef.current) { setClipDraft(null); setTextReorderDraft([]); return; }
+        if (drag.latest.kind === "text") {
+            if (drag.reorder?.length) {
+                queueTimelineTextReorder(drag.reorder);
+                setClipDraft(null);
+                setTextReorderDraft([]);
+                return;
+            }
+            if (timelineTexts.some((item) => item.id !== drag.latest.item.id && item.trackNumber === drag.latest.item.trackNumber && timelineTextOverlaps(item, drag.latest.item))) {
+                message.warning("同一文字轨道的片段不能重叠");
+                setClipDraft(null);
+                setTextReorderDraft([]);
+                return;
+            }
+            queueTimelineText(drag.latest.item);
+        }
+        else queueTimelineVoice(drag.latest.item);
+        setClipDraft(null);
+        setTextReorderDraft([]);
+    };
+
+    const confirmDeleteText = (item: ComicDramaTimelineTextInput) => {
+        modal.confirm({
+            title: "删除文字片段",
+            content: `确定删除“${item.content}”吗？`,
+            okText: "删除", cancelText: "取消", okButtonProps: { danger: true },
+            onOk: async () => {
+                try {
+                    if (Object.keys(useComicDramaStore.getState().pendingTimelineTexts).length + Object.keys(useComicDramaStore.getState().pendingTimelineVoices).length > 0 && !await savePendingTimelineChanges()) throw new Error("请先解决待保存的时间轴修改");
+                    await deleteTimelineText(item.id);
+                    clearPendingTimelineText(item.id);
+                    if (selectedPreviewTextId === item.id) setSelectedPreviewTextId(null);
+                    if (selectedTimelineNode?.kind === "text" && selectedTimelineNode.id === item.id) setSelectedTimelineNode(null);
+                    setTextDraft(null);
+                    message.success("文字片段已删除");
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : "文字片段删除失败");
+                    throw error;
+                }
+            },
+        });
+    };
+
+    const confirmDeleteTextTrack = (trackNumber: number) => {
+        const clipCount = timelineTexts.filter((item) => item.trackNumber === trackNumber).length;
+        modal.confirm({
+            title: `删除文字轨道${trackNumber}`,
+            content: clipCount ? `该轨道中的 ${clipCount} 个文字片段将一同删除，确定继续吗？` : "确定删除该文字轨道吗？",
+            okText: "删除轨道", cancelText: "取消", okButtonProps: { danger: true },
+            onOk: async () => {
+                try {
+                    if (pendingTimelineCount && !await savePendingTimelineChanges()) throw new Error("请先解决待保存的时间轴修改");
+                    await deleteTextTrack(trackNumber);
+                    setSelectedPreviewTextId(null);
+                    setSelectedTimelineNode(null);
+                    message.success("文字轨道已删除");
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : "删除文字轨道失败");
+                    throw error;
+                }
+            },
+        });
+    };
+
+    const selectAudioFile = async (file: File | null) => {
+        setAudioFile(file);
+        if (!file) return;
+        try {
+            const metadata = await readAudioMetadata(file);
+            setAudioDraft((current) => current ? { ...current, audioDurationMs: metadata.durationMs, trimStartMs: 0, trimEndMs: Math.min(metadata.durationMs, Math.max(100, projectDurationMs - (current.timelineStartMs || 0))) } : current);
+        } catch (error) {
+            setAudioFile(null);
+            message.error(error instanceof Error ? error.message : "音频解析失败");
+        }
+    };
+
+    const removeAudioFromTimeline = async (item: ComicDramaVoiceTrackInput) => {
+        setSavingTrack(true);
+        try {
+            if (Object.keys(useComicDramaStore.getState().pendingTimelineTexts).length + Object.keys(useComicDramaStore.getState().pendingTimelineVoices).length > 0 && !await savePendingTimelineChanges()) throw new Error("请先解决待保存的时间轴修改");
+            const current = useComicDramaStore.getState().workspace?.voiceTracks.find((track) => track.id === item.id);
+            await saveVoiceTrack({ ...item, revision: current?.revision ?? item.revision, timelineStartMs: null, trimStartMs: null, trimEndMs: null });
+            clearPendingTimelineVoice(item.id);
+            setAudioDraft(null);
+            message.success("音频已移出轨道，声音条目和文件已保留");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "移出音频轨道失败");
+        } finally {
+            setSavingTrack(false);
+        }
+    };
 
     // 鼠标悬停位置仅用于显示时间辅助线，不参与播放位置计算。
     const [hoverTime, setHoverTime] = useState<number | null>(null);
@@ -420,6 +847,7 @@ export function StageStoryboard() {
     // 空格键仅切换播放状态，始终从当前进度线位置继续播放。
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            if (textDraft || audioDraft || editModalOpen) return;
             if (e.code === "Space" || e.key === " ") {
                 const target = e.target as HTMLElement | null;
                 if (
@@ -440,7 +868,7 @@ export function StageStoryboard() {
 
         window.addEventListener("keydown", handleKeyDown);
         return () => window.removeEventListener("keydown", handleKeyDown);
-    }, []);
+    }, [textDraft, audioDraft, editModalOpen]);
 
     // Sync video play/pause and sound with isPlaying
     useEffect(() => {
@@ -507,20 +935,18 @@ export function StageStoryboard() {
 
     // Timeline navigation helpers
     const seekToShotStart = (index: number) => {
-        let acc = 0;
-        for (let i = 0; i < index && i < filteredShots.length; i++) {
-            acc += getShotDuration(filteredShots[i]);
-        }
-        setCurrentTime(acc + 0.05);
+        setSelectedShotId(null);
+        setSelectedTimelineNode(null);
+        setCurrentTime((shotIntervals[index]?.startMs || 0) / 1000 + 0.05);
     };
 
     const handlePrevShot = () => {
         if (activeIndex > 0) seekToShotStart(activeIndex - 1);
-        else setCurrentTime(0);
+        else { setSelectedShotId(null); setSelectedTimelineNode(null); setCurrentTime(0); }
     };
 
     const handleNextShot = () => {
-        if (activeIndex < filteredShots.length - 1) seekToShotStart(activeIndex + 1);
+        if (activeIndex < timelineShots.length - 1) seekToShotStart(activeIndex + 1);
     };
 
     // Calculate time from clientX coordinate in timeline track
@@ -534,24 +960,28 @@ export function StageStoryboard() {
         [pps, totalDuration]
     );
 
-    // Pointer event handlers for timeline scrubbing and mouse position tracking
+    // 仅从播放头开始拖动，按下时保留原时间，避免命中区边缘造成跳动。
     const handlePointerDown = (e: React.PointerEvent) => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        setIsPlaying(false);
+        setSelectedShotId(null);
+        setSelectedTimelineNode(null);
         isScrubbingRef.current = true;
+        scrubStartRef.current = { clientX: e.clientX, time: currentTime };
         if (tlBodyRef.current) {
             try {
                 tlBodyRef.current.setPointerCapture(e.pointerId);
             } catch {}
         }
-        const t = timeFromClientX(e.clientX);
-        setHoverTime(t);
-        setCurrentTime(t);
     };
 
     const handlePointerMove = (e: React.PointerEvent) => {
         const t = timeFromClientX(e.clientX);
         setHoverTime(t);
-        if (isScrubbingRef.current || (e.pointerType === "mouse" && e.buttons === 1)) {
-            setCurrentTime(t);
+        if (isScrubbingRef.current) {
+            const { clientX, time } = scrubStartRef.current;
+            setCurrentTime(Math.min(Math.max(time + (e.clientX - clientX) / pps, 0), totalDuration));
         }
     };
 
@@ -566,9 +996,6 @@ export function StageStoryboard() {
 
     const handlePointerLeave = () => {
         setHoverTime(null);
-        if (isScrubbingRef.current) {
-            isScrubbingRef.current = false;
-        }
     };
 
     // Zoom handlers
@@ -733,8 +1160,9 @@ export function StageStoryboard() {
         return activeShot.assetVersionIds.map((vId) => {
             const asset = assets.find((a) => (versionsByAsset[a.id] || []).some((v) => v.id === vId));
             const version = asset ? (versionsByAsset[asset.id] || []).find((v) => v.id === vId) : undefined;
+            // 需要更新只代表上游有变更，历史结果仍要展示给用户，口径与资产阶段保持一致。
             const matchedMedia = mediaList.find(
-                (m) => m.targetType === "assetVersion" && m.targetId === vId && m.status === "completed"
+                (m) => m.targetType === "assetVersion" && m.targetId === vId && (m.status === "completed" || m.status === "needsUpdate")
             );
             const imageUrl = matchedMedia ? readComicDramaMediaUrl(matchedMedia.resultData) : "";
             return {
@@ -750,11 +1178,11 @@ export function StageStoryboard() {
         });
     }, [activeShot, assets, versionsByAsset, mediaList]);
 
-    // 分镜图参考底图（分镜图已采用或已完成，作为图生视频参考）
+    // 分镜图参考底图（分镜图已采用或已生成，作为图生视频参考；needsUpdate 只代表上游有变更，历史结果仍要展示）
     const storyboardReferenceImage = useMemo(() => {
         if (!activeShot) return "";
         const imageMedia = mediaList.find(
-            (m) => m.targetType === "shot" && m.targetId === activeShot.id && m.mediaType === "image" && (m.adopted || m.status === "completed")
+            (m) => m.targetType === "shot" && m.targetId === activeShot.id && m.mediaType === "image" && (m.adopted || m.status === "completed" || m.status === "needsUpdate")
         );
         if (imageMedia) {
             return readComicDramaMediaUrl(imageMedia.resultData);
@@ -780,7 +1208,7 @@ export function StageStoryboard() {
     return (
         <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--studio-bg)] text-[var(--studio-text)]">
             {/* Topbar: Subtitle, Episode Switcher, Views & Actions */}
-            <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--studio-line)] bg-[var(--studio-panel-solid)]/90 px-5 backdrop-blur-md z-30">
+            <header className="z-30 flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--studio-line)] bg-[var(--studio-panel-solid)]/90 px-5 py-2 backdrop-blur-md">
                 <div className="flex items-center gap-3">
                     <div className="flex size-8 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--studio-brand-start)] to-[var(--studio-brand-end)] text-[var(--studio-action-foreground)] shadow-md shadow-[var(--studio-brand-glow)] font-bold text-sm">
                         ◈
@@ -790,16 +1218,23 @@ export function StageStoryboard() {
                             视觉分镜板 · 工作台
                         </div>
                         <div className="text-[11px] text-[var(--studio-muted)]">
-                            {workspace.scriptProject.overview.title || "漫剧项目"} · 共 {filteredShots.length} 个镜头
+                            {workspace.scriptProject.overview.title || "漫剧项目"} · 共 {viewMode === "timeline" ? timelineShots.length : filteredShots.length} 个镜头
                         </div>
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2.5">
+                <div className="flex min-w-0 flex-wrap items-center justify-end gap-2.5">
                     <Select
                         className="w-36 [&_.ant-select-selector]:!bg-[var(--studio-surface)] [&_.ant-select-selector]:!border-[var(--studio-line)] [&_.ant-select-selection-item]:!text-[var(--studio-ink)]"
                         value={selectedEpisodeId}
-                        onChange={setSelectedEpisodeId}
+                        onChange={(episodeId) => {
+                            setSelectedEpisodeId(episodeId);
+                            setSelectedShotId(null);
+                            setSelectedPreviewTextId(null);
+                            setSelectedTimelineNode(null);
+                            const firstIndex = episodeId === "all" ? 0 : shotIntervals.findIndex(({ shot }) => shot.sourceEpisodeId === episodeId);
+                            if (firstIndex >= 0) setCurrentTime(shotIntervals[firstIndex].startMs / 1000);
+                        }}
                         options={[
                             { value: "all", label: "全部分集" },
                             ...episodes.map((ep) => ({
@@ -808,6 +1243,9 @@ export function StageStoryboard() {
                             })),
                         ]}
                     />
+
+                    {timelineSaveError ? <span className="max-w-52 truncate text-xs text-rose-500" title={timelineSaveError}>保存失败：{timelineSaveError}</span> : pendingTimelineCount > 0 ? <span className="text-xs text-[var(--studio-muted)]">待保存 {pendingTimelineCount} 项</span> : null}
+                    <Button size="small" icon={<Save className="size-3.5" />} disabled={!pendingTimelineCount} loading={timelineSaving} onClick={() => void savePendingTimelineChanges().then((saved) => { if (saved) message.success("时间轴已保存"); else message.error(useComicDramaStore.getState().timelineSaveError || "仍有待保存的修改"); })}>保存</Button>
 
                     {/* View mode toggle */}
                     <div className="flex items-center rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-0.5">
@@ -852,7 +1290,7 @@ export function StageStoryboard() {
             </header>
 
             {/* 分集切换控件始终保留，空分集仅替换内容区，避免用户无法切回有分镜的分集。 */}
-            {filteredShots.length === 0 ? (
+            {shots.length === 0 || (viewMode === "grid" && filteredShots.length === 0) ? (
                 <div className="flex flex-1 items-center justify-center p-8">
                     <Empty description="当前分集暂无镜头画面，请先进行镜头拆分">
                         <Button type="primary" icon={<Clapperboard className="size-4" />} onClick={() => setActiveStage("shots")}>
@@ -943,7 +1381,7 @@ export function StageStoryboard() {
                                                 type="text"
                                                 className="!text-[var(--studio-primary)] hover:!text-[var(--studio-primary-hover)]"
                                                 onClick={() => {
-                                                    seekToShotStart(idx);
+                                                    seekToShotStart(timelineShots.findIndex((item) => item.id === shot.id));
                                                     setViewMode("timeline");
                                                 }}
                                             >
@@ -1003,11 +1441,11 @@ export function StageStoryboard() {
                                         flipSide === "config" ? "pointer-events-none" : ""
                                     }`}
                                 >
-                                    <div className="relative flex h-full w-full items-center justify-center bg-[var(--studio-media)] overflow-hidden">
+                                    <div ref={previewSurfaceRef} className="relative flex h-full w-full items-center justify-center bg-[var(--studio-media)] overflow-hidden">
                                         {/* Frame background or real media */}
                                         {activeMediaUrl ? (
                                             isVideo ? (
-                                                <video
+                                                        <video
                                                     ref={videoRef}
                                                     src={activeMediaUrl}
                                                     poster={activePosterUrl || undefined}
@@ -1018,7 +1456,8 @@ export function StageStoryboard() {
                                                     onClick={() => setIsPlaying((prev) => !prev)}
                                                     onLoadedMetadata={(e) => {
                                                         const d = e.currentTarget.duration;
-                                                        if (activeShot && Number.isFinite(d) && d > 0) {
+                                                                if (activeShot && Number.isFinite(d) && d > 0) {
+                                                                    if (e.currentTarget.videoWidth && e.currentTarget.videoHeight) setPreviewRatio(e.currentTarget.videoWidth / e.currentTarget.videoHeight);
                                                             const preciseDur = Math.round(d * 10) / 10;
                                                             setRealVideoDurations((prev) => {
                                                                 if (prev[activeShot.id] === preciseDur) return prev;
@@ -1040,6 +1479,10 @@ export function StageStoryboard() {
                                                     src={activeMediaUrl}
                                                     alt={`镜头 #${activeShot?.shotNumber}`}
                                                     className="h-full w-full max-h-full max-w-full object-contain"
+                                                    onLoad={(event) => {
+                                                        const image = event.currentTarget;
+                                                        if (image.naturalWidth && image.naturalHeight) setPreviewRatio(image.naturalWidth / image.naturalHeight);
+                                                    }}
                                                 />
                                             )
                                         ) : isActiveMediaGenerating ? (
@@ -1094,6 +1537,54 @@ export function StageStoryboard() {
                                             </div>
                                         )}
 
+                                        {previewRatio > 0 ? <div
+                                            ref={previewFrameRef}
+                                            className="pointer-events-none absolute z-10 overflow-hidden"
+                                            style={{
+                                                width: Math.min(previewBounds.width, previewBounds.height * previewRatio),
+                                                height: Math.min(previewBounds.height, previewBounds.width / previewRatio),
+                                                left: "50%", top: "50%", transform: "translate(-50%, -50%)",
+                                            }}
+                                        >
+                                            {activeTexts.map((item) => {
+                                                const position = textPositions[item.id] || { x: item.positionX, y: item.positionY };
+                                                return (
+                                                    <button
+                                                        key={item.id}
+                                                        type="button"
+                                                        aria-label={`拖动文字：${item.content}`}
+                                                        aria-pressed={selectedPreviewTextId === item.id}
+                                                        title="拖动调整位置，双击编辑"
+                                                        className={`pointer-events-auto absolute max-w-[90%] cursor-move whitespace-pre-wrap break-words rounded-sm border px-1.5 py-0.5 leading-tight focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${draggingPreviewTextId === item.id ? "border-[var(--studio-action)]" : "border-transparent"}`}
+                                                        style={{
+                                                            left: `${position.x * 100}%`, top: `${position.y * 100}%`,
+                                                            transform: "translate(-50%, -50%)",
+                                                            fontSize: `${Math.max(12, item.fontSize * Math.min(previewBounds.width, previewBounds.height * previewRatio) / 1000)}px`,
+                                                            color: item.color, backgroundColor: item.backgroundColor || "transparent", textAlign: item.alignment,
+                                                            textShadow: item.backgroundColor ? undefined : "0 1px 3px rgb(0 0 0 / 75%)",
+                                                        }}
+                                                        onPointerDown={(event) => {
+                                                            event.stopPropagation();
+                                                            if (event.button !== 0) return;
+                                                            setIsPlaying(false);
+                                                            setSelectedPreviewTextId(item.id);
+                                                            setSelectedTimelineNode({ kind: "text", id: item.id });
+                                                            event.currentTarget.setPointerCapture(event.pointerId);
+                                                            textWasDraggedRef.current = false;
+                                                            textDragRef.current = { id: item.id, x: position.x, y: position.y };
+                                                        }}
+                                                        onPointerMove={movePreviewText}
+                                                        onPointerUp={finishPreviewTextDrag}
+                                                        onPointerCancel={finishPreviewTextDrag}
+                                                        onClick={(event) => { event.stopPropagation(); textWasDraggedRef.current = false; }}
+                                                        onDoubleClick={(event) => { event.stopPropagation(); setTextDraft(item); }}
+                                                    >
+                                                        {item.content}
+                                                    </button>
+                                                );
+                                            })}
+                                        </div> : null}
+
                                         {/* Top-Right Badges */}
                                         <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
                                             <span className="rounded-full border border-[var(--studio-line)] bg-[var(--studio-panel-solid)]/85 px-3 py-1 text-xs font-semibold text-[var(--studio-ink)] backdrop-blur-md shadow-sm">
@@ -1121,16 +1612,6 @@ export function StageStoryboard() {
                                                     ? "生成失败"
                                                     : "未生成"}
                                             </span>
-                                        </div>
-
-                                        {/* Subtitle / Caption Overlay */}
-                                        <div className="absolute inset-x-5 bottom-16 z-10 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-[var(--studio-text)] drop-shadow-md">
-                                            {activeShot?.visualDescription || "暂无画面描述"}
-                                            {activeShot?.dialogueVoiceover && (
-                                                <span className="ml-2 font-medium italic text-[var(--studio-primary)]">
-                                                    「{activeShot.dialogueVoiceover}」
-                                                </span>
-                                            )}
                                         </div>
 
                                         {/* Transport Bar */}
@@ -1592,19 +2073,19 @@ export function StageStoryboard() {
 
             {/* Bottom Timeline Dock */}
             {viewMode === "timeline" && (
-                <footer className="flex h-56 shrink-0 flex-col border-t border-[var(--studio-line)] bg-[var(--studio-panel-solid)] z-20 select-none pb-2">
+                <footer className="z-20 flex shrink-0 flex-col border-t border-[var(--studio-line)] bg-[var(--studio-panel-solid)] pb-2 select-none" style={{ height: 286 + (textTrackCount - 1) * 48 }}>
                     {/* Timeline Head Bar */}
                     <div className="flex shrink-0 items-center justify-between px-5 py-2.5">
                         <div className="text-xs font-semibold text-[var(--studio-ink)]">
                             分镜轨道
                             <span className="ml-2 font-normal text-[var(--studio-muted)]">
-                                共 {filteredShots.length} 个镜头 · 总时长 {totalDuration.toFixed(1)}s
+                                共 {timelineShots.length} 个镜头 · 总时长 {totalDuration.toFixed(1)}s
                             </span>
                         </div>
 
                         <div className="flex items-center gap-3 text-xs text-[var(--studio-muted)]">
-                            <span className="rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--studio-primary)]">
-                                ← 在轨道上拖动定位 · 按空格键播放/暂停 →
+                            <span className="hidden rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--studio-primary)] lg:inline-flex">
+                                ← 拖动时间轴竖线定位 · 按空格键播放/暂停 →
                             </span>
 
                             <div className="flex items-center gap-1.5">
@@ -1635,10 +2116,26 @@ export function StageStoryboard() {
                     </div>
 
                     {/* Timeline Track Body */}
+                    <div className="flex min-h-0 flex-1">
+                        <div className="z-10 w-36 shrink-0 border-r border-[var(--studio-line)] bg-[var(--studio-panel-solid)] text-xs text-[var(--studio-ink)]">
+                            <div className="h-5 border-b border-[var(--studio-line)]" />
+                            <div className="flex h-[88px] items-center gap-2 border-b border-[var(--studio-line)] px-3 font-medium"><Video className="size-4" aria-hidden="true" />视频轨道</div>
+                            {Array.from({ length: textTrackCount }, (_, trackNumber) => (
+                                <div key={trackNumber} className="flex h-12 items-center justify-between border-b border-[var(--studio-line)] px-3 font-medium">
+                                    <span className="flex items-center gap-2"><Type className="size-4" aria-hidden="true" />{trackNumber === 0 ? "文字轨道" : `文字轨道${trackNumber}`}</span>
+                                    {trackNumber === 0
+                                        ? <button type="button" className="flex size-8 items-center justify-center rounded hover:bg-[var(--studio-surface-soft)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label="添加文字" title="添加文字" onClick={openNewText}><Plus className="size-3.5" /></button>
+                                        : <button type="button" className="flex size-8 items-center justify-center rounded text-[var(--studio-muted)] hover:bg-[var(--studio-surface-soft)] hover:text-rose-500 focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label={`删除文字轨道${trackNumber}`} title={`删除文字轨道${trackNumber}`} onClick={() => confirmDeleteTextTrack(trackNumber)}><Trash2 className="size-3.5" /></button>}
+                                </div>
+                            ))}
+                            <div className="flex h-12 items-center justify-between px-3 font-medium">
+                                <span className="flex items-center gap-2"><Music2 className="size-4" aria-hidden="true" />音频轨道</span>
+                                <button type="button" className="flex size-8 items-center justify-center rounded hover:bg-[var(--studio-surface-soft)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label="添加音频" title="添加音频" onClick={openNewAudio}><Plus className="size-3.5" /></button>
+                            </div>
+                        </div>
                     <div
                         ref={tlBodyRef}
-                        className="relative flex-1 overflow-x-auto overflow-y-hidden cursor-ew-resize hover-scrollbar [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[var(--studio-scrollbar)] hover:[&::-webkit-scrollbar-thumb]:bg-[var(--studio-scrollbar)]/80"
-                        onPointerDown={handlePointerDown}
+                        className="relative min-w-0 flex-1 overflow-x-auto overflow-y-hidden hover-scrollbar [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-[var(--studio-scrollbar)] hover:[&::-webkit-scrollbar-thumb]:bg-[var(--studio-scrollbar)]/80"
                         onPointerMove={handlePointerMove}
                         onPointerUp={handlePointerUp}
                         onPointerCancel={handlePointerUp}
@@ -1647,7 +2144,7 @@ export function StageStoryboard() {
                     >
                         <div
                             ref={tlContentRef}
-                            className="relative flex h-full flex-col min-w-full"
+                            className="relative flex h-full min-w-full flex-col"
                             style={{ width: `${Math.max(totalDuration * pps + 100, 600)}px` }}
                         >
                             {/* Ruler */}
@@ -1671,25 +2168,31 @@ export function StageStoryboard() {
                             </div>
 
                             {/* Shot Clips Container */}
-                            <div className="relative flex flex-1 items-start pt-2 pb-10">
-                                {filteredShots.map((shot, idx) => {
+                            <div className="relative flex h-[88px] shrink-0 items-start border-b border-[var(--studio-line)] pt-1">
+                                {timelineShots.map((shot, idx) => {
                                     const dur = getShotDuration(shot);
-                                    const clipWidth = Math.max(dur * pps, 54);
+                                    const clipWidth = dur * pps;
                                     const media = getShotMedia(shot.id);
                                     const url = media ? readComicDramaMediaUrl(media.resultData) : "";
                                     const isVid = isVideoMedia(media, url);
                                     const hasVideo = Boolean(url && isVid);
                                     const posterUrl = readComicDramaThumbnailUrl(media?.resultData) || getShotImagePoster(shot.id);
-                                    const isActive = idx === activeIndex;
+                                    const isActive = selectedTimelineNode
+                                        ? selectedTimelineNode.kind === "video" && selectedTimelineNode.id === shot.id
+                                        : idx === activeIndex;
 
                                     return (
                                         <div
                                             key={shot.id}
-                                            className="group relative h-[100px] shrink-0 px-1"
+                                            className={`group relative h-[80px] shrink-0 px-0.5 ${selectedEpisodeId !== "all" && shot.sourceEpisodeId !== selectedEpisodeId ? "opacity-35" : ""}`}
                                             style={{ width: `${clipWidth}px` }}
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                seekToShotStart(idx);
+                                                setIsPlaying(false);
+                                                setSelectedShotId(shot.id);
+                                                setSelectedPreviewTimeMs(null);
+                                                setSelectedPreviewTextId(null);
+                                                setSelectedTimelineNode({ kind: "video", id: shot.id });
                                             }}
                                         >
                                             <div
@@ -1724,11 +2227,6 @@ export function StageStoryboard() {
                                                 >
                                                     {hasVideo ? "已生成" : media?.status === "failed" ? "失败" : "未生成"}
                                                 </span>
-
-                                                {/* Bottom Name Snippet */}
-                                                <span className="absolute inset-x-0 bottom-0 z-10 overflow-hidden text-ellipsis whitespace-nowrap bg-gradient-to-t from-[var(--studio-panel-solid)]/95 to-transparent px-2 py-1 text-[10px] font-medium text-[var(--studio-text)]">
-                                                    {shot.visualDescription || `镜头 #${shot.shotNumber}`}
-                                                </span>
                                             </div>
                                         </div>
                                     );
@@ -1737,8 +2235,9 @@ export function StageStoryboard() {
                                 {/* Mouse Hover Ghost Needle & Time Tooltip */}
                                 {hoverTime !== null && (
                                     <div
-                                        className="pointer-events-none absolute top-1 h-[104px] z-10 w-[1.5px] bg-[var(--studio-primary)]/70 shadow-sm shadow-[var(--studio-primary)]"
+                                        className="pointer-events-none absolute top-1 z-10 w-[1.5px] bg-[var(--studio-primary)]/70 shadow-sm shadow-[var(--studio-primary)]"
                                         style={{
+                                            height: 190 + (textTrackCount - 1) * 48,
                                             transform: `translateX(${hoverTime * pps}px)`,
                                             willChange: "transform",
                                         }}
@@ -1751,20 +2250,138 @@ export function StageStoryboard() {
 
                                 {/* Playhead Needle */}
                                 <div
-                                    className="pointer-events-none absolute top-1 h-[104px] z-20 w-[2px] bg-gradient-to-b from-[var(--studio-brand-start)] to-[var(--studio-brand-end)] shadow-md shadow-[var(--studio-brand-glow)]"
+                                    className="absolute top-1 z-20 w-3 cursor-ew-resize touch-none"
                                     style={{
-                                        transform: `translateX(${currentTime * pps}px)`,
+                                        height: 190 + (textTrackCount - 1) * 48,
+                                        transform: `translateX(${currentTime * pps - 5}px)`,
                                         willChange: "transform",
                                     }}
+                                    onPointerDown={handlePointerDown}
+                                    title="拖动时间轴竖线"
                                 >
+                                    <div className="pointer-events-none absolute inset-y-0 left-[5px] w-[2px] bg-gradient-to-b from-[var(--studio-brand-start)] to-[var(--studio-brand-end)] shadow-md shadow-[var(--studio-brand-glow)]" />
                                     {/* Playhead Top Pin */}
-                                    <div className="absolute -left-1.5 -top-1.5 size-3 rounded-sm bg-gradient-to-br from-[var(--studio-brand-start)] to-[var(--studio-brand-end)] shadow-lg shadow-[var(--studio-brand-glow)]" />
+                                    <div className="pointer-events-none absolute -top-1.5 left-0 size-3 rounded-sm bg-gradient-to-br from-[var(--studio-brand-start)] to-[var(--studio-brand-end)] shadow-lg shadow-[var(--studio-brand-glow)]" />
                                 </div>
+                            </div>
+
+                            {Array.from({ length: textTrackCount }, (_, trackNumber) => <div key={trackNumber} className="relative h-12 shrink-0 border-b border-[var(--studio-line)] bg-[var(--studio-surface-soft)]/35">
+                                {timelineTexts.filter((item) => item.trackNumber === trackNumber).map((source) => {
+                                    // 被拖动片段始终跟随鼠标；只有其他片段预览换位后的落点。
+                                    const item = clipDraft?.kind === "text" && clipDraft.item.id === source.id
+                                        ? clipDraft.item : textReorderDraft.find((draft) => draft.id === source.id) || source;
+                                    return (
+                                        <button key={source.id} type="button" title={`${item.content} · 双击编辑，拖动移动，两端调整时间`} aria-pressed={selectedTimelineNode?.kind === "text" && selectedTimelineNode.id === source.id} className={`absolute top-1.5 h-9 min-w-[8px] touch-none cursor-grab overflow-hidden rounded border bg-[var(--studio-primary-soft)] text-left text-xs text-[var(--studio-ink)] active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${selectedTimelineNode?.kind === "text" && selectedTimelineNode.id === source.id ? "border-[var(--studio-primary)] shadow-lg shadow-[var(--studio-primary-soft)] ring-1 ring-[var(--studio-primary)]" : "border-[var(--studio-primary-line)] hover:border-[var(--studio-primary)]"} ${clipDragRef.current?.id === source.id ? "z-30" : ""}`} style={{ left: item.startMs / 1000 * pps, width: (item.endMs - item.startMs) / 1000 * pps }}
+                                            onPointerDown={(event) => startClipDrag(event, { kind: "text", item })}
+                                            onDragStart={(event) => event.preventDefault()}
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                if (clipWasDraggedRef.current) { clipWasDraggedRef.current = false; return; }
+                                                setIsPlaying(false);
+                                                setFlipSide("preview");
+                                                const previewTimeMs = item.startMs + Math.min(50, (item.endMs - item.startMs) / 2);
+                                                setSelectedShotId(locate(previewTimeMs / 1000).shot?.id || null);
+                                                setSelectedPreviewTimeMs(previewTimeMs);
+                                                setSelectedPreviewTextId(item.id);
+                                                setSelectedTimelineNode({ kind: "text", id: item.id });
+                                            }}
+                                            onDoubleClick={(event) => { event.stopPropagation(); setIsPlaying(false); setTextDraft(item); }}
+                                            onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); setIsPlaying(false); setTextDraft(item); }}>
+                                            <span data-edge="left" className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize" />
+                                            <span className="block truncate px-2 pt-2">{item.content}</span>
+                                            <span data-edge="right" className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize" />
+                                        </button>
+                                    );
+                                })}
+                            </div>)}
+                            <div className="relative h-12 shrink-0 bg-[var(--studio-surface-soft)]/15">
+                                {scheduledVoices.map((source) => {
+                                    const item = clipDraft?.kind === "audio" && clipDraft.item.id === source.id ? clipDraft.item : source;
+                                    const endMs = voiceTrackEndMs(item);
+                                    if (item.timelineStartMs == null || endMs == null) return null;
+                                    const error = item.audioStorageKey ? audioErrors[item.audioStorageKey] : "";
+                                    return (
+                                        <button key={source.id} type="button" title={error || `${item.content} · 点击编辑，拖动移动，两端裁剪音频`} aria-pressed={selectedTimelineNode?.kind === "audio" && selectedTimelineNode.id === source.id} className={`absolute top-1.5 h-9 min-w-[8px] touch-none overflow-hidden rounded border bg-[var(--studio-surface-raised)] text-left text-xs focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${clipDragRef.current?.id === source.id ? "z-30" : ""} ${selectedTimelineNode?.kind === "audio" && selectedTimelineNode.id === source.id ? "border-[var(--studio-primary)] shadow-lg shadow-[var(--studio-primary-soft)] ring-1 ring-[var(--studio-primary)]" : error ? "border-red-500" : "border-[var(--studio-line-strong)]"} ${error ? "text-red-500" : "text-[var(--studio-ink)]"}`} style={{ left: item.timelineStartMs / 1000 * pps, width: (endMs - item.timelineStartMs) / 1000 * pps }}
+                                            onPointerDown={(event) => startClipDrag(event, { kind: "audio", item })}
+                                            onDragStart={(event) => event.preventDefault()}
+                                            onClick={(event) => { event.stopPropagation(); if (clipWasDraggedRef.current) { clipWasDraggedRef.current = false; return; } setIsPlaying(false); setSelectedPreviewTextId(null); setSelectedTimelineNode({ kind: "audio", id: item.id }); setAudioFile(null); setAudioDraft(item); }}>
+                                            <span data-edge="left" className="absolute inset-y-0 left-0 w-1.5 cursor-ew-resize border-r border-[var(--studio-line-strong)]" />
+                                            <span className="flex items-center gap-1 truncate px-2 pt-2"><Music2 className="size-3 shrink-0" />{error || item.content}</span>
+                                            <span data-edge="right" className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize border-l border-[var(--studio-line-strong)]" />
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
+                    </div>
                 </footer>
             )}
+
+            {scheduledVoices.map((track) => track.audioStorageKey && audioUrls[track.audioStorageKey] ? (
+                <audio
+                    key={track.id}
+                    ref={(element) => { audioRefs.current[track.id] = element; }}
+                    src={audioUrls[track.audioStorageKey]}
+                    preload="auto"
+                    onError={() => setAudioErrors((current) => ({ ...current, [track.audioStorageKey!]: "音频文件加载失败，请重新上传" }))}
+                />
+            ) : null)}
+
+            <Modal
+                title={timelineTexts.some((item) => item.id === textDraft?.id) ? "编辑文字片段" : "添加文字片段"}
+                open={Boolean(textDraft)}
+                onCancel={() => setTextDraft(null)}
+                onOk={() => { if (textDraft) void saveText(textDraft).then((saved) => { if (saved) setTextDraft(null); }); }}
+                okText="保存文字"
+                confirmLoading={savingTrack}
+                destroyOnHidden
+                footer={textDraft ? [
+                    timelineTexts.some((item) => item.id === textDraft.id) ? <Button key="delete" danger icon={<Trash2 className="size-4" />} onClick={() => confirmDeleteText(textDraft)}>删除</Button> : null,
+                    <Button key="cancel" onClick={() => setTextDraft(null)}>取消</Button>,
+                    <Button key="save" type="primary" loading={savingTrack} onClick={() => { void saveText(textDraft).then((saved) => { if (saved) setTextDraft(null); }); }}>保存文字</Button>,
+                ] : undefined}
+            >
+                {textDraft ? <div className="space-y-4 pt-3">
+                    <div><label className="mb-1 block text-sm font-medium">文字内容</label><Input.TextArea rows={3} maxLength={2000} value={textDraft.content} onChange={(event) => setTextDraft({ ...textDraft, content: event.target.value })} /></div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><label className="mb-1 block text-sm font-medium">字号</label><InputNumber className="w-full" min={12} max={120} value={textDraft.fontSize} onChange={(value) => setTextDraft({ ...textDraft, fontSize: value || 12 })} /></div>
+                        <div><label className="mb-1 block text-sm font-medium">对齐方式</label><Select className="w-full" value={textDraft.alignment} options={[{ value: "left", label: "左对齐" }, { value: "center", label: "居中" }, { value: "right", label: "右对齐" }]} onChange={(alignment) => setTextDraft({ ...textDraft, alignment })} /></div>
+                        <div><label className="mb-1 block text-sm font-medium">文字颜色</label><input type="color" className="h-9 w-full cursor-pointer rounded border border-[var(--studio-line)] bg-transparent" value={textDraft.color.slice(0, 7)} onChange={(event) => setTextDraft({ ...textDraft, color: event.target.value })} /></div>
+                        <div><label className="mb-1 block text-sm font-medium">背景颜色</label><div className="flex h-9 items-center gap-2"><Checkbox checked={Boolean(textDraft.backgroundColor)} onChange={(event) => setTextDraft({ ...textDraft, backgroundColor: event.target.checked ? "#000000" : null })}>启用</Checkbox>{textDraft.backgroundColor ? <input type="color" className="h-8 w-14 cursor-pointer rounded border border-[var(--studio-line)] bg-transparent" value={textDraft.backgroundColor.slice(0, 7)} onChange={(event) => setTextDraft({ ...textDraft, backgroundColor: event.target.value })} /> : null}</div></div>
+                    </div>
+                </div> : null}
+            </Modal>
+
+            <Modal
+                title="音频片段"
+                open={Boolean(audioDraft)}
+                onCancel={() => { setAudioDraft(null); setAudioFile(null); }}
+                footer={audioDraft ? [
+                    audioDraft.timelineStartMs != null && voiceTracks.some((item) => item.id === audioDraft.id) ? <Button key="remove" danger onClick={() => void removeAudioFromTimeline(audioDraft)}>移出轨道</Button> : null,
+                    <Button key="cancel" onClick={() => { setAudioDraft(null); setAudioFile(null); }}>取消</Button>,
+                    <Button key="save" type="primary" loading={savingTrack} onClick={() => void saveAudio(audioDraft)}>保存音频</Button>,
+                ] : undefined}
+                destroyOnHidden
+            >
+                {audioDraft ? <div className="space-y-4 pt-3">
+                    <div><label className="mb-1 block text-sm font-medium">声音条目</label><Select className="w-full" value={voiceTracks.some((item) => item.id === audioDraft.id) ? audioDraft.id : undefined} placeholder="新建声音条目" allowClear options={voiceTracks.filter((item) => voiceTrackEndMs(item) == null || item.id === audioDraft.id).map((item) => ({ value: item.id, label: `${item.trackType} · ${item.content}` }))} onChange={(id) => {
+                        const track = voiceTracks.find((item) => item.id === id);
+                        setAudioFile(null);
+                        if (track) setAudioDraft({ ...track, timelineStartMs: Math.round(currentTime * 1000), trimStartMs: track.audioStorageKey ? 0 : null, trimEndMs: track.audioDurationMs || null });
+                        else openNewAudio();
+                    }} /></div>
+                    <div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-sm font-medium">类型</label><Select className="w-full" value={audioDraft.trackType} options={[{ value: "dialogue", label: "对白" }, { value: "narration", label: "旁白" }, { value: "ambient", label: "环境声" }, { value: "soundEffect", label: "音效" }, { value: "music", label: "配乐" }]} onChange={(trackType) => setAudioDraft({ ...audioDraft, trackType })} /></div>
+                    <div><label className="mb-1 block text-sm font-medium">上传音频</label><input type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" className="block w-full text-xs" onChange={(event) => void selectAudioFile(event.target.files?.[0] || null)} /></div></div>
+                    <div><label className="mb-1 block text-sm font-medium">内容或声音描述</label><Input value={audioDraft.content} maxLength={12000} onChange={(event) => setAudioDraft({ ...audioDraft, content: event.target.value })} /></div>
+                    <div className="grid grid-cols-3 gap-3">
+                        <div><label className="mb-1 block text-sm font-medium">时间轴起点（秒）</label><InputNumber className="w-full" min={0} max={totalDuration} step={0.1} value={(audioDraft.timelineStartMs || 0) / 1000} onChange={(value) => setAudioDraft({ ...audioDraft, timelineStartMs: Math.round((value || 0) * 1000) })} /></div>
+                        <div><label className="mb-1 block text-sm font-medium">裁剪起点（秒）</label><InputNumber className="w-full" min={0} max={(audioDraft.audioDurationMs || 0) / 1000} step={0.1} value={audioDraft.trimStartMs == null ? null : audioDraft.trimStartMs / 1000} onChange={(value) => setAudioDraft({ ...audioDraft, trimStartMs: Math.round((value || 0) * 1000) })} /></div>
+                        <div><label className="mb-1 block text-sm font-medium">裁剪终点（秒）</label><InputNumber className="w-full" min={0} max={(audioDraft.audioDurationMs || 0) / 1000} step={0.1} value={audioDraft.trimEndMs == null ? null : audioDraft.trimEndMs / 1000} onChange={(value) => setAudioDraft({ ...audioDraft, trimEndMs: Math.round((value || 0) * 1000) })} /></div>
+                    </div>
+                    <p className="text-xs text-[var(--studio-muted)]">{audioFile ? `待上传：${audioFile.name}` : audioDraft.audioStorageKey ? `已关联音频 · ${((audioDraft.audioDurationMs || 0) / 1000).toFixed(1)} 秒` : "支持 MP3、WAV，最大 15 MB"}</p>
+                </div> : null}
+            </Modal>
 
             {/* Shot Edit Modal */}
             <Modal

@@ -3,11 +3,15 @@ package com.novanovastudio.dto;
 import com.alibaba.fastjson2.JSONObject;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -114,7 +118,23 @@ public final class ComicDramaDtos {
                              @Size(max = 256) String voiceModel, @NotNull BigDecimal speechRate,
                              @Size(max = 120) String tone, @Size(max = 120) String emotion,
                              @NotBlank @Size(max = 20) String status, @Min(0) long revision,
+                             @Size(max = 256) String audioStorageKey, @Positive Long audioDurationMs,
+                             @Min(0) Long timelineStartMs, @Min(0) Long trimStartMs, @Positive Long trimEndMs,
                              OffsetDateTime createdAt, OffsetDateTime updatedAt) {
+    }
+
+    /** 分镜时间轴文字片段。 */
+    public record TimelineText(@NotBlank @Size(max = 64) String id,
+                               @NotBlank @Size(max = 2000) String content,
+                               @Min(0) long startMs, @Positive long endMs,
+                               @Min(0) @Max(2) int trackNumber,
+                               @NotNull @DecimalMin("0") @DecimalMax("1") BigDecimal positionX,
+                               @NotNull @DecimalMin("0") @DecimalMax("1") BigDecimal positionY,
+                               @Min(12) @Max(120) int fontSize,
+                               @NotBlank @Pattern(regexp = "#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?") String color,
+                               @NotBlank @Pattern(regexp = "left|center|right") String alignment,
+                               @Pattern(regexp = "#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?") String backgroundColor,
+                               @Min(0) long revision, OffsetDateTime createdAt, OffsetDateTime updatedAt) {
     }
 
     /** P1批量任务。 */
@@ -142,7 +162,8 @@ public final class ComicDramaDtos {
                             ProductionProgress productionProgress, Readiness readiness,
                             List<Asset> assets, List<Shot> shots, List<ShotDraft> shotDrafts,
                             List<PromptVersion> promptVersions, List<MediaResult> media, List<ChangeImpact> impacts,
-                            List<VoiceTrack> voiceTracks, List<BatchTask> batchTasks,
+                            List<VoiceTrack> voiceTracks, List<TimelineText> timelineTexts, int textTrackCount,
+                            List<BatchTask> batchTasks,
                             List<CanvasBinding> canvasBindings, List<ContinuityIssue> continuityIssues) {
     }
 
@@ -323,6 +344,34 @@ public final class ComicDramaDtos {
     public record SaveVoiceTrackRequest(@NotBlank @Size(max = 64) String projectId,
                                         @Min(0) long expectedRevision,
                                         @NotNull @Valid VoiceTrack voiceTrack) {
+    }
+
+    /** 查询分镜时间轴文字片段请求。 */
+    public record ListTimelineTextsRequest(@NotBlank @Size(max = 64) String projectId) {
+    }
+
+    /** 保存分镜时间轴文字片段请求。 */
+    public record SaveTimelineTextRequest(@NotBlank @Size(max = 64) String projectId,
+                                          @Min(0) long expectedRevision,
+                                          @NotNull @Valid TimelineText timelineText) {
+    }
+
+    /** 批量保存同轨文字片段换位请求。 */
+    public record ReorderTimelineTextsRequest(@NotBlank @Size(max = 64) String projectId,
+                                              @Min(0) long expectedRevision,
+                                              @NotEmpty List<@NotNull @Valid TimelineText> timelineTexts) {
+    }
+
+    /** 删除分镜时间轴文字片段请求。 */
+    public record DeleteTimelineTextRequest(@NotBlank @Size(max = 64) String projectId,
+                                            @Min(0) long expectedRevision,
+                                            @NotBlank @Size(max = 64) String timelineTextId) {
+    }
+
+    /** 删除新增文字轨道请求。 */
+    public record DeleteTextTrackRequest(@NotBlank @Size(max = 64) String projectId,
+                                         @Min(0) long expectedRevision,
+                                         @Min(1) @Max(2) int trackNumber) {
     }
 
     /** 创建批量任务请求。 */

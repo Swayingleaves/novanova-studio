@@ -12,15 +12,19 @@ import {
     createComicDramaBatchTask,
     createComicDramaGenerationTask,
     deleteComicDramaShot,
+    deleteComicDramaTextTrack,
+    deleteComicDramaTimelineText,
     discardComicDramaShotDraft,
     generateComicDramaShotDraft,
     getComicDramaWorkspace,
     listComicDramaMedia,
     reorderComicDramaShots,
+    reorderComicDramaTimelineTexts,
     saveComicDramaAsset,
     saveComicDramaAssetVersion,
     saveComicDramaPrompt,
     saveComicDramaShot,
+    saveComicDramaTimelineText,
     saveComicDramaVoiceTrack,
     updateComicDramaSettings,
     updateComicDramaShotDraft,
@@ -39,6 +43,8 @@ import type {
     ComicDramaShot,
     ComicDramaShotDraft,
     ComicDramaShotInput,
+    ComicDramaTimelineText,
+    ComicDramaTimelineTextInput,
     ComicDramaStage,
     ComicDramaVoiceTrack,
     ComicDramaVoiceTrackInput,
@@ -51,16 +57,23 @@ type ComicDramaState = {
     error: string;
     refreshing: boolean;
     activeStage: ComicDramaStage;
+    pendingStage: ComicDramaStage | null;
     selectedShotId: string | null;
     selectedAssetId: string | null;
     selectedEpisodeId: string | null;
     selectedSceneId: string | null;
     /** 待生成信号：其他阶段点「生成」时写入，媒体生成中心消费后清空。 */
     pendingGeneration: { shotId: string; mediaType: "image" | "video" } | null;
+    pendingTimelineTexts: Record<string, ComicDramaTimelineTextInput>;
+    pendingTimelineTextReorderIds: string[];
+    pendingTimelineVoices: Record<string, ComicDramaVoiceTrackInput>;
+    timelineSaving: boolean;
+    timelineSaveError: string;
 
     loadWorkspace: (projectId: string) => Promise<void>;
     reloadWorkspace: () => Promise<void>;
     setActiveStage: (stage: ComicDramaStage) => void;
+    clearPendingStage: () => void;
     setSelectedShotId: (id: string | null) => void;
     setSelectedAssetId: (id: string | null) => void;
     setSelectedEpisodeId: (id: string | null) => void;
@@ -100,6 +113,16 @@ type ComicDramaState = {
     adoptMedia: (mediaId: string) => Promise<ComicDramaMutationResult>;
     confirmUpdate: (scope: string, targetId: string, resolution: "keepOld" | "update") => Promise<ComicDramaMutationResult>;
     saveVoiceTrack: (voiceTrack: ComicDramaVoiceTrackInput) => Promise<ComicDramaVoiceTrack>;
+    saveTimelineText: (timelineText: ComicDramaTimelineTextInput) => Promise<ComicDramaTimelineText>;
+    deleteTimelineText: (timelineTextId: string) => Promise<void>;
+    deleteTextTrack: (trackNumber: number) => Promise<void>;
+    queueTimelineText: (timelineText: ComicDramaTimelineTextInput) => void;
+    queueTimelineTextReorder: (timelineTexts: ComicDramaTimelineTextInput[]) => void;
+    queueTimelineVoice: (voiceTrack: ComicDramaVoiceTrackInput) => void;
+    clearPendingTimelineText: (timelineTextId: string) => void;
+    clearPendingTimelineVoice: (voiceTrackId: string) => void;
+    discardPendingTimelineChanges: () => void;
+    savePendingTimelineChanges: () => Promise<boolean>;
     createBatchTask: (input: {
         scope: string;
         targetIds: string[];
@@ -142,27 +165,38 @@ function withRefreshedMediaProgress(workspace: ComicDramaWorkspace, media: Comic
     };
 }
 
+let timelineSavePromise: Promise<boolean> | null = null;
+
 export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
     workspace: null,
     loading: false,
     error: "",
     refreshing: false,
     activeStage: "readiness",
+    pendingStage: null,
     selectedShotId: null,
     selectedAssetId: null,
     selectedEpisodeId: null,
     selectedSceneId: null,
     pendingGeneration: null,
+    pendingTimelineTexts: {},
+    pendingTimelineTextReorderIds: [],
+    pendingTimelineVoices: {},
+    timelineSaving: false,
+    timelineSaveError: "",
 
     loadWorkspace: async (projectId: string) => {
         set({ loading: true, error: "" });
         try {
             const workspace = await getComicDramaWorkspace(projectId);
+            const projectChanged = get().workspace?.projectId !== workspace.projectId;
             set({
                 workspace,
                 loading: false,
+                ...(projectChanged ? { pendingTimelineTexts: {}, pendingTimelineTextReorderIds: [], pendingTimelineVoices: {}, timelineSaveError: "" } : {}),
                 // If shots already exist, default to shots stage, otherwise readiness
                 activeStage: workspace.shots.length > 0 ? "shots" : workspace.readiness.ready ? "settings" : "readiness",
+                pendingStage: null,
                 selectedEpisodeId: workspace.scriptProject.episodes[0]?.id || null,
             });
         } catch (requestError) {
@@ -188,7 +222,11 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
         }
     },
 
-    setActiveStage: (activeStage) => set({ activeStage }),
+    setActiveStage: (activeStage) => set((state) => state.activeStage === "storyboard" && activeStage !== "storyboard"
+        && (Object.keys(state.pendingTimelineTexts).length > 0 || Object.keys(state.pendingTimelineVoices).length > 0)
+        ? { pendingStage: activeStage }
+        : { activeStage, pendingStage: null }),
+    clearPendingStage: () => set({ pendingStage: null }),
     setSelectedShotId: (selectedShotId) => set({ selectedShotId }),
     setSelectedAssetId: (selectedAssetId) => set({ selectedAssetId }),
     setSelectedEpisodeId: (selectedEpisodeId) => set({ selectedEpisodeId }),
@@ -344,6 +382,142 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
         return saved;
     },
 
+    saveTimelineText: async (timelineText) => {
+        const workspace = get().workspace;
+        if (!workspace) throw new Error("工作区未初始化");
+        const saved = await saveComicDramaTimelineText(workspace.projectId, workspace.revision, timelineText);
+        await get().reloadWorkspace();
+        return saved;
+    },
+
+    deleteTimelineText: async (timelineTextId) => {
+        const workspace = get().workspace;
+        if (!workspace) throw new Error("工作区未初始化");
+        await deleteComicDramaTimelineText(workspace.projectId, workspace.revision, timelineTextId);
+        await get().reloadWorkspace();
+    },
+
+    deleteTextTrack: async (trackNumber) => {
+        const workspace = get().workspace;
+        if (!workspace) throw new Error("工作区未初始化");
+        await deleteComicDramaTextTrack(workspace.projectId, workspace.revision, trackNumber);
+        await get().reloadWorkspace();
+    },
+
+    queueTimelineText: (timelineText) => set((state) => ({
+        pendingTimelineTexts: { ...state.pendingTimelineTexts, [timelineText.id]: timelineText },
+        timelineSaveError: "",
+    })),
+
+    queueTimelineTextReorder: (timelineTexts) => set((state) => ({
+        pendingTimelineTexts: { ...state.pendingTimelineTexts, ...Object.fromEntries(timelineTexts.map((item) => [item.id, item])) },
+        pendingTimelineTextReorderIds: [...new Set([...state.pendingTimelineTextReorderIds, ...timelineTexts.map((item) => item.id)])],
+        timelineSaveError: "",
+    })),
+
+    queueTimelineVoice: (voiceTrack) => set((state) => ({
+        pendingTimelineVoices: { ...state.pendingTimelineVoices, [voiceTrack.id]: voiceTrack },
+        timelineSaveError: "",
+    })),
+
+    clearPendingTimelineText: (timelineTextId) => set((state) => {
+        const pendingTimelineTexts = { ...state.pendingTimelineTexts };
+        delete pendingTimelineTexts[timelineTextId];
+        return { pendingTimelineTexts, pendingTimelineTextReorderIds: state.pendingTimelineTextReorderIds.filter((id) => id !== timelineTextId) };
+    }),
+
+    clearPendingTimelineVoice: (voiceTrackId) => set((state) => {
+        const pendingTimelineVoices = { ...state.pendingTimelineVoices };
+        delete pendingTimelineVoices[voiceTrackId];
+        return { pendingTimelineVoices };
+    }),
+
+    discardPendingTimelineChanges: () => set({ pendingTimelineTexts: {}, pendingTimelineTextReorderIds: [], pendingTimelineVoices: {}, timelineSaveError: "" }),
+
+    savePendingTimelineChanges: () => {
+        if (timelineSavePromise) return timelineSavePromise;
+        timelineSavePromise = Promise.resolve().then(async () => {
+            set({ timelineSaving: true, timelineSaveError: "" });
+            const workspace = get().workspace;
+            if (!workspace) {
+                set({ timelineSaving: false, timelineSaveError: "工作区未初始化" });
+                timelineSavePromise = null;
+                return false;
+            }
+            let expectedRevision = workspace.revision;
+            let savedAny = false;
+            const applySavedItems = (texts: ComicDramaTimelineText[] = [], voice?: ComicDramaVoiceTrack) => {
+                expectedRevision += 1;
+                savedAny = true;
+                const textIds = new Set(texts.map((item) => item.id));
+                // 保存响应已经包含最新片段，直接更新工作区，避免每项保存后重取完整数据。
+                set((state) => state.workspace && state.workspace.projectId === workspace.projectId ? { workspace: {
+                    ...state.workspace,
+                    revision: expectedRevision,
+                    timelineTexts: texts.length ? [...state.workspace.timelineTexts.filter((item) => !textIds.has(item.id)), ...texts] : state.workspace.timelineTexts,
+                    voiceTracks: voice ? [...state.workspace.voiceTracks.filter((item) => item.id !== voice.id), voice] : state.workspace.voiceTracks,
+                    textTrackCount: texts.length ? Math.max(state.workspace.textTrackCount, ...texts.map((item) => item.trackNumber + 1)) : state.workspace.textTrackCount,
+                } } : state);
+            };
+            try {
+                if (get().pendingTimelineTextReorderIds.length) {
+                    const reorderIds = get().pendingTimelineTextReorderIds;
+                    const drafts = reorderIds.map((id) => get().pendingTimelineTexts[id]);
+                    const saved = await reorderComicDramaTimelineTexts(workspace.projectId, expectedRevision, drafts);
+                    applySavedItems(saved);
+                    const savedRevisions = new Map(saved.map((item) => [item.id, item.revision]));
+                    set((state) => {
+                        const pendingTimelineTexts = { ...state.pendingTimelineTexts };
+                        for (const draft of drafts) {
+                            if (pendingTimelineTexts[draft.id] === draft) delete pendingTimelineTexts[draft.id];
+                            else if (pendingTimelineTexts[draft.id]) pendingTimelineTexts[draft.id] = { ...pendingTimelineTexts[draft.id], revision: savedRevisions.get(draft.id) ?? pendingTimelineTexts[draft.id].revision };
+                        }
+                        return { pendingTimelineTexts, pendingTimelineTextReorderIds: state.pendingTimelineTextReorderIds.filter((id) => {
+                            const submitted = drafts.find((draft) => draft.id === id);
+                            return !submitted || state.pendingTimelineTexts[id] !== submitted;
+                        }) };
+                    });
+                }
+                // 同一片段只保存最后一次拖动结果；逐条推进项目修订号，沿用保存响应更新工作区。
+                for (const [id, draft] of Object.entries(get().pendingTimelineTexts)) {
+                    if (get().pendingTimelineTexts[id] !== draft) continue;
+                    const saved = await saveComicDramaTimelineText(workspace.projectId, expectedRevision, draft);
+                    applySavedItems([saved]);
+                    set((state) => {
+                        const current = state.pendingTimelineTexts[id];
+                        if (!current) return state;
+                        const pendingTimelineTexts = { ...state.pendingTimelineTexts };
+                        if (current === draft) delete pendingTimelineTexts[id];
+                        else pendingTimelineTexts[id] = { ...current, revision: saved.revision };
+                        return { pendingTimelineTexts };
+                    });
+                }
+                for (const [id, draft] of Object.entries(get().pendingTimelineVoices)) {
+                    if (get().pendingTimelineVoices[id] !== draft) continue;
+                    const saved = await saveComicDramaVoiceTrack(workspace.projectId, expectedRevision, draft);
+                    applySavedItems([], saved);
+                    set((state) => {
+                        const current = state.pendingTimelineVoices[id];
+                        if (!current) return state;
+                        const pendingTimelineVoices = { ...state.pendingTimelineVoices };
+                        if (current === draft) delete pendingTimelineVoices[id];
+                        else pendingTimelineVoices[id] = { ...current, revision: saved.revision };
+                        return { pendingTimelineVoices };
+                    });
+                }
+                return Object.keys(get().pendingTimelineTexts).length === 0 && Object.keys(get().pendingTimelineVoices).length === 0;
+            } catch (error) {
+                if (savedAny) await get().reloadWorkspace();
+                set({ timelineSaveError: error instanceof Error ? error.message : "时间轴保存失败" });
+                return false;
+            } finally {
+                set({ timelineSaving: false });
+                timelineSavePromise = null;
+            }
+        });
+        return timelineSavePromise;
+    },
+
     createBatchTask: async (input) => {
         const workspace = get().workspace;
         if (!workspace) throw new Error("工作区未初始化");
@@ -389,10 +563,16 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
         error: "",
         refreshing: false,
         activeStage: "readiness",
+        pendingStage: null,
         selectedShotId: null,
         selectedAssetId: null,
         selectedEpisodeId: null,
         selectedSceneId: null,
-    pendingGeneration: null,
+        pendingGeneration: null,
+        pendingTimelineTexts: {},
+        pendingTimelineTextReorderIds: [],
+        pendingTimelineVoices: {},
+        timelineSaving: false,
+        timelineSaveError: "",
     }),
 }));

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Alert, Badge, Button, Progress, Spin, Tag } from "antd";
+import { Alert, App, Badge, Button, Modal, Progress, Spin, Tag } from "antd";
 import {
     ArrowLeft,
     CheckCircle2,
@@ -70,6 +70,7 @@ type ComicDramaWorkspaceProps = {
 /** 漫剧生产工作台主容器。 */
 export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWorkspaceProps) {
     const router = useRouter();
+    const { message } = App.useApp();
     const workspace = useComicDramaStore((state) => state.workspace);
     const loading = useComicDramaStore((state) => state.loading);
     const error = useComicDramaStore((state) => state.error);
@@ -78,10 +79,79 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
     const loadWorkspace = useComicDramaStore((state) => state.loadWorkspace);
     const reloadWorkspace = useComicDramaStore((state) => state.reloadWorkspace);
     const setActiveStage = useComicDramaStore((state) => state.setActiveStage);
+    const pendingStage = useComicDramaStore((state) => state.pendingStage);
+    const clearPendingStage = useComicDramaStore((state) => state.clearPendingStage);
+    const pendingTimelineTexts = useComicDramaStore((state) => state.pendingTimelineTexts);
+    const pendingTimelineVoices = useComicDramaStore((state) => state.pendingTimelineVoices);
+    const savePendingTimelineChanges = useComicDramaStore((state) => state.savePendingTimelineChanges);
+    const discardPendingTimelineChanges = useComicDramaStore((state) => state.discardPendingTimelineChanges);
+    const timelineSaving = useComicDramaStore((state) => state.timelineSaving);
+    const timelineSaveError = useComicDramaStore((state) => state.timelineSaveError);
 
     // Global modals
     const [batchModalOpen, setBatchModalOpen] = useState(false);
     const [continuityOpen, setContinuityOpen] = useState(false);
+    const [routeLeaveAction, setRouteLeaveAction] = useState<(() => void) | null>(null);
+    const hasPendingTimelineChanges = Object.keys(pendingTimelineTexts).length > 0 || Object.keys(pendingTimelineVoices).length > 0;
+    const leavePromptOpen = Boolean(pendingStage || routeLeaveAction);
+
+    const requestRouteLeave = useCallback((action: () => void) => {
+        if (activeStage === "storyboard" && hasPendingTimelineChanges) setRouteLeaveAction(() => action);
+        else action();
+    }, [activeStage, hasPendingTimelineChanges]);
+
+    const cancelLeave = () => {
+        setRouteLeaveAction(null);
+        clearPendingStage();
+    };
+
+    const finishLeave = (discard: boolean) => {
+        if (discard) discardPendingTimelineChanges();
+        const action = routeLeaveAction;
+        const stage = pendingStage;
+        cancelLeave();
+        if (action) action();
+        else if (stage) setActiveStage(stage);
+    };
+
+    const saveAndLeave = async () => {
+        if (!await savePendingTimelineChanges()) {
+            message.error(useComicDramaStore.getState().timelineSaveError || "仍有待保存的时间轴修改");
+            return;
+        }
+        finishLeave(false);
+    };
+
+    useEffect(() => {
+        if (!hasPendingTimelineChanges || activeStage !== "storyboard") return;
+        const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+            const current = useComicDramaStore.getState();
+            if (Object.keys(current.pendingTimelineTexts).length === 0 && Object.keys(current.pendingTimelineVoices).length === 0) return;
+            event.preventDefault();
+            event.returnValue = "";
+        };
+        window.addEventListener("beforeunload", warnBeforeUnload);
+        return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+    }, [activeStage, hasPendingTimelineChanges]);
+
+    useEffect(() => {
+        if (!hasPendingTimelineChanges || activeStage !== "storyboard") return;
+        const interceptLink = (event: MouseEvent) => {
+            if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+            const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+            if (!anchor || anchor.hasAttribute("download") || (anchor.getAttribute("target") && anchor.getAttribute("target") !== "_self")) return;
+            const destination = new URL((anchor as HTMLAnchorElement).href, window.location.href);
+            if (destination.origin === window.location.origin && destination.pathname === window.location.pathname && destination.search === window.location.search) return;
+            event.preventDefault();
+            event.stopPropagation();
+            requestRouteLeave(() => {
+                if (destination.origin === window.location.origin) router.push(`${destination.pathname}${destination.search}${destination.hash}`);
+                else window.location.assign(destination.href);
+            });
+        };
+        document.addEventListener("click", interceptLink, true);
+        return () => document.removeEventListener("click", interceptLink, true);
+    }, [activeStage, hasPendingTimelineChanges, requestRouteLeave, router]);
 
     useEffect(() => {
         if (projectId) {
@@ -132,7 +202,7 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
             case "shots":
                 return <StageShots />;
             case "storyboard":
-                return <StageStoryboard />;
+                return <StageStoryboard pauseAutoSave={leavePromptOpen} />;
             case "media":
                 return <StageMedia />;
             case "sound":
@@ -193,7 +263,7 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
                     type="text"
                     aria-label="返回漫剧项目库"
                     icon={<ArrowLeft className="size-4" />}
-                    onClick={() => router.push("/comic-drama")}
+                        onClick={() => requestRouteLeave(() => router.push("/comic-drama"))}
                 />
 
                 <div className="min-w-0 flex-1">
@@ -237,7 +307,7 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
 
                     <Button
                         icon={<ExternalLink className="size-3.5" />}
-                        onClick={() => router.push(`/script/${encodeURIComponent(workspace.scriptProjectId)}`)}
+                        onClick={() => requestRouteLeave(() => router.push(`/script/${encodeURIComponent(workspace.scriptProjectId)}`))}
                     >
                         剧本工作台
                     </Button>
@@ -288,6 +358,14 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
             {/* Global Modals & Drawers */}
             <BatchGenerationModal open={batchModalOpen} onClose={() => setBatchModalOpen(false)} />
             <ContinuityDrawer open={continuityOpen} onClose={() => setContinuityOpen(false)} />
+            <Modal title="时间轴有未保存的修改" open={leavePromptOpen} onCancel={cancelLeave} closable={!timelineSaving} mask={{ closable: false }} footer={[
+                <Button key="cancel" onClick={cancelLeave} disabled={timelineSaving}>继续编辑</Button>,
+                <Button key="discard" danger onClick={() => finishLeave(true)} disabled={timelineSaving}>不保存并离开</Button>,
+                <Button key="save" type="primary" loading={timelineSaving} onClick={() => void saveAndLeave()}>保存后离开</Button>,
+            ]}>
+                <p>文字或音频轨道有尚未保存的移动与裁剪修改。</p>
+                {timelineSaveError ? <Alert className="mt-3" type="error" showIcon message={timelineSaveError} /> : null}
+            </Modal>
         </main>
     );
 }

@@ -34,7 +34,7 @@ public class ComicDramaRepository {
 
     /** 漫剧项目数据库记录。 */
     public record ProjectRecord(String projectId, Long userId, String title, String productionStatus,
-                                long revision, OffsetDateTime createdAt, OffsetDateTime updatedAt) {
+                                long revision, int textTrackCount, OffsetDateTime createdAt, OffsetDateTime updatedAt) {
     }
 
     /** 分镜生成需要的共享剧本正文与项目视觉风格。 */
@@ -139,12 +139,14 @@ public class ComicDramaRepository {
      */
     public Mono<ProjectRecord> getProject(Long userId, String projectId) {
         return databaseClient.sql("""
-                SELECT c.script_project_id, c.user_id, s.title, c.production_status, c.revision, c.created_at, c.updated_at
+                SELECT c.script_project_id, c.user_id, s.title, c.production_status, c.revision, c.text_track_count,
+                       c.created_at, c.updated_at
                 FROM comic_drama_projects c JOIN script_projects s ON s.id=c.script_project_id AND s.status=1
                 WHERE c.script_project_id=:projectId AND c.user_id=:userId
                 """).bind("projectId", projectId).bind("userId", userId).map((row, metadata) -> new ProjectRecord(
                         row.get("script_project_id", String.class), row.get("user_id", Long.class), row.get("title", String.class),
                         row.get("production_status", String.class), value(row, "revision", Long.class, 0L),
+                        value(row, "text_track_count", Integer.class, 1),
                         row.get("created_at", OffsetDateTime.class), row.get("updated_at", OffsetDateTime.class))).one();
     }
 
@@ -952,16 +954,27 @@ public class ComicDramaRepository {
         return spec.map((row, metadata) -> mapVoiceTrack(row)).all();
     }
 
-    /** 新增或按实体修订号更新声音轨。 */
+    /**
+     * 新增或按实体修订号更新声音轨及其音频排期。
+     *
+     * @param projectId 所属漫剧项目标识
+     * @param voiceTrack 声音条目及可选音频编排
+     * @return 保存后的实体修订号
+     */
     public Mono<Long> saveVoiceTrack(String projectId, ComicDramaDtos.VoiceTrack voiceTrack) {
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
                 INSERT INTO comic_drama_voice_tracks(id,script_project_id,shot_id,source_block_id,character_id,
-                    track_type,content,voice_model,speech_rate,tone,emotion,status)
-                VALUES (:id,:projectId,:shotId,:sourceBlockId,:characterId,:trackType,:content,:voiceModel,:speechRate,:tone,:emotion,:status)
+                    track_type,content,voice_model,speech_rate,tone,emotion,status,audio_storage_key,audio_duration_ms,
+                    timeline_start_ms,trim_start_ms,trim_end_ms)
+                VALUES (:id,:projectId,:shotId,:sourceBlockId,:characterId,:trackType,:content,:voiceModel,:speechRate,:tone,:emotion,:status,
+                    :audioStorageKey,:audioDurationMs,:timelineStartMs,:trimStartMs,:trimEndMs)
                 ON CONFLICT (id) DO UPDATE SET shot_id=EXCLUDED.shot_id,source_block_id=EXCLUDED.source_block_id,
                     character_id=EXCLUDED.character_id,track_type=EXCLUDED.track_type,content=EXCLUDED.content,
                     voice_model=EXCLUDED.voice_model,speech_rate=EXCLUDED.speech_rate,tone=EXCLUDED.tone,
-                    emotion=EXCLUDED.emotion,status=EXCLUDED.status,revision=comic_drama_voice_tracks.revision+1,
+                    emotion=EXCLUDED.emotion,status=EXCLUDED.status,audio_storage_key=EXCLUDED.audio_storage_key,
+                    audio_duration_ms=EXCLUDED.audio_duration_ms,timeline_start_ms=EXCLUDED.timeline_start_ms,
+                    trim_start_ms=EXCLUDED.trim_start_ms,trim_end_ms=EXCLUDED.trim_end_ms,
+                    revision=comic_drama_voice_tracks.revision+1,
                     updated_at=CURRENT_TIMESTAMP
                 WHERE comic_drama_voice_tracks.script_project_id=EXCLUDED.script_project_id AND comic_drama_voice_tracks.revision=:revision
                 RETURNING revision
@@ -969,6 +982,11 @@ public class ComicDramaRepository {
         spec = bindNullable(spec, "shotId", voiceTrack.shotId(), String.class);
         spec = bindNullable(spec, "sourceBlockId", voiceTrack.sourceBlockId(), String.class);
         spec = bindNullable(spec, "characterId", voiceTrack.characterId(), String.class);
+        spec = bindNullable(spec, "audioStorageKey", voiceTrack.audioStorageKey(), String.class);
+        spec = bindNullable(spec, "audioDurationMs", voiceTrack.audioDurationMs(), Long.class);
+        spec = bindNullable(spec, "timelineStartMs", voiceTrack.timelineStartMs(), Long.class);
+        spec = bindNullable(spec, "trimStartMs", voiceTrack.trimStartMs(), Long.class);
+        spec = bindNullable(spec, "trimEndMs", voiceTrack.trimEndMs(), Long.class);
         return spec.bind("trackType", voiceTrack.trackType()).bind("content", text(voiceTrack.content()))
                 .bind("voiceModel", text(voiceTrack.voiceModel())).bind("speechRate", voiceTrack.speechRate())
                 .bind("tone", text(voiceTrack.tone())).bind("emotion", text(voiceTrack.emotion()))
@@ -993,6 +1011,116 @@ public class ComicDramaRepository {
         spec = bindNullable(spec, "characterId", voiceTrack.characterId(), String.class);
         spec = bindNullable(spec, "sourceBlockId", voiceTrack.sourceBlockId(), String.class);
         return spec.map((row, metadata) -> Boolean.TRUE.equals(row.get("valid", Boolean.class))).one();
+    }
+
+    /**
+     * 查询项目的全部时间轴文字片段。
+     *
+     * @param projectId 所属漫剧项目标识
+     * @return 按轨道及起点排序的文字片段流
+     */
+    public Flux<ComicDramaDtos.TimelineText> listTimelineTexts(String projectId) {
+        return databaseClient.sql("""
+                SELECT * FROM comic_drama_timeline_texts
+                WHERE script_project_id=:projectId ORDER BY track_number,start_ms,id
+                """).bind("projectId", projectId).map((row, metadata) -> mapTimelineText(row)).all();
+    }
+
+    /**
+     * 按片段修订号保存时间轴文字。
+     *
+     * @param projectId 所属漫剧项目标识
+     * @param timelineText 待保存的文字片段
+     * @return 保存后的实体修订号
+     */
+    public Mono<Long> saveTimelineText(String projectId, ComicDramaDtos.TimelineText timelineText) {
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
+                INSERT INTO comic_drama_timeline_texts(id,script_project_id,content,start_ms,end_ms,track_number,position_x,position_y,
+                    font_size,color,alignment,background_color)
+                VALUES (:id,:projectId,:content,:startMs,:endMs,:trackNumber,:positionX,:positionY,:fontSize,:color,:alignment,:backgroundColor)
+                ON CONFLICT (id) DO UPDATE SET content=EXCLUDED.content,start_ms=EXCLUDED.start_ms,end_ms=EXCLUDED.end_ms,
+                    track_number=EXCLUDED.track_number,position_x=EXCLUDED.position_x,position_y=EXCLUDED.position_y,font_size=EXCLUDED.font_size,
+                    color=EXCLUDED.color,alignment=EXCLUDED.alignment,background_color=EXCLUDED.background_color,
+                    revision=comic_drama_timeline_texts.revision+1,updated_at=CURRENT_TIMESTAMP
+                WHERE comic_drama_timeline_texts.script_project_id=EXCLUDED.script_project_id
+                    AND comic_drama_timeline_texts.revision=:revision
+                RETURNING revision
+                """).bind("id", timelineText.id()).bind("projectId", projectId)
+                .bind("content", timelineText.content().trim()).bind("startMs", timelineText.startMs())
+                .bind("endMs", timelineText.endMs()).bind("trackNumber", timelineText.trackNumber())
+                .bind("positionX", timelineText.positionX())
+                .bind("positionY", timelineText.positionY()).bind("fontSize", timelineText.fontSize())
+                .bind("color", timelineText.color()).bind("alignment", timelineText.alignment())
+                .bind("revision", timelineText.revision());
+        spec = bindNullable(spec, "backgroundColor", timelineText.backgroundColor(), String.class);
+        return spec.map((row, metadata) -> value(row, "revision", Long.class, 0L)).one();
+    }
+
+    /**
+     * 删除项目所属的时间轴文字片段。
+     *
+     * @param projectId 所属漫剧项目标识
+     * @param timelineTextId 待删除文字片段标识
+     * @return 删除的记录数量
+     */
+    public Mono<Long> deleteTimelineText(String projectId, String timelineTextId) {
+        return databaseClient.sql("""
+                DELETE FROM comic_drama_timeline_texts WHERE script_project_id=:projectId AND id=:timelineTextId
+                """).bind("projectId", projectId).bind("timelineTextId", timelineTextId).fetch().rowsUpdated();
+    }
+
+    /**
+     * 判断同一文字轨道是否已有时间重叠的其他片段。
+     *
+     * @param projectId 所属漫剧项目标识
+     * @param timelineText 待保存文字片段
+     * @return 是否存在重叠片段
+     */
+    public Mono<Boolean> hasTimelineTextOverlap(String projectId, ComicDramaDtos.TimelineText timelineText) {
+        return databaseClient.sql("""
+                SELECT EXISTS (SELECT 1 FROM comic_drama_timeline_texts
+                    WHERE script_project_id=:projectId AND track_number=:trackNumber AND id<>:id
+                      AND start_ms<:endMs AND end_ms>:startMs) AS present
+                """).bind("projectId", projectId).bind("trackNumber", timelineText.trackNumber())
+                .bind("id", timelineText.id()).bind("startMs", timelineText.startMs())
+                .bind("endMs", timelineText.endMs())
+                .map((row, metadata) -> Boolean.TRUE.equals(row.get("present", Boolean.class))).one();
+    }
+
+    /**
+     * 增加项目文字轨道数量。
+     *
+     * @param projectId 所属漫剧项目标识
+     * @param count 新轨道数量
+     * @return 更新完成信号
+     */
+    public Mono<Void> setTextTrackCount(String projectId, int count) {
+        return databaseClient.sql("""
+                UPDATE comic_drama_projects SET text_track_count=:count WHERE script_project_id=:projectId
+                """).bind("count", count).bind("projectId", projectId).fetch().rowsUpdated().then();
+    }
+
+    /**
+     * 删除指定新增文字轨道，并将更高编号的轨道顺序前移。
+     *
+     * @param projectId 所属漫剧项目标识
+     * @param trackNumber 待删除轨道编号
+     * @return 删除完成信号
+     */
+    public Mono<Void> deleteTextTrack(String projectId, int trackNumber) {
+        return databaseClient.sql("""
+                DELETE FROM comic_drama_timeline_texts
+                WHERE script_project_id=:projectId AND track_number=:trackNumber
+                """).bind("projectId", projectId).bind("trackNumber", trackNumber).fetch().rowsUpdated()
+                .then(databaseClient.sql("""
+                        UPDATE comic_drama_timeline_texts SET track_number=track_number-1, revision=revision+1,
+                            updated_at=CURRENT_TIMESTAMP
+                        WHERE script_project_id=:projectId AND track_number>:trackNumber
+                        """).bind("projectId", projectId).bind("trackNumber", trackNumber).fetch().rowsUpdated())
+                .then(databaseClient.sql("""
+                        UPDATE comic_drama_projects SET text_track_count=text_track_count-1
+                        WHERE script_project_id=:projectId
+                        """).bind("projectId", projectId).fetch().rowsUpdated()).then();
     }
 
     /** 校验镜头的来源分集与场次属于当前共享剧本。 */
@@ -1242,7 +1370,26 @@ public class ComicDramaRepository {
                 row.get("content", String.class), row.get("voice_model", String.class),
                 value(row, "speech_rate", BigDecimal.class, BigDecimal.ONE), row.get("tone", String.class),
                 row.get("emotion", String.class), row.get("status", String.class), value(row, "revision", Long.class, 0L),
+                row.get("audio_storage_key", String.class), row.get("audio_duration_ms", Long.class),
+                row.get("timeline_start_ms", Long.class), row.get("trim_start_ms", Long.class), row.get("trim_end_ms", Long.class),
                 row.get("created_at", OffsetDateTime.class), row.get("updated_at", OffsetDateTime.class));
+    }
+
+    /**
+     * 将数据库行映射为时间轴文字片段。
+     *
+     * @param row 文字片段数据库行
+     * @return 时间轴文字片段
+     */
+    private ComicDramaDtos.TimelineText mapTimelineText(Row row) {
+        return new ComicDramaDtos.TimelineText(row.get("id", String.class), row.get("content", String.class),
+                value(row, "start_ms", Long.class, 0L), value(row, "end_ms", Long.class, 0L),
+                value(row, "track_number", Integer.class, 0),
+                row.get("position_x", BigDecimal.class), row.get("position_y", BigDecimal.class),
+                value(row, "font_size", Integer.class, 36), row.get("color", String.class),
+                row.get("alignment", String.class), row.get("background_color", String.class),
+                value(row, "revision", Long.class, 0L), row.get("created_at", OffsetDateTime.class),
+                row.get("updated_at", OffsetDateTime.class));
     }
 
     /** 映射批量任务记录。 */

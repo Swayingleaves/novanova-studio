@@ -83,7 +83,7 @@ export function StageSound() {
         try {
             const values = await form.validateFields();
             setSaving(true);
-            await saveVoiceTrack(values);
+            await saveVoiceTrack({ ...(editingTrack || {}), ...values });
             message.success(editingTrack ? "声音条目已更新" : "声音条目已创建");
             setDrawerOpen(false);
         } catch (error) {

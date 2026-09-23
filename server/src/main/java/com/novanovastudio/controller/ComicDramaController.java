@@ -237,6 +237,71 @@ public class ComicDramaController {
         return execute("保存漫剧声音轨", httpRequest, request, service.saveVoiceTrack(request));
     }
 
+    /**
+     * 查询分镜时间轴文字片段。
+     *
+     * @param request 项目标识
+     * @param httpRequest 当前HTTP请求
+     * @return 项目的文字片段列表
+     */
+    @PostMapping("/listTimelineTexts")
+    public Mono<ApiResponse<List<ComicDramaDtos.TimelineText>>> listTimelineTexts(
+            @Valid @RequestBody ComicDramaDtos.ListTimelineTextsRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询分镜时间轴文字", httpRequest, request, service.listTimelineTexts(request));
+    }
+
+    /**
+     * 保存分镜时间轴文字片段。
+     *
+     * @param request 项目修订号和文字片段
+     * @param httpRequest 当前HTTP请求
+     * @return 保存后的文字片段
+     */
+    @PostMapping("/saveTimelineText")
+    public Mono<ApiResponse<ComicDramaDtos.TimelineText>> saveTimelineText(
+            @Valid @RequestBody ComicDramaDtos.SaveTimelineTextRequest request, ServerHttpRequest httpRequest) {
+        return execute("保存分镜时间轴文字", httpRequest, request, service.saveTimelineText(request));
+    }
+
+    /**
+     * 原子保存文字轨道片段换位。
+     *
+     * @param request 项目修订号和受影响文字片段
+     * @param httpRequest 当前HTTP请求
+     * @return 保存后的文字片段列表
+     */
+    @PostMapping("/reorderTimelineTexts")
+    public Mono<ApiResponse<List<ComicDramaDtos.TimelineText>>> reorderTimelineTexts(
+            @Valid @RequestBody ComicDramaDtos.ReorderTimelineTextsRequest request, ServerHttpRequest httpRequest) {
+        return execute("重排分镜时间轴文字", httpRequest, request, service.reorderTimelineTexts(request));
+    }
+
+    /**
+     * 删除分镜时间轴文字片段。
+     *
+     * @param request 项目修订号和文字片段标识
+     * @param httpRequest 当前HTTP请求
+     * @return 更新后的项目修订信息
+     */
+    @PostMapping("/deleteTimelineText")
+    public Mono<ApiResponse<ComicDramaDtos.MutationResult>> deleteTimelineText(
+            @Valid @RequestBody ComicDramaDtos.DeleteTimelineTextRequest request, ServerHttpRequest httpRequest) {
+        return execute("删除分镜时间轴文字", httpRequest, request, service.deleteTimelineText(request));
+    }
+
+    /**
+     * 删除新增的文字轨道及其片段。
+     *
+     * @param request 项目修订号与轨道编号
+     * @param httpRequest 当前HTTP请求
+     * @return 更新后的项目修订信息
+     */
+    @PostMapping("/deleteTextTrack")
+    public Mono<ApiResponse<ComicDramaDtos.MutationResult>> deleteTextTrack(
+            @Valid @RequestBody ComicDramaDtos.DeleteTextTrackRequest request, ServerHttpRequest httpRequest) {
+        return execute("删除分镜文字轨道", httpRequest, request, service.deleteTextTrack(request));
+    }
+
     /** 查询P1批量生产任务。 */
     @GetMapping("/listBatchTasks")
     public Mono<ApiResponse<List<ComicDramaDtos.BatchTask>>> listBatchTasks(

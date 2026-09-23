@@ -13,11 +13,13 @@ import com.novanovastudio.repository.ComicDramaRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -91,7 +93,8 @@ public class ComicDramaService {
             Mono<?>[] extraSources = {scriptService.getProject(projectId), getReadiness(projectId),
                     repository.listShotDrafts(projectId).collectList(), repository.listPromptVersions(projectId, null).collectList(),
                     syncMediaStatuses(userId, projectId, null, null),
-                    repository.listVoiceTracks(projectId, null).collectList(), repository.listBatchTasks(projectId).collectList(),
+                    repository.listVoiceTracks(projectId, null).collectList(), repository.listTimelineTexts(projectId).collectList(),
+                    repository.listBatchTasks(projectId).collectList(),
                     repository.listCanvasBindings(projectId).collectList(), repository.listContinuityIssues(projectId).collectList()};
             return Mono.zip(core, Mono.zip(values -> values, extraSources)).map(tuple -> {
                 var values = tuple.getT2();
@@ -101,9 +104,10 @@ public class ComicDramaService {
                 @SuppressWarnings("unchecked") List<ComicDramaDtos.PromptVersion> prompts = (List<ComicDramaDtos.PromptVersion>) values[3];
                 @SuppressWarnings("unchecked") List<ComicDramaDtos.MediaResult> media = (List<ComicDramaDtos.MediaResult>) values[4];
                 @SuppressWarnings("unchecked") List<ComicDramaDtos.VoiceTrack> voices = (List<ComicDramaDtos.VoiceTrack>) values[5];
-                @SuppressWarnings("unchecked") List<ComicDramaDtos.BatchTask> batches = (List<ComicDramaDtos.BatchTask>) values[6];
-                @SuppressWarnings("unchecked") List<ComicDramaDtos.CanvasBinding> bindings = (List<ComicDramaDtos.CanvasBinding>) values[7];
-                @SuppressWarnings("unchecked") List<ComicDramaDtos.ContinuityIssue> issues = (List<ComicDramaDtos.ContinuityIssue>) values[8];
+                @SuppressWarnings("unchecked") List<ComicDramaDtos.TimelineText> timelineTexts = (List<ComicDramaDtos.TimelineText>) values[6];
+                @SuppressWarnings("unchecked") List<ComicDramaDtos.BatchTask> batches = (List<ComicDramaDtos.BatchTask>) values[7];
+                @SuppressWarnings("unchecked") List<ComicDramaDtos.CanvasBinding> bindings = (List<ComicDramaDtos.CanvasBinding>) values[8];
+                @SuppressWarnings("unchecked") List<ComicDramaDtos.ContinuityIssue> issues = (List<ComicDramaDtos.ContinuityIssue>) values[9];
                 var data = tuple.getT1();
                 int readyAssets = (int) data.getT2().stream().filter(asset -> "active".equals(asset.usageStatus())).count();
                 long completedShots = data.getT3().stream().filter(shot -> media.stream().anyMatch(item ->
@@ -118,7 +122,7 @@ public class ComicDramaService {
                         : (readyAssets + (int) completedShots) * 100 / productionUnits;
                 return new ComicDramaDtos.Workspace(projectId, projectId, scriptProject, data.getT1(), project.revision(),
                         completionRate, progress, readiness, data.getT2(), data.getT3(), drafts, prompts, media,
-                        data.getT4(), voices, batches, bindings, issues);
+                        data.getT4(), voices, timelineTexts, project.textTrackCount(), batches, bindings, issues);
             });
         }));
     }
@@ -589,17 +593,193 @@ public class ComicDramaService {
         return withProject(request.projectId(), () -> repository.listVoiceTracks(request.projectId(), request.shotId()).collectList());
     }
 
-    /** 保存P1结构化声音轨。 */
+    /**
+     * 保存结构化声音条目及其音频编排。
+     *
+     * @param request 项目与声音条目保存请求
+     * @return 保存后的声音条目
+     * @throws BusinessException 音频排期、媒体归属或项目修订不合法时抛出
+     */
     public Mono<ComicDramaDtos.VoiceTrack> saveVoiceTrack(ComicDramaDtos.SaveVoiceTrackRequest request) {
+        validateVoiceTrackTiming(request.voiceTrack());
         return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
                 requireProjectRevision(userId, request.projectId(), request.expectedRevision())
                         .then(repository.validateVoiceTrackReferences(request.projectId(), request.voiceTrack()))
                         .flatMap(valid -> valid ? Mono.empty() : Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
                                 "声音轨引用的镜头、人物或正文块不属于当前项目")))
+                        .then(validateVoiceTrackMedia(userId, request.voiceTrack()))
                         .then(repository.saveVoiceTrack(request.projectId(), request.voiceTrack()).switchIfEmpty(conflict()))
                         .then(advance(userId, request.projectId(), request.expectedRevision()))
                         .then(repository.listVoiceTracks(request.projectId(), null)
                                 .filter(item -> item.id().equals(request.voiceTrack().id())).next())));
+    }
+
+    /**
+     * 查询当前项目的分镜时间轴文字片段。
+     *
+     * @param request 项目标识请求
+     * @return 按起点排序的文字片段列表
+     */
+    public Mono<List<ComicDramaDtos.TimelineText>> listTimelineTexts(ComicDramaDtos.ListTimelineTextsRequest request) {
+        return withProject(request.projectId(), () -> repository.listTimelineTexts(request.projectId()).collectList());
+    }
+
+    /**
+     * 保存分镜时间轴文字，并推进项目修订号。
+     *
+     * @param request 项目修订号及文字片段
+     * @return 保存后的文字片段
+     */
+    public Mono<ComicDramaDtos.TimelineText> saveTimelineText(ComicDramaDtos.SaveTimelineTextRequest request) {
+        ComicDramaDtos.TimelineText timelineText = request.timelineText();
+        if (timelineText.endMs() <= timelineText.startMs() || timelineText.fontSize() > 120
+                || timelineText.trackNumber() < 0 || timelineText.trackNumber() > 2) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "文字片段时间、字号或轨道编号无效"));
+        }
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                        .flatMap(project -> timelineText.trackNumber() > project.textTrackCount()
+                                ? Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "文字轨道不能跳号新增"))
+                                : repository.hasTimelineTextOverlap(request.projectId(), timelineText)
+                                        .flatMap(overlap -> overlap
+                                                ? Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "同一文字轨道的片段时间不能重叠"))
+                                                : timelineText.trackNumber() == project.textTrackCount()
+                                                        ? repository.setTextTrackCount(request.projectId(), project.textTrackCount() + 1)
+                                                        : Mono.empty()))
+                        .then(repository.saveTimelineText(request.projectId(), timelineText).switchIfEmpty(conflict()))
+                        .then(advance(userId, request.projectId(), request.expectedRevision()))
+                        .then(repository.listTimelineTexts(request.projectId())
+                                .filter(item -> item.id().equals(timelineText.id())).next())));
+    }
+
+    /**
+     * 在同一事务中保存文字片段换位，避免逐条保存时触发临时重叠。
+     *
+     * @param request 项目修订号及换位后的片段
+     * @return 更新后的文字片段
+     */
+    public Mono<List<ComicDramaDtos.TimelineText>> reorderTimelineTexts(ComicDramaDtos.ReorderTimelineTextsRequest request) {
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                        .flatMap(project -> repository.listTimelineTexts(request.projectId()).collectList()
+                                .flatMap(existing -> {
+                                    validateTimelineTextReorder(existing, request.timelineTexts(), project.textTrackCount());
+                                    Set<String> changedIds = request.timelineTexts().stream()
+                                            .map(ComicDramaDtos.TimelineText::id).collect(java.util.stream.Collectors.toSet());
+                                    return Flux.fromIterable(request.timelineTexts())
+                                            .concatMap(item -> repository.saveTimelineText(request.projectId(), item).switchIfEmpty(conflict()))
+                                            .then(advance(userId, request.projectId(), request.expectedRevision()))
+                                            .then(repository.listTimelineTexts(request.projectId())
+                                                    .filter(item -> changedIds.contains(item.id()))
+                                                    .collectList());
+                                }))));
+    }
+
+    /**
+     * 校验批量结果中的实体修订号、轨道范围及最终时间区间。
+     *
+     * @param existing 当前项目全部文字片段
+     * @param changed 待换位文字片段
+     * @param trackCount 当前项目文字轨道数
+     */
+    private void validateTimelineTextReorder(List<ComicDramaDtos.TimelineText> existing,
+                                             List<ComicDramaDtos.TimelineText> changed, int trackCount) {
+        Map<String, ComicDramaDtos.TimelineText> finalTexts = new LinkedHashMap<>();
+        existing.forEach(item -> finalTexts.put(item.id(), item));
+        if (changed.stream().map(ComicDramaDtos.TimelineText::id).distinct().count() != changed.size()) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "文字片段列表无效");
+        }
+        for (ComicDramaDtos.TimelineText item : changed) {
+            ComicDramaDtos.TimelineText current = finalTexts.get(item.id());
+            if (current == null ? item.revision() != 0 : current.revision() != item.revision()) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "文字片段已变更，请刷新后重试");
+            }
+            if (item.startMs() < 0 || item.endMs() <= item.startMs()
+                    || item.trackNumber() < 0 || item.trackNumber() >= trackCount) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "文字片段时间或轨道编号无效");
+            }
+            finalTexts.put(item.id(), item);
+        }
+        for (int trackNumber = 0; trackNumber < trackCount; trackNumber++) {
+            int currentTrack = trackNumber;
+            List<ComicDramaDtos.TimelineText> ordered = finalTexts.values().stream()
+                    .filter(item -> item.trackNumber() == currentTrack)
+                    .sorted(Comparator.comparingLong(ComicDramaDtos.TimelineText::startMs)).toList();
+            for (int index = 1; index < ordered.size(); index++) {
+                if (ordered.get(index - 1).endMs() > ordered.get(index).startMs()) {
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, "同一文字轨道的片段时间不能重叠");
+                }
+            }
+        }
+    }
+
+    /**
+     * 删除项目所属的分镜时间轴文字。
+     *
+     * @param request 项目修订号及文字片段标识
+     * @return 更新后的项目修订信息
+     */
+    public Mono<ComicDramaDtos.MutationResult> deleteTimelineText(ComicDramaDtos.DeleteTimelineTextRequest request) {
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                        .then(repository.deleteTimelineText(request.projectId(), request.timelineTextId()))
+                        .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : notFound("文字片段不存在"))
+                        .then(advance(userId, request.projectId(), request.expectedRevision()))
+                        .then(requireProject(userId, request.projectId())).map(this::mutationResult)));
+    }
+
+    /**
+     * 删除新增文字轨道及其中片段，默认轨道不可删除。
+     *
+     * @param request 项目修订号及待删除轨道编号
+     * @return 更新后的项目修订信息
+     */
+    public Mono<ComicDramaDtos.MutationResult> deleteTextTrack(ComicDramaDtos.DeleteTextTrackRequest request) {
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                        .flatMap(project -> request.trackNumber() < 1 || request.trackNumber() >= project.textTrackCount()
+                                ? Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "只能删除已存在的新增文字轨道"))
+                                : repository.deleteTextTrack(request.projectId(), request.trackNumber()))
+                        .then(advance(userId, request.projectId(), request.expectedRevision()))
+                        .then(requireProject(userId, request.projectId())).map(this::mutationResult)));
+    }
+
+    /**
+     * 校验声音条目的文件和裁剪时间组合，避免保存不可播放的轨道。
+     *
+     * @param voiceTrack 待保存的声音条目
+     * @throws BusinessException 音频字段组合不合法时抛出
+     */
+    private void validateVoiceTrackTiming(ComicDramaDtos.VoiceTrack voiceTrack) {
+        boolean hasAudio = StringUtils.hasText(voiceTrack.audioStorageKey());
+        boolean hasDuration = voiceTrack.audioDurationMs() != null && voiceTrack.audioDurationMs() > 0;
+        boolean scheduled = voiceTrack.timelineStartMs() != null;
+        boolean hasAnyTrim = voiceTrack.trimStartMs() != null || voiceTrack.trimEndMs() != null;
+        boolean hasCompleteTrim = voiceTrack.trimStartMs() != null && voiceTrack.trimEndMs() != null;
+        if ((voiceTrack.audioStorageKey() != null && !hasAudio) || hasAudio != hasDuration || (!hasAudio && (scheduled || hasAnyTrim)) ||
+                (scheduled != hasAnyTrim) || (scheduled != hasCompleteTrim) || (scheduled && (voiceTrack.trimStartMs() < 0 ||
+                        voiceTrack.trimEndMs() <= voiceTrack.trimStartMs() || voiceTrack.trimEndMs() > voiceTrack.audioDurationMs()))) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "声音轨音频时长或裁剪范围无效");
+        }
+    }
+
+    /**
+     * 确认音频存储键属于当前用户，且媒体元数据与声音条目一致。
+     *
+     * @param userId 当前用户标识
+     * @param voiceTrack 待保存的声音条目
+     * @return 完成媒体归属和格式校验的信号
+     */
+    private Mono<Void> validateVoiceTrackMedia(Long userId, ComicDramaDtos.VoiceTrack voiceTrack) {
+        if (!StringUtils.hasText(voiceTrack.audioStorageKey())) return Mono.empty();
+        return persistenceService.getMediaInfoForUser(userId, voiceTrack.audioStorageKey())
+                .flatMap(media -> {
+                    if (media.mimeType() == null || !List.of("audio/mpeg", "audio/wav").contains(media.mimeType()) ||
+                            media.durationMs() == null || media.durationMs().longValue() != voiceTrack.audioDurationMs()) {
+                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "声音轨音频格式或时长与上传文件不一致"));
+                    }
+                    return Mono.<Void>empty();
+                });
     }
 
     /** 查询P1批量生产任务。 */

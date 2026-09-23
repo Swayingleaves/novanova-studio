@@ -513,6 +513,16 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 
 最终状态更新仍在写入正式镜头的同一事务内再次通过数据库子查询校验两条修订线；并发变化会使确认更新行数为零并回滚已追加镜头，不会形成部分写入。
 
+## 11、V35 分镜多轨时间轴
+
+`V35__Add_Comic_Drama_Timeline_Tracks.sql` 新增 `comic_drama_timeline_texts`，按项目绝对毫秒时间保存文字叠层及归一化画面位置，并建立项目与起点索引。`comic_drama_voice_tracks` 增加音频存储标识、原始时长、排期起点及源音频裁剪范围；未排期的声音条目仍可保留描述和已上传文件。新增 `listTimelineTexts`、`saveTimelineText`、`deleteTimelineText` 接口，工作区聚合响应增加 `timelineTexts`。文字与音频保存沿用项目修订号，文字和声音条目分别使用实体修订号。
+
+同轨文字片段拖动换位使用 `/comicDrama/reorderTimelineTexts` 批量接口，在同一事务中校验最终时间区间、实体修订号并保存受影响片段，项目修订号只推进一次。
+
+## 12、V36 文字轨道分层
+
+`V36__Add_Comic_Drama_Text_Track_Lanes.sql` 为 `comic_drama_projects` 增加 `text_track_count`，范围为 1 至 3、默认 1；为 `comic_drama_timeline_texts` 增加从 0 开始的 `track_number`，并建立项目、轨道及时间组合索引。默认 0 号轨道不可删除。同一轨道的片段时间不得重叠，不同轨道允许重叠。保存文字时可顺序新增轨道；`deleteTextTrack` 删除指定新增轨道及片段，并将后续轨道编号前移。
+
 
 ## 画布音频与模型输入能力
 
