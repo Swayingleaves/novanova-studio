@@ -332,6 +332,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         String prompt = "你是AI请求体构造助手。请严格按用户要求构造JSON请求体对象。\n\n"
                 + "用户构造要求：\n" + userPrompt + "\n\n"
                 + "本次请求信息：\n" + describeRequestParameters(context, group, referenceUrls, videoReferenceUrls, audioReferenceUrls, taskId) + "\n\n"
+                + "【约束规则】：严格仅包含用户构造要求或示例中明确需要的字段，严禁自行扩展未提及的额外字段（如 count、batch 等）。\n"
                 + "只返回请求体JSON对象，不要返回解释、Markdown代码块或任何其他内容。";
         log.info("AI构造请求体请求: taskId={}, purpose={}, prompt={}", context.task().getId(), purpose, abbreviate(prompt));
         AtomicReference<String> agentOutput = new AtomicReference<>();
@@ -402,7 +403,9 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         if (StringUtils.hasText(seconds)) {
             builder.append("- 时长(秒): ").append(seconds).append('\n');
         }
-        builder.append("- 数量: ").append(AiTaskParameterReader.intParameter(parameters, "count", 1, 1, 10)).append('\n');
+        if (AiTaskTypes.IMAGE.equals(context.task().getTaskType())) {
+            builder.append("- 数量: ").append(AiTaskParameterReader.intParameter(parameters, "count", 1, 1, 10)).append('\n');
+        }
         if (StringUtils.hasText(taskId)) {
             builder.append("- 轮询任务ID: ").append(taskId).append('\n');
         }

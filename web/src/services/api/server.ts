@@ -10,6 +10,19 @@ type ApiResponse<T> = {
     msg: string;
 };
 
+/** 服务端业务错误，保留HTTP状态和业务错误码供并发冲突等场景判断。 */
+export class ServerApiError extends Error {
+    readonly status: number;
+    readonly code: number;
+
+    constructor(message: string, status: number, code: number) {
+        super(message);
+        this.name = "ServerApiError";
+        this.status = status;
+        this.code = code;
+    }
+}
+
 export type ServerMediaInput = {
     kind: string;
     storageKey?: string;
@@ -1267,7 +1280,7 @@ function readOptionalText(value: unknown): string | undefined {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-async function serverGet<T>(path: string, options?: { auth?: boolean }) {
+export async function serverGet<T>(path: string, options?: { auth?: boolean }) {
     return serverFetch<T>(path, { method: "GET" }, options);
 }
 
@@ -1287,10 +1300,10 @@ async function serverFetch<T>(path: string, init: RequestInit, options: { auth?:
     const response = await requestServer(path, init, options);
     const payload = (await response.json().catch(() => null)) as ApiResponse<T> | null;
     if (!response.ok || !payload) {
-        throw new Error(payload?.msg || `服务端请求失败：${response.status}`);
+        throw new ServerApiError(payload?.msg || `服务端请求失败：${response.status}`, response.status, payload?.code ?? -1);
     }
     if (payload.code !== 0) {
-        throw new Error(payload.msg || "服务端请求失败");
+        throw new ServerApiError(payload.msg || "服务端请求失败", response.status, payload.code);
     }
     return payload.data;
 }

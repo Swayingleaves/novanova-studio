@@ -41,6 +41,7 @@ export function AppSidebar() {
                     <Icon className="size-5" />
                 </span>
                 <span className="sidebar-rail-label">{tool.label}</span>
+                {tool.pro ? <span className="pro-badge right-0.5 top-0.5" title="企业版功能">PRO</span> : null}
             </Link>
         );
     };

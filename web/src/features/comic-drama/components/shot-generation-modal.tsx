@@ -1,0 +1,368 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { App, Button, Checkbox, Modal, Space, Spin } from "antd";
+import { Coins, Sparkles } from "lucide-react";
+
+import { VideoSettingsPanel, sizeFromAspectRatio } from "@/features/generation/components/video-settings-panel";
+import { ModelPicker } from "@/features/settings/components/model-picker";
+import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
+import { useThemeStore } from "@/features/theme/stores/use-theme-store";
+import { estimateComicDramaGeneration, readComicDramaMediaUrl } from "@/services/api/comic-drama";
+import { canvasThemes } from "@/shared/lib/canvas-theme";
+import { useComicDramaStore } from "../stores/use-comic-drama-store";
+import type { ComicDramaPromptVersion, ComicDramaShot } from "../types";
+
+type VideoConfigKey = "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark";
+
+type ShotGenerationModalProps = {
+    /** 弹窗是否可见 */
+    open: boolean;
+    /** 目标镜头 id；单个镜头即就地生成该镜头，多个镜头按同一套参数批量提交 */
+    shotIds: string[];
+    /** 关闭弹窗 */
+    onClose: () => void;
+};
+
+/**
+ * 分镜板就地配置并生成镜头视频的弹窗。
+ *
+ * 参数面板与提交载荷和「媒体生成中心」的生成弹窗保持同一套口径（同一 VideoSettingsPanel、
+ * 同一 settings 键名），区别只是目标镜头由当前页面直接给定，因此不需要跳转阶段。
+ * 传入多个镜头时按同一套参数批量提交，供分镜板右上角「批量媒体生成」使用。
+ */
+export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationModalProps) {
+    const { message } = App.useApp();
+    const config = useEffectiveConfig();
+    const workspace = useComicDramaStore((state) => state.workspace);
+    const createGenerationTask = useComicDramaStore((state) => state.createGenerationTask);
+
+    const [model, setModel] = useState<string>("");
+    const [size, setSize] = useState<string>("16:9");
+    const [vquality, setVquality] = useState<string>("720p");
+    const [videoSeconds, setVideoSeconds] = useState<string>("5");
+    /** 批量模式下勾选要生成的镜头，打开弹窗时默认全选 */
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [estimatedCredits, setEstimatedCredits] = useState<number | null>(null);
+    const [estimating, setEstimating] = useState(false);
+    const [generating, setGenerating] = useState(false);
+
+    const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
+    const settingsTheme = canvasThemes[resolvedTheme];
+
+    const shots = useMemo(
+        () => shotIds.map((id) => workspace?.shots.find((item) => item.id === id)).filter((item): item is ComicDramaShot => Boolean(item)),
+        [shotIds, workspace]
+    );
+    const isBatch = shotIds.length > 1;
+    const activeShot = shots[0];
+    const projectId = workspace?.projectId;
+    const mediaList = workspace?.media || [];
+
+    // 每个镜头各自使用其已采用的最终提示词，口径与镜头清单一致。
+    const adoptedPrompts = useMemo(() => {
+        const promptsByShotId = new Map<string, ComicDramaPromptVersion>();
+        for (const prompt of workspace?.promptVersions || []) {
+            if (prompt.status !== "adopted") continue;
+            const current = promptsByShotId.get(prompt.shotId);
+            if (!current || prompt.versionNumber > current.versionNumber) {
+                promptsByShotId.set(prompt.shotId, prompt);
+            }
+        }
+        return promptsByShotId;
+    }, [workspace]);
+    const finalVideoPrompt = activeShot ? adoptedPrompts.get(activeShot.id) || null : null;
+
+    // 参考图数量：优先已采用的分镜图，其次该镜头绑定的资产图。有参考图按图生视频计，否则文生视频
+    const referenceCountByShot = useMemo(() => {
+        const counts = new Map<string, number>();
+        for (const shot of shots) {
+            let count = 0;
+            const storyboardImage =
+                mediaList.find((item) => item.targetType === "shot" && item.targetId === shot.id && item.mediaType === "image" && (item.status === "completed" || item.status === "needsUpdate") && item.adopted) ||
+                mediaList.find((item) => item.targetType === "shot" && item.targetId === shot.id && item.mediaType === "image" && (item.status === "completed" || item.status === "needsUpdate"));
+            if (storyboardImage && readComicDramaMediaUrl(storyboardImage.resultData)) count += 1;
+            for (const versionId of shot.assetVersionIds || []) {
+                const assetImage = mediaList.find((item) => item.targetType === "assetVersion" && item.targetId === versionId && item.mediaType === "image" && (item.status === "completed" || item.status === "needsUpdate"));
+                if (assetImage && readComicDramaMediaUrl(assetImage.resultData)) count += 1;
+            }
+            counts.set(shot.id, count);
+        }
+        return counts;
+    }, [mediaList, shots]);
+    const referenceCount = activeShot ? referenceCountByShot.get(activeShot.id) || 0 : 0;
+
+    // 批量只提交勾选的镜头，单镜头模式固定为当前镜头
+    const targetShots = isBatch ? shots.filter((shot) => selectedIds.includes(shot.id)) : shots;
+    const targetIds = targetShots.map((shot) => shot.id);
+    const shotsWithPromptCount = targetShots.filter((shot) => adoptedPrompts.has(shot.id)).length;
+    const shotsWithReferenceCount = targetShots.filter((shot) => (referenceCountByShot.get(shot.id) || 0) > 0).length;
+    const allSelected = shots.length > 0 && targetShots.length === shots.length;
+
+    // 与生成页一致：适配器读 size/resolution/seconds
+    const taskSettings = useMemo(
+        () => ({
+            mediaType: "video",
+            size,
+            resolution: vquality,
+            seconds: videoSeconds,
+            videoGenerationMode: (isBatch ? shotsWithReferenceCount > 0 : referenceCount > 0) ? "image-to-video" : "text-to-video",
+        }),
+        [size, vquality, videoSeconds, referenceCount, isBatch, shotsWithReferenceCount]
+    );
+
+    // 每次打开都回到项目画幅与默认模型配置并默认全选镜头；单镜头沿用其分镜时长，批量时各镜头时长不一致，回落到默认视频时长。
+    useEffect(() => {
+        if (!open || shots.length === 0) return;
+        setSelectedIds(shots.map((shot) => shot.id));
+        setModel(config.videoModel || "");
+        // 跟随项目生产设置的画面方向（9:16 等），并按当前模型换算成它接受的 size 取值
+        setSize(sizeFromAspectRatio(config, workspace?.settings.aspectRatio));
+        setVquality(config.vquality || "720p");
+        setVideoSeconds(isBatch ? config.videoSeconds || "5" : String(activeShot?.durationSeconds || config.videoSeconds || "5"));
+        setEstimatedCredits(null);
+        // 只在打开的那一帧重置一次，避免配置变化打断正在调整的参数
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
+
+    // 模型、勾选范围或任何影响计费的参数变化后自动估算总价，用户不需要再手点一次。
+    const targetIdsKey = targetIds.join(",");
+    useEffect(() => {
+        if (!open || !projectId || !model || targetIds.length === 0) {
+            setEstimatedCredits(null);
+            setEstimating(false);
+            return;
+        }
+        let cancelled = false;
+        setEstimating(true);
+        // 轻微延迟，避免快速连改参数时连续打请求
+        const timer = setTimeout(() => {
+            estimateComicDramaGeneration({ projectId, targetType: "shot", targetIds, model, settings: taskSettings })
+                .then((res) => {
+                    if (!cancelled) setEstimatedCredits(res.estimatedCredits);
+                })
+                .catch(() => {
+                    if (!cancelled) setEstimatedCredits(null);
+                })
+                .finally(() => {
+                    if (!cancelled) setEstimating(false);
+                });
+        }, 300);
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open, projectId, model, targetIdsKey, taskSettings]);
+
+    const handleCreate = async () => {
+        if (!model) {
+            message.warning("请先选择生成模型");
+            return;
+        }
+        if (targetIds.length === 0) {
+            message.warning("请至少勾选一个镜头");
+            return;
+        }
+        setGenerating(true);
+        try {
+            const res = await createGenerationTask({ targetType: "shot", targetIds, model, settings: taskSettings });
+            message.success(isBatch ? `已创建 ${res.taskCount} 个视频生成任务，分镜板将自动同步生成进度` : "已创建视频生成任务，分镜板将自动同步生成进度");
+            onClose();
+        } catch (error) {
+            if (error instanceof Error) message.error(error.message);
+        } finally {
+            setGenerating(false);
+        }
+    };
+
+    const handleSettingChange = (key: VideoConfigKey, value: string) => {
+        if (key === "size") setSize(value);
+        else if (key === "vquality") setVquality(value);
+        else if (key === "videoSeconds") setVideoSeconds(value);
+    };
+
+    return (
+        <Modal
+            title={isBatch ? `批量生成镜头视频（已选 ${targetShots.length}/${shots.length}）` : `生成镜头视频 #${String(activeShot?.shotNumber || 0).padStart(2, "0")}`}
+            open={open}
+            onCancel={onClose}
+            footer={null}
+            width={isBatch ? 1040 : 820}
+            destroyOnHidden
+        >
+            <div className="flex gap-4 py-2">
+                {/* 左：镜头勾选与剧情提示词 */}
+                <div className="flex min-w-0 flex-1 flex-col gap-2">
+                    <div className="flex items-center justify-between gap-2 border-b border-[var(--studio-line)] pb-2">
+                        {isBatch ? (
+                            <Checkbox
+                                indeterminate={targetShots.length > 0 && !allSelected}
+                                checked={allSelected}
+                                onChange={(e) => setSelectedIds(e.target.checked ? shots.map((shot) => shot.id) : [])}
+                            >
+                                <span className="text-xs font-medium text-[var(--studio-ink)]">选择要生成的镜头</span>
+                            </Checkbox>
+                        ) : (
+                            <span className="text-xs font-medium text-[var(--studio-ink)]">镜头提示词</span>
+                        )}
+                        <span className="text-[10px] text-[var(--studio-muted)]">
+                            {isBatch
+                                ? `已选 ${targetShots.length} 个 · 已采用提示词 ${shotsWithPromptCount}/${targetShots.length}`
+                                : finalVideoPrompt
+                                    ? `已采用 v${finalVideoPrompt.versionNumber}`
+                                    : "尚未采用最终提示词"}
+                        </span>
+                    </div>
+
+                    <div className="flex max-h-[62vh] flex-col gap-2 overflow-y-auto pr-1">
+                        {shots.map((shot) => {
+                            const shotPrompt = adoptedPrompts.get(shot.id);
+                            const selected = !isBatch || selectedIds.includes(shot.id);
+                            return (
+                                <div
+                                    key={shot.id}
+                                    onClick={
+                                        isBatch
+                                            ? () =>
+                                                  setSelectedIds((current) =>
+                                                      selected ? current.filter((id) => id !== shot.id) : [...current, shot.id]
+                                                  )
+                                            : undefined
+                                    }
+                                    className={`rounded-lg border p-2.5 transition-colors ${
+                                        isBatch ? "cursor-pointer hover:border-[var(--studio-line-strong)]" : ""
+                                    } ${
+                                        selected
+                                            ? "border-[var(--studio-primary)] bg-[var(--studio-surface-soft)]"
+                                            : "border-[var(--studio-line)] opacity-60"
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        {isBatch && (
+                                            <Checkbox
+                                                checked={selectedIds.includes(shot.id)}
+                                                onClick={(e) => e.stopPropagation()}
+                                                onChange={(e) =>
+                                                    setSelectedIds((current) =>
+                                                        e.target.checked ? [...current, shot.id] : current.filter((id) => id !== shot.id)
+                                                    )
+                                                }
+                                                aria-label={`选择镜头 #${shot.shotNumber}`}
+                                            />
+                                        )}
+                                        <span className="font-mono text-xs font-semibold text-[var(--studio-ink)]">#{shot.shotNumber}</span>
+                                        <span className="text-[10px] text-[var(--studio-muted)]">{shot.shotSize || "未定景别"}</span>
+                                        <span className="text-[10px] text-[var(--studio-muted)]">{shot.durationSeconds}s</span>
+                                        {shotPrompt ? (
+                                            <span className="ml-auto text-[10px] text-[var(--studio-muted)]">提示词 v{shotPrompt.versionNumber}</span>
+                                        ) : (
+                                            <span className="ml-auto text-[10px] text-amber-500">缺最终提示词</span>
+                                        )}
+                                    </div>
+                                    {/* 正文完整展示，过长时卡片内独立滚动；阻止冒泡，避免选中复制提示词时误切换勾选 */}
+                                    <div
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-xs leading-5 text-[var(--studio-text)]"
+                                    >
+                                        {shotPrompt?.prompt || shot.visualDescription || "暂无提示词与画面描述"}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* 右：生成配置 */}
+                <div className="flex w-[420px] shrink-0 flex-col gap-4 border-l border-[var(--studio-line)] pl-4">
+                    <div>
+                        <label className="text-xs font-medium text-[var(--studio-muted)]">生成模型</label>
+                        <div className="mt-1">
+                            <ModelPicker
+                                config={config}
+                                capability="video"
+                                value={model}
+                                onChange={(value) => {
+                                    setModel(value);
+                                    // 新模型可能不支持当前比例（面板只置灰不回退），按项目画幅重新锚定
+                                    setSize(sizeFromAspectRatio({ ...config, videoModel: value }, workspace?.settings.aspectRatio));
+                                    setEstimatedCredits(null);
+                                }}
+                                fullWidth
+                            />
+                        </div>
+                    </div>
+
+                    <div className="rounded-xl border border-[var(--studio-line)] p-3">
+                        <VideoSettingsPanel
+                            config={{
+                                ...config,
+                                // 面板按 config.videoModel 决定为哪个渠道模型展示比例/清晰度/时长，必须传入弹窗里选中的模型
+                                videoModel: model || config.videoModel,
+                                size,
+                                vquality,
+                                videoSeconds,
+                                videoGenerationMode: taskSettings.videoGenerationMode,
+                            }}
+                            onConfigChange={handleSettingChange}
+                            theme={settingsTheme}
+                            showTitle={false}
+                            showGenerationMode={false}
+                            // 批量时各镜头分镜时长不一致，无法用一个值代表，直接隐藏时长项
+                            showDuration={!isBatch}
+                            className="space-y-4 px-0 py-0"
+                        />
+                    </div>
+
+                    <p className="text-xs text-[var(--studio-muted)]">
+                        {isBatch
+                            ? `已选 ${targetShots.length} 个镜头：${shotsWithReferenceCount} 个已有参考图（按图生视频），${targetShots.length - shotsWithReferenceCount} 个暂无参考图`
+                            : referenceCount > 0
+                                ? `将使用 ${referenceCount} 张已生成图片作为参考（图生视频）`
+                                : "当前镜头暂无参考图，将按提示词文生视频"}
+                    </p>
+
+                    <div className="mt-auto flex flex-col gap-3 border-t border-[var(--studio-line)] pt-3">
+                        {/* 价格放在确认按钮正上方，用色块与大号数字提高可读性 */}
+                        <div className="flex min-h-[52px] items-center justify-between gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+                            <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--studio-muted)]">
+                                <Coins className="size-4 text-amber-500" />
+                                预估总价
+                            </span>
+                            {estimating ? (
+                                <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
+                                    <Spin size="small" />
+                                    计算中…
+                                </span>
+                            ) : estimatedCredits !== null ? (
+                                <span className="text-xl font-semibold leading-none text-amber-500">
+                                    {estimatedCredits}
+                                    <span className="ml-1 text-xs font-normal">积分</span>
+                                </span>
+                            ) : (
+                                <span className="text-xs text-[var(--studio-muted)]">
+                                    {targetIds.length === 0 ? "未选择镜头" : "估算失败"}
+                                </span>
+                            )}
+                        </div>
+
+                        <div className="flex items-center justify-end">
+                            <Space>
+                                <Button onClick={onClose}>取消</Button>
+                                <Button
+                                    type="primary"
+                                    loading={generating}
+                                    disabled={targetIds.length === 0}
+                                    icon={<Sparkles className="size-4" />}
+                                    onClick={handleCreate}
+                                >
+                                    {isBatch ? `确认批量生成（${targetShots.length}）` : "确认生成"}
+                                </Button>
+                            </Space>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </Modal>
+    );
+}

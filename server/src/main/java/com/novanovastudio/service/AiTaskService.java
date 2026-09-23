@@ -315,6 +315,18 @@ public class AiTaskService {
     }
 
     /**
+     * 使用与真实任务一致的模型解析和计费规则计算单个任务积分，不创建任务也不扣费。
+     *
+     * @param request 待报价的标准AI任务请求
+     * @return 单个任务的精确预计积分
+     */
+    public Mono<Integer> quoteTaskCredits(AiTaskDtos.CreateAiTaskRequest request) {
+        AiTaskDtos.CreateAiTaskRequest normalizedRequest = normalizeVideoGenerationMode(request);
+        return resolveModel(normalizedRequest.taskType(), normalizedRequest.model())
+                .map(model -> calculateTaskCredits(normalizedRequest, model));
+    }
+
+    /**
      * 创建AI生成任务，并在任务发布和入队前执行持久化处理。
      *
      * @param request CreateAiTaskRequest 创建任务请求
@@ -381,13 +393,11 @@ public class AiTaskService {
                 task.setResultData("{}");
                 return repository.createTask(task)
                         .then(creditService.chargeTask(userId, taskId, creditCost, preparedRequest.taskType(), preparedRequest.generationSource()))
-                        .as(transactionalOperator::transactional)
                         .then(getTaskResponse(taskId, userId))
+                        .flatMap(response -> beforeEnqueue.apply(response).thenReturn(response))
+                        .as(transactionalOperator::transactional)
                         .flatMap(response -> Mono.fromRunnable(() -> orchestrator.prepareTask(taskId, preparedRequest))
                                 .subscribeOn(Schedulers.boundedElastic())
-                                .then(beforeEnqueue.apply(response)
-                                        .onErrorResume(exception -> finishTaskWithRefund(task, STATUS_FAILED, "任务创建失败: " + empty(exception.getMessage()), null)
-                                                .then(Mono.error(exception))))
                                 .then(Mono.defer(() -> eventPublisher.publish(userId, new AiTaskDtos.AiTaskEvent(EVENT_TASK, response))
                                         .then(dispatchTask(task, resolvedModel))
                                         .onErrorResume(exception -> finishTaskWithRefund(task, STATUS_FAILED, "任务入队失败: " + empty(exception.getMessage()), null)
@@ -405,14 +415,27 @@ public class AiTaskService {
      * 规范化视频生成模式；携带音频引用时，未声明模式默认使用全能参考。
      *
      * @param request CreateAiTaskRequest 原始任务请求
+     *
+     * @param request CreateAiTaskRequest 原始任务请求
      * @return CreateAiTaskRequest 写入默认模式后的任务请求
      */
     private AiTaskDtos.CreateAiTaskRequest normalizeVideoGenerationMode(AiTaskDtos.CreateAiTaskRequest request) {
         if (!TYPE_VIDEO.equals(request.taskType())) return request;
         boolean hasAudioReferences = request.audioReferences() != null && !request.audioReferences().isEmpty();
-        String mode = request.videoGenerationMode() == null || request.videoGenerationMode().isBlank()
-                ? (hasAudioReferences ? VideoGenerationMode.REFERENCE_TO_VIDEO : VideoGenerationMode.TEXT_TO_VIDEO)
-                : request.videoGenerationMode().trim();
+        boolean hasImageReferences = request.references() != null && !request.references().isEmpty();
+        String mode = request.videoGenerationMode();
+        if ((mode == null || mode.isBlank()) && request.parameters() != null) {
+            Object paramMode = request.parameters().get("videoGenerationMode");
+            if (paramMode instanceof String str && !str.isBlank()) {
+                mode = str;
+            }
+        }
+        if (mode == null || mode.isBlank()) {
+            mode = hasAudioReferences ? VideoGenerationMode.REFERENCE_TO_VIDEO
+                    : (hasImageReferences ? VideoGenerationMode.IMAGE_TO_VIDEO : VideoGenerationMode.TEXT_TO_VIDEO);
+        } else {
+            mode = mode.trim();
+        }
         if (mode.equals(request.videoGenerationMode())) return request;
         return new AiTaskDtos.CreateAiTaskRequest(request.taskType(), request.prompt(), request.model(), request.parameters(),
                 request.references(), request.videoReferences(), request.generationSource(), request.generationStyleIds(),

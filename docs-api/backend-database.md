@@ -1,5 +1,28 @@
 # 后端数据库说明（已实现）
 
+## 剧本创作（V32）
+
+剧本正式数据采用关系模型；只有不可变版本快照和待确认 AI 草稿使用 `JSONB`。项目级 `revision` 负责乐观锁，旧修订号提交返回数据冲突，不允许多标签页静默覆盖。
+
+| 表 | 作用 | 关键索引或约束 |
+| --- | --- | --- |
+| `script_projects` | 项目概览、阶段、完成度、软删除与修订号 | `(user_id, status, updated_at DESC, id)`、用户+阶段、用户+内容形式 |
+| `script_templates`、`script_template_sections` | 16 个内置模板及可编辑大纲骨架 | 启用状态+顺序、模板+结构段顺序 |
+| `script_outline_sections`、`script_story_events` | 大纲结构段与关键剧情事件 | 项目+顺序；事件按分集、场次定位 |
+| `script_characters`、`script_character_relations` | 人物文字设定、关系和关系图位置 | 项目+顺序；关系起点、终点索引 |
+| `script_world_settings`、`script_world_items`、`script_locations` | 世界观基础、规则条目和地点文字设定 | 项目+类型+顺序、项目+地点顺序 |
+| `script_episodes`、`script_scenes` | 分集摘要与场次 | 项目+分集顺序、分集+场次顺序、地点索引 |
+| `script_scene_characters`、`script_blocks` | 场次人物与动作/对白/旁白/转场正文块 | 人物反查、场次+正文顺序、对白人物索引 |
+| `script_versions` | 手动命名版本与 AI 修改前完整快照 | 项目+创建时间倒序；`snapshot_data` 必须为 JSON 对象 |
+| `script_ai_drafts` | 待确认、已应用或已放弃的结构化 AI 草稿 | 项目+状态+时间、用户+时间；保存目标原内容用于冲突检查 |
+| `script_analysis_reports`、`script_analysis_issues` | 全项目或单集分析及具体问题锚点 | 项目+时间、报告+问题顺序 |
+
+正式实体使用不超过 64 字符的稳定标识。人物和地点仍被场次或对白引用时禁止删除；场次和正文块保存采用稳定标识更新，只有请求中明确缺失的实体才会删除。
+
+完成度固定为：故事概览 20%、大纲 20%、人物/世界观/地点 20%、已完成集数占目标集数比例 40%。阶段由正式内容自动推导为 `idea`、`outline`、`writing`、`completed` 或 `production`。
+
+---
+
 ## 密码重置
 
 ### `users`
@@ -445,6 +468,50 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 ## 8、附录说明
 
 - 文档状态：已实现。
+
+## 9、V33 漫剧生产工作台
+
+`V33__Add_Comic_Drama_Production.sql` 在共享 `script_projects` 之上增加漫剧下游生产模型。`comic_drama_projects.script_project_id` 同时是主键和剧本项目外键，因此剧本始终只有一份；人物、地点、分集、场次与正文块的下游来源标识不建立限制删除的外键，保证剧本替换和版本恢复不会被漫剧数据阻塞。
+
+| 表 | 用途 | 关键索引或约束 |
+| --- | --- | --- |
+| `comic_drama_projects` | 一对一漫剧项目、用户归属、生产状态和工作区乐观锁 | 用户更新时间索引、`script_project_id` 主键 |
+| `comic_drama_project_settings` | 项目类型、时长、横竖屏、比例、视觉风格和目标平台 | 项目一对一主键 |
+| `comic_drama_assets` | 人物、场景与道具视觉资产 | 项目+类型、来源实体索引 |
+| `comic_drama_asset_versions` | 服装、年龄、时间、天气和剧情状态等多版本 | 资产+创建时间索引、实体修订号 |
+| `comic_drama_shot_drafts` | AI自动拆镜头的待确认草稿 | 项目+状态+创建时间索引 |
+| `comic_drama_shots` | 关系化正式镜头清单 | 项目排序、来源场次、制作状态索引 |
+| `comic_drama_shot_asset_versions` | 镜头实际引用的具体资产版本 | 镜头+资产版本复合主键 |
+| `comic_drama_prompt_versions` | AI或人工提示词不可变版本 | 镜头+版本号唯一约束 |
+| `comic_drama_media_results` | 图片、视频、音频与合成任务及输入快照 | 目标、任务ID索引；每目标每媒体类型只允许一个采用版本 |
+| `comic_drama_change_impacts` | 上游剧本变化产生的待更新影响 | 项目+状态+创建时间索引 |
+| `comic_drama_canvas_bindings` | 结构化实体与无限画布节点绑定 | 项目+画布+节点唯一约束 |
+| `comic_drama_voice_tracks` | P1对白、旁白、环境音、音效与音乐轨 | 项目+镜头索引、实体修订号 |
+| `comic_drama_batch_tasks` | P1批量生产范围、报价、确认和进度统计 | 项目时间、用户状态索引 |
+
+所有项目读写先按 `comic_drama_projects.user_id` 校验当前用户归属。项目级写操作使用 `expectedRevision` 更新 `comic_drama_projects.revision`；资产、资产版本、镜头和声音轨同时保留各自修订号。视频任务创建后只记录底层 `task_id`、输入快照和真实排队状态，不会在底层任务完成前写成 `completed`。
+
+上游剧本保存由独立 `ComicDramaImpactService` 单向标记影响，覆盖故事概览、人物、世界观、分集场次正文和版本恢复。该过程保留全部下游内容，只把镜头、资产、提示词、声音与已完成媒体标记为 `needsUpdate`，用户通过更新中心确认范围后再决定是否重新生成。
+
+### V33 漫剧接口
+
+- 项目与设置：`GET /api/v1/comicDrama/listProjects`、`POST /api/v1/comicDrama/getWorkspace`、`initializeProject`、`updateSettings`、`getReadiness`。
+- 视觉资产：`listAssets`、`saveAsset`、`listAssetVersions`、`saveAssetVersion`。
+- 镜头与提示词：`generateShotDraft`、`confirmShotDraft`、`listShots`、`saveShot`、`reorderShots`、`deleteShot`、`composePrompt`、`savePrompt`。
+- 媒体生产：`estimateGeneration`、`createGenerationTask`、`listMedia`、`adoptMedia`。
+- 联动与P1：`listImpacts`、`confirmUpdate`、`listVoiceTracks`、`saveVoiceTrack`、`listBatchTasks`、`createBatchTask`、`checkContinuity`。
+- 无限画布：`listCanvasBindings`、`bindCanvas`。
+
+## 10、V34 镜头草稿双修订基线
+
+`V34__Add_Shot_Draft_Script_Revision.sql` 为 `comic_drama_shot_drafts` 新增 `base_script_revision`。镜头草稿生成时同时保存漫剧项目修订号 `base_project_revision` 和共享剧本修订号 `base_script_revision`。
+
+确认镜头草稿时必须同时满足：
+
+- 漫剧工作区当前修订号与 `base_project_revision` 一致，避免生产设置、视觉资产或镜头清单变化后继续应用旧草稿。
+- 共享剧本当前修订号与 `base_script_revision` 一致，避免故事、分集、场次或正文变化后静默确认旧拆镜结果。
+
+最终状态更新仍在写入正式镜头的同一事务内再次通过数据库子查询校验两条修订线；并发变化会使确认更新行数为零并回滚已追加镜头，不会形成部分写入。
 
 
 ## 画布音频与模型输入能力

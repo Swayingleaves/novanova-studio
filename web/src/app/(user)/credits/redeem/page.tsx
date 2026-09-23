@@ -158,7 +158,7 @@ export default function CreditRedeemPage() {
                             />
                         </div>
                     </div>
-                    {recordsQuery.isError ? <Alert className="mt-5" type="error" showIcon message="兑换记录加载失败" action={<Button size="small" onClick={() => void recordsQuery.refetch()}>重新加载</Button>} /> : null}
+                    {recordsQuery.isError ? <Alert className="mt-5" type="error" showIcon title="兑换记录加载失败" action={<Button size="small" onClick={() => void recordsQuery.refetch()}>重新加载</Button>} /> : null}
                     <div className="mt-5 overflow-x-auto">
                         <Table<ServerRedemptionRecord>
                             rowKey="id"

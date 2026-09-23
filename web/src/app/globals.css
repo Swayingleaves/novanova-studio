@@ -126,6 +126,7 @@
     --studio-accent: #db4f97;
     --studio-accent-soft: color-mix(in srgb, var(--studio-accent) 12%, transparent);
     --studio-accent-line: color-mix(in srgb, var(--studio-accent) 26%, transparent);
+    --studio-pro: #2563eb;
     --studio-brand-start: #5d8fff;
     --studio-brand-middle: #8a75ff;
     --studio-brand-end: #f46ab8;
@@ -204,6 +205,7 @@ html[data-theme="dark"] {
     --studio-primary-line: color-mix(in srgb, var(--studio-action) 36%, transparent);
     --studio-accent-soft: color-mix(in srgb, var(--studio-accent) 18%, transparent);
     --studio-accent-line: color-mix(in srgb, var(--studio-accent) 34%, transparent);
+    --studio-pro: #60a5fa;
     --studio-brand-start: #8db2ff;
     --studio-brand-middle: #aa92ff;
     --studio-brand-end: #ff95d1;
@@ -283,6 +285,7 @@ html[data-theme="purple"] {
     --studio-accent: #ec4899;
     --studio-accent-soft: color-mix(in srgb, var(--studio-accent) 18%, transparent);
     --studio-accent-line: color-mix(in srgb, var(--studio-accent) 34%, transparent);
+    --studio-pro: #60a5fa;
     --studio-brand-start: #a78bfa;
     --studio-brand-middle: #b85cf6;
     --studio-brand-end: #ec4899;
@@ -827,6 +830,13 @@ html[data-theme="purple"] {
         @apply max-w-full truncate;
         position: relative;
         z-index: 1;
+    }
+
+    /* 企业版专属功能的 PRO 文字角标，只用颜色区分，不带底色。 */
+    .pro-badge {
+        @apply absolute text-[10px] font-bold leading-none tracking-[0.06em];
+        color: var(--studio-pro);
+        z-index: 2;
     }
 
     .sidebar-rail-item-inactive {
@@ -1630,7 +1640,8 @@ html[data-theme="dark"] .creation-composer-submit-trigger:disabled {
 }
 
 .studio-sidebar-rail .sidebar-rail-item-active svg,
-.studio-sidebar-rail .sidebar-rail-item-active .sidebar-rail-label {
+.studio-sidebar-rail .sidebar-rail-item-active .sidebar-rail-label,
+.studio-sidebar-rail .sidebar-rail-item-active .pro-badge {
     color: var(--studio-action-foreground);
 }
 

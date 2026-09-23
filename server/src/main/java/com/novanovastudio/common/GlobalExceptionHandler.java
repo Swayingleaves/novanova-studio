@@ -38,6 +38,7 @@ public class GlobalExceptionHandler {
             case ErrorCode.TOKEN_INVALID, ErrorCode.TOKEN_EXPIRED, ErrorCode.AUTH_ERROR -> HttpStatus.UNAUTHORIZED;
             case ErrorCode.PERMISSION_DENIED -> HttpStatus.FORBIDDEN;
             case ErrorCode.RESOURCE_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case ErrorCode.DATA_CONFLICT -> HttpStatus.CONFLICT;
             case ErrorCode.PARAM_ERROR, ErrorCode.PARAM_INVALID, ErrorCode.PARAM_MISSING -> HttpStatus.BAD_REQUEST;
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };

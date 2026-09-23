@@ -54,7 +54,7 @@ function ResetPasswordContent() {
                 {!token ? (
                     <>
                         <h1 id="reset-password-title" className="studio-title mb-4 text-2xl font-semibold">重置链接无效</h1>
-                        <Alert type="error" showIcon message="缺少重置链接" description="请重新发送密码重置邮件，并使用邮件中的最新链接。" />
+                        <Alert type="error" showIcon title="缺少重置链接" description="请重新发送密码重置邮件，并使用邮件中的最新链接。" />
                         <Button type="primary" size="large" block className="mt-6" href="/auth/forgotPassword">
                             重新发送重置邮件
                         </Button>
@@ -77,7 +77,7 @@ function ResetPasswordContent() {
                         </div>
                         {resetLinkInvalid ? (
                             <div className="mb-4 space-y-3">
-                                <Alert type="error" showIcon message="重置链接已失效" description="请重新发送邮件，并使用最新链接设置密码。" />
+                                <Alert type="error" showIcon title="重置链接已失效" description="请重新发送邮件，并使用最新链接设置密码。" />
                                 <Button type="link" href="/auth/forgotPassword" className="h-auto px-0">重新发送重置邮件</Button>
                             </div>
                         ) : null}

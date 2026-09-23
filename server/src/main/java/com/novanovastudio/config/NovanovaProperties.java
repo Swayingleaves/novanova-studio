@@ -695,6 +695,9 @@ public class NovanovaProperties {
         /** 分镜Agent配置 */
         private StoryboardAgent storyboardAgent = new StoryboardAgent();
 
+        /** 剧本Agent配置 */
+        private ScriptAgent scriptAgent = new ScriptAgent();
+
         /** AI图片结果配置 */
         private Image image = new Image();
 
@@ -756,6 +759,24 @@ public class NovanovaProperties {
         }
 
         /**
+         * 获取剧本Agent配置。
+         *
+         * @return ScriptAgent 剧本Agent配置
+         */
+        public ScriptAgent getScriptAgent() {
+            return scriptAgent;
+        }
+
+        /**
+         * 设置剧本Agent配置。
+         *
+         * @param scriptAgent ScriptAgent 剧本Agent配置
+         */
+        public void setScriptAgent(ScriptAgent scriptAgent) {
+            this.scriptAgent = scriptAgent;
+        }
+
+        /**
          * 获取AI图片结果配置。
          *
          * @return Image AI图片结果配置
@@ -798,6 +819,33 @@ public class NovanovaProperties {
 
             /** Agent单次调用超时时间（秒） */
             private int timeoutSeconds = 90;
+
+            /**
+             * 获取Agent单次调用超时时间（秒）。
+             *
+             * @return int 超时时间秒数
+             */
+            public int getTimeoutSeconds() {
+                return timeoutSeconds;
+            }
+
+            /**
+             * 设置Agent单次调用超时时间（秒）。
+             *
+             * @param timeoutSeconds int 超时时间秒数
+             */
+            public void setTimeoutSeconds(int timeoutSeconds) {
+                this.timeoutSeconds = timeoutSeconds;
+            }
+        }
+
+        /**
+         * 剧本Agent配置。
+         */
+        public static class ScriptAgent {
+
+            /** Agent单次调用超时时间（秒） */
+            private int timeoutSeconds = 120;
 
             /**
              * 获取Agent单次调用超时时间（秒）。
@@ -1306,6 +1354,9 @@ public class NovanovaProperties {
             /** 分镜脚本Agent文件路径 */
             private String agentStoryboardFile = "";
 
+            /** 剧本创作Agent文件路径 */
+            private String agentScriptFile = "";
+
             /** 分镜资产图片提示词模板文件路径 */
             private String imageStoryboardAssetFile = "";
 
@@ -1451,6 +1502,24 @@ public class NovanovaProperties {
              */
             public void setAgentStoryboardFile(String agentStoryboardFile) {
                 this.agentStoryboardFile = agentStoryboardFile;
+            }
+
+            /**
+             * 获取剧本创作Agent文件路径。
+             *
+             * @return String 剧本创作Agent文件路径
+             */
+            public String getAgentScriptFile() {
+                return agentScriptFile;
+            }
+
+            /**
+             * 设置剧本创作Agent文件路径。
+             *
+             * @param agentScriptFile String 剧本创作Agent文件路径
+             */
+            public void setAgentScriptFile(String agentScriptFile) {
+                this.agentScriptFile = agentScriptFile;
             }
 
             /**

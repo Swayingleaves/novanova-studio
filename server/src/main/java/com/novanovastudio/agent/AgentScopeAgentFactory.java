@@ -95,6 +95,17 @@ public class AgentScopeAgentFactory {
     }
 
     /**
+     * 创建剧本创作Agent。
+     *
+     * @param model Model 用户明确选择的文本模型
+     * @return ReActAgent 剧本创作Agent
+     */
+    public ReActAgent scriptAgent(Model model) {
+        return build("script-agent", promptService.get(PromptTemplateType.AGENT_SCRIPT), model,
+                "只能返回当前请求对应的剧本结构化结果，不得调用工具、解释或输出额外文本。", false);
+    }
+
+    /**
      * 创建视频技能工作流对话Agent，负责多轮理解意图并起草阶段提示词。
      *
      * @param model Model 用户明确选择的文本模型

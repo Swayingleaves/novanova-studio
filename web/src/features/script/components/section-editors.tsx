@@ -1,0 +1,341 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { nanoid } from "nanoid";
+import { App, Button, Empty, Input, InputNumber, Popconfirm, Select, Spin, Tabs, Tag } from "antd";
+import { ArrowDown, ArrowUp, Plus, Sparkles, Trash2 } from "lucide-react";
+
+import { moveScriptBlock, removeScriptBlock, replaceScriptBlock, synchronizeDialogueCharacters } from "../lib/script-episode-editing";
+import { useScriptStore } from "../stores/use-script-store";
+import type { EpisodeDetail, ScriptBlock, ScriptCharacter, ScriptOverview, ScriptScene, ScriptWorkspaceSection } from "../types";
+import { CharacterRelationshipGraph } from "./character-relationship-graph";
+import { ScriptAnalysisVersions } from "./script-analysis-versions";
+
+type ScriptSectionEditorProps = { section: ScriptWorkspaceSection; selectedEpisodeId: string; onSelectEpisode: (episodeId: string) => void };
+
+const CONTENT_TYPE_OPTIONS = [
+    { value: "comicDrama", label: "漫剧" },
+    { value: "liveActionShort", label: "真人短剧" },
+    { value: "animation", label: "动画" },
+    { value: "advertisement", label: "广告 / 宣传片" },
+    { value: "musicVideo", label: "音乐视频" },
+    { value: "storyShort", label: "故事短片" },
+] as const;
+
+/** 渲染工作台当前剧本区块。 */
+export function ScriptSectionEditor({ section, selectedEpisodeId, onSelectEpisode }: ScriptSectionEditorProps) {
+    if (section === "overview") return <OverviewEditor />;
+    if (section === "outline") return <OutlineEditor />;
+    if (section === "characters") return <CharactersEditor />;
+    if (section === "world") return <WorldEditor />;
+    if (section === "episodes") return <EpisodesEditor selectedEpisodeId={selectedEpisodeId} onSelectEpisode={onSelectEpisode} />;
+    return <ScriptAnalysisVersions mode={section} />;
+}
+
+function SectionHeader({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) {
+    return <header className="mb-5 flex items-start justify-between gap-4 border-b border-[var(--studio-line)] pb-4"><div><h2 className="text-xl font-semibold text-[var(--studio-ink)]">{title}</h2><p className="mt-1 text-sm text-[var(--studio-muted)]">{description}</p></div>{action}</header>;
+}
+
+function Field({ label, required = false, requirement, children }: {
+    label: string;
+    required?: boolean;
+    requirement?: string;
+    children: React.ReactNode;
+}) {
+    return <label className="flex min-w-0 flex-col gap-2 text-sm text-[var(--studio-text)]"><span className="flex flex-wrap items-center gap-1.5 font-medium"><span>{label}{required ? <><span aria-hidden="true" className="ml-1 text-[var(--studio-danger)]">*</span><span className="sr-only">（必填）</span></> : null}</span>{requirement ? <span className="text-xs font-normal text-[var(--studio-muted)]">{requirement}</span> : null}</span>{children}</label>;
+}
+
+function OverviewEditor() {
+    const project = useScriptStore((state) => state.project);
+    const updateOverview = useScriptStore((state) => state.updateOverview);
+    if (!project) return null;
+    const update = <K extends keyof ScriptOverview>(key: K, value: ScriptOverview[K]) => updateOverview({ ...project.overview, [key]: value });
+    const textAreas: Array<[keyof ScriptOverview, string, number]> = [
+        ["logline", "一句话创意", 2], ["synopsis", "故事梗概", 5], ["sellingPoints", "核心卖点", 3],
+        ["targetAudience", "目标受众", 2], ["theme", "故事主题", 3], ["mainPlot", "主线剧情", 6],
+        ["mainConflict", "主要冲突", 4], ["endingDirection", "结局方向", 4], ["narrativeStyle", "叙事风格", 3],
+    ];
+    return <section><SectionHeader title="故事概览" description="先把故事目标、主要冲突和最终方向写清楚。" /><p id="script-overview-story-requirement" className="mb-4 text-xs leading-5 text-[var(--studio-muted)]"><span aria-hidden="true" className="font-medium text-[var(--studio-danger)]">*</span> 为必填项；一句话创意与故事梗概至少填写一项，才能生成候选故事方向或故事大纲。</p><div className="grid gap-4 md:grid-cols-2"><Field label="项目名称" required><Input aria-required="true" value={project.overview.title} maxLength={120} onChange={(event) => update("title", event.target.value)} /></Field><Field label="内容形式" required><Select aria-required="true" value={project.overview.contentType} options={[...CONTENT_TYPE_OPTIONS]} onChange={(value) => update("contentType", value)} /></Field><Field label="题材"><Input value={project.overview.genre} maxLength={80} onChange={(event) => update("genre", event.target.value)} /></Field><Field label="目标集数"><InputNumber className="w-full" min={1} max={1000} value={project.overview.targetEpisodeCount} onChange={(value) => update("targetEpisodeCount", value || 1)} /></Field><Field label="目标总时长（秒）"><InputNumber className="w-full" min={0} value={project.overview.targetDurationSeconds} onChange={(value) => update("targetDurationSeconds", value || 0)} /></Field>{textAreas.map(([key, label, rows]) => { const isStoryPrerequisite = key === "logline" || key === "synopsis"; return <div key={key} className={key === "logline" || key === "targetAudience" ? "" : "md:col-span-2"}><Field label={label} requirement={isStoryPrerequisite ? "（至少填一项）" : undefined}><Input.TextArea aria-describedby={isStoryPrerequisite ? "script-overview-story-requirement" : undefined} value={String(project.overview[key] || "")} rows={rows} onChange={(event) => update(key, event.target.value as never)} /></Field></div>; })}</div></section>;
+}
+
+function OutlineEditor() {
+    const project = useScriptStore((state) => state.project);
+    const episodes = useScriptStore((state) => state.episodes);
+    const updateOutline = useScriptStore((state) => state.updateOutline);
+    if (!project) return null;
+    const sections = project.outlineSections;
+    const events = project.storyEvents;
+    const replaceSection = (id: string, patch: Partial<(typeof sections)[number]>) => updateOutline(sections.map((item) => item.id === id ? { ...item, ...patch } : item), events);
+    const moveSection = (index: number, direction: -1 | 1) => {
+        const next = [...sections];
+        const target = index + direction;
+        if (target < 0 || target >= next.length) return;
+        [next[index], next[target]] = [next[target], next[index]];
+        updateOutline(next.map((item, sortOrder) => ({ ...item, sortOrder })), events);
+    };
+    const removeSection = (id: string) => updateOutline(sections.filter((item) => item.id !== id).map((item, sortOrder) => ({ ...item, sortOrder })), events.map((event) => event.outlineSectionId === id ? { ...event, outlineSectionId: null } : event));
+    const updateEvent = (id: string, patch: Partial<(typeof events)[number]>) => updateOutline(sections,
+        events.map((event) => event.id === id ? { ...event, ...patch } : event));
+    const episodeOptions = project.episodes.map((episode) => ({ value: episode.id, label: `第 ${episode.episodeNumber} 集 · ${episode.title}` }));
+    const eventTypes = [
+        ["plot", "剧情"], ["conflict", "冲突"], ["suspense", "悬念"],
+        ["twist", "反转"], ["climax", "高潮"], ["ending", "结局"],
+    ];
+    return <section><SectionHeader title="故事大纲" description="按幕、主线、支线或人物成长线组织剧情骨架。" action={<Button icon={<Plus className="size-4" />} onClick={() => updateOutline([...sections, { id: nanoid(), sectionType: "act", title: `结构段 ${sections.length + 1}`, content: "", sortOrder: sections.length }], events)}>添加结构段</Button>} /><div className="space-y-4">{sections.map((item, index) => <article key={item.id} className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4"><div className="flex flex-wrap gap-2"><Input className="min-w-48 flex-1" value={item.title} onChange={(event) => replaceSection(item.id, { title: event.target.value })} /><Select value={item.sectionType} className="w-36" onChange={(sectionType) => replaceSection(item.id, { sectionType })} options={[{ value: "act", label: "幕结构" }, { value: "mainPlot", label: "主线" }, { value: "subplot", label: "支线" }, { value: "characterArc", label: "人物成长线" }]} /><Button aria-label="上移" icon={<ArrowUp className="size-4" />} disabled={!index} onClick={() => moveSection(index, -1)} /><Button aria-label="下移" icon={<ArrowDown className="size-4" />} disabled={index === sections.length - 1} onClick={() => moveSection(index, 1)} /><Popconfirm title="删除这个结构段？" onConfirm={() => removeSection(item.id)}><Button danger aria-label="删除" icon={<Trash2 className="size-4" />} /></Popconfirm></div><Input.TextArea className="mt-3" rows={6} value={item.content} onChange={(event) => replaceSection(item.id, { content: event.target.value })} placeholder="写下这一段的剧情推进、人物选择和关键结果" /></article>)}</div><div className="mt-8"><div className="mb-3 flex items-center justify-between"><h3 className="font-semibold text-[var(--studio-ink)]">关键事件</h3><Button size="small" icon={<Plus className="size-4" />} onClick={() => updateOutline(sections, [...events, { id: nanoid(), outlineSectionId: sections[0]?.id || null, episodeId: null, sceneId: null, eventType: "plot", title: "新事件", description: "", sortOrder: events.length }])}>添加事件</Button></div><div className="space-y-3">{events.map((event) => {
+        const selectedEpisode = event.episodeId ? episodes[event.episodeId] : undefined;
+        const sceneOptions = selectedEpisode?.scenes.map((scene) => ({ value: scene.id, label: `第 ${scene.sceneNumber} 场 · ${scene.title || "未命名场次"}` })) || [];
+        return <div key={event.id} className="grid gap-2 rounded-lg border border-[var(--studio-line)] p-3 md:grid-cols-2 xl:grid-cols-[140px_180px_180px_180px_1fr_auto]"><Select aria-label="事件类型" value={event.eventType} onChange={(eventType) => updateEvent(event.id, { eventType })} options={eventTypes.map(([value, label]) => ({ value, label }))} /><Select aria-label="所属结构段" allowClear value={event.outlineSectionId || undefined} placeholder="所属结构段" options={sections.map((section) => ({ value: section.id, label: section.title }))} onChange={(outlineSectionId) => updateEvent(event.id, { outlineSectionId: outlineSectionId || null })} /><Select aria-label="关联分集" allowClear value={event.episodeId || undefined} placeholder="关联分集（可选）" options={episodeOptions} onChange={(episodeId) => updateEvent(event.id, { episodeId: episodeId || null, sceneId: null })} /><Select aria-label="关联场次" allowClear disabled={!event.episodeId || !selectedEpisode} value={event.sceneId || undefined} placeholder={!event.episodeId ? "先选择分集" : selectedEpisode ? "关联场次（可选）" : "请先加载该分集"} options={sceneOptions} onChange={(sceneId) => updateEvent(event.id, { sceneId: sceneId || null })} /><div><Input aria-label="事件标题" value={event.title} onChange={(input) => updateEvent(event.id, { title: input.target.value })} /><Input.TextArea aria-label="事件说明" className="mt-2" rows={2} value={event.description} onChange={(input) => updateEvent(event.id, { description: input.target.value })} /></div><Button danger aria-label="删除事件" icon={<Trash2 className="size-4" />} onClick={() => updateOutline(sections, events.filter((item) => item.id !== event.id).map((item, sortOrder) => ({ ...item, sortOrder })))} /></div>;
+    })}</div><p className="mt-2 text-xs text-[var(--studio-faint)]">关联场次前请先在“分集剧本”中打开该分集，以加载场次列表。</p></div></section>;
+}
+
+function CharactersEditor() {
+    const project = useScriptStore((state) => state.project);
+    const updateCharacters = useScriptStore((state) => state.updateCharacters);
+    if (!project) return null;
+    const characters = project.characters;
+    const relations = project.characterRelations;
+    const updateCharacter = (id: string, patch: Partial<ScriptCharacter>) => updateCharacters(characters.map((character) => character.id === id ? { ...character, ...patch } : character), relations);
+    const addCharacter = () => updateCharacters([...characters, { id: nanoid(), name: `人物 ${characters.length + 1}`, identity: "", age: "", occupation: "", roleType: "", personality: "", valuesDescription: "", goal: "", desire: "", fear: "", motivation: "", appearanceDescription: "", habits: "", speechStyle: "", backgroundStory: "", characterArc: "", graphPositionX: characters.length * 180, graphPositionY: characters.length % 2 * 120, sortOrder: characters.length }], relations);
+    const characterOptions = characters.map((character) => ({ value: character.id, label: character.name }));
+    const profileFields = [
+        ["personality", "性格"], ["valuesDescription", "价值观"], ["goal", "外在目标"],
+        ["desire", "内在欲望"], ["fear", "恐惧"], ["motivation", "核心动机"],
+        ["appearanceDescription", "外貌文字描述"], ["habits", "习惯"], ["speechStyle", "语言特点"],
+        ["backgroundStory", "背景经历"], ["characterArc", "人物弧光"],
+    ] as const;
+    const updateRelation = (id: string, patch: Partial<(typeof relations)[number]>) =>
+        updateCharacters(characters, relations.map((relation) => relation.id === id ? { ...relation, ...patch } : relation));
+    return <section>
+        <SectionHeader title="人物与关系" description="建立人物目标、动机、语言特点与故事中的关系变化。"
+            action={<Button icon={<Plus className="size-4" />} onClick={addCharacter}>添加人物</Button>} />
+        <Tabs items={[
+            { key: "profiles", label: "人物设定", children: <div className="space-y-4">
+                {characters.map((character) => <article key={character.id} className="rounded-xl border border-[var(--studio-line)] p-4">
+                    <div className="flex gap-2">
+                        <Input aria-label="人物姓名" value={character.name} className="font-medium" onChange={(event) => updateCharacter(character.id, { name: event.target.value })} />
+                        <Popconfirm title="删除人物？" description="人物仍被场次或对白引用时，服务端会拒绝删除。" onConfirm={() => updateCharacters(
+                            characters.filter((item) => item.id !== character.id).map((item, sortOrder) => ({ ...item, sortOrder })),
+                            relations.filter((relation) => relation.sourceCharacterId !== character.id && relation.targetCharacterId !== character.id)
+                                .map((relation, sortOrder) => ({ ...relation, sortOrder })))}>
+                            <Button danger aria-label={`删除人物 ${character.name}`} icon={<Trash2 className="size-4" />} />
+                        </Popconfirm>
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-4">
+                        {([ ["identity", "身份"], ["age", "年龄"], ["occupation", "职业"], ["roleType", "角色定位"] ] as const)
+                            .map(([key, label]) => <Field key={key} label={label}><Input value={character[key]} onChange={(event) => updateCharacter(character.id, { [key]: event.target.value })} /></Field>)}
+                    </div>
+                    <div className="mt-3 grid max-w-md gap-3 sm:grid-cols-2">
+                        <Field label="关系图横坐标"><InputNumber className="w-full" value={character.graphPositionX} onChange={(value) => updateCharacter(character.id, { graphPositionX: value ?? 0 })} /></Field>
+                        <Field label="关系图纵坐标"><InputNumber className="w-full" value={character.graphPositionY} onChange={(value) => updateCharacter(character.id, { graphPositionY: value ?? 0 })} /></Field>
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        {profileFields.map(([key, label]) => <Field key={key} label={label}>
+                            <Input.TextArea rows={3} value={character[key]} onChange={(event) => updateCharacter(character.id, { [key]: event.target.value })} />
+                        </Field>)}
+                    </div>
+                </article>)}
+                {!characters.length ? <Empty description="还没有人物" /> : null}
+            </div> },
+            { key: "relations", label: "人物关系图", children: <div className="space-y-4">
+                <CharacterRelationshipGraph />
+                <div className="flex justify-end"><Button size="small" icon={<Plus className="size-4" />} disabled={characters.length < 2}
+                    onClick={() => updateCharacters(characters, [...relations, { id: nanoid(), sourceCharacterId: characters[0].id,
+                        targetCharacterId: characters[1].id, relationshipType: "关系", relationshipDirection: "bidirectional",
+                        storyStage: "", conflictDescription: "", description: "", sortOrder: relations.length }])}>添加关系</Button></div>
+                {relations.map((relation) => <div key={relation.id} className="grid gap-3 rounded-lg border border-[var(--studio-line)] p-3 md:grid-cols-2">
+                    <Field label="起点人物"><Select value={relation.sourceCharacterId} options={characterOptions} onChange={(value) => updateRelation(relation.id, { sourceCharacterId: value })} /></Field>
+                    <Field label="终点人物"><Select value={relation.targetCharacterId} options={characterOptions} onChange={(value) => updateRelation(relation.id, { targetCharacterId: value })} /></Field>
+                    <Field label="关系类型"><Input value={relation.relationshipType} onChange={(event) => updateRelation(relation.id, { relationshipType: event.target.value })} /></Field>
+                    <Field label="关系方向"><Select value={relation.relationshipDirection} options={[{ value: "bidirectional", label: "双向关系" }, { value: "directed", label: "单向关系" }]} onChange={(value) => updateRelation(relation.id, { relationshipDirection: value })} /></Field>
+                    <Field label="故事阶段"><Input value={relation.storyStage} onChange={(event) => updateRelation(relation.id, { storyStage: event.target.value })} /></Field>
+                    <Field label="关系冲突"><Input value={relation.conflictDescription} onChange={(event) => updateRelation(relation.id, { conflictDescription: event.target.value })} /></Field>
+                    <div className="md:col-span-2"><Field label="关系说明"><Input.TextArea rows={2} value={relation.description} onChange={(event) => updateRelation(relation.id, { description: event.target.value })} /></Field></div>
+                    <Button danger icon={<Trash2 className="size-4" />} onClick={() => updateCharacters(characters,
+                        relations.filter((item) => item.id !== relation.id).map((item, sortOrder) => ({ ...item, sortOrder })))}>删除关系</Button>
+                </div>)}
+            </div> },
+        ]} />
+    </section>;
+}
+
+function WorldEditor() {
+    const project = useScriptStore((state) => state.project);
+    const updateWorld = useScriptStore((state) => state.updateWorld);
+    if (!project) return null;
+    const setting = project.worldSetting;
+    const items = project.worldItems;
+    const locations = project.locations;
+    const updateItem = (id: string, patch: Partial<(typeof items)[number]>) => updateWorld(setting,
+        items.map((item) => item.id === id ? { ...item, ...patch } : item), locations);
+    const updateLocation = (id: string, patch: Partial<(typeof locations)[number]>) => updateWorld(setting, items,
+        locations.map((location) => location.id === id ? { ...location, ...patch } : location));
+    const locationFields = [
+        ["spacePurpose", "空间用途"], ["narrativeRole", "叙事作用"], ["defaultTime", "默认时间"],
+        ["weather", "天气"], ["atmosphere", "空间氛围"], ["keyObjects", "关键物件"], ["mainEvents", "主要事件"],
+    ] as const;
+    const itemTypes = [
+        ["rule", "规则"], ["organization", "组织"], ["faction", "势力"],
+        ["hierarchy", "等级"], ["restriction", "限制"], ["history", "历史事件"],
+    ] as const;
+    return <section>
+        <SectionHeader title="世界观与地点" description="记录故事规则、时代背景和反复出现的重要地点。" />
+        <div className="grid gap-4 md:grid-cols-2">
+            <Field label="时代"><Input value={setting.era} onChange={(event) => updateWorld({ ...setting, era: event.target.value }, items, locations)} /></Field>
+            <Field label="地域"><Input value={setting.region} onChange={(event) => updateWorld({ ...setting, region: event.target.value }, items, locations)} /></Field>
+            <Field label="社会背景"><Input.TextArea rows={4} value={setting.socialBackground} onChange={(event) => updateWorld({ ...setting, socialBackground: event.target.value }, items, locations)} /></Field>
+            <Field label="整体基调"><Input.TextArea rows={4} value={setting.overallTone} onChange={(event) => updateWorld({ ...setting, overallTone: event.target.value }, items, locations)} /></Field>
+        </div>
+        <div className="mt-8 flex items-center justify-between"><h3 className="font-semibold text-[var(--studio-ink)]">世界规则</h3>
+            <Button size="small" icon={<Plus className="size-4" />} onClick={() => updateWorld(setting,
+                [...items, { id: nanoid(), itemType: "rule", name: "新规则", description: "", sortOrder: items.length }], locations)}>添加条目</Button>
+        </div>
+        <div className="mt-3 space-y-3">{items.map((item) => <article key={item.id} className="grid gap-3 rounded-lg border border-[var(--studio-line)] p-3 md:grid-cols-[150px_1fr_auto]">
+            <Field label="条目类型"><Select value={item.itemType} options={itemTypes.map(([value, label]) => ({ value, label }))}
+                onChange={(itemType) => updateItem(item.id, { itemType })} /></Field>
+            <div className="space-y-3"><Field label="名称"><Input value={item.name} onChange={(event) => updateItem(item.id, { name: event.target.value })} /></Field>
+                <Field label="说明"><Input.TextArea rows={2} value={item.description} onChange={(event) => updateItem(item.id, { description: event.target.value })} /></Field></div>
+            <Button danger aria-label={`删除条目 ${item.name}`} icon={<Trash2 className="size-4" />} onClick={() => updateWorld(setting,
+                items.filter((current) => current.id !== item.id).map((current, sortOrder) => ({ ...current, sortOrder })), locations)} />
+        </article>)}</div>
+        <div className="mt-8 flex items-center justify-between"><h3 className="font-semibold text-[var(--studio-ink)]">场景地点</h3>
+            <Button size="small" icon={<Plus className="size-4" />} onClick={() => updateWorld(setting, items,
+                [...locations, { id: nanoid(), name: "新地点", spacePurpose: "", narrativeRole: "", defaultTime: "", weather: "",
+                    atmosphere: "", keyObjects: "", mainEvents: "", sortOrder: locations.length }])}>添加地点</Button>
+        </div>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">{locations.map((location) => <article key={location.id} className="rounded-lg border border-[var(--studio-line)] p-3">
+            <div className="flex gap-2"><div className="min-w-0 flex-1"><Field label="地点名称"><Input value={location.name} onChange={(event) => updateLocation(location.id, { name: event.target.value })} /></Field></div>
+                <Button danger aria-label={`删除地点 ${location.name}`} icon={<Trash2 className="size-4" />} onClick={() => updateWorld(setting, items,
+                    locations.filter((item) => item.id !== location.id).map((item, sortOrder) => ({ ...item, sortOrder })))} /></div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">{locationFields.map(([key, label]) => <div key={key} className={key === "defaultTime" || key === "weather" ? "" : "sm:col-span-2"}>
+                <Field label={label}>{key === "defaultTime" || key === "weather"
+                    ? <Input value={location[key]} onChange={(event) => updateLocation(location.id, { [key]: event.target.value })} />
+                    : <Input.TextArea rows={2} value={location[key]} onChange={(event) => updateLocation(location.id, { [key]: event.target.value })} />}</Field>
+            </div>)}</div>
+        </article>)}</div>
+    </section>;
+}
+
+function EpisodesEditor({ selectedEpisodeId, onSelectEpisode }: { selectedEpisodeId: string; onSelectEpisode: (episodeId: string) => void }) {
+    const { modal, message } = App.useApp();
+    const project = useScriptStore((state) => state.project);
+    const detail = useScriptStore((state) => selectedEpisodeId ? state.episodes[selectedEpisodeId] : undefined);
+    const loadEpisode = useScriptStore((state) => state.loadEpisode);
+    const updateEpisode = useScriptStore((state) => state.updateEpisode);
+    const reorderEpisodes = useScriptStore((state) => state.reorderEpisodes);
+    const deleteEpisode = useScriptStore((state) => state.deleteEpisode);
+    const setAiTarget = useScriptStore((state) => state.setAiTarget);
+    const [loadError, setLoadError] = useState("");
+    useEffect(() => {
+        let active = true;
+        setLoadError("");
+        if (selectedEpisodeId && !detail) {
+            void loadEpisode(selectedEpisodeId).catch((error: unknown) => {
+                if (active) setLoadError(error instanceof Error ? error.message : "分集正文加载失败");
+            });
+        }
+        return () => { active = false; };
+    }, [detail, loadEpisode, selectedEpisodeId]);
+    if (!project) return null;
+    const addEpisode = () => {
+        const id = nanoid();
+        const episode: EpisodeDetail = { episode: { id, episodeNumber: project.episodes.length + 1, title: `第 ${project.episodes.length + 1} 集`, summary: "", keyEvents: "", mainConflict: "", climax: "", endingHook: "", targetDurationSeconds: 0, completionStatus: "planning", sortOrder: project.episodes.length }, scenes: [] };
+        updateEpisode(episode);
+        onSelectEpisode(id);
+        setAiTarget({ targetType: "episode", targetId: id, label: episode.episode.title });
+    };
+    const moveEpisode = (index: number, direction: -1 | 1) => {
+        const ids = project.episodes.map((episode) => episode.id);
+        const target = index + direction;
+        if (target < 0 || target >= ids.length) return;
+        [ids[index], ids[target]] = [ids[target], ids[index]];
+        reorderEpisodes(ids);
+    };
+    const confirmDelete = (episodeId: string) => modal.confirm({
+        title: "删除当前分集？",
+        content: "该分集中的场次和正文也会被删除。",
+        okText: "删除",
+        okButtonProps: { danger: true },
+        cancelText: "取消",
+        onOk: async () => {
+            try {
+                await deleteEpisode(episodeId);
+                onSelectEpisode(project.episodes.find((episode) => episode.id !== episodeId)?.id || "");
+                message.success("分集已删除");
+            } catch (error) {
+                message.error(error instanceof Error ? error.message : "分集删除失败，请重试");
+                throw error;
+            }
+        },
+    });
+    return <section><SectionHeader title="分集剧本" description="按集、场次和正文块组织动作、对白、旁白与转场。" action={<Button icon={<Plus className="size-4" />} onClick={addEpisode}>新增分集</Button>} /><div className="mb-5 space-y-2">{project.episodes.map((episode, index) => <div key={episode.id} className={`flex items-center gap-2 rounded-lg border p-2 ${episode.id === selectedEpisodeId ? "border-[var(--studio-primary)] bg-[var(--studio-primary-soft)]" : "border-[var(--studio-line)]"}`}><button type="button" className="min-w-0 flex-1 text-left" onClick={() => { onSelectEpisode(episode.id); setAiTarget({ targetType: "episode", targetId: episode.id, label: episode.title }); }}><span className="font-medium text-[var(--studio-ink)]">第 {episode.episodeNumber} 集 · {episode.title}</span><Tag className="ml-2">{episode.completionStatus}</Tag></button><Button size="small" aria-label="上移分集" icon={<ArrowUp className="size-3.5" />} disabled={!index} onClick={() => moveEpisode(index, -1)} /><Button size="small" aria-label="下移分集" icon={<ArrowDown className="size-3.5" />} disabled={index === project.episodes.length - 1} onClick={() => moveEpisode(index, 1)} /></div>)}</div>{loadError ? <Empty description={loadError}><Button onClick={() => { setLoadError(""); void loadEpisode(selectedEpisodeId).catch((error: unknown) => setLoadError(error instanceof Error ? error.message : "分集正文加载失败")); }}>重新加载分集</Button></Empty> : selectedEpisodeId && !detail ? <Spin /> : detail ? <EpisodeDetailEditor detail={detail} onChange={updateEpisode} onDelete={() => confirmDelete(detail.episode.id)} /> : <Empty description="新建或选择一个分集开始写作"><Button type="primary" onClick={addEpisode}>新增分集</Button></Empty>}</section>;
+}
+
+function EpisodeDetailEditor({ detail, onChange, onDelete }: { detail: EpisodeDetail; onChange: (detail: EpisodeDetail) => void; onDelete: () => void }) {
+    const project = useScriptStore((state) => state.project)!;
+    const setAiTarget = useScriptStore((state) => state.setAiTarget);
+    const updateSummary = (patch: Partial<EpisodeDetail["episode"]>) => onChange({ ...detail, episode: { ...detail.episode, ...patch } });
+    const updateScene = (sceneId: string, updater: (scene: ScriptScene) => ScriptScene) => onChange({ ...detail, scenes: detail.scenes.map((scene) => scene.id === sceneId ? updater(scene) : scene) });
+    const moveScene = (index: number, direction: -1 | 1) => { const scenes = [...detail.scenes]; const target = index + direction; if (target < 0 || target >= scenes.length) return; [scenes[index], scenes[target]] = [scenes[target], scenes[index]]; onChange({ ...detail, scenes: scenes.map((scene, sortOrder) => ({ ...scene, sortOrder, sceneNumber: sortOrder + 1 })) }); };
+    const addScene = () => { const scene: ScriptScene = { id: nanoid(), locationId: null, sceneNumber: detail.scenes.length + 1, title: `场次 ${detail.scenes.length + 1}`, interiorExterior: "interior", timeDescription: "", sceneGoal: "", actionSummary: "", transitionDescription: "", previousRelation: "", nextRelation: "", sortOrder: detail.scenes.length, characterIds: [], blocks: [] }; onChange({ ...detail, scenes: [...detail.scenes, scene] }); };
+    const episodeFields = [
+        ["summary", "分集梗概"], ["keyEvents", "关键事件"], ["mainConflict", "主要冲突"],
+        ["climax", "高潮"], ["endingHook", "结尾悬念"],
+    ] as const;
+    const sceneFields = [
+        ["sceneGoal", "场次目标"], ["actionSummary", "动作概述"], ["transitionDescription", "转场说明"],
+        ["previousRelation", "与前一场次的关系"], ["nextRelation", "与后一场次的关系"],
+    ] as const;
+    return <div className="space-y-5">
+        <div className="rounded-xl border border-[var(--studio-line)] p-4">
+            <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-48 flex-1"><Field label="分集标题"><Input value={detail.episode.title} onChange={(event) => updateSummary({ title: event.target.value })} /></Field></div>
+                <Field label="完成状态"><Select value={detail.episode.completionStatus} options={[{ value: "planning", label: "规划中" }, { value: "draft", label: "草稿" }, { value: "complete", label: "已完成" }]} onChange={(completionStatus) => updateSummary({ completionStatus })} /></Field>
+                <Button icon={<Sparkles className="size-4" />} onClick={() => setAiTarget({ targetType: "episode", targetId: detail.episode.id, label: detail.episode.title })}>设为AI目标</Button>
+                <Button danger icon={<Trash2 className="size-4" />} onClick={onDelete}>删除分集</Button>
+            </div>
+            <div className="mt-3 max-w-52"><Field label="目标时长（秒）"><InputNumber className="w-full" min={0} max={86400} value={detail.episode.targetDurationSeconds} onChange={(value) => updateSummary({ targetDurationSeconds: value ?? 0 })} /></Field></div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">{episodeFields.map(([key, label]) => <Field key={key} label={label}>
+                <Input.TextArea rows={3} value={detail.episode[key]} onChange={(event) => updateSummary({ [key]: event.target.value })} />
+            </Field>)}</div>
+        </div>
+        <div className="flex justify-end"><Button icon={<Plus className="size-4" />} onClick={addScene}>添加场次</Button></div>
+        {detail.scenes.map((scene, sceneIndex) => <article key={scene.id} className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-4">
+            <div className="flex flex-wrap items-end gap-2">
+                <div className="min-w-44 flex-1"><Field label={`第 ${scene.sceneNumber} 场标题`}><Input value={scene.title} onChange={(event) => updateScene(scene.id, (current) => ({ ...current, title: event.target.value }))} /></Field></div>
+                <Field label="地点"><Select allowClear className="min-w-32" value={scene.locationId || undefined} options={project.locations.map((location) => ({ value: location.id, label: location.name }))} onChange={(locationId) => updateScene(scene.id, (current) => ({ ...current, locationId: locationId || null }))} /></Field>
+                <Field label="内外景"><Select value={scene.interiorExterior} options={[{ value: "interior", label: "内景" }, { value: "exterior", label: "外景" }, { value: "mixed", label: "混合" }]} onChange={(interiorExterior) => updateScene(scene.id, (current) => ({ ...current, interiorExterior }))} /></Field>
+                <Button aria-label="AI优化场次" icon={<Sparkles className="size-4" />} onClick={() => setAiTarget({ targetType: "scene", targetId: scene.id, label: `${detail.episode.title} · ${scene.title}` })} />
+                <Button aria-label="上移场次" icon={<ArrowUp className="size-4" />} disabled={!sceneIndex} onClick={() => moveScene(sceneIndex, -1)} />
+                <Button aria-label="下移场次" icon={<ArrowDown className="size-4" />} disabled={sceneIndex === detail.scenes.length - 1} onClick={() => moveScene(sceneIndex, 1)} />
+                <Button danger aria-label="删除场次" icon={<Trash2 className="size-4" />} onClick={() => onChange({ ...detail,
+                    scenes: detail.scenes.filter((item) => item.id !== scene.id).map((item, sortOrder) => ({ ...item, sortOrder, sceneNumber: sortOrder + 1 })) })} />
+            </div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <Field label="发生时间"><Input value={scene.timeDescription} onChange={(event) => updateScene(scene.id, (current) => ({ ...current, timeDescription: event.target.value }))} /></Field>
+                <Field label="出场人物"><Select mode="multiple" className="w-full" value={scene.characterIds} options={project.characters.map((character) => ({ value: character.id, label: character.name }))}
+                    onChange={(characterIds) => updateScene(scene.id, (current) => ({ ...current, characterIds,
+                        blocks: synchronizeDialogueCharacters(current.blocks, characterIds) }))} /></Field>
+                {sceneFields.map(([key, label]) => <Field key={key} label={label}><Input.TextArea rows={2} value={scene[key]}
+                    onChange={(event) => updateScene(scene.id, (current) => ({ ...current, [key]: event.target.value }))} /></Field>)}
+            </div>
+            <div className="mt-4 space-y-2">{scene.blocks.map((block, blockIndex) => <ScriptBlockEditor key={block.id} block={block}
+                characters={project.characters.filter((character) => scene.characterIds.includes(character.id))}
+                onChange={(next) => updateScene(scene.id, (current) => ({ ...current, blocks: replaceScriptBlock(current.blocks, next) }))}
+                onAi={() => setAiTarget({ targetType: "block", targetId: block.id, label: `${scene.title} · 正文块 ${blockIndex + 1}` })}
+                onMove={(direction) => updateScene(scene.id, (current) => ({ ...current,
+                    blocks: moveScriptBlock(current.blocks, blockIndex, direction) }))}
+                onDelete={() => updateScene(scene.id, (current) => ({ ...current,
+                    blocks: removeScriptBlock(current.blocks, block.id) }))} first={!blockIndex} last={blockIndex === scene.blocks.length - 1} />)}</div>
+            <div className="mt-3 flex flex-wrap gap-2">{(["action", "dialogue", "narration", "transition"] as ScriptBlock["blockType"][]).map((blockType) =>
+                <Button key={blockType} size="small" disabled={blockType === "dialogue" && !scene.characterIds.length}
+                    onClick={() => updateScene(scene.id, (current) => ({ ...current, blocks: [...current.blocks, { id: nanoid(), blockType,
+                        characterId: blockType === "dialogue" ? current.characterIds[0] : null, content: "", sortOrder: current.blocks.length }] }))}>
+                    添加{({ action: "动作", dialogue: "对白", narration: "旁白", transition: "转场" })[blockType]}</Button>)}</div>
+        </article>)}
+    </div>;
+}
+
+function ScriptBlockEditor({ block, characters, onChange, onAi, onMove, onDelete, first, last }: { block: ScriptBlock; characters: ScriptCharacter[]; onChange: (block: ScriptBlock) => void; onAi: () => void; onMove: (direction: -1 | 1) => void; onDelete: () => void; first: boolean; last: boolean }) {
+    const labels = { action: "动作", dialogue: "对白", narration: "旁白", transition: "转场" };
+    return <div className="grid gap-2 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3 md:grid-cols-[120px_1fr_auto]"><div><Select className="w-full" value={block.blockType} options={Object.entries(labels).map(([value, label]) => ({ value, label }))} onChange={(blockType) => onChange({ ...block, blockType, characterId: blockType === "dialogue" ? block.characterId || characters[0]?.id || null : null })} />{block.blockType === "dialogue" ? <Select className="mt-2 w-full" value={block.characterId || undefined} placeholder="人物" options={characters.map((character) => ({ value: character.id, label: character.name }))} onChange={(characterId) => onChange({ ...block, characterId })} /> : null}</div><Input.TextArea autoSize={{ minRows: 2, maxRows: 10 }} value={block.content} placeholder={`输入${labels[block.blockType]}内容`} onChange={(event) => onChange({ ...block, content: event.target.value })} /><div className="flex gap-1 md:flex-col"><Button size="small" aria-label="AI优化正文块" icon={<Sparkles className="size-3.5" />} onClick={onAi} /><Button size="small" aria-label="上移正文块" icon={<ArrowUp className="size-3.5" />} disabled={first} onClick={() => onMove(-1)} /><Button size="small" aria-label="下移正文块" icon={<ArrowDown className="size-3.5" />} disabled={last} onClick={() => onMove(1)} /><Button size="small" danger aria-label="删除正文块" icon={<Trash2 className="size-3.5" />} onClick={onDelete} /></div></div>;
+}

@@ -1,13 +1,25 @@
+"use client";
+
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { Spin } from "antd";
+
+import { ComicDramaProjectLibrary } from "@/features/comic-drama/components/comic-drama-project-library";
+import { ComicDramaWorkspace } from "@/features/comic-drama/components/comic-drama-workspace";
+
+function ComicDramaPageContent() {
+    const searchParams = useSearchParams();
+    const scriptProjectId = searchParams.get("scriptProjectId");
+    const projectId = searchParams.get("projectId") || scriptProjectId;
+
+    return projectId ? <ComicDramaWorkspace projectId={projectId} scriptProjectId={scriptProjectId || undefined} /> : <ComicDramaProjectLibrary />;
+}
+
+/** 漫剧创作菜单入口，根据查询参数在项目库与项目生产工作台之间切换。 */
 export default function ComicDramaPage() {
     return (
-        <main className="studio-page h-full overflow-y-auto px-4 py-6 sm:px-6">
-            <div className="mx-auto flex max-w-7xl flex-col gap-5">
-                <header className="border-b border-[var(--studio-line)] pb-5">
-                    <p className="studio-caption text-xs">创作</p>
-                    <h1 className="studio-title mt-2 text-2xl font-semibold">漫剧创作</h1>
-                    <p className="studio-subtitle mt-2 text-sm">功能建设中，敬请期待。</p>
-                </header>
-            </div>
-        </main>
+        <Suspense fallback={<main className="studio-page flex h-full items-center justify-center"><Spin size="large" /></main>}>
+            <ComicDramaPageContent />
+        </Suspense>
     );
 }

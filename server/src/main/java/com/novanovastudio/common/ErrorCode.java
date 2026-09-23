@@ -44,6 +44,9 @@ public final class ErrorCode {
     /** 第三方调用错误码 */
     public static final int THIRD_PARTY_CALL_ERROR = 4003;
 
+    /** 数据修订冲突错误码 */
+    public static final int DATA_CONFLICT = 4004;
+
     /** 系统内部错误码 */
     public static final int SYSTEM_ERROR = 5000;
 

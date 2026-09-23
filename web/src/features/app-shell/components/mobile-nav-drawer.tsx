@@ -37,7 +37,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                                             href={`/${tool.slug}`}
                                             onClick={onClose}
                                             className={cn(
-                                                "flex min-h-20 flex-col justify-between rounded-lg border p-3 transition",
+                                                "relative flex min-h-20 flex-col justify-between rounded-lg border p-3 transition",
                                                 active
                                                     ? "border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] font-medium text-[var(--studio-ink)]"
                                                     : "border-[var(--studio-line)] bg-[var(--studio-surface-soft)] text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]",
@@ -45,6 +45,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                                         >
                                             <Icon className="size-5" />
                                             <span className="text-sm">{tool.label}</span>
+                                            {tool.pro ? <span className="pro-badge right-2 top-2" title="企业版功能">PRO</span> : null}
                                         </Link>
                                     );
                                 })}

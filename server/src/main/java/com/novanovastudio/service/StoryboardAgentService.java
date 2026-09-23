@@ -116,6 +116,19 @@ public class StoryboardAgentService {
      * @return Mono<AiGenerationTaskResponse> 已入队的AI任务
      */
     public Mono<AiTaskDtos.AiGenerationTaskResponse> createAssetImageTask(StoryboardDtos.CreateAssetImageTaskRequest request) {
+        return createAssetImageTask(request, response -> Mono.empty());
+    }
+
+    /**
+     * 为分镜资产创建图片任务，并在入队前执行持久化回调。
+     *
+     * @param request 资产图片任务请求
+     * @param beforeEnqueue 入队前持久化回调
+     * @return 已入队的AI任务
+     */
+    public Mono<AiTaskDtos.AiGenerationTaskResponse> createAssetImageTask(
+            StoryboardDtos.CreateAssetImageTaskRequest request,
+            Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
         validateAssetImageRequest(request);
         Map<String, Object> parameters = new LinkedHashMap<>();
         parameters.put("count", 1);
@@ -126,7 +139,7 @@ public class StoryboardAgentService {
         parameters.put("storyboardAssetId", request.asset().id().trim());
         AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(
                 AiTaskTypes.IMAGE, renderAssetImagePrompt(request), request.model().trim(), parameters, null, null, AiTaskSources.STORYBOARD);
-        return aiTaskService.createTask(taskRequest);
+        return aiTaskService.createTask(taskRequest, beforeEnqueue);
     }
 
     /**

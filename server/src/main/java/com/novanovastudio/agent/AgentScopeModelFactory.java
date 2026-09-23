@@ -8,14 +8,14 @@ import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.service.PersistenceService;
-import io.agentscope.core.model.AnthropicChatModel;
 import io.agentscope.core.message.Msg;
 import io.agentscope.core.model.ChatResponse;
-import io.agentscope.core.model.GeminiChatModel;
 import io.agentscope.core.model.GenerateOptions;
 import io.agentscope.core.model.Model;
-import io.agentscope.core.model.OpenAIChatModel;
 import io.agentscope.core.model.ToolSchema;
+import io.agentscope.extensions.model.anthropic.AnthropicChatModel;
+import io.agentscope.extensions.model.gemini.GeminiChatModel;
+import io.agentscope.extensions.model.openai.OpenAIChatModel;
 import java.util.List;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
@@ -78,7 +78,7 @@ public class AgentScopeModelFactory {
      */
     public Mono<TextModelSelection> resolveTextModel(String selectedModel) {
         if (!StringUtils.hasText(selectedModel)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "分镜脚本必须选择文本模型"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "当前AI操作必须选择文本模型"));
         }
         String normalizedModel = selectedModel.trim();
         int separatorIndex = normalizedModel.indexOf("::");
@@ -182,11 +182,11 @@ public class AgentScopeModelFactory {
      */
     private GenerateOptions openAiGenerateOptions(boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters) {
         GenerateOptions.Builder builder = GenerateOptions.builder()
+                .additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters)
                 .additionalBodyParam("thinking", Map.of("type", thinkingEnabled ? "enabled" : "disabled"));
         if (thinkingEnabled) {
             builder.reasoningEffort(reasoningEffort(reasoningEffort));
         }
-        builder.additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters);
         return builder.build();
     }
 

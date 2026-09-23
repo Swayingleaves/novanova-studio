@@ -110,6 +110,12 @@ public final class AiTaskDtos {
                                    String generationSource) {
             this(taskType, prompt, model, parameters, references, videoReferences, generationSource, null, null, null);
         }
+
+        public CreateAiTaskRequest(String taskType, String prompt, String model, Map<String, Object> parameters,
+                                   List<AiTaskMediaReference> references, List<AiTaskMediaReference> videoReferences,
+                                   String generationSource, String videoGenerationMode) {
+            this(taskType, prompt, model, parameters, references, videoReferences, generationSource, null, null, videoGenerationMode, null);
+        }
     }
 
     /**

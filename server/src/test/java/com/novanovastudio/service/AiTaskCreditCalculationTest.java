@@ -104,7 +104,8 @@ class AiTaskCreditCalculationTest {
             Class<?> resolvedModelType = Class.forName("com.novanovastudio.service.AiTaskService$ResolvedModel");
             Constructor<?> constructor = resolvedModelType.getDeclaredConstructor(
                     AiTaskDtos.AiChannelConfig.class, String.class, String.class, Integer.class, String.class,
-                    List.class, VideoBillingConfiguration.class, boolean.class, String.class, com.alibaba.fastjson2.JSONObject.class);
+                    List.class, VideoBillingConfiguration.class, boolean.class, String.class, com.alibaba.fastjson2.JSONObject.class,
+                    boolean.class, Map.class);
             constructor.setAccessible(true);
             boolean video = "video".equals(request.taskType());
             VideoBillingConfiguration videoBillingConfiguration = video
@@ -115,7 +116,8 @@ class AiTaskCreditCalculationTest {
                     new AiTaskDtos.AiChannelConfig("channel", "测试渠道", "https://example.com", "key", "openai", List.of("model")),
                     "model", "model-config", creditCost, creditUnit,
                     video ? List.of(VideoGenerationMode.TEXT_TO_VIDEO) : List.of(), videoBillingConfiguration, true, "high",
-                    new com.alibaba.fastjson2.JSONObject());
+                    new com.alibaba.fastjson2.JSONObject(),
+                    false, Map.of());
             Method method = AiTaskService.class.getDeclaredMethod("calculateTaskCredits", AiTaskDtos.CreateAiTaskRequest.class, resolvedModelType);
             method.setAccessible(true);
             return (Integer) method.invoke(new AiTaskService(null, null, null, null, null, null, null, null, null, null, null, null), request, resolvedModel);

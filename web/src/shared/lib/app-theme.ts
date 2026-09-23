@@ -134,7 +134,7 @@ export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
             colorLink: brand.primary,
             colorLinkHover: brand.hover,
             colorLinkActive: brand.active,
-            colorTextLightSolid: "#ffffff",
+            colorTextLightSolid: brand.foreground,
             colorBgLayout: p.layout,
             colorBgContainer: p.bg,
             colorBgElevated: p.bgElevated,
@@ -161,6 +161,16 @@ export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
                 defaultHoverBorderColor: brand.border,
                 borderRadius: 8,
                 controlHeight: 34,
+            },
+            Radio: {
+                buttonSolidCheckedColor: brand.foreground,
+                buttonSolidCheckedBg: brand.primary,
+                buttonSolidCheckedHoverBg: brand.hover,
+                buttonSolidCheckedActiveBg: brand.active,
+            },
+            Segmented: {
+                itemSelectedBg: brand.primary,
+                itemSelectedColor: brand.foreground,
             },
             Input: {
                 activeBorderColor: brand.primary,
@@ -194,12 +204,12 @@ export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
             Menu: {
                 itemActiveBg: brand.soft,
                 itemHoverBg: p.fill,
-                itemSelectedBg: brand.soft,
-                itemSelectedColor: p.text,
+                itemSelectedBg: brand.primary,
+                itemSelectedColor: brand.foreground,
                 darkItemBg: p.bg,
                 darkItemHoverBg: brand.soft,
-                darkItemSelectedBg: brand.soft,
-                darkItemSelectedColor: p.text,
+                darkItemSelectedBg: brand.primary,
+                darkItemSelectedColor: brand.foreground,
             },
         },
     };

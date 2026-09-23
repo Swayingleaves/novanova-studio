@@ -76,7 +76,7 @@ export default function ProfilePage() {
                     <Alert
                         type="error"
                         showIcon
-                        message="个人信息加载失败"
+                        title="个人信息加载失败"
                         description={loadError}
                         action={
                             <Button size="small" onClick={() => setReloadVersion((value) => value + 1)}>
@@ -252,7 +252,7 @@ function InvitationLinkPanel() {
                     className="mt-3"
                     type="error"
                     showIcon
-                    message="邀请链接加载失败"
+                    title="邀请链接加载失败"
                     action={<Button size="small" onClick={() => void invitationQuery.refetch()}>重试</Button>}
                 />
             ) : null}

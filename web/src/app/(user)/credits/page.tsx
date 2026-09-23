@@ -169,7 +169,7 @@ export default function CreditsPage() {
                     className="mt-5"
                     type="error"
                     showIcon
-                    message="积分数据加载失败"
+                    title="积分数据加载失败"
                     action={<Button size="small" onClick={() => { void overviewQuery.refetch(); void transactionsQuery.refetch(); }}>重新加载</Button>}
                 />
             ) : null}

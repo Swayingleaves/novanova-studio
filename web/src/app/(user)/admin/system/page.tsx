@@ -265,7 +265,7 @@ function CreditConsumptionManagement() {
                     className="mt-5"
                     type="error"
                     showIcon
-                    message="积分数据加载失败"
+                    title="积分数据加载失败"
                     action={
                         <Button
                             size="small"
@@ -619,7 +619,7 @@ function UserManagement() {
                     className="mb-4"
                     type="error"
                     showIcon
-                    message="用户统计加载失败"
+                    title="用户统计加载失败"
                     action={
                         <Button size="small" onClick={() => void statisticsQuery.refetch()}>
                             重新加载

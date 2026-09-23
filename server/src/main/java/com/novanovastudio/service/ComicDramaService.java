@@ -1,0 +1,954 @@
+package com.novanovastudio.service;
+
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
+import com.novanovastudio.ai.AiTaskSources;
+import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.dto.AiTaskDtos;
+import com.novanovastudio.dto.ComicDramaDtos;
+import com.novanovastudio.dto.ScriptDtos;
+import com.novanovastudio.dto.StoryboardDtos;
+import com.novanovastudio.repository.ComicDramaRepository;
+import com.novanovastudio.security.CurrentUserProvider;
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.reactive.TransactionalOperator;
+import org.springframework.util.StringUtils;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+/**
+ * 漫剧生产工作台业务服务。
+ *
+ * @author   zhenglin.cn.cq@gmail.com
+ * @date     2026-09-21 11:00
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class ComicDramaService {
+
+    /** 当前登录用户提供器。 */
+    private final CurrentUserProvider currentUserProvider;
+
+    /** 漫剧生产仓储。 */
+    private final ComicDramaRepository repository;
+
+    /** 剧本业务服务，用于读取共享剧本与准备度。 */
+    private final ScriptService scriptService;
+
+    /** 既有分镜Agent服务。 */
+    private final StoryboardAgentService storyboardAgentService;
+
+    /** 既有AI任务服务。 */
+    private final AiTaskService aiTaskService;
+
+    /** 无限画布持久化服务，用于验证画布归属。 */
+    private final PersistenceService persistenceService;
+
+    /** 响应式事务操作器。 */
+    private final TransactionalOperator transactionalOperator;
+
+    /**
+     * 分页查询当前用户漫剧项目。
+     *
+     * @param page 页码
+     * @param pageSize 每页数量
+     * @param keyword 搜索词
+     * @return 当前用户项目分页结果
+     */
+    public Mono<ComicDramaDtos.ProjectListResponse> listProjects(int page, int pageSize, String keyword) {
+        int normalizedPage = Math.max(page, 1);
+        int normalizedPageSize = Math.min(Math.max(pageSize, 1), 100);
+        return currentUserProvider.currentUserId().flatMap(userId -> Mono.zip(
+                repository.listProjects(userId, text(keyword), (normalizedPage - 1) * normalizedPageSize, normalizedPageSize).collectList(),
+                repository.countProjects(userId, text(keyword)),
+                (projects, total) -> new ComicDramaDtos.ProjectListResponse(projects, total, normalizedPage, normalizedPageSize)));
+    }
+
+    /**
+     * 查询漫剧项目完整工作区。
+     *
+     * @param projectId 项目ID
+     * @return 工作区聚合数据
+     */
+    public Mono<ComicDramaDtos.Workspace> getWorkspace(String projectId) {
+        return currentUserProvider.currentUserId().flatMap(userId -> requireProject(userId, projectId).flatMap(project -> {
+            Mono<reactor.util.function.Tuple4<ComicDramaDtos.ProductionSettings, List<ComicDramaDtos.Asset>,
+                    List<ComicDramaDtos.Shot>, List<ComicDramaDtos.ChangeImpact>>> core = Mono.zip(
+                    repository.getSettings(projectId), repository.listAssets(projectId, "").collectList(),
+                    repository.listShots(projectId, null, null).collectList(), repository.listImpacts(projectId).collectList());
+            Mono<?>[] extraSources = {scriptService.getProject(projectId), getReadiness(projectId),
+                    repository.listShotDrafts(projectId).collectList(), repository.listPromptVersions(projectId, null).collectList(),
+                    syncMediaStatuses(userId, projectId, null, null),
+                    repository.listVoiceTracks(projectId, null).collectList(), repository.listBatchTasks(projectId).collectList(),
+                    repository.listCanvasBindings(projectId).collectList(), repository.listContinuityIssues(projectId).collectList()};
+            return Mono.zip(core, Mono.zip(values -> values, extraSources)).map(tuple -> {
+                var values = tuple.getT2();
+                ScriptDtos.ProjectDetail scriptProject = (ScriptDtos.ProjectDetail) values[0];
+                ComicDramaDtos.Readiness readiness = (ComicDramaDtos.Readiness) values[1];
+                @SuppressWarnings("unchecked") List<ComicDramaDtos.ShotDraft> drafts = (List<ComicDramaDtos.ShotDraft>) values[2];
+                @SuppressWarnings("unchecked") List<ComicDramaDtos.PromptVersion> prompts = (List<ComicDramaDtos.PromptVersion>) values[3];
+                @SuppressWarnings("unchecked") List<ComicDramaDtos.MediaResult> media = (List<ComicDramaDtos.MediaResult>) values[4];
+                @SuppressWarnings("unchecked") List<ComicDramaDtos.VoiceTrack> voices = (List<ComicDramaDtos.VoiceTrack>) values[5];
+                @SuppressWarnings("unchecked") List<ComicDramaDtos.BatchTask> batches = (List<ComicDramaDtos.BatchTask>) values[6];
+                @SuppressWarnings("unchecked") List<ComicDramaDtos.CanvasBinding> bindings = (List<ComicDramaDtos.CanvasBinding>) values[7];
+                @SuppressWarnings("unchecked") List<ComicDramaDtos.ContinuityIssue> issues = (List<ComicDramaDtos.ContinuityIssue>) values[8];
+                var data = tuple.getT1();
+                int readyAssets = (int) data.getT2().stream().filter(asset -> "active".equals(asset.usageStatus())).count();
+                long completedShots = data.getT3().stream().filter(shot -> media.stream().anyMatch(item ->
+                        "shot".equals(item.targetType()) && shot.id().equals(item.targetId())
+                                && item.adopted() && "completed".equals(item.status()))).count();
+                int pendingUpdates = (int) data.getT4().stream().filter(impact -> "pending".equals(impact.status())).count();
+                int runningTasks = (int) media.stream().filter(item -> List.of("queued", "processing").contains(item.status())).count();
+                ComicDramaDtos.ProductionProgress progress = new ComicDramaDtos.ProductionProgress(data.getT2().size(),
+                        readyAssets, data.getT3().size(), (int) completedShots, pendingUpdates, runningTasks);
+                int productionUnits = data.getT2().size() + data.getT3().size();
+                int completionRate = productionUnits == 0 ? 0
+                        : (readyAssets + (int) completedShots) * 100 / productionUnits;
+                return new ComicDramaDtos.Workspace(projectId, projectId, scriptProject, data.getT1(), project.revision(),
+                        completionRate, progress, readiness, data.getT2(), data.getT3(), drafts, prompts, media,
+                        data.getT4(), voices, batches, bindings, issues);
+            });
+        }));
+    }
+
+    /**
+     * 将当前用户已有剧本初始化为一对一漫剧生产项目。
+     *
+     * @param request 初始化请求
+     * @return 初始化后的工作区
+     */
+    public Mono<ComicDramaDtos.Workspace> initializeProject(ComicDramaDtos.InitializeProjectRequest request) {
+        String projectType = StringUtils.hasText(request.projectType()) ? request.projectType().trim() : "comicDrama";
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                repository.initializeProject(userId, request.scriptProjectId(), projectType)
+                        .then(requireProject(userId, request.scriptProjectId())))).then(getWorkspace(request.scriptProjectId()));
+    }
+
+    /**
+     * 使用项目乐观锁更新生产设置。
+     *
+     * @param request 设置更新请求
+     * @return 最新项目修订信息
+     */
+    public Mono<ComicDramaDtos.MutationResult> updateSettings(ComicDramaDtos.UpdateSettingsRequest request) {
+        return mutate(request.projectId(), request.expectedRevision(),
+                repository.updateSettings(request.projectId(), request.settings()));
+    }
+
+    /**
+     * 查询项目视觉资产。
+     *
+     * @param request 资产列表请求
+     * @return 视觉资产列表
+     */
+    public Mono<List<ComicDramaDtos.Asset>> listAssets(ComicDramaDtos.ListAssetsRequest request) {
+        return withProject(request.projectId(), () -> repository.listAssets(request.projectId(), text(request.assetType())).collectList());
+    }
+
+    /**
+     * 新增或更新视觉资产。
+     *
+     * @param request 保存请求
+     * @return 保存后的资产
+     */
+    public Mono<ComicDramaDtos.Asset> saveAsset(ComicDramaDtos.SaveAssetRequest request) {
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                        .then(repository.validateAssetSourceReference(request.projectId(), request.asset()))
+                        .flatMap(valid -> valid ? Mono.empty() : Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
+                                "视觉资产来源人物、地点或场次不属于当前共享剧本")))
+                        .then(repository.saveAsset(request.projectId(), request.asset()).switchIfEmpty(conflict()))
+                        .then(repository.markUpstreamChanges(request.projectId(), "asset", List.of(request.asset().id()), "视觉资产发生变化"))
+                        .then(advance(userId, request.projectId(), request.expectedRevision()))
+                        .then(repository.refreshProjectProductionStatus(request.projectId()))
+                        .then(repository.getAsset(request.projectId(), request.asset().id()))));
+    }
+
+    /**
+     * 查询视觉资产历史版本。
+     *
+     * @param request 版本列表请求
+     * @return 资产版本列表
+     */
+    public Mono<List<ComicDramaDtos.AssetVersion>> listAssetVersions(ComicDramaDtos.ListAssetVersionsRequest request) {
+        return withProject(request.projectId(), () -> repository.listAssetVersions(request.projectId(), request.assetId()).collectList());
+    }
+
+    /**
+     * 新增或更新视觉资产版本。
+     *
+     * @param request 保存版本请求
+     * @return 保存后的资产版本
+     */
+    public Mono<ComicDramaDtos.AssetVersion> saveAssetVersion(ComicDramaDtos.SaveAssetVersionRequest request) {
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                        .then(repository.getAsset(request.projectId(), request.version().assetId()).switchIfEmpty(notFound("视觉资产不存在")))
+                        .then(repository.saveAssetVersion(request.version()).switchIfEmpty(conflict()))
+                        .then(repository.markUpstreamChanges(request.projectId(), "assetVersion", List.of(request.version().id()), "视觉资产版本发生变化"))
+                        .then(advance(userId, request.projectId(), request.expectedRevision()))
+                        .then(repository.getAssetVersion(request.projectId(), request.version().id()))));
+    }
+
+    /**
+     * 查询共享剧本的生产准备度。
+     *
+     * @param projectId 项目ID
+     * @return 不修改剧本的准备度检查结果
+     */
+    public Mono<ComicDramaDtos.Readiness> getReadiness(String projectId) {
+        return withProject(projectId, () -> scriptService.getProductionReadiness(projectId).map(readiness ->
+                new ComicDramaDtos.Readiness(readiness.projectId(), readiness.ready(), readiness.items().stream()
+                        .map(item -> new ComicDramaDtos.ReadinessItem(item.key(), item.status(), item.title(),
+                                item.description(), item.targetSection())).toList())));
+    }
+
+    /**
+     * 复用分镜Agent生成待确认镜头草稿。
+     *
+     * @param request 自动拆镜头请求
+     * @return 已持久化草稿
+     */
+    public Mono<ComicDramaDtos.ShotDraft> generateShotDraft(ComicDramaDtos.GenerateShotDraftRequest request) {
+        if (!request.confirmed()) {
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "生成镜头草稿前必须明确确认费用"));
+        }
+        return currentUserProvider.currentUserId().flatMap(userId -> requireProject(userId, request.projectId()).flatMap(project ->
+                repository.getShotGenerationSource(request.projectId(), request.episodeId(), request.sceneId())
+                        .switchIfEmpty(notFound("未找到可拆分的剧本范围"))
+                        .flatMap(source -> {
+                            if (!StringUtils.hasText(source.scriptContent())) {
+                                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "所选范围没有可用剧本正文"));
+                            }
+                            String instruction = "请拆分为约" + request.shotCount() + "个镜头。节奏：" + text(request.rhythm())
+                                    + "。创作重点：" + text(request.focus());
+                            Mono<String> sourceEpisode = StringUtils.hasText(request.sceneId())
+                                    ? repository.getSceneEpisodeId(request.projectId(), request.sceneId())
+                                    : Mono.just(text(request.episodeId()));
+                            return sourceEpisode.defaultIfEmpty("").flatMap(resolvedEpisodeId -> storyboardAgentService.generateStoryboard(
+                                    new StoryboardDtos.GenerateStoryboardRequest(source.scriptContent(), instruction,
+                                            source.visualStyle(), request.model()))
+                                    .flatMap(response -> {
+                                        JSONObject data = (JSONObject) JSON.toJSON(response);
+                                        data.put("sourceScriptExcerpt", source.scriptContent());
+                                        data.put("sourceEpisodeId", resolvedEpisodeId);
+                                        data.put("sourceSceneId", text(request.sceneId()));
+                                        ComicDramaDtos.ShotDraft draft = new ComicDramaDtos.ShotDraft(id(), request.projectId(),
+                                                scopeType(request), scopeId(request), project.revision(), source.scriptRevision(),
+                                                instruction, request.model(), data, response.chargedCredits(), "pending",
+                                                OffsetDateTime.now(), null);
+                                        return repository.createShotDraft(userId, draft).thenReturn(draft);
+                                    }));
+                        })));
+    }
+
+    /**
+     * 确认镜头草稿并追加为正式镜头，不覆盖已有镜头。
+     *
+     * @param request 草稿确认请求
+     * @return 最新项目修订信息
+     */
+    public Mono<ComicDramaDtos.MutationResult> confirmShotDraft(ComicDramaDtos.ConfirmShotDraftRequest request) {
+        return currentUserProvider.currentUserId().flatMap(userId -> requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                .then(repository.getPendingShotDraft(userId, request.projectId(), request.draftId()).switchIfEmpty(notFound("待确认镜头草稿不存在")))
+                .flatMap(draft -> scriptService.getProject(request.projectId()).flatMap(scriptProject -> {
+                    if (draft.baseProjectRevision() != request.expectedRevision()
+                            || draft.baseScriptRevision() != scriptProject.revision()) {
+                        return Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT,
+                                "镜头草稿生成后剧本或生产设置已变化，请重新生成镜头草稿"));
+                    }
+                    return repository.listShots(request.projectId(), null, null).collectList().flatMap(existing -> {
+                        StoryboardDtos.GenerateStoryboardResponse response = draft.draftData()
+                                .toJavaObject(StoryboardDtos.GenerateStoryboardResponse.class);
+                        Map<String, DraftAssetPlan> assetPlans = buildDraftAssetPlans(request.draftId(), response);
+                        String sourceEpisodeId = text(draft.draftData().getString("sourceEpisodeId"));
+                        String sourceSceneId = text(draft.draftData().getString("sourceSceneId"));
+                        return repository.validateShotSourceReferences(request.projectId(),
+                                        sourceEpisodeId.isEmpty() ? null : sourceEpisodeId,
+                                        sourceSceneId.isEmpty() ? null : sourceSceneId)
+                                .flatMap(valid -> valid ? Mono.just(existing.size())
+                                        : Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
+                                                "镜头草稿的来源分集或场次不属于当前项目")))
+                                .flatMap(start -> transactionalOperator.transactional(
+                                        persistDraftAssets(request.projectId(), assetPlans.values())
+                                        .thenMany(Flux.fromIterable(response.shots()).index())
+                                        .concatMap(item -> {
+                                            StoryboardDtos.StoryboardShot source = item.getT2();
+                                            List<String> assetVersionIds = source.assetIds().stream()
+                                                    .map(assetId -> assetPlans.get(assetId).version().id()).toList();
+                                            ComicDramaDtos.Shot shot = new ComicDramaDtos.Shot(id(),
+                                                    sourceEpisodeId.isEmpty() ? null : sourceEpisodeId,
+                                                    sourceSceneId.isEmpty() ? null : sourceSceneId,
+                                                    text(draft.draftData().getString("sourceScriptExcerpt")),
+                                                    start + item.getT1().intValue() + 1, start + item.getT1().intValue(),
+                                                    BigDecimal.valueOf(source.durationSeconds()), source.shotSize(), "",
+                                                    source.visualDescription(), "", source.cameraMovement(), source.lightingAtmosphere(),
+                                                    source.dialogueVoiceover(), source.soundEffect(), "", "draft",
+                                                    assetVersionIds, 0, null, null);
+                                            return repository.saveShot(request.projectId(), shot).switchIfEmpty(conflict())
+                                                    .then(repository.replaceShotAssetVersions(
+                                                            request.projectId(), shot.id(), assetVersionIds))
+                                                    .flatMap(inserted -> inserted == assetVersionIds.size()
+                                                            ? Mono.empty() : conflict());
+                                        }).then(repository.confirmShotDraft(request.projectId(), request.draftId())
+                                                .flatMap(count -> count == 1 ? Mono.empty() : conflict()))
+                                        .then(advance(userId, request.projectId(), request.expectedRevision()))
+                                        .then(repository.refreshProjectProductionStatus(request.projectId()))
+                                        .then(requireProject(userId, request.projectId())).map(this::mutationResult)));
+                    });
+                })));
+    }
+
+    /** 保存用户编辑后的待确认镜头草稿。 */
+    public Mono<ComicDramaDtos.ShotDraft> updateShotDraft(ComicDramaDtos.UpdateShotDraftRequest request) {
+        StoryboardDtos.GenerateStoryboardResponse draft = request.draftData()
+                .toJavaObject(StoryboardDtos.GenerateStoryboardResponse.class);
+        if (draft == null || draft.shots() == null || draft.shots().isEmpty()) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "镜头草稿至少需要保留一个镜头"));
+        }
+        validateDraftAssetReferences(draft);
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                        .then(repository.updateShotDraft(request.projectId(), request.draftId(),
+                                request.expectedRevision(), request.draftData()))
+                        .flatMap(rows -> rows == 1 ? Mono.empty() : conflict())
+                        .then(advance(userId, request.projectId(), request.expectedRevision()))
+                        .then(repository.getPendingShotDraft(userId, request.projectId(), request.draftId()))));
+    }
+
+    /** 放弃待确认镜头草稿并保留历史记录。 */
+    public Mono<ComicDramaDtos.MutationResult> discardShotDraft(ComicDramaDtos.DiscardShotDraftRequest request) {
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                        .then(repository.discardShotDraft(request.projectId(), request.draftId(), request.expectedRevision()))
+                        .flatMap(rows -> rows == 1 ? Mono.empty() : conflict())
+                        .then(advance(userId, request.projectId(), request.expectedRevision()))
+                        .then(requireProject(userId, request.projectId())).map(this::mutationResult)));
+    }
+
+    /** 查询正式镜头清单。 */
+    public Mono<List<ComicDramaDtos.Shot>> listShots(ComicDramaDtos.ListShotsRequest request) {
+        return withProject(request.projectId(), () -> repository.listShots(request.projectId(), request.episodeId(), request.sceneId()).collectList());
+    }
+
+    /** 保存一个正式镜头及其资产版本引用。 */
+    public Mono<ComicDramaDtos.Shot> saveShot(ComicDramaDtos.SaveShotRequest request) {
+        if (request.shot().assetVersionIds().stream().distinct().count() != request.shot().assetVersionIds().size()) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "镜头资产版本引用不能重复"));
+        }
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                        .then(repository.validateShotSourceReferences(request.projectId(), request.shot()))
+                        .flatMap(valid -> valid ? Mono.empty() : Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
+                                "镜头来源分集或场次不属于当前项目")))
+                        .then(repository.saveShot(request.projectId(), request.shot()).switchIfEmpty(conflict()))
+                        .then(repository.replaceShotAssetVersions(request.projectId(), request.shot().id(), request.shot().assetVersionIds()))
+                        .flatMap(inserted -> inserted == request.shot().assetVersionIds().size()
+                                ? Mono.empty()
+                                : Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "资产版本不存在或不属于当前项目")))
+                        .then(advance(userId, request.projectId(), request.expectedRevision()))
+                        .then(repository.refreshProjectProductionStatus(request.projectId()))
+                        .then(repository.getShot(request.projectId(), request.shot().id()))));
+    }
+
+    /** 调整全部镜头排序。 */
+    public Mono<ComicDramaDtos.MutationResult> reorderShots(ComicDramaDtos.ReorderShotsRequest request) {
+        return withProject(request.projectId(), () -> repository.listShots(request.projectId(), null, null).collectList())
+                .flatMap(shots -> {
+                    List<String> existingIds = shots.stream().map(ComicDramaDtos.Shot::id).toList();
+                    if (request.shotIds().size() != existingIds.size() || !existingIds.containsAll(request.shotIds())
+                            || request.shotIds().stream().distinct().count() != request.shotIds().size()) {
+                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "镜头排序必须包含项目全部且不重复的镜头标识"));
+                    }
+                    return mutate(request.projectId(), request.expectedRevision(), repository.reorderShots(request.projectId(), request.shotIds()));
+                });
+    }
+
+    /** 删除用户已二次确认的镜头。 */
+    public Mono<ComicDramaDtos.MutationResult> deleteShot(ComicDramaDtos.DeleteShotRequest request) {
+        if (!request.confirm()) {
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "删除镜头前必须先查询影响范围并明确确认"));
+        }
+        return mutate(request.projectId(), request.expectedRevision(), repository.deleteShot(request.projectId(), request.shotId())
+                .flatMap(rows -> rows > 0 ? Mono.empty() : notFound("镜头不存在")));
+    }
+
+    /** 查询镜头删除影响范围，供二次确认弹窗展示。 */
+    public Mono<ComicDramaDtos.ShotDeleteImpact> getShotDeleteImpact(String projectId, String shotId) {
+        return withProject(projectId, () -> repository.getShotDeleteImpact(projectId, shotId)
+                .switchIfEmpty(notFound("镜头不存在")));
+    }
+
+    /**
+     * 复用分镜提示词Agent生成新的待确认提示词版本。
+     *
+     * @param request 提示词合成请求
+     * @return 新提示词草稿版本
+     */
+    public Mono<ComicDramaDtos.PromptVersion> composePrompt(ComicDramaDtos.ComposePromptRequest request) {
+        if (!request.confirmed()) {
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "合成提示词前必须明确确认费用"));
+        }
+        return currentUserProvider.currentUserId().flatMap(userId -> requireProject(userId, request.projectId())
+                .then(repository.getShot(request.projectId(), request.shotId()).switchIfEmpty(notFound("镜头不存在")))
+                .flatMap(shot -> Mono.zip(Mono.just(shot), repository.getSettings(request.projectId()),
+                        repository.getShotGenerationSource(request.projectId(), shot.sourceEpisodeId(), shot.sourceSceneId()),
+                        repository.listShotStoryboardAssets(request.projectId(), shot.id()).collectList()))
+                .flatMap(tuple -> {
+                    ComicDramaDtos.Shot shot = tuple.getT1();
+                    List<StoryboardDtos.StoryboardAsset> assets = tuple.getT4();
+                    StoryboardDtos.StoryboardShot agentShot = new StoryboardDtos.StoryboardShot(shot.id(), shot.shotNumber(),
+                            Math.max(1, shot.durationSeconds().intValue()), shot.visualDescription(),
+                            StringUtils.hasText(shot.shotSize()) ? shot.shotSize() : "中景", shot.lightingAtmosphere(),
+                            shot.dialogueVoiceover(), shot.soundDescription(), shot.cameraMovement(), "",
+                            assets.stream().map(StoryboardDtos.StoryboardAsset::id).toList());
+                    StoryboardDtos.ComposePromptsRequest agentRequest = new StoryboardDtos.ComposePromptsRequest(
+                            StringUtils.hasText(shot.sourceScriptExcerpt()) ? shot.sourceScriptExcerpt() : tuple.getT3().scriptContent(),
+                            shot.visualDescription(), tuple.getT2().visualStyle(), request.model(), List.of(agentShot), assets);
+                    return storyboardAgentService.composePrompts(agentRequest).flatMap(response ->
+                            repository.nextPromptVersion(request.projectId(), shot.id()).flatMap(versionNumber -> {
+                                JSONObject snapshot = new JSONObject();
+                                snapshot.put("shot", shot);
+                                snapshot.put("settings", tuple.getT2());
+                                ComicDramaDtos.PromptVersion prompt = new ComicDramaDtos.PromptVersion(id(), shot.id(), versionNumber,
+                                        "ai", response.prompts().getFirst().finalPrompt(), snapshot, request.model(),
+                                        response.chargedCredits(), "draft", OffsetDateTime.now());
+                                return repository.createPromptVersion(request.projectId(), prompt).thenReturn(prompt);
+                            }));
+                }));
+    }
+
+    /** 保存用户明确编辑的提示词为新采用版本。 */
+    public Mono<ComicDramaDtos.PromptVersion> savePrompt(ComicDramaDtos.SavePromptRequest request) {
+        return currentUserProvider.currentUserId().flatMap(userId -> requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                .then(repository.getShot(request.projectId(), request.shotId()).switchIfEmpty(notFound("镜头不存在")))
+                .then(repository.nextPromptVersion(request.projectId(), request.shotId())).flatMap(version -> {
+                    if (request.expectedPromptVersion() != null && request.expectedPromptVersion() != version - 1) {
+                        return conflict();
+                    }
+                    ComicDramaDtos.PromptVersion prompt = new ComicDramaDtos.PromptVersion(id(), request.shotId(), version,
+                            "manual", request.prompt().trim(), new JSONObject(), "", 0, "adopted", OffsetDateTime.now());
+                    return transactionalOperator.transactional(repository.createPromptVersion(request.projectId(), prompt)
+                            .then(advance(userId, request.projectId(), request.expectedRevision())).thenReturn(prompt));
+                }));
+    }
+
+    /**
+     * 估算所选生成范围的任务数和模型积分。
+     *
+     * @param request 生成报价请求
+     * @return 明确的任务数量与预计积分
+     */
+    public Mono<ComicDramaDtos.GenerationEstimate> estimateGeneration(ComicDramaDtos.EstimateGenerationRequest request) {
+        String mediaType = request.settings().getString("mediaType");
+        if (!List.of("image", "video").contains(mediaType)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成设置mediaType仅支持image或video"));
+        }
+        if (request.targetIds().stream().distinct().count() != request.targetIds().size()) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成目标不能重复"));
+        }
+        ComicDramaDtos.CreateGenerationTaskRequest generationRequest = new ComicDramaDtos.CreateGenerationTaskRequest(
+                request.projectId(), 0, request.targetType(), request.targetIds(), request.model(), request.settings(), true);
+        return withProject(request.projectId(), () -> Flux.fromIterable(request.targetIds())
+                .concatMap(targetId -> prepareSingleGeneration(generationRequest, targetId, mediaType))
+                .collectList()
+                .flatMap(plans -> {
+                    Map<String, Object> quoteParameters = new LinkedHashMap<>(request.settings());
+                    List<AiTaskDtos.AiTaskMediaReference> sampleReferences = plans.isEmpty() ? null : plans.get(0).references();
+                    if ("video".equals(mediaType) && sampleReferences != null && !sampleReferences.isEmpty()) {
+                        String mode = (String) quoteParameters.get("videoGenerationMode");
+                        if (!StringUtils.hasText(mode) || "text-to-video".equals(mode)) {
+                            quoteParameters.put("videoGenerationMode", "image-to-video");
+                        }
+                    }
+                    String videoMode = "video".equals(mediaType) ? (String) quoteParameters.get("videoGenerationMode") : null;
+                    AiTaskDtos.CreateAiTaskRequest quoteRequest = new AiTaskDtos.CreateAiTaskRequest(mediaType, "漫剧生成费用预估",
+                            request.model(), quoteParameters, sampleReferences, null, AiTaskSources.STORYBOARD, videoMode);
+                    return aiTaskService.quoteTaskCredits(quoteRequest).map(unitCredits -> {
+                        try {
+                            return new ComicDramaDtos.GenerationEstimate(request.targetType(), request.targetIds().size(),
+                                    Math.multiplyExact(unitCredits, request.targetIds().size()), request.model(), request.settings());
+                        } catch (ArithmeticException exception) {
+                            throw new BusinessException(ErrorCode.PARAM_INVALID, "预计积分超出允许范围");
+                        }
+                    });
+                }));
+    }
+
+    /**
+     * 为用户明确确认的目标创建实际图片或视频任务，并记录输入快照。
+     *
+     * @param request 媒体任务请求
+     * @return 已排队任务记录
+     */
+    public Mono<ComicDramaDtos.GenerationTaskResult> createGenerationTask(ComicDramaDtos.CreateGenerationTaskRequest request) {
+        String mediaType = request.settings().getString("mediaType");
+        if (!List.of("image", "video").contains(mediaType)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成设置mediaType仅支持image或video"));
+        }
+        if (!request.confirmed()) {
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "生成媒体前必须明确确认费用"));
+        }
+        if (request.targetIds().stream().distinct().count() != request.targetIds().size()) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成目标不能重复"));
+        }
+        return currentUserProvider.currentUserId().flatMap(userId -> requireProject(userId, request.projectId())
+                .thenMany(Flux.fromIterable(request.targetIds())
+                        .concatMap(targetId -> prepareSingleGeneration(request, targetId, mediaType))).collectList()
+                .flatMap(plans -> transactionalOperator.transactional(
+                                requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                                        .then(advance(userId, request.projectId(), request.expectedRevision()))
+                                         .thenMany(Flux.fromIterable(plans)
+                                                 .concatMap(plan -> repository.createMediaResult(request.projectId(), plan.media())))
+                                         .then(repository.refreshProjectProductionStatus(request.projectId()))
+                                         .then())
+                        .thenMany(Flux.fromIterable(plans)
+                                .concatMap(plan -> executeSingleGeneration(request, plan, mediaType)))
+                        .collectList()
+                        .map(results -> new ComicDramaDtos.GenerationTaskResult(results, results.size()))));
+    }
+
+    /** 查询项目媒体任务与结果。 */
+    public Mono<List<ComicDramaDtos.MediaResult>> listMedia(ComicDramaDtos.ListMediaRequest request) {
+        return currentUserProvider.currentUserId().flatMap(userId -> requireProject(userId, request.projectId())
+                .then(syncMediaStatuses(userId, request.projectId(), request.shotId(), request.assetId())));
+    }
+
+    /**
+     * 查询并回写当前用户底层AI任务的最新媒体状态。
+     *
+     * @param userId 当前用户ID
+     * @param projectId 漫剧项目ID
+     * @param shotId 可选镜头过滤条件
+     * @param assetId 可选资产过滤条件
+     * @return 已同步的媒体结果列表
+     */
+    private Mono<List<ComicDramaDtos.MediaResult>> syncMediaStatuses(Long userId, String projectId,
+                                                                      String shotId, String assetId) {
+        return repository.listMedia(projectId, shotId, assetId).collectList()
+                .flatMapMany(Flux::fromIterable)
+                .concatMap(media -> syncOneMediaStatus(userId, projectId, media))
+                .thenMany(repository.listMedia(projectId, shotId, assetId))
+                .collectList();
+    }
+
+    /** 同步单个媒体结果对应的底层AI任务。 */
+    private Mono<ComicDramaDtos.MediaResult> syncOneMediaStatus(Long userId, String projectId,
+                                                                  ComicDramaDtos.MediaResult media) {
+        if (!StringUtils.hasText(media.taskId())) {
+            return Mono.just(media);
+        }
+        return aiTaskService.getTaskForUser(userId, media.taskId()).flatMap(task -> {
+            String status = List.of("queued", "processing").contains(media.status())
+                    ? normalizeMediaStatus(task.status()) : media.status();
+            String failureReason = StringUtils.hasText(task.errorMessage()) ? task.errorMessage() : "";
+            return repository.updateMediaTaskState(projectId, media.taskId(), status,
+                    task.resultData() == null ? new JSONObject() : task.resultData(), failureReason)
+                    .then(repository.refreshBatchTaskProgress(projectId))
+                    .then(repository.refreshProjectProductionStatus(projectId)).thenReturn(media);
+        });
+    }
+
+    /** 采用一个生成媒体版本。 */
+    public Mono<ComicDramaDtos.MutationResult> adoptMedia(ComicDramaDtos.AdoptMediaRequest request) {
+        return mutate(request.projectId(), request.expectedRevision(), repository.adoptMedia(request.projectId(), request.mediaId())
+                .flatMap(rows -> rows > 0 ? Mono.empty() : rows < 0
+                        ? Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "仅允许采用已完成的媒体结果"))
+                        : notFound("媒体结果不存在")));
+    }
+
+    /** 查询待处理的上游变化影响。 */
+    public Mono<List<ComicDramaDtos.ChangeImpact>> listImpacts(String projectId) {
+        return withProject(projectId, () -> repository.listImpacts(projectId).collectList());
+    }
+
+    /** 确认用户选择的更新范围，仅关闭影响项且不自动重生成。 */
+    public Mono<ComicDramaDtos.MutationResult> confirmUpdate(ComicDramaDtos.ConfirmUpdateRequest request) {
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                        .then(repository.resolveImpacts(request.projectId(), request.scope(), request.targetId(), request.resolution()))
+                        .then(advance(userId, request.projectId(), request.expectedRevision()))
+                        .then(repository.refreshProjectProductionStatus(request.projectId()))
+                        .then(requireProject(userId, request.projectId())).map(this::mutationResult)));
+    }
+
+    /** 查询P1声音轨。 */
+    public Mono<List<ComicDramaDtos.VoiceTrack>> listVoiceTracks(ComicDramaDtos.ListVoiceTracksRequest request) {
+        return withProject(request.projectId(), () -> repository.listVoiceTracks(request.projectId(), request.shotId()).collectList());
+    }
+
+    /** 保存P1结构化声音轨。 */
+    public Mono<ComicDramaDtos.VoiceTrack> saveVoiceTrack(ComicDramaDtos.SaveVoiceTrackRequest request) {
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                        .then(repository.validateVoiceTrackReferences(request.projectId(), request.voiceTrack()))
+                        .flatMap(valid -> valid ? Mono.empty() : Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
+                                "声音轨引用的镜头、人物或正文块不属于当前项目")))
+                        .then(repository.saveVoiceTrack(request.projectId(), request.voiceTrack()).switchIfEmpty(conflict()))
+                        .then(advance(userId, request.projectId(), request.expectedRevision()))
+                        .then(repository.listVoiceTracks(request.projectId(), null)
+                                .filter(item -> item.id().equals(request.voiceTrack().id())).next())));
+    }
+
+    /** 查询P1批量生产任务。 */
+    public Mono<List<ComicDramaDtos.BatchTask>> listBatchTasks(String projectId) {
+        return withProject(projectId, () -> repository.listBatchTasks(projectId).collectList());
+    }
+
+    /**
+     * 创建用户已确认的P1批量生产计划。
+     * <p>批量计划只记录用户选择、报价和排队进度；实际媒体任务由生成接口创建，避免伪报已完成。</p>
+     *
+     * @param request 批量任务请求
+     * @return 已排队批量任务
+     */
+    public Mono<ComicDramaDtos.BatchTask> createBatchTask(ComicDramaDtos.CreateBatchTaskRequest request) {
+        if (!List.of("image", "video").contains(request.taskType())) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "当前批量生成仅支持image或video"));
+        }
+        if (!request.confirmed()) {
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "批量生成前必须明确确认费用"));
+        }
+        if (request.targetIds().stream().distinct().count() != request.targetIds().size()) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "批量生成目标不能重复"));
+        }
+        ComicDramaDtos.CreateGenerationTaskRequest generationRequest = new ComicDramaDtos.CreateGenerationTaskRequest(
+                request.projectId(), request.expectedRevision(),
+                Objects.requireNonNullElse(request.settings().getString("targetType"), "shot"), request.targetIds(),
+                request.model(), request.settings(), true);
+        return currentUserProvider.currentUserId().flatMap(userId -> requireProject(userId, request.projectId()).then(
+                Flux.fromIterable(request.targetIds())
+                        .concatMap(targetId -> prepareSingleGeneration(generationRequest, targetId, request.taskType()))
+                        .collectList()
+                        .flatMap(plans -> {
+                            Map<String, Object> quoteParameters = new LinkedHashMap<>(request.settings());
+                            List<AiTaskDtos.AiTaskMediaReference> sampleReferences = plans.isEmpty() ? null : plans.get(0).references();
+                            if ("video".equals(request.taskType()) && sampleReferences != null && !sampleReferences.isEmpty()) {
+                                String mode = (String) quoteParameters.get("videoGenerationMode");
+                                if (!StringUtils.hasText(mode) || "text-to-video".equals(mode)) {
+                                    quoteParameters.put("videoGenerationMode", "image-to-video");
+                                }
+                            }
+                            String videoMode = "video".equals(request.taskType()) ? (String) quoteParameters.get("videoGenerationMode") : null;
+                            return aiTaskService.quoteTaskCredits(new AiTaskDtos.CreateAiTaskRequest(request.taskType(), "漫剧批量生成费用预估",
+                                    request.model(), quoteParameters, sampleReferences, null, AiTaskSources.STORYBOARD, videoMode))
+                                    .flatMap(unitCredits -> {
+                                        int credits = Math.multiplyExact(unitCredits, request.targetIds().size());
+                                        JSONObject scope = new JSONObject();
+                                        scope.put("type", request.scope());
+                                        scope.put("targetIds", request.targetIds());
+                                        JSONObject modelSettings = new JSONObject(request.settings());
+                                        modelSettings.put("model", request.model());
+                                        modelSettings.put("targetType", generationRequest.targetType());
+                                        modelSettings.put("mediaResultIds", plans.stream().map(plan -> plan.media().id()).toList());
+                                        ComicDramaDtos.BatchTask task = new ComicDramaDtos.BatchTask(id(),
+                                                request.taskType(), request.scope(), scope, modelSettings,
+                                                credits, request.targetIds().size(), request.targetIds().size(), 0, 0, 0, 0,
+                                                "queued", OffsetDateTime.now(), OffsetDateTime.now(), OffsetDateTime.now());
+                                        return transactionalOperator.transactional(
+                                                        requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                                                                .then(advance(userId, request.projectId(), request.expectedRevision()))
+                                                                .then(repository.createBatchTask(userId, request.projectId(), task))
+                                                                .thenMany(Flux.fromIterable(plans)
+                                                                        .concatMap(plan -> repository.createMediaResult(request.projectId(), plan.media())))
+                                                                .then(repository.refreshProjectProductionStatus(request.projectId()))
+                                                                .then())
+                                                .thenMany(Flux.fromIterable(plans)
+                                                        .concatMap(plan -> executeSingleGeneration(generationRequest, plan, request.taskType())))
+                                                .collectList().flatMap(results -> {
+                                                    int failedCount = (int) results.stream().filter(result -> "failed".equals(result.status())).count();
+                                                    int queuedCount = results.size() - failedCount;
+                                                    String status = failedCount == 0 ? "queued"
+                                                            : queuedCount == 0 ? "failed" : "partialFailed";
+                                                    return repository.updateBatchTaskProgress(request.projectId(), task.id(), queuedCount, failedCount, status)
+                                                            .thenReturn(new ComicDramaDtos.BatchTask(task.id(), task.batchType(), task.scopeType(), task.scope(),
+                                                                    task.modelSettings(), task.estimatedCredits(), task.totalCount(), queuedCount,
+                                                                    0, 0, failedCount, 0, status, task.confirmedAt(), task.createdAt(), OffsetDateTime.now()));
+                                                });
+                                    });
+                        })));
+    }
+
+    /** 查询无限画布绑定。 */
+    public Mono<List<ComicDramaDtos.CanvasBinding>> listCanvasBindings(String projectId) {
+        return withProject(projectId, () -> repository.listCanvasBindings(projectId).collectList());
+    }
+
+    /** 创建或更新漫剧实体与无限画布节点绑定。 */
+    public Mono<ComicDramaDtos.CanvasBinding> bindCanvas(ComicDramaDtos.BindCanvasRequest request) {
+        ComicDramaDtos.CanvasBinding binding = new ComicDramaDtos.CanvasBinding(id(), request.entityType(), request.entityId(),
+                request.canvasProjectId(), request.nodeId(), new JSONObject(), OffsetDateTime.now(), OffsetDateTime.now());
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                        .then(Mono.zip(persistenceService.getProject(request.canvasProjectId()),
+                                repository.existsProjectEntity(request.projectId(), request.entityType(), request.entityId())))
+                        .flatMap(tuple -> {
+                            if (!tuple.getT2()) {
+                                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "绑定实体不存在或不属于当前项目"));
+                            }
+                            if (!canvasContainsNode(tuple.getT1(), request.nodeId())) {
+                                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "画布节点不存在"));
+                            }
+                            return repository.bindCanvas(request.projectId(), binding);
+                        })
+                        .flatMap(saved -> advance(userId, request.projectId(), request.expectedRevision())
+                                .then(repository.refreshProjectProductionStatus(request.projectId())).thenReturn(saved))));
+    }
+
+    /** 查询相邻镜头资产版本连续性问题，不自动替换任何内容。 */
+    public Mono<List<ComicDramaDtos.ContinuityIssue>> checkContinuity(String projectId) {
+        return withProject(projectId, () -> repository.listContinuityIssues(projectId).collectList());
+    }
+
+    /** 在发生计费前校验生成目标并构建可追踪的媒体计划。 */
+    private Mono<GenerationPlan> prepareSingleGeneration(ComicDramaDtos.CreateGenerationTaskRequest request,
+                                                          String targetId, String mediaType) {
+        Mono<String> promptMono;
+        Mono<List<AiTaskDtos.AiTaskMediaReference>> referencesMono;
+        if ("shot".equals(request.targetType())) {
+            promptMono = repository.getLatestPrompt(request.projectId(), targetId).switchIfEmpty(notFound("镜头尚无已采用的提示词版本"))
+                    .map(ComicDramaDtos.PromptVersion::prompt);
+            if ("video".equals(mediaType)) {
+                referencesMono = repository.listShotReferencesForVideo(request.projectId(), targetId);
+            } else if ("image".equals(mediaType)) {
+                referencesMono = repository.listShotAssetReferenceImages(request.projectId(), targetId).collectList();
+            } else {
+                referencesMono = Mono.just(List.of());
+            }
+        } else if ("assetVersion".equals(request.targetType())) {
+            promptMono = repository.getAssetVersion(request.projectId(), targetId).switchIfEmpty(notFound("资产版本不存在"))
+                    .map(version -> version.versionName() + "\n" + text(version.appearanceDescription()));
+            referencesMono = Mono.just(List.of());
+        } else {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成目标仅支持shot或assetVersion"));
+        }
+        return Mono.zip(promptMono, referencesMono).map(tuple -> {
+            String prompt = tuple.getT1();
+            List<AiTaskDtos.AiTaskMediaReference> references = tuple.getT2();
+            JSONObject snapshot = new JSONObject(request.settings());
+            snapshot.put("prompt", prompt);
+            snapshot.put("model", request.model());
+            snapshot.put("targetType", request.targetType());
+            if (references != null && !references.isEmpty()) {
+                snapshot.put("referenceCount", references.size());
+            }
+            ComicDramaDtos.MediaResult media = new ComicDramaDtos.MediaResult(id(), request.targetType(), targetId,
+                    mediaType, null, snapshot, new JSONObject(), "queued", false, "",
+                    OffsetDateTime.now(), OffsetDateTime.now());
+            return new GenerationPlan(media, prompt, references);
+        });
+    }
+
+    /** 执行单个已预先持久化的媒体计划。 */
+    private Mono<ComicDramaDtos.MediaResult> executeSingleGeneration(ComicDramaDtos.CreateGenerationTaskRequest request,
+                                                                      GenerationPlan plan, String mediaType) {
+        String targetId = plan.media().targetId();
+        String prompt = plan.prompt();
+        List<AiTaskDtos.AiTaskMediaReference> references = plan.references();
+        java.util.function.Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> attachTask = created ->
+                repository.attachMediaTask(request.projectId(), plan.media().id(), created.id(), normalizeMediaStatus(created.status()))
+                        .flatMap(rows -> rows == 1 ? Mono.empty() : conflict());
+        Mono<AiTaskDtos.AiGenerationTaskResponse> task;
+        if ("image".equals(mediaType) && "assetVersion".equals(request.targetType())) {
+            task = Mono.zip(repository.getAssetVersion(request.projectId(), targetId), repository.getSettings(request.projectId()))
+                    .flatMap(tuple -> repository.getAsset(request.projectId(), tuple.getT1().assetId()).flatMap(asset ->
+                            storyboardAgentService.createAssetImageTask(new StoryboardDtos.CreateAssetImageTaskRequest(
+                                    request.projectId(), new StoryboardDtos.StoryboardAsset(targetId, asset.assetType(),
+                                    asset.name() + "-" + tuple.getT1().versionName(), tuple.getT1().appearanceDescription()),
+                                    StringUtils.hasText(request.settings().getString("visualStyle"))
+                                            ? request.settings().getString("visualStyle") : tuple.getT2().visualStyle(),
+                                    request.model(), new StoryboardDtos.AssetImageSettings(
+                                    request.settings().getString("quality"), request.settings().getString("resolution"),
+                                    request.settings().getString("size"))), attachTask)));
+        } else {
+            Map<String, Object> parameters = new LinkedHashMap<>(request.settings());
+            String videoMode = null;
+            if ("video".equals(mediaType)) {
+                String mode = (String) parameters.get("videoGenerationMode");
+                if (references != null && !references.isEmpty()) {
+                    if (!StringUtils.hasText(mode) || "text-to-video".equals(mode)) {
+                        mode = "image-to-video";
+                    }
+                }
+                videoMode = StringUtils.hasText(mode) ? mode : (references != null && !references.isEmpty() ? "image-to-video" : "text-to-video");
+                parameters.put("videoGenerationMode", videoMode);
+            }
+            task = aiTaskService.createTask(new AiTaskDtos.CreateAiTaskRequest(mediaType, prompt, request.model(),
+                    parameters, references, null, AiTaskSources.STORYBOARD, videoMode), attachTask);
+        }
+        return task.map(created -> new ComicDramaDtos.MediaResult(plan.media().id(), plan.media().targetType(), targetId,
+                        mediaType, created.id(), plan.media().inputSnapshot(), new JSONObject(),
+                        normalizeMediaStatus(created.status()), false, "", plan.media().createdAt(), OffsetDateTime.now()))
+                .onErrorResume(exception -> {
+                    String reason = StringUtils.hasText(exception.getMessage()) ? exception.getMessage() : "AI任务创建失败";
+                    ComicDramaDtos.MediaResult failed = new ComicDramaDtos.MediaResult(plan.media().id(),
+                            plan.media().targetType(), targetId, mediaType, plan.media().taskId(), plan.media().inputSnapshot(),
+                            new JSONObject(), "failed", false, reason, plan.media().createdAt(), OffsetDateTime.now());
+                    return repository.failMediaResult(request.projectId(), plan.media().id(), reason).thenReturn(failed);
+                });
+    }
+
+    /** 判断归属已验证的画布中是否存在目标节点。 */
+    private boolean canvasContainsNode(JSONObject canvas, String nodeId) {
+        JSONObject scene = canvas == null ? null : canvas.getJSONObject("scene");
+        return scene != null && scene.getJSONArray("nodes") != null
+                && scene.getJSONArray("nodes").stream()
+                .filter(JSONObject.class::isInstance).map(JSONObject.class::cast)
+                .anyMatch(node -> nodeId.equals(node.getString("id")));
+    }
+
+    /** 媒体生成前已完成权限与输入校验的持久化计划。 */
+    private record GenerationPlan(ComicDramaDtos.MediaResult media, String prompt, List<AiTaskDtos.AiTaskMediaReference> references) {
+    }
+
+    /** 校验镜头草稿的资产引用并构建项目资产与初始版本。 */
+    private Map<String, DraftAssetPlan> buildDraftAssetPlans(
+            String draftId, StoryboardDtos.GenerateStoryboardResponse response) {
+        Map<String, StoryboardDtos.StoryboardAsset> sources = validateDraftAssetReferences(response);
+        Map<String, DraftAssetPlan> plans = new LinkedHashMap<>();
+        for (StoryboardDtos.StoryboardAsset source : sources.values()) {
+            JSONObject attributes = new JSONObject();
+            attributes.put("source", "shotDraft");
+            attributes.put("draftId", draftId);
+            ComicDramaDtos.Asset asset = new ComicDramaDtos.Asset(source.id(), source.kind(), null,
+                    source.name().trim(), text(source.description()), new JSONObject(), "active", 0, null, null);
+            ComicDramaDtos.AssetVersion version = new ComicDramaDtos.AssetVersion(id(), source.id(), "初始版本",
+                    "default", text(source.description()), List.of(), attributes, "active", 0, null, null);
+            plans.put(source.id(), new DraftAssetPlan(asset, version));
+        }
+        return plans;
+    }
+
+    /** 校验镜头草稿资产与镜头引用是一致的封闭集合。 */
+    private Map<String, StoryboardDtos.StoryboardAsset> validateDraftAssetReferences(
+            StoryboardDtos.GenerateStoryboardResponse response) {
+        if (response == null || response.shots() == null || response.shots().isEmpty()) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头草稿至少需要一个镜头");
+        }
+        Map<String, StoryboardDtos.StoryboardAsset> sources = new LinkedHashMap<>();
+        for (StoryboardDtos.StoryboardAsset source : response.assets() == null
+                ? List.<StoryboardDtos.StoryboardAsset>of() : response.assets()) {
+            if (source == null || !StringUtils.hasText(source.id()) || !source.id().equals(source.id().trim())
+                    || source.id().length() > 64
+                    || !List.of("character", "scene", "prop").contains(source.kind())
+                    || !StringUtils.hasText(source.name()) || source.name().length() > 200) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头草稿包含不合法的视觉资产");
+            }
+            if (sources.putIfAbsent(source.id(), source) != null) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头草稿的资产标识不能重复");
+            }
+        }
+        for (StoryboardDtos.StoryboardShot shot : response.shots()) {
+            if (shot == null || shot.assetIds() == null) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头草稿的资产引用不完整");
+            }
+            LinkedHashSet<String> uniqueIds = new LinkedHashSet<>(shot.assetIds());
+            if (uniqueIds.size() != shot.assetIds().size() || !sources.keySet().containsAll(uniqueIds)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头草稿引用了重复或不存在的资产");
+            }
+        }
+        return sources;
+    }
+
+    /** 在镜头确认事务内持久化草稿资产及其初始版本。 */
+    private Mono<Void> persistDraftAssets(String projectId, java.util.Collection<DraftAssetPlan> plans) {
+        return Flux.fromIterable(plans).concatMap(plan -> repository.createShotDraftAsset(projectId, plan.asset())
+                        .flatMap(inserted -> inserted == 1 ? Mono.empty()
+                                : Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT,
+                                        "镜头草稿资产标识已存在，请重新生成草稿")))
+                        .then(repository.createShotDraftAssetVersion(plan.version()))
+                        .flatMap(inserted -> inserted == 1 ? Mono.empty() : conflict()))
+                .then();
+    }
+
+    /** 镜头草稿资产与其项目初始版本。 */
+    private record DraftAssetPlan(ComicDramaDtos.Asset asset, ComicDramaDtos.AssetVersion version) {
+    }
+
+    /** 执行带项目乐观锁的通用写操作。 */
+    private Mono<ComicDramaDtos.MutationResult> mutate(String projectId, long expectedRevision, Mono<?> mutation) {
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                requireProjectRevision(userId, projectId, expectedRevision).then(mutation)
+                        .then(advance(userId, projectId, expectedRevision))
+                        .then(repository.refreshProjectProductionStatus(projectId)).then(requireProject(userId, projectId))
+                        .map(this::mutationResult)));
+    }
+
+    /** 在严格项目归属校验后执行读取操作。 */
+    private <T> Mono<T> withProject(String projectId, java.util.function.Supplier<Mono<T>> operation) {
+        return currentUserProvider.currentUserId().flatMap(userId -> requireProject(userId, projectId).then(Mono.defer(operation)));
+    }
+
+    /** 校验漫剧项目归属。 */
+    private Mono<ComicDramaRepository.ProjectRecord> requireProject(Long userId, String projectId) {
+        return repository.getProject(userId, projectId).switchIfEmpty(notFound("漫剧项目不存在"));
+    }
+
+    /** 校验漫剧项目修订号。 */
+    private Mono<ComicDramaRepository.ProjectRecord> requireProjectRevision(Long userId, String projectId, long expectedRevision) {
+        return requireProject(userId, projectId).flatMap(project -> project.revision() == expectedRevision
+                ? Mono.just(project) : conflict());
+    }
+
+    /** 使用乐观锁推进修订号。 */
+    private Mono<Long> advance(Long userId, String projectId, long expectedRevision) {
+        return repository.advanceRevision(userId, projectId, expectedRevision).switchIfEmpty(conflict());
+    }
+
+    /** 构造通用修订结果。 */
+    private ComicDramaDtos.MutationResult mutationResult(ComicDramaRepository.ProjectRecord project) {
+        return new ComicDramaDtos.MutationResult(project.projectId(), project.revision(), project.updatedAt());
+    }
+
+    /** 判断镜头草稿范围类型。 */
+    private String scopeType(ComicDramaDtos.GenerateShotDraftRequest request) {
+        return StringUtils.hasText(request.sceneId()) ? "scene" : StringUtils.hasText(request.episodeId()) ? "episode" : "project";
+    }
+
+    /** 读取镜头草稿范围标识。 */
+    private String scopeId(ComicDramaDtos.GenerateShotDraftRequest request) {
+        return StringUtils.hasText(request.sceneId()) ? request.sceneId() : StringUtils.hasText(request.episodeId()) ? request.episodeId() : null;
+    }
+
+    /** 创建稳定标识。 */
+    private String id() {
+        return UUID.randomUUID().toString();
+    }
+
+    /** 标准化可选文本。 */
+    private String text(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    /** 将底层AI任务状态映射为漫剧媒体状态。 */
+    private String normalizeMediaStatus(String status) {
+        return switch (status) {
+            case "success" -> "completed";
+            case "running" -> "processing";
+            case "failed", "canceled" -> "failed";
+            default -> "queued";
+        };
+    }
+
+    /** 创建资源不存在错误流。 */
+    private <T> Mono<T> notFound(String message) {
+        return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, message));
+    }
+
+    /** 创建数据修订冲突错误流。 */
+    private <T> Mono<T> conflict() {
+        return Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT, "数据已被其他操作修改，请刷新后重试"));
+    }
+}

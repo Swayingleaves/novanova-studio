@@ -126,7 +126,7 @@ export default function CheckInPage() {
                     className="mt-5"
                     type="error"
                     showIcon
-                    message="签到信息加载失败"
+                    title="签到信息加载失败"
                     action={<Button size="small" onClick={() => void statusQuery.refetch()}>重新加载</Button>}
                 />
             ) : null}
