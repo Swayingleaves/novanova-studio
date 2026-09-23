@@ -181,30 +181,32 @@ public class UserService {
      * @return Mono<Void> 操作结果
      */
     public Mono<Void> sendEmailCode(UserDtos.SendEmailCodeRequest request) {
-        // 标准化并校验邮箱，避免同一邮箱大小写重复注册。
-        String email = normalizeEmail(request.email());
-        validateEmailAllowedForRegistration(email);
-        log.info("发送邮箱验证码: email={}, purpose={}", email, CODE_PURPOSE_REGISTER);
-        return userRepository.findByEmail(email)
-                .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱已注册")))
-                .switchIfEmpty(Mono.defer(() -> {
-                    String code = randomNumericCode();
-                    return encodePassword(code)
-                            .flatMap(codeHash -> {
-                                EmailVerificationCode record = new EmailVerificationCode();
-                                record.setEmail(email);
-                                record.setCodeHash(codeHash);
-                                record.setPurpose(CODE_PURPOSE_REGISTER);
-                                record.setSendCount(1);
-                                record.setStatus(0);
-                                record.setExpiresAt(OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(EMAIL_CODE_EXPIRE_MINUTES));
-                                return userRepository.createEmailCode(record)
-                                        .flatMap(codeId -> sendEmailVerificationCode(email, code)
-                                                .onErrorResume(exception -> userRepository.markEmailCodeUsed(codeId)
-                                                        .then(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "发送验证码失败: " + exception.getMessage())))));
-                            });
-                }))
-                .then();
+        return Mono.defer(() -> {
+            // 标准化并校验邮箱，避免同一邮箱大小写重复注册。
+            String email = normalizeEmail(request.email());
+            validateEmailAllowedForRegistration(email);
+            log.info("发送邮箱验证码: email={}, purpose={}", email, CODE_PURPOSE_REGISTER);
+            return userRepository.findByEmail(email)
+                    .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱已注册")))
+                    .switchIfEmpty(Mono.defer(() -> {
+                        String code = randomNumericCode();
+                        return encodePassword(code)
+                                .flatMap(codeHash -> {
+                                    EmailVerificationCode record = new EmailVerificationCode();
+                                    record.setEmail(email);
+                                    record.setCodeHash(codeHash);
+                                    record.setPurpose(CODE_PURPOSE_REGISTER);
+                                    record.setSendCount(1);
+                                    record.setStatus(0);
+                                    record.setExpiresAt(OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(EMAIL_CODE_EXPIRE_MINUTES));
+                                    return userRepository.createEmailCode(record)
+                                            .flatMap(codeId -> sendEmailVerificationCode(email, code)
+                                                    .onErrorResume(exception -> userRepository.markEmailCodeUsed(codeId)
+                                                            .then(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "发送验证码失败: " + exception.getMessage())))));
+                                });
+                    }))
+                    .then();
+        });
     }
 
     /**
@@ -214,43 +216,45 @@ public class UserService {
      * @return Mono<AuthResponse> 登录响应
      */
     public Mono<UserDtos.AuthResponse> register(UserDtos.RegisterRequest request) {
-        // 注册前统一校验邮箱、密码和邮箱占用状态。
-        String email = normalizeEmail(request.email());
-        validateEmailAllowedForRegistration(email);
-        log.info("用户注册: email={}", email);
-        validatePassword(request.password());
-        return invitationService.resolveInviterUserId(request.invitationCode())
-                .map(Optional::of)
-                .defaultIfEmpty(Optional.empty())
-                .flatMap(inviterUserId -> userRepository.findByEmail(email)
-                .flatMap(existing -> Mono.<UserDtos.AuthResponse>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱已注册")))
-                .switchIfEmpty(userRepository.latestValidEmailCode(email, CODE_PURPOSE_REGISTER)
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱验证码无效或已过期")))
-                        .flatMap(codeRecord -> matchesPassword(request.code().trim(), codeRecord.getCodeHash())
-                                .flatMap(matches -> {
-                                    if (!matches) {
-                                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱验证码无效或已过期"));
-                                    }
-                                    return encodePassword(request.password())
-                                            .flatMap(passwordHash -> {
-                                                User user = new User();
-                                                user.setUsername(email);
-                                                user.setPassword(passwordHash);
-                                                user.setEmail(email);
-                                                user.setNickname(firstNonEmpty(request.nickname(), emailName(email)));
-                                                user.setRole(ROLE_USER);
-                                                user.setStatus(STATUS_NORMAL);
-                                                user.setInvitationCode(invitationService.generateInvitationCode());
-                                                user.setInvitedByUserId(inviterUserId.orElse(null));
-                                                user.setRegisteredAt(OffsetDateTime.now(ZoneOffset.UTC));
-                                                return userRepository.registerUserWithEmailCode(user, codeRecord.getId())
-                                                        .flatMap(userId -> creditService.initializeAccount(userId)
-                                                                .then(inviterUserId.map(inviterId -> creditService.grantInvitationReward(inviterId, userId)).orElseGet(Mono::empty))
-                                                                .then(userRepository.findById(userId)))
-                                                        .as(transactionalOperator::transactional)
-                                                        .map(this::buildAuthResponse);
-                                            });
-                                }))));
+        return Mono.defer(() -> {
+            // 注册前统一校验邮箱、密码和邮箱占用状态。
+            String email = normalizeEmail(request.email());
+            validateEmailAllowedForRegistration(email);
+            log.info("用户注册: email={}", email);
+            validatePassword(request.password());
+            return invitationService.resolveInviterUserId(request.invitationCode())
+                    .map(Optional::of)
+                    .defaultIfEmpty(Optional.empty())
+                    .flatMap(inviterUserId -> userRepository.findByEmail(email)
+                    .flatMap(existing -> Mono.<UserDtos.AuthResponse>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱已注册")))
+                    .switchIfEmpty(userRepository.latestValidEmailCode(email, CODE_PURPOSE_REGISTER)
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱验证码无效或已过期")))
+                            .flatMap(codeRecord -> matchesPassword(request.code().trim(), codeRecord.getCodeHash())
+                                    .flatMap(matches -> {
+                                        if (!matches) {
+                                            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱验证码无效或已过期"));
+                                        }
+                                        return encodePassword(request.password())
+                                                .flatMap(passwordHash -> {
+                                                    User user = new User();
+                                                    user.setUsername(email);
+                                                    user.setPassword(passwordHash);
+                                                    user.setEmail(email);
+                                                    user.setNickname(firstNonEmpty(request.nickname(), emailName(email)));
+                                                    user.setRole(ROLE_USER);
+                                                    user.setStatus(STATUS_NORMAL);
+                                                    user.setInvitationCode(invitationService.generateInvitationCode());
+                                                    user.setInvitedByUserId(inviterUserId.orElse(null));
+                                                    user.setRegisteredAt(OffsetDateTime.now(ZoneOffset.UTC));
+                                                    return userRepository.registerUserWithEmailCode(user, codeRecord.getId())
+                                                            .flatMap(userId -> creditService.initializeAccount(userId)
+                                                                    .then(inviterUserId.map(inviterId -> creditService.grantInvitationReward(inviterId, userId)).orElseGet(Mono::empty))
+                                                                    .then(userRepository.findById(userId)))
+                                                            .as(transactionalOperator::transactional)
+                                                            .map(this::buildAuthResponse);
+                                                });
+                                    }))));
+        });
     }
 
     /**
