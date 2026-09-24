@@ -81,6 +81,7 @@ type ScriptStoreReference = {
 let storeReference: ScriptStoreReference;
 let projectLoadGeneration = 0;
 let projectListLoadGeneration = 0;
+const episodeLoadRequests = new Map<string, Promise<EpisodeDetail>>();
 
 const saveScheduler = createScriptSaveScheduler({
     delayMilliseconds: 600,
@@ -161,10 +162,17 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
         if (cached) return cached;
         const projectId = get().project?.id;
         if (!projectId) throw new Error("剧本项目尚未加载");
-        const detail = await getScriptEpisode(projectId, episodeId);
-        if (get().project?.id !== projectId) throw new Error("剧本项目已经切换，请重新打开分集");
-        set((state) => ({ episodes: { ...state.episodes, [episodeId]: detail } }));
-        return detail;
+        const loadGeneration = projectLoadGeneration;
+        const requestKey = `${loadGeneration}:${episodeId}`;
+        const pendingRequest = episodeLoadRequests.get(requestKey);
+        if (pendingRequest) return pendingRequest;
+        const request = getScriptEpisode(projectId, episodeId).then((detail) => {
+            if (projectLoadGeneration !== loadGeneration || get().project?.id !== projectId) throw new Error("剧本项目已经切换，请重新打开分集");
+            set((state) => ({ episodes: { ...state.episodes, [episodeId]: detail } }));
+            return detail;
+        }).finally(() => { episodeLoadRequests.delete(requestKey); });
+        episodeLoadRequests.set(requestKey, request);
+        return request;
     },
     loadSupportingData: async () => {
         const projectId = get().project?.id;

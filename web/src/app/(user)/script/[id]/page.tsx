@@ -1,15 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { nanoid } from "nanoid";
 import { App, Alert, Button, Drawer, Progress, Spin, Tag } from "antd";
-import { ArrowLeft, Bot, BookOpenText, CheckCircle2, CircleAlert, FileClock, Globe2, ListTree, ScrollText, Sparkles, Users, WandSparkles } from "lucide-react";
+import { ArrowLeft, Bot, BookOpenText, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, FileClock, Globe2, ListTree, Plus, ScrollText, Sparkles, Users, WandSparkles } from "lucide-react";
 
 import { enterComicDrama, getScriptProductionReadiness } from "@/services/api/script";
 import { ScriptAiPanel } from "@/features/script/components/script-ai-panel";
 import { ScriptSectionEditor } from "@/features/script/components/section-editors";
+import { ScriptEpisodeReader } from "@/features/script/components/script-episode-reader";
+import { createScriptScene } from "@/features/script/lib/script-episode-editing";
 import { useScriptStore } from "@/features/script/stores/use-script-store";
-import type { ScriptWorkspaceSection } from "@/features/script/types";
+import type { EpisodeDetail, ScriptWorkspaceSection } from "@/features/script/types";
+import styles from "./script-directory.module.css";
 
 const NAVIGATION: Array<{ key: ScriptWorkspaceSection; label: string; icon: typeof BookOpenText }> = [
     { key: "overview", label: "故事概览", icon: BookOpenText },
@@ -39,6 +43,9 @@ export default function ScriptWorkspacePage() {
     const setAiTarget = useScriptStore((state) => state.setAiTarget);
     const [section, setSection] = useState<ScriptWorkspaceSection>("overview");
     const [selectedEpisodeId, setSelectedEpisodeId] = useState("");
+    const [selectedSceneId, setSelectedSceneId] = useState("");
+    const [sceneEditRequestId, setSceneEditRequestId] = useState("");
+    const [expandedEpisodeIds, setExpandedEpisodeIds] = useState<string[]>([]);
     const [directoryOpen, setDirectoryOpen] = useState(false);
     const [assistantOpen, setAssistantOpen] = useState(false);
     const [entering, setEntering] = useState(false);
@@ -47,6 +54,9 @@ export default function ScriptWorkspacePage() {
         const projectId = params.id;
         if (!projectId) return;
         setSelectedEpisodeId("");
+        setSelectedSceneId("");
+        setSceneEditRequestId("");
+        setExpandedEpisodeIds([]);
         void loadProject(projectId).then(() => loadSupportingData()).catch(() => undefined);
     }, [loadProject, loadSupportingData, params.id]);
     useEffect(() => {
@@ -60,13 +70,28 @@ export default function ScriptWorkspacePage() {
     const selectSection = (next: ScriptWorkspaceSection) => {
         setSection(next);
         setDirectoryOpen(false);
+        if (next === "episodes" && section !== "episodes") {
+            setSelectedSceneId("");
+            if (selectedEpisodeId) setExpandedEpisodeIds((current) => current.includes(selectedEpisodeId) ? current : [...current, selectedEpisodeId]);
+        }
         if (["overview", "outline", "characters", "world"].includes(next)) setAiTarget(null);
     };
     const selectEpisode = (episodeId: string) => {
         setSelectedEpisodeId(episodeId);
+        setSelectedSceneId("");
+        if (episodeId) setExpandedEpisodeIds((current) => current.includes(episodeId) ? current : [...current, episodeId]);
         const episode = project?.episodes.find((item) => item.id === episodeId);
         setAiTarget(episode ? { targetType: "episode", targetId: episode.id, label: episode.title } : null);
     };
+    const selectScene = useCallback((sceneId: string, episodeId = selectedEpisodeId) => {
+        if (episodeId !== selectedEpisodeId) setSelectedEpisodeId(episodeId);
+        setSelectedSceneId(sceneId);
+        if (episodeId) setExpandedEpisodeIds((current) => current.includes(episodeId) ? current : [...current, episodeId]);
+        const episode = useScriptStore.getState().episodes[episodeId];
+        const scene = episode?.scenes.find((item) => item.id === sceneId);
+        setAiTarget(scene ? { targetType: "scene", targetId: scene.id, label: `${episode.episode.title} · ${scene.title || `第 ${scene.sceneNumber} 场`}` } : episode ? { targetType: "episode", targetId: episode.episode.id, label: episode.episode.title } : null);
+    }, [selectedEpisodeId, setAiTarget]);
+    const toggleEpisodeExpansion = (episodeId: string) => setExpandedEpisodeIds((current) => current.includes(episodeId) ? current.filter((id) => id !== episodeId) : [...current, episodeId]);
 
     const openProduction = async () => {
         if (!project) return;
@@ -122,7 +147,7 @@ export default function ScriptWorkspacePage() {
                 <div className="min-w-0 flex-1"><h1 className="truncate text-base font-semibold text-[var(--studio-ink)]">{project.overview.title}</h1><div className="mt-1 flex items-center gap-2 text-xs text-[var(--studio-faint)]"><span>{SAVE_LABELS[saveStatus]}</span><span>修订 {project.revision}</span><span>{project.completionRate}%</span></div></div>
                 <Progress type="circle" size={34} percent={project.completionRate} strokeWidth={10} format={(percent) => `${percent}`} strokeColor="var(--studio-primary)" />
                 <Button className="lg:hidden" icon={<ListTree className="size-4" />} onClick={() => setDirectoryOpen(true)}>目录</Button>
-                <Button className="xl:hidden" icon={<Bot className="size-4" />} onClick={() => setAssistantOpen(true)}>AI</Button>
+                {section !== "episodes" ? <Button className="xl:hidden" icon={<Bot className="size-4" />} onClick={() => setAssistantOpen(true)}>AI</Button> : null}
                 <Button type="primary" loading={entering} icon={<Sparkles className="size-4" />} onClick={() => void openProduction()}>进入漫剧创作</Button>
             </header>
 
@@ -130,24 +155,63 @@ export default function ScriptWorkspacePage() {
             {saveStatus === "error" ? <Alert banner type="error" title={saveError || "保存失败，编辑内容仍保留在本地页面中。"} action={<Button size="small" onClick={retrySave}>重试保存</Button>} /> : null}
             {saveStatus === "conflict" ? <Alert banner type="warning" title="云端版本已被其他页面更新，自动保存已暂停。当前页面编辑内容仍保留，请确认后重载云端版本。" action={<Button size="small" onClick={() => modal.confirm({ title: "重载云端版本？", content: "当前页面未保存的修改会丢失。建议先复制重要内容后再重载。", okText: "确认重载", cancelText: "取消", onOk: () => reloadProject() })}>重载云端版本</Button>} /> : null}
 
-            <div className="grid min-h-0 flex-1 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[260px_minmax(0,1fr)_360px]">
-                <aside className="hidden min-h-0 overflow-y-auto border-r border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-3 lg:block"><Directory section={section} selectedEpisodeId={selectedEpisodeId} onSelectSection={selectSection} onSelectEpisode={(episodeId) => { selectEpisode(episodeId); setSection("episodes"); }} /></aside>
-                <section className="min-h-0 overflow-y-auto p-4 sm:p-6"><div className="mx-auto max-w-5xl rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-4 sm:p-6"><ScriptSectionEditor section={section} selectedEpisodeId={selectedEpisodeId} onSelectEpisode={selectEpisode} /></div></section>
-                <div className="hidden min-h-0 border-l border-[var(--studio-line)] xl:block"><ScriptAiPanel section={section} selectedEpisodeId={selectedEpisodeId} /></div>
+            <div className={`grid min-h-0 flex-1 lg:grid-cols-[260px_minmax(0,1fr)] ${section === "episodes" ? "" : "xl:grid-cols-[260px_minmax(0,1fr)_360px]"}`}>
+                <aside className="hidden min-h-0 overflow-y-auto border-r border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-3 lg:block"><Directory section={section} selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} expandedEpisodeIds={expandedEpisodeIds} onToggleEpisode={toggleEpisodeExpansion} onSelectSection={selectSection} onSelectEpisode={(episodeId) => { selectEpisode(episodeId); setSection("episodes"); }} onSelectScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSection("episodes"); }} onCreatedScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSceneEditRequestId(sceneId); setSection("episodes"); }} /></aside>
+                {section === "episodes" ? <ScriptEpisodeReader selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} sceneEditRequestId={sceneEditRequestId} onSceneEditRequestHandled={() => setSceneEditRequestId("")} onSelectEpisode={selectEpisode} onSelectScene={selectScene} onOpenAiGeneration={() => setAssistantOpen(true)} /> : <>
+                    <section className="min-h-0 overflow-y-auto p-4 sm:p-6"><div className="mx-auto max-w-5xl rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-4 sm:p-6"><ScriptSectionEditor section={section} /></div></section>
+                    <div className="hidden min-h-0 border-l border-[var(--studio-line)] xl:block"><ScriptAiPanel section={section} selectedEpisodeId={selectedEpisodeId} /></div>
+                </>}
             </div>
 
-            <Drawer title="剧本目录" placement="left" size={300} open={directoryOpen} onClose={() => setDirectoryOpen(false)}><Directory section={section} selectedEpisodeId={selectedEpisodeId} onSelectSection={selectSection} onSelectEpisode={(episodeId) => { selectEpisode(episodeId); setSection("episodes"); setDirectoryOpen(false); }} /></Drawer>
+            <Drawer title="剧本目录" placement="left" size={300} open={directoryOpen} onClose={() => setDirectoryOpen(false)}><Directory section={section} selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} expandedEpisodeIds={expandedEpisodeIds} onToggleEpisode={toggleEpisodeExpansion} onSelectSection={selectSection} onSelectEpisode={(episodeId) => { selectEpisode(episodeId); setSection("episodes"); setDirectoryOpen(false); }} onSelectScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSection("episodes"); setDirectoryOpen(false); }} onCreatedScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSceneEditRequestId(sceneId); setSection("episodes"); setDirectoryOpen(false); }} /></Drawer>
             <Drawer title="AI 剧本助手" placement="right" size="min(380px, 100vw)" open={assistantOpen} onClose={() => setAssistantOpen(false)} styles={{ body: { padding: 0 } }}><ScriptAiPanel section={section} selectedEpisodeId={selectedEpisodeId} /></Drawer>
         </main>
     );
 }
 
-function Directory({ section, selectedEpisodeId, onSelectSection, onSelectEpisode }: { section: ScriptWorkspaceSection; selectedEpisodeId: string; onSelectSection: (section: ScriptWorkspaceSection) => void; onSelectEpisode: (episodeId: string) => void }) {
+function Directory({ section, selectedEpisodeId, selectedSceneId, expandedEpisodeIds, onToggleEpisode, onSelectSection, onSelectEpisode, onSelectScene, onCreatedScene }: { section: ScriptWorkspaceSection; selectedEpisodeId: string; selectedSceneId: string; expandedEpisodeIds: string[]; onToggleEpisode: (episodeId: string) => void; onSelectSection: (section: ScriptWorkspaceSection) => void; onSelectEpisode: (episodeId: string) => void; onSelectScene: (episodeId: string, sceneId: string) => void; onCreatedScene: (episodeId: string, sceneId: string) => void }) {
+    const { message } = App.useApp();
     const project = useScriptStore((state) => state.project);
-    const selectedEpisode = useScriptStore((state) => selectedEpisodeId ? state.episodes[selectedEpisodeId] : undefined);
-    const setAiTarget = useScriptStore((state) => state.setAiTarget);
-    const aiTarget = useScriptStore((state) => state.aiTarget);
+    const episodes = useScriptStore((state) => state.episodes);
+    const loadEpisode = useScriptStore((state) => state.loadEpisode);
+    const updateEpisode = useScriptStore((state) => state.updateEpisode);
+    const [loadingEpisodeIds, setLoadingEpisodeIds] = useState<string[]>([]);
+    const [episodeLoadErrors, setEpisodeLoadErrors] = useState<Record<string, string>>({});
+    const [creatingSceneEpisodeIds, setCreatingSceneEpisodeIds] = useState<string[]>([]);
     if (!project) return null;
+    const loadScenes = (episodeId: string) => {
+        if (useScriptStore.getState().episodes[episodeId] || loadingEpisodeIds.includes(episodeId)) return;
+        setLoadingEpisodeIds((current) => [...current, episodeId]);
+        setEpisodeLoadErrors((current) => ({ ...current, [episodeId]: "" }));
+        void loadEpisode(episodeId).catch((error: unknown) => {
+            setEpisodeLoadErrors((current) => ({ ...current, [episodeId]: error instanceof Error ? error.message : "场次加载失败" }));
+        }).finally(() => setLoadingEpisodeIds((current) => current.filter((id) => id !== episodeId)));
+    };
+    const addEpisode = () => {
+        const currentProject = useScriptStore.getState().project;
+        if (!currentProject) return;
+        const episodeNumber = currentProject.episodes.length + 1;
+        const id = nanoid();
+        const detail: EpisodeDetail = { episode: { id, episodeNumber, title: `第 ${episodeNumber} 集`, summary: "", keyEvents: "", mainConflict: "", climax: "", endingHook: "", targetDurationSeconds: 0, completionStatus: "planning", sortOrder: currentProject.episodes.length }, scenes: [] };
+        updateEpisode(detail);
+        onSelectEpisode(id);
+    };
+    const addScene = async (episodeId: string) => {
+        if (creatingSceneEpisodeIds.includes(episodeId)) return;
+        setCreatingSceneEpisodeIds((current) => [...current, episodeId]);
+        try {
+            const detail = useScriptStore.getState().episodes[episodeId] || await loadEpisode(episodeId);
+            if (useScriptStore.getState().project?.id !== project.id) return;
+            const latestDetail = useScriptStore.getState().episodes[episodeId] || detail;
+            const scene = createScriptScene(latestDetail.scenes.length);
+            updateEpisode({ ...latestDetail, scenes: [...latestDetail.scenes, scene] });
+            onCreatedScene(episodeId, scene.id);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "新增场次失败，请重试");
+        } finally {
+            setCreatingSceneEpisodeIds((current) => current.filter((id) => id !== episodeId));
+        }
+    };
     return (
         <nav aria-label="剧本工作台目录">
             <div className="space-y-1">
@@ -178,50 +242,52 @@ function Directory({ section, selectedEpisodeId, onSelectSection, onSelectEpisod
                 <div className="mt-2 space-y-1">
                     {project.episodes.map((episode) => {
                         const isEpActive = episode.id === selectedEpisodeId;
+                        const isCoverActive = section === "episodes" && isEpActive && !selectedSceneId;
+                        const isExpanded = expandedEpisodeIds.includes(episode.id);
+                        const detail = episodes[episode.id];
                         return (
                             <div key={episode.id}>
-                                <button
-                                    type="button"
-                                    aria-expanded={isEpActive}
-                                    // 同上：选中态与主导航同一组变量，内联样式保证一定生效。
-                                    style={isEpActive ? { background: "var(--studio-action)", color: "var(--studio-action-foreground)" } : undefined}
-                                    className={`block w-full truncate rounded-lg px-3 py-2 text-left text-sm focus-visible:outline-2 focus-visible:outline-[var(--studio-primary)] ${
-                                        isEpActive
-                                            ? "font-semibold shadow-sm"
-                                            : "text-[var(--studio-muted)] hover:bg-[var(--studio-surface-soft)]"
-                                    }`}
-                                    onClick={() => onSelectEpisode(episode.id)}
-                                >
-                                    第 {episode.episodeNumber} 集 · {episode.title}
-                                </button>
-                                {isEpActive && selectedEpisode?.scenes.length ? (
-                                    <div className="ml-4 mt-1 space-y-1 border-l border-[var(--studio-line)] pl-2">
-                                        {selectedEpisode.scenes.map((scene) => {
-                                            const isSceneActive = aiTarget?.targetType === "scene" && aiTarget?.targetId === scene.id;
+                                <div className="flex items-center gap-1">
+                                    <button type="button" aria-expanded={isExpanded} aria-label={`${isExpanded ? "收起" : "展开"}第 ${episode.episodeNumber} 集场次`} className="flex size-11 shrink-0 items-center justify-center rounded-md text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" onClick={() => { onToggleEpisode(episode.id); if (!isExpanded) loadScenes(episode.id); }}>
+                                        {isExpanded ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronRight className="size-4" aria-hidden="true" />}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        aria-current={section === "episodes" && isEpActive && !selectedSceneId ? "page" : undefined}
+                                        style={isCoverActive ? { background: "var(--studio-action)", color: "var(--studio-action-foreground)" } : isEpActive && section === "episodes" ? { background: "var(--studio-primary-soft)", color: "var(--studio-action)" } : undefined}
+                                        className={`min-w-0 flex-1 truncate rounded-lg px-2 py-2 text-left text-sm focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${isEpActive && section === "episodes" ? "font-semibold" : "text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)]"}`}
+                                        onClick={() => onSelectEpisode(episode.id)}
+                                        title={`第 ${episode.episodeNumber} 集 · ${episode.title}`}
+                                    >
+                                        第 {episode.episodeNumber} 集 · {episode.title}
+                                    </button>
+                                    <button type="button" aria-label={`为第 ${episode.episodeNumber} 集新增场次`} title="新增场次" disabled={creatingSceneEpisodeIds.includes(episode.id)} className="flex size-11 shrink-0 items-center justify-center rounded-md text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] disabled:opacity-50" onClick={() => void addScene(episode.id)}><Plus className="size-4" aria-hidden="true" /></button>
+                                </div>
+                                {isExpanded ? (
+                                    <div className={styles.sceneGroup}>
+                                        {detail?.scenes.map((scene) => {
+                                            const isSceneActive = section === "episodes" && selectedSceneId === scene.id;
                                             return (
                                                 <button
                                                     key={scene.id}
                                                     type="button"
-                                                    // 同上：场次选中态与主导航同一组变量。
+                                                    aria-current={isSceneActive ? "page" : undefined}
                                                     style={isSceneActive ? { background: "var(--studio-action)", color: "var(--studio-action-foreground)" } : undefined}
-                                                    className={`block w-full truncate rounded-md px-2 py-1.5 text-left text-xs transition-colors focus-visible:outline-2 focus-visible:outline-[var(--studio-primary)] ${
+                                                    className={`${styles.sceneItem} block w-full truncate rounded-md px-2 py-1.5 text-left text-xs transition-colors focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${
                                                         isSceneActive
                                                             ? "font-semibold shadow-sm"
                                                             : "text-[var(--studio-muted)] hover:bg-[var(--studio-surface-soft)] hover:text-[var(--studio-ink)]"
                                                     }`}
-                                                    onClick={() => {
-                                                        onSelectEpisode(episode.id);
-                                                        setAiTarget({
-                                                            targetType: "scene",
-                                                            targetId: scene.id,
-                                                            label: `${episode.title} · ${scene.title || `第 ${scene.sceneNumber} 场`}`,
-                                                        });
-                                                    }}
+                                                    onClick={() => onSelectScene(episode.id, scene.id)}
+                                                    title={`第 ${scene.sceneNumber} 场 · ${scene.title || "未命名场次"}`}
                                                 >
                                                     第 {scene.sceneNumber} 场 · {scene.title || "未命名场次"}
                                                 </button>
                                             );
                                         })}
+                                        {!detail && !episodeLoadErrors[episode.id] ? <div className="px-2 py-1.5 text-xs text-[var(--studio-faint)]"><span>{loadingEpisodeIds.includes(episode.id) ? "正在加载场次…" : "场次尚未加载"}</span>{!loadingEpisodeIds.includes(episode.id) ? <button type="button" className="ml-2 underline focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" onClick={() => loadScenes(episode.id)}>加载</button> : null}</div> : null}
+                                        {!detail && episodeLoadErrors[episode.id] ? <div className="px-2 py-1.5 text-xs text-[var(--studio-danger)]"><span>{episodeLoadErrors[episode.id]}</span><button type="button" className="ml-2 underline focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" onClick={() => loadScenes(episode.id)}>重试</button></div> : null}
+                                        {detail && !detail.scenes.length ? <p className="px-2 py-1.5 text-xs text-[var(--studio-faint)]">暂无场次</p> : null}
                                     </div>
                                 ) : null}
                             </div>
@@ -230,6 +296,7 @@ function Directory({ section, selectedEpisodeId, onSelectSection, onSelectEpisod
                     {!project.episodes.length ? (
                         <p className="px-3 py-2 text-xs text-[var(--studio-faint)]">尚未创建分集</p>
                     ) : null}
+                    <button type="button" className="mt-3 flex w-full items-center gap-2 rounded-lg border border-dashed border-[var(--studio-line-strong)] px-3 py-2 text-left text-sm text-[var(--studio-muted)] hover:border-[var(--studio-action)] hover:text-[var(--studio-ink)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" onClick={addEpisode}><Plus className="size-4" aria-hidden="true" />新增分集</button>
                 </div>
             </div>
         </nav>

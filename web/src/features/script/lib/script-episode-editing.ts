@@ -1,4 +1,10 @@
-import type { ScriptAiDraft, ScriptBlock } from "../types";
+import { nanoid } from "nanoid";
+import type { ScriptAiDraft, ScriptBlock, ScriptScene } from "../types";
+
+/** 创建按现有场次数量顺序排列的空白场次。 */
+export function createScriptScene(sceneCount: number): ScriptScene {
+    return { id: nanoid(), locationId: null, sceneNumber: sceneCount + 1, title: `场次 ${sceneCount + 1}`, interiorExterior: "interior", timeDescription: "", sceneGoal: "", actionSummary: "", transitionDescription: "", previousRelation: "", nextRelation: "", sortOrder: sceneCount, characterIds: [], blocks: [] };
+}
 
 /** 替换指定正文块并保持其他正文块引用不变。 */
 export function replaceScriptBlock(blocks: ScriptBlock[], replacement: ScriptBlock) {

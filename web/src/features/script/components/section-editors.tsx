@@ -1,17 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { nanoid } from "nanoid";
-import { App, Button, Empty, Input, InputNumber, Popconfirm, Select, Spin, Tabs, Tag } from "antd";
+import { Button, Input, InputNumber, Popconfirm, Select, Tabs } from "antd";
 import { ArrowDown, ArrowUp, Plus, Sparkles, Trash2 } from "lucide-react";
 
-import { moveScriptBlock, removeScriptBlock, replaceScriptBlock, synchronizeDialogueCharacters } from "../lib/script-episode-editing";
+import { createScriptScene, moveScriptBlock, removeScriptBlock, replaceScriptBlock, synchronizeDialogueCharacters } from "../lib/script-episode-editing";
 import { useScriptStore } from "../stores/use-script-store";
 import type { EpisodeDetail, ScriptBlock, ScriptCharacter, ScriptOverview, ScriptScene, ScriptWorkspaceSection } from "../types";
 import { CharacterRelationshipGraph } from "./character-relationship-graph";
 import { ScriptAnalysisVersions } from "./script-analysis-versions";
 
-type ScriptSectionEditorProps = { section: ScriptWorkspaceSection; selectedEpisodeId: string; onSelectEpisode: (episodeId: string) => void };
+type ScriptSectionEditorProps = { section: Exclude<ScriptWorkspaceSection, "episodes"> };
 
 const CONTENT_TYPE_OPTIONS = [
     { value: "comicDrama", label: "漫剧" },
@@ -23,12 +22,11 @@ const CONTENT_TYPE_OPTIONS = [
 ] as const;
 
 /** 渲染工作台当前剧本区块。 */
-export function ScriptSectionEditor({ section, selectedEpisodeId, onSelectEpisode }: ScriptSectionEditorProps) {
+export function ScriptSectionEditor({ section }: ScriptSectionEditorProps) {
     if (section === "overview") return <OverviewEditor />;
     if (section === "outline") return <OutlineEditor />;
     if (section === "characters") return <CharactersEditor />;
     if (section === "world") return <WorldEditor />;
-    if (section === "episodes") return <EpisodesEditor selectedEpisodeId={selectedEpisodeId} onSelectEpisode={onSelectEpisode} />;
     return <ScriptAnalysisVersions mode={section} />;
 }
 
@@ -215,68 +213,13 @@ function WorldEditor() {
     </section>;
 }
 
-function EpisodesEditor({ selectedEpisodeId, onSelectEpisode }: { selectedEpisodeId: string; onSelectEpisode: (episodeId: string) => void }) {
-    const { modal, message } = App.useApp();
-    const project = useScriptStore((state) => state.project);
-    const detail = useScriptStore((state) => selectedEpisodeId ? state.episodes[selectedEpisodeId] : undefined);
-    const loadEpisode = useScriptStore((state) => state.loadEpisode);
-    const updateEpisode = useScriptStore((state) => state.updateEpisode);
-    const reorderEpisodes = useScriptStore((state) => state.reorderEpisodes);
-    const deleteEpisode = useScriptStore((state) => state.deleteEpisode);
-    const setAiTarget = useScriptStore((state) => state.setAiTarget);
-    const [loadError, setLoadError] = useState("");
-    useEffect(() => {
-        let active = true;
-        setLoadError("");
-        if (selectedEpisodeId && !detail) {
-            void loadEpisode(selectedEpisodeId).catch((error: unknown) => {
-                if (active) setLoadError(error instanceof Error ? error.message : "分集正文加载失败");
-            });
-        }
-        return () => { active = false; };
-    }, [detail, loadEpisode, selectedEpisodeId]);
-    if (!project) return null;
-    const addEpisode = () => {
-        const id = nanoid();
-        const episode: EpisodeDetail = { episode: { id, episodeNumber: project.episodes.length + 1, title: `第 ${project.episodes.length + 1} 集`, summary: "", keyEvents: "", mainConflict: "", climax: "", endingHook: "", targetDurationSeconds: 0, completionStatus: "planning", sortOrder: project.episodes.length }, scenes: [] };
-        updateEpisode(episode);
-        onSelectEpisode(id);
-        setAiTarget({ targetType: "episode", targetId: id, label: episode.episode.title });
-    };
-    const moveEpisode = (index: number, direction: -1 | 1) => {
-        const ids = project.episodes.map((episode) => episode.id);
-        const target = index + direction;
-        if (target < 0 || target >= ids.length) return;
-        [ids[index], ids[target]] = [ids[target], ids[index]];
-        reorderEpisodes(ids);
-    };
-    const confirmDelete = (episodeId: string) => modal.confirm({
-        title: "删除当前分集？",
-        content: "该分集中的场次和正文也会被删除。",
-        okText: "删除",
-        okButtonProps: { danger: true },
-        cancelText: "取消",
-        onOk: async () => {
-            try {
-                await deleteEpisode(episodeId);
-                onSelectEpisode(project.episodes.find((episode) => episode.id !== episodeId)?.id || "");
-                message.success("分集已删除");
-            } catch (error) {
-                message.error(error instanceof Error ? error.message : "分集删除失败，请重试");
-                throw error;
-            }
-        },
-    });
-    return <section><SectionHeader title="分集剧本" description="按集、场次和正文块组织动作、对白、旁白与转场。" action={<Button icon={<Plus className="size-4" />} onClick={addEpisode}>新增分集</Button>} /><div className="mb-5 space-y-2">{project.episodes.map((episode, index) => <div key={episode.id} className={`flex items-center gap-2 rounded-lg border p-2 ${episode.id === selectedEpisodeId ? "border-[var(--studio-primary)] bg-[var(--studio-primary-soft)]" : "border-[var(--studio-line)]"}`}><button type="button" className="min-w-0 flex-1 text-left" onClick={() => { onSelectEpisode(episode.id); setAiTarget({ targetType: "episode", targetId: episode.id, label: episode.title }); }}><span className="font-medium text-[var(--studio-ink)]">第 {episode.episodeNumber} 集 · {episode.title}</span><Tag className="ml-2">{episode.completionStatus}</Tag></button><Button size="small" aria-label="上移分集" icon={<ArrowUp className="size-3.5" />} disabled={!index} onClick={() => moveEpisode(index, -1)} /><Button size="small" aria-label="下移分集" icon={<ArrowDown className="size-3.5" />} disabled={index === project.episodes.length - 1} onClick={() => moveEpisode(index, 1)} /></div>)}</div>{loadError ? <Empty description={loadError}><Button onClick={() => { setLoadError(""); void loadEpisode(selectedEpisodeId).catch((error: unknown) => setLoadError(error instanceof Error ? error.message : "分集正文加载失败")); }}>重新加载分集</Button></Empty> : selectedEpisodeId && !detail ? <Spin /> : detail ? <EpisodeDetailEditor detail={detail} onChange={updateEpisode} onDelete={() => confirmDelete(detail.episode.id)} /> : <Empty description="新建或选择一个分集开始写作"><Button type="primary" onClick={addEpisode}>新增分集</Button></Empty>}</section>;
-}
-
-function EpisodeDetailEditor({ detail, onChange, onDelete }: { detail: EpisodeDetail; onChange: (detail: EpisodeDetail) => void; onDelete: () => void }) {
+export function EpisodeDetailEditor({ detail, sceneId, onChange, onDelete, onSelectScene }: { detail: EpisodeDetail; sceneId?: string; onChange: (detail: EpisodeDetail) => void; onDelete: () => void; onSelectScene: (sceneId: string) => void }) {
     const project = useScriptStore((state) => state.project)!;
     const setAiTarget = useScriptStore((state) => state.setAiTarget);
     const updateSummary = (patch: Partial<EpisodeDetail["episode"]>) => onChange({ ...detail, episode: { ...detail.episode, ...patch } });
     const updateScene = (sceneId: string, updater: (scene: ScriptScene) => ScriptScene) => onChange({ ...detail, scenes: detail.scenes.map((scene) => scene.id === sceneId ? updater(scene) : scene) });
     const moveScene = (index: number, direction: -1 | 1) => { const scenes = [...detail.scenes]; const target = index + direction; if (target < 0 || target >= scenes.length) return; [scenes[index], scenes[target]] = [scenes[target], scenes[index]]; onChange({ ...detail, scenes: scenes.map((scene, sortOrder) => ({ ...scene, sortOrder, sceneNumber: sortOrder + 1 })) }); };
-    const addScene = () => { const scene: ScriptScene = { id: nanoid(), locationId: null, sceneNumber: detail.scenes.length + 1, title: `场次 ${detail.scenes.length + 1}`, interiorExterior: "interior", timeDescription: "", sceneGoal: "", actionSummary: "", transitionDescription: "", previousRelation: "", nextRelation: "", sortOrder: detail.scenes.length, characterIds: [], blocks: [] }; onChange({ ...detail, scenes: [...detail.scenes, scene] }); };
+    const addScene = () => { const scene = createScriptScene(detail.scenes.length); onChange({ ...detail, scenes: [...detail.scenes, scene] }); onSelectScene(scene.id); };
     const episodeFields = [
         ["summary", "分集梗概"], ["keyEvents", "关键事件"], ["mainConflict", "主要冲突"],
         ["climax", "高潮"], ["endingHook", "结尾悬念"],
@@ -286,7 +229,7 @@ function EpisodeDetailEditor({ detail, onChange, onDelete }: { detail: EpisodeDe
         ["previousRelation", "与前一场次的关系"], ["nextRelation", "与后一场次的关系"],
     ] as const;
     return <div className="space-y-5">
-        <div className="rounded-xl border border-[var(--studio-line)] p-4">
+        {!sceneId ? <div className="rounded-xl border border-[var(--studio-line)] p-4">
             <div className="flex flex-wrap items-end gap-2">
                 <div className="min-w-48 flex-1"><Field label="分集标题"><Input value={detail.episode.title} onChange={(event) => updateSummary({ title: event.target.value })} /></Field></div>
                 <Field label="完成状态"><Select value={detail.episode.completionStatus} options={[{ value: "planning", label: "规划中" }, { value: "draft", label: "草稿" }, { value: "complete", label: "已完成" }]} onChange={(completionStatus) => updateSummary({ completionStatus })} /></Field>
@@ -297,9 +240,9 @@ function EpisodeDetailEditor({ detail, onChange, onDelete }: { detail: EpisodeDe
             <div className="mt-3 grid gap-3 md:grid-cols-2">{episodeFields.map(([key, label]) => <Field key={key} label={label}>
                 <Input.TextArea rows={3} value={detail.episode[key]} onChange={(event) => updateSummary({ [key]: event.target.value })} />
             </Field>)}</div>
-        </div>
+        </div> : null}
         <div className="flex justify-end"><Button icon={<Plus className="size-4" />} onClick={addScene}>添加场次</Button></div>
-        {detail.scenes.map((scene, sceneIndex) => <article key={scene.id} className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-4">
+        {detail.scenes.filter((scene) => scene.id === sceneId).map((scene) => { const sceneIndex = detail.scenes.findIndex((item) => item.id === scene.id); return <article key={scene.id} className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-4">
             <div className="flex flex-wrap items-end gap-2">
                 <div className="min-w-44 flex-1"><Field label={`第 ${scene.sceneNumber} 场标题`}><Input value={scene.title} onChange={(event) => updateScene(scene.id, (current) => ({ ...current, title: event.target.value }))} /></Field></div>
                 <Field label="地点"><Select allowClear className="min-w-32" value={scene.locationId || undefined} options={project.locations.map((location) => ({ value: location.id, label: location.name }))} onChange={(locationId) => updateScene(scene.id, (current) => ({ ...current, locationId: locationId || null }))} /></Field>
@@ -307,8 +250,8 @@ function EpisodeDetailEditor({ detail, onChange, onDelete }: { detail: EpisodeDe
                 <Button aria-label="AI优化场次" icon={<Sparkles className="size-4" />} onClick={() => setAiTarget({ targetType: "scene", targetId: scene.id, label: `${detail.episode.title} · ${scene.title}` })} />
                 <Button aria-label="上移场次" icon={<ArrowUp className="size-4" />} disabled={!sceneIndex} onClick={() => moveScene(sceneIndex, -1)} />
                 <Button aria-label="下移场次" icon={<ArrowDown className="size-4" />} disabled={sceneIndex === detail.scenes.length - 1} onClick={() => moveScene(sceneIndex, 1)} />
-                <Button danger aria-label="删除场次" icon={<Trash2 className="size-4" />} onClick={() => onChange({ ...detail,
-                    scenes: detail.scenes.filter((item) => item.id !== scene.id).map((item, sortOrder) => ({ ...item, sortOrder, sceneNumber: sortOrder + 1 })) })} />
+                <Button danger aria-label="删除场次" icon={<Trash2 className="size-4" />} onClick={() => { onSelectScene(detail.scenes[sceneIndex + 1]?.id || detail.scenes[sceneIndex - 1]?.id || ""); onChange({ ...detail,
+                    scenes: detail.scenes.filter((item) => item.id !== scene.id).map((item, sortOrder) => ({ ...item, sortOrder, sceneNumber: sortOrder + 1 })) }); }} />
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <Field label="发生时间"><Input value={scene.timeDescription} onChange={(event) => updateScene(scene.id, (current) => ({ ...current, timeDescription: event.target.value }))} /></Field>
@@ -331,7 +274,7 @@ function EpisodeDetailEditor({ detail, onChange, onDelete }: { detail: EpisodeDe
                     onClick={() => updateScene(scene.id, (current) => ({ ...current, blocks: [...current.blocks, { id: nanoid(), blockType,
                         characterId: blockType === "dialogue" ? current.characterIds[0] : null, content: "", sortOrder: current.blocks.length }] }))}>
                     添加{({ action: "动作", dialogue: "对白", narration: "旁白", transition: "转场" })[blockType]}</Button>)}</div>
-        </article>)}
+        </article>; })}
     </div>;
 }
 
