@@ -33,7 +33,8 @@ export type ComicDramaVoiceTrack = { id: string; shotId?: string | null; sourceB
 /** 保存结构化声音轨所需字段。 */
 export type ComicDramaVoiceTrackInput = Omit<ComicDramaVoiceTrack, "createdAt" | "updatedAt">;
 /** 分镜项目绝对时间轴上的文字片段。 */
-export type ComicDramaTimelineText = { id: string; content: string; startMs: number; endMs: number; trackNumber: number; positionX: number; positionY: number; fontSize: number; color: string; alignment: "left" | "center" | "right"; backgroundColor?: string | null; revision: number; createdAt?: string; updatedAt?: string };
+export type StoryboardFontFamily = "notoSansSc" | "notoSerifSc" | "lxgwWenKai" | "inter" | "montserrat" | "lora" | "caveat";
+export type ComicDramaTimelineText = { id: string; content: string; startMs: number; endMs: number; trackNumber: number; positionX: number; positionY: number; fontSize: number; fontFamily: StoryboardFontFamily; color: string; alignment: "left" | "center" | "right"; backgroundColor?: string | null; revision: number; createdAt?: string; updatedAt?: string };
 /** 保存文字片段所需字段。 */
 export type ComicDramaTimelineTextInput = Omit<ComicDramaTimelineText, "createdAt" | "updatedAt">;
 /** 批量任务。 */

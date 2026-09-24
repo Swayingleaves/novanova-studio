@@ -130,8 +130,9 @@ public final class ComicDramaDtos {
                                @Min(0) @Max(2) int trackNumber,
                                @NotNull @DecimalMin("0") @DecimalMax("1") BigDecimal positionX,
                                @NotNull @DecimalMin("0") @DecimalMax("1") BigDecimal positionY,
-                               @Min(12) @Max(120) int fontSize,
-                               @NotBlank @Pattern(regexp = "#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?") String color,
+                                @Min(12) @Max(120) int fontSize,
+                                @NotBlank String fontFamily,
+                                @NotBlank @Pattern(regexp = "#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?") String color,
                                @NotBlank @Pattern(regexp = "left|center|right") String alignment,
                                @Pattern(regexp = "#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?") String backgroundColor,
                                @Min(0) long revision, OffsetDateTime createdAt, OffsetDateTime updatedAt) {

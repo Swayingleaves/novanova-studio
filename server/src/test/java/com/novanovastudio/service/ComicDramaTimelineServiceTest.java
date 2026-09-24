@@ -116,7 +116,7 @@ class ComicDramaTimelineServiceTest {
         ComicDramaDtos.TimelineText firstTrackText = timelineText(1000, 2500);
         ComicDramaDtos.TimelineText text = new ComicDramaDtos.TimelineText(firstTrackText.id(), firstTrackText.content(),
                 firstTrackText.startMs(), firstTrackText.endMs(), 1, firstTrackText.positionX(),
-                firstTrackText.positionY(), firstTrackText.fontSize(), firstTrackText.color(),
+                firstTrackText.positionY(), firstTrackText.fontSize(), firstTrackText.fontFamily(), firstTrackText.color(),
                 firstTrackText.alignment(), firstTrackText.backgroundColor(), 0L, null, null);
         ComicDramaRepository.ProjectRecord project = new ComicDramaRepository.ProjectRecord(
                 "project-one", 7L, "测试项目", "draft", 3L, 1, OffsetDateTime.now(), OffsetDateTime.now());
@@ -141,13 +141,13 @@ class ComicDramaTimelineServiceTest {
     void shouldReorderTimelineTextsTogether() {
         ComicDramaDtos.TimelineText first = timelineText(0, 1000);
         ComicDramaDtos.TimelineText second = new ComicDramaDtos.TimelineText("text-two", "第二段", 1500, 3500,
-                0, first.positionX(), first.positionY(), first.fontSize(), first.color(), first.alignment(),
+                0, first.positionX(), first.positionY(), first.fontSize(), first.fontFamily(), first.color(), first.alignment(),
                 first.backgroundColor(), 0L, null, null);
         ComicDramaDtos.TimelineText movedSecond = new ComicDramaDtos.TimelineText(second.id(), second.content(), 0, 2000,
-                0, second.positionX(), second.positionY(), second.fontSize(), second.color(), second.alignment(),
+                0, second.positionX(), second.positionY(), second.fontSize(), second.fontFamily(), second.color(), second.alignment(),
                 second.backgroundColor(), 0L, null, null);
         ComicDramaDtos.TimelineText movedFirst = new ComicDramaDtos.TimelineText(first.id(), first.content(), 2500, 3500,
-                0, first.positionX(), first.positionY(), first.fontSize(), first.color(), first.alignment(),
+                0, first.positionX(), first.positionY(), first.fontSize(), first.fontFamily(), first.color(), first.alignment(),
                 first.backgroundColor(), 0L, null, null);
         ComicDramaRepository.ProjectRecord project = new ComicDramaRepository.ProjectRecord(
                 "project-one", 7L, "测试项目", "draft", 3L, 1, OffsetDateTime.now(), OffsetDateTime.now());
@@ -175,10 +175,10 @@ class ComicDramaTimelineServiceTest {
     void shouldRejectOverlappingTimelineTextReorder() {
         ComicDramaDtos.TimelineText first = timelineText(0, 1000);
         ComicDramaDtos.TimelineText second = new ComicDramaDtos.TimelineText("text-two", "第二段", 1500, 2500,
-                0, first.positionX(), first.positionY(), first.fontSize(), first.color(), first.alignment(),
+                0, first.positionX(), first.positionY(), first.fontSize(), first.fontFamily(), first.color(), first.alignment(),
                 first.backgroundColor(), 0L, null, null);
         ComicDramaDtos.TimelineText overlapping = new ComicDramaDtos.TimelineText(second.id(), second.content(), 500, 1500,
-                0, second.positionX(), second.positionY(), second.fontSize(), second.color(), second.alignment(),
+                0, second.positionX(), second.positionY(), second.fontSize(), second.fontFamily(), second.color(), second.alignment(),
                 second.backgroundColor(), 0L, null, null);
         ComicDramaRepository.ProjectRecord project = new ComicDramaRepository.ProjectRecord(
                 "project-one", 7L, "测试项目", "draft", 3L, 1, OffsetDateTime.now(), OffsetDateTime.now());
@@ -193,6 +193,22 @@ class ComicDramaTimelineServiceTest {
     }
 
     /**
+     * 未列入字体目录的标识必须在访问数据库之前被拒绝。
+     */
+    @Test
+    void shouldRejectUnsupportedTimelineFont() {
+        ComicDramaDtos.TimelineText original = timelineText(0, 1000);
+        ComicDramaDtos.TimelineText invalid = new ComicDramaDtos.TimelineText(original.id(), original.content(),
+                original.startMs(), original.endMs(), original.trackNumber(), original.positionX(),
+                original.positionY(), original.fontSize(), "unknownFont", original.color(), original.alignment(),
+                original.backgroundColor(), original.revision(), null, null);
+
+        assertThrows(BusinessException.class, () -> service.saveTimelineText(
+                new ComicDramaDtos.SaveTimelineTextRequest("project-one", 3L, invalid)));
+        verify(repository, org.mockito.Mockito.never()).saveTimelineText(any(), any());
+    }
+
+    /**
      * 构建具备完整展示字段的测试文字。
      *
      * @param startMs 起点毫秒
@@ -201,7 +217,7 @@ class ComicDramaTimelineServiceTest {
      */
     private ComicDramaDtos.TimelineText timelineText(long startMs, long endMs) {
         return new ComicDramaDtos.TimelineText("text-one", "片头文字", startMs, endMs,
-                0, new BigDecimal("0.5"), new BigDecimal("0.8"), 36, "#ffffff", "center", null,
+                0, new BigDecimal("0.5"), new BigDecimal("0.8"), 36, "notoSansSc", "#ffffff", "center", null,
                 0L, null, null);
     }
 }
