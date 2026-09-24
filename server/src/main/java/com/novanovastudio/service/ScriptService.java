@@ -103,7 +103,7 @@ public class ScriptService {
                             .defaultIfEmpty(List.of()).flatMap(sections -> {
                                 ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview(
                                         request.title().trim(), StringUtils.hasText(request.contentType()) ? request.contentType().trim() : template.contentType(),
-                                        text(template.genre()), text(request.logline()), "", "", "", 0,
+                                        text(template.genre()), text(request.logline()), "", 0,
                                         template.recommendedEpisodeCount(), "", "", "", "", "");
                                 ScriptRepository.ProjectRecord record = new ScriptRepository.ProjectRecord(projectId, userId, overview,
                                         "idea", 0, 0, null, null, null);
@@ -842,8 +842,8 @@ public class ScriptService {
         if (draft.selectedIndex() >= draft.candidates().size()) throw invalid("请选择有效的候选故事方向");
         ScriptDtos.StoryDirection selected = validated(draft.candidates().get(draft.selectedIndex()));
         ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview(current.title(), current.contentType(),
-                current.genre(), selected.logline(), text(selected.synopsis()), current.sellingPoints(),
-                current.targetAudience(), current.targetDurationSeconds(), current.targetEpisodeCount(),
+                current.genre(), selected.logline(), text(selected.synopsis()),
+                current.targetDurationSeconds(), current.targetEpisodeCount(),
                 current.narrativeStyle(), text(selected.theme()), current.mainPlot(), text(selected.mainConflict()),
                 text(selected.endingDirection()));
         return applyOverviewDraft(userId, projectId, expectedRevision, validated(overview));

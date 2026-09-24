@@ -236,7 +236,7 @@ class ScriptAgentServiceTest {
      */
     private ScriptDtos.ProjectSnapshot snapshot(String logline, String synopsis) {
         ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", logline, synopsis,
-                "", "", 0, 1, "", "", "", "", "");
+                0, 1, "", "", "", "", "");
         ScriptDtos.ProjectDetail project = new ScriptDtos.ProjectDetail("project-a", overview, List.of(), List.of(), List.of(),
                 List.of(), new ScriptDtos.WorldSetting("", "", "", ""), List.of(), List.of(), List.of(),
                 "idea", 0, false, 0L, null, null);

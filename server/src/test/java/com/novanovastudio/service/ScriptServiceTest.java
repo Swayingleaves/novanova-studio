@@ -159,7 +159,7 @@ class ScriptServiceTest {
      */
     @Test
     void shouldRejectStaleOverviewRevision() {
-        ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "", "", "",
+        ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "",
                 0, 1, "", "", "", "", "");
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
         when(repository.updateOverview(8L, "project-a", 3L, overview)).thenReturn(Mono.just(0L));
@@ -177,7 +177,7 @@ class ScriptServiceTest {
      */
     @Test
     void shouldDescribeCharacterReferenceLocationBeforeDeletion() {
-        ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "", "", "",
+        ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "",
                 0, 1, "", "", "", "", "");
         ScriptDtos.Character character = new ScriptDtos.Character("person-a", "人物", "", "", "", "", "", "", "", "",
                 "", "", "", "", "", "", "", 0, 0, 0);
@@ -204,7 +204,7 @@ class ScriptServiceTest {
      */
     @Test
     void shouldRejectDiscardingAiDraftWithStaleRevision() {
-        ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "", "", "",
+        ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "",
                 0, 1, "", "", "", "", "");
         ScriptRepository.ProjectRecord project = new ScriptRepository.ProjectRecord("project-a", 8L, overview,
                 "idea", 0, 4L, null, OffsetDateTime.now(), OffsetDateTime.now());
@@ -238,7 +238,7 @@ class ScriptServiceTest {
      */
     @Test
     void shouldRejectAiDraftWhoseBaseRevisionIsStale() {
-        ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "", "", "",
+        ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "",
                 0, 1, "", "", "", "", "");
         ScriptRepository.ProjectRecord project = new ScriptRepository.ProjectRecord("project-a", 8L, overview,
                 "idea", 0, 4L, null, OffsetDateTime.now(), OffsetDateTime.now());

@@ -53,8 +53,6 @@ public final class ScriptDtos {
             @Size(max = 80, message = "题材不能超过80字") String genre,
             @Size(max = 2000, message = "一句话创意不能超过2000字") String logline,
             @Size(max = 20000, message = "故事简介不能超过20000字") String synopsis,
-            @Size(max = 8000, message = "核心卖点不能超过8000字") String sellingPoints,
-            @Size(max = 4000, message = "目标受众不能超过4000字") String targetAudience,
             @Min(value = 0, message = "目标时长不能小于0") @Max(value = 864000, message = "目标时长不能超过10天") int targetDurationSeconds,
             @Min(value = 1, message = "目标集数不能小于1") @Max(value = 1000, message = "目标集数不能超过1000") int targetEpisodeCount,
             @Size(max = 8000, message = "叙事风格不能超过8000字") String narrativeStyle,

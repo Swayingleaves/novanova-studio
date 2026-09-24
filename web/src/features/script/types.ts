@@ -38,8 +38,6 @@ export type ScriptOverview = {
     genre: string;
     logline: string;
     synopsis: string;
-    sellingPoints: string;
-    targetAudience: string;
     targetDurationSeconds: number;
     targetEpisodeCount: number;
     narrativeStyle: string;

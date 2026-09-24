@@ -1,0 +1,447 @@
+.workspace {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    flex-direction: column;
+    background: var(--studio-page);
+}
+
+.toolbar {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 56px;
+    padding: 9px 20px;
+    border-bottom: 1px solid var(--studio-line);
+    background: var(--studio-panel-solid);
+    font-family: var(--studio-interface-font);
+}
+
+.heading,
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.heading {
+    min-width: 0;
+    color: var(--studio-ink);
+}
+
+.heading h2 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.saveStatus {
+    color: var(--studio-muted);
+    font-size: 12px;
+}
+
+.progressTrack {
+    height: 2px;
+    flex: none;
+    background: var(--studio-line);
+}
+
+.progressBar {
+    height: 100%;
+    background: var(--studio-action);
+    transform: scaleX(0);
+    transform-origin: left center;
+}
+
+.scrollArea,
+.editorScroll {
+    min-height: 0;
+    flex: 1;
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.scrollArea {
+    container: outline-reader / inline-size;
+}
+
+.layout {
+    display: grid;
+    width: 100%;
+    max-width: 1130px;
+    grid-template-columns: 176px minmax(0, 742px);
+    justify-content: center;
+    gap: clamp(24px, 4vw, 56px);
+    margin: 0 auto;
+    padding: 36px 28px 100px;
+}
+
+.toc {
+    position: sticky;
+    top: 32px;
+    align-self: start;
+    min-width: 0;
+    font-family: var(--studio-interface-font);
+}
+
+.tocLabel {
+    margin: 0 0 15px 12px;
+    color: var(--studio-muted);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+}
+
+.tocItem {
+    display: flex;
+    width: 100%;
+    min-height: 38px;
+    align-items: baseline;
+    gap: 10px;
+    padding: 8px 8px 8px 12px;
+    border: 0;
+    border-left: 2px solid transparent;
+    background: transparent;
+    color: var(--studio-text);
+    cursor: pointer;
+    text-align: left;
+}
+
+.tocItem:hover {
+    color: var(--studio-ink);
+}
+
+.tocItem:focus-visible {
+    outline: 2px solid var(--studio-action);
+    outline-offset: 2px;
+}
+
+.tocItemActive {
+    border-left-color: var(--studio-action);
+    color: var(--studio-action);
+}
+
+.tocNumber {
+    flex: none;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.tocTitle {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.paper {
+    min-width: 0;
+    padding: 68px clamp(38px, 6vw, 82px) 90px;
+    border: 1px solid var(--studio-line);
+    border-radius: 3px;
+    background: var(--studio-surface);
+    box-shadow: var(--studio-shadow);
+    color: var(--studio-ink);
+    font-family: "Songti SC", "Source Han Serif SC", "Noto Serif SC", "STSong", "SimSun", Georgia, serif;
+}
+
+.eyebrow {
+    color: var(--studio-muted);
+    font-family: var(--studio-interface-font);
+    font-size: 11px;
+    letter-spacing: 0.24em;
+}
+
+.storyTitle {
+    margin: 14px 0 0;
+    overflow-wrap: anywhere;
+    font-size: clamp(29px, 3.4vw, 43px);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    line-height: 1.3;
+}
+
+.logline {
+    margin: 24px 0 0;
+    padding-left: 16px;
+    border-left: 2px solid var(--studio-action);
+    color: var(--studio-text);
+    font-size: 16px;
+    line-height: 1.9;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 24px;
+}
+
+.chip {
+    max-width: 100%;
+    padding: 4px 11px;
+    border: 1px solid var(--studio-line);
+    border-radius: 999px;
+    background: var(--studio-surface-raised);
+    color: var(--studio-muted);
+    font-family: var(--studio-interface-font);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.roles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 30px;
+    margin-top: 40px;
+    padding-top: 28px;
+    border-top: 1px solid var(--studio-line);
+}
+
+.role {
+    min-width: 0;
+}
+
+.roleName {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 6px;
+    overflow-wrap: anywhere;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.roleName span {
+    color: var(--studio-action);
+    font-family: var(--studio-interface-font);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.roleDescription {
+    margin: 2px 0 0;
+    color: var(--studio-muted);
+    font-family: var(--studio-interface-font);
+    font-size: 12px;
+    line-height: 1.8;
+    overflow-wrap: anywhere;
+}
+
+.chapter {
+    margin-top: 68px;
+    padding-top: 54px;
+    border-top: 1px solid var(--studio-line);
+    scroll-margin-top: 26px;
+}
+
+.chapterHeader {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 10px 14px;
+    margin-bottom: 24px;
+}
+
+.chapterIndex {
+    flex: none;
+    color: var(--studio-action);
+    font-family: var(--studio-interface-font);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+}
+
+.chapterTitle {
+    min-width: 0;
+    flex: 1;
+    margin: 0;
+    overflow-wrap: anywhere;
+    font-size: 25px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.chapterType {
+    padding: 2px 7px;
+    border: 1px solid var(--studio-line);
+    border-radius: 4px;
+    color: var(--studio-muted);
+    font-family: var(--studio-interface-font);
+    font-size: 11px;
+}
+
+.episodeLinks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: -10px 0 20px;
+    color: var(--studio-muted);
+    font-family: var(--studio-interface-font);
+    font-size: 11px;
+}
+
+.episodeLinks span {
+    padding: 2px 7px;
+    border: 1px solid var(--studio-line);
+    border-radius: 4px;
+}
+
+.paragraph {
+    margin: 0 0 1em;
+    overflow-wrap: anywhere;
+    font-size: 17px;
+    line-height: 2;
+    text-indent: 2em;
+    white-space: pre-wrap;
+}
+
+.emptyChapter {
+    color: var(--studio-muted);
+    font-family: var(--studio-interface-font);
+    font-size: 13px;
+}
+
+.beat {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-top: 18px;
+    overflow-wrap: anywhere;
+    font-size: 15px;
+    line-height: 1.8;
+}
+
+.beatType {
+    flex: none;
+    color: var(--studio-action);
+    font-family: var(--studio-interface-font);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.beatType::before {
+    margin-right: 5px;
+    content: "◆";
+    font-size: 8px;
+}
+
+.beat strong {
+    font-weight: 600;
+}
+
+.eventEpisode {
+    margin-left: 10px;
+    color: var(--studio-muted);
+    font-family: var(--studio-interface-font);
+    font-size: 11px;
+}
+
+.beat p {
+    margin: 3px 0 0;
+    color: var(--studio-text);
+    white-space: pre-wrap;
+}
+
+.emptyState {
+    display: flex;
+    min-height: 220px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--studio-muted);
+    font-family: var(--studio-interface-font);
+    font-size: 14px;
+}
+
+.emptyState p {
+    margin: 0;
+}
+
+.endMark {
+    margin-top: 74px;
+    color: var(--studio-muted);
+    font-family: var(--studio-interface-font);
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    text-align: center;
+}
+
+.editorScroll {
+    padding: 20px;
+}
+
+.editorPanel {
+    max-width: 1024px;
+    margin: 0 auto;
+    padding: 20px;
+    border: 1px solid var(--studio-line);
+    border-radius: 8px;
+    background: var(--studio-panel-solid);
+}
+
+@container outline-reader (max-width: 800px) {
+    .layout {
+        grid-template-columns: minmax(0, 742px);
+        padding: 20px 16px 70px;
+    }
+
+    .toc {
+        display: none;
+    }
+
+    .paper {
+        padding: 48px 38px 68px;
+    }
+}
+
+@container outline-reader (max-width: 520px) {
+    .layout {
+        padding: 12px 10px 50px;
+    }
+
+    .paper {
+        padding: 36px 24px 50px;
+    }
+
+    .storyTitle {
+        font-size: 30px;
+    }
+
+    .roles {
+        grid-template-columns: 1fr;
+    }
+
+    .chapter {
+        margin-top: 48px;
+        padding-top: 38px;
+    }
+
+    .chapterTitle {
+        font-size: 21px;
+    }
+
+    .paragraph {
+        font-size: 16px;
+    }
+}
+
+@media (max-width: 640px) {
+    .toolbar {
+        padding: 10px 12px;
+    }
+
+    .editorScroll {
+        padding: 10px;
+    }
+
+    .editorPanel {
+        padding: 14px;
+    }
+}

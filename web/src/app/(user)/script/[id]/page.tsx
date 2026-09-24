@@ -10,6 +10,7 @@ import { enterComicDrama, getScriptProductionReadiness } from "@/services/api/sc
 import { ScriptAiPanel } from "@/features/script/components/script-ai-panel";
 import { ScriptSectionEditor } from "@/features/script/components/section-editors";
 import { ScriptEpisodeReader } from "@/features/script/components/script-episode-reader";
+import { ScriptOutlineWorkspace } from "@/features/script/components/script-outline-workspace";
 import { createScriptScene } from "@/features/script/lib/script-episode-editing";
 import { useScriptStore } from "@/features/script/stores/use-script-store";
 import type { EpisodeDetail, ScriptWorkspaceSection } from "@/features/script/types";
@@ -147,7 +148,7 @@ export default function ScriptWorkspacePage() {
                 <div className="min-w-0 flex-1"><h1 className="truncate text-base font-semibold text-[var(--studio-ink)]">{project.overview.title}</h1><div className="mt-1 flex items-center gap-2 text-xs text-[var(--studio-faint)]"><span>{SAVE_LABELS[saveStatus]}</span><span>修订 {project.revision}</span><span>{project.completionRate}%</span></div></div>
                 <Progress type="circle" size={34} percent={project.completionRate} strokeWidth={10} format={(percent) => `${percent}`} strokeColor="var(--studio-primary)" />
                 <Button className="lg:hidden" icon={<ListTree className="size-4" />} onClick={() => setDirectoryOpen(true)}>目录</Button>
-                {section !== "episodes" ? <Button className="xl:hidden" icon={<Bot className="size-4" />} onClick={() => setAssistantOpen(true)}>AI</Button> : null}
+                {section !== "episodes" ? <Button className={section === "outline" ? "" : "xl:hidden"} icon={<Bot className="size-4" />} onClick={() => setAssistantOpen(true)}>AI</Button> : null}
                 <Button type="primary" loading={entering} icon={<Sparkles className="size-4" />} onClick={() => void openProduction()}>进入漫剧创作</Button>
             </header>
 
@@ -155,9 +156,9 @@ export default function ScriptWorkspacePage() {
             {saveStatus === "error" ? <Alert banner type="error" title={saveError || "保存失败，编辑内容仍保留在本地页面中。"} action={<Button size="small" onClick={retrySave}>重试保存</Button>} /> : null}
             {saveStatus === "conflict" ? <Alert banner type="warning" title="云端版本已被其他页面更新，自动保存已暂停。当前页面编辑内容仍保留，请确认后重载云端版本。" action={<Button size="small" onClick={() => modal.confirm({ title: "重载云端版本？", content: "当前页面未保存的修改会丢失。建议先复制重要内容后再重载。", okText: "确认重载", cancelText: "取消", onOk: () => reloadProject() })}>重载云端版本</Button>} /> : null}
 
-            <div className={`grid min-h-0 flex-1 lg:grid-cols-[260px_minmax(0,1fr)] ${section === "episodes" ? "" : "xl:grid-cols-[260px_minmax(0,1fr)_360px]"}`}>
+            <div className={`grid min-h-0 flex-1 lg:grid-cols-[260px_minmax(0,1fr)] ${section === "episodes" || section === "outline" ? "" : "xl:grid-cols-[260px_minmax(0,1fr)_360px]"}`}>
                 <aside className="hidden min-h-0 overflow-y-auto border-r border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-3 lg:block"><Directory section={section} selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} expandedEpisodeIds={expandedEpisodeIds} onToggleEpisode={toggleEpisodeExpansion} onSelectSection={selectSection} onSelectEpisode={(episodeId) => { selectEpisode(episodeId); setSection("episodes"); }} onSelectScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSection("episodes"); }} onCreatedScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSceneEditRequestId(sceneId); setSection("episodes"); }} /></aside>
-                {section === "episodes" ? <ScriptEpisodeReader selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} sceneEditRequestId={sceneEditRequestId} onSceneEditRequestHandled={() => setSceneEditRequestId("")} onSelectEpisode={selectEpisode} onSelectScene={selectScene} onOpenAiGeneration={() => setAssistantOpen(true)} /> : <>
+                {section === "episodes" ? <ScriptEpisodeReader selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} sceneEditRequestId={sceneEditRequestId} onSceneEditRequestHandled={() => setSceneEditRequestId("")} onSelectEpisode={selectEpisode} onSelectScene={selectScene} onOpenAiGeneration={() => setAssistantOpen(true)} /> : section === "outline" ? <ScriptOutlineWorkspace key={project.id} onOpenAiGeneration={() => setAssistantOpen(true)} /> : <>
                     <section className="min-h-0 overflow-y-auto p-4 sm:p-6"><div className="mx-auto max-w-5xl rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-4 sm:p-6"><ScriptSectionEditor section={section} /></div></section>
                     <div className="hidden min-h-0 border-l border-[var(--studio-line)] xl:block"><ScriptAiPanel section={section} selectedEpisodeId={selectedEpisodeId} /></div>
                 </>}

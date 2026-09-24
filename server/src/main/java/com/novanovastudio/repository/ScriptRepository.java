@@ -146,15 +146,14 @@ public class ScriptRepository {
         ScriptDtos.ProjectOverview overview = project.overview();
         return databaseClient.sql("""
                 INSERT INTO script_projects(id, user_id, title, content_type, genre, logline, synopsis,
-                    selling_points, target_audience, target_duration_seconds, target_episode_count,
+                    target_duration_seconds, target_episode_count,
                     narrative_style, theme, main_plot, main_conflict, ending_direction)
-                VALUES (:id, :userId, :title, :contentType, :genre, :logline, :synopsis, :sellingPoints,
-                    :targetAudience, :targetDurationSeconds, :targetEpisodeCount, :narrativeStyle,
+                VALUES (:id, :userId, :title, :contentType, :genre, :logline, :synopsis,
+                    :targetDurationSeconds, :targetEpisodeCount, :narrativeStyle,
                     :theme, :mainPlot, :mainConflict, :endingDirection)
                 """).bind("id", project.id()).bind("userId", project.userId()).bind("title", overview.title())
                 .bind("contentType", overview.contentType()).bind("genre", text(overview.genre()))
                 .bind("logline", text(overview.logline())).bind("synopsis", text(overview.synopsis()))
-                .bind("sellingPoints", text(overview.sellingPoints())).bind("targetAudience", text(overview.targetAudience()))
                 .bind("targetDurationSeconds", overview.targetDurationSeconds()).bind("targetEpisodeCount", overview.targetEpisodeCount())
                 .bind("narrativeStyle", text(overview.narrativeStyle())).bind("theme", text(overview.theme()))
                 .bind("mainPlot", text(overview.mainPlot())).bind("mainConflict", text(overview.mainConflict()))
@@ -205,15 +204,14 @@ public class ScriptRepository {
     public Mono<Long> updateOverview(Long userId, String projectId, long expectedRevision, ScriptDtos.ProjectOverview overview) {
         return databaseClient.sql("""
                 UPDATE script_projects SET title=:title, content_type=:contentType, genre=:genre, logline=:logline,
-                    synopsis=:synopsis, selling_points=:sellingPoints, target_audience=:targetAudience,
+                    synopsis=:synopsis,
                     target_duration_seconds=:targetDurationSeconds, target_episode_count=:targetEpisodeCount,
                     narrative_style=:narrativeStyle, theme=:theme, main_plot=:mainPlot, main_conflict=:mainConflict,
                     ending_direction=:endingDirection, revision=revision+1, updated_at=CURRENT_TIMESTAMP
                 WHERE id=:projectId AND user_id=:userId AND status=1 AND revision=:expectedRevision
                 """).bind("title", overview.title()).bind("contentType", overview.contentType())
                 .bind("genre", text(overview.genre())).bind("logline", text(overview.logline()))
-                .bind("synopsis", text(overview.synopsis())).bind("sellingPoints", text(overview.sellingPoints()))
-                .bind("targetAudience", text(overview.targetAudience())).bind("targetDurationSeconds", overview.targetDurationSeconds())
+                .bind("synopsis", text(overview.synopsis())).bind("targetDurationSeconds", overview.targetDurationSeconds())
                 .bind("targetEpisodeCount", overview.targetEpisodeCount()).bind("narrativeStyle", text(overview.narrativeStyle()))
                 .bind("theme", text(overview.theme())).bind("mainPlot", text(overview.mainPlot()))
                 .bind("mainConflict", text(overview.mainConflict())).bind("endingDirection", text(overview.endingDirection()))
@@ -1226,8 +1224,8 @@ public class ScriptRepository {
     private ProjectRecord mapProject(Row row) {
         ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview(
                 row.get("title", String.class), row.get("content_type", String.class), row.get("genre", String.class),
-                row.get("logline", String.class), row.get("synopsis", String.class), row.get("selling_points", String.class),
-                row.get("target_audience", String.class), value(row, "target_duration_seconds", Integer.class, 0),
+                row.get("logline", String.class), row.get("synopsis", String.class),
+                value(row, "target_duration_seconds", Integer.class, 0),
                 value(row, "target_episode_count", Integer.class, 1), row.get("narrative_style", String.class),
                 row.get("theme", String.class), row.get("main_plot", String.class), row.get("main_conflict", String.class),
                 row.get("ending_direction", String.class));
