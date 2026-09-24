@@ -314,6 +314,9 @@ public final class RowMappers {
         task.setStatus(row.get("status", String.class));
         task.setProgress(row.get("progress", Integer.class));
         task.setSourceStorageKeys(jsonText(row, "source_storage_keys"));
+        task.setTaskType(row.get("task_type", String.class));
+        task.setProjectId(row.get("project_id", String.class));
+        task.setInputSnapshot(jsonText(row, "input_snapshot"));
         task.setResultData(jsonText(row, "result_data"));
         task.setErrorMessage(row.get("error_message", String.class));
         task.setStartedAt(row.get("started_at", OffsetDateTime.class));

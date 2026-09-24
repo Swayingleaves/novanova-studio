@@ -27,6 +27,15 @@ public class VideoCompositionTask {
     /** 源视频媒体存储键JSON */
     private String sourceStorageKeys;
 
+    /** 任务类型 */
+    private String taskType;
+
+    /** 所属漫剧项目ID */
+    private String projectId;
+
+    /** 分镜导出输入快照JSON */
+    private String inputSnapshot;
+
     /** 合成结果JSON */
     private String resultData;
 

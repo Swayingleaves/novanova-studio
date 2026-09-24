@@ -1,4 +1,5 @@
 import { serverGet, serverPost, type ServerAiTask } from "./server";
+import type { VideoCompositionTask } from "./video-composition";
 import type {
     ComicDramaAsset,
     ComicDramaAssetInput,
@@ -24,6 +25,16 @@ import type {
 } from "@/features/comic-drama/types";
 
 const COMIC_DRAMA_PATH = "/comicDrama";
+
+/** 创建分镜板视频导出任务。 */
+export function exportComicDramaVideo(projectId: string, episodeId: string | null) {
+    return serverPost<VideoCompositionTask>(`${COMIC_DRAMA_PATH}/exportVideo`, { projectId, episodeId });
+}
+
+/** 查询项目最近一次视频导出任务。 */
+export function getLatestComicDramaVideoExport(projectId: string) {
+    return serverPost<{ task: VideoCompositionTask | null }>(`${COMIC_DRAMA_PATH}/getLatestExportVideoTask`, { projectId });
+}
 
 export function listComicDramaProjects(params: { page: number; pageSize: number; keyword?: string }) {
     const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });

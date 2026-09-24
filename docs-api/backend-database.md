@@ -163,6 +163,9 @@ flowchart TB
 | `status` | `VARCHAR(20)` | 任务状态：`pending`、`running`、`succeeded`、`failed`、`canceled`。 |
 | `progress` | `INTEGER` | 当前进度，取值范围为 `0` 至 `100`。 |
 | `source_storage_keys` | `JSONB` | 按最终合成顺序固化的源视频媒体存储键数组。 |
+| `task_type` | `VARCHAR(32)` | `canvasComposition` 画布拼接或 `storyboardExport` 分镜导出。 |
+| `project_id` | `VARCHAR(64)` | 分镜导出所属漫剧项目 ID，画布任务为空。 |
+| `input_snapshot` | `JSONB` | 分镜导出时冻结的镜头、文字和声音时间轴。 |
 | `result_data` | `JSONB` | 成片的存储键、URL、MIME、尺寸、字节数和时长。 |
 | `error_message` | `TEXT` | 下载、探测、转码或上传失败时的可展示错误信息。 |
 | `started_at` | `TIMESTAMPTZ` | 实际开始处理时间。 |
@@ -247,6 +250,8 @@ CREATE INDEX idx_video_composition_tasks_recovery
     ON video_composition_tasks(status, created_at, id)
     WHERE status IN ('pending', 'running');
 ```
+
+V37 为该表增加 `task_type`、`project_id`、`input_snapshot`，并建立 `(user_id, project_id, created_at DESC, id DESC)` 的分镜导出任务索引；旧迁移不修改。
 
 ```sql
 ALTER TABLE generation_styles
@@ -522,6 +527,8 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 ## 12、V36 文字轨道分层
 
 `V36__Add_Comic_Drama_Text_Track_Lanes.sql` 为 `comic_drama_projects` 增加 `text_track_count`，范围为 1 至 3、默认 1；为 `comic_drama_timeline_texts` 增加从 0 开始的 `track_number`，并建立项目、轨道及时间组合索引。默认 0 号轨道不可删除。同一轨道的片段时间不得重叠，不同轨道允许重叠。保存文字时可顺序新增轨道；`deleteTextTrack` 删除指定新增轨道及片段，并将后续轨道编号前移。
+
+`V38__Add_Storyboard_Text_Font_Family.sql` 为 `comic_drama_timeline_texts` 增加 `font_family`，使用固定字体目录标识；已有文字片段默认 `notoSansSc`，数据库约束限定七款随产品分发的免费字体。文字保存接口与分镜导出快照均保留该字段。
 
 
 ## 画布音频与模型输入能力

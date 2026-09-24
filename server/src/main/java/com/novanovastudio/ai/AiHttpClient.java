@@ -25,6 +25,9 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.core.io.buffer.DefaultDataBufferFactory;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -580,6 +583,34 @@ public class AiHttpClient {
             }
             return new RemoteMediaFile(bytes, mimeType);
         });
+    }
+
+    /**
+     * 经远程媒体地址校验后，以数据流方式转发媒体。
+     * @param url 媒体下载地址
+     * @return 媒体数据流
+     */
+    public Flux<DataBuffer> streamRemoteMedia(String url) {
+        return Flux.using(() -> {
+            URI uri = validateRemoteMediaUri(url);
+            HttpRequest request = HttpRequest.newBuilder(uri).timeout(Duration.ofMinutes(15)).GET().build();
+            try {
+                HttpResponse<InputStream> response = remoteMediaHttpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+                if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                    response.body().close();
+                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, "导出视频下载源不可用");
+                }
+                return response.body();
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "导出视频下载已中断");
+            } catch (java.io.IOException exception) {
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "导出视频下载失败");
+            }
+        }, stream -> DataBufferUtils.readInputStream(() -> stream, new DefaultDataBufferFactory(), 65536),
+                stream -> {
+                    try { stream.close(); } catch (Exception ignored) { /* 连接释放失败由HTTP客户端处理。 */ }
+                });
     }
 
     /**

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { App, Button, Checkbox, Empty, Form, Image, Input, InputNumber, Modal, Select, Space, Spin, Tag, Tooltip } from "antd";
+import { App, Button, Checkbox, Empty, Form, Image, Input, InputNumber, Modal, Progress, Select, Space, Spin, Tag, Tooltip } from "antd";
 import {
     AlertCircle,
     Check,
@@ -9,6 +9,7 @@ import {
     ChevronRight,
     Clapperboard,
     Copy,
+    Download,
     Edit,
     ExternalLink,
     Film,
@@ -37,15 +38,18 @@ import {
     ZoomOut,
 } from "lucide-react";
 
-import { listComicDramaAssetVersions, readComicDramaMediaUrl } from "@/services/api/comic-drama";
-import { getServerMediaInfo } from "@/services/api/server";
+import { exportComicDramaVideo, getLatestComicDramaVideoExport, listComicDramaAssetVersions, readComicDramaMediaUrl } from "@/services/api/comic-drama";
+import { downloadComicDramaExportVideo, getServerMediaInfo } from "@/services/api/server";
+import { cancelCompositionTask, waitVideoCompositionTask, type VideoCompositionTask } from "@/services/api/video-composition";
 import { readAudioMetadata, uploadAudioFile } from "@/features/storage/services/audio-storage";
 import { nanoid } from "nanoid";
 import { useMediaAutoRefresh } from "../hooks/use-media-auto-refresh";
 import { usePendingImpactTargets } from "../hooks/use-pending-impact-targets";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
-import type { ComicDramaAssetVersion, ComicDramaMediaResult, ComicDramaShot, ComicDramaShotInput, ComicDramaTimelineText, ComicDramaTimelineTextInput, ComicDramaVoiceTrack, ComicDramaVoiceTrackInput } from "../types";
+import type { ComicDramaAssetVersion, ComicDramaMediaResult, ComicDramaShot, ComicDramaShotInput, ComicDramaTimelineText, ComicDramaTimelineTextInput, ComicDramaVoiceTrack, ComicDramaVoiceTrackInput, StoryboardFontFamily } from "../types";
 import { ShotGenerationModal } from "./shot-generation-modal";
+import { STORYBOARD_FONTS, STORYBOARD_FONT_OPTIONS } from "./storyboard-fonts";
+import "./storyboard-fonts.css";
 import { availableTextTrackPlacement, buildShotIntervals, clampPreviewPosition, clampTimelineStart, reorderTimelineTexts, timelineTextOverlaps, visibleTimelineTexts, voiceTrackEndMs, voiceTrackSourceTimeMs } from "./storyboard-timeline";
 
 const CAMERA_MOVEMENT_OPTIONS = [
@@ -296,11 +300,16 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
     const [audioDraft, setAudioDraft] = useState<ComicDramaVoiceTrackInput | null>(null);
     const [audioFile, setAudioFile] = useState<File | null>(null);
     const [savingTrack, setSavingTrack] = useState(false);
+    const [exportDialogOpen, setExportDialogOpen] = useState(false);
+    const [exportTask, setExportTask] = useState<VideoCompositionTask | null>(null);
+    const [exportSubmitting, setExportSubmitting] = useState(false);
+    const [exportDownloading, setExportDownloading] = useState(false);
     const [audioUrls, setAudioUrls] = useState<Record<string, string>>({});
     const [audioErrors, setAudioErrors] = useState<Record<string, string>>({});
     const [previewRatio, setPreviewRatio] = useState(0);
     const [previewBounds, setPreviewBounds] = useState({ width: 0, height: 0 });
     const [textPositions, setTextPositions] = useState<Record<string, { x: number; y: number }>>({});
+    const [textFontSizes, setTextFontSizes] = useState<Record<string, number>>({});
     const [selectedPreviewTextId, setSelectedPreviewTextId] = useState<string | null>(null);
     const [selectedTimelineNode, setSelectedTimelineNode] = useState<{ kind: "video" | "text" | "audio"; id: string } | null>(null);
     const [draggingPreviewTextId, setDraggingPreviewTextId] = useState<string | null>(null);
@@ -314,6 +323,73 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
 
     // Project and assets
     const projectId = workspace?.projectId;
+
+    useEffect(() => {
+        if (!projectId) return;
+        let canceled = false;
+        setExportTask(null);
+        void getLatestComicDramaVideoExport(projectId)
+            .then((result) => { if (!canceled) setExportTask(result.task); })
+            .catch((error) => { if (!canceled) message.error(error instanceof Error ? error.message : "读取导出任务失败"); });
+        return () => { canceled = true; };
+    }, [projectId, message]);
+
+    useEffect(() => {
+        if (!exportTask || !["pending", "running"].includes(exportTask.status)) return;
+        const controller = new AbortController();
+        void waitVideoCompositionTask(exportTask.id, {
+            signal: controller.signal,
+            onProgress: setExportTask,
+        }).then((task) => setExportTask(task)).catch((error) => {
+            if (!controller.signal.aborted) message.error(error instanceof Error ? error.message : "查询导出进度失败");
+        });
+        return () => controller.abort();
+    }, [exportTask?.id, exportTask?.status, message]);
+
+    const startVideoExport = async () => {
+        if (!projectId || exportSubmitting) return;
+        setExportSubmitting(true);
+        try {
+            const pending = useComicDramaStore.getState();
+            if ((Object.keys(pending.pendingTimelineTexts).length || Object.keys(pending.pendingTimelineVoices).length)
+                && !await savePendingTimelineChanges()) {
+                throw new Error(useComicDramaStore.getState().timelineSaveError || "时间轴保存失败，无法导出");
+            }
+            const task = await exportComicDramaVideo(projectId, selectedEpisodeId === "all" ? null : selectedEpisodeId);
+            setExportTask(task);
+            message.success("视频导出任务已创建");
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "视频导出失败");
+        } finally {
+            setExportSubmitting(false);
+        }
+    };
+
+    const downloadExport = async () => {
+        if (!exportTask || exportDownloading) return;
+        setExportDownloading(true);
+        try {
+            const blob = await downloadComicDramaExportVideo(exportTask.id);
+            const url = URL.createObjectURL(blob);
+            const anchor = document.createElement("a");
+            anchor.href = url;
+            anchor.download = "分镜成片.mp4";
+            document.body.append(anchor);
+            anchor.click();
+            anchor.remove();
+            window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : "视频下载失败");
+        } finally {
+            setExportDownloading(false);
+        }
+    };
+
+    const cancelVideoExport = async () => {
+        if (!exportTask) return;
+        try { setExportTask(await cancelCompositionTask(exportTask.id)); }
+        catch (error) { message.error(error instanceof Error ? error.message : "取消导出失败"); }
+    };
     const episodes = workspace?.scriptProject.episodes || [];
     const shots = workspace?.shots || [];
     const mediaList = workspace?.media || [];
@@ -329,6 +405,21 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         Object.values(pendingTimelineTexts).forEach((item) => items.set(item.id, { ...item, trackNumber: trackNumberOf(item) }));
         return [...items.values()];
     }, [savedTimelineTexts, pendingTimelineTexts]);
+    const storyboardFontFamilies = [...new Set(timelineTexts.map((item) => item.fontFamily))].sort().join("|");
+    useEffect(() => {
+        if (!storyboardFontFamilies) return;
+        let canceled = false;
+        const families = new Set<StoryboardFontFamily>(["notoSansSc", ...(storyboardFontFamilies.split("|") as StoryboardFontFamily[])]);
+        void Promise.all([...families].map(async (family) => {
+            const font = STORYBOARD_FONTS[family];
+            if (!font) throw new Error(`不支持的分镜文字字体：${family}`);
+            const faces = await document.fonts.load(`400 16px ${font.cssFamily.split(",")[0]}`);
+            if (!faces.length) throw new Error(`浏览器缺少分镜字体资源：${font.label}`);
+        })).catch((error) => {
+            if (!canceled) message.error(error instanceof Error ? error.message : "加载分镜字体失败");
+        });
+        return () => { canceled = true; };
+    }, [storyboardFontFamilies, message]);
     const savedTextTrackCount = workspace?.textTrackCount;
     const textTrackCount = Math.min(3, Math.max(1,
         typeof savedTextTrackCount === "number" && Number.isInteger(savedTextTrackCount) ? savedTextTrackCount : 1,
@@ -379,7 +470,11 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
     const previewSurfaceRef = useRef<HTMLDivElement>(null);
     const previewFrameRef = useRef<HTMLDivElement>(null);
     const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
-    const textDragRef = useRef<{ id: string; x: number; y: number } | null>(null);
+    const textDragRef = useRef<
+        | { mode: "move"; id: string; x: number; y: number }
+        | { mode: "resize"; id: string; fontSize: number; pointerX: number; pointerY: number; halfWidth: number; halfHeight: number; latestFontSize: number }
+        | null
+    >(null);
     const textWasDraggedRef = useRef(false);
     const tlBodyRef = useRef<HTMLDivElement>(null);
     const tlContentRef = useRef<HTMLDivElement>(null);
@@ -507,6 +602,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         if (isPlaying) {
             setSelectedShotId(null);
             setSelectedTimelineNode(null);
+            setSelectedPreviewTextId(null);
         }
     }, [isPlaying]);
     const projectDurationMs = Math.round(totalDuration * 1000);
@@ -572,7 +668,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         if (!placement) { message.warning("三条文字轨道在当前时间均已有片段"); return; }
         setIsPlaying(false);
         setFlipSide("preview");
-        const item = { id: nanoid(), content: "文字", startMs, endMs: placement.endMs, trackNumber: placement.trackNumber, positionX: 0.5, positionY: 0.82 - placement.trackNumber * 0.14, fontSize: 36, color: "#ffffff", alignment: "center" as const, backgroundColor: null, revision: 0 };
+        const item = { id: nanoid(), content: "文字", startMs, endMs: placement.endMs, trackNumber: placement.trackNumber, positionX: 0.5, positionY: 0.82 - placement.trackNumber * 0.14, fontSize: 36, fontFamily: "notoSansSc" as const, color: "#ffffff", alignment: "center" as const, backgroundColor: null, revision: 0 };
         queueTimelineText(item);
         setSelectedPreviewTextId(item.id);
         setSelectedTimelineNode({ kind: "text", id: item.id });
@@ -588,7 +684,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         }
         setSavingTrack(true);
         try {
-            const editedFields = { content: value.content.trim(), fontSize: value.fontSize, color: value.color,
+            const editedFields = { content: value.content.trim(), fontSize: value.fontSize, fontFamily: value.fontFamily, color: value.color,
                 alignment: value.alignment, backgroundColor: value.backgroundColor };
             const saved = await saveTimelineText({ ...(current || value), ...editedFields });
             const pending = useComicDramaStore.getState().pendingTimelineTexts[value.id];
@@ -643,6 +739,20 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         const dragging = textDragRef.current;
         const frame = previewFrameRef.current;
         if (!dragging || !frame) return;
+        if (dragging.mode === "resize") {
+            const deltaX = event.clientX - dragging.pointerX;
+            const deltaY = event.clientY - dragging.pointerY;
+            const radiusSquared = dragging.halfWidth ** 2 + dragging.halfHeight ** 2;
+            const scale = 1 + (deltaX * dragging.halfWidth + deltaY * dragging.halfHeight) / radiusSquared;
+            const fontSize = Math.max(12, Math.min(120, Math.round(dragging.fontSize * scale)));
+            if (Math.abs(deltaX) + Math.abs(deltaY) > 3) {
+                textWasDraggedRef.current = true;
+                setDraggingPreviewTextId(dragging.id);
+            }
+            textDragRef.current = { ...dragging, latestFontSize: fontSize };
+            setTextFontSizes((current) => current[dragging.id] === fontSize ? current : { ...current, [dragging.id]: fontSize });
+            return;
+        }
         const bounds = frame.getBoundingClientRect();
         const x = clampPreviewPosition((event.clientX - bounds.left) / bounds.width, event.currentTarget.offsetWidth, bounds.width);
         const y = clampPreviewPosition((event.clientY - bounds.top) / bounds.height, event.currentTarget.offsetHeight, bounds.height);
@@ -660,6 +770,14 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         setDraggingPreviewTextId(null);
         if (!dragging) return;
         event.currentTarget.releasePointerCapture(event.pointerId);
+        if (dragging.mode === "resize") {
+            setTextFontSizes((current) => { const next = { ...current }; delete next[dragging.id]; return next; });
+            const text = timelineTexts.find((item) => item.id === dragging.id);
+            if (event.type !== "pointercancel" && text && dragging.latestFontSize !== text.fontSize) {
+                queueTimelineText({ ...text, fontSize: dragging.latestFontSize });
+            }
+            return;
+        }
         const text = timelineTexts.find((item) => item.id === dragging.id);
         if (text && (text.positionX !== dragging.x || text.positionY !== dragging.y)) {
             const updated = { ...text, positionX: dragging.x, positionY: dragging.y };
@@ -751,13 +869,14 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         if (!drag) return;
         if (!clipWasDraggedRef.current) { setClipDraft(null); setTextReorderDraft([]); return; }
         if (drag.latest.kind === "text") {
+            const draggedText = drag.latest.item;
             if (drag.reorder?.length) {
                 queueTimelineTextReorder(drag.reorder);
                 setClipDraft(null);
                 setTextReorderDraft([]);
                 return;
             }
-            if (timelineTexts.some((item) => item.id !== drag.latest.item.id && item.trackNumber === drag.latest.item.trackNumber && timelineTextOverlaps(item, drag.latest.item))) {
+            if (timelineTexts.some((item) => item.id !== draggedText.id && item.trackNumber === draggedText.trackNumber && timelineTextOverlaps(item, draggedText))) {
                 message.warning("同一文字轨道的片段不能重叠");
                 setClipDraft(null);
                 setTextReorderDraft([]);
@@ -1195,10 +1314,6 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         if (!activeShot) return "";
         const ep = episodes.find((e) => e.id === activeShot.sourceEpisodeId);
         if (!ep) return "";
-        const sc = ep.scenes?.find((s) => s.id === activeShot.sourceSceneId);
-        if (sc) {
-            return `第${ep.episodeNumber}集 · 第${sc.sceneNumber}场 ${sc.location ? `(${sc.location})` : ""}`;
-        }
         return `第${ep.episodeNumber}集：${ep.title || "无标题"}`;
     }, [activeShot, episodes]);
 
@@ -1247,6 +1362,8 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                     {timelineSaveError ? <span className="max-w-52 truncate text-xs text-rose-500" title={timelineSaveError}>保存失败：{timelineSaveError}</span> : pendingTimelineCount > 0 ? <span className="text-xs text-[var(--studio-muted)]">待保存 {pendingTimelineCount} 项</span> : null}
                     <Button size="small" icon={<Save className="size-3.5" />} disabled={!pendingTimelineCount} loading={timelineSaving} onClick={() => void savePendingTimelineChanges().then((saved) => { if (saved) message.success("时间轴已保存"); else message.error(useComicDramaStore.getState().timelineSaveError || "仍有待保存的修改"); })}>保存</Button>
 
+                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => setExportDialogOpen(true)}>导出视频</Button>
+
                     {/* View mode toggle */}
                     <div className="flex items-center rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-0.5">
                         <button
@@ -1288,6 +1405,22 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                     </Button>
                 </div>
             </header>
+
+            <Modal title="导出分镜视频" open={exportDialogOpen} onCancel={() => setExportDialogOpen(false)} footer={null} mask={{ closable: true }}>
+                <div className="space-y-4 py-2">
+                    <p className="text-sm text-[var(--studio-muted)]">当前范围：{selectedEpisodeId === "all" ? "全部分集" : episodes.find((item) => item.id === selectedEpisodeId)?.title || "当前分集"}。成片包含视频、文字和音频轨道，缺失镜头保留黑画面，最长10分钟。</p>
+                    {exportTask && <div className="space-y-2 rounded border border-[var(--studio-line)] p-3">
+                        <div className="text-sm">最近任务：{exportTask.status === "succeeded" ? "导出完成" : exportTask.status === "failed" ? "导出失败" : exportTask.status === "canceled" ? "已取消" : "正在导出"}</div>
+                        <Progress percent={exportTask.progress} status={exportTask.status === "failed" ? "exception" : exportTask.status === "succeeded" ? "success" : "active"} strokeColor={exportTask.status === "failed" ? undefined : "var(--studio-primary)"} />
+                        {exportTask.status === "failed" && <p className="text-sm text-red-500">{exportTask.errorMessage || "导出失败"}</p>}
+                    </div>}
+                    <Space>
+                        <Button type="primary" loading={exportSubmitting} disabled={exportTask?.status === "pending" || exportTask?.status === "running"} onClick={() => void startVideoExport()}>{exportTask ? "重新导出" : "开始导出"}</Button>
+                        {exportTask?.status === "succeeded" && <Button icon={<Download className="size-4" />} loading={exportDownloading} onClick={() => void downloadExport()}>下载 MP4</Button>}
+                        {(exportTask?.status === "pending" || exportTask?.status === "running") && <Button danger onClick={() => void cancelVideoExport()}>取消导出</Button>}
+                    </Space>
+                </div>
+            </Modal>
 
             {/* 分集切换控件始终保留，空分集仅替换内容区，避免用户无法切回有分镜的分集。 */}
             {shots.length === 0 || (viewMode === "grid" && filteredShots.length === 0) ? (
@@ -1441,7 +1574,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                         flipSide === "config" ? "pointer-events-none" : ""
                                     }`}
                                 >
-                                    <div ref={previewSurfaceRef} className="relative flex h-full w-full items-center justify-center bg-[var(--studio-media)] overflow-hidden">
+                                    <div ref={previewSurfaceRef} className="relative flex h-full w-full items-center justify-center bg-[var(--studio-media)] overflow-hidden" onPointerDown={() => setSelectedPreviewTextId(null)}>
                                         {/* Frame background or real media */}
                                         {activeMediaUrl ? (
                                             isVideo ? (
@@ -1548,20 +1681,26 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                         >
                                             {activeTexts.map((item) => {
                                                 const position = textPositions[item.id] || { x: item.positionX, y: item.positionY };
+                                                const previewWidth = Math.min(previewBounds.width, previewBounds.height * previewRatio);
+                                                const fontSize = (textFontSizes[item.id] ?? item.fontSize) * previewWidth / 1000;
+                                                const shadowOffset = previewWidth / 1000;
+                                                const selected = selectedPreviewTextId === item.id;
                                                 return (
                                                     <button
                                                         key={item.id}
                                                         type="button"
-                                                        aria-label={`拖动文字：${item.content}`}
-                                                        aria-pressed={selectedPreviewTextId === item.id}
-                                                        title="拖动调整位置，双击编辑"
-                                                        className={`pointer-events-auto absolute max-w-[90%] cursor-move whitespace-pre-wrap break-words rounded-sm border px-1.5 py-0.5 leading-tight focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${draggingPreviewTextId === item.id ? "border-[var(--studio-action)]" : "border-transparent"}`}
+                                                        aria-label={`拖动文字或右下角调整字号：${item.content}`}
+                                                        aria-pressed={selected}
+                                                        title="拖动文字调整位置，拖动右下角调整大小，双击编辑"
+                                                        className={`pointer-events-auto absolute cursor-move touch-none whitespace-pre-wrap break-all rounded-sm focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${selected ? "ring-1 ring-[var(--studio-action)]" : ""}`}
                                                         style={{
                                                             left: `${position.x * 100}%`, top: `${position.y * 100}%`,
-                                                            transform: "translate(-50%, -50%)",
-                                                            fontSize: `${Math.max(12, item.fontSize * Math.min(previewBounds.width, previewBounds.height * previewRatio) / 1000)}px`,
+                                                            transform: "translate(-50%, -50%)", width: "max-content", maxWidth: "90%",
+                                                            fontSize, fontFamily: STORYBOARD_FONTS[item.fontFamily].cssFamily,
+                                                            fontWeight: 400, fontVariantLigatures: "none", lineHeight: 1.2,
+                                                            padding: `${fontSize / 16}px ${fontSize / 8}px`,
                                                             color: item.color, backgroundColor: item.backgroundColor || "transparent", textAlign: item.alignment,
-                                                            textShadow: item.backgroundColor ? undefined : "0 1px 3px rgb(0 0 0 / 75%)",
+                                                            textShadow: item.backgroundColor ? undefined : `${shadowOffset}px ${shadowOffset}px 0 rgb(0 0 0 / 75%)`,
                                                         }}
                                                         onPointerDown={(event) => {
                                                             event.stopPropagation();
@@ -1571,7 +1710,14 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                             setSelectedTimelineNode({ kind: "text", id: item.id });
                                                             event.currentTarget.setPointerCapture(event.pointerId);
                                                             textWasDraggedRef.current = false;
-                                                            textDragRef.current = { id: item.id, x: position.x, y: position.y };
+                                                            if ((event.target as HTMLElement).closest("[data-text-resize-handle]")) {
+                                                                const bounds = event.currentTarget.getBoundingClientRect();
+                                                                textDragRef.current = { mode: "resize", id: item.id, fontSize: item.fontSize,
+                                                                    pointerX: event.clientX, pointerY: event.clientY,
+                                                                    halfWidth: bounds.width / 2, halfHeight: bounds.height / 2, latestFontSize: item.fontSize };
+                                                            } else {
+                                                                textDragRef.current = { mode: "move", id: item.id, x: position.x, y: position.y };
+                                                            }
                                                         }}
                                                         onPointerMove={movePreviewText}
                                                         onPointerUp={finishPreviewTextDrag}
@@ -1580,6 +1726,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                         onDoubleClick={(event) => { event.stopPropagation(); setTextDraft(item); }}
                                                     >
                                                         {item.content}
+                                                        {selected && <span data-text-resize-handle aria-hidden="true" className="absolute bottom-0 right-0 z-10 size-3 translate-x-1/2 translate-y-1/2 cursor-nwse-resize rounded-sm border border-[var(--studio-action-foreground)] bg-[var(--studio-action)] shadow-sm" />}
                                                     </button>
                                                 );
                                             })}
@@ -2345,6 +2492,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                 {textDraft ? <div className="space-y-4 pt-3">
                     <div><label className="mb-1 block text-sm font-medium">文字内容</label><Input.TextArea rows={3} maxLength={2000} value={textDraft.content} onChange={(event) => setTextDraft({ ...textDraft, content: event.target.value })} /></div>
                     <div className="grid grid-cols-2 gap-3">
+                        <div><label className="mb-1 block text-sm font-medium">字体</label><Select<StoryboardFontFamily> className="w-full" value={textDraft.fontFamily} options={STORYBOARD_FONT_OPTIONS} onChange={(fontFamily) => setTextDraft({ ...textDraft, fontFamily })} /></div>
                         <div><label className="mb-1 block text-sm font-medium">字号</label><InputNumber className="w-full" min={12} max={120} value={textDraft.fontSize} onChange={(value) => setTextDraft({ ...textDraft, fontSize: value || 12 })} /></div>
                         <div><label className="mb-1 block text-sm font-medium">对齐方式</label><Select className="w-full" value={textDraft.alignment} options={[{ value: "left", label: "左对齐" }, { value: "center", label: "居中" }, { value: "right", label: "右对齐" }]} onChange={(alignment) => setTextDraft({ ...textDraft, alignment })} /></div>
                         <div><label className="mb-1 block text-sm font-medium">文字颜色</label><input type="color" className="h-9 w-full cursor-pointer rounded border border-[var(--studio-line)] bg-transparent" value={textDraft.color.slice(0, 7)} onChange={(event) => setTextDraft({ ...textDraft, color: event.target.value })} /></div>

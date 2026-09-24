@@ -39,6 +39,18 @@ public final class VideoCompositionDtos {
     public record VideoCompositionTaskIdRequest(@NotBlank(message = "任务ID不能为空") String taskId) {
     }
 
+    /** 创建分镜板成片导出任务。 */
+    public record ExportStoryboardVideoRequest(@NotBlank String projectId, String episodeId) {
+    }
+
+    /** 查询项目最近导出任务。 */
+    public record LatestStoryboardExportRequest(@NotBlank String projectId) {
+    }
+
+    /** 最近任务可能不存在时的查询响应。 */
+    public record LatestStoryboardExportResponse(VideoCompositionTaskResponse task) {
+    }
+
     /**
      * 视频合成任务响应。
      *

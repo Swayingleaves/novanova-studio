@@ -2,7 +2,10 @@ package com.novanovastudio.controller;
 
 import com.novanovastudio.common.ApiResponse;
 import com.novanovastudio.dto.ComicDramaDtos;
+import com.novanovastudio.dto.VideoCompositionDtos;
 import com.novanovastudio.service.ComicDramaService;
+import com.novanovastudio.service.VideoCompositionTaskService;
+import com.novanovastudio.service.PersistenceService;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Locale;
@@ -10,6 +13,10 @@ import java.util.Map;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -17,7 +24,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * 漫剧生产项目、视觉资产、镜头、媒体、声音与画布接口。
@@ -37,6 +46,57 @@ public class ComicDramaController {
 
     /** 漫剧生产业务服务。 */
     private final ComicDramaService service;
+
+    /** 视频合成任务服务。 */
+    private final VideoCompositionTaskService videoCompositionTaskService;
+
+    /** 媒体流服务。 */
+    private final PersistenceService persistenceService;
+
+    /**
+     * 创建分镜成片导出任务。
+     * @param request 项目与分集选择
+     * @param httpRequest 当前HTTP请求
+     * @return 已创建的任务
+     */
+    @PostMapping("/exportVideo")
+    public Mono<ApiResponse<VideoCompositionDtos.VideoCompositionTaskResponse>> exportVideo(
+            @Valid @RequestBody VideoCompositionDtos.ExportStoryboardVideoRequest request, ServerHttpRequest httpRequest) {
+        return execute("导出分镜视频", httpRequest, request, videoCompositionTaskService.exportStoryboardVideo(request));
+    }
+
+    /**
+     * 查询项目最近一次成片导出任务。
+     * @param request 项目标识
+     * @param httpRequest 当前HTTP请求
+     * @return 最近的导出任务
+     */
+    @PostMapping("/getLatestExportVideoTask")
+    public Mono<ApiResponse<VideoCompositionDtos.LatestStoryboardExportResponse>> getLatestExportVideoTask(
+            @Valid @RequestBody VideoCompositionDtos.LatestStoryboardExportRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询最近分镜导出任务", httpRequest, request,
+                videoCompositionTaskService.getLatestStoryboardExport(request.projectId())
+                        .map(VideoCompositionDtos.LatestStoryboardExportResponse::new)
+                        .defaultIfEmpty(new VideoCompositionDtos.LatestStoryboardExportResponse(null)));
+    }
+
+    /**
+     * 流式下载已完成的分镜成片。
+     * @param request 导出任务标识
+     * @param httpRequest 当前HTTP请求
+     * @return MP4数据流响应
+     */
+    @PostMapping("/downloadExportVideo")
+    public Mono<ResponseEntity<Flux<DataBuffer>>> downloadExportVideo(
+            @Valid @RequestBody VideoCompositionDtos.VideoCompositionTaskIdRequest request, ServerHttpRequest httpRequest) {
+        log.info("下载分镜导出视频: url=/api/v1/comicDrama/downloadExportVideo, headers={}, request={}",
+                sanitizedHeaders(httpRequest), request);
+        return videoCompositionTaskService.getStoryboardExportStorageKey(request.taskId()).flatMap(storageKey ->
+            persistenceService.streamVideoMediaForCurrentUser(storageKey)
+                    .map(body -> ResponseEntity.ok().contentType(MediaType.valueOf("video/mp4"))
+                            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=storyboard-export.mp4")
+                            .body(body.subscribeOn(Schedulers.boundedElastic()))));
+    }
 
     /** 分页查询当前用户漫剧项目。 */
     @GetMapping("/listProjects")

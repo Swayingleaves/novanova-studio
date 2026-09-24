@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.common.StoryboardFontCatalog;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.ComicDramaDtos;
 import com.novanovastudio.dto.ScriptDtos;
@@ -632,6 +633,7 @@ public class ComicDramaService {
      */
     public Mono<ComicDramaDtos.TimelineText> saveTimelineText(ComicDramaDtos.SaveTimelineTextRequest request) {
         ComicDramaDtos.TimelineText timelineText = request.timelineText();
+        StoryboardFontCatalog.fileName(timelineText.fontFamily());
         if (timelineText.endMs() <= timelineText.startMs() || timelineText.fontSize() > 120
                 || timelineText.trackNumber() < 0 || timelineText.trackNumber() > 2) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "文字片段时间、字号或轨道编号无效"));
@@ -690,6 +692,7 @@ public class ComicDramaService {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "文字片段列表无效");
         }
         for (ComicDramaDtos.TimelineText item : changed) {
+            StoryboardFontCatalog.fileName(item.fontFamily());
             ComicDramaDtos.TimelineText current = finalTexts.get(item.id());
             if (current == null ? item.revision() != 0 : current.revision() != item.revision()) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, "文字片段已变更，请刷新后重试");

@@ -43,6 +43,7 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -1469,6 +1470,30 @@ public class PersistenceService {
     }
 
     /**
+     * 将用户音频流式下载到分镜导出的临时文件。
+     * @param userId 媒体所属用户
+     * @param storageKey 音频媒体键
+     * @param target 临时文件
+     * @return 已下载的媒体文件
+     */
+    public Mono<DownloadedMediaFile> downloadAudioMediaToFileForUser(Long userId, String storageKey, Path target) {
+        return repository.getMedia(userId, storageKey)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "音频媒体不存在")))
+                .flatMap(record -> {
+                    if (!"audio".equals(normalizeMediaKind(record.getKind()))) {
+                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "分镜音轨必须使用音频媒体"));
+                    }
+                    String sourceUrl = firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl());
+                    if (!StringUtils.hasText(sourceUrl)) {
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "音频媒体没有可下载的地址"));
+                    }
+                    return aiHttpClient.downloadRemoteMediaToFile(sourceUrl, firstNonEmpty(record.getMimeType(), "audio/mpeg"),
+                                    target, Math.max(1L, properties.getAi().getVideoComposition().getMaximumInputBytes()))
+                            .map(downloaded -> new DownloadedMediaFile(storageKey, target, downloaded.mimeType(), downloaded.bytes()));
+                });
+    }
+
+    /**
      * 校验指定用户拥有可用于合成的视频媒体。
      *
      * @param userId Long 用户ID
@@ -1523,6 +1548,26 @@ public class PersistenceService {
                                         mimeType,
                                         "generated-" + normalizeMediaKind(record.getKind()) + mediaFileExtension(mimeType));
                             });
+                }));
+    }
+
+    /**
+     * 验证当前用户的成片归属并返回流式下载内容。
+     * @param storageKey 成片媒体键
+     * @return 媒体数据流
+     */
+    public Mono<Flux<DataBuffer>> streamVideoMediaForCurrentUser(String storageKey) {
+        return currentUserProvider.currentUserId().flatMap(userId -> repository.getMedia(userId, storageKey)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "导出视频媒体不存在")))
+                .map(record -> {
+                    if (!"video".equals(normalizeMediaKind(record.getKind()))) {
+                        throw new BusinessException(ErrorCode.PARAM_INVALID, "导出媒体不是视频");
+                    }
+                    String sourceUrl = firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl());
+                    if (!StringUtils.hasText(sourceUrl)) {
+                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "导出视频媒体没有可下载地址");
+                    }
+                    return aiHttpClient.streamRemoteMedia(sourceUrl);
                 }));
     }
 

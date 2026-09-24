@@ -10,8 +10,10 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.VideoCompositionDtos;
 import com.novanovastudio.repository.VideoCompositionTaskRepository;
+import com.novanovastudio.repository.ComicDramaRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.task.VideoCompositionMediaProcessor;
+import com.novanovastudio.task.StoryboardVideoExportProcessor;
 import com.novanovastudio.task.VideoCompositionTaskCancellation;
 import com.novanovastudio.task.VideoCompositionTaskDispatcher;
 import com.novanovastudio.task.VideoCompositionTaskQueue;
@@ -62,6 +64,10 @@ class VideoCompositionTaskServiceTest {
                 currentUserProvider,
                 persistenceService,
                 mock(VideoCompositionMediaProcessor.class),
+                mock(StoryboardVideoExportProcessor.class),
+                mock(ComicDramaRepository.class),
+                mock(ScriptService.class),
+                mock(ComicDramaService.class),
                 taskDispatcher,
                 mock(VideoCompositionTaskQueue.class),
                 cancellation,

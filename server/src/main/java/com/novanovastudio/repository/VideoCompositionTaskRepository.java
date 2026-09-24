@@ -27,18 +27,21 @@ public class VideoCompositionTaskRepository {
      * @return Mono<Void> 保存结果
      */
     public Mono<Void> createTask(VideoCompositionTask task) {
-        return databaseClient.sql("""
-                INSERT INTO video_composition_tasks(id, user_id, status, progress, source_storage_keys, result_data, error_message)
-                VALUES (:id, :userId, :status, :progress, CAST(:sourceStorageKeys AS jsonb), CAST(:resultData AS jsonb), :errorMessage)
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
+                INSERT INTO video_composition_tasks(id, user_id, status, progress, source_storage_keys, task_type, project_id, input_snapshot, result_data, error_message)
+                VALUES (:id, :userId, :status, :progress, CAST(:sourceStorageKeys AS jsonb), :taskType, :projectId, CAST(:inputSnapshot AS jsonb), CAST(:resultData AS jsonb), :errorMessage)
                 """)
                 .bind("id", task.getId())
                 .bind("userId", task.getUserId())
                 .bind("status", task.getStatus())
                 .bind("progress", task.getProgress())
                 .bind("sourceStorageKeys", task.getSourceStorageKeys())
+                .bind("taskType", task.getTaskType() == null ? "canvasComposition" : task.getTaskType())
+                .bind("inputSnapshot", task.getInputSnapshot() == null ? "{}" : task.getInputSnapshot())
                 .bind("resultData", task.getResultData())
-                .bind("errorMessage", task.getErrorMessage() == null ? "" : task.getErrorMessage())
-                .fetch()
+                .bind("errorMessage", task.getErrorMessage() == null ? "" : task.getErrorMessage());
+        spec = task.getProjectId() == null ? spec.bindNull("projectId", String.class) : spec.bind("projectId", task.getProjectId());
+        return spec.fetch()
                 .rowsUpdated()
                 .then();
     }
@@ -69,6 +72,18 @@ public class VideoCompositionTaskRepository {
                 .bind("taskId", taskId)
                 .map((row, metadata) -> RowMappers.videoCompositionTask(row))
                 .one();
+    }
+
+    /**
+     * 查询当前用户在项目下最近的分镜导出任务。
+     * @param userId 当前用户标识
+     * @param projectId 漫剧项目标识
+     * @return 最近导出任务
+     */
+    public Mono<VideoCompositionTask> getLatestStoryboardExport(Long userId, String projectId) {
+        return queryTask("WHERE user_id = :userId AND project_id = :projectId AND task_type = 'storyboardExport' ORDER BY created_at DESC, id DESC LIMIT 1")
+                .bind("userId", userId).bind("projectId", projectId)
+                .map((row, metadata) -> RowMappers.videoCompositionTask(row)).one();
     }
 
     /**
@@ -203,7 +218,8 @@ public class VideoCompositionTaskRepository {
      */
     private DatabaseClient.GenericExecuteSpec queryTask(String condition) {
         return databaseClient.sql("""
-                SELECT id, user_id, status, progress, source_storage_keys::text AS source_storage_keys, result_data::text AS result_data,
+                SELECT id, user_id, status, progress, source_storage_keys::text AS source_storage_keys, task_type, project_id,
+                       input_snapshot::text AS input_snapshot, result_data::text AS result_data,
                        error_message, started_at, completed_at, created_at, updated_at
                 FROM video_composition_tasks
                 """ + condition);

@@ -1036,10 +1036,10 @@ public class ComicDramaRepository {
     public Mono<Long> saveTimelineText(String projectId, ComicDramaDtos.TimelineText timelineText) {
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
                 INSERT INTO comic_drama_timeline_texts(id,script_project_id,content,start_ms,end_ms,track_number,position_x,position_y,
-                    font_size,color,alignment,background_color)
-                VALUES (:id,:projectId,:content,:startMs,:endMs,:trackNumber,:positionX,:positionY,:fontSize,:color,:alignment,:backgroundColor)
+                    font_size,font_family,color,alignment,background_color)
+                VALUES (:id,:projectId,:content,:startMs,:endMs,:trackNumber,:positionX,:positionY,:fontSize,:fontFamily,:color,:alignment,:backgroundColor)
                 ON CONFLICT (id) DO UPDATE SET content=EXCLUDED.content,start_ms=EXCLUDED.start_ms,end_ms=EXCLUDED.end_ms,
-                    track_number=EXCLUDED.track_number,position_x=EXCLUDED.position_x,position_y=EXCLUDED.position_y,font_size=EXCLUDED.font_size,
+                    track_number=EXCLUDED.track_number,position_x=EXCLUDED.position_x,position_y=EXCLUDED.position_y,font_size=EXCLUDED.font_size,font_family=EXCLUDED.font_family,
                     color=EXCLUDED.color,alignment=EXCLUDED.alignment,background_color=EXCLUDED.background_color,
                     revision=comic_drama_timeline_texts.revision+1,updated_at=CURRENT_TIMESTAMP
                 WHERE comic_drama_timeline_texts.script_project_id=EXCLUDED.script_project_id
@@ -1050,6 +1050,7 @@ public class ComicDramaRepository {
                 .bind("endMs", timelineText.endMs()).bind("trackNumber", timelineText.trackNumber())
                 .bind("positionX", timelineText.positionX())
                 .bind("positionY", timelineText.positionY()).bind("fontSize", timelineText.fontSize())
+                .bind("fontFamily", timelineText.fontFamily())
                 .bind("color", timelineText.color()).bind("alignment", timelineText.alignment())
                 .bind("revision", timelineText.revision());
         spec = bindNullable(spec, "backgroundColor", timelineText.backgroundColor(), String.class);
@@ -1386,7 +1387,7 @@ public class ComicDramaRepository {
                 value(row, "start_ms", Long.class, 0L), value(row, "end_ms", Long.class, 0L),
                 value(row, "track_number", Integer.class, 0),
                 row.get("position_x", BigDecimal.class), row.get("position_y", BigDecimal.class),
-                value(row, "font_size", Integer.class, 36), row.get("color", String.class),
+                value(row, "font_size", Integer.class, 36), row.get("font_family", String.class), row.get("color", String.class),
                 row.get("alignment", String.class), row.get("background_color", String.class),
                 value(row, "revision", Long.class, 0L), row.get("created_at", OffsetDateTime.class),
                 row.get("updated_at", OffsetDateTime.class));

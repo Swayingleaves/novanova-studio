@@ -6,11 +6,16 @@ import com.novanovastudio.ai.AiTaskPollingSupport;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
+import com.novanovastudio.dto.ComicDramaDtos;
 import com.novanovastudio.dto.PersistenceDtos;
+import com.novanovastudio.dto.ScriptDtos;
+import com.novanovastudio.dto.StoryboardExportSnapshot;
 import com.novanovastudio.dto.VideoCompositionDtos;
 import com.novanovastudio.entity.VideoCompositionTask;
+import com.novanovastudio.repository.ComicDramaRepository;
 import com.novanovastudio.repository.VideoCompositionTaskRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.task.StoryboardVideoExportProcessor;
 import com.novanovastudio.task.VideoCompositionMediaProcessor;
 import com.novanovastudio.task.VideoCompositionTaskCancellation;
 import com.novanovastudio.task.VideoCompositionTaskDispatcher;
@@ -80,6 +85,18 @@ public class VideoCompositionTaskService {
 
     /** 视频媒体处理器 */
     private final VideoCompositionMediaProcessor mediaProcessor;
+
+    /** 分镜时间轴媒体处理器 */
+    private final StoryboardVideoExportProcessor storyboardExportProcessor;
+
+    /** 漫剧项目归属查询。 */
+    private final ComicDramaRepository comicDramaRepository;
+
+    /** 剧本分集查询。 */
+    private final ScriptService scriptService;
+
+    /** 漫剧媒体任务状态同步。 */
+    private final ComicDramaService comicDramaService;
 
     /** 视频合成任务调度器 */
     private final VideoCompositionTaskDispatcher taskDispatcher;
@@ -162,6 +179,7 @@ public class VideoCompositionTaskService {
                     task.setStatus(STATUS_PENDING);
                     task.setProgress(0);
                     task.setSourceStorageKeys(JSON.toJSONString(sourceStorageKeys));
+                    task.setTaskType("canvasComposition");
                     task.setResultData("{}");
                     task.setErrorMessage("");
                     log.info("创建视频合成任务: taskId={}, userId={}, sourceCount={}", task.getId(), userId, sourceStorageKeys.size());
@@ -170,6 +188,140 @@ public class VideoCompositionTaskService {
                             .then(taskDispatcher.enqueue(task.getId()))
                             .thenReturn(taskResponse(task));
                 })));
+    }
+
+    /**
+     * 按已保存的项目数据创建分镜导出任务。
+     * @param request 导出项目与分集选择
+     * @return 已入队任务
+     */
+    public Mono<VideoCompositionDtos.VideoCompositionTaskResponse> exportStoryboardVideo(
+            VideoCompositionDtos.ExportStoryboardVideoRequest request) {
+        return currentUserProvider.currentUserId().flatMap(userId -> comicDramaRepository.getProject(userId, request.projectId())
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "漫剧项目不存在")))
+                .flatMap(project -> Mono.zip(comicDramaRepository.getSettings(request.projectId()),
+                        comicDramaRepository.listShots(request.projectId(), null, null).collectList(),
+                        comicDramaService.listMedia(new ComicDramaDtos.ListMediaRequest(request.projectId(), null, null)),
+                        comicDramaRepository.listVoiceTracks(request.projectId(), null).collectList(),
+                        comicDramaRepository.listTimelineTexts(request.projectId()).collectList(),
+                        scriptService.getProject(request.projectId())))
+                .flatMap(data -> {
+                    StoryboardExportSnapshot snapshot = buildStoryboardSnapshot(request.projectId(), request.episodeId(),
+                            data.getT1(), data.getT2(), data.getT3(), data.getT4(), data.getT5(), data.getT6().episodes());
+                    VideoCompositionTask task = new VideoCompositionTask();
+                    task.setId(UUID.randomUUID().toString());
+                    task.setUserId(userId);
+                    task.setStatus(STATUS_PENDING);
+                    task.setProgress(0);
+                    task.setTaskType("storyboardExport");
+                    task.setProjectId(request.projectId());
+                    task.setSourceStorageKeys("[]");
+                    task.setInputSnapshot(JSON.toJSONString(snapshot));
+                    task.setResultData("{}");
+                    task.setErrorMessage("");
+                    log.info("创建分镜导出任务: taskId={}, projectId={}, episodeId={}", task.getId(), request.projectId(), request.episodeId());
+                    return cancellation.clearCancellation(task.getId()).then(repository.createTask(task))
+                            .then(taskDispatcher.enqueue(task.getId())).thenReturn(taskResponse(task));
+                }));
+    }
+
+    /**
+     * 查询项目最近的导出任务。
+     * @param projectId 项目标识
+     * @return 最近任务
+     */
+    public Mono<VideoCompositionDtos.VideoCompositionTaskResponse> getLatestStoryboardExport(String projectId) {
+        return currentUserProvider.currentUserId().flatMap(userId -> comicDramaRepository.getProject(userId, projectId)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "漫剧项目不存在")))
+                .then(repository.getLatestStoryboardExport(userId, projectId))
+                .map(this::taskResponse));
+    }
+
+    /**
+     * 验证导出任务归属与完成状态后读取媒体键。
+     * @param taskId 导出任务标识
+     * @return 成片媒体键
+     */
+    public Mono<String> getStoryboardExportStorageKey(String taskId) {
+        return currentUserProvider.currentUserId().flatMap(userId -> repository.getTask(userId, taskId)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "分镜导出任务不存在")))
+                .map(task -> {
+                    if (!"storyboardExport".equals(task.getTaskType()) || !STATUS_SUCCEEDED.equals(task.getStatus())) {
+                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "分镜视频尚未导出完成");
+                    }
+                    String key = parseJsonObject(task.getResultData()).getString("storageKey");
+                    if (!StringUtils.hasText(key)) throw new BusinessException(ErrorCode.BUSINESS_ERROR, "分镜视频媒体不存在");
+                    return key;
+                }));
+    }
+
+    /**
+     * 将已保存的数据冻结为项目绝对时间轴快照。
+     * @param projectId 项目标识
+     * @param episodeId 可选分集标识
+     * @param settings 项目画面设置
+     * @param sourceShots 镜头列表
+     * @param mediaResults 媒体结果
+     * @param voiceTracks 音频轨道
+     * @param timelineTexts 文字轨道
+     * @param episodes 分集列表
+     * @return 导出输入快照
+     */
+    private StoryboardExportSnapshot buildStoryboardSnapshot(String projectId, String episodeId,
+            ComicDramaDtos.ProductionSettings settings, List<ComicDramaDtos.Shot> sourceShots,
+            List<ComicDramaDtos.MediaResult> mediaResults, List<ComicDramaDtos.VoiceTrack> voiceTracks,
+            List<ComicDramaDtos.TimelineText> timelineTexts, List<ScriptDtos.EpisodeSummary> episodes) {
+        if (episodeId != null && episodes.stream().noneMatch(item -> episodeId.equals(item.id()))) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "所选分集不存在");
+        }
+        List<ComicDramaDtos.Shot> ordered = sourceShots.stream()
+                .sorted(Comparator.comparingInt(ComicDramaDtos.Shot::sortOrder)).toList();
+        List<StoryboardExportSnapshot.Shot> shots = new java.util.ArrayList<>();
+        long cursor = 0;
+        long selectedDuration = 0;
+        for (ComicDramaDtos.Shot shot : ordered) {
+            ComicDramaDtos.MediaResult media = mediaResults.stream()
+                    .filter(item -> "shot".equals(item.targetType()) && shot.id().equals(item.targetId())
+                            && "video".equals(item.mediaType()))
+                    .findFirst().orElse(null);
+            JSONObject result = media == null ? null : media.resultData();
+            JSONObject item = result == null ? null : result.getJSONObject("item");
+            if (item == null && result != null && result.getJSONArray("items") != null
+                    && !result.getJSONArray("items").isEmpty()) {
+                item = result.getJSONArray("items").getJSONObject(0);
+            }
+            boolean selected = episodeId == null || episodeId.equals(shot.sourceEpisodeId());
+            String storageKey = media != null && ("completed".equals(media.status()) || "needsUpdate".equals(media.status()))
+                    && item != null ? item.getString("storageKey") : null;
+            if (selected && media != null && ("completed".equals(media.status()) || "needsUpdate".equals(media.status()))
+                    && storageKey == null && item != null && StringUtils.hasText(item.getString("url"))) {
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "镜头视频尚未保存到媒体库，无法导出: " + shot.shotNumber());
+            }
+            long duration = item != null && item.getLongValue("durationMs") > 0
+                    ? item.getLongValue("durationMs") : shot.durationSeconds().multiply(java.math.BigDecimal.valueOf(1000)).longValue();
+            if (item != null && item.getLongValue("durationMs") < 1) {
+                Object rawDuration = item.get("duration");
+                if (rawDuration instanceof Number number && number.doubleValue() > 0) {
+                    duration = Math.round(number.doubleValue() * 1000);
+                }
+            }
+            shots.add(new StoryboardExportSnapshot.Shot(shot.id(), storageKey, cursor, duration, selected));
+            cursor += duration;
+            if (selected) selectedDuration += duration;
+        }
+        if (selectedDuration < 1) throw new BusinessException(ErrorCode.PARAM_INVALID, "当前导出范围没有镜头");
+        long maximum = Math.max(1, properties.getAi().getVideoComposition().getMaximumTotalDurationSeconds()) * 1000L;
+        if (selectedDuration > maximum) throw new BusinessException(ErrorCode.PARAM_INVALID, "导出时长不能超过10分钟");
+        List<StoryboardExportSnapshot.Text> texts = timelineTexts.stream()
+                .map(item -> new StoryboardExportSnapshot.Text(item.id(), item.content(), item.startMs(), item.endMs(),
+                        item.trackNumber(), item.positionX().doubleValue(), item.positionY().doubleValue(),
+                        item.fontSize(), item.fontFamily(), item.color(), item.alignment(), item.backgroundColor())).toList();
+        List<StoryboardExportSnapshot.Audio> audio = voiceTracks.stream()
+                .filter(item -> StringUtils.hasText(item.audioStorageKey()) && item.timelineStartMs() != null
+                        && item.trimStartMs() != null && item.trimEndMs() != null)
+                .map(item -> new StoryboardExportSnapshot.Audio(item.id(), item.audioStorageKey(),
+                        item.timelineStartMs(), item.trimStartMs(), item.trimEndMs())).toList();
+        return new StoryboardExportSnapshot(projectId, episodeId, settings.aspectRatio(), shots, texts, audio);
     }
 
     /**
@@ -249,6 +401,7 @@ public class VideoCompositionTaskService {
      * @return Mono<Void> 合成结果
      */
     private Mono<Void> composeTask(VideoCompositionTask task) {
+        if ("storyboardExport".equals(task.getTaskType())) return composeStoryboardTask(task);
         List<String> sourceStorageKeys = parseSourceStorageKeys(task.getSourceStorageKeys());
         return Mono.usingWhen(
                         createWorkingDirectory(task.getId()),
@@ -264,6 +417,36 @@ public class VideoCompositionTaskService {
                         },
                         exception -> log.error("清理视频合成取消标记失败: taskId={}", task.getId(), exception)
                 ));
+    }
+
+    /**
+     * 执行分镜导出并复用任务结果收尾逻辑。
+     * @param task 已领取的导出任务
+     * @return 执行完成信号
+     */
+    private Mono<Void> composeStoryboardTask(VideoCompositionTask task) {
+        return Mono.defer(() -> {
+                    StoryboardExportSnapshot snapshot = JSON.parseObject(task.getInputSnapshot(), StoryboardExportSnapshot.class);
+                    if (snapshot == null) throw new BusinessException(ErrorCode.BUSINESS_ERROR, "分镜导出快照无效");
+                    AtomicInteger lastProgress = new AtomicInteger(0);
+                    return Mono.usingWhen(createWorkingDirectory(task.getId()), directory ->
+                                    storyboardExportProcessor.render(task.getUserId(), snapshot, directory,
+                                            progress -> updateProgress(task.getId(), progress, lastProgress),
+                                            () -> isCancellationRequested(task.getId()))
+                                            .flatMap(output -> cancellation.isCancellationRequested(task.getId())
+                                                    .flatMap(cancelRequested -> {
+                                                        if (Boolean.TRUE.equals(cancelRequested)) {
+                                                            return Mono.error(new VideoCompositionMediaProcessor.VideoCompositionCanceledException());
+                                                        }
+                                                        return persistenceService.storeGeneratedMediaFileForUser(task.getUserId(),
+                                                                "video", "storyboard-export.mp4", "video/mp4", output.path(),
+                                                                output.result().width(), output.result().height(), durationAsInteger(output.result().durationMilliseconds()));
+                                                    })),
+                                    this::deleteWorkingDirectory, (directory, exception) -> deleteWorkingDirectory(directory), this::deleteWorkingDirectory);
+                })
+                .flatMap(media -> finishSucceeded(task, media)).onErrorResume(exception -> finishFailed(task, exception))
+                .doFinally(signal -> cancellation.clearCancellation(task.getId()).subscribe(
+                        ignored -> {}, exception -> log.error("清理分镜导出取消标记失败: taskId={}", task.getId(), exception)));
     }
 
     /**
@@ -481,7 +664,8 @@ public class VideoCompositionTaskService {
      */
     private VideoCompositionDtos.VideoCompositionTaskResponse taskResponse(VideoCompositionTask task) {
         return new VideoCompositionDtos.VideoCompositionTaskResponse(
-                task.getId(), task.getStatus(), task.getProgress(), parseSourceStorageKeys(task.getSourceStorageKeys()),
+                task.getId(), task.getStatus(), task.getProgress(),
+                "storyboardExport".equals(task.getTaskType()) ? List.of() : parseSourceStorageKeys(task.getSourceStorageKeys()),
                 parseJsonObject(task.getResultData()), task.getErrorMessage(), formatTime(task.getStartedAt()),
                 formatTime(task.getCompletedAt()), formatTime(task.getCreatedAt()), formatTime(task.getUpdatedAt())
         );

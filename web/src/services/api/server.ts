@@ -936,6 +936,20 @@ export async function downloadServerMedia(storageKey: string) {
     return response.blob();
 }
 
+/** 流式读取已完成的分镜导出视频。 */
+export async function downloadComicDramaExportVideo(taskId: string): Promise<Blob> {
+    const response = await requestServer("/comicDrama/downloadExportVideo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId }),
+    });
+    if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as ApiResponse<never> | null;
+        throw new Error(payload?.msg || `下载失败：${response.status}`);
+    }
+    return response.blob();
+}
+
 export function uploadRemoteMediaToObjectStorage(storageKey: string) {
     return serverPost<ServerMediaInfo>("/media/uploadRemoteMediaToObjectStorage", { storageKey });
 }

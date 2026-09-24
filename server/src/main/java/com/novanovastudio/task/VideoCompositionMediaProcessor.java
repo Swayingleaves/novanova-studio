@@ -196,10 +196,45 @@ public class VideoCompositionMediaProcessor {
      */
     private void runFfmpeg(List<Path> sourceFiles, List<VideoProbe> probes, Path outputFile, long totalDurationMilliseconds,
                            IntConsumer progressConsumer, BooleanSupplier cancellationRequested) {
+        runCommand(buildFfmpegCommand(sourceFiles, probes, outputFile), outputFile, totalDurationMilliseconds,
+                progressConsumer, cancellationRequested);
+    }
+
+    /**
+     * 执行分镜导出的FFmpeg命令，沿用进度、超时及取消处理。
+     * @param command FFmpeg命令参数
+     * @param outputFile 输出文件
+     * @param durationMilliseconds 预期时长
+     * @param width 输出宽度
+     * @param height 输出高度
+     * @param progressConsumer 进度回调
+     * @param cancellationRequested 取消状态查询
+     * @return 成片媒体信息
+     */
+    public CompositionResult runStoryboardCommand(List<String> command, Path outputFile, long durationMilliseconds,
+                                                    int width, int height, IntConsumer progressConsumer,
+                                                    BooleanSupplier cancellationRequested) {
+        runCommand(command, outputFile, durationMilliseconds, progressConsumer, cancellationRequested);
+        if (!Files.isRegularFile(outputFile)) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "FFmpeg未生成分镜视频文件");
+        }
+        return new CompositionResult(width, height, probe(outputFile).durationMilliseconds());
+    }
+
+    /**
+     * 执行指定的FFmpeg命令。
+     * @param command FFmpeg命令参数
+     * @param outputFile 输出文件
+     * @param totalDurationMilliseconds 预期时长
+     * @param progressConsumer 进度回调
+     * @param cancellationRequested 取消状态查询
+     */
+    private void runCommand(List<String> command, Path outputFile, long totalDurationMilliseconds,
+                            IntConsumer progressConsumer, BooleanSupplier cancellationRequested) {
         Process process;
         try {
             Files.createDirectories(outputFile.toAbsolutePath().getParent());
-            process = new ProcessBuilder(buildFfmpegCommand(sourceFiles, probes, outputFile)).start();
+            process = new ProcessBuilder(command).start();
         } catch (IOException exception) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, "服务端未安装FFmpeg或FFmpeg路径配置错误");
         }
@@ -508,7 +543,7 @@ public class VideoCompositionMediaProcessor {
      * @param durationMilliseconds long 时长毫秒数
      * @param hasAudio boolean 是否包含音轨
      */
-    record VideoProbe(int width, int height, String frameRate, long durationMilliseconds, boolean hasAudio) {
+    public record VideoProbe(int width, int height, String frameRate, long durationMilliseconds, boolean hasAudio) {
     }
 
     /**
