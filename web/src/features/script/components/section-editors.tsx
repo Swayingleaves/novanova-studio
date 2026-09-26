@@ -1,13 +1,13 @@
 "use client";
 
 import { nanoid } from "nanoid";
-import { Button, Input, InputNumber, Popconfirm, Select, Tabs } from "antd";
+import { Button, Input, InputNumber, Popconfirm, Select } from "antd";
 import { ArrowDown, ArrowUp, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { createScriptScene, moveScriptBlock, removeScriptBlock, replaceScriptBlock, synchronizeDialogueCharacters } from "../lib/script-episode-editing";
 import { useScriptStore } from "../stores/use-script-store";
 import type { EpisodeDetail, ScriptBlock, ScriptCharacter, ScriptOverview, ScriptScene, ScriptWorkspaceSection } from "../types";
-import { CharacterRelationshipGraph } from "./character-relationship-graph";
+import { CharactersEditor } from "./characters-editor";
 import { ScriptAnalysisVersions } from "./script-analysis-versions";
 
 type ScriptSectionEditorProps = { section: Exclude<ScriptWorkspaceSection, "episodes"> };
@@ -84,76 +84,6 @@ function OutlineEditor() {
         const sceneOptions = selectedEpisode?.scenes.map((scene) => ({ value: scene.id, label: `第 ${scene.sceneNumber} 场 · ${scene.title || "未命名场次"}` })) || [];
         return <div key={event.id} className="grid gap-2 rounded-lg border border-[var(--studio-line)] p-3 md:grid-cols-2 xl:grid-cols-[140px_180px_180px_180px_1fr_auto]"><Select aria-label="事件类型" value={event.eventType} onChange={(eventType) => updateEvent(event.id, { eventType })} options={eventTypes.map(([value, label]) => ({ value, label }))} /><Select aria-label="所属结构段" allowClear value={event.outlineSectionId || undefined} placeholder="所属结构段" options={sections.map((section) => ({ value: section.id, label: section.title }))} onChange={(outlineSectionId) => updateEvent(event.id, { outlineSectionId: outlineSectionId || null })} /><Select aria-label="关联分集" allowClear value={event.episodeId || undefined} placeholder="关联分集（可选）" options={episodeOptions} onChange={(episodeId) => updateEvent(event.id, { episodeId: episodeId || null, sceneId: null })} /><Select aria-label="关联场次" allowClear disabled={!event.episodeId || !selectedEpisode} value={event.sceneId || undefined} placeholder={!event.episodeId ? "先选择分集" : selectedEpisode ? "关联场次（可选）" : "请先加载该分集"} options={sceneOptions} onChange={(sceneId) => updateEvent(event.id, { sceneId: sceneId || null })} /><div><Input aria-label="事件标题" value={event.title} onChange={(input) => updateEvent(event.id, { title: input.target.value })} /><Input.TextArea aria-label="事件说明" className="mt-2" rows={2} value={event.description} onChange={(input) => updateEvent(event.id, { description: input.target.value })} /></div><Button danger aria-label="删除事件" icon={<Trash2 className="size-4" />} onClick={() => updateOutline(sections, events.filter((item) => item.id !== event.id).map((item, sortOrder) => ({ ...item, sortOrder })))} /></div>;
     })}</div><p className="mt-2 text-xs text-[var(--studio-faint)]">关联场次前请先在“分集剧本”中打开该分集，以加载场次列表。</p></div></section>;
-}
-
-function CharactersEditor() {
-    const project = useScriptStore((state) => state.project);
-    const updateCharacters = useScriptStore((state) => state.updateCharacters);
-    if (!project) return null;
-    const characters = project.characters;
-    const relations = project.characterRelations;
-    const updateCharacter = (id: string, patch: Partial<ScriptCharacter>) => updateCharacters(characters.map((character) => character.id === id ? { ...character, ...patch } : character), relations);
-    const addCharacter = () => updateCharacters([...characters, { id: nanoid(), name: `人物 ${characters.length + 1}`, identity: "", age: "", occupation: "", roleType: "", personality: "", valuesDescription: "", goal: "", desire: "", fear: "", motivation: "", appearanceDescription: "", habits: "", speechStyle: "", backgroundStory: "", characterArc: "", graphPositionX: characters.length * 180, graphPositionY: characters.length % 2 * 120, sortOrder: characters.length }], relations);
-    const characterOptions = characters.map((character) => ({ value: character.id, label: character.name }));
-    const profileFields = [
-        ["personality", "性格"], ["valuesDescription", "价值观"], ["goal", "外在目标"],
-        ["desire", "内在欲望"], ["fear", "恐惧"], ["motivation", "核心动机"],
-        ["appearanceDescription", "外貌文字描述"], ["habits", "习惯"], ["speechStyle", "语言特点"],
-        ["backgroundStory", "背景经历"], ["characterArc", "人物弧光"],
-    ] as const;
-    const updateRelation = (id: string, patch: Partial<(typeof relations)[number]>) =>
-        updateCharacters(characters, relations.map((relation) => relation.id === id ? { ...relation, ...patch } : relation));
-    return <section>
-        <SectionHeader title="人物与关系" description="建立人物目标、动机、语言特点与故事中的关系变化。"
-            action={<Button icon={<Plus className="size-4" />} onClick={addCharacter}>添加人物</Button>} />
-        <Tabs items={[
-            { key: "profiles", label: "人物设定", children: <div className="space-y-4">
-                {characters.map((character) => <article key={character.id} className="rounded-xl border border-[var(--studio-line)] p-4">
-                    <div className="flex gap-2">
-                        <Input aria-label="人物姓名" value={character.name} className="font-medium" onChange={(event) => updateCharacter(character.id, { name: event.target.value })} />
-                        <Popconfirm title="删除人物？" description="人物仍被场次或对白引用时，服务端会拒绝删除。" onConfirm={() => updateCharacters(
-                            characters.filter((item) => item.id !== character.id).map((item, sortOrder) => ({ ...item, sortOrder })),
-                            relations.filter((relation) => relation.sourceCharacterId !== character.id && relation.targetCharacterId !== character.id)
-                                .map((relation, sortOrder) => ({ ...relation, sortOrder })))}>
-                            <Button danger aria-label={`删除人物 ${character.name}`} icon={<Trash2 className="size-4" />} />
-                        </Popconfirm>
-                    </div>
-                    <div className="mt-3 grid gap-3 md:grid-cols-4">
-                        {([ ["identity", "身份"], ["age", "年龄"], ["occupation", "职业"], ["roleType", "角色定位"] ] as const)
-                            .map(([key, label]) => <Field key={key} label={label}><Input value={character[key]} onChange={(event) => updateCharacter(character.id, { [key]: event.target.value })} /></Field>)}
-                    </div>
-                    <div className="mt-3 grid max-w-md gap-3 sm:grid-cols-2">
-                        <Field label="关系图横坐标"><InputNumber className="w-full" value={character.graphPositionX} onChange={(value) => updateCharacter(character.id, { graphPositionX: value ?? 0 })} /></Field>
-                        <Field label="关系图纵坐标"><InputNumber className="w-full" value={character.graphPositionY} onChange={(value) => updateCharacter(character.id, { graphPositionY: value ?? 0 })} /></Field>
-                    </div>
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        {profileFields.map(([key, label]) => <Field key={key} label={label}>
-                            <Input.TextArea rows={3} value={character[key]} onChange={(event) => updateCharacter(character.id, { [key]: event.target.value })} />
-                        </Field>)}
-                    </div>
-                </article>)}
-                {!characters.length ? <Empty description="还没有人物" /> : null}
-            </div> },
-            { key: "relations", label: "人物关系图", children: <div className="space-y-4">
-                <CharacterRelationshipGraph />
-                <div className="flex justify-end"><Button size="small" icon={<Plus className="size-4" />} disabled={characters.length < 2}
-                    onClick={() => updateCharacters(characters, [...relations, { id: nanoid(), sourceCharacterId: characters[0].id,
-                        targetCharacterId: characters[1].id, relationshipType: "关系", relationshipDirection: "bidirectional",
-                        storyStage: "", conflictDescription: "", description: "", sortOrder: relations.length }])}>添加关系</Button></div>
-                {relations.map((relation) => <div key={relation.id} className="grid gap-3 rounded-lg border border-[var(--studio-line)] p-3 md:grid-cols-2">
-                    <Field label="起点人物"><Select value={relation.sourceCharacterId} options={characterOptions} onChange={(value) => updateRelation(relation.id, { sourceCharacterId: value })} /></Field>
-                    <Field label="终点人物"><Select value={relation.targetCharacterId} options={characterOptions} onChange={(value) => updateRelation(relation.id, { targetCharacterId: value })} /></Field>
-                    <Field label="关系类型"><Input value={relation.relationshipType} onChange={(event) => updateRelation(relation.id, { relationshipType: event.target.value })} /></Field>
-                    <Field label="关系方向"><Select value={relation.relationshipDirection} options={[{ value: "bidirectional", label: "双向关系" }, { value: "directed", label: "单向关系" }]} onChange={(value) => updateRelation(relation.id, { relationshipDirection: value })} /></Field>
-                    <Field label="故事阶段"><Input value={relation.storyStage} onChange={(event) => updateRelation(relation.id, { storyStage: event.target.value })} /></Field>
-                    <Field label="关系冲突"><Input value={relation.conflictDescription} onChange={(event) => updateRelation(relation.id, { conflictDescription: event.target.value })} /></Field>
-                    <div className="md:col-span-2"><Field label="关系说明"><Input.TextArea rows={2} value={relation.description} onChange={(event) => updateRelation(relation.id, { description: event.target.value })} /></Field></div>
-                    <Button danger icon={<Trash2 className="size-4" />} onClick={() => updateCharacters(characters,
-                        relations.filter((item) => item.id !== relation.id).map((item, sortOrder) => ({ ...item, sortOrder })))}>删除关系</Button>
-                </div>)}
-            </div> },
-        ]} />
-    </section>;
 }
 
 function WorldEditor() {

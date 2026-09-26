@@ -62,6 +62,7 @@ type ScriptStore = {
     updateOverview: (overview: ScriptOverview) => void;
     updateOutline: (sections: OutlineSection[], events: StoryEvent[]) => void;
     updateCharacters: (characters: ScriptCharacter[], relations: CharacterRelation[]) => void;
+    deleteCharacter: (characterId: string) => Promise<void>;
     updateWorld: (worldSetting: WorldSetting, worldItems: WorldItem[], locations: ScriptLocation[]) => void;
     updateEpisode: (detail: EpisodeDetail) => void;
     reorderEpisodes: (episodeIds: string[]) => void;
@@ -232,6 +233,26 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
             const result = await saveScriptCharacters(project.id, project.revision, project.characters, project.characterRelations);
             if (saveGeneration === projectLoadGeneration) applyMutation(project.id, result);
         });
+    },
+    deleteCharacter: async (characterId) => {
+        const project = get().project;
+        if (!project) return;
+        if (get().saveStatus !== "saved" && get().saveStatus !== "idle") {
+            throw new Error("请等待当前修改保存完成后再删除人物");
+        }
+        const characters = project.characters.filter((character) => character.id !== characterId)
+            .map((character, sortOrder) => ({ ...character, sortOrder }));
+        if (characters.length === project.characters.length) return;
+        const relations = project.characterRelations.filter((relation) => relation.sourceCharacterId !== characterId && relation.targetCharacterId !== characterId)
+            .map((relation, sortOrder) => ({ ...relation, sortOrder }));
+        const result = await saveScriptCharacters(project.id, project.revision, characters, relations);
+        if (get().project?.id !== project.id) return;
+        applyMutation(project.id, result);
+        try {
+            await get().reloadProject();
+        } catch {
+            throw new Error("人物已删除，但重新加载项目失败，请刷新页面查看最新内容");
+        }
     },
     updateWorld: (worldSetting, worldItems, locations) => {
         const saveGeneration = projectLoadGeneration;
