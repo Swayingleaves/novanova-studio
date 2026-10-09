@@ -3,13 +3,20 @@ package com.novanovastudio.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 
+import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -21,6 +28,8 @@ import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.UUID;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -265,6 +274,172 @@ class ScriptServiceTest {
 
         assertEquals(ErrorCode.DATA_CONFLICT, exception.getCode());
         verifyNoInteractions(transactionalOperator);
+    }
+
+    /** 验证已生成草稿中的通用短标识不会占用其他项目的主键，应用状态保存同步后的引用。 */
+    @Test
+    void shouldApplyOutlineDraftWithIdsAlreadyUsedByAnotherProject() {
+        JSONObject data = outlineDraftData();
+        stubOutlineDraft(data, List.of(), List.of(), "outline");
+        stubOutlineWrites(List.of("section-1", "event-1"));
+
+        service.applyAiDraft(new ScriptDtos.ApplyAiDraftRequest("project-a", 4L, "draft-a", data)).block();
+
+        ScriptDtos.OutlineDraft applied = captureAppliedOutline();
+        String sectionId = applied.sections().getFirst().id();
+        String eventId = applied.events().getFirst().id();
+        assertNotEquals("section-1", sectionId);
+        assertNotEquals("event-1", eventId);
+        assertEquals(sectionId, UUID.fromString(sectionId).toString());
+        assertEquals(eventId, UUID.fromString(eventId).toString());
+        assertEquals(sectionId, applied.events().getFirst().outlineSectionId());
+        verify(repository).updateAiDraftStatus("project-a", "draft-a", "applied", data);
+        assertEquals(applied, ScriptStructuredDraftParser.parseOutlineDraft(data));
+    }
+
+    /** 验证编辑已有大纲时保留结构段和事件的稳定标识。 */
+    @Test
+    void shouldPreserveExistingOutlineIds() {
+        JSONObject data = outlineDraftData();
+        ScriptDtos.OutlineDraft existing = ScriptStructuredDraftParser.parseOutlineDraft(data);
+        stubOutlineDraft(data, existing.sections(), existing.events(), "outline");
+        stubOutlineWrites(List.of());
+
+        service.applyAiDraft(new ScriptDtos.ApplyAiDraftRequest("project-a", 4L, "draft-a", data)).block();
+
+        assertEquals(existing, captureAppliedOutline());
+    }
+
+    /** 验证新增事件引用已有结构段时，只给新增事件分配唯一标识。 */
+    @Test
+    void shouldAssignNewEventIdAndPreserveExistingSectionReference() {
+        JSONObject data = outlineDraftData();
+        ScriptDtos.OutlineDraft existing = ScriptStructuredDraftParser.parseOutlineDraft(data);
+        stubOutlineDraft(data, existing.sections(), List.of(), "outline");
+        stubOutlineWrites(List.of());
+
+        service.applyAiDraft(new ScriptDtos.ApplyAiDraftRequest("project-a", 4L, "draft-a", data)).block();
+
+        ScriptDtos.OutlineDraft applied = captureAppliedOutline();
+        assertEquals("section-1", applied.sections().getFirst().id());
+        assertEquals("section-1", applied.events().getFirst().outlineSectionId());
+        assertNotEquals("event-1", applied.events().getFirst().id());
+    }
+
+    /** 验证小说改编来源追溯使用应用后的正式标识。 */
+    @Test
+    void shouldRecordAdaptationSourcesWithAssignedOutlineIds() {
+        JSONObject data = outlineDraftData();
+        stubOutlineDraft(data, List.of(), List.of(), "novelAdaptationoutline");
+        stubOutlineWrites(List.of());
+
+        service.applyAiDraft(new ScriptDtos.ApplyAiDraftRequest("project-a", 4L, "draft-a", data)).block();
+
+        ScriptDtos.OutlineDraft applied = captureAppliedOutline();
+        verify(novelAdaptationRepository).recordApplied("draft-a", "project-a", "outline", null, data,
+                List.of(applied.sections().getFirst().id(), applied.events().getFirst().id()));
+    }
+
+    /** 验证不存在的结构段引用不会在标识映射时被清空并静默放行。 */
+    @Test
+    void shouldRejectUnknownOutlineSectionReferenceBeforeAssigningIds() {
+        JSONObject data = outlineDraftData();
+        data.getJSONArray("events").getJSONObject(0).put("outlineSectionId", "unknown-section");
+        stubOutlineDraft(data, List.of(), List.of(), "outline");
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> service.applyAiDraft(
+                new ScriptDtos.ApplyAiDraftRequest("project-a", 4L, "draft-a", data)).block());
+
+        assertTrue(exception.getMessage().contains("故事事件关联了不存在的大纲结构段"));
+        assertEquals("section-1", data.getJSONArray("sections").getJSONObject(0).getString("id"));
+        verify(repository, never()).advanceRevision(anyLong(), anyString(), anyLong());
+    }
+
+    /** 验证重复事件标识不会通过分配新标识被掩盖。 */
+    @Test
+    void shouldRejectDuplicateOutlineEventIdsBeforeAssigningIds() {
+        JSONObject data = outlineDraftData();
+        JSONObject duplicate = JSON.parseObject(data.getJSONArray("events").getJSONObject(0).toJSONString());
+        duplicate.put("sortOrder", 1);
+        data.getJSONArray("events").add(duplicate);
+        stubOutlineDraft(data, List.of(), List.of(), "outline");
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> service.applyAiDraft(
+                new ScriptDtos.ApplyAiDraftRequest("project-a", 4L, "draft-a", data)).block());
+
+        assertTrue(exception.getMessage().contains("故事事件"));
+        verify(repository, never()).advanceRevision(anyLong(), anyString(), anyLong());
+    }
+
+    /**
+     * 创建最小合法大纲草稿，模拟模型重复使用的通用标识。
+     *
+     * @return JSONObject 大纲草稿
+     */
+    private JSONObject outlineDraftData() {
+        return JSONObject.parseObject("""
+                {"sections":[{"id":"section-1","sectionType":"act","title":"开端","content":"建立世界","sortOrder":0}],
+                 "events":[{"id":"event-1","outlineSectionId":"section-1","episodeId":"","sceneId":"","eventType":"plot","title":"发现异常","description":"主角发现线索","sortOrder":0}]}
+                """);
+    }
+
+    /**
+     * 准备待应用草稿与真实序列化形态的目标基线。
+     *
+     * @param data JSONObject 待应用草稿
+     * @param sections List 当前项目结构段
+     * @param events List 当前项目事件
+     * @param actionType String 草稿动作类型
+     */
+    private void stubOutlineDraft(JSONObject data, List<ScriptDtos.OutlineSection> sections,
+                                  List<ScriptDtos.StoryEvent> events, String actionType) {
+        ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "",
+                0, 1, "", "", "", "", "");
+        when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
+        when(repository.getProject(8L, "project-a")).thenReturn(Mono.just(new ScriptRepository.ProjectRecord(
+                "project-a", 8L, overview, "idea", 0, 4L, null, OffsetDateTime.now(), OffsetDateTime.now())));
+        stubEmptyProjectReads();
+        when(repository.listOutlineSections("project-a")).thenReturn(Flux.fromIterable(sections));
+        when(repository.listStoryEvents("project-a")).thenReturn(Flux.fromIterable(events));
+        JSONObject source = JSON.parseObject(JSON.toJSONString(new ScriptDtos.OutlineDraft(sections, events)));
+        when(repository.getPendingAiDraft("project-a", "draft-a")).thenReturn(Mono.just(new ScriptDtos.AiDraft(
+                "draft-a", "project-a", actionType, "outline", null, 4L, "", source,
+                JSON.parseObject(data.toJSONString()), "text-model", 1, "pending", OffsetDateTime.now())));
+        when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<ScriptDtos.MutationResult>>any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
+    /**
+     * 准备大纲应用的版本、来源、修订和状态写入。
+     *
+     * @param foreignIds List 其他项目已占用的标识
+     */
+    private void stubOutlineWrites(List<String> foreignIds) {
+        when(repository.createVersion(anyString(), eq("project-a"), eq(8L), anyString(), anyString(), anyString(), anyLong(), any()))
+                .thenReturn(Mono.empty());
+        when(novelAdaptationRepository.requireTargetSelectionForDraft("draft-a", "project-a", "outline", null, List.of()))
+                .thenReturn(Mono.empty());
+        when(repository.countIdsOwnedByAnotherProject(eq("project-a"), anyString(), anyList()))
+                .thenAnswer(invocation -> Mono.just(invocation.<List<String>>getArgument(2).stream()
+                        .filter(foreignIds::contains).count()));
+        when(repository.advanceRevision(8L, "project-a", 4L)).thenReturn(Mono.just(1L));
+        when(repository.replaceOutline(eq("project-a"), anyList(), anyList())).thenReturn(Mono.empty());
+        when(novelAdaptationRepository.recordApplied(eq("draft-a"), eq("project-a"), eq("outline"), any(), any(), anyList()))
+                .thenReturn(Mono.empty());
+        when(repository.updateAiDraftStatus(eq("project-a"), eq("draft-a"), eq("applied"), any())).thenReturn(Mono.just(1L));
+        when(repository.updateProgress(eq("project-a"), anyString(), anyInt())).thenReturn(Mono.empty());
+    }
+
+    /**
+     * 捕获正式写入的大纲，核对持久化标识与引用。
+     *
+     * @return OutlineDraft 正式写入的数据
+     */
+    private ScriptDtos.OutlineDraft captureAppliedOutline() {
+        ArgumentCaptor<List<ScriptDtos.OutlineSection>> sections = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<ScriptDtos.StoryEvent>> events = ArgumentCaptor.forClass(List.class);
+        verify(repository).replaceOutline(eq("project-a"), sections.capture(), events.capture());
+        return new ScriptDtos.OutlineDraft(sections.getValue(), events.getValue());
     }
 
     /**

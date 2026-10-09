@@ -700,6 +700,8 @@ public class ScriptService {
     private Mono<ScriptDtos.MutationResult> applyValidatedAiDraft(Long userId, ScriptDtos.ApplyAiDraftRequest request,
                                                                   ScriptDtos.AiDraft draft, ScriptDtos.ProjectSnapshot snapshot,
                                                                   boolean perDraftVersion) {
+        // 在合并和来源追溯前分配正式标识，待确认的大纲草稿也沿用同一套映射规则。
+        if ("outline".equals(draft.targetType())) assignOutlineIds(request.draftData(), snapshot);
         MergedAdaptationDraft merged = mergeAdaptationDraft(draft, request.draftData(), snapshot,
                 request.selectedTargetIds() == null ? List.of() : request.selectedTargetIds());
         Mono<Void> operation = (perDraftVersion
@@ -1381,6 +1383,45 @@ public class ScriptService {
         return requireStableIdsAvailable(projectId, "outline", draft.sections().stream().map(ScriptDtos.OutlineSection::id).toList(), "大纲结构段标识已属于其他项目")
                 .then(requireStableIdsAvailable(projectId, "event", draft.events().stream().map(ScriptDtos.StoryEvent::id).toList(), "故事事件标识已属于其他项目"))
                 .then(advance(userId, projectId, expectedRevision)).then(repository.replaceOutline(projectId, draft.sections(), draft.events()));
+    }
+
+    /**
+     * 保留当前项目已有大纲标识，为新增结构段和事件分配唯一标识并同步结构段引用。
+     *
+     * @param draftData JSONObject 用户确认的大纲草稿，就地更新正式标识
+     * @param snapshot ProjectSnapshot 当前项目完整快照
+     * @return void 无返回值
+     * @throws BusinessException 草稿标识重复、字段非法或结构段引用不存在时抛出
+     */
+    private void assignOutlineIds(JSONObject draftData, ScriptDtos.ProjectSnapshot snapshot) {
+        ScriptDtos.OutlineDraft draft;
+        try {
+            draft = ScriptStructuredDraftParser.parseOutlineDraft(draftData);
+        } catch (ScriptStructuredDraftParser.DraftStructureException exception) {
+            throw invalid("AI草稿结构不合法：" + exception.getMessage());
+        }
+        // 先检查草稿内的标识和关联，禁止通过换新标识掩盖重复条目或错误引用。
+        draft.sections().forEach(this::validated);
+        draft.events().forEach(this::validated);
+        Set<String> draftSectionIds = ids(draft.sections().stream().map(ScriptDtos.OutlineSection::id).toList(), "大纲结构段");
+        ids(draft.events().stream().map(ScriptDtos.StoryEvent::id).toList(), "故事事件");
+        draft.events().forEach(event -> requireOptionalReference(event.outlineSectionId(), draftSectionIds,
+                "故事事件关联了不存在的大纲结构段"));
+        Set<String> existingSectionIds = snapshot.project().outlineSections().stream()
+                .map(ScriptDtos.OutlineSection::id).collect(java.util.stream.Collectors.toSet());
+        Set<String> existingEventIds = snapshot.project().storyEvents().stream()
+                .map(ScriptDtos.StoryEvent::id).collect(java.util.stream.Collectors.toSet());
+        Map<String, String> sectionIds = new java.util.HashMap<>();
+        List<ScriptDtos.OutlineSection> sections = draft.sections().stream().map(section -> {
+            String id = existingSectionIds.contains(section.id()) ? section.id() : UUID.randomUUID().toString();
+            sectionIds.put(section.id(), id);
+            return new ScriptDtos.OutlineSection(id, section.sectionType(), section.title(), section.content(), section.sortOrder());
+        }).toList();
+        List<ScriptDtos.StoryEvent> events = draft.events().stream().map(event -> new ScriptDtos.StoryEvent(
+                existingEventIds.contains(event.id()) ? event.id() : UUID.randomUUID().toString(),
+                StringUtils.hasText(event.outlineSectionId()) ? sectionIds.get(event.outlineSectionId()) : event.outlineSectionId(),
+                event.episodeId(), event.sceneId(), event.eventType(), event.title(), event.description(), event.sortOrder())).toList();
+        draftData.putAll(JSON.parseObject(JSON.toJSONString(new ScriptDtos.OutlineDraft(sections, events))));
     }
 
     /**

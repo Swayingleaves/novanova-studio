@@ -1,0 +1,196 @@
+---
+title: Script Creation
+description: Turn a one-line idea into a structured, continuously editable script with scenes, episodes, a story bible, and AI novel adaptation. PRO feature.
+pro: true
+---
+
+# Script Creation
+
+> **PRO feature.** "Script Creation" carries a PRO badge in the sidebar and is available with an enterprise license.
+
+Script Creation turns an idea into a **structured script you can revise again and again**. Everything lives in layers — overview → outline → characters and world → episodes and scenes — so editing one part never breaks another. Storyboard, visual assets, and media production happen in Comic Drama Creation, but both modules share the same script data.
+
+## Two ways to start
+
+| Approach | Entry | Who it fits |
+| --- | --- | --- |
+| New script | "New script" at the top right of the library | You have an idea and build the structure from scratch |
+| Upload script / novel | "Upload script / novel" at the top right of the library | You already have source text to extract and adapt |
+
+**New script**: fill in the project name, creation method (`Blank project` or a built-in template), content form, and an optional one-line idea, then click "Create and enter". Sixteen templates cover comic drama, live-action short drama, animation, advertising, music video, and more; picking a template fills in the matching content form automatically.
+
+**Upload script / novel**: choose import type `Novel` or `Script`, attach a TXT, DOCX, or DOC file up to 50 MB, and pick the encoding for TXT (`UTF-8` by default, or `GB18030` for older Simplified Chinese files). Uploading only stores the source text and its chapter structure — it does **not** generate characters, episodes, or scenes. You can proofread the structure on the "Source" page.
+
+## Project library
+
+Each card shows the project name, content form, genre, production stage, one-line idea, progress (`episodes / target episodes` plus a completion rate), and the last modified time.
+
+- Filter by content form (comic drama / live-action short drama / animation / advertisement / promotional video / music video / story short) and stage (ideating / outlining / writing / completed / in production). The search box matches project names and one-line ideas.
+- Select multiple projects to "Delete selected (N)". Projects move to a soft-deleted state; related script content is not purged immediately.
+
+## Saving (read this first)
+
+The script workspace has **no autosave**. The "Save" button in the top bar is enabled only after something changes, and the save state has six values: `No changes / Unsaved changes / Saving / Saved / Save failed / Version conflict`.
+
+- Switching sections with unsaved changes opens a dialog: "Save and continue" or "Discard and continue".
+- Closing the tab or refreshing triggers the native browser prompt; clicking in-app links is intercepted with the same confirmation.
+- On failure a banner reads "Save failed; your edits are still kept on this page." with a "Retry save" action.
+- On a version conflict you are told the cloud copy was updated elsewhere; copy anything important, then reload the cloud version.
+- "Discard and continue" **really drops** local edits and reloads the cloud copy.
+
+These actions require a saved state first, and say so explicitly when they are blocked: calling AI, starting novel adaptation or body generation, creating or restoring a version, deleting characters or episodes, and entering Comic Drama Creation.
+
+## Workspace sections
+
+The left directory has two groups:
+
+| Group | Items |
+| --- | --- |
+| Script | Story overview, Story outline, Characters, World and locations, Episode script, Versions |
+| Novel | Source, Story bible, Novel adaptation |
+
+Below them is a "Episodes and scenes" shortcut list: expand an episode to see its scenes, use `+` to add a scene to that episode, and use the dashed "Add episode" button to append one at the end. Selecting an episode or scene there also sets the AI panel's current target.
+
+### Story overview
+
+Write down the goal, the main conflict, and the ending direction first. Fields cover project name, content form, genre, target episode count, target total duration, plus one-line idea, synopsis, theme, main plot, main conflict, ending direction, and narrative style.
+
+**Fill in at least one of the one-line idea or the synopsis** — candidate directions and outlines cannot be generated without one.
+
+### Story outline
+
+The default reading view shows a table of contents on the left and a paper-style layout on the right, including the header, one-line idea, genre/target episodes/structure section count, a characters section (role, identity·age·occupation, goal), and key events per chapter.
+
+Switch to "Edit" to organize structure sections as act structure, main line, subplot, or character growth arc. Each section holds key events typed as plot / conflict / suspense / twist / climax / ending, optionally linked to a specific episode and scene.
+
+Linking a scene requires opening that episode in "Episode script" first so its scene list is loaded.
+
+### Characters
+
+A card grid shows the first character of each name, the name, role tag, `age · identity · occupation`, and a personality summary. Clicking a card opens the editor with three field groups:
+
+- **Basic information**: character name (required), role, age, identity, occupation
+- **Personality and motivation**: personality, values, outer goal, inner desire, fear, core motivation
+- **Appearance and background**: appearance description, habits, speech traits, background, character arc
+
+The toolbar supports "Select all on this page", batch delete, and "Add character". Deletion warns that relations are removed too, and that characters referenced by scenes or dialogue are rejected by the server.
+
+### World and locations
+
+Fill in era, region, social background, and overall tone at the top, then work in two tabs:
+
+- **World rules**: sub-tabs for rules / organizations / factions / ranks / limits / historical events, each with its own card grid.
+- **Locations**: name, spatial use, narrative role, default time, weather, atmosphere, key props, and main events.
+
+Deleting a location referenced by a scene leaves that scene's location empty.
+
+### Episode script
+
+A horizontal card rail: the cover card shows episode number, title, synopsis, scene count, completion status, and target duration; each scene card shows `Scene N`, its title, `location · time · interior/exterior`, and body blocks typed as action / dialogue / narration / transition, with the speaker shown for dialogue. Blocks produced by adaptation are additionally marked "Adapted".
+
+Navigate with arrows, a slider, the scroll wheel, and `←/→`, `PageUp/PageDown`, `Home/End`.
+
+Each card has three shortcuts: edit, AI, delete. The editor sets the episode title, completion status (planning / draft / completed), target duration, and per-scene location, interior or exterior, time of day, cast, scene goal, action summary, transition note, relations to the previous and next scene, plus body blocks with "AI optimize scene" and "AI optimize body block".
+
+## Source (novel projects)
+
+After uploading, proofread chapter and scene structure here. Status tags are `Queued / Parsing / Completed / Parse failed`, and parsing advances through "read file → write chapters and chunks → done".
+
+The proofreading workspace shows a chapter tree on the left (chapters as parents, scenes as children) with a gold "Needs review" tag on items to check. On the right you can:
+
+- Rename a section ("Save title")
+- **Split**: in split mode every body line gets a "Split" button that starts a new structure section from that line
+- **Merge with previous / next**: bodies are concatenated in order; the original file is unchanged
+
+Each line shows its start offset, and clicking evidence scrolls to it and highlights it. Very long sections show only the first 600 lines and at most 20000 characters, so split points must fall inside the visible range.
+
+**"Confirm structure" is a prerequisite for story bible analysis.** If TXT parsing fails you can "Switch to GB18030 and retry".
+
+## Story bible
+
+AI extraction over the source text turns long prose into reviewable, editable knowledge items.
+
+### Analysis flow
+
+1. Pick a text model.
+2. Pick the scope: the whole book by default, or tick chapters/scenes for partial re-analysis.
+3. Click "Quote and analyze". The dialog shows the model, scope, billable character count, price tier, **pre-charged credits**, and batch count. The billing note states: charged by source character tier, cancellation only charges the initial batches that completed successfully (refunds round down), finished content is kept, total model failure is fully refunded, and **items you confirmed or edited manually are never overwritten**.
+4. The job runs through "batch extraction → storyline synthesis → done", with states `Queued / Analyzing / Interrupted, resumable / Completed / Partially completed / Failed, refunded / Cancelled, billed per batch`.
+5. Interrupted jobs can be resumed; you can also cancel, which only bills completed batches.
+
+Note: analysis **re-charges for the selected scope each run** — there is no "skip already analyzed chapters" incremental mode. Existing items are not duplicated: unlocked items are updated in place, while confirmed or locked items only receive pending suggestions.
+
+### Six tabs
+
+`Characters / Locations / Relations / Events / Storylines / Timeline` (the timeline reuses event data with a different sort, switchable between "Narrative order" and "Story time").
+
+Each item has a status: `Pending / Confirmed / Rejected`, plus a "Locked" marker. **Confirming an item locks it** — new suggestions from a later analysis are not written in automatically and must be merged or rejected by hand.
+
+### Evidence
+
+Each item shows its evidence count with "View source" jumping to the matching offset in the source and highlighting it. The item drawer lists all source evidence (start offset plus quote), each clickable. Evidence is only produced by analysis and is read-only; when merging or splitting items you can assign which evidence follows which side.
+
+### Batch confirm
+
+The toolbar offers "Select all pending on this page", "Confirm selected (N)", and "Confirm all". Confirming locks the items and merges their pending suggestions. "Confirm all" covers every pending item in the current category regardless of pagination, search, or status filters.
+
+Other actions: create items manually, merge or split aliases, and link confirmed story bible characters and locations to Comic Drama visual assets.
+
+## Novel adaptation
+
+For projects with imported source text, open "Novel adaptation" from the directory. Its subtitle states: source material is distilled in batches, a unified strategy is synthesized, episode count is confirmed before episode identities are fixed, and bodies are generated episode by episode — **storyboard, visual assets, and media production continue in the comic drama workspace**.
+
+### Adaptation settings
+
+Choose the adaptation form, episode duration (seconds), narrative pace (relaxed / balanced / tight), adaptation degree (faithful / balanced / bold), and a text model, then click "Start whole-book adaptation". Parameters are frozen once the job starts and can only be changed when it has not started or has finished.
+
+A quote dialog confirms: input covers all confirmed story facts; this run performs "material distillation → whole-book strategy" and then pauses for episode-count confirmation, showing the estimated call count and the pre-charged credits.
+
+### Nine-step pipeline
+
+`Adaptation settings → Material distillation → Whole-book strategy → Confirm episode count → Overview and outline → Characters and locations → Selection and episode planning → Apply replacement → Episode bodies`
+
+There are two mandatory human checkpoints:
+
+- **Confirm episode count**: after the strategy is generated the job pauses and you enter the final count (not less than the number of story stages). The server allocates quotas by each stage's suggested ratio using the largest remainder method, fixing all episode identities and numbers at once, running 1 → N. Once allocated it **cannot change** — a different count means starting a new adaptation.
+- **Apply replacement**: after the unified plan is ready the job pauses and shows the pending drafts. "Apply and continue" writes the overview, outline, character/location settings, and episode plans into the project in a single transaction, replacing same-named content and saving a pre-change version. The dialog states that storyboard, visual assets, and media are preserved and recorded as impacts, never deleted, and that a failed apply leaves no half-applied state.
+
+### Generating episode bodies
+
+Bodies are generated per fixed episode. Two modes:
+
+- **Generate and write into the script directly (recommended)**: each episode is merged into the script as soon as it succeeds, and a pre-change version is saved before starting.
+- **Drafts only**: output is stored as pending drafts and applied episode by episode from the AI script assistant.
+
+Use the quick picks "All / None / Only unfinished" — you can queue a hundred episodes at once, and "Continue from missing episodes" after a failure or cancellation only redoes unfinished episodes without charging again.
+
+## AI script assistant
+
+The assistant appears as a right sidebar in story overview, world and locations, and versions; other sections open it in a dialog. The top-bar "AI" button opens it anywhere.
+
+Pick an action, a model, and a target, add any extra requirements, then click "Generate pending draft". The panel shows the current target and estimated credits. Common actions include generating candidate directions, outlines, characters and relations, world and locations, episode plans, single-episode scenes and bodies, plus polish / expand / condense / rewrite / colloquialize / dialogue tuning / conflict strengthening / suspense tuning / twist tuning / motivation tuning / emotion tuning / climax tuning / pacing tuning / style tuning.
+
+**AI output always lands as a pending draft first.** Open "Preview diff" from the pending list to see per-field changes (`N added` / `N updated`), expand "Advanced edit (raw JSON)" to edit both sides side by side, then click "Apply". Drafts are `Pending` or `Expired`; once project content changes, old drafts are marked expired and cannot overwrite current content.
+
+Precondition checks tell you exactly what is missing, for example "fill in a one-line idea or synopsis in the story overview first", "finish the story outline first", "save your script changes first", or "select an episode, scene, or body block as the AI target".
+
+## Versions
+
+Ordinary saves do not create history; a pre-change snapshot is kept automatically before an AI draft is applied. The timeline shows the version name, source (`Before AI change` / `Manual`), revision, time, and change note.
+
+- "Create version" saves a named version (e.g. "Act one final") with an optional note.
+- "Restore" does not auto-save current content — create a named version first if you want to keep the current state.
+- "Structure diff" compares each block between the version and the current content: story overview, story outline, key events, characters, character relations, world, world rules, locations, episode plans, and episode bodies. Episode bodies load on demand, so only structured settings and episode summaries are compared.
+
+## Entering Comic Drama Creation
+
+The top-bar "Enter Comic Drama Creation" saves first, then shows a pre-flight check listing story synopsis, episode structure, usable script body, scene production info, main characters, locations, and pending AI drafts, each marked `Ready / Missing / Suggested`.
+
+If items are missing you can go back and fill them in, or "Ignore missing and continue" — entering production only marks the project, it **neither copies content nor charges credits**.
+
+## Credits and limits
+
+- Every AI action (story bible analysis, novel adaptation, episode body generation, the AI script assistant) is billed on the chosen text model, shows the pre-charge up front, settles on successfully persisted units, and refunds unfinished parts on failure or cancellation.
+- When a model price is not configured you get "the current model has no explicit credit price; refresh the model configuration and retry". Adaptation and body generation prices are configured under "Script pricing" in the admin backend.
+- Target episode count ranges from 1 to 1000; target episode duration from 0 to 86400 seconds.
+- There is no export on the script side, and a script project can only hold one imported source document.

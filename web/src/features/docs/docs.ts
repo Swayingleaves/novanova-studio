@@ -11,6 +11,8 @@ export type DocPage = {
     title: string;
     description: string;
     content: string;
+    /** 企业版专属文档，在侧边栏与总览里展示 PRO 角标。 */
+    pro?: boolean;
 };
 
 export type SearchEntry = Pick<DocPage, "locale" | "slug" | "title" | "description"> & { text: string };
@@ -23,7 +25,7 @@ export type DocGroup = {
 
 const groupDefinitions = [
     { key: "getting-started", titles: { "zh-cn": "快速开始", en: "Getting started" }, order: ["project-introduction", "docker-start", "local-development"] },
-    { key: "using-studio", titles: { "zh-cn": "使用本项目", en: "Using Novanova Studio" }, order: ["workspace", "image-generation", "video-generation", "canvas", "assets", "prompt-library", "admin", "system-configuration", "theme", "announcements", "profile"] },
+    { key: "using-studio", titles: { "zh-cn": "使用本项目", en: "Using Novanova Studio" }, order: ["workspace", "image-generation", "video-generation", "canvas", "script-creation", "comic-drama", "assets", "prompt-library", "admin", "system-configuration", "theme", "announcements", "profile"] },
     { key: "troubleshooting", titles: { "zh-cn": "问题与解决", en: "Troubleshooting" }, order: ["faq"] },
 ] as const;
 
@@ -86,7 +88,7 @@ function readDocPage(locale: Locale, filePath: string): DocPage {
     const { data, content } = parseFrontmatter(source);
     const relative = path.relative(path.join(docsRoot, locale), filePath).replace(/\\/g, "/").replace(/\.(mdx|md)$/, "");
     const slug = relative === "index" ? [] : relative.split("/");
-    return { locale, slug, title: String(data.title || slug.at(-1) || "Novanova Studio"), description: String(data.description || ""), content };
+    return { locale, slug, title: String(data.title || slug.at(-1) || "Novanova Studio"), description: String(data.description || ""), content, pro: data.pro === true || data.pro === "true" };
 }
 
 function parseFrontmatter(source: string): { data: Record<string, unknown>; content: string } {
