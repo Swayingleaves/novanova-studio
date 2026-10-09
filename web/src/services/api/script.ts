@@ -229,19 +229,6 @@ export function discardScriptAiDraft(projectId: string, expectedRevision: number
     return serverPost<MutationResult>(`${SCRIPT_PATH}/discardAiDraft`, { projectId, expectedRevision, draftId });
 }
 
-export function analyzeScript(input: { projectId: string; expectedRevision: number; scopeType: "project" | "episode"; scopeId?: string; instruction?: string; model: string }) {
-    return serverPost<AnalysisReport>(`${SCRIPT_PATH}/analyzeScript`, input);
-}
-
-export function listScriptAnalysisReports(projectId: string) {
-    return serverGet<AnalysisReport[]>(`${SCRIPT_PATH}/listAnalysisReports?projectId=${encodeURIComponent(projectId)}`);
-}
-
-export function getScriptAnalysisReport(projectId: string, reportId: string) {
-    const query = new URLSearchParams({ projectId, reportId });
-    return serverGet<AnalysisReport>(`${SCRIPT_PATH}/getAnalysisReport?${query}`);
-}
-
 export function listScriptVersions(projectId: string) {
     return serverGet<ScriptVersionSummary[]>(`${SCRIPT_PATH}/listVersions?projectId=${encodeURIComponent(projectId)}`);
 }
