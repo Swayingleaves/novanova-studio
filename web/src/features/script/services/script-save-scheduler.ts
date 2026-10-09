@@ -64,6 +64,20 @@ export function createScriptSaveScheduler(options: ScriptSaveSchedulerOptions) {
         hasPending() {
             return pendingJobs.size > 0;
         },
+        /**
+         * 丢弃某个待保存区块（如删除尚未落库的分集）。
+         * 返回是否确实取消成功：已经开跑的任务返回 false，调用方据此回退到「请等待保存完成」。
+         */
+        cancel(key: string) {
+            if (failedJob?.[0] === key) {
+                failedJob = null;
+                paused = false;
+            } else if (!pendingJobs.delete(key)) {
+                return false;
+            }
+            if (!running && !pendingJobs.size && !paused) options.onStatusChange("saved");
+            return true;
+        },
         /** 执行队列中所有待保存内容。返回是否成功（失败或冲突时为 false）。 */
         async flush() {
             paused = false;

@@ -2,8 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { App, Button, Empty, Modal, Spin } from "antd";
-import { ArrowLeft, ArrowRight, Bot, Pencil, Sparkles, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Bot, Pencil, Plus, Sparkles, X } from "lucide-react";
 
+import { createScriptScene } from "../lib/script-episode-editing";
 import { useScriptStore } from "../stores/use-script-store";
 import type { ScriptBlock, ScriptCharacter } from "../types";
 import { EpisodeDetailEditor } from "./section-editors";
@@ -20,6 +21,7 @@ export function ScriptEpisodeReader({ selectedEpisodeId, selectedSceneId, sceneE
     const detail = useScriptStore((state) => selectedEpisodeId ? state.episodes[selectedEpisodeId] : undefined);
     const loadEpisode = useScriptStore((state) => state.loadEpisode);
     const updateEpisode = useScriptStore((state) => state.updateEpisode);
+    const createEpisode = useScriptStore((state) => state.createEpisode);
     const deleteEpisode = useScriptStore((state) => state.deleteEpisode);
     const [loadError, setLoadError] = useState("");
     const [editingPage, setEditingPage] = useState<{ episodeId: string; sceneId: string } | null>(null);
@@ -156,6 +158,21 @@ export function ScriptEpisodeReader({ selectedEpisodeId, selectedSceneId, sceneE
         });
     };
 
+    /** 空态下从 + 卡片直接建第一集。 */
+    const addEpisode = () => {
+        const id = createEpisode();
+        if (id) onSelectEpisode(id);
+    };
+
+    /** 空分集时从 + 卡片直接起一场，并进入编辑。 */
+    const addScene = () => {
+        if (!detail) return;
+        const scene = createScriptScene(detail.scenes.length);
+        updateEpisode({ ...detail, scenes: [...detail.scenes, scene] });
+        onSelectScene(scene.id, detail.episode.id);
+        setEditingPage({ episodeId: detail.episode.id, sceneId: scene.id });
+    };
+
     const confirmDeleteScene = (sceneId: string) => {
         if (!detail) return;
         const sceneIndex = detail.scenes.findIndex((scene) => scene.id === sceneId);
@@ -201,15 +218,16 @@ export function ScriptEpisodeReader({ selectedEpisodeId, selectedSceneId, sceneE
     return <section className={styles.reader} onKeyDown={onKeyDown} tabIndex={-1} aria-label="分集剧本阅读器">
         <header className={styles.header}>
             <div className="min-w-0"><h2 className="truncate text-base font-semibold text-[var(--studio-ink)]">{detail ? `第 ${currentEpisode?.episodeNumber ?? detail.episode.episodeNumber} 集 · ${detail.episode.title}` : "分集剧本"}</h2><p className="mt-1 truncate text-xs text-[var(--studio-muted)]">{currentScene ? `第 ${currentScene.sceneNumber} 场 · ${currentScene.title}` : detail ? statusLabels[detail.episode.completionStatus] : "选择分集开始写作"}</p></div>
-            <Button size="small" icon={<Bot className="size-4" />} onClick={onOpenAiGeneration}>AI生成</Button>
+            {/* 宽屏下右侧常驻「AI剧本助手」，这个入口只在窄屏（面板隐藏时）保留 */}
+            <Button className="xl:hidden" size="small" icon={<Bot className="size-4" />} onClick={onOpenAiGeneration}>AI生成</Button>
         </header>
-        {!selectedEpisodeId ? <div className="flex min-h-0 flex-1 items-center justify-center"><Empty description="请从目录新增或选择分集" /></div>
+        {!selectedEpisodeId ? <div className="flex min-h-0 flex-1 items-center justify-center p-6"><button type="button" className={styles.newEpisodeCard} onClick={addEpisode} aria-label="新增分集"><Plus className="size-9" aria-hidden="true" /><span className="text-base font-semibold">新增分集</span><span className="text-xs text-[var(--studio-faint)]">创建第一集，开始写分集剧本</span></button></div>
             : loadError ? <div className="flex min-h-0 flex-1 items-center justify-center"><Empty description={loadError}><Button onClick={() => { setLoadError(""); void loadEpisode(selectedEpisodeId).catch((error: unknown) => setLoadError(error instanceof Error ? error.message : "分集正文加载失败")); }}>重新加载分集</Button></Empty></div>
                 : !detail ? <div className="flex min-h-0 flex-1 items-center justify-center"><Spin /></div> : <>
                     <div className={styles.stage} tabIndex={0} aria-label="剧本卡片，使用左右方向键翻页">
                         <div ref={trackRef} className={styles.track} onScroll={onScroll}>
                             <article ref={(element) => { pageRefs.current[0] = element; }} className={`${styles.page} ${pageIndex === 0 ? styles.active : ""} ${pageIndex > 1 ? styles.distant : ""}`}>
-                                <div className={`${styles.card} ${styles.cover}`}><span className={styles.eyebrow}>第 {currentEpisode?.episodeNumber ?? detail.episode.episodeNumber} 集</span><h3>{detail.episode.title || "未命名分集"}</h3><span className={styles.rule} /><p className={styles.synopsis}>{detail.episode.summary || "尚未填写分集梗概"}</p><div className={styles.tags}><span>{scenes?.length || 0} 场</span><span>{statusLabels[detail.episode.completionStatus]}</span>{detail.episode.targetDurationSeconds > 0 ? <span>目标时长 {Math.ceil(detail.episode.targetDurationSeconds / 60)} 分钟</span> : null}</div>{pageIndex === 1 ? <button type="button" className={styles.previewTarget} aria-label="查看本集封面" onClick={() => selectPage(0)} /> : null}<div className={styles.cardActions}><button type="button" className={styles.cardAction} aria-label="编辑分集封面" onClick={() => setEditingPage({ episodeId: selectedEpisodeId, sceneId: "" })}><Pencil className="size-4" /></button><button type="button" className={styles.cardAction} aria-label="AI生成本集场次与正文" onClick={() => setAiPage({ episodeId: selectedEpisodeId, sceneId: "" })}><Sparkles className="size-4" /></button></div></div>
+                                <div className={`${styles.card} ${styles.cover}`}><span className={styles.eyebrow}>第 {currentEpisode?.episodeNumber ?? detail.episode.episodeNumber} 集</span><h3>{detail.episode.title || "未命名分集"}</h3><span className={styles.rule} /><p className={styles.synopsis}>{detail.episode.summary || "尚未填写分集梗概"}</p><div className={styles.tags}><span>{scenes?.length || 0} 场</span><span>{statusLabels[detail.episode.completionStatus]}</span>{detail.episode.targetDurationSeconds > 0 ? <span>目标时长 {Math.ceil(detail.episode.targetDurationSeconds / 60)} 分钟</span> : null}</div>{scenes?.length ? null : <button type="button" className={styles.addCard} onClick={addScene} aria-label="新增场次"><Plus className="size-5" aria-hidden="true" /><span>新增场次</span></button>}{pageIndex === 1 ? <button type="button" className={styles.previewTarget} aria-label="查看本集封面" onClick={() => selectPage(0)} /> : null}<div className={styles.cardActions}><button type="button" className={styles.cardAction} aria-label="编辑分集封面" onClick={() => setEditingPage({ episodeId: selectedEpisodeId, sceneId: "" })}><Pencil className="size-4" /></button><button type="button" className={styles.cardAction} aria-label="AI生成本集场次与正文" onClick={() => setAiPage({ episodeId: selectedEpisodeId, sceneId: "" })}><Sparkles className="size-4" /></button></div></div>
                             </article>
                             {scenes?.map((scene, index) => <article key={scene.id} ref={(element) => { pageRefs.current[index + 1] = element; }} className={`${styles.page} ${pageIndex === index + 1 ? styles.active : ""} ${Math.abs(pageIndex - index - 1) > 1 ? styles.distant : ""}`}>
                                 <div className={styles.card}>

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { nanoid } from "nanoid";
 import { App, Button, Checkbox, Empty, Input, Modal, Pagination, Popconfirm } from "antd";
-import { Plus, Trash2, Users } from "lucide-react";
+import { Plus, Sparkles, Trash2, Users } from "lucide-react";
 
 import { useScriptStore } from "../stores/use-script-store";
 import type { ScriptCharacter } from "../types";
@@ -29,6 +29,7 @@ export function CharactersEditor() {
     const project = useScriptStore((state) => state.project);
     const updateCharacters = useScriptStore((state) => state.updateCharacters);
     const deleteCharactersFromProject = useScriptStore((state) => state.deleteCharacters);
+    const setAssistantOpen = useScriptStore((state) => state.setAssistantOpen);
     const [draft, setDraft] = useState<ScriptCharacter | null>(null);
     const [isNew, setIsNew] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -112,6 +113,8 @@ export function CharactersEditor() {
                 <Popconfirm title={`删除选中的 ${selectedCount} 个人物？`} description="关联关系会一起删除；人物若被场次或对白引用，服务端会拒绝删除。" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} disabled={!selectedCount} onConfirm={() => void deleteSelected()}>
                     <Button danger disabled={!selectedCount || deleting} loading={deleting} icon={<Trash2 className="size-4" />}>{selectedCount ? `删除 (${selectedCount})` : "删除"}</Button>
                 </Popconfirm>
+                {/* 宽屏下右侧常驻「AI剧本助手」，这个入口只在窄屏（面板隐藏时）保留 */}
+                <Button className="xl:hidden" icon={<Sparkles className="size-4" />} onClick={() => setAssistantOpen(true)}>AI生成人物</Button>
                 <Button type="primary" icon={<Plus className="size-4" />} onClick={addCharacter}>添加人物</Button>
             </div>
         </header>

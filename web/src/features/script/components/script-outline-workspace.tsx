@@ -102,7 +102,8 @@ export function ScriptOutlineWorkspace({ onOpenAiGeneration }: { onOpenAiGenerat
                 {saveStatus === "error" ? <Button size="small" type="link" onClick={retrySave}>重试保存</Button> : null}
             </div>
             <div className={styles.actions}>
-                <Button size="small" icon={<RotateCcw className="size-3.5" />} onClick={onOpenAiGeneration}>重新生成</Button>
+                {/* 宽屏下右侧常驻「AI剧本助手」，这个入口只在窄屏（面板隐藏时）保留 */}
+                <Button className="xl:hidden" size="small" icon={<RotateCcw className="size-3.5" />} onClick={onOpenAiGeneration}>重新生成</Button>
                 <Button size="small" icon={editing ? <BookOpenText className="size-3.5" /> : <Pencil className="size-3.5" />} onClick={() => setEditing((current) => !current)}>
                     {editing ? "返回阅读" : "编辑"}
                 </Button>

@@ -1,5 +1,6 @@
 "use client";
 
+import { nanoid } from "nanoid";
 import { create } from "zustand";
 
 import { ServerApiError } from "@/services/api/server";
@@ -47,6 +48,8 @@ type ScriptStore = {
     drafts: ScriptAiDraft[];
     versions: ScriptVersionSummary[];
     aiTarget: { targetType: string; targetId?: string; label: string } | null;
+    /** AI 剧本助手抽屉是否展开。分集卡片、大纲工作区和人物设定都从这里唤起同一个助手。 */
+    assistantOpen: boolean;
     loading: boolean;
     error: string;
     saveStatus: SaveStatus;
@@ -65,10 +68,13 @@ type ScriptStore = {
     updateCharacters: (characters: ScriptCharacter[], relations: CharacterRelation[]) => void;
     deleteCharacters: (characterIds: string[]) => Promise<void>;
     updateWorld: (worldSetting: WorldSetting, worldItems: WorldItem[], locations: ScriptLocation[]) => void;
+    /** 新建空白分集，返回其标识；项目未加载时返回空串。 */
+    createEpisode: () => string;
     updateEpisode: (detail: EpisodeDetail) => void;
     reorderEpisodes: (episodeIds: string[]) => void;
     deleteEpisode: (episodeId: string) => Promise<void>;
     setAiTarget: (target: { targetType: string; targetId?: string; label: string } | null) => void;
+    setAssistantOpen: (open: boolean) => void;
     replaceDrafts: (drafts: ScriptAiDraft[]) => void;
     replaceVersions: (versions: ScriptVersionSummary[]) => void;
     retrySave: () => void;
@@ -83,6 +89,8 @@ let storeReference: ScriptStoreReference;
 let projectLoadGeneration = 0;
 let projectListLoadGeneration = 0;
 const episodeLoadRequests = new Map<string, Promise<EpisodeDetail>>();
+/** 只存在于本地、尚未落库的分集标识。这类分集可以直接丢弃，不需要等服务端。 */
+const localOnlyEpisodeIds = new Set<string>();
 
 const saveScheduler = createScriptSaveScheduler({
     isConflict: (error) => error instanceof ServerApiError && (error.status === 409 || error.code === 4004),
@@ -115,6 +123,7 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
     drafts: [],
     versions: [],
     aiTarget: null,
+    assistantOpen: false,
     loading: false,
     error: "",
     saveStatus: "idle",
@@ -137,6 +146,7 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
     loadProject: async (projectId) => {
         const loadGeneration = ++projectLoadGeneration;
         saveScheduler.reset();
+        localOnlyEpisodeIds.clear();
         set({ project: null, loading: true, error: "", saveStatus: "idle", saveError: "", hasUnsaved: false, episodes: {}, drafts: [], versions: [], aiTarget: null });
         try {
             const project = await getScriptProject(projectId);
@@ -264,8 +274,22 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
             if (saveGeneration === projectLoadGeneration) applyMutation(project.id, result);
         });
     },
+    createEpisode: () => {
+        const project = get().project;
+        if (!project) return "";
+        const episodeNumber = project.episodes.length + 1;
+        const id = nanoid();
+        get().updateEpisode({
+            episode: { id, episodeNumber, title: `第 ${episodeNumber} 集`, summary: "", keyEvents: "", mainConflict: "", climax: "", endingHook: "", targetDurationSeconds: 0, completionStatus: "planning", sortOrder: project.episodes.length },
+            scenes: [],
+        });
+        return id;
+    },
     updateEpisode: (detail) => {
         const saveGeneration = projectLoadGeneration;
+        if (!get().project?.episodes.some((episode) => episode.id === detail.episode.id)) {
+            localOnlyEpisodeIds.add(detail.episode.id);
+        }
         set((state) => ({
             episodes: { ...state.episodes, [detail.episode.id]: detail },
             project: state.project ? {
@@ -280,7 +304,10 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
             const latest = get().episodes[detail.episode.id];
             if (!project || !latest || saveGeneration !== projectLoadGeneration) return;
             const result = await saveScriptEpisode(project.id, project.revision, latest);
-            if (saveGeneration === projectLoadGeneration) applyMutation(project.id, result);
+            if (saveGeneration === projectLoadGeneration) {
+                localOnlyEpisodeIds.delete(detail.episode.id);
+                applyMutation(project.id, result);
+            }
         });
     },
     reorderEpisodes: (episodeIds) => {
@@ -304,6 +331,28 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
     deleteEpisode: async (episodeId) => {
         const project = get().project;
         if (!project) return;
+        if (localOnlyEpisodeIds.delete(episodeId)) {
+            // 本地新建、尚未落库：直接丢掉本地数据和待保存任务，不必等服务端。保存任务已经开跑时才回退到等待提示。
+            if (!saveScheduler.cancel(`episode:${episodeId}`)) {
+                localOnlyEpisodeIds.add(episodeId);
+                throw new Error("请等待当前修改保存完成后再删除分集");
+            }
+            const remaining = project.episodes.filter((episode) => episode.id !== episodeId);
+            if (remaining.length === project.episodes.length) return;
+            set((state) => {
+                const episodes = { ...state.episodes };
+                delete episodes[episodeId];
+                return {
+                    episodes,
+                    project: state.project ? { ...state.project, episodes: state.project.episodes.filter((episode) => episode.id !== episodeId) } : null,
+                };
+            });
+            // 未落库的分集本来就不在服务端，集号通常已经是连续的；只有确实出现空洞才需要重排（并落库）。
+            if (remaining.some((episode, index) => episode.episodeNumber !== index + 1 || episode.sortOrder !== index)) {
+                get().reorderEpisodes(remaining.map((episode) => episode.id));
+            }
+            return;
+        }
         if (get().saveStatus !== "saved" && get().saveStatus !== "idle") {
             throw new Error("请等待当前修改保存完成后再删除分集");
         }
@@ -316,6 +365,7 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
         }
     },
     setAiTarget: (aiTarget) => set({ aiTarget }),
+    setAssistantOpen: (assistantOpen) => set({ assistantOpen }),
     replaceDrafts: (drafts) => set({ drafts }),
     replaceVersions: (versions) => set({ versions }),
     retrySave: () => saveScheduler.retry(),
@@ -334,7 +384,8 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
         projectLoadGeneration += 1;
         projectListLoadGeneration += 1;
         saveScheduler.reset();
-        set({ projects: [], projectTotal: 0, project: null, episodes: {}, drafts: [], versions: [], aiTarget: null, loading: false, error: "", saveStatus: "idle", saveError: "", hasUnsaved: false });
+        localOnlyEpisodeIds.clear();
+        set({ projects: [], projectTotal: 0, project: null, episodes: {}, drafts: [], versions: [], aiTarget: null, assistantOpen: false, loading: false, error: "", saveStatus: "idle", saveError: "", hasUnsaved: false });
     },
 }));
 

@@ -116,3 +116,50 @@ test("reset 清空待保存内容，resume 不会偷偷发请求", async () => {
     await pause(20);
     assert.deepEqual(saved, []);
 });
+
+test("cancel 丢弃指定待保存区块，队列空时回到 saved", async () => {
+    const saved: string[] = [];
+    let status: ScriptSaveSchedulerStatus | undefined;
+    const scheduler = createScriptSaveScheduler({
+        isConflict: () => false,
+        onStatusChange: (next) => { status = next; },
+    });
+    scheduler.schedule("episode:1", async () => { saved.push("分集1"); });
+    scheduler.schedule("episode:2", async () => { saved.push("分集2"); });
+    assert.equal(scheduler.cancel("episode:1"), true);
+    assert.equal(status, "dirty", "还有其他待保存内容时状态仍是 dirty");
+    assert.equal(scheduler.cancel("episode:2"), true);
+    assert.equal(status, "saved");
+    await scheduler.flush();
+    assert.deepEqual(saved, []);
+});
+
+test("cancel 无法取消已经开跑的任务，调用方据此提示等待", async () => {
+    const statuses: ScriptSaveSchedulerStatus[] = [];
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const scheduler = createScriptSaveScheduler({
+        isConflict: () => false,
+        onStatusChange: (next) => { statuses.push(next); },
+    });
+    scheduler.schedule("episode:1", async () => { await gate; });
+    const flushing = scheduler.flush();
+    await pause(15);
+    assert.equal(scheduler.cancel("episode:1"), false);
+    release?.();
+    await flushing;
+    assert.equal(statuses.at(-1), "saved");
+});
+
+test("cancel 可以清掉失败记录并解除暂停", async () => {
+    let status: ScriptSaveSchedulerStatus | undefined;
+    const scheduler = createScriptSaveScheduler({
+        isConflict: () => false,
+        onStatusChange: (next) => { status = next; },
+    });
+    scheduler.schedule("episode:1", async () => { throw new Error("请求失败"); });
+    assert.equal(await scheduler.flush(), false);
+    assert.equal(status, "error");
+    assert.equal(scheduler.cancel("episode:1"), true);
+    assert.equal(status, "saved");
+});

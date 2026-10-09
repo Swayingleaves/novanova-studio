@@ -18,11 +18,19 @@
 .synopsis { max-width:560px; margin:0; color:var(--studio-text); font-size:16px; line-height:2; white-space:pre-wrap; text-align:left; }
 .tags { display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:30px; }
 .tags span { padding:5px 12px; border:1px solid var(--studio-line); border-radius:999px; color:var(--studio-muted); font-size:12px; }
+/* 空分集时封面上的「+」入口：不走 .card 的翻页高亮，永远可点。margin-bottom 让开封面底部的编辑/AI 按钮 */
+.addCard { display:inline-flex; align-items:center; gap:8px; margin:22px 0 60px; padding:9px 18px; border:1px dashed var(--studio-line-strong); border-radius:999px; background:transparent; color:var(--studio-muted); font-size:14px; font-weight:600; cursor:pointer; transition:border-color .2s ease, color .2s ease; }
+.addCard:hover { border-color:var(--studio-action); color:var(--studio-action); }
+.addCard:focus-visible { outline:2px solid var(--studio-action); outline-offset:2px; }
 .sceneHeader { flex:none; padding:28px clamp(24px,5vw,48px) 20px; border-bottom:1px solid var(--studio-line); }
 .sceneDelete { position:absolute; top:0; right:0; z-index:2; display:grid; place-items:center; width:40px; height:40px; border:0; border-radius:0 15px 0 8px; background:transparent; color:var(--studio-muted); cursor:pointer; }
 .sceneDelete:hover { background:var(--studio-surface-hover); color:var(--studio-ink); }
 .sceneDelete:focus-visible { outline:2px solid var(--studio-action); outline-offset:-3px; }
 .cardActions { position:absolute; bottom:20px; left:50%; z-index:2; display:flex; gap:10px; transform:translateX(-22px); }
+/* 一集都没有时的「+」大卡片 */
+.newEpisodeCard { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; width:min(420px,100%); padding:56px 32px; border:1px dashed var(--studio-line-strong); border-radius:16px; background:var(--studio-panel-solid); color:var(--studio-muted); cursor:pointer; transition:border-color .2s ease, color .2s ease; }
+.newEpisodeCard:hover { border-color:var(--studio-action); color:var(--studio-action); }
+.newEpisodeCard:focus-visible { outline:2px solid var(--studio-action); outline-offset:2px; }
 .cardAction { display:grid; place-items:center; width:44px; height:44px; border:1px solid var(--studio-line-strong); border-radius:50%; background:var(--studio-panel-solid); color:var(--studio-ink); cursor:pointer; }
 .cardAction:hover { border-color:var(--studio-action); color:var(--studio-action); }
 .cardAction:focus-visible { outline:2px solid var(--studio-action); outline-offset:2px; }

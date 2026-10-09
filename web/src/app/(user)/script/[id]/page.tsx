@@ -16,7 +16,7 @@ import { StoryBiblePanel } from "@/features/script/components/story-bible-panel"
 import { NovelAdaptationPanel } from "@/features/script/components/novel-adaptation-panel";
 import { createScriptScene } from "@/features/script/lib/script-episode-editing";
 import { useScriptStore } from "@/features/script/stores/use-script-store";
-import type { EpisodeDetail, ScriptSourceFocus, ScriptWorkspaceSection } from "@/features/script/types";
+import type { ScriptSourceFocus, ScriptWorkspaceSection } from "@/features/script/types";
 import styles from "./script-directory.module.css";
 
 /** 左侧目录的一级分组：剧本创作入口与小说素材入口分开。 */
@@ -42,8 +42,11 @@ const NAVIGATION_GROUPS: Array<{ label: string; items: Array<{ key: ScriptWorksp
     },
 ];
 
-/** 不带右侧AI面板的全宽区块。 */
-const FULL_WIDTH_SECTIONS: ScriptWorkspaceSection[] = ["episodes", "outline", "characters", "source", "storyBible", "adaptation"];
+/**
+ * 右侧常驻「AI剧本助手」的区块：只有带AI动作的创作页面才占这一栏。
+ * 版本记录、原文、故事知识库、小说改编没有AI动作，不显示助手，也不占宽度。
+ */
+const AI_PANEL_SECTIONS: ScriptWorkspaceSection[] = ["episodes", "overview", "outline", "characters", "world"];
 
 const SAVE_LABELS = { idle: "尚未修改", dirty: "有未保存修改", saving: "保存中", saved: "已保存", error: "保存失败", conflict: "版本冲突" };
 
@@ -66,13 +69,14 @@ export default function ScriptWorkspacePage() {
     const retrySave = useScriptStore((state) => state.retrySave);
     const saveAll = useScriptStore((state) => state.saveAll);
     const setAiTarget = useScriptStore((state) => state.setAiTarget);
+    const assistantOpen = useScriptStore((state) => state.assistantOpen);
+    const setAssistantOpen = useScriptStore((state) => state.setAssistantOpen);
     const [section, setSection] = useState<ScriptWorkspaceSection>("overview");
     const [selectedEpisodeId, setSelectedEpisodeId] = useState("");
     const [selectedSceneId, setSelectedSceneId] = useState("");
     const [sceneEditRequestId, setSceneEditRequestId] = useState("");
     const [expandedEpisodeIds, setExpandedEpisodeIds] = useState<string[]>([]);
     const [directoryOpen, setDirectoryOpen] = useState(false);
-    const [assistantOpen, setAssistantOpen] = useState(false);
     const [entering, setEntering] = useState(false);
     const [sourceFocus, setSourceFocus] = useState<ScriptSourceFocus | null>(null);
 
@@ -83,17 +87,25 @@ export default function ScriptWorkspacePage() {
         setSelectedSceneId("");
         setSceneEditRequestId("");
         setExpandedEpisodeIds([]);
+        setAssistantOpen(false);
         /* 上传原文后带 source=1 进入，直接停在“原文”核对解析进度。 */
         if (new URLSearchParams(window.location.search).get("source") === "1") setSection("source");
         void loadProject(projectId).then(() => loadSupportingData()).catch(() => undefined);
-    }, [loadProject, loadSupportingData, params.id]);
+    }, [loadProject, loadSupportingData, params.id, setAssistantOpen]);
+    /**
+     * 把选中的分集对齐到当前项目：没选过就选第一集。
+     * 选中的分集已经不在项目里时必须重新选，否则「分集剧本」会一直提示“分集不存在”：
+     * 丢弃未保存修改、应用AI草稿、应用小说改编、恢复版本都会整批替换分集（标识会变），
+     * 本地选择却还停在旧标识上，重载分集也永远加载不出来。
+     */
     useEffect(() => {
-        if (!selectedEpisodeId && project?.episodes.length) {
-            const first = project.episodes[0];
-            setSelectedEpisodeId(first.id);
-            setAiTarget({ targetType: "episode", targetId: first.id, label: first.title });
-        }
-    }, [project?.episodes, selectedEpisodeId, setAiTarget]);
+        if (!project || project.id !== params.id) return;
+        if (project.episodes.some((episode) => episode.id === selectedEpisodeId)) return;
+        const first = project.episodes[0];
+        setSelectedEpisodeId(first?.id || "");
+        setSelectedSceneId("");
+        setAiTarget(first ? { targetType: "episode", targetId: first.id, label: first.title } : null);
+    }, [params.id, project, selectedEpisodeId, setAiTarget]);
 
     const selectSection = (next: ScriptWorkspaceSection) => {
         if (next === section) return;
@@ -116,7 +128,8 @@ export default function ScriptWorkspacePage() {
     const applySection = (next: ScriptWorkspaceSection) => {
         setSection(next);
         setDirectoryOpen(false);
-        if (next === "characters") setAssistantOpen(false);
+        // 抽屉是窄屏下的助手入口：切到没有AI动作的区块就收起来，别让它飘在版本记录、原文这些页面上
+        if (!AI_PANEL_SECTIONS.includes(next)) setAssistantOpen(false);
         if (next === "episodes" && section !== "episodes") {
             setSelectedSceneId("");
             if (selectedEpisodeId) setExpandedEpisodeIds((current) => current.includes(selectedEpisodeId) ? current : [...current, selectedEpisodeId]);
@@ -265,7 +278,7 @@ export default function ScriptWorkspacePage() {
                 <div className="min-w-0 flex-1"><h1 className="truncate text-base font-semibold text-[var(--studio-ink)]">{project.overview.title}</h1><div className="mt-1 flex items-center gap-2 text-xs text-[var(--studio-faint)]"><span>{SAVE_LABELS[saveStatus]}</span><span>修订 {project.revision}</span><span>{project.completionRate}%</span></div></div>
                 <Progress type="circle" size={34} percent={project.completionRate} strokeWidth={10} format={(percent) => `${percent}`} strokeColor="var(--studio-primary)" />
                 <Button className="lg:hidden" icon={<ListTree className="size-4" />} onClick={() => setDirectoryOpen(true)}>目录</Button>
-                {section !== "episodes" && section !== "source" && section !== "storyBible" && section !== "adaptation" ? <Button className={section === "outline" || section === "characters" ? "" : "xl:hidden"} icon={<Bot className="size-4" />} onClick={() => setAssistantOpen(true)}>AI</Button> : null}
+                {AI_PANEL_SECTIONS.includes(section) ? <Button className="xl:hidden" icon={<Bot className="size-4" />} onClick={() => setAssistantOpen(true)}>AI</Button> : null}
                 <Button type="primary" icon={<Save className="size-4" />} disabled={!hasUnsaved || saveStatus === "saving"} loading={saveStatus === "saving"} onClick={() => void saveAll().then((success) => { if (!success) message.error("保存失败，请检查网络或版本冲突"); })}>保存</Button>
                 <Button type="primary" ghost loading={entering} icon={<Sparkles className="size-4" />} onClick={() => void openProduction()}>进入漫剧创作</Button>
             </header>
@@ -274,12 +287,12 @@ export default function ScriptWorkspacePage() {
             {saveStatus === "error" ? <Alert banner type="error" title={saveError || "保存失败，编辑内容仍保留在本地页面中。"} action={<Button size="small" onClick={retrySave}>重试保存</Button>} /> : null}
             {saveStatus === "conflict" ? <Alert banner type="warning" title="云端版本已被其他页面更新。当前页面编辑内容仍保留，请先复制重要内容，再确认是否重载云端版本。" action={<Button size="small" onClick={() => modal.confirm({ title: "重载云端版本？", content: "当前页面未保存的修改会丢失。建议先复制重要内容后再重载。", okText: "确认重载", cancelText: "取消", onOk: () => reloadProject() })}>重载云端版本</Button>} /> : null}
 
-            <div className={`grid min-h-0 flex-1 lg:grid-cols-[260px_minmax(0,1fr)] ${FULL_WIDTH_SECTIONS.includes(section) ? "" : "xl:grid-cols-[260px_minmax(0,1fr)_360px]"}`}>
+            <div className={`grid min-h-0 flex-1 lg:grid-cols-[260px_minmax(0,1fr)] ${AI_PANEL_SECTIONS.includes(section) ? "xl:grid-cols-[260px_minmax(0,1fr)_360px]" : ""}`}>
                 <aside className="hidden min-h-0 overflow-y-auto border-r border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-3 lg:block"><Directory section={section} selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} expandedEpisodeIds={expandedEpisodeIds} onToggleEpisode={toggleEpisodeExpansion} onSelectSection={selectSection} onSelectEpisode={(episodeId) => { selectEpisode(episodeId); setSection("episodes"); }} onSelectScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSection("episodes"); }} onCreatedScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSceneEditRequestId(sceneId); setSection("episodes"); }} /></aside>
                 {section === "episodes" ? <ScriptEpisodeReader selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} sceneEditRequestId={sceneEditRequestId} onSceneEditRequestHandled={() => setSceneEditRequestId("")} onSelectEpisode={selectEpisode} onSelectScene={selectScene} onOpenAiGeneration={() => setAssistantOpen(true)} /> : section === "outline" ? <ScriptOutlineWorkspace key={project.id} onOpenAiGeneration={() => setAssistantOpen(true)} /> : section === "source" ? <ScriptSourcePanel focus={sourceFocus} /> : section === "storyBible" ? <StoryBiblePanel onOpenSource={(start, end) => { setSourceFocus({ start, end, key: nanoid() }); setSection("source"); }} /> : section === "adaptation" ? <NovelAdaptationPanel /> : <>
                     <section className="min-h-0 overflow-y-auto p-4 sm:p-6"><div className="mx-auto max-w-5xl rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-4 sm:p-6"><ScriptSectionEditor section={section} /></div></section>
-                    {section !== "characters" ? <div className="hidden min-h-0 border-l border-[var(--studio-line)] xl:block"><ScriptAiPanel section={section} selectedEpisodeId={selectedEpisodeId} /></div> : null}
                 </>}
+                {AI_PANEL_SECTIONS.includes(section) ? <div className="hidden min-h-0 border-l border-[var(--studio-line)] xl:block"><ScriptAiPanel section={section} selectedEpisodeId={selectedEpisodeId} /></div> : null}
             </div>
 
             <Drawer title="剧本目录" placement="left" size={300} open={directoryOpen} onClose={() => setDirectoryOpen(false)}><Directory section={section} selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} expandedEpisodeIds={expandedEpisodeIds} onToggleEpisode={toggleEpisodeExpansion} onSelectSection={selectSection} onSelectEpisode={(episodeId) => { selectEpisode(episodeId); setSection("episodes"); setDirectoryOpen(false); }} onSelectScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSection("episodes"); setDirectoryOpen(false); }} onCreatedScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSceneEditRequestId(sceneId); setSection("episodes"); setDirectoryOpen(false); }} /></Drawer>
@@ -294,6 +307,7 @@ function Directory({ section, selectedEpisodeId, selectedSceneId, expandedEpisod
     const episodes = useScriptStore((state) => state.episodes);
     const loadEpisode = useScriptStore((state) => state.loadEpisode);
     const updateEpisode = useScriptStore((state) => state.updateEpisode);
+    const createEpisode = useScriptStore((state) => state.createEpisode);
     const [loadingEpisodeIds, setLoadingEpisodeIds] = useState<string[]>([]);
     const [episodeLoadErrors, setEpisodeLoadErrors] = useState<Record<string, string>>({});
     const [creatingSceneEpisodeIds, setCreatingSceneEpisodeIds] = useState<string[]>([]);
@@ -307,13 +321,8 @@ function Directory({ section, selectedEpisodeId, selectedSceneId, expandedEpisod
         }).finally(() => setLoadingEpisodeIds((current) => current.filter((id) => id !== episodeId)));
     };
     const addEpisode = () => {
-        const currentProject = useScriptStore.getState().project;
-        if (!currentProject) return;
-        const episodeNumber = currentProject.episodes.length + 1;
-        const id = nanoid();
-        const detail: EpisodeDetail = { episode: { id, episodeNumber, title: `第 ${episodeNumber} 集`, summary: "", keyEvents: "", mainConflict: "", climax: "", endingHook: "", targetDurationSeconds: 0, completionStatus: "planning", sortOrder: currentProject.episodes.length }, scenes: [] };
-        updateEpisode(detail);
-        onSelectEpisode(id);
+        const id = createEpisode();
+        if (id) onSelectEpisode(id);
     };
     const addScene = async (episodeId: string) => {
         if (creatingSceneEpisodeIds.includes(episodeId)) return;
