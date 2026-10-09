@@ -10,7 +10,6 @@ import type {
     EpisodeDetail,
     MutationResult,
     NovelAdaptationDraftSource,
-    NovelAdaptationAssetLink,
     NovelAdaptationConsistencyIssue,
     NovelAdaptationImpact,
     NovelAdaptationSettings,
@@ -139,14 +138,6 @@ export function listNovelAdaptationDraftSources(projectId: string) {
 
 export function listNovelAdaptationImpacts(projectId: string) {
     return serverPost<NovelAdaptationImpact[]>(`${NOVEL_ADAPTATION_PATH}/listSourceImpacts`, { projectId });
-}
-
-export function listNovelAdaptationAssetLinks(projectId: string) {
-    return serverPost<NovelAdaptationAssetLink[]>(`${NOVEL_ADAPTATION_PATH}/listAssetLinks`, { projectId });
-}
-
-export function linkNovelAdaptationAsset(input: { projectId: string; factId: string; assetId?: string; expectedProductionRevision: number }) {
-    return serverPost<NovelAdaptationAssetLink>(`${NOVEL_ADAPTATION_PATH}/linkAsset`, input);
 }
 
 export function checkNovelAdaptationConsistency(projectId: string) {

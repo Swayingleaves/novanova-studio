@@ -1079,6 +1079,24 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         [pps, totalDuration]
     );
 
+    // 点击刻度或使用方向键时，预览与播放头统一定位到所选时间。
+    const seekTimelineTime = (time: number) => {
+        setIsPlaying(false);
+        setSelectedShotId(null);
+        setSelectedTimelineNode(null);
+        setSelectedPreviewTextId(null);
+        setCurrentTime(Math.min(Math.max(time, 0), totalDuration));
+    };
+
+    const handleRulerKeyDown = (event: React.KeyboardEvent) => {
+        const timeByKey: Record<string, number> = { ArrowLeft: currentTime - 1, ArrowRight: currentTime + 1, Home: 0, End: totalDuration };
+        const time = timeByKey[event.key];
+        if (time === undefined) return;
+        event.preventDefault();
+        event.stopPropagation();
+        seekTimelineTime(time);
+    };
+
     // 仅从播放头开始拖动，按下时保留原时间，避免命中区边缘造成跳动。
     const handlePointerDown = (e: React.PointerEvent) => {
         if (e.button !== 0) return;
@@ -2232,7 +2250,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
 
                         <div className="flex items-center gap-3 text-xs text-[var(--studio-muted)]">
                             <span className="hidden rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--studio-primary)] lg:inline-flex">
-                                ← 拖动时间轴竖线定位 · 按空格键播放/暂停 →
+                                ← 点击时间刻度或拖动竖线定位 · 按空格键播放/暂停 →
                             </span>
 
                             <div className="flex items-center gap-1.5">
@@ -2294,8 +2312,23 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                             className="relative flex h-full min-w-full flex-col"
                             style={{ width: `${Math.max(totalDuration * pps + 100, 600)}px` }}
                         >
-                            {/* Ruler */}
-                            <div className="relative h-5 shrink-0 border-b border-[var(--studio-line)]">
+                            {/* 点击时间刻度定位播放头。 */}
+                            <div
+                                className="relative h-5 shrink-0 cursor-pointer border-b border-[var(--studio-line)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]"
+                                role="slider"
+                                tabIndex={0}
+                                aria-label="时间轴播放位置"
+                                aria-valuemin={0}
+                                aria-valuemax={totalDuration}
+                                aria-valuenow={currentTime}
+                                aria-valuetext={fmtTime(currentTime)}
+                                onPointerDown={(event) => {
+                                    if (event.button !== 0) return;
+                                    seekTimelineTime(timeFromClientX(event.clientX));
+                                }}
+                                onKeyDown={handleRulerKeyDown}
+                                title="点击定位时间，方向键微调，Home / End 跳到起点 / 终点"
+                            >
                                 {Array.from({ length: Math.ceil(totalDuration) + 2 }).map((_, sec) => {
                                     const left = sec * pps;
                                     const step = pps < 30 ? 5 : pps < 50 ? 2 : 1;

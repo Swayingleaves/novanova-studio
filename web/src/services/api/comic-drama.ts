@@ -74,7 +74,7 @@ export function getComicDramaReadiness(projectId: string) {
     return serverPost<ComicDramaWorkspace["readiness"]>(`${COMIC_DRAMA_PATH}/getReadiness`, { projectId });
 }
 
-export function generateComicDramaShotDraft(input: { projectId: string; episodeId?: string; sceneId?: string; shotCount: number; rhythm: string; focus: string; model: string; confirmed: true }) {
+export function generateComicDramaShotDraft(input: { projectId: string; episodeId?: string; sceneId?: string; shotCount?: number; rhythm: string; focus: string; model: string; confirmed: true }) {
     return serverPost<ComicDramaShotDraft>(`${COMIC_DRAMA_PATH}/generateShotDraft`, input);
 }
 
