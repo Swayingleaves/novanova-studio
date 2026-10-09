@@ -11,6 +11,8 @@ import {
     Copy,
     Download,
     Edit,
+    Eye,
+    EyeOff,
     ExternalLink,
     Film,
     Grid,
@@ -294,6 +296,9 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
     const [selectedPreviewTimeMs, setSelectedPreviewTimeMs] = useState<number | null>(null);
     const [isPlaying, setIsPlaying] = useState<boolean>(false);
     const [isMuted, setIsMuted] = useState<boolean>(false);
+    // 轨道开关仅控制当前工作台预览，不修改项目或导出内容。
+    const [disabledTextTracks, setDisabledTextTracks] = useState<number[]>([]);
+    const [audioTrackEnabled, setAudioTrackEnabled] = useState(true);
     const [previewVideoUrl, setPreviewVideoUrl] = useState<string | null>(null);
     const [previewVideoProgress, setPreviewVideoProgress] = useState({ sourceKey: "", currentTime: 0, duration: 0 });
     const [textDraft, setTextDraft] = useState<ComicDramaTimelineTextInput | null>(null);
@@ -323,6 +328,11 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
 
     // Project and assets
     const projectId = workspace?.projectId;
+
+    useEffect(() => {
+        setDisabledTextTracks([]);
+        setAudioTrackEnabled(true);
+    }, [projectId]);
 
     useEffect(() => {
         if (!projectId) return;
@@ -606,7 +616,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         }
     }, [isPlaying]);
     const projectDurationMs = Math.round(totalDuration * 1000);
-    const activeTexts = useMemo(() => visibleTimelineTexts(timelineTexts, previewTimeMs), [timelineTexts, previewTimeMs]);
+    const activeTexts = useMemo(() => visibleTimelineTexts(timelineTexts, previewTimeMs).filter((item) => !disabledTextTracks.includes(item.trackNumber)), [timelineTexts, previewTimeMs, disabledTextTracks]);
     const scheduledVoices = useMemo(() => voiceTracks.filter((track) => track.audioStorageKey && voiceTrackEndMs(track) !== null), [voiceTracks]);
 
     // 媒体 URL 由后端存储标识解析，不把可能过期的下载地址写入项目数据。
@@ -650,8 +660,8 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             const audio = audioRefs.current[track.id];
             if (!audio) return;
             const sourceTimeMs = voiceTrackSourceTimeMs(track, projectTimeMs);
-            audio.muted = isMuted;
-            if (sourceTimeMs === null || !isPlaying) {
+            audio.muted = isMuted || !audioTrackEnabled;
+            if (sourceTimeMs === null || !isPlaying || !audioTrackEnabled) {
                 audio.pause();
                 if (sourceTimeMs !== null && Math.abs(audio.currentTime * 1000 - sourceTimeMs) > 50) audio.currentTime = sourceTimeMs / 1000;
                 return;
@@ -659,7 +669,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             if (Math.abs(audio.currentTime * 1000 - sourceTimeMs) > 250) audio.currentTime = sourceTimeMs / 1000;
             if (audio.paused && !audioErrors[track.audioStorageKey!]) audio.play().catch(() => setAudioErrors((current) => current[track.audioStorageKey!] ? current : { ...current, [track.audioStorageKey!]: "浏览器未能播放音频，请检查文件或手动开始播放" }));
         });
-    }, [currentTime, isPlaying, isMuted, scheduledVoices, audioUrls, audioErrors]);
+    }, [currentTime, isPlaying, isMuted, audioTrackEnabled, scheduledVoices, audioUrls, audioErrors]);
 
     const openNewText = () => {
         const startMs = Math.round(currentTime * 1000);
@@ -921,6 +931,8 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                 try {
                     if (pendingTimelineCount && !await savePendingTimelineChanges()) throw new Error("请先解决待保存的时间轴修改");
                     await deleteTextTrack(trackNumber);
+                    // 删除后后续轨道重新编号，临时开关随原轨道一起移动。
+                    setDisabledTextTracks((tracks) => tracks.filter((number) => number !== trackNumber).map((number) => number > trackNumber ? number - 1 : number));
                     setSelectedPreviewTextId(null);
                     setSelectedTimelineNode(null);
                     message.success("文字轨道已删除");
@@ -2286,15 +2298,31 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                             <div className="h-5 border-b border-[var(--studio-line)]" />
                             <div className="flex h-[88px] items-center gap-2 border-b border-[var(--studio-line)] px-3 font-medium"><Video className="size-4" aria-hidden="true" />视频轨道</div>
                             {Array.from({ length: textTrackCount }, (_, trackNumber) => (
-                                <div key={trackNumber} className="flex h-12 items-center justify-between border-b border-[var(--studio-line)] px-3 font-medium">
-                                    <span className="flex items-center gap-2"><Type className="size-4" aria-hidden="true" />{trackNumber === 0 ? "文字轨道" : `文字轨道${trackNumber}`}</span>
+                                <div key={trackNumber} className="flex h-12 items-center justify-between border-b border-[var(--studio-line)] px-2 font-medium">
+                                    <span className="flex items-center gap-1">
+                                        <button type="button" className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--studio-muted)] hover:bg-[var(--studio-surface-soft)] hover:text-[var(--studio-ink)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]"
+                                            aria-label={`${disabledTextTracks.includes(trackNumber) ? "开启" : "禁用"}文字轨道${trackNumber === 0 ? "" : trackNumber}预览`} aria-pressed={!disabledTextTracks.includes(trackNumber)} title={`${disabledTextTracks.includes(trackNumber) ? "开启" : "禁用"}该文字轨道预览`}
+                                            onClick={() => {
+                                                setDisabledTextTracks((tracks) => tracks.includes(trackNumber) ? tracks.filter((number) => number !== trackNumber) : [...tracks, trackNumber]);
+                                                if (timelineTexts.some((item) => item.id === selectedPreviewTextId && item.trackNumber === trackNumber)) setSelectedPreviewTextId(null);
+                                            }}>
+                                            {disabledTextTracks.includes(trackNumber) ? <EyeOff className="size-3.5" aria-hidden="true" /> : <Eye className="size-3.5" aria-hidden="true" />}
+                                        </button>
+                                        {trackNumber === 0 ? "文字轨道" : `文字轨道${trackNumber}`}
+                                    </span>
                                     {trackNumber === 0
                                         ? <button type="button" className="flex size-8 items-center justify-center rounded hover:bg-[var(--studio-surface-soft)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label="添加文字" title="添加文字" onClick={openNewText}><Plus className="size-3.5" /></button>
                                         : <button type="button" className="flex size-8 items-center justify-center rounded text-[var(--studio-muted)] hover:bg-[var(--studio-surface-soft)] hover:text-rose-500 focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label={`删除文字轨道${trackNumber}`} title={`删除文字轨道${trackNumber}`} onClick={() => confirmDeleteTextTrack(trackNumber)}><Trash2 className="size-3.5" /></button>}
                                 </div>
                             ))}
-                            <div className="flex h-12 items-center justify-between px-3 font-medium">
-                                <span className="flex items-center gap-2"><Music2 className="size-4" aria-hidden="true" />音频轨道</span>
+                            <div className="flex h-12 items-center justify-between px-2 font-medium">
+                                <span className="flex items-center gap-1">
+                                    <button type="button" className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--studio-muted)] hover:bg-[var(--studio-surface-soft)] hover:text-[var(--studio-ink)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]"
+                                        aria-label={`${audioTrackEnabled ? "禁用" : "开启"}音频轨道预览`} aria-pressed={audioTrackEnabled} title={`${audioTrackEnabled ? "禁用" : "开启"}该音频轨道预览`} onClick={() => setAudioTrackEnabled((enabled) => !enabled)}>
+                                        {audioTrackEnabled ? <Eye className="size-3.5" aria-hidden="true" /> : <EyeOff className="size-3.5" aria-hidden="true" />}
+                                    </button>
+                                    音频轨道
+                                </span>
                                 <button type="button" className="flex size-8 items-center justify-center rounded hover:bg-[var(--studio-surface-soft)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label="添加音频" title="添加音频" onClick={openNewAudio}><Plus className="size-3.5" /></button>
                             </div>
                         </div>
@@ -2445,7 +2473,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                 </div>
                             </div>
 
-                            {Array.from({ length: textTrackCount }, (_, trackNumber) => <div key={trackNumber} className="relative h-12 shrink-0 border-b border-[var(--studio-line)] bg-[var(--studio-surface-soft)]/35">
+                            {Array.from({ length: textTrackCount }, (_, trackNumber) => <div key={trackNumber} className="relative h-12 shrink-0 border-b border-[var(--studio-line)] bg-[var(--studio-surface-soft)]/35" style={{ opacity: disabledTextTracks.includes(trackNumber) ? 0.4 : 1 }}>
                                 {timelineTexts.filter((item) => item.trackNumber === trackNumber).map((source) => {
                                     // 被拖动片段始终跟随鼠标；只有其他片段预览换位后的落点。
                                     const item = clipDraft?.kind === "text" && clipDraft.item.id === source.id
@@ -2474,7 +2502,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                     );
                                 })}
                             </div>)}
-                            <div className="relative h-12 shrink-0 bg-[var(--studio-surface-soft)]/15">
+                            <div className="relative h-12 shrink-0 bg-[var(--studio-surface-soft)]/15" style={{ opacity: audioTrackEnabled ? 1 : 0.4 }}>
                                 {scheduledVoices.map((source) => {
                                     const item = clipDraft?.kind === "audio" && clipDraft.item.id === source.id ? clipDraft.item : source;
                                     const endMs = voiceTrackEndMs(item);
