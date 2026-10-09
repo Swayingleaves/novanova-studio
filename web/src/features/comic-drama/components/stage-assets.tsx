@@ -9,7 +9,6 @@ import { useEffectiveConfig } from "@/features/settings/stores/use-config-store"
 import { estimateComicDramaGeneration, listComicDramaAssetVersions, readComicDramaMediaUrl } from "@/services/api/comic-drama";
 import { useMediaAutoRefresh } from "../hooks/use-media-auto-refresh";
 import { usePendingImpactTargets } from "../hooks/use-pending-impact-targets";
-import { NovelAssetSuggestions } from "./novel-asset-suggestions";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type {
     ComicDramaAsset,
@@ -508,8 +507,6 @@ export function StageAssets() {
                     </Button>
                 </div>
             </header>
-
-            <NovelAssetSuggestions />
 
             {/* Filter & Search Bar */}
             <div className="flex flex-wrap items-center justify-between gap-3">

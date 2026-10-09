@@ -54,16 +54,6 @@ public final class NovelAdaptationDtos {
     public record SourceImpact(String targetType, String targetId, String factId, String factName,
                                long factRevision, Long currentRevision, boolean needsReview) { }
 
-    /** 用户确认把知识库人物或地点关联到现有或新视觉资产。 */
-    public record LinkAssetRequest(@NotBlank @Size(max = 64) String projectId,
-                                   @NotBlank @Size(max = 64) String factId,
-                                   @Size(max = 64) String assetId,
-                                   @Min(0) long expectedProductionRevision) { }
-
-    /** 已建立的事实与视觉资产关联。 */
-    public record AssetLink(String assetId, String factId, long factRevision, String factName,
-                            String assetName, boolean needsReview) { }
-
     /** 免费规则检查发现的待人工审阅问题。 */
     public record ConsistencyIssue(String category, String severity, String title, String description,
                                    String factId, String targetType, String targetId) { }

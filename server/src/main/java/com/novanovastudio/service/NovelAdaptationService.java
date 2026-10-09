@@ -1,12 +1,10 @@
 package com.novanovastudio.service;
 
 import com.alibaba.fastjson2.JSON;
-import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentScopeModelFactory;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
-import com.novanovastudio.dto.ComicDramaDtos;
 import com.novanovastudio.dto.NovelAdaptationDtos;
 import com.novanovastudio.dto.ScriptDtos;
 import com.novanovastudio.dto.StoryBibleDtos;
@@ -97,9 +95,6 @@ public class NovelAdaptationService {
     /** 改编来源数据库访问。 */
     private final NovelAdaptationRepository novelAdaptationRepository;
 
-    /** 漫剧生产服务，沿用视觉资产保存与项目乐观锁。 */
-    private final ComicDramaService comicDramaService;
-
     /** 关联与资产创建的原子事务。 */
     private final TransactionalOperator transactionalOperator;
 
@@ -186,8 +181,7 @@ public class NovelAdaptationService {
     public Mono<List<NovelAdaptationDtos.ConsistencyIssue>> checkConsistency(String projectId) {
         return scriptService.getProject(projectId).flatMap(project -> Mono.zip(
                 novelAdaptationRepository.listSourceImpacts(projectId).collectList(),
-                storyBibleRepository.listUncertainEvents(projectId).collectList(),
-                novelAdaptationRepository.listAssetLinks(projectId).collectList())
+                storyBibleRepository.listUncertainEvents(projectId).collectList())
                 .map(result -> {
                     List<NovelAdaptationDtos.ConsistencyIssue> issues = new ArrayList<>();
                     Set<String> outlineIds = new HashSet<>();
@@ -211,10 +205,6 @@ public class NovelAdaptationService {
                     result.getT2().forEach(item -> issues.add(new NovelAdaptationDtos.ConsistencyIssue(
                                     "uncertainTime", "info", "事件时间待确认", "该事件的故事发生顺序尚未确认，生成时需人工判断",
                                     item.id(), "storyBible", item.id())));
-                    result.getT3().stream().filter(NovelAdaptationDtos.AssetLink::needsReview)
-                            .forEach(link -> issues.add(new NovelAdaptationDtos.ConsistencyIssue("assetSource", "warning",
-                                    "视觉资产设定来源已变化", "保留已有资产与图片，请人工判断是否更新文字设定",
-                                    link.factId(), "asset", link.assetId())));
                     return issues;
                 }));
     }
@@ -259,57 +249,6 @@ public class NovelAdaptationService {
      */
     public Mono<List<NovelAdaptationDtos.SourceImpact>> listSourceImpacts(String projectId) {
         return scriptService.getProject(projectId).then(novelAdaptationRepository.listSourceImpacts(projectId).collectList());
-    }
-
-    /**
-     * 查询故事事实与视觉资产的确认关联。
-     *
-     * @param projectId 共享项目标识
-     * @return 资产关联列表
-     */
-    public Mono<List<NovelAdaptationDtos.AssetLink>> listAssetLinks(String projectId) {
-        return comicDramaService.getWorkspace(projectId)
-                .then(novelAdaptationRepository.listAssetLinks(projectId).collectList());
-    }
-
-    /**
-     * 将已确认的人物或地点事实关联现有视觉资产，或在用户确认时新建文字资产。
-     *
-     * @param request 项目、事实与可选现有资产标识
-     * @return 已建立的事实资产关联
-     */
-    public Mono<NovelAdaptationDtos.AssetLink> linkAsset(NovelAdaptationDtos.LinkAssetRequest request) {
-        return comicDramaService.getWorkspace(request.projectId()).flatMap(workspace -> {
-            if (workspace.revision() != request.expectedProductionRevision()) {
-                return Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT, "漫剧项目已变化，请刷新后重试"));
-            }
-            return storyBibleRepository.getItem(request.projectId(), request.factId())
-                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "故事事实不存在")))
-                    .flatMap(fact -> {
-                        if (!"confirmed".equals(fact.status()) || !Set.of("character", "location").contains(fact.itemType())) {
-                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "只能关联已确认的人物或地点事实"));
-                        }
-                        String assetType = "character".equals(fact.itemType()) ? "character" : "scene";
-                        ComicDramaDtos.Asset existing = workspace.assets().stream()
-                                .filter(asset -> asset.id().equals(request.assetId())).findFirst().orElse(null);
-                        if (StringUtils.hasText(request.assetId()) && (existing == null || !assetType.equals(existing.assetType()))) {
-                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "所选视觉资产不存在或类型不匹配"));
-                        }
-                        if (existing != null && StringUtils.hasText(existing.sourceEntityId())) {
-                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "该视觉资产已关联正式剧本设定"));
-                        }
-                        String assetId = existing == null ? UUID.randomUUID().toString() : existing.id();
-                        Mono<?> create = existing == null
-                                ? comicDramaService.saveAsset(new ComicDramaDtos.SaveAssetRequest(request.projectId(),
-                                        request.expectedProductionRevision(), new ComicDramaDtos.Asset(assetId, assetType,
-                                        null, fact.name(), fact.summary(), new JSONObject(), "active", 0, null, null)))
-                                : Mono.empty();
-                        return transactionalOperator.transactional(create.then(novelAdaptationRepository.linkAsset(
-                                        request.projectId(), fact.id(), fact.revision(), assetId)))
-                                .thenReturn(new NovelAdaptationDtos.AssetLink(assetId, fact.id(), fact.revision(),
-                                        fact.name(), existing == null ? fact.name() : existing.name(), false));
-                    });
-        });
     }
 
     /**

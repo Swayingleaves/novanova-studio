@@ -237,8 +237,13 @@ public class ComicDramaService {
                             if (!StringUtils.hasText(source.scriptContent())) {
                                 return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "所选范围没有可用剧本正文"));
                             }
-                            String instruction = "请拆分为约" + request.shotCount() + "个镜头。节奏：" + text(request.rhythm())
-                                    + "。创作重点：" + text(request.focus());
+                            // 预计镜头数量可以不填：不填时由模型按剧本内容自行判断，填了就必须按填的数量来。
+                            // 创作重点同样可选，没填就不带这一段，避免指令里留下空的「创作重点：」。
+                            String instruction = (request.shotCount() == null
+                                    ? "请根据剧本正文的场次、动作与对白自行判断合适的镜头数量"
+                                    : "请拆分为约" + request.shotCount() + "个镜头")
+                                    + "。节奏：" + text(request.rhythm())
+                                    + (StringUtils.hasText(request.focus()) ? "。创作重点：" + request.focus().trim() : "");
                             Mono<String> sourceEpisode = StringUtils.hasText(request.sceneId())
                                     ? repository.getSceneEpisodeId(request.projectId(), request.sceneId())
                                     : Mono.just(text(request.episodeId()));

@@ -196,7 +196,6 @@ export type NovelAdaptationFactEvidence = { startOffset: number; endOffset: numb
 export type NovelAdaptationFact = { id: string; revision: number; itemType: StoryBibleItemType; name: string; summary: string; storyTime: string; evidences: NovelAdaptationFactEvidence[] };
 export type NovelAdaptationDraftSource = { draftId: string; stage: "outline" | "episodes" | "episode"; settings: NovelAdaptationSettings; facts: NovelAdaptationFact[]; status: ScriptAiDraft["status"] };
 export type NovelAdaptationImpact = { targetType: string; targetId: string; factId: string; factName: string | null; factRevision: number; currentRevision: number | null; needsReview: boolean };
-export type NovelAdaptationAssetLink = { assetId: string; factId: string; factRevision: number; factName: string | null; assetName: string; needsReview: boolean };
 export type NovelAdaptationConsistencyIssue = { category: string; severity: "info" | "warning"; title: string; description: string; factId: string; targetType: string; targetId: string };
 
 /** 改编阶段，与后端 GenerateRequest.stage 取值一致。 */

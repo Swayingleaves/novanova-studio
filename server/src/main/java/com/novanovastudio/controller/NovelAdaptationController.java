@@ -68,33 +68,6 @@ public class NovelAdaptationController {
     }
 
     /**
-     * 查询人物、地点事实与漫剧视觉资产的关联。
-     *
-     * @param request 项目标识
-     * @param httpRequest 当前HTTP请求
-     * @return 资产关联列表
-     */
-    @PostMapping("/listAssetLinks")
-    public Mono<ApiResponse<List<NovelAdaptationDtos.AssetLink>>> listAssetLinks(
-            @Valid @RequestBody NovelAdaptationDtos.ProjectRequest request, ServerHttpRequest httpRequest) {
-        return execute("查询故事事实视觉资产关联", httpRequest, request,
-                novelAdaptationService.listAssetLinks(request.projectId()));
-    }
-
-    /**
-     * 按用户确认建立人物或地点与现有或新视觉资产的关联。
-     *
-     * @param request 事实、资产及生产项目修订号
-     * @param httpRequest 当前HTTP请求
-     * @return 已建立的关联
-     */
-    @PostMapping("/linkAsset")
-    public Mono<ApiResponse<NovelAdaptationDtos.AssetLink>> linkAsset(
-            @Valid @RequestBody NovelAdaptationDtos.LinkAssetRequest request, ServerHttpRequest httpRequest) {
-        return execute("关联故事事实与视觉资产", httpRequest, request, novelAdaptationService.linkAsset(request));
-    }
-
-    /**
      * 免费检查事实来源与时间线等明确规则。
      *
      * @param request 项目标识

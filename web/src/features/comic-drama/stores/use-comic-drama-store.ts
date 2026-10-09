@@ -89,7 +89,8 @@ type ComicDramaState = {
     generateShotDraft: (input: {
         episodeId?: string;
         sceneId?: string;
-        shotCount: number;
+        /** 预计镜头数量；不填时由模型按剧本内容自行判断。 */
+        shotCount?: number;
         rhythm: string;
         focus: string;
         model: string;

@@ -59,7 +59,6 @@ Manages the visual baseline for characters, scenes, and props. Each asset can de
 - Batch operations: select all, **select only ungenerated**, and "Batch generate asset images" (latest version per asset; assets without a version are skipped and counted).
 - Asset cards show type, description, referencing shot count, and version count; a "Needs update" tag appears when an upstream change is pending.
 - Version variant types: default baseline / costume change / age period / lighting or weather / damaged or transformed state.
-- The "Story bible asset suggestions" panel links confirmed story bible characters and locations to existing assets or new text assets. **Fact changes never overwrite descriptions or generated images** — they only raise a review prompt.
 
 AI asset image generation offers model, quality (low / standard / high), resolution (1K / 2K / 4K), and aspect ratio. Output form is fixed: characters produce a white-background three-view turnaround sheet, props a white-background multi-view sheet, and scenes an empty environment shot with no characters or action.
 
@@ -67,7 +66,7 @@ AI asset image generation offers model, quality (low / standard / high), resolut
 
 "The shot breakdown and list" turns script scenes into executable picture units.
 
-- **AI auto-split**: pick the range (episode), optionally a specific scene, the expected shot count (1–50), narrative pace (tight / climax-twist / lyrical / action-heavy), a creative focus note, and the splitting model. Generated drafts **only take effect after you review and confirm them**.
+- **AI auto-split**: pick the range (episode), optionally a specific scene, the expected shot count (1–50; **empty by default, so the AI decides from the script content**), narrative pace (tight / climax-twist / lyrical / action-heavy), an optional creative focus note (for example "highlight character conflict and key actions"), and the splitting model. Generated drafts **only take effect after you review and confirm them**.
 - In the review drawer you can tune shot size, duration (0.5–60 s), visual description, dialogue and voiceover, camera direction, and lighting, then "Save changes" or "Confirm as official shots"; the last remaining shot cannot be deleted.
 - Each shot card shows composition and content, dialogue and sound, lighting atmosphere with bound asset versions, and the final video prompt.
 - Six shot sizes: extreme long / long / medium / medium close-up / close-up / extreme close-up.
@@ -158,7 +157,7 @@ From the storyboard top bar, "Export video" → "Export storyboard video".
 
 | Item | Limit |
 | --- | --- |
-| Expected shots per AI split | 1–50 |
+| Expected shots per AI split | 1–50; empty by default, meaning unspecified so the AI decides from the script content |
 | Shot duration | 0.5–120 s (review drawer and storyboard dialog 0.5–60 / 1–60 s) |
 | Target episode count | 1–1000 |
 | Text clips | Content ≤ 2000 characters, size 12–120, at most 3 text lanes |

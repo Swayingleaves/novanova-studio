@@ -230,7 +230,7 @@ public final class ComicDramaDtos {
     /** 生成镜头草稿请求。 */
     public record GenerateShotDraftRequest(@NotBlank @Size(max = 64) String projectId,
                                            @Size(max = 64) String episodeId, @Size(max = 64) String sceneId,
-                                           @Min(1) int shotCount, @Size(max = 120) String rhythm,
+                                           @Min(1) Integer shotCount, @Size(max = 120) String rhythm,
                                            @Size(max = 8000) String focus,
                                            @NotBlank @Size(max = 256) String model,
                                            @AssertTrue(message = "生成镜头草稿前必须明确确认费用") boolean confirmed) {

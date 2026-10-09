@@ -628,7 +628,6 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 | `novel_adaptation_jobs` | 一键改编流水线与逐集正文批量的任务、计费快照与人工停点状态（`phase` 阶段：`materials` 素材与策略、`planning` 统一规划、`bodies` 逐集正文，另有升级前遗留的 `skeleton`、`episodes`、`drafts`；`stage` 单元阶段：概览、人物与关系、世界观与地点、大纲、分集规划、单集剧本，以及 `material`、`summary`、`strategy`、`locations`、`relations`、`assignment`、`episodePlan`、`draft`（草稿）、`body`（正文），`done` 表示结束；状态：排队、运行、等待确认、完成、失败、取消） | `id` 主键；`(user_id, client_request_id)` 唯一约束；项目活跃任务唯一索引 `uq_novel_adaptation_job_active`；`(status, updated_at)` 恢复扫描索引；`retry_count` 为非负整数、默认0，记录失败续跑次数并隔离计费流水 |
 | `novel_adaptation_drafts` | 保存改编草稿的阶段（故事概览、人物与关系、世界观与地点、故事大纲、分集规划、单集剧本）、用户设置和已确认事实快照；`job_id` 指向产出它的一键改编任务，同步单阶段生成为空 | `draft_id` 主键；`(project_id, created_at)`、`(job_id, stage)` 索引 |
 | `novel_adaptation_sources` | 保存已应用正式产物与故事事实的引用及生成时修订号 | `(draft_id, target_type, target_id, fact_id)` 唯一约束；项目事实和项目目标索引 |
-| `novel_adaptation_asset_links` | 保存用户确认的人物或地点事实与漫剧视觉资产关联 | `asset_id` 主键、项目+事实唯一约束 |
 | `novel_adaptation_workflows` | 全书改编的不可变输入：全部已确认事实与关联快照、人物及地点事实到正式条目的固定映射、统一策略、人工确认后固定的分集标识与集号、启动时确认的单次调用单价 | `job_id` 主键并外键指向任务；`strategy` 可为空、`episode_slots` 默认空数组，分别表示尚未归纳或尚未确认集数；`episode_ids` 默认空数组，非空表示逐集正文批量任务且元素顺序即生成顺序 |
 | `novel_adaptation_units` | 全书改编与逐集正文批量的持久化生成单元：单元身份、输入边界、已校验输出、对应草稿与预扣标识；成功输出是恢复与结算的唯一依据；正文批量单元固定为 `episode:<分集标识>`，`input_snapshot` 为 `{episodeId}`、`output_snapshot` 为 `{draftId}`，`completed_at` 表示已写回正式剧本 | `(job_id, unit_key)` 主键；`job_id` 外键指向工作流快照；`(job_id, phase, sequence)` 进度索引、`(job_id, charge_id)` 计费索引 |
 

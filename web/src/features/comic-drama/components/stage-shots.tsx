@@ -97,9 +97,11 @@ export function StageShots() {
     // AI Split form state
     const [splitEpisodeId, setSplitEpisodeId] = useState<string>("");
     const [splitSceneId, setSplitSceneId] = useState<string>("");
-    const [splitShotCount, setSplitShotCount] = useState<number>(6);
+    // 预计镜头数量默认留空，由模型按剧本内容自行判断；填了才按填的数量拆分。
+    const [splitShotCount, setSplitShotCount] = useState<number | null>(null);
     const [splitRhythm, setSplitRhythm] = useState<string>("紧凑利落");
-    const [splitFocus, setSplitFocus] = useState<string>("突出人物冲突与关键动作");
+    // 创作重点不预填，改成输入框里的帮助提示，避免每次都要先删掉默认文案。
+    const [splitFocus, setSplitFocus] = useState<string>("");
     const [splitModel, setSplitModel] = useState<string>("");
     const [splitting, setSplitting] = useState(false);
     const [promptModel, setPromptModel] = useState<string>("");
@@ -216,7 +218,7 @@ export function StageShots() {
             await generateShotDraft({
                 episodeId: splitEpisodeId || undefined,
                 sceneId: splitSceneId || undefined,
-                shotCount: splitShotCount,
+                shotCount: splitShotCount ?? undefined,
                 rhythm: splitRhythm,
                 focus: splitFocus,
                 model: splitModel,
@@ -685,7 +687,7 @@ export function StageShots() {
                     </p>
 
                     <div>
-                        <label className="text-xs font-medium text-[var(--studio-muted)]">拆分范围（分集）</label>
+                        <label className="block text-xs font-medium text-[var(--studio-muted)]">拆分范围（分集）</label>
                         <Select
                             className="mt-1 w-full"
                             value={splitEpisodeId}
@@ -702,7 +704,7 @@ export function StageShots() {
 
                     {splitEpisodeId && (
                         <div>
-                            <label className="text-xs font-medium text-[var(--studio-muted)]">指定场次（可选）</label>
+                            <label className="block text-xs font-medium text-[var(--studio-muted)]">指定场次（可选）</label>
                             <Select
                                 className="mt-1 w-full"
                                 value={splitSceneId}
@@ -720,18 +722,20 @@ export function StageShots() {
 
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="text-xs font-medium text-[var(--studio-muted)]">预计镜头数量</label>
+                            <label className="block text-xs font-medium text-[var(--studio-muted)]">预计镜头数量</label>
+                            {/* InputNumber 自带 90px 固定宽度且属于无层样式，普通 w-full 会被它压过，必须用 w-full! 才能撑满 */}
                             <InputNumber
                                 min={1}
                                 max={50}
-                                className="mt-1 w-full"
+                                className="mt-1 w-full!"
+                                placeholder="留空由 AI 自行判断"
                                 value={splitShotCount}
-                                onChange={(val) => setSplitShotCount(val || 6)}
+                                onChange={setSplitShotCount}
                             />
                         </div>
 
                         <div>
-                            <label className="text-xs font-medium text-[var(--studio-muted)]">叙事节奏</label>
+                            <label className="block text-xs font-medium text-[var(--studio-muted)]">叙事节奏</label>
                             <Select
                                 className="mt-1 w-full"
                                 value={splitRhythm}
@@ -747,17 +751,17 @@ export function StageShots() {
                     </div>
 
                     <div>
-                        <label className="text-xs font-medium text-[var(--studio-muted)]">创作重点指示</label>
+                        <label className="block text-xs font-medium text-[var(--studio-muted)]">创作重点指示</label>
                         <Input
                             className="mt-1"
                             value={splitFocus}
                             onChange={(e) => setSplitFocus(e.target.value)}
-                            placeholder="例如：突出男女主角眼神拉扯，重点呈现雨夜氛围"
+                            placeholder="突出人物冲突与关键动作"
                         />
                     </div>
 
                     <div>
-                        <label className="text-xs font-medium text-[var(--studio-muted)]">拆分模型</label>
+                        <label className="block text-xs font-medium text-[var(--studio-muted)]">拆分模型</label>
                         <div className="mt-1">
                             <ModelPicker
                                 config={config}
@@ -825,7 +829,8 @@ export function StageShots() {
                             label="镜号"
                             rules={[{ required: true, message: "请输入镜号" }]}
                         >
-                            <InputNumber min={1} className="w-full" />
+                            {/* InputNumber 自带 90px 固定宽度，普通 w-full 压不过它，必须用 w-full! */}
+                            <InputNumber min={1} className="w-full!" />
                         </Form.Item>
 
                         <Form.Item
@@ -833,7 +838,7 @@ export function StageShots() {
                             label="预估时长 (秒)"
                             rules={[{ required: true, message: "请输入时长" }]}
                         >
-                            <InputNumber min={0.5} max={120} step={0.5} className="w-full" />
+                            <InputNumber min={0.5} max={120} step={0.5} className="w-full!" />
                         </Form.Item>
                     </div>
 

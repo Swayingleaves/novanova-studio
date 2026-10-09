@@ -250,9 +250,6 @@ public class NovelAdaptationRepository {
                         AND ((s.target_type='scene' AND sh.source_scene_id=s.target_id)
                             OR (s.target_type='episode' AND sh.source_episode_id=s.target_id))
                     WHERE s.project_id=:projectId AND s.active=TRUE
-                    UNION
-                    SELECT 'asset',l.asset_id,l.fact_id,l.fact_revision FROM novel_adaptation_asset_links l
-                    WHERE l.project_id=:projectId
                 )
                 SELECT s.target_type,s.target_id,s.fact_id,s.fact_revision,i.name AS fact_name,
                     i.revision AS current_revision,i.status AS fact_status
@@ -267,41 +264,6 @@ public class NovelAdaptationRepository {
                             row.get("target_id", String.class), row.get("fact_id", String.class),
                             row.get("fact_name", String.class), recorded, current,
                             current == null || current != recorded || !"confirmed".equals(status));
-                }).all();
-    }
-
-    /**
-     * 在用户确认后关联知识库事实与视觉资产，拒绝重复关联。
-     *
-     * @param projectId 共享项目标识
-     * @param factId 事实标识
-     * @param factRevision 确认时的事实修订号
-     * @param assetId 视觉资产标识
-     * @return 写入完成信号
-     */
-    public Mono<Void> linkAsset(String projectId, String factId, long factRevision, String assetId) {
-        return databaseClient.sql("INSERT INTO novel_adaptation_asset_links(asset_id,project_id,fact_id,fact_revision) SELECT :assetId,:projectId,i.id,i.revision FROM story_bible_items i WHERE i.id=:factId AND i.project_id=:projectId AND i.status='confirmed' AND i.revision=:revision ON CONFLICT DO NOTHING")
-                .bind("assetId", assetId).bind("projectId", projectId).bind("factId", factId)
-                .bind("revision", factRevision).fetch().rowsUpdated()
-                .flatMap(count -> count == 1 ? Mono.empty() : Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT,
-                        "故事事实已变化或视觉资产已关联，请刷新后重试")));
-    }
-
-    /**
-     * 查询项目中的视觉资产事实关联和待审影响。
-     *
-     * @param projectId 共享项目标识
-     * @return 资产关联列表
-     */
-    public Flux<NovelAdaptationDtos.AssetLink> listAssetLinks(String projectId) {
-        return databaseClient.sql("SELECT l.asset_id,l.fact_id,l.fact_revision,i.name AS fact_name,i.revision AS current_revision,i.status AS fact_status,a.name AS asset_name FROM novel_adaptation_asset_links l JOIN comic_drama_assets a ON a.id=l.asset_id AND a.script_project_id=l.project_id LEFT JOIN story_bible_items i ON i.id=l.fact_id AND i.project_id=l.project_id WHERE l.project_id=:projectId ORDER BY l.created_at DESC")
-                .bind("projectId", projectId).map((row, metadata) -> {
-                    Long revision = row.get("current_revision", Long.class);
-                    long recorded = row.get("fact_revision", Long.class);
-                    return new NovelAdaptationDtos.AssetLink(row.get("asset_id", String.class),
-                            row.get("fact_id", String.class), recorded, row.get("fact_name", String.class),
-                            row.get("asset_name", String.class), revision == null || revision != recorded
-                                    || !"confirmed".equals(row.get("fact_status", String.class)));
                 }).all();
     }
 
