@@ -250,14 +250,19 @@ novanova:
       agent-storyboard-file: ${AI_SYSTEM_PROMPT_AGENT_STORYBOARD_FILE:file:./server/config/prompts/agent-storyboard.md}
       # 剧本创作 Agent 系统提示词文件路径
       agent-script-file: ${AI_SYSTEM_PROMPT_AGENT_SCRIPT_FILE:file:./server/config/prompts/agent-script.md}
+      # 故事知识库分析 Agent 系统提示词文件路径
+      agent-story-bible-file: ${AI_SYSTEM_PROMPT_AGENT_STORY_BIBLE_FILE:file:./server/config/prompts/agent-story-bible.md}
       # 分镜资产图片提示词模板文件路径
       image-storyboard-asset-file: ${AI_SYSTEM_PROMPT_IMAGE_STORYBOARD_ASSET_FILE:file:./server/config/prompts/image-storyboard-asset.md}
     storyboard-agent:
       # 分镜 Agent 单次调用超时时间（秒）
       timeout-seconds: ${AI_STORYBOARD_AGENT_TIMEOUT_SECONDS:90}
     script-agent:
-      # 剧本 Agent 单次调用超时时间（秒）
-      timeout-seconds: ${AI_SCRIPT_AGENT_TIMEOUT_SECONDS:120}
+      # 剧本 Agent 单次调用超时时间（秒）；批量归纳（人物、地点等结构化草稿）输出量大，与故事知识库保持一致
+      timeout-seconds: ${AI_SCRIPT_AGENT_TIMEOUT_SECONDS:600}
+    story-bible-agent:
+      # 故事知识库分析 Agent 单次调用超时时间（秒）
+      timeout-seconds: ${排队中:600}
     image:
       # 是否将第三方HTTP图片结果下载并转存到默认对象存储
       upload-http-result-to-object-storage: ${AI_IMAGE_HTTP_RESULT_UPLOAD_TO_OBJECT_STORAGE:false}

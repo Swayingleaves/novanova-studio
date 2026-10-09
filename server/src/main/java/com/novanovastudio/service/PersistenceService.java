@@ -1667,7 +1667,7 @@ public class PersistenceService {
      *
      * @return Mono<ObjectStorageConfig> 全站对象存储配置
      */
-    private Mono<PersistenceDtos.ObjectStorageConfig> getPlatformObjectStorageConfig() {
+    public Mono<PersistenceDtos.ObjectStorageConfig> getPlatformObjectStorageConfig() {
         // 仅在服务端解密密钥，普通用户永远无法读取对象存储密钥。
         return repository.getDefaultPlatformObjectStorage()
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员配置默认对象存储")))
@@ -1680,6 +1680,17 @@ public class PersistenceService {
             }
             return config;
         }));
+    }
+
+    /**
+     * 按已保存的配置标识读取原文使用的对象存储配置。
+     * @param storageId String 存储配置标识
+     * @return Mono<ObjectStorageConfig> 解密后的服务端配置
+     */
+    public Mono<PersistenceDtos.ObjectStorageConfig> getPlatformObjectStorageConfig(String storageId) {
+        return repository.getPlatformObjectStorage(storageId)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "原文对象存储配置已不存在")))
+                .flatMap(this::decryptObjectStorage);
     }
 
     /**

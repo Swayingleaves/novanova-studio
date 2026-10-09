@@ -4,29 +4,52 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
 import { App, Alert, Button, Drawer, Progress, Spin, Tag } from "antd";
-import { ArrowLeft, Bot, BookOpenText, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, FileClock, Globe2, ListTree, Plus, ScrollText, Sparkles, Users, WandSparkles } from "lucide-react";
+import { ArrowLeft, Bot, BookOpenText, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, FileClock, FileText, Globe2, Library, ListTree, Plus, Save, ScrollText, Sparkles, Users, WandSparkles } from "lucide-react";
 
 import { enterComicDrama, getScriptProductionReadiness } from "@/services/api/script";
 import { ScriptAiPanel } from "@/features/script/components/script-ai-panel";
 import { ScriptSectionEditor } from "@/features/script/components/section-editors";
 import { ScriptEpisodeReader } from "@/features/script/components/script-episode-reader";
 import { ScriptOutlineWorkspace } from "@/features/script/components/script-outline-workspace";
+import { ScriptSourcePanel } from "@/features/script/components/script-source-panel";
+import { StoryBiblePanel } from "@/features/script/components/story-bible-panel";
+import { NovelAdaptationPanel } from "@/features/script/components/novel-adaptation-panel";
 import { createScriptScene } from "@/features/script/lib/script-episode-editing";
 import { useScriptStore } from "@/features/script/stores/use-script-store";
-import type { EpisodeDetail, ScriptWorkspaceSection } from "@/features/script/types";
+import type { EpisodeDetail, ScriptSourceFocus, ScriptWorkspaceSection } from "@/features/script/types";
 import styles from "./script-directory.module.css";
 
-const NAVIGATION: Array<{ key: ScriptWorkspaceSection; label: string; icon: typeof BookOpenText }> = [
-    { key: "overview", label: "故事概览", icon: BookOpenText },
-    { key: "outline", label: "故事大纲", icon: ListTree },
-    { key: "characters", label: "人物与关系", icon: Users },
-    { key: "world", label: "世界观与地点", icon: Globe2 },
-    { key: "episodes", label: "分集剧本", icon: ScrollText },
-    { key: "analysis", label: "专业分析", icon: WandSparkles },
-    { key: "versions", label: "版本记录", icon: FileClock },
+/** 左侧目录的一级分组：剧本创作入口与小说素材入口分开。 */
+const NAVIGATION_GROUPS: Array<{ label: string; items: Array<{ key: ScriptWorkspaceSection; label: string; icon: typeof BookOpenText }> }> = [
+    {
+        label: "剧本",
+        items: [
+            { key: "overview", label: "故事概览", icon: BookOpenText },
+            { key: "outline", label: "故事大纲", icon: ListTree },
+            { key: "characters", label: "人物设定", icon: Users },
+            { key: "world", label: "世界观与地点", icon: Globe2 },
+            { key: "episodes", label: "分集剧本", icon: ScrollText },
+            { key: "analysis", label: "专业分析", icon: WandSparkles },
+            { key: "versions", label: "版本记录", icon: FileClock },
+        ],
+    },
+    {
+        label: "小说",
+        items: [
+            { key: "source", label: "原文", icon: FileText },
+            { key: "storyBible", label: "故事知识库", icon: Library },
+            { key: "adaptation", label: "小说改编", icon: Sparkles },
+        ],
+    },
 ];
 
+/** 不带右侧AI面板的全宽区块。 */
+const FULL_WIDTH_SECTIONS: ScriptWorkspaceSection[] = ["episodes", "outline", "characters", "source", "storyBible", "adaptation"];
+
 const SAVE_LABELS = { idle: "尚未修改", dirty: "有未保存修改", saving: "保存中", saved: "已保存", error: "保存失败", conflict: "版本冲突" };
+
+/** 离开剧本工作台时的选择：保存并继续，或放弃并继续。 */
+type LeaveChoice = "save" | "discard";
 
 export default function ScriptWorkspacePage() {
     const params = useParams<{ id: string }>();
@@ -37,10 +60,12 @@ export default function ScriptWorkspacePage() {
     const error = useScriptStore((state) => state.error);
     const saveStatus = useScriptStore((state) => state.saveStatus);
     const saveError = useScriptStore((state) => state.saveError);
+    const hasUnsaved = useScriptStore((state) => state.hasUnsaved);
     const loadProject = useScriptStore((state) => state.loadProject);
     const reloadProject = useScriptStore((state) => state.reloadProject);
     const loadSupportingData = useScriptStore((state) => state.loadSupportingData);
     const retrySave = useScriptStore((state) => state.retrySave);
+    const saveAll = useScriptStore((state) => state.saveAll);
     const setAiTarget = useScriptStore((state) => state.setAiTarget);
     const [section, setSection] = useState<ScriptWorkspaceSection>("overview");
     const [selectedEpisodeId, setSelectedEpisodeId] = useState("");
@@ -50,6 +75,7 @@ export default function ScriptWorkspacePage() {
     const [directoryOpen, setDirectoryOpen] = useState(false);
     const [assistantOpen, setAssistantOpen] = useState(false);
     const [entering, setEntering] = useState(false);
+    const [sourceFocus, setSourceFocus] = useState<ScriptSourceFocus | null>(null);
 
     useEffect(() => {
         const projectId = params.id;
@@ -58,6 +84,8 @@ export default function ScriptWorkspacePage() {
         setSelectedSceneId("");
         setSceneEditRequestId("");
         setExpandedEpisodeIds([]);
+        /* 上传原文后带 source=1 进入，直接停在“原文”核对解析进度。 */
+        if (new URLSearchParams(window.location.search).get("source") === "1") setSection("source");
         void loadProject(projectId).then(() => loadSupportingData()).catch(() => undefined);
     }, [loadProject, loadSupportingData, params.id]);
     useEffect(() => {
@@ -69,6 +97,24 @@ export default function ScriptWorkspacePage() {
     }, [project?.episodes, selectedEpisodeId, setAiTarget]);
 
     const selectSection = (next: ScriptWorkspaceSection) => {
+        if (next === section) return;
+        // 有未保存内容时先确认，避免切换区块把编辑意图丢掉
+        if (hasUnsaved) {
+            void confirmLeave({
+                onContinue: async (choice) => {
+                    // 选「放弃」时 confirmLeave 内部已丢弃本地改动并重载云端，直接切过去即可
+                    if (choice === "discard") {
+                        applySection(next);
+                        return;
+                    }
+                    if (await saveAll()) applySection(next);
+                },
+            });
+            return;
+        }
+        applySection(next);
+    };
+    const applySection = (next: ScriptWorkspaceSection) => {
         setSection(next);
         setDirectoryOpen(false);
         if (next === "characters") setAssistantOpen(false);
@@ -76,8 +122,62 @@ export default function ScriptWorkspacePage() {
             setSelectedSceneId("");
             if (selectedEpisodeId) setExpandedEpisodeIds((current) => current.includes(selectedEpisodeId) ? current : [...current, selectedEpisodeId]);
         }
-        if (["overview", "outline", "characters", "world"].includes(next)) setAiTarget(null);
+        if (next !== "source") setSourceFocus(null);
+        if (["overview", "outline", "characters", "world", "source", "storyBible", "adaptation"].includes(next)) setAiTarget(null);
     };
+    /**
+     * 未保存提示：保存并继续 / 放弃并继续 / 取消。
+     * onContinue 收到用户的选择，由调用方决定接下来做什么（切区块或跳转）。
+     * 选择「放弃」时会先丢弃本地改动，否则弹窗说放弃、实际内容还留在 store 里。
+     */
+    const confirmLeave = ({ onContinue }: { onContinue: (choice: LeaveChoice) => void | Promise<void> }) => {
+        modal.confirm({
+            width: 460,
+            title: "当前有未保存的修改",
+            content: "选择「保存并继续」会先把修改写入云端；选择「放弃并继续」将丢弃本页所有未保存的修改。",
+            okText: "保存并继续",
+            cancelText: "放弃并继续",
+            onOk: async () => { await onContinue("save"); },
+            onCancel: () => {
+                const state = useScriptStore.getState();
+                state.discardUnsaved();
+                void onContinue("discard");
+            },
+        });
+    };
+    // 关闭标签页、刷新、后退这类真正离开页面的动作，浏览器只允许同步提示
+    useEffect(() => {
+        if (!hasUnsaved) return;
+        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+            event.preventDefault();
+            event.returnValue = "";
+        };
+        window.addEventListener("beforeunload", handleBeforeUnload);
+        return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+    }, [hasUnsaved]);
+    // App Router 的路由跳转不会触发 beforeunload，这里用导航拦截补上
+    useEffect(() => {
+        if (!hasUnsaved) return;
+        const handleClick = (event: MouseEvent) => {
+            const link = (event.target as HTMLElement | null)?.closest("a[href]");
+            if (!link || link.target === "_blank") return;
+            if (!useScriptStore.getState().hasUnsaved) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const href = link.getAttribute("href") || "/script";
+            confirmLeave({
+                onContinue: async (choice) => {
+                    if (choice === "save" && !await saveAll()) {
+                        message.error("保存失败，已取消跳转");
+                        return;
+                    }
+                    router.push(href);
+                },
+            });
+        };
+        document.addEventListener("click", handleClick, true);
+        return () => document.removeEventListener("click", handleClick, true);
+    }, [hasUnsaved, router, saveAll]);
     const selectEpisode = (episodeId: string) => {
         setSelectedEpisodeId(episodeId);
         setSelectedSceneId("");
@@ -97,8 +197,9 @@ export default function ScriptWorkspacePage() {
 
     const openProduction = async () => {
         if (!project) return;
-        if (!["saved", "idle"].includes(useScriptStore.getState().saveStatus)) {
-            message.warning("请等待当前剧本修改保存完成，再检查生产准备度");
+        // 手动保存后未保存是常态，进入下游前先强制落盘，否则漫剧读到的会是旧内容
+        if (useScriptStore.getState().hasUnsaved && !await saveAll()) {
+            message.error("剧本还有未保存的修改，请先保存成功再进入漫剧创作");
             return;
         }
         const projectId = project.id;
@@ -112,8 +213,9 @@ export default function ScriptWorkspacePage() {
                 okText: readiness.ready ? "进入漫剧创作" : "忽略缺失并继续",
                 cancelText: "返回补充",
                 onOk: async () => {
-                    if (!["saved", "idle"].includes(useScriptStore.getState().saveStatus)) {
-                        message.warning("剧本又有未保存修改，请保存完成后重新确认");
+                    // 准备度检查是弹窗打开前算的，这期间用户可能又改了内容，再落一次盘
+                    if (useScriptStore.getState().hasUnsaved && !await saveAll()) {
+                        message.error("剧本又有未保存的修改，请保存成功后再确认");
                         return;
                     }
                     const latestProject = useScriptStore.getState().project;
@@ -137,6 +239,21 @@ export default function ScriptWorkspacePage() {
         }
     };
 
+    const leaveProjectList = () => {
+        if (!hasUnsaved) {
+            router.push("/script");
+            return;
+        }
+        confirmLeave({
+            onContinue: async (choice) => {
+                if (choice === "save" && !await saveAll()) {
+                    message.error("保存失败，已取消返回");
+                    return;
+                }
+                router.push("/script");
+            },
+        });
+    };
     if (loading && !project) return <main className="studio-page flex h-full items-center justify-center"><Spin size="large" /></main>;
     if (error && !project) return <main className="studio-page flex h-full items-center justify-center p-6"><Alert type="error" showIcon title="无法打开剧本" description={error} action={<Button onClick={() => void loadProject(params.id).catch(() => undefined)}>重试</Button>} /></main>;
     if (!project) return null;
@@ -145,21 +262,22 @@ export default function ScriptWorkspacePage() {
         <main className="studio-page flex h-full min-h-0 flex-col overflow-hidden">
             {/* 右侧预留全局浮动操作区（版本对比/文档/GitHub/个人中心，fixed right-3 约 256px）的宽度，避免两组按钮重叠 */}
             <header className="flex flex-wrap items-center gap-3 border-b border-[var(--studio-line)] bg-[var(--studio-panel-solid)] py-3 pl-4 pr-[260px]">
-                <Button type="text" aria-label="返回项目库" icon={<ArrowLeft className="size-4" />} onClick={() => router.push("/script")} />
+                <Button type="text" aria-label="返回项目库" icon={<ArrowLeft className="size-4" />} onClick={leaveProjectList} />
                 <div className="min-w-0 flex-1"><h1 className="truncate text-base font-semibold text-[var(--studio-ink)]">{project.overview.title}</h1><div className="mt-1 flex items-center gap-2 text-xs text-[var(--studio-faint)]"><span>{SAVE_LABELS[saveStatus]}</span><span>修订 {project.revision}</span><span>{project.completionRate}%</span></div></div>
                 <Progress type="circle" size={34} percent={project.completionRate} strokeWidth={10} format={(percent) => `${percent}`} strokeColor="var(--studio-primary)" />
                 <Button className="lg:hidden" icon={<ListTree className="size-4" />} onClick={() => setDirectoryOpen(true)}>目录</Button>
-                {section !== "episodes" ? <Button className={section === "outline" || section === "characters" ? "" : "xl:hidden"} icon={<Bot className="size-4" />} onClick={() => setAssistantOpen(true)}>AI</Button> : null}
-                <Button type="primary" loading={entering} icon={<Sparkles className="size-4" />} onClick={() => void openProduction()}>进入漫剧创作</Button>
+                {section !== "episodes" && section !== "source" && section !== "storyBible" && section !== "adaptation" ? <Button className={section === "outline" || section === "characters" ? "" : "xl:hidden"} icon={<Bot className="size-4" />} onClick={() => setAssistantOpen(true)}>AI</Button> : null}
+                <Button type="primary" icon={<Save className="size-4" />} disabled={!hasUnsaved || saveStatus === "saving"} loading={saveStatus === "saving"} onClick={() => void saveAll().then((success) => { if (!success) message.error("保存失败，请检查网络或版本冲突"); })}>保存</Button>
+                <Button type="primary" ghost loading={entering} icon={<Sparkles className="size-4" />} onClick={() => void openProduction()}>进入漫剧创作</Button>
             </header>
 
             {error ? <Alert banner type="warning" title={error} action={<Button size="small" onClick={() => void loadSupportingData().catch(() => undefined)}>重试加载</Button>} /> : null}
             {saveStatus === "error" ? <Alert banner type="error" title={saveError || "保存失败，编辑内容仍保留在本地页面中。"} action={<Button size="small" onClick={retrySave}>重试保存</Button>} /> : null}
-            {saveStatus === "conflict" ? <Alert banner type="warning" title="云端版本已被其他页面更新，自动保存已暂停。当前页面编辑内容仍保留，请确认后重载云端版本。" action={<Button size="small" onClick={() => modal.confirm({ title: "重载云端版本？", content: "当前页面未保存的修改会丢失。建议先复制重要内容后再重载。", okText: "确认重载", cancelText: "取消", onOk: () => reloadProject() })}>重载云端版本</Button>} /> : null}
+            {saveStatus === "conflict" ? <Alert banner type="warning" title="云端版本已被其他页面更新。当前页面编辑内容仍保留，请先复制重要内容，再确认是否重载云端版本。" action={<Button size="small" onClick={() => modal.confirm({ title: "重载云端版本？", content: "当前页面未保存的修改会丢失。建议先复制重要内容后再重载。", okText: "确认重载", cancelText: "取消", onOk: () => reloadProject() })}>重载云端版本</Button>} /> : null}
 
-            <div className={`grid min-h-0 flex-1 lg:grid-cols-[260px_minmax(0,1fr)] ${section === "episodes" || section === "outline" || section === "characters" ? "" : "xl:grid-cols-[260px_minmax(0,1fr)_360px]"}`}>
+            <div className={`grid min-h-0 flex-1 lg:grid-cols-[260px_minmax(0,1fr)] ${FULL_WIDTH_SECTIONS.includes(section) ? "" : "xl:grid-cols-[260px_minmax(0,1fr)_360px]"}`}>
                 <aside className="hidden min-h-0 overflow-y-auto border-r border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-3 lg:block"><Directory section={section} selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} expandedEpisodeIds={expandedEpisodeIds} onToggleEpisode={toggleEpisodeExpansion} onSelectSection={selectSection} onSelectEpisode={(episodeId) => { selectEpisode(episodeId); setSection("episodes"); }} onSelectScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSection("episodes"); }} onCreatedScene={(episodeId, sceneId) => { selectScene(sceneId, episodeId); setSceneEditRequestId(sceneId); setSection("episodes"); }} /></aside>
-                {section === "episodes" ? <ScriptEpisodeReader selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} sceneEditRequestId={sceneEditRequestId} onSceneEditRequestHandled={() => setSceneEditRequestId("")} onSelectEpisode={selectEpisode} onSelectScene={selectScene} onOpenAiGeneration={() => setAssistantOpen(true)} /> : section === "outline" ? <ScriptOutlineWorkspace key={project.id} onOpenAiGeneration={() => setAssistantOpen(true)} /> : <>
+                {section === "episodes" ? <ScriptEpisodeReader selectedEpisodeId={selectedEpisodeId} selectedSceneId={selectedSceneId} sceneEditRequestId={sceneEditRequestId} onSceneEditRequestHandled={() => setSceneEditRequestId("")} onSelectEpisode={selectEpisode} onSelectScene={selectScene} onOpenAiGeneration={() => setAssistantOpen(true)} /> : section === "outline" ? <ScriptOutlineWorkspace key={project.id} onOpenAiGeneration={() => setAssistantOpen(true)} /> : section === "source" ? <ScriptSourcePanel focus={sourceFocus} /> : section === "storyBible" ? <StoryBiblePanel onOpenSource={(start, end) => { setSourceFocus({ start, end, key: nanoid() }); setSection("source"); }} /> : section === "adaptation" ? <NovelAdaptationPanel /> : <>
                     <section className="min-h-0 overflow-y-auto p-4 sm:p-6"><div className="mx-auto max-w-5xl rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-4 sm:p-6"><ScriptSectionEditor section={section} /></div></section>
                     {section !== "characters" ? <div className="hidden min-h-0 border-l border-[var(--studio-line)] xl:block"><ScriptAiPanel section={section} selectedEpisodeId={selectedEpisodeId} /></div> : null}
                 </>}
@@ -216,29 +334,34 @@ function Directory({ section, selectedEpisodeId, selectedSceneId, expandedEpisod
     };
     return (
         <nav aria-label="剧本工作台目录">
-            <div className="space-y-1">
-                {NAVIGATION.map((item) => {
-                    const Icon = item.icon;
-                    const isActive = section === item.key;
-                    return (
-                        <button
-                            key={item.key}
-                            type="button"
-                            // 激活态与左侧主导航同源，用内联样式避免被 utilities 层或样式表缓存干扰（图标/文字继承 currentColor）。
-                            style={isActive ? { background: "var(--studio-action)", color: "var(--studio-action-foreground)" } : undefined}
-                            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors focus-visible:outline-2 focus-visible:outline-[var(--studio-primary)] ${
-                                isActive
-                                    ? "font-semibold shadow-sm"
-                                    : "text-[var(--studio-text)] hover:bg-[var(--studio-surface-hover)]"
-                            }`}
-                            onClick={() => onSelectSection(item.key)}
-                        >
-                            <Icon className="size-4 shrink-0 text-current" aria-hidden="true" />
-                            <span className="text-current">{item.label}</span>
-                        </button>
-                    );
-                })}
-            </div>
+            {NAVIGATION_GROUPS.map((group, groupIndex) => (
+                <div key={group.label} className={groupIndex ? "mt-5 border-t border-[var(--studio-line)] pt-4" : ""}>
+                    <p className="px-3 text-xs font-medium uppercase tracking-wide text-[var(--studio-faint)]">{group.label}</p>
+                    <div className="mt-2 space-y-1">
+                        {group.items.map((item) => {
+                            const Icon = item.icon;
+                            const isActive = section === item.key;
+                            return (
+                                <button
+                                    key={item.key}
+                                    type="button"
+                                    // 激活态与左侧主导航同源，用内联样式避免被 utilities 层或样式表缓存干扰（图标/文字继承 currentColor）。
+                                    style={isActive ? { background: "var(--studio-action)", color: "var(--studio-action-foreground)" } : undefined}
+                                    className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors focus-visible:outline-2 focus-visible:outline-[var(--studio-primary)] ${
+                                        isActive
+                                            ? "font-semibold shadow-sm"
+                                            : "text-[var(--studio-text)] hover:bg-[var(--studio-surface-hover)]"
+                                    }`}
+                                    onClick={() => onSelectSection(item.key)}
+                                >
+                                    <Icon className="size-4 shrink-0 text-current" aria-hidden="true" />
+                                    <span className="text-current">{item.label}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            ))}
             <div className="mt-5 border-t border-[var(--studio-line)] pt-4">
                 <p className="px-3 text-xs font-medium uppercase tracking-wide text-[var(--studio-faint)]">分集与场次</p>
                 <div className="mt-2 space-y-1">

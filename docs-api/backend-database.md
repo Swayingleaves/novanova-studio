@@ -9,7 +9,7 @@
 | `script_projects` | 项目概览、阶段、完成度、软删除与修订号 | `(user_id, status, updated_at DESC, id)`、用户+阶段、用户+内容形式 |
 | `script_templates`、`script_template_sections` | 16 个内置模板及可编辑大纲骨架 | 启用状态+顺序、模板+结构段顺序 |
 | `script_outline_sections`、`script_story_events` | 大纲结构段与关键剧情事件 | 项目+顺序；事件按分集、场次定位 |
-| `script_characters`、`script_character_relations` | 人物文字设定、关系和关系图位置 | 项目+顺序；关系起点、终点索引 |
+| `script_characters`、`script_character_relations` | 人物文字设定与人物关系 | 项目+顺序；关系起点、终点索引 |
 | `script_world_settings`、`script_world_items`、`script_locations` | 世界观基础、规则条目和地点文字设定 | 项目+类型+顺序、项目+地点顺序 |
 | `script_episodes`、`script_scenes` | 分集摘要与场次 | 项目+分集顺序、分集+场次顺序、地点索引 |
 | `script_scene_characters`、`script_blocks` | 场次人物与动作/对白/旁白/转场正文块 | 人物反查、场次+正文顺序、对白人物索引 |
@@ -20,6 +20,10 @@
 正式实体使用不超过 64 字符的稳定标识。人物和地点仍被场次或对白引用时禁止删除；场次和正文块保存采用稳定标识更新，只有请求中明确缺失的实体才会删除。
 
 V39 移除 `script_projects` 的 `selling_points` 和 `target_audience` 字段，故事概览不再收集核心卖点和目标受众。
+
+V52 为 `script_blocks` 增加 `origin` 字段（`original` 原著事实 / `adapted` AI 改编创作）。此前提示词要求把「【改编创作】」写在正文 `content` 里，标记会随正文流入分集工作台与后续配音、成片链路，且实测半数以上正文块都被标注而失去区分度；改为结构化字段承载，迁移同时摘除了存量正文里的标记并把来源记为 `adapted`。
+
+V53 新增 `episode_bodies_pricing`（`model_config_id` 主键、`credits`、`revision`）：分集正文生成按文本模型配置「每生成一集的积分」。此前单价直接取模型自身的 `credit_cost`，管理员无法针对这一步单独定价。未配置的模型不参与报价。
 
 完成度固定为：故事概览 20%、大纲 20%、人物/世界观/地点 20%、已完成集数占目标集数比例 40%。阶段由正式内容自动推导为 `idea`、`outline`、`writing`、`completed` 或 `production`。
 
@@ -533,6 +537,77 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 `V38__Add_Storyboard_Text_Font_Family.sql` 为 `comic_drama_timeline_texts` 增加 `font_family`，使用固定字体目录标识；已有文字片段默认 `notoSansSc`，数据库约束限定七款随产品分发的免费字体。文字保存接口与分镜导出快照均保留该字段。
 
 
+## 13、V40 原文导入与人工校对
+
+`V40__Add_Script_Source_Import.sql` 新增导入原文层，与 V32 的正式剧本数据分离保存（见 ADR-006）。脚本创作阶段只写入本节四张表，不生成人物、Story Bible、分集或正式剧本场次。
+
+| 表 | 作用 | 关键索引或约束 |
+| --- | --- | --- |
+| `script_source_documents` | 不可变原文件元信息与仅规范换行后的完整正文 | `project_id` 唯一；`(user_id, client_request_id)` 唯一用于上传幂等；单文件与单项目一条原文 |
+| `script_source_sections` | 章节与场景结构投影，偏移基于规范化正文 | 自关联 `parent_id` 级联；`(document_id, parent_id, sort_order)` 与 `(document_id, start_offset, end_offset)` 索引 |
+| `script_source_chunks` | 供后续分析使用的有序文本片段 | `(section_id, chunk_index)` 唯一保证重复解析幂等；`(document_id, start_offset)` 索引 |
+| `script_source_import_tasks` | 解析任务状态、阶段、进度、失败原因与检查点 | `document_id` 唯一；`(status, updated_at)` 用于重启恢复扫描 |
+
+约定：
+
+- 数据库只保存对象存储配置标识 `storage_config_id` 与私有对象键 `object_key`，接口不返回原文件公开地址；原文件保持不可变，校对只修改结构投影。
+- 所有位置使用规范化文本的 UTF-16 偏移，起点包含、终点不包含。片段按段落边界切分，`character_count` 为 UTF-16 字符数，不代表模型令牌数。
+- 结构段标识由 `原文标识 + 解析下标` 推导，重复投递会命中主键冲突而不重复写入；`processed_sections` 记录已落库的顶层结构段数，服务重启后从检查点续跑。
+- 上游规则未识别到标题时保存为单个 `needs_review` 结构段并写入 `warning`，由用户人工校对标题与边界。
+- 校对操作（改名、拆分、合并）以 `expectedRevision` 更新 `script_source_documents.revision`，冲突返回 `DATA_CONFLICT`；拆分与合并会重建受影响结构段的片段。
+
+### V40 原文接口
+
+- 导入与进度：`POST /api/v1/script/source/uploadSource`、`getImportStatus`、`retryImport`。
+- 读取：`getSourceTree`、`getSourceSection`。
+- 校对：`renameSection`、`splitSection`、`mergeSections`。
+
+每个接口都按当前用户校验项目归属；`uploadSource` 使用 `client_request_id` 防止重复创建剧本项目，并在写入对象存储前确认默认桶拒绝匿名读取。
+
+
+## 故事知识库（Story Bible）
+
+`V41__Add_Story_Bible.sql` 新增故事知识库与分析任务（见 ADR-007、ADR-008），同时补充原文层字段：
+
+`V43__Remove_Story_Bible_Analysis_Mode.sql` 移除分析模式列，新写入的工作单元仅允许分批分析及故事线归纳。类型约束使用 `NOT VALID`，保留已有精细分析检查点，不扫描或删除历史记录（见 ADR-010）。
+
+`V44__Add_Story_Bible_Initial_Batch_Count.sql` 保存报价时规划的初始批数，取消结算以此为分母；旧任务按已规划的初始批次回填。尚未规划批次的旧任务在取消时全额退款。
+
+| 变更 | 作用 |
+| --- | --- |
+| `script_source_documents.confirmed_revision` | 用户确认过的结构修订号；与 `revision` 相等时才允许报价和启动分析，拆分、合并、改名后需重新确认 |
+| `script_source_import_tasks.lease_until` | 导入任务执行租约；执行中定期续租，过期后由恢复扫描重新抢占，不再在启动时无条件重置执行中任务 |
+
+| 表 | 作用 | 关键索引或约束 |
+| --- | --- | --- |
+| `story_bible_pricing` | 每个文本模型的字数档位、积分价格和分析容量配置 | `quick_configuration` 为管理员验证的输入字符、上下文、输出和补分析次数，空值禁用该模型的分析；`revision` 用于报价校验 |
+| `story_bible_analysis_jobs` | 分析任务、范围、计费快照与进度 | `quick_configuration` 为启动时分批分析配置快照；`initial_batch_count` 固定退款分母；`supplement_calls` 限制补分析；`partial` 表示预算耗尽后有缺口；同项目仅允许一个活跃任务 |
+| `story_bible_analysis_units` | 分析批次与故事线归纳的工作单元及检查点 | `batch` 批次逐批事务提交条目和结果；`book` 用于故事线归纳；`result.gap` 标记未覆盖章节片段；取消结算仅把初始批次下所有叶子结果成功的批次计为已完成；`(job_id, unit_type, unit_key)` 唯一 |
+| `story_bible_items` | 人物、地点、关系、事件、故事线条目 | `(project_id, item_type, status, narrative_offset)` 列表索引；`(project_id, item_type, match_key)` 重分析匹配；`suggest_for_item_id` 自关联级联 |
+| `story_bible_aliases` | 人物与地点别名 | `(item_id, normalized_alias)` 唯一 |
+| `story_bible_links` | 关系双方、事件参与者与地点、故事线包含事件 | `(item_id, related_item_id, role)` 唯一；两端均级联删除 |
+| `story_bible_evidences` | 条目的原文证据 | 偏移为规范化正文 UTF-16 起点含、终点不含；`(item_id, start_offset)`、`(document_id, start_offset)` 索引 |
+
+分批分析按管理员配置的单次正文最大字符数装批，最多 50 万字符；章节片段仅用于原文引文定位与覆盖校验，不限制单批章节数量。`estimatedBatches` 表示初始批数，截断或结果不完整时可能增加补分析调用。
+
+约定：
+
+- 证据不引用片段或结构段标识；写入前校验证据文字与原文范围完全一致，且不切开代理对。
+- 计费字数为所选范围内非空白 Unicode 码点数；任务创建与积分预扣在同一事务中完成，积分流水操作标识为任务标识。
+- 任务状态：`queued`、`running`、`retryable`、`completed`、`partial`、`failed`、`canceled`。可重试任务续跑不再扣费；主动取消保留已完成内容，仅按成功完成的初始批次分摊扣费，未成功批次退款向下取整；拆分批次全部叶子成功才算原批次成功，补分析不额外分摊；最终失败全额退款。任务状态接口以 `credits` 返回预扣积分、`refundedCredits` 返回已退积分。
+- `origin` 区分 AI 与人工条目；人工编辑、确认、合并、拆分后 `locked=TRUE`。重分析只更新未锁定 AI 条目；命中锁定条目时写入待审建议；`rejected` 条目保留以抑制重复生成。
+- 时间线：叙事顺序按 `narrative_offset`（首条证据起点）；故事时间按 `story_order`、`story_time_status`、`narrative_offset` 排序，时间不明的事件保持 `uncertain`。
+
+### V41 接口
+
+- 原文：`POST /api/v1/script/source/confirmStructure`。
+- 用户：`POST /api/v1/script/storyBible/quoteAnalysis`、`startAnalysis`、`getAnalysisStatus`、`retryAnalysis`、`cancelAnalysis`、`listItems`、`getItem`、`saveItem`、`confirmItem`、`confirmItems`、`confirmAllItems`、`rejectItem`、`mergeEntities`、`splitEntity`。
+- 管理员：`GET /api/v1/admin/storyBible/getPricing`、`POST /api/v1/admin/storyBible/savePricing`。
+
+每个用户接口都按当前用户校验项目归属。
+`confirmItems` 接收 `projectId` 和至多 200 个 `{ itemId, expectedRevision }`，在同一事务中校验全部条目后确认；待审建议的别名与证据并入目标条目，任一条目状态、修订号或目标不符则整批回滚。
+`confirmAllItems` 接收 `projectId` 和 `itemType`，确认该类型下全部待确认条目，不受分页与筛选影响；修订号由服务端读取，确认逻辑与批量确认一致，没有待确认内容时返回空结果。
+
 ## 画布音频与模型输入能力
 
 本次复用现有字段，不新增表、字段或 Flyway 迁移。
@@ -546,3 +621,61 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 | AI 任务请求 JSON | `audioReferences` 保存有序音频引用，贯通任务快照、恢复和重试。 |
 
 参考音频在扣费前校验归属及存储元数据：MP3/WAV，单文件不超过 15 MB，最多 3 段，每段 2～15 秒，合计不超过 15 秒。普通画布播放只受文件大小约束。
+## 小说改编来源与任务表（V45、V46、V47、V48、V49、V51）
+
+| 表名 | 用途 | 核心字段与索引 |
+| --- | --- | --- |
+| `novel_adaptation_jobs` | 一键改编流水线与逐集正文批量的任务、计费快照与人工停点状态（`phase` 阶段：`materials` 素材与策略、`planning` 统一规划、`bodies` 逐集正文，另有升级前遗留的 `skeleton`、`episodes`、`drafts`；`stage` 单元阶段：概览、人物与关系、世界观与地点、大纲、分集规划、单集剧本，以及 `material`、`summary`、`strategy`、`locations`、`relations`、`assignment`、`episodePlan`、`draft`（草稿）、`body`（正文），`done` 表示结束；状态：排队、运行、等待确认、完成、失败、取消） | `id` 主键；`(user_id, client_request_id)` 唯一约束；项目活跃任务唯一索引 `uq_novel_adaptation_job_active`；`(status, updated_at)` 恢复扫描索引；`retry_count` 为非负整数、默认0，记录失败续跑次数并隔离计费流水 |
+| `novel_adaptation_drafts` | 保存改编草稿的阶段（故事概览、人物与关系、世界观与地点、故事大纲、分集规划、单集剧本）、用户设置和已确认事实快照；`job_id` 指向产出它的一键改编任务，同步单阶段生成为空 | `draft_id` 主键；`(project_id, created_at)`、`(job_id, stage)` 索引 |
+| `novel_adaptation_sources` | 保存已应用正式产物与故事事实的引用及生成时修订号 | `(draft_id, target_type, target_id, fact_id)` 唯一约束；项目事实和项目目标索引 |
+| `novel_adaptation_asset_links` | 保存用户确认的人物或地点事实与漫剧视觉资产关联 | `asset_id` 主键、项目+事实唯一约束 |
+| `novel_adaptation_workflows` | 全书改编的不可变输入：全部已确认事实与关联快照、人物及地点事实到正式条目的固定映射、统一策略、人工确认后固定的分集标识与集号、启动时确认的单次调用单价 | `job_id` 主键并外键指向任务；`strategy` 可为空、`episode_slots` 默认空数组，分别表示尚未归纳或尚未确认集数；`episode_ids` 默认空数组，非空表示逐集正文批量任务且元素顺序即生成顺序 |
+| `novel_adaptation_units` | 全书改编与逐集正文批量的持久化生成单元：单元身份、输入边界、已校验输出、对应草稿与预扣标识；成功输出是恢复与结算的唯一依据；正文批量单元固定为 `episode:<分集标识>`，`input_snapshot` 为 `{episodeId}`、`output_snapshot` 为 `{draftId}`，`completed_at` 表示已写回正式剧本 | `(job_id, unit_key)` 主键；`job_id` 外键指向工作流快照；`(job_id, phase, sequence)` 进度索引、`(job_id, charge_id)` 计费索引 |
+
+V48 新增 `retry_count` 字段及约束，表字段注释见 `V48__Add_Novel_Adaptation_Retry_Count.sql`。失败任务通过 `quoteRetryPipeline` 报价、`retryPipeline` 用户确认后续跑；草稿的阶段、目标分集及事实标识集合为成功批次检查点，只生成缺失批次。续跑按原单价预扣已退款的剩余内容，使用每次独立的计费标识；一键任务的生成调用不再重复按单次扣费。`listActivePipeline` 优先返回进行中任务，否则返回最近任务，刷新页面后保留失败续跑入口。
+
+V49 新增全书改编工作流与生成单元，并把任务阶段扩展为 `materials`（素材与策略）与 `planning`（统一规划），表字段注释见 `V49__Add_Whole_Book_Adaptation.sql`。素材阶段按容量决定是否分层归并：素材摘要装得下就一次归纳全书策略，不再按固定根数归并，因为根汇总数量决定模型可划分的故事阶段上限。策略完成后任务停在集数确认停点，确认时按最大余数法分配各故事阶段配额并固定全部分集身份。预扣标识按阶段区分（`{jobId}:stage:{phase}`），避免三段计费共用同一标识被幂等判重而跳过扣费；结算与退款只依据 `output_snapshot` 已写入的单元。任务是否存在工作流快照决定队列分发到全书改编执行器还是升级前的遗留执行器；`wholeBookAdaptation/active` 优先返回进行中任务，否则返回最近任务。
+
+四张表的表和字段注释见 `V45__Add_Novel_Adaptation.sql`、`V46__Expand_Novel_Adaptation_Stages.sql` 与 `V47__Add_Novel_Adaptation_Jobs.sql`。正式剧本仍由 `script_*` 表维护；事实修订差异由来源表与 `story_bible_items` 联查，不覆盖既有媒体结果。来源关联表示本次生成选用了哪些事实作为上下文，不代表逐句原文证据。一键改编在启动时按估算调用次数预扣积分，取消或失败时按已结算调用数退还；同一项目同时只允许一个未结束任务。
+
+V51 新增逐集正文批量生成，复用全书改编的任务、工作流快照与生成单元，把已固定的分集排队写成场次与正文，表字段注释见 `V51__Add_Episode_Body_Batch.sql`。任务阶段扩展为 `bodies`（逐集正文），单元阶段扩展为 `draft`（草稿）与 `body`（正文）；队列按 `novel_adaptation_workflows.episode_ids` 是否非空把任务分发给正文批量执行器，而不是新增任务类型列。
+
+| 约定 | 说明 |
+| --- | --- |
+| 目标分集 | `episode_ids` 保存本次批量的目标分集，由服务端按项目集号排列，顺序即生成顺序；空数组表示不是正文批量任务 |
+| 生成单元 | `unit_key='episode:<分集标识>'`、`phase='bodies'`、`stage='body'`，`sequence` 即生成顺序；`input_snapshot` 为 `{episodeId}`，`output_snapshot` 为 `{draftId}` |
+| 完成判定 | `output_snapshot` 非空表示已生成草稿，`completed_at` 非空表示草稿已写回正式剧本。只出草稿模式生成即完成，立即写入模式必须写回才算完成 |
+| 续跑 | 只重做未完成分集（只出草稿看 `output_snapshot`，立即写入模式还要看 `completed_at`），已完成单元保持原样，预扣标识沿用原值，不重复扣费 |
+| 计费 | 预扣标识为 `{jobId}:stage:bodies`，按分集预扣（单集单价取所选文本模型的单次调用积分）；失败或取消按未完成分集退回，已完成产出保留 |
+| 版本 | 整批启动前只保存一个检查点版本「批量生成分集正文前」，批量写入不逐集保存版本 |
+
+### V51 逐集正文批量接口
+
+接口均在 `/api/v1/script/episodeBodies` 下，统一返回 `{ code, data, msg }`（成功为 `code=0`、`msg=success`），并按当前用户校验项目归属。
+
+| 接口 | 请求字段（校验约束） | 成功 `data` |
+| --- | --- | --- |
+| `POST /quote` | `projectId` 非空；`expectedRevision` ≥ 0；`model` 非空；`mode` 非空且为 `draft` 或 `apply`；`episodeIds` 必填、最多 1000 个、元素非空 | `Quote`：`revision`、`episodes`、`calls`、`credits`、`fingerprint`、`episodeIds` |
+| `POST /start` | 同 `quote`，另加 `clientRequestId` 非空且不超过 64 字符、`expectedCredits` ≥ 0、`expectedFingerprint` 非空 | `Job` |
+| `POST /status` | `projectId`、`jobId` 非空 | `Job` |
+| `POST /latest` | `projectId` 非空 | `Job`；项目还没有正文批量任务时返回空响应体 |
+| `POST /retry` | `projectId`、`jobId` 非空 | `Job` |
+| `POST /cancel` | `projectId`、`jobId` 非空 | `Job` |
+
+`Job` 结构：`jobId`、`phase`、`status`、`totalEpisodes`、`processedEpisodes`、`credits`（整批预扣积分）、`refundedCredits`（失败或取消时按未完成分集计出的退款，其他状态为 0）、`errorMessage`、`revision`（本批生成基线修订号）、`retryCount`、`failedEpisodeIds`（失败或取消时的未完成分集，其他状态为空数组）。任务状态取值为 `queued`、`running`、`completed`、`failed`、`canceled`。
+
+`mode` 语义：
+
+| `mode` | 语义 |
+| --- | --- |
+| `draft` | 每集只生成待审草稿，在剧本工作台审阅后再由用户应用；生成出草稿即算该集完成 |
+| `apply` | 每集生成后立即写回正式剧本；写回成功后才算该集完成，该路径不逐条保存版本 |
+
+约定：
+
+- 目标分集必须是项目内已固定的分集：空数组、重复选择、不属于本项目或项目还没有分集时以 `PARAM_INVALID` 拒绝；服务端按项目集号排列目标，请求顺序不影响生成顺序。
+- `status`、`retry`、`cancel` 按当前用户的项目归属查找任务，任务不存在或不属于该项目时返回 `RESOURCE_NOT_FOUND`。
+- `model` 为 `渠道标识::模型名称`，格式不合法返回 `PARAM_INVALID`，不是启用的文本模型返回 `BUSINESS_ERROR`。
+- `start` 会用当前输入重新规划并比对 `expectedCredits` 与 `expectedFingerprint`，不一致返回 `DATA_CONFLICT` 并要求重新报价；指纹覆盖项目修订号、模型、模式与目标分集。
+- 任务按集顺序串行生成，一集失败即停在当前分集并保留已完成分集；`retry` 只接受 `failed` 或 `canceled` 任务，没有未完成分集时返回 `DATA_CONFLICT`。
+- `cancel` 只对 `queued`、`running` 生效，其他状态直接返回当前进度；已完成产出保留，只退未完成分集的积分。

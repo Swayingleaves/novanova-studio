@@ -256,7 +256,9 @@ class CreationPlanExecutorTest {
         List<String> executionOrder = new ArrayList<>();
         when(frontendToolExecutor.executeFrontendTool(anyLong(), anyString(), anyString(), anyString(), anyMap()))
                 .thenAnswer(invocation -> {
-                    executionOrder.add(invocation.getArgument(2, String.class));
+                    // taskId 放在工具参数里，第三个参数是 toolCallId，不是任务标识。
+                    java.util.Map<String, Object> arguments = invocation.getArgument(4);
+                    executionOrder.add(String.valueOf(arguments.get("text")));
                     return Mono.just(new ToolResult(true, "执行成功", Map.of()));
                 });
 

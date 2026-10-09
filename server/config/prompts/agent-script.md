@@ -16,6 +16,7 @@
 6. 不得删除或改写未被当前目标包含的正式内容。
 7. 优先强化人物动机、因果、冲突、悬念、反转、情绪推进和高潮兑现，避免空泛评价。
 8. 所有数组字段必须直接包含对象或字符串等声明类型的值；对象数组的元素必须是 JSON 对象，严禁将对象序列化为 JSON 字符串。
+9. 正文块用 `origin` 声明内容来源：`original` 表示来自原著事实，`adapted` 表示 AI 新增的情节或对白。`content` 只写剧本本身，不得写入「【改编创作】」之类的标记——来源信息由 `origin` 承载，不需要在正文里重复。
 
 ## 枚举字段严格值
 
@@ -23,6 +24,7 @@
 
 | 字段 | 允许值 |
 | --- | --- |
+| `ProjectOverview.contentType` | `comicDrama`、`liveActionShort`、`animation`、`advertisement`、`musicVideo`、`storyShort` |
 | `OutlineSection.sectionType` | `act`、`mainPlot`、`subplot`、`characterArc` |
 | `StoryEvent.eventType` | `plot`、`conflict`、`suspense`、`twist`、`climax`、`ending` |
 | `CharacterRelation.relationshipDirection` | `directed`、`bidirectional` |
@@ -30,6 +32,53 @@
 | `EpisodeSummary.completionStatus` | `planning`、`draft`、`complete` |
 | `Scene.interiorExterior` | `interior`、`exterior`、`mixed` |
 | `ScriptBlock.blockType` | `action`、`dialogue`、`narration`、`transition` |
+| `ScriptBlock.origin` | `original`、`adapted` |
+
+# 全书改编请求
+
+全书改编由服务端分批提供输入，你不掌握全书全貌，不得假设输入之外的情节已经确定。
+
+## 素材归纳
+
+`requestType` 为 `material` 时返回 `Material`，只包含 `summary` 字段：
+
+- 用不超过 800 字概括本批内容的因果关系、人物变化与阶段转折。
+- 保留可定位的事实标识，便于后续按事件核对。
+- 不逐条复述事件，不写入正式大纲或分集，不新增输入中不存在的情节。
+- 故事发生顺序无法从输入确定时必须直接标注，不得臆测。
+
+## 全书策略
+
+`requestType` 为 `strategy` 时返回 `Strategy`，字段固定为 `mainPlot`、`ending`、`reasoning`、`compression`、`arcs`：
+
+- `mainPlot`：全书主线走向。
+- `ending`：结局走向。
+- `reasoning`：建议集数的理由。
+- `compression`：压缩与省略的取舍说明。允许合理省略支线，但必须说明取舍了什么。
+- `arcs`：故事阶段数组，每项包含 `title`、`summary`、`sourceKeys`、`recommendedEpisodes`。
+  - `sourceKeys` 必须精确取自输入的 `sources[].key`，不得编造、改写或使用其他编号。
+  - 每个来源至少被一个阶段引用；允许同一来源被多个阶段引用，但不得遗漏任何来源。
+  - `recommendedEpisodes` 为正整数，是建议值；最终集数由用户确认，不由你决定。
+
+## 事件取舍
+
+`requestType` 为 `assignment` 时返回 `Assignment`，包含 `events` 数组，每项字段固定为 `factId`、`treatment`、`episodeId`、`reason`：
+
+- 输入的 `events[].id` 与 `episodes[].id` 是**批内序号标识**（形如 `e1`、`e17`、`ep1`、`ep2`），只在本批输入内有效，不是集号也不是数据库标识。
+- `factId` 必须**逐字复制**输入的 `events[].id`，每个事件恰好出现一次，不得遗漏、重复或编造。
+- `treatment` 只能是 `retain` 保留、`merge` 合并、`omit` 省略。
+- `treatment` 为 `merge` 时，`episodeId` 必须**逐字复制**输入的 `episodes[].id`（批内序号标识，不是集号、序号或自编号）；`retain` 可以留空或指向本阶段某一集；`omit` 必须留空。
+- `reason` 必须给出可核对的中文理由；省略事件时必须说明取舍原因。
+- 同一事件不能被分配到多个分集；需要跨集呼应时保留到主要分集，并在其他分集的分集规划中说明。
+
+## 逐集规划
+
+`requestType` 为 `draft` 且 `actionType` 为 `episodePlan` 时，按输入的 `episodes` 逐集填写：
+
+- 输入的 `episodes[].id` 是批内序号标识（形如 `ep1`、`ep2`）；返回的 `id` 必须**逐字复制**对应输入的 `id`，不得增删分集或打乱顺序。
+- `episodeNumber`、`sortOrder`、`targetDurationSeconds` 由服务端按固定分集写入，填任意值都会被覆盖，无需关心。
+- 每集必须给出非空的 `summary`、`keyEvents`、`mainConflict`、`climax`、`endingHook`。
+- 只填写输入分集范围内的内容，不得引用其他分集。
 
 # 草稿请求
 
@@ -40,7 +89,7 @@
 - `characters`：`CharacterDraft`，包含 `characters` 和 `relations`。
 - `world`：`WorldDraft`，包含 `worldSetting`、`worldItems` 和 `locations`。
 - `episodes`：`EpisodePlanDraft`，包含 `episodes`。
-- `episode`：完整 `EpisodeDetail`，包含 `episode` 和 `scenes`。
+- `episode`：完整 `EpisodeDetail`，包含 `episode` 和 `scenes`。场次数量按指令给出的单场秒数区间换算，每场都要有明确的场景目标与至少一次情节推进，不要为了凑数量稀释内容。
 - `scene`：完整 `Scene`。
 - `block`：完整 `ScriptBlock`。
 
@@ -108,8 +157,6 @@
         "speechStyle": "简短直接。",
         "backgroundStory": "大学毕业后离开家乡多年。",
         "characterArc": "从独自硬撑转变为愿意信任伙伴。",
-        "graphPositionX": 0,
-        "graphPositionY": 0,
         "sortOrder": 0
       },
       {
@@ -130,8 +177,6 @@
         "speechStyle": "用礼貌措辞包装强硬要求。",
         "backgroundStory": "出身本地商业家族，早年曾在海外投行任职。",
         "characterArc": "从只看重收益，逐渐理解旧街区的人情价值。",
-        "graphPositionX": 320,
-        "graphPositionY": 0,
         "sortOrder": 1
       }
     ],

@@ -101,6 +101,11 @@ class ComicDramaTimelineServiceTest {
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(7L));
         when(repository.getProject(7L, "project-one")).thenReturn(Mono.just(project));
         when(repository.hasTimelineTextOverlap("project-one", text)).thenReturn(Mono.just(true));
+        // 重叠命中会在写入前短路，这里仍需把写入与修订推进都给成非空返回，
+        // 否则一旦短路失效就会先撞未 mock 的 NPE，把预期的业务异常掩盖掉。
+        when(repository.saveTimelineText("project-one", text)).thenReturn(Mono.just(0L));
+        when(repository.advanceRevision(7L, "project-one", 3L)).thenReturn(Mono.just(4L));
+        when(repository.listTimelineTexts("project-one")).thenReturn(Flux.just(text));
         when(transactionalOperator.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         assertThrows(BusinessException.class, () -> service.saveTimelineText(

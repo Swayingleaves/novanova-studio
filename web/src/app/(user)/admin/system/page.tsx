@@ -54,6 +54,8 @@ import { getHomepageTargetPath } from "@/features/homepage/api/homepage-showcase
 import { adminCreditFilterKey, adminCreditUserLabel } from "./admin-credit-utils";
 import { CreditCardManagement } from "./components/credit-card-management";
 import { ApiLogsManagement } from "./components/api-logs-management";
+import { StoryBiblePricingManagement } from "./components/story-bible-pricing-management";
+import { EpisodeBodiesPricingManagement } from "./components/episode-bodies-pricing-management";
 import { GenerationStyleCover } from "@/features/generation/components/generation-style-picker";
 import { uploadImage } from "@/features/storage/services/image-storage";
 import { CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactionIcon, creditTransactionTypeLabel, formatCreditChange, formatCredits, formatCreditTime, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
@@ -102,6 +104,14 @@ export default function AdminSystemPage() {
                         { key: "styles", label: "风格管理", children: <GenerationStyleManagement /> },
                         { key: "skills", label: "技能管理", children: <SkillManagement /> },
                         { key: "homepage", label: "首页展示", children: <HomepageShowcaseManagement /> },
+                        {
+                            key: "scriptPricing", label: "剧本创作定价", children: <Tabs
+                                items={[
+                                    { key: "storyBible", label: "知识库定价", children: <StoryBiblePricingManagement /> },
+                                    { key: "episodeBodies", label: "分集正文", children: <EpisodeBodiesPricingManagement /> },
+                                ]}
+                            />,
+                        },
                         { key: "apiLogs", label: "接口记录", children: <ApiLogsManagement /> },
                     ]}
                 />

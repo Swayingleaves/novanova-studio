@@ -8,6 +8,8 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.ScriptDtos;
+import com.novanovastudio.dto.NovelAdaptationDtos;
+import com.novanovastudio.repository.NovelAdaptationRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
@@ -25,6 +27,7 @@ import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.reactive.TransactionalOperator;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Mono;
 
@@ -70,6 +73,193 @@ public class ScriptAgentService {
 
     /** Agent结构化返回校验器。 */
     private final Validator validator;
+
+    /** 小说改编草稿来源仓储。 */
+    private final NovelAdaptationRepository novelAdaptationRepository;
+
+    /** 改编草稿与来源快照的原子写入事务。 */
+    private final TransactionalOperator transactionalOperator;
+
+    /**
+     * 为已预扣的全书生成单元复用剧本Agent和强类型结构化输出。
+     * @param userId Long 发起用户
+     * @param operationId String 持久化单元身份
+     * @param modelValue String 文本模型
+     * @param input Map<String,Object> 已校验容量的单元输入
+     * @param resultType Class<T> 结构化结果类型
+     * @param <T> 结果类型
+     * @return Mono<T> 模型结果，保存及计费由工作流负责
+     */
+    public <T> Mono<T> callWholeBookUnit(Long userId, String operationId, String modelValue,
+                                         Map<String, Object> input, Class<T> resultType) {
+        validateContextSize(input, "episode");
+        return modelFactory.resolveTextModel(modelValue)
+                .flatMap(model -> callAgent(userId, operationId, model, input, resultType));
+    }
+
+    /**
+     * 工作流保存前复用正式草稿结构及引用校验。
+     * @param data JSONObject 生成数据
+     * @param targetType String 目标类型
+     * @param targetId String 可选目标
+     * @param snapshot ProjectSnapshot 校验基线
+     * @return Mono<JSONObject> 已校验数据
+     */
+    public Mono<JSONObject> validateWholeBookDraft(JSONObject data, String targetType, String targetId,
+                                                   ScriptDtos.ProjectSnapshot snapshot) {
+        return validateGeneratedDraft(new ScriptDtos.GeneratedDraft(data), targetType, targetType, targetId, snapshot);
+    }
+
+    /**
+     * 复用剧本Agent结构化草稿扩展点，按选定事实生成改编草稿并保存来源快照。
+     *
+     * @param request 用户确认的改编阶段与设置
+     * @param snapshot 当前正式剧本快照
+     * @param facts 已确认事实及证据
+     * @return 待人工审阅的剧本AI草稿
+     */
+    public Mono<ScriptDtos.AiDraft> generateAdaptationDraft(NovelAdaptationDtos.GenerateRequest request,
+                                                              ScriptDtos.ProjectSnapshot snapshot,
+                                                              List<NovelAdaptationDtos.Fact> facts) {
+        return generateAdaptationDraft(request, snapshot, facts, false);
+    }
+
+    /**
+     * 沿用结构化生成扩展点，流水线已预扣时不再按单次重复扣费。
+     * @param request GenerateRequest 当前生成请求
+     * @param snapshot ProjectSnapshot 正式项目快照
+     * @param facts List&lt;Fact&gt; 本批事实
+     * @param prepaid boolean 是否由一键任务整体预扣
+     * @return Mono&lt;AiDraft&gt; 已持久化草稿
+     */
+    public Mono<ScriptDtos.AiDraft> generateAdaptationDraft(NovelAdaptationDtos.GenerateRequest request,
+                                                          ScriptDtos.ProjectSnapshot snapshot,
+                                                          List<NovelAdaptationDtos.Fact> facts, boolean prepaid) {
+        return generateAdaptationDraft(request, snapshot, facts, prepaid, null);
+    }
+
+    /**
+     * 保存模型产物时将草稿与任务归属一起提交，保证续跑检查点不会因进程退出丢失。
+     * @param request GenerateRequest 当前生成请求
+     * @param snapshot ProjectSnapshot 正式项目快照
+     * @param facts List&lt;Fact&gt; 本批事实
+     * @param prepaid boolean 是否由一键任务预扣
+     * @param jobId String 所属任务标识，单次生成时为空
+     * @return Mono&lt;AiDraft&gt; 已保存并关联任务的草稿
+     */
+    public Mono<ScriptDtos.AiDraft> generateAdaptationDraft(NovelAdaptationDtos.GenerateRequest request,
+                                                          ScriptDtos.ProjectSnapshot snapshot,
+                                                          List<NovelAdaptationDtos.Fact> facts, boolean prepaid, String jobId) {
+        // 概览、人物与关系、世界观与地点、故事大纲四个阶段的目标类型与阶段同名，其余阶段沿用原有动作类型。
+        String targetType = switch (request.stage()) {
+            case "overview", "characters", "world", "outline" -> request.stage();
+            case "episodes" -> "episodes";
+            case "episode" -> "episode";
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "不支持的改编阶段");
+        };
+        String actionType = switch (request.stage()) {
+            case "episodes" -> "episodePlan";
+            case "episode" -> "episodeDraft";
+            default -> request.stage();
+        };
+        String targetId = "episode".equals(targetType) ? request.episodeId() : null;
+        JSONObject sourceData = scriptService.targetSnapshot(snapshot, targetType, targetId);
+        Map<String, Object> context = adaptationContext(request, snapshot, facts);
+        validateContextSize(context, targetType);
+        String instruction = "根据confirmedFacts中的已确认事实改编。形式=" + request.settings().format()
+                + "；目标集数=" + request.settings().episodeCount()
+                + "；单集秒数=" + request.settings().episodeDurationSeconds()
+                + "；节奏=" + request.settings().pacing()
+                + "；改编程度=" + request.settings().adaptationLevel()
+                + "。不得把推测当作原文事实；正文块origin填original表示来自原著事实，填adapted表示AI新增的情节或对白；"
+                + "正文内容里只写剧本本身，不要写【改编创作】之类的标记。"
+                + "只生成当前阶段的结构化草稿，不改动当前项目中非目标内容。"
+                + ("episode".equals(targetType)
+                        ? "characters和locations是正式剧本的引用列表。场次characterIds和对白characterId只能使用characters中的id；"
+                        + "场次locationId只能使用locations中的id，没有对应正式地点时留空。"
+                        + "confirmedFacts中的id是故事知识库事实标识，不能作为人物或地点引用，也不能自行创建这些引用标识。" : "")
+                // 全量入库时证据条数即重要性信号：次要条目只保留可核实的最少信息，避免模型为路人角色编造完整人设。
+                + (Set.of("characters", "world").contains(targetType)
+                        ? "证据少于3条的次要条目只填写名称、身份与简介，其余设定字段留空，不得编造。" : "");
+        ScriptDtos.GenerateDraftRequest draftRequest = new ScriptDtos.GenerateDraftRequest(request.projectId(),
+                request.expectedRevision(), actionType, targetType, targetId, instruction, request.model());
+        return currentUserProvider.currentUserId().flatMap(userId -> modelFactory.resolveTextModel(request.model())
+                .flatMap(model -> executeChargedOperation(userId, prepaid ? 0 : model.creditCost(), "小说改编草稿生成", operationId ->
+                        callDraftAgent(userId, operationId, model, draftRequest, context)
+                                .flatMap(generated -> validateGeneratedDraft(generated, actionType, targetType, targetId, snapshot))
+                                .flatMap(data -> {
+                                    Mono<ScriptDtos.AiDraft> save = scriptService.saveAiDraft(userId,
+                                                    request.projectId(), request.expectedRevision(),
+                                                    "novelAdaptation" + request.stage(), targetType, targetId,
+                                                    instruction, model.modelValue(), prepaid ? 0 : model.creditCost(), sourceData, data)
+                                            .flatMap(draft -> novelAdaptationRepository.saveDraft(draft.id(),
+                                                    request.projectId(), request.stage(), request.settings(), facts)
+                                                    .then(jobId == null ? Mono.<Void>empty() : novelAdaptationRepository.attachJob(draft.id(), jobId))
+                                                    .thenReturn(draft));
+                                    return novelAdaptationRepository.requireCurrentFacts(request.projectId(), facts)
+                                            .then(transactionalOperator.transactional(save));
+                                }))));
+    }
+
+    /**
+     * 构建改编上下文，单集正文同时提供正式引用列表与事实设定，避免混淆两类标识。
+     *
+     * @param request GenerateRequest 当前改编阶段与目标分集
+     * @param snapshot ProjectSnapshot 正式剧本完整快照
+     * @param facts List&lt;Fact&gt; 本批故事事实及证据
+     * @return Map&lt;String, Object&gt; 发送给模型的改编上下文
+     */
+    private Map<String, Object> adaptationContext(NovelAdaptationDtos.GenerateRequest request,
+                                                  ScriptDtos.ProjectSnapshot snapshot,
+                                                  List<NovelAdaptationDtos.Fact> facts) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("overview", snapshot.project().overview());
+        context.put("outline", snapshot.project().outlineSections());
+        context.put("episodes", snapshot.project().episodes());
+        if ("episode".equals(request.stage())) {
+            context.put("targetEpisode", snapshot.episodeDetails().stream()
+                    .filter(episode -> episode.episode().id().equals(request.episodeId())).findFirst().orElseThrow());
+            // 事实标识与正式条目标识独立，只提供全量标识和名称，详细设定仍由本批事实提供。
+            context.put("characters", snapshot.project().characters().stream()
+                    .map(character -> JSONObject.of("id", character.id(), "name", character.name())).toList());
+            context.put("locations", snapshot.project().locations().stream()
+                    .map(location -> JSONObject.of("id", location.id(), "name", location.name())).toList());
+        }
+        context.put("confirmedFacts", facts);
+        context.put("adaptationSettings", request.settings());
+        return context;
+    }
+
+    /**
+     * 按用户明确确认的费用，对正式剧本与已确认事实执行深入一致性检查。
+     *
+     * @param request 模型、事实与项目修订号
+     * @param snapshot 正式剧本快照
+     * @param facts 已确认事实快照
+     * @return 已保存的分析报告
+     */
+    public Mono<ScriptDtos.AnalysisReport> analyzeAdaptationConsistency(NovelAdaptationDtos.AnalyzeRequest request,
+                                                                          ScriptDtos.ProjectSnapshot snapshot,
+                                                                          List<NovelAdaptationDtos.Fact> facts) {
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("script", snapshot);
+        context.put("confirmedFacts", facts);
+        validateContextSize(context, "project");
+        return currentUserProvider.currentUserId().flatMap(userId -> modelFactory.resolveTextModel(request.model())
+                .flatMap(model -> executeChargedOperation(userId, model.creditCost(), "小说改编深入一致性检查", operationId -> {
+                    Map<String, Object> input = new LinkedHashMap<>();
+                    input.put("requestType", "analysis");
+                    input.put("scopeType", "project");
+                    input.put("instruction", "对照confirmedFacts检查人物设定、关系、时间、地点及剧情因果。"
+                            + "仅指出可定位且有依据的潜在冲突；改编创作不是自动错误，供用户人工判断。");
+                    input.put("context", context);
+                    return callAgent(userId, operationId, model, input, ScriptDtos.GeneratedAnalysis.class)
+                            .map(generated -> validateAnalysis(generated, snapshot, "project", null))
+                            .flatMap(generated -> novelAdaptationRepository.requireCurrentFacts(request.projectId(), facts)
+                                    .then(scriptService.saveAnalysisReport(userId, request.projectId(), "project", null,
+                                            model.modelValue(), model.creditCost(), request.expectedRevision(), generated)));
+                })));
+    }
 
     /**
      * 生成待用户确认的结构化剧本草稿。
@@ -626,7 +816,9 @@ public class ScriptAgentService {
         Set<String> characterIds = snapshot.project().characters().stream().map(ScriptDtos.Character::id).collect(java.util.stream.Collectors.toSet());
         Set<String> locationIds = snapshot.project().locations().stream().map(ScriptDtos.Location::id).collect(java.util.stream.Collectors.toSet());
         requireAgentResult(!StringUtils.hasText(scene.locationId()) || locationIds.contains(scene.locationId()), "剧本Agent返回了无效的地点引用");
-        requireAgentResult(scene.characterIds().stream().allMatch(characterIds::contains), "剧本Agent返回了无效的出场人物引用");
+        List<String> unknownCharacterIds = scene.characterIds().stream().filter(id -> !characterIds.contains(id)).toList();
+        requireAgentResult(unknownCharacterIds.isEmpty(), "剧本Agent返回了无效的出场人物引用：场次=" + scene.id()
+                + "，人物标识=" + unknownCharacterIds);
         requireAgentResult(Set.copyOf(scene.characterIds()).size() == scene.characterIds().size(), "剧本Agent返回了重复的出场人物引用");
         validateContinuousOrder(scene.blocks().stream().map(ScriptDtos.ScriptBlock::sortOrder).toList(), "正文块");
         Set<String> blockIds = Set.copyOf(scene.blocks().stream().map(ScriptDtos.ScriptBlock::id).toList());

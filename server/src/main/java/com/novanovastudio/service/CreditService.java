@@ -234,16 +234,64 @@ public class CreditService {
      */
     public Mono<Void> refundOperation(Long userId, String operationId, String operationName) {
         String chargeReason = operationReason(operationName, "扣费", operationId);
-        String refundReason = operationReason(operationName, "退款", operationId);
         return creditRepository.getOperationChargeAmount(userId, chargeReason)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "未找到需要退款的" + operationName + "扣费流水")))
-                .flatMap(credits -> creditRepository.claimOperationTransaction(userId, operationId, TRANSACTION_TASK_REFUND, credits, refundReason)
-                        .flatMap(transactionId -> creditRepository.changeBalance(userId, credits)
-                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, operationName + "退款失败")))
-                                .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
-                        .then())
+                .flatMap(credits -> refundOperationAmount(userId, operationId, operationName, credits))
                 .then()
                 .as(transactionalOperator::transactional);
+    }
+
+    /**
+     * 按业务结算金额退还部分积分，退款金额不得超过原始扣费。
+     *
+     * @param userId Long 用户标识
+     * @param operationId String 稳定操作标识
+     * @param operationName String 业务名称
+     * @param credits int 本次应退积分，零表示不退款
+     * @return Mono&lt;Void&gt; 退款完成信号
+     */
+    public Mono<Void> refundOperation(Long userId, String operationId, String operationName, int credits) {
+        if (credits < 0) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "退款积分不能小于0"));
+        }
+        if (credits == 0) return Mono.empty();
+        return creditRepository.getOperationChargeAmount(userId, operationReason(operationName, "扣费", operationId))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "未找到需要退款的" + operationName + "扣费流水")))
+                .flatMap(charged -> credits <= charged
+                        ? refundOperationAmount(userId, operationId, operationName, credits)
+                        : Mono.<Void>error(new BusinessException(ErrorCode.PARAM_INVALID, "退款积分不能超过原始扣费")))
+                .as(transactionalOperator::transactional);
+    }
+
+    /**
+     * 读取业务操作的已退积分，用于任务状态回显。
+     *
+     * @param userId Long 用户标识
+     * @param operationId String 稳定操作标识
+     * @param operationName String 业务名称
+     * @return Mono&lt;Integer&gt; 已退积分，尚无退款流水时为零
+     */
+    public Mono<Integer> getOperationRefundAmount(Long userId, String operationId, String operationName) {
+        return creditRepository.getOperationRefundAmount(userId, operationReason(operationName, "退款", operationId))
+                .defaultIfEmpty(0);
+    }
+
+    /**
+     * 复用业务退款幂等键写入流水并更新余额，调用方必须开启事务。
+     *
+     * @param userId Long 用户标识
+     * @param operationId String 稳定操作标识
+     * @param operationName String 业务名称
+     * @param credits int 已校验的退款积分
+     * @return Mono&lt;Void&gt; 退款完成信号
+     */
+    private Mono<Void> refundOperationAmount(Long userId, String operationId, String operationName, int credits) {
+        return creditRepository.claimOperationTransaction(userId, operationId, TRANSACTION_TASK_REFUND, credits,
+                        operationReason(operationName, "退款", operationId))
+                .flatMap(transactionId -> creditRepository.changeBalance(userId, credits)
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, operationName + "退款失败")))
+                        .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
+                .then();
     }
 
     /**

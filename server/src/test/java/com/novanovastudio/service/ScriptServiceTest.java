@@ -15,6 +15,7 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.ScriptDtos;
 import com.novanovastudio.repository.ScriptRepository;
+import com.novanovastudio.repository.NovelAdaptationRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -46,6 +47,8 @@ class ScriptServiceTest {
     @Mock private TransactionalOperator transactionalOperator;
     /** 漫剧下游影响标记服务。 */
     @Mock private ComicDramaImpactService comicDramaImpactService;
+    /** 小说改编来源仓储。 */
+    @Mock private NovelAdaptationRepository novelAdaptationRepository;
     /** 结构校验器。 */
     private Validator validator;
     /** 被测剧本服务。 */
@@ -59,7 +62,8 @@ class ScriptServiceTest {
         validator = Validation.buildDefaultValidatorFactory().getValidator();
         lenient().when(comicDramaImpactService.markUpstreamChanges(anyString(), anyString(), any(), anyString()))
                 .thenReturn(Mono.just(0L));
-        service = new ScriptService(repository, currentUserProvider, transactionalOperator, validator, comicDramaImpactService);
+        service = new ScriptService(repository, currentUserProvider, transactionalOperator, validator,
+                comicDramaImpactService, novelAdaptationRepository);
     }
 
     /**
@@ -159,15 +163,23 @@ class ScriptServiceTest {
      */
     @Test
     void shouldRejectStaleOverviewRevision() {
-        ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "",
+        ScriptDtos.ProjectOverview stored = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "",
                 0, 1, "", "", "", "", "");
+        // 内容必须与库中不同：saveOverview 对未变更的概览会短路返回，不写库也不校验修订号，
+        // 那样就测不到旧修订号这条分支了。
+        ScriptDtos.ProjectOverview changed = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "玄幻", "新的一句话创意",
+                "", 0, 1, "", "", "", "", "");
+        ScriptRepository.ProjectRecord project = new ScriptRepository.ProjectRecord("project-a", 8L, stored,
+                "writing", 40, 4L, null, OffsetDateTime.now(), OffsetDateTime.now());
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
-        when(repository.updateOverview(8L, "project-a", 3L, overview)).thenReturn(Mono.just(0L));
+        when(repository.getProject(8L, "project-a")).thenReturn(Mono.just(project));
+        stubEmptyProjectReads();
+        when(repository.updateOverview(8L, "project-a", 3L, changed)).thenReturn(Mono.just(0L));
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<ScriptDtos.MutationResult>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         BusinessException exception = assertThrows(BusinessException.class,
-                () -> service.saveOverview(new ScriptDtos.SaveOverviewRequest("project-a", 3L, overview)).block());
+                () -> service.saveOverview(new ScriptDtos.SaveOverviewRequest("project-a", 3L, changed)).block());
 
         assertEquals(ErrorCode.DATA_CONFLICT, exception.getCode());
     }
@@ -180,7 +192,7 @@ class ScriptServiceTest {
         ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", "", "",
                 0, 1, "", "", "", "", "");
         ScriptDtos.Character character = new ScriptDtos.Character("person-a", "人物", "", "", "", "", "", "", "", "",
-                "", "", "", "", "", "", "", 0, 0, 0);
+                "", "", "", "", "", "", "", 0);
         ScriptRepository.ProjectRecord project = new ScriptRepository.ProjectRecord("project-a", 8L, overview,
                 "writing", 40, 4L, null, OffsetDateTime.now(), OffsetDateTime.now());
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
@@ -283,5 +295,22 @@ class ScriptServiceTest {
             throw new BusinessException(ErrorCode.PARAM_INVALID,
                     violation.getPropertyPath() + "：" + violation.getMessage());
         }
+    }
+
+    /**
+     * 准备项目详情读取的空结果，供需要完整快照的保存类用例复用。
+     * <p>
+     * 保存类接口会先读取全量项目详情判断内容是否变化，缺任一读取都会在 zip 阶段拿到 null。
+     */
+    private void stubEmptyProjectReads() {
+        lenient().when(repository.listOutlineSections("project-a")).thenReturn(Flux.empty());
+        lenient().when(repository.listStoryEvents("project-a")).thenReturn(Flux.empty());
+        lenient().when(repository.listCharacters("project-a")).thenReturn(Flux.empty());
+        lenient().when(repository.listCharacterRelations("project-a")).thenReturn(Flux.empty());
+        lenient().when(repository.getWorldSetting("project-a"))
+                .thenReturn(Mono.just(new ScriptDtos.WorldSetting("", "", "", "")));
+        lenient().when(repository.listWorldItems("project-a")).thenReturn(Flux.empty());
+        lenient().when(repository.listLocations("project-a")).thenReturn(Flux.empty());
+        lenient().when(repository.listEpisodes("project-a")).thenReturn(Flux.empty());
     }
 }

@@ -1,27 +1,35 @@
 package com.novanovastudio.service;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.alibaba.fastjson2.JSONObject;
+import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.agent.AgentScopeAgentFactory;
 import com.novanovastudio.agent.AgentScopeModelFactory;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.ScriptDtos;
+import com.novanovastudio.dto.NovelAdaptationDtos;
+import com.novanovastudio.repository.NovelAdaptationRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;
 
 /**
@@ -43,6 +51,10 @@ class ScriptAgentServiceTest {
     @Mock private CreditService creditService;
     /** 剧本领域服务。 */
     @Mock private ScriptService scriptService;
+    /** 小说改编来源仓储。 */
+    @Mock private NovelAdaptationRepository novelAdaptationRepository;
+    /** 草稿来源保存事务。 */
+    @Mock private TransactionalOperator transactionalOperator;
     /** 结构校验器。 */
     private Validator validator;
     /** 被测Agent服务。 */
@@ -55,7 +67,8 @@ class ScriptAgentServiceTest {
     void setUp() {
         validator = Validation.buildDefaultValidatorFactory().getValidator();
         service = new ScriptAgentService(currentUserProvider, modelFactory, agentFactory,
-                new NovanovaProperties(), creditService, scriptService, validator);
+                new NovanovaProperties(), creditService, scriptService, validator,
+                novelAdaptationRepository, transactionalOperator);
     }
 
     /**
@@ -225,6 +238,85 @@ class ScriptAgentServiceTest {
                         generated, snapshot("创意", "简介"), "project", null));
 
         assertTrue(exception.getMessage().contains("项目级问题"));
+    }
+
+    /**
+     * 验证长篇小说的正式引用列表保留全量标识，但不传入冗长的人物与地点设定。
+     */
+    @Test
+    void shouldProvideCompactFormalReferencesForAdaptationEpisode() {
+        ScriptDtos.ProjectSnapshot snapshot = adaptationSnapshot();
+        List<NovelAdaptationDtos.Fact> facts = List.of(new NovelAdaptationDtos.Fact("fact-character", 1,
+                "character", "人物0", "事实设定", "", List.of()));
+        NovelAdaptationDtos.GenerateRequest request = new NovelAdaptationDtos.GenerateRequest("project-a", 0,
+                "episode", "episode-a", new NovelAdaptationDtos.Settings("comicDrama", 1, 60, "balanced", "faithful"),
+                List.of("fact-character"), "text-model");
+
+        Map<String, Object> context = ReflectionTestUtils.invokeMethod(service, "adaptationContext", request, snapshot, facts);
+        JSONObject serialized = JSON.parseObject(JSON.toJSONString(context));
+
+        assertEquals(526, serialized.getJSONArray("characters").size());
+        assertEquals(261, serialized.getJSONArray("locations").size());
+        assertEquals(Set.of("id", "name"), serialized.getJSONArray("characters").getJSONObject(0).keySet());
+        assertEquals(Set.of("id", "name"), serialized.getJSONArray("locations").getJSONObject(0).keySet());
+        assertEquals("character-0", serialized.getJSONArray("characters").getJSONObject(0).getString("id"));
+        assertEquals("location-0", serialized.getJSONArray("locations").getJSONObject(0).getString("id"));
+        assertEquals("fact-character", serialized.getJSONArray("confirmedFacts").getJSONObject(0).getString("id"));
+        assertEquals("episode-a", serialized.getJSONObject("targetEpisode").getJSONObject("episode").getString("id"));
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(service, "validateContextSize", context, "episode"));
+    }
+
+    /**
+     * 验证使用正式人物和地点标识的场次可通过引用校验。
+     */
+    @Test
+    void shouldAcceptFormalReferencesInAdaptationScene() {
+        ScriptDtos.Scene scene = adaptationScene("character-0");
+
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(service, "validateSceneReferences", scene, adaptationSnapshot()));
+    }
+
+    /**
+     * 验证知识库事实标识仍不能代替正式人物标识，错误信息准确定位场次与非法引用。
+     */
+    @Test
+    void shouldRejectFactIdentifierAsFormalCharacterReference() {
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> ReflectionTestUtils.invokeMethod(service, "validateSceneReferences",
+                        adaptationScene("fact-character"), adaptationSnapshot()));
+
+        assertTrue(exception.getMessage().contains("scene-a"));
+        assertTrue(exception.getMessage().contains("fact-character"));
+    }
+
+    /**
+     * 创建包含大量冗长设定的正式项目，模拟长篇小说改编的上下文容量压力。
+     * @return ProjectSnapshot 包含正式人物、地点和目标集的项目快照
+     */
+    private ScriptDtos.ProjectSnapshot adaptationSnapshot() {
+        ScriptDtos.ProjectDetail base = snapshot("创意", "简介").project();
+        List<ScriptDtos.Character> characters = IntStream.range(0, 526).mapToObj(index ->
+                JSONObject.of("id", "character-" + index, "name", "人物" + index,
+                        "backgroundStory", "人物经历".repeat(1000)).toJavaObject(ScriptDtos.Character.class)).toList();
+        List<ScriptDtos.Location> locations = IntStream.range(0, 261).mapToObj(index ->
+                JSONObject.of("id", "location-" + index, "name", "地点" + index,
+                        "mainEvents", "地点事件".repeat(1000)).toJavaObject(ScriptDtos.Location.class)).toList();
+        ScriptDtos.EpisodeSummary episode = new ScriptDtos.EpisodeSummary("episode-a", 1, "第一集", "剧情摘要",
+                "", "", "", "", 60, "planning", 0);
+        ScriptDtos.ProjectDetail project = new ScriptDtos.ProjectDetail(base.id(), base.overview(), base.outlineSections(),
+                base.storyEvents(), characters, List.of(), base.worldSetting(), base.worldItems(), locations,
+                List.of(episode), base.stage(), base.completionRate(), false, base.revision(), null, null);
+        return new ScriptDtos.ProjectSnapshot(project, List.of(new ScriptDtos.EpisodeDetail(episode, List.of())));
+    }
+
+    /**
+     * 创建指定人物引用的最小合法场次。
+     * @param characterId String 待校验的正式人物标识或非法事实标识
+     * @return Scene 包含人物、地点引用的场次
+     */
+    private ScriptDtos.Scene adaptationScene(String characterId) {
+        return new ScriptDtos.Scene("scene-a", "location-0", 1, "开场", "interior", "白天",
+                "", "", "", "", "", 0, List.of(characterId), List.of());
     }
 
     /**

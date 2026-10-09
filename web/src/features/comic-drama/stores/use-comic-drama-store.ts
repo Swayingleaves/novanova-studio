@@ -111,7 +111,7 @@ type ComicDramaState = {
         settings: Record<string, unknown>;
     }) => Promise<{ mediaResults: ComicDramaMediaResult[]; taskCount: number }>;
     adoptMedia: (mediaId: string) => Promise<ComicDramaMutationResult>;
-    confirmUpdate: (scope: string, targetId: string, resolution: "keepOld" | "update") => Promise<ComicDramaMutationResult>;
+    confirmUpdate: (scope: string, targetId: string | null, resolution: "keepOld" | "update", source?: { sourceType: string; sourceId: string }) => Promise<ComicDramaMutationResult>;
     saveVoiceTrack: (voiceTrack: ComicDramaVoiceTrackInput) => Promise<ComicDramaVoiceTrack>;
     saveTimelineText: (timelineText: ComicDramaTimelineTextInput) => Promise<ComicDramaTimelineText>;
     deleteTimelineText: (timelineTextId: string) => Promise<void>;
@@ -193,11 +193,17 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
             set({
                 workspace,
                 loading: false,
-                ...(projectChanged ? { pendingTimelineTexts: {}, pendingTimelineTextReorderIds: [], pendingTimelineVoices: {}, timelineSaveError: "" } : {}),
-                // If shots already exist, default to shots stage, otherwise readiness
-                activeStage: workspace.shots.length > 0 ? "shots" : workspace.readiness.ready ? "settings" : "readiness",
-                pendingStage: null,
-                selectedEpisodeId: workspace.scriptProject.episodes[0]?.id || null,
+                // 只有切换项目（含首次加载）才重新决定默认阶段。同一项目重复加载时无条件重置，
+                // 会把用户在加载期间选好的阶段顶掉 —— 表现为刚点开「待更新项」过一会儿又跳回镜头清单。
+                ...(projectChanged ? {
+                    pendingTimelineTexts: {},
+                    pendingTimelineTextReorderIds: [],
+                    pendingTimelineVoices: {},
+                    timelineSaveError: "",
+                    activeStage: workspace.shots.length > 0 ? "shots" : workspace.readiness.ready ? "settings" : "readiness",
+                    pendingStage: null,
+                    selectedEpisodeId: workspace.scriptProject.episodes[0]?.id || null,
+                } : {}),
             });
         } catch (requestError) {
             set({
@@ -366,10 +372,10 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
         return result;
     },
 
-    confirmUpdate: async (scope, targetId, resolution) => {
+    confirmUpdate: async (scope, targetId, resolution, source) => {
         const workspace = get().workspace;
         if (!workspace) throw new Error("工作区未初始化");
-        const result = await confirmComicDramaUpdate(workspace.projectId, workspace.revision, scope, targetId, resolution, true);
+        const result = await confirmComicDramaUpdate(workspace.projectId, workspace.revision, scope, targetId, resolution, true, source);
         await get().reloadWorkspace();
         return result;
     },

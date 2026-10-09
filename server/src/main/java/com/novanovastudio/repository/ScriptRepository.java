@@ -407,7 +407,6 @@ public class ScriptRepository {
                 row.get("desire", String.class), row.get("fear", String.class), row.get("motivation", String.class),
                 row.get("appearance_description", String.class), row.get("habits", String.class), row.get("speech_style", String.class),
                 row.get("background_story", String.class), row.get("character_arc", String.class),
-                value(row, "graph_position_x", Double.class, 0D), value(row, "graph_position_y", Double.class, 0D),
                 value(row, "sort_order", Integer.class, 0))).all();
     }
 
@@ -663,7 +662,8 @@ public class ScriptRepository {
         return databaseClient.sql("SELECT * FROM script_blocks WHERE scene_id=:sceneId ORDER BY sort_order,id")
                 .bind("sceneId", sceneId).map((row, metadata) -> new ScriptDtos.ScriptBlock(
                         row.get("id", String.class), row.get("block_type", String.class), row.get("character_id", String.class),
-                        row.get("content", String.class), value(row, "sort_order", Integer.class, 0))).all();
+                        row.get("content", String.class), value(row, "origin", String.class, "original"),
+                        value(row, "sort_order", Integer.class, 0))).all();
     }
 
     /**
@@ -971,16 +971,16 @@ public class ScriptRepository {
         return databaseClient.sql("""
                 INSERT INTO script_characters(id,project_id,name,identity,age,occupation,role_type,personality,values_description,
                     goal,desire,fear,motivation,appearance_description,habits,speech_style,background_story,character_arc,
-                    graph_position_x,graph_position_y,sort_order)
+                    sort_order)
                 VALUES (:id,:projectId,:name,:identity,:age,:occupation,:roleType,:personality,:valuesDescription,
                     :goal,:desire,:fear,:motivation,:appearanceDescription,:habits,:speechStyle,:backgroundStory,:characterArc,
-                    :graphPositionX,:graphPositionY,:sortOrder)
+                    :sortOrder)
                 ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,identity=EXCLUDED.identity,age=EXCLUDED.age,
                     occupation=EXCLUDED.occupation,role_type=EXCLUDED.role_type,personality=EXCLUDED.personality,
                     values_description=EXCLUDED.values_description,goal=EXCLUDED.goal,desire=EXCLUDED.desire,fear=EXCLUDED.fear,
                     motivation=EXCLUDED.motivation,appearance_description=EXCLUDED.appearance_description,habits=EXCLUDED.habits,
                     speech_style=EXCLUDED.speech_style,background_story=EXCLUDED.background_story,character_arc=EXCLUDED.character_arc,
-                    graph_position_x=EXCLUDED.graph_position_x,graph_position_y=EXCLUDED.graph_position_y,sort_order=EXCLUDED.sort_order
+                    sort_order=EXCLUDED.sort_order
                 WHERE script_characters.project_id=EXCLUDED.project_id
                 """).bind("id", character.id()).bind("projectId", projectId).bind("name", character.name())
                 .bind("identity", text(character.identity())).bind("age", text(character.age())).bind("occupation", text(character.occupation()))
@@ -989,8 +989,7 @@ public class ScriptRepository {
                 .bind("desire", text(character.desire())).bind("fear", text(character.fear())).bind("motivation", text(character.motivation()))
                 .bind("appearanceDescription", text(character.appearanceDescription())).bind("habits", text(character.habits()))
                 .bind("speechStyle", text(character.speechStyle())).bind("backgroundStory", text(character.backgroundStory()))
-                .bind("characterArc", text(character.characterArc())).bind("graphPositionX", character.graphPositionX())
-                .bind("graphPositionY", character.graphPositionY()).bind("sortOrder", character.sortOrder()).fetch().rowsUpdated();
+                .bind("characterArc", text(character.characterArc())).bind("sortOrder", character.sortOrder()).fetch().rowsUpdated();
     }
 
     /**
@@ -1096,14 +1095,16 @@ public class ScriptRepository {
      */
     private Mono<Long> saveBlock(String sceneId, ScriptDtos.ScriptBlock block) {
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                INSERT INTO script_blocks(id,scene_id,block_type,character_id,content,sort_order)
-                VALUES (:id,:sceneId,:blockType,:characterId,:content,:sortOrder)
+                INSERT INTO script_blocks(id,scene_id,block_type,character_id,content,origin,sort_order)
+                VALUES (:id,:sceneId,:blockType,:characterId,:content,:origin,:sortOrder)
                 ON CONFLICT (id) DO UPDATE SET block_type=EXCLUDED.block_type,character_id=EXCLUDED.character_id,
-                    content=EXCLUDED.content,sort_order=EXCLUDED.sort_order
+                    content=EXCLUDED.content,origin=EXCLUDED.origin,sort_order=EXCLUDED.sort_order
                 WHERE script_blocks.scene_id=EXCLUDED.scene_id
                 """).bind("id", block.id()).bind("sceneId", sceneId).bind("blockType", block.blockType());
         spec = R2dbcBindings.bindNullable(spec, "characterId", blankToNull(block.characterId()), String.class);
-        return spec.bind("content", text(block.content())).bind("sortOrder", block.sortOrder()).fetch().rowsUpdated();
+        return spec.bind("content", text(block.content()))
+                .bind("origin", "adapted".equals(block.origin()) ? "adapted" : "original")
+                .bind("sortOrder", block.sortOrder()).fetch().rowsUpdated();
     }
 
     /**

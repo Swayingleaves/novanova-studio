@@ -106,6 +106,17 @@ public class AgentScopeAgentFactory {
     }
 
     /**
+     * 创建故事知识库分析Agent。
+     *
+     * @param model Model 用户明确选择的文本模型
+     * @return ReActAgent 故事知识库分析Agent
+     */
+    public ReActAgent storyBibleAgent(Model model) {
+        return build("story-bible-agent", promptService.get(PromptTemplateType.AGENT_STORY_BIBLE), model,
+                "只能返回当前请求对应的故事知识库结构化结果，不得调用工具、解释或输出额外文本；证据必须逐字摘自输入原文。", false);
+    }
+
+    /**
      * 创建视频技能工作流对话Agent，负责多轮理解意图并起草阶段提示词。
      *
      * @param model Model 用户明确选择的文本模型

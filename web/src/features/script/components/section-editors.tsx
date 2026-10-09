@@ -1,16 +1,17 @@
 "use client";
 
+import { useState } from "react";
 import { nanoid } from "nanoid";
-import { Button, Input, InputNumber, Popconfirm, Select } from "antd";
-import { ArrowDown, ArrowUp, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Button, Checkbox, Empty, Input, InputNumber, Modal, Pagination, Popconfirm, Select, Tabs } from "antd";
+import { ArrowDown, ArrowUp, BookOpen, MapPin, Plus, Sparkles, Trash2 } from "lucide-react";
 
 import { createScriptScene, moveScriptBlock, removeScriptBlock, replaceScriptBlock, synchronizeDialogueCharacters } from "../lib/script-episode-editing";
 import { useScriptStore } from "../stores/use-script-store";
-import type { EpisodeDetail, ScriptBlock, ScriptCharacter, ScriptOverview, ScriptScene, ScriptWorkspaceSection } from "../types";
+import type { EpisodeDetail, ScriptBlock, ScriptCharacter, ScriptLocation, ScriptOverview, ScriptScene, ScriptWorkspaceSection, WorldItem } from "../types";
 import { CharactersEditor } from "./characters-editor";
 import { ScriptAnalysisVersions } from "./script-analysis-versions";
 
-type ScriptSectionEditorProps = { section: Exclude<ScriptWorkspaceSection, "episodes"> };
+type ScriptSectionEditorProps = { section: Exclude<ScriptWorkspaceSection, "episodes" | "source"> };
 
 const CONTENT_TYPE_OPTIONS = [
     { value: "comicDrama", label: "漫剧" },
@@ -19,6 +20,20 @@ const CONTENT_TYPE_OPTIONS = [
     { value: "advertisement", label: "广告 / 宣传片" },
     { value: "musicVideo", label: "音乐视频" },
     { value: "storyShort", label: "故事短片" },
+] as const;
+
+const PAGE_SIZE_OPTIONS = [20, 50, 100, 200];
+
+/** 世界规则条目的分类，取值必须与后端 `WorldItem.itemType` 的枚举一致。 */
+const WORLD_ITEM_TYPES = [
+    ["rule", "规则"], ["organization", "组织"], ["faction", "势力"],
+    ["hierarchy", "等级"], ["restriction", "限制"], ["history", "历史事件"],
+] as const;
+
+/** 地点字段的录入行数，0 表示单行输入。 */
+const LOCATION_FIELDS = [
+    ["spacePurpose", "空间用途", 2], ["narrativeRole", "叙事作用", 2], ["defaultTime", "默认时间", 0],
+    ["weather", "天气", 0], ["atmosphere", "空间氛围", 2], ["keyObjects", "关键物件", 2], ["mainEvents", "主要事件", 3],
 ] as const;
 
 /** 渲染工作台当前剧本区块。 */
@@ -86,6 +101,146 @@ function OutlineEditor() {
     })}</div><p className="mt-2 text-xs text-[var(--studio-faint)]">关联场次前请先在“分集剧本”中打开该分集，以加载场次列表。</p></div></section>;
 }
 
+/** 卡片列表的分页与勾选状态；页码越界自动回落，选中项自动剔除已不存在的条目。 */
+function useCardPaging<T extends { id: string }>(items: T[]) {
+    const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    const [page, setPage] = useState(1);
+    const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
+    const selectedSet = new Set(selectedIds);
+    const selectedCount = items.filter((item) => selectedSet.has(item.id)).length;
+    const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+    const currentPage = Math.min(page, pageCount);
+    const pagedItems = items.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    const selectedOnPage = pagedItems.filter((item) => selectedSet.has(item.id)).length;
+    return {
+        pagedItems, selectedSet, selectedCount, currentPage, pageSize, selectedOnPage,
+        selectedIds: items.filter((item) => selectedSet.has(item.id)).map((item) => item.id),
+        toggle: (id: string) => setSelectedIds((ids) => ids.includes(id) ? ids.filter((current) => current !== id) : [...ids, id]),
+        togglePage: () => setSelectedIds((ids) => selectedOnPage === pagedItems.length
+            ? ids.filter((id) => !pagedItems.some((item) => item.id === id))
+            : Array.from(new Set([...ids, ...pagedItems.map((item) => item.id)]))),
+        changePage: (nextPage: number, nextPageSize: number) => { if (nextPageSize !== pageSize) { setPageSize(nextPageSize); setPage(1); } else setPage(nextPage); },
+        clear: () => setSelectedIds([]),
+    };
+}
+
+/** 与人物设定一致的卡片外壳：左上角勾选、整卡点击进入编辑。 */
+function CardShell({ name, icon, selected, onSelect, onOpen, children }: {
+    name: string;
+    icon: React.ReactNode;
+    selected: boolean;
+    onSelect: () => void;
+    onOpen: () => void;
+    children: React.ReactNode;
+}) {
+    const label = name.trim() || "未命名条目";
+    return <article className={`group relative min-w-0 overflow-hidden rounded-lg border bg-[var(--studio-panel-solid)] transition-colors ${selected ? "border-[var(--studio-primary)]" : "border-[var(--studio-line)] hover:border-[var(--studio-primary-line)]"}`}>
+        <div className="absolute left-2 top-2 z-10"><Checkbox aria-label={`选择 ${label}`} checked={selected} onChange={onSelect} /></div>
+        <button type="button" className="block w-full cursor-pointer text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--studio-primary)]" aria-label={`查看并编辑 ${label}`} onClick={onOpen}>
+            <div className="flex h-28 items-center justify-center border-b border-[var(--studio-line)] bg-[var(--studio-primary-soft)] text-4xl font-semibold text-[var(--studio-primary)]" aria-hidden="true">{name.trim().charAt(0) || icon}</div>
+            {children}
+        </button>
+    </article>;
+}
+
+/** 某一类世界规则条目的分页卡片列表。 */
+function WorldItemPane({ typeLabel, items, onAdd, onOpen, onDelete }: {
+    typeLabel: string;
+    items: WorldItem[];
+    onAdd: () => void;
+    onOpen: (item: WorldItem) => void;
+    onDelete: (ids: string[]) => void;
+}) {
+    const paging = useCardPaging(items);
+    return <>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+                {items.length ? <Checkbox checked={paging.selectedOnPage === paging.pagedItems.length} indeterminate={paging.selectedOnPage > 0 && paging.selectedOnPage < paging.pagedItems.length} onChange={paging.togglePage}>本页全选</Checkbox> : null}
+                <Popconfirm title={`删除选中的 ${paging.selectedCount} 个条目？`} okText="删除" cancelText="取消" okButtonProps={{ danger: true }} disabled={!paging.selectedCount} onConfirm={() => { onDelete(paging.selectedIds); paging.clear(); }}>
+                    <Button danger disabled={!paging.selectedCount} icon={<Trash2 className="size-4" />}>{paging.selectedCount ? `删除 (${paging.selectedCount})` : "删除"}</Button>
+                </Popconfirm>
+            </div>
+            <Button icon={<Plus className="size-4" />} onClick={onAdd}>添加条目</Button>
+        </div>
+        {items.length ? <>
+            <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-3 sm:gap-4">
+                {paging.pagedItems.map((item) => <CardShell key={item.id} name={item.name} icon={<BookOpen className="size-9" />} selected={paging.selectedSet.has(item.id)} onSelect={() => paging.toggle(item.id)} onOpen={() => onOpen(item)}>
+                    <div className="space-y-2 p-4"><div className="flex items-center gap-2"><strong className="truncate text-base text-[var(--studio-ink)]">{item.name || "未命名条目"}</strong><span className="shrink-0 rounded bg-[var(--studio-surface-soft)] px-2 py-0.5 text-xs text-[var(--studio-muted)]">{typeLabel}</span></div>
+                        <p className="line-clamp-3 min-h-[3.75rem] text-sm leading-5 text-[var(--studio-text)]">{item.description || "尚未填写说明，点击卡片补充。"}</p>
+                    </div>
+                </CardShell>)}
+            </div>
+            <div className="mt-4 flex justify-end"><Pagination size="small" current={paging.currentPage} pageSize={paging.pageSize} pageSizeOptions={PAGE_SIZE_OPTIONS} total={items.length} showSizeChanger onChange={paging.changePage} /></div>
+        </> : <Empty className="py-12" description={`还没有「${typeLabel}」条目，点击右上角添加`} />}
+    </>;
+}
+
+/** 世界规则：按条目类型分子 Tab 展示分页卡片。 */
+function WorldRulesTab({ items, onSave, onDelete }: { items: WorldItem[]; onSave: (item: WorldItem, isNew: boolean) => void; onDelete: (ids: string[]) => void }) {
+    const [draft, setDraft] = useState<{ item: WorldItem; isNew: boolean } | null>(null);
+    const updateDraft = (patch: Partial<WorldItem>) => setDraft((current) => current ? { ...current, item: { ...current.item, ...patch } } : current);
+    const saveDraft = () => {
+        if (!draft) return;
+        onSave({ ...draft.item, name: draft.item.name.trim() || "未命名条目" }, draft.isNew);
+        setDraft(null);
+    };
+    return <>
+        <Tabs size="small" items={WORLD_ITEM_TYPES.map(([itemType, typeLabel]) => ({
+            key: itemType,
+            label: `${typeLabel} (${items.filter((item) => item.itemType === itemType).length})`,
+            children: <WorldItemPane typeLabel={typeLabel} items={items.filter((item) => item.itemType === itemType)} onDelete={onDelete}
+                onAdd={() => setDraft({ isNew: true, item: { id: nanoid(), itemType, name: `新${typeLabel}`, description: "", sortOrder: items.length } })}
+                onOpen={(item) => setDraft({ isNew: false, item: { ...item } })} />,
+        }))} />
+        <Modal title={draft?.isNew ? "添加世界规则条目" : `编辑条目 · ${draft?.item.name || "未命名条目"}`} open={Boolean(draft)} width={640} onCancel={() => setDraft(null)} destroyOnHidden
+            footer={<><Button onClick={() => setDraft(null)}>取消</Button><Button type="primary" onClick={saveDraft}>保存</Button></>}>
+            {draft ? <div className="space-y-4">
+                <Field label="条目类型" required><Select className="w-full" value={draft.item.itemType} options={WORLD_ITEM_TYPES.map(([value, label]) => ({ value, label }))} onChange={(itemType) => updateDraft({ itemType })} /></Field>
+                <Field label="名称" required><Input maxLength={160} value={draft.item.name} onChange={(event) => updateDraft({ name: event.target.value })} /></Field>
+                <Field label="说明"><Input.TextArea rows={5} value={draft.item.description} onChange={(event) => updateDraft({ description: event.target.value })} /></Field>
+            </div> : null}
+        </Modal>
+    </>;
+}
+
+/** 场景地点：分页卡片展示。 */
+function WorldLocationsTab({ items, onSave, onDelete }: { items: ScriptLocation[]; onSave: (item: ScriptLocation, isNew: boolean) => void; onDelete: (ids: string[]) => void }) {
+    const [draft, setDraft] = useState<{ item: ScriptLocation; isNew: boolean } | null>(null);
+    const updateDraft = (patch: Partial<ScriptLocation>) => setDraft((current) => current ? { ...current, item: { ...current.item, ...patch } } : current);
+    const paging = useCardPaging(items);
+    return <>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+                {items.length ? <Checkbox checked={paging.selectedOnPage === paging.pagedItems.length} indeterminate={paging.selectedOnPage > 0 && paging.selectedOnPage < paging.pagedItems.length} onChange={paging.togglePage}>本页全选</Checkbox> : null}
+                <Popconfirm title={`删除选中的 ${paging.selectedCount} 个地点？`} description="已被场次引用的地点删除后，场次的地点会变成空值。" okText="删除" cancelText="取消" okButtonProps={{ danger: true }} disabled={!paging.selectedCount} onConfirm={() => { onDelete(paging.selectedIds); paging.clear(); }}>
+                    <Button danger disabled={!paging.selectedCount} icon={<Trash2 className="size-4" />}>{paging.selectedCount ? `删除 (${paging.selectedCount})` : "删除"}</Button>
+                </Popconfirm>
+            </div>
+            <Button icon={<Plus className="size-4" />} onClick={() => setDraft({ isNew: true, item: { id: nanoid(), name: "新地点", spacePurpose: "", narrativeRole: "", defaultTime: "", weather: "", atmosphere: "", keyObjects: "", mainEvents: "", sortOrder: items.length } })}>添加地点</Button>
+        </div>
+        {items.length ? <>
+            <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(min(100%,220px),1fr))] gap-3 sm:gap-4">
+                {paging.pagedItems.map((location) => <CardShell key={location.id} name={location.name} icon={<MapPin className="size-9" />} selected={paging.selectedSet.has(location.id)} onSelect={() => paging.toggle(location.id)} onOpen={() => setDraft({ isNew: false, item: { ...location } })}>
+                    <div className="space-y-2 p-4"><div className="flex items-center gap-2"><strong className="truncate text-base text-[var(--studio-ink)]">{location.name || "未命名地点"}</strong>{location.defaultTime ? <span className="shrink-0 rounded bg-[var(--studio-surface-soft)] px-2 py-0.5 text-xs text-[var(--studio-muted)]">{location.defaultTime}</span> : null}</div>
+                        <p className="truncate text-xs text-[var(--studio-muted)]">{[location.weather, location.narrativeRole].filter(Boolean).join(" · ") || "尚未填写叙事作用"}</p>
+                        <p className="line-clamp-3 min-h-[3.75rem] text-sm leading-5 text-[var(--studio-text)]">{location.atmosphere || location.spacePurpose || "尚未填写空间氛围，点击卡片补充。"}</p>
+                    </div>
+                </CardShell>)}
+            </div>
+            <div className="mt-4 flex justify-end"><Pagination size="small" current={paging.currentPage} pageSize={paging.pageSize} pageSizeOptions={PAGE_SIZE_OPTIONS} total={items.length} showSizeChanger onChange={paging.changePage} /></div>
+        </> : <Empty className="py-12" description="还没有地点，点击右上角添加" />}
+        <Modal title={draft?.isNew ? "添加地点" : `编辑地点 · ${draft?.item.name || "未命名地点"}`} open={Boolean(draft)} width={720} onCancel={() => setDraft(null)} destroyOnHidden
+            footer={<><Button onClick={() => setDraft(null)}>取消</Button><Button type="primary" onClick={() => { if (draft) { onSave({ ...draft.item, name: draft.item.name.trim() || "未命名地点" }, draft.isNew); setDraft(null); } }}>保存</Button></>}>
+            {draft ? <div className="max-h-[min(68vh,700px)] overflow-y-auto pr-1"><div className="grid gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2"><Field label="地点名称" required><Input maxLength={160} value={draft.item.name} onChange={(event) => updateDraft({ name: event.target.value })} /></Field></div>
+                {LOCATION_FIELDS.map(([key, label, rows]) => <div key={key} className={rows ? "sm:col-span-2" : ""}>
+                    <Field label={label}>{rows ? <Input.TextArea rows={rows} value={draft.item[key]} onChange={(event) => updateDraft({ [key]: event.target.value })} /> : <Input maxLength={120} value={draft.item[key]} onChange={(event) => updateDraft({ [key]: event.target.value })} />}</Field>
+                </div>)}
+            </div></div> : null}
+        </Modal>
+    </>;
+}
+
 function WorldEditor() {
     const project = useScriptStore((state) => state.project);
     const updateWorld = useScriptStore((state) => state.updateWorld);
@@ -93,53 +248,27 @@ function WorldEditor() {
     const setting = project.worldSetting;
     const items = project.worldItems;
     const locations = project.locations;
-    const updateItem = (id: string, patch: Partial<(typeof items)[number]>) => updateWorld(setting,
-        items.map((item) => item.id === id ? { ...item, ...patch } : item), locations);
-    const updateLocation = (id: string, patch: Partial<(typeof locations)[number]>) => updateWorld(setting, items,
-        locations.map((location) => location.id === id ? { ...location, ...patch } : location));
-    const locationFields = [
-        ["spacePurpose", "空间用途"], ["narrativeRole", "叙事作用"], ["defaultTime", "默认时间"],
-        ["weather", "天气"], ["atmosphere", "空间氛围"], ["keyObjects", "关键物件"], ["mainEvents", "主要事件"],
-    ] as const;
-    const itemTypes = [
-        ["rule", "规则"], ["organization", "组织"], ["faction", "势力"],
-        ["hierarchy", "等级"], ["restriction", "限制"], ["history", "历史事件"],
-    ] as const;
+    const saveSetting = (patch: Partial<typeof setting>) => updateWorld({ ...setting, ...patch }, items, locations);
+    const saveItem = (item: WorldItem, isNew: boolean) => updateWorld(setting,
+        isNew ? [...items, item] : items.map((current) => current.id === item.id ? item : current), locations);
+    const saveLocation = (location: ScriptLocation, isNew: boolean) => updateWorld(setting, items,
+        isNew ? [...locations, location] : locations.map((current) => current.id === location.id ? location : current));
+    const removeItems = (ids: string[]) => updateWorld(setting,
+        items.filter((item) => !ids.includes(item.id)).map((item, sortOrder) => ({ ...item, sortOrder })), locations);
+    const removeLocations = (ids: string[]) => updateWorld(setting, items,
+        locations.filter((location) => !ids.includes(location.id)).map((location, sortOrder) => ({ ...location, sortOrder })));
     return <section>
         <SectionHeader title="世界观与地点" description="记录故事规则、时代背景和反复出现的重要地点。" />
         <div className="grid gap-4 md:grid-cols-2">
-            <Field label="时代"><Input value={setting.era} onChange={(event) => updateWorld({ ...setting, era: event.target.value }, items, locations)} /></Field>
-            <Field label="地域"><Input value={setting.region} onChange={(event) => updateWorld({ ...setting, region: event.target.value }, items, locations)} /></Field>
-            <Field label="社会背景"><Input.TextArea rows={4} value={setting.socialBackground} onChange={(event) => updateWorld({ ...setting, socialBackground: event.target.value }, items, locations)} /></Field>
-            <Field label="整体基调"><Input.TextArea rows={4} value={setting.overallTone} onChange={(event) => updateWorld({ ...setting, overallTone: event.target.value }, items, locations)} /></Field>
+            <Field label="时代"><Input maxLength={160} value={setting.era} onChange={(event) => saveSetting({ era: event.target.value })} /></Field>
+            <Field label="地域"><Input maxLength={240} value={setting.region} onChange={(event) => saveSetting({ region: event.target.value })} /></Field>
+            <Field label="社会背景"><Input.TextArea rows={4} value={setting.socialBackground} onChange={(event) => saveSetting({ socialBackground: event.target.value })} /></Field>
+            <Field label="整体基调"><Input.TextArea rows={4} value={setting.overallTone} onChange={(event) => saveSetting({ overallTone: event.target.value })} /></Field>
         </div>
-        <div className="mt-8 flex items-center justify-between"><h3 className="font-semibold text-[var(--studio-ink)]">世界规则</h3>
-            <Button size="small" icon={<Plus className="size-4" />} onClick={() => updateWorld(setting,
-                [...items, { id: nanoid(), itemType: "rule", name: "新规则", description: "", sortOrder: items.length }], locations)}>添加条目</Button>
-        </div>
-        <div className="mt-3 space-y-3">{items.map((item) => <article key={item.id} className="grid gap-3 rounded-lg border border-[var(--studio-line)] p-3 md:grid-cols-[150px_1fr_auto]">
-            <Field label="条目类型"><Select value={item.itemType} options={itemTypes.map(([value, label]) => ({ value, label }))}
-                onChange={(itemType) => updateItem(item.id, { itemType })} /></Field>
-            <div className="space-y-3"><Field label="名称"><Input value={item.name} onChange={(event) => updateItem(item.id, { name: event.target.value })} /></Field>
-                <Field label="说明"><Input.TextArea rows={2} value={item.description} onChange={(event) => updateItem(item.id, { description: event.target.value })} /></Field></div>
-            <Button danger aria-label={`删除条目 ${item.name}`} icon={<Trash2 className="size-4" />} onClick={() => updateWorld(setting,
-                items.filter((current) => current.id !== item.id).map((current, sortOrder) => ({ ...current, sortOrder })), locations)} />
-        </article>)}</div>
-        <div className="mt-8 flex items-center justify-between"><h3 className="font-semibold text-[var(--studio-ink)]">场景地点</h3>
-            <Button size="small" icon={<Plus className="size-4" />} onClick={() => updateWorld(setting, items,
-                [...locations, { id: nanoid(), name: "新地点", spacePurpose: "", narrativeRole: "", defaultTime: "", weather: "",
-                    atmosphere: "", keyObjects: "", mainEvents: "", sortOrder: locations.length }])}>添加地点</Button>
-        </div>
-        <div className="mt-3 grid gap-3 md:grid-cols-2">{locations.map((location) => <article key={location.id} className="rounded-lg border border-[var(--studio-line)] p-3">
-            <div className="flex gap-2"><div className="min-w-0 flex-1"><Field label="地点名称"><Input value={location.name} onChange={(event) => updateLocation(location.id, { name: event.target.value })} /></Field></div>
-                <Button danger aria-label={`删除地点 ${location.name}`} icon={<Trash2 className="size-4" />} onClick={() => updateWorld(setting, items,
-                    locations.filter((item) => item.id !== location.id).map((item, sortOrder) => ({ ...item, sortOrder })))} /></div>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">{locationFields.map(([key, label]) => <div key={key} className={key === "defaultTime" || key === "weather" ? "" : "sm:col-span-2"}>
-                <Field label={label}>{key === "defaultTime" || key === "weather"
-                    ? <Input value={location[key]} onChange={(event) => updateLocation(location.id, { [key]: event.target.value })} />
-                    : <Input.TextArea rows={2} value={location[key]} onChange={(event) => updateLocation(location.id, { [key]: event.target.value })} />}</Field>
-            </div>)}</div>
-        </article>)}</div>
+        <Tabs className="mt-6" items={[
+            { key: "rules", label: "世界规则", children: <WorldRulesTab items={items} onSave={saveItem} onDelete={removeItems} /> },
+            { key: "locations", label: "场景地点", children: <WorldLocationsTab items={locations} onSave={saveLocation} onDelete={removeLocations} /> },
+        ]} />
     </section>;
 }
 

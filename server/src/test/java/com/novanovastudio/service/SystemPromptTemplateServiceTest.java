@@ -111,6 +111,7 @@ class SystemPromptTemplateServiceTest {
         systemPrompt.setAgentCanvasFile(templateFile(PromptTemplateType.AGENT_CANVAS).toUri().toString());
         systemPrompt.setAgentStoryboardFile(templateFile(PromptTemplateType.AGENT_STORYBOARD).toUri().toString());
         systemPrompt.setAgentScriptFile(templateFile(PromptTemplateType.AGENT_SCRIPT).toUri().toString());
+        systemPrompt.setAgentStoryBibleFile(templateFile(PromptTemplateType.AGENT_STORY_BIBLE).toUri().toString());
         systemPrompt.setImageStoryboardAssetFile(templateFile(PromptTemplateType.IMAGE_STORYBOARD_ASSET).toUri().toString());
         return properties;
     }

@@ -476,6 +476,23 @@ public class CreditRepository {
     }
 
     /**
+     * 查询业务操作已退积分，未生成退款流水时返回空结果。
+     *
+     * @param userId Long 用户标识
+     * @param refundReason String 退款流水原因
+     * @return Mono&lt;Integer&gt; 已退款的积分
+     */
+    public Mono<Integer> getOperationRefundAmount(Long userId, String refundReason) {
+        return databaseClient.sql("""
+                SELECT change_amount
+                FROM user_credit_transactions
+                WHERE user_id = :userId AND task_id IS NULL
+                  AND transaction_type = 'task_refund' AND reason = :reason
+                """).bind("userId", userId).bind("reason", refundReason)
+                .map((row, metadata) -> row.get("change_amount", Integer.class)).one();
+    }
+
+    /**
      * 查询任务类型维度的实际积分消耗。
      *
      * @param query CreditConsumptionQuery 消耗查询条件

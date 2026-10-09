@@ -238,5 +238,5 @@ export function ScriptEpisodeReader({ selectedEpisodeId, selectedSceneId, sceneE
 /** 根据正文块类型排版阅读内容。 */
 function ScriptReadingBlock({ block, characters }: { block: ScriptBlock; characters: ScriptCharacter[] }) {
     const speaker = block.blockType === "dialogue" ? characters.find((character) => character.id === block.characterId)?.name || "未指定人物" : "";
-    return <div className={`${styles.block} ${styles[block.blockType]}`}><span className={styles.blockLabel}>{speaker || blockLabels[block.blockType]}</span><p>{block.content || `尚未填写${blockLabels[block.blockType]}内容`}</p></div>;
+    return <div className={`${styles.block} ${styles[block.blockType]}`}><span className={styles.blockLabel}>{speaker || blockLabels[block.blockType]}{block.origin === "adapted" ? <span className={styles.blockOrigin}>改编创作</span> : null}</span><p>{block.content || `尚未填写${blockLabels[block.blockType]}内容`}</p></div>;
 }

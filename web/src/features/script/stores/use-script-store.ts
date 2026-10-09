@@ -54,15 +54,19 @@ type ScriptStore = {
     error: string;
     saveStatus: SaveStatus;
     saveError: string;
+    hasUnsaved: boolean;
     loadProjects: (query: ProjectQuery) => Promise<void>;
     loadProject: (projectId: string) => Promise<void>;
     reloadProject: () => Promise<void>;
     loadEpisode: (episodeId: string) => Promise<EpisodeDetail>;
     loadSupportingData: () => Promise<void>;
+    saveAll: () => Promise<boolean>;
+    /** 丢弃本地未保存的修改：清空保存队列并重载云端版本。 */
+    discardUnsaved: () => void;
     updateOverview: (overview: ScriptOverview) => void;
     updateOutline: (sections: OutlineSection[], events: StoryEvent[]) => void;
     updateCharacters: (characters: ScriptCharacter[], relations: CharacterRelation[]) => void;
-    deleteCharacter: (characterId: string) => Promise<void>;
+    deleteCharacters: (characterIds: string[]) => Promise<void>;
     updateWorld: (worldSetting: WorldSetting, worldItems: WorldItem[], locations: ScriptLocation[]) => void;
     updateEpisode: (detail: EpisodeDetail) => void;
     reorderEpisodes: (episodeIds: string[]) => void;
@@ -85,12 +89,12 @@ let projectListLoadGeneration = 0;
 const episodeLoadRequests = new Map<string, Promise<EpisodeDetail>>();
 
 const saveScheduler = createScriptSaveScheduler({
-    delayMilliseconds: 600,
     isConflict: (error) => error instanceof ServerApiError && (error.status === 409 || error.code === 4004),
     onStatusChange: (status, error) => {
         storeReference.setState({
             saveStatus: status,
             saveError: error instanceof Error ? error.message : error ? String(error) : "",
+            hasUnsaved: status === "dirty",
         });
     },
 });
@@ -120,6 +124,7 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
     error: "",
     saveStatus: "idle",
     saveError: "",
+    hasUnsaved: false,
     loadProjects: async (query) => {
         const loadGeneration = ++projectListLoadGeneration;
         set({ loading: true, error: "" });
@@ -137,7 +142,7 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
     loadProject: async (projectId) => {
         const loadGeneration = ++projectLoadGeneration;
         saveScheduler.reset();
-        set({ project: null, loading: true, error: "", saveStatus: "idle", saveError: "", episodes: {}, drafts: [], analysisReports: [], versions: [], aiTarget: null });
+        set({ project: null, loading: true, error: "", saveStatus: "idle", saveError: "", hasUnsaved: false, episodes: {}, drafts: [], analysisReports: [], versions: [], aiTarget: null });
         try {
             const project = await getScriptProject(projectId);
             if (loadGeneration === projectLoadGeneration) set({ project, loading: false });
@@ -234,16 +239,17 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
             if (saveGeneration === projectLoadGeneration) applyMutation(project.id, result);
         });
     },
-    deleteCharacter: async (characterId) => {
+    deleteCharacters: async (characterIds) => {
         const project = get().project;
-        if (!project) return;
+        if (!project || !characterIds.length) return;
         if (get().saveStatus !== "saved" && get().saveStatus !== "idle") {
             throw new Error("请等待当前修改保存完成后再删除人物");
         }
-        const characters = project.characters.filter((character) => character.id !== characterId)
+        const removing = new Set(characterIds);
+        const characters = project.characters.filter((character) => !removing.has(character.id))
             .map((character, sortOrder) => ({ ...character, sortOrder }));
         if (characters.length === project.characters.length) return;
-        const relations = project.characterRelations.filter((relation) => relation.sourceCharacterId !== characterId && relation.targetCharacterId !== characterId)
+        const relations = project.characterRelations.filter((relation) => !removing.has(relation.sourceCharacterId) && !removing.has(relation.targetCharacterId))
             .map((relation, sortOrder) => ({ ...relation, sortOrder }));
         const result = await saveScriptCharacters(project.id, project.revision, characters, relations);
         if (get().project?.id !== project.id) return;
@@ -320,11 +326,22 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
     replaceAnalysisReports: (analysisReports) => set({ analysisReports }),
     replaceVersions: (versions) => set({ versions }),
     retrySave: () => saveScheduler.retry(),
+    /** 执行所有待保存区块。返回是否全部成功，供「保存并离开」这类场景判断。 */
+    saveAll: async () => {
+        const success = await saveScheduler.flush();
+        storeReference.setState({ hasUnsaved: !success && saveScheduler.hasPending() });
+        return success;
+    },
+    discardUnsaved: () => {
+        saveScheduler.reset();
+        set({ hasUnsaved: false, saveStatus: "idle", saveError: "" });
+        void get().reloadProject();
+    },
     reset: () => {
         projectLoadGeneration += 1;
         projectListLoadGeneration += 1;
         saveScheduler.reset();
-        set({ projects: [], projectTotal: 0, project: null, episodes: {}, drafts: [], analysisReports: [], versions: [], aiTarget: null, loading: false, error: "", saveStatus: "idle", saveError: "" });
+        set({ projects: [], projectTotal: 0, project: null, episodes: {}, drafts: [], analysisReports: [], versions: [], aiTarget: null, loading: false, error: "", saveStatus: "idle", saveError: "", hasUnsaved: false });
     },
 }));
 

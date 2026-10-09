@@ -625,7 +625,15 @@ class PersistenceServiceTest {
 
         Assertions.assertNotNull(created);
         Assertions.assertEquals(List.of(VideoGenerationMode.REFERENCE_TO_VIDEO, AudioInputSupport.CAPABILITY), created.capabilities());
-        Assertions.assertEquals(java.util.Set.of(VideoGenerationMode.REFERENCE_TO_VIDEO), created.videoBillingConfiguration().modePrices().keySet());
+        // 计费价格表只按生成模式归一化，音频能力是能力标记，不参与价格表。
+        java.util.Map<String, java.util.Map<String, Integer>> modePrices =
+                created.videoBillingConfiguration().modePrices();
+        Assertions.assertFalse(modePrices.containsKey(AudioInputSupport.CAPABILITY));
+        Assertions.assertEquals(java.util.Map.of("720p", 10), modePrices.get(VideoGenerationMode.REFERENCE_TO_VIDEO));
+        // 未勾选能力的模式只保留空价格表，不写入价格。
+        modePrices.forEach((mode, prices) -> Assertions.assertTrue(
+                VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode) == !prices.isEmpty(),
+                mode + " 的价格表应与已勾选能力一致"));
     }
 
     /** 未开启全能参考时，服务端必须拒绝音频能力配置。 */

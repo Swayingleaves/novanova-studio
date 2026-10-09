@@ -127,6 +127,35 @@ public class AgentScopeModelFactory {
     }
 
     /**
+     * 为单次故事知识库快速分析请求设置管理员验证的最大输出Token数。
+     * @param model Model 原模型
+     * @param maximumOutputTokens int 最大输出Token数
+     * @return Model 限制输出的模型
+     */
+    public Model withOutputLimit(Model model, int maximumOutputTokens) {
+        return new Model() {
+            @Override
+            public Flux<ChatResponse> stream(List<Msg> messages, List<ToolSchema> tools, GenerateOptions options) {
+                GenerateOptions limited = GenerateOptions.mergeOptions(
+                        GenerateOptions.builder().maxTokens(maximumOutputTokens).build(), options);
+                return model.stream(messages, tools, limited);
+            }
+
+            @Override
+            public String getModelName() { return model.getModelName(); }
+
+            @Override
+            public boolean supportsNativeStructuredOutput() { return model.supportsNativeStructuredOutput(); }
+
+            @Override
+            public boolean supportsNativeStructuredOutputWithTools() { return model.supportsNativeStructuredOutputWithTools(); }
+
+            @Override
+            public int getContextWindowSize() { return model.getContextWindowSize(); }
+        };
+    }
+
+    /**
      * 按渠道格式创建AgentScope模型。
      *
      * @param channel AiChannelConfig 文本模型渠道

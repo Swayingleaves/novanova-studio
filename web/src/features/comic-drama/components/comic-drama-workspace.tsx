@@ -42,12 +42,14 @@ const STAGE_NAV_ITEMS: Array<{
     label: string;
     icon: typeof Clapperboard;
     badgeKey?: "pendingUpdateCount";
+    /** 有值的项在菜单里显示步骤序号，用于指示推荐操作顺序。 */
+    order?: number;
 }> = [
-    { key: "readiness", label: "生产准备", icon: CheckCircle2 },
-    { key: "settings", label: "生产设置", icon: Settings },
+    { key: "readiness", label: "生产准备", icon: CheckCircle2, order: 1 },
+    { key: "settings", label: "生产设置", icon: Settings, order: 2 },
+    { key: "shots", label: "镜头清单", icon: Clapperboard, order: 3 },
+    { key: "storyboard", label: "视觉分镜板", icon: LayoutGrid, order: 4 },
     { key: "assets", label: "视觉资产", icon: Palette },
-    { key: "shots", label: "镜头清单", icon: Clapperboard },
-    { key: "storyboard", label: "视觉分镜板", icon: LayoutGrid },
     { key: "sound", label: "声音对白", icon: Volume2 },
     { key: "canvas", label: "画布联动", icon: SendToBack },
     { key: "updates", label: "待更新项", icon: History, badgeKey: "pendingUpdateCount" },
@@ -238,6 +240,9 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
                         onClick={() => setActiveStage(item.key)}
                     >
                         <div className="flex items-center gap-2.5">
+                            {typeof item.order === "number" && (
+                                <span className="w-3.5 shrink-0 text-right text-xs font-semibold tabular-nums text-current opacity-60">{item.order}.</span>
+                            )}
                             <Icon className="size-4 shrink-0 text-current" />
                             <span className="text-current">{item.label}</span>
                         </div>

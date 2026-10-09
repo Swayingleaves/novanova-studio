@@ -1,11 +1,13 @@
 package com.novanovastudio.service;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.ScriptDtos;
 import com.novanovastudio.repository.ScriptRepository;
+import com.novanovastudio.repository.NovelAdaptationRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
@@ -19,6 +21,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.ToIntFunction;
+import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -52,6 +55,27 @@ public class ScriptService {
 
     /** 剧本变化到漫剧下游的单向影响标记服务。 */
     private final ComicDramaImpactService comicDramaImpactService;
+
+    /** 小说改编正式产物的来源关联。 */
+    private final NovelAdaptationRepository novelAdaptationRepository;
+
+    /** 概览与世界观基调这类单对象追溯目标使用的固定标识，与前端停点界面的勾选项一致。 */
+    private static final String OVERVIEW_TARGET_ID = "overview";
+    private static final String WORLD_SETTING_TARGET_ID = "worldSetting";
+
+    /** 正文块来源取值：来自原著事实。 */
+    private static final String ORIGIN_ORIGINAL = "original";
+
+    /** 正文块来源取值：AI 新增的改编创作。 */
+    private static final String ORIGIN_ADAPTED = "adapted";
+
+    /**
+     * 模型此前被要求在正文里写的改编标记。
+     * <p>
+     * 标记会随剧本正文流入分集工作台与后续配音、成片链路，因此来源改由 {@code origin} 字段承载；
+     * 这里保留识别与摘除，既兼容模型的旧习惯，也用于清理存量正文。
+     */
+    private static final Pattern ADAPTATION_MARK = Pattern.compile("【改编创作[^】]*】");
 
     /**
      * 分页查询当前用户的剧本项目。
@@ -624,17 +648,439 @@ public class ScriptService {
                                 return Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT,
                                         "AI草稿对应的目标内容已经变化，请重新生成草稿"));
                             }
-                            Mono<Void> operation = repository.createVersion(UUID.randomUUID().toString(), request.projectId(), userId,
-                                            "AI修改前", "ai", "应用AI动作：" + draft.actionType(), request.expectedRevision(),
-                                            JSON.parseObject(JSON.toJSONString(snapshot)))
-                                    .then(applyDraftData(userId, draft, request.draftData(), snapshot, request.expectedRevision()))
-                                    .then(repository.updateAiDraftStatus(request.projectId(), request.draftId(), "applied", request.draftData())
-                                            .flatMap(count -> count == 1 ? Mono.empty() : Mono.error(conflictException())));
-                            return operation.then(recalculateProgress(userId, request.projectId()))
-                                    .flatMap(result -> markAppliedDraftImpact(draft, request.draftData(), snapshot).thenReturn(result));
+                            return applyValidatedAiDraft(userId, request, draft, snapshot, true);
                         }));
                 }));
     }
+
+    /**
+     * 原子应用同一停点的小说改编草稿，先校验共同基线，再按本批写入后的修订与内容依次合并。
+     *
+     * @param projectId String 剧本项目标识
+     * @param expectedRevision long 整批草稿的共同基线修订号
+     * @param draftIds List&lt;String&gt; 按生成顺序排列的待确认草稿标识
+     * @return Mono&lt;Void&gt; 全部应用完成信号，任一冲突使整批回滚
+     */
+    public Mono<Void> applyAdaptationDrafts(String projectId, long expectedRevision, List<String> draftIds) {
+        return applyAdaptationDrafts(projectId, expectedRevision, draftIds, true);
+    }
+
+    /**
+     * 批量应用改编草稿，可关闭逐条版本快照。
+     * <p>
+     * 逐集正文批量生成会连续应用上百份草稿，逐条保存完整项目快照既没有审阅价值也会让版本表失控；
+     * 该路径由调用方在整批开始前保存一份检查点版本，因此这里跳过逐条版本。
+     *
+     * @param projectId String 剧本项目标识
+     * @param expectedRevision long 整批草稿的共同基线修订号
+     * @param draftIds List&lt;String&gt; 按生成顺序排列的待确认草稿标识
+     * @param perDraftVersion boolean 是否逐条保存修改前版本
+     * @return Mono&lt;Void&gt; 全部应用完成信号
+     */
+    public Mono<Void> applyAdaptationDrafts(String projectId, long expectedRevision, List<String> draftIds,
+                                            boolean perDraftVersion) {
+        return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
+                getSnapshotForUser(userId, projectId, expectedRevision).flatMap(baseline ->
+                        Flux.fromIterable(draftIds).concatMap(id -> getPendingAiDraft(userId, projectId, id))
+                                .collectList().flatMap(drafts -> {
+                                    // 整批写入前校验，不能把真实人工修改或不同生成基线当成本批修订递增。
+                                    for (ScriptDtos.AiDraft draft : drafts) {
+                                        if (!draft.actionType().startsWith("novelAdaptation")) {
+                                            return Mono.error(invalid("批量应用只支持小说改编草稿"));
+                                        }
+                                        if (draft.baseRevision() != expectedRevision) {
+                                            return Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT,
+                                                    "AI草稿基于旧修订生成，请重新生成草稿"));
+                                        }
+                                        if (!Objects.equals(targetSnapshot(baseline, draft.targetType(), draft.targetId()),
+                                                draft.sourceData())) {
+                                            return Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT,
+                                                    "AI草稿对应的目标内容已经变化，请重新生成草稿"));
+                                        }
+                                    }
+                                    Mono<Long> chain = Mono.just(expectedRevision);
+                                    for (ScriptDtos.AiDraft draft : drafts) {
+                                        chain = chain.flatMap(revision -> getSnapshotForUser(userId, projectId, revision)
+                                                .flatMap(snapshot -> applyValidatedAiDraft(userId,
+                                                        new ScriptDtos.ApplyAiDraftRequest(projectId, revision, draft.id(),
+                                                                JSON.parseObject(JSON.toJSONString(draft.draftData())),
+                                                                allAiDraftTargetIds(draft.targetType(), targetSnapshot(snapshot,
+                                                                        draft.targetType(), draft.targetId()))),
+                                                        draft, snapshot, perDraftVersion))
+                                                .map(ScriptDtos.MutationResult::revision));
+                                    }
+                                    return chain.then();
+                                }))));
+    }
+
+    /**
+     * 写入已完成基线校验的草稿，沿用版本、事实来源、目标修订与下游影响处理。
+     *
+     * @param userId Long 当前用户标识
+     * @param request ApplyAiDraftRequest 当前写入修订与选定内容
+     * @param draft AiDraft 已校验的待确认草稿
+     * @param snapshot ProjectSnapshot 本次写入前的完整项目快照
+     * @param perDraftVersion boolean 是否在写入前保存修改前版本
+     * @return Mono&lt;MutationResult&gt; 写入后的项目修订信息
+     */
+    private Mono<ScriptDtos.MutationResult> applyValidatedAiDraft(Long userId, ScriptDtos.ApplyAiDraftRequest request,
+                                                                  ScriptDtos.AiDraft draft, ScriptDtos.ProjectSnapshot snapshot,
+                                                                  boolean perDraftVersion) {
+        MergedAdaptationDraft merged = mergeAdaptationDraft(draft, request.draftData(), snapshot,
+                request.selectedTargetIds() == null ? List.of() : request.selectedTargetIds());
+        Mono<Void> operation = (perDraftVersion
+                ? repository.createVersion(UUID.randomUUID().toString(), request.projectId(), userId,
+                        "AI修改前", "ai", "应用AI动作：" + draft.actionType(), request.expectedRevision(),
+                        JSON.parseObject(JSON.toJSONString(snapshot)))
+                : Mono.<Long>empty())
+                .then(novelAdaptationRepository.requireTargetSelectionForDraft(draft.id(), draft.projectId(),
+                        draft.targetType(), draft.targetId(), request.selectedTargetIds()))
+                .then(applyDraftData(userId, draft, merged.data(), snapshot, request.expectedRevision()))
+                .then(novelAdaptationRepository.recordApplied(draft.id(), draft.projectId(),
+                        draft.targetType(), draft.targetId(), merged.data(), merged.changedTargetIds()))
+                .then(repository.updateAiDraftStatus(request.projectId(), request.draftId(), "applied", merged.data())
+                        .flatMap(count -> count == 1 ? Mono.empty() : Mono.error(conflictException())));
+        return operation.then(recalculateProgress(userId, request.projectId()))
+                .flatMap(result -> markAppliedDraftImpact(draft, merged.data(), snapshot).thenReturn(result));
+    }
+
+    /**
+     * 在批量写入前保存一次整批检查点版本，供批量逐集应用后整体回退。
+     *
+     * @param projectId String 剧本项目标识
+     * @param expectedRevision long 当前项目修订号
+     * @param userId Long 当前离线用户标识
+     * @param versionName String 版本名称
+     * @param changeSummary String 修改摘要
+     * @return Mono&lt;Void&gt; 版本创建完成信号
+     */
+    public Mono<Void> createCheckpointVersion(String projectId, long expectedRevision, Long userId,
+                                              String versionName, String changeSummary) {
+        return getSnapshotForUser(userId, projectId, expectedRevision).flatMap(snapshot ->
+                repository.createVersion(UUID.randomUUID().toString(), projectId, userId, versionName, "ai",
+                        changeSummary, expectedRevision, JSON.parseObject(JSON.toJSONString(snapshot))));
+    }
+
+    /**
+     * 合并小说改编草稿，保留未选中的正式内容，并只允许覆盖明确勾选的旧目标。
+     *
+     * @param draft 待应用改编草稿
+     * @param data 用户审阅后的草稿数据
+     * @param snapshot 当前正式内容快照
+     * @param selectedTargetIds 用户明确选择更新的现有目标
+     * @return 合并后的完整数据与本次更新目标
+     */
+    private MergedAdaptationDraft mergeAdaptationDraft(ScriptDtos.AiDraft draft, JSONObject data,
+                                                        ScriptDtos.ProjectSnapshot snapshot,
+                                                        List<String> selectedTargetIds) {
+        if (!draft.actionType().startsWith("novelAdaptation")) return new MergedAdaptationDraft(data, List.of());
+        Set<String> selected = Set.copyOf(selectedTargetIds);
+        // 同一停点可能有多份同阶段草稿，合并必须保留本批此前已写入的内容。
+        JSONObject source = targetSnapshot(snapshot, draft.targetType(), draft.targetId());
+        normalizeDraftIds(draft.targetType(), source, data);
+        JSONObject merged = new JSONObject();
+        List<String> changed = new ArrayList<>();
+        switch (draft.targetType()) {
+            case "overview" -> {
+                // 概览是单对象，用固定标识参与勾选判断，未勾选时保留现有概览。
+                if (selected.contains(OVERVIEW_TARGET_ID)) {
+                    merged.putAll(data);
+                    changed.add(OVERVIEW_TARGET_ID);
+                } else {
+                    merged.putAll(source);
+                }
+            }
+            case "characters" -> {
+                merged.put("characters", mergeArray(source.getJSONArray("characters"), data.getJSONArray("characters"), selected, "sortOrder", changed));
+                // 关系跟随两端人物：只有两端都被勾选的现有关系才允许被草稿覆盖；关系变更不参与来源追溯。
+                merged.put("relations", mergeArray(source.getJSONArray("relations"), data.getJSONArray("relations"),
+                        selectedRelationIds(source, selected), "sortOrder", new ArrayList<>()));
+            }
+            case "world" -> {
+                // 世界观基调属于全局归纳，没有稳定标识，用固定标识参与勾选判断。
+                JSONObject setting = selected.contains(WORLD_SETTING_TARGET_ID)
+                        ? data.getJSONObject("worldSetting") : source.getJSONObject("worldSetting");
+                merged.put("worldSetting", setting == null ? new JSONObject() : setting);
+                merged.put("worldItems", mergeArray(source.getJSONArray("worldItems"), data.getJSONArray("worldItems"), selected, "sortOrder", changed));
+                merged.put("locations", mergeArray(source.getJSONArray("locations"), data.getJSONArray("locations"), selected, "sortOrder", changed));
+            }
+            case "outline" -> {
+                // 结构段标识每次改编都是新生成的 UUID，两套大纲之间没有交集；按 id 合并会把上一套整段保留、
+                // 新的一套追加，表现为两套幕并存、幕号重复。当勾选范围覆盖现有全部条目时（一键应用与批量
+                // 应用都是这种全量情况），把草稿当作整套大纲：旧内容不参与合并，未出现在草稿里的条目随之移除。
+                JSONObject base = coversAll(selected, "outline", source) ? new JSONObject() : source;
+                merged.put("sections", mergeArray(base.getJSONArray("sections"), data.getJSONArray("sections"), selected, "sortOrder", changed));
+                merged.put("events", mergeArray(base.getJSONArray("events"), data.getJSONArray("events"), selected, "sortOrder", changed));
+            }
+            case "episodes" -> {
+                JSONArray episodes = mergeArray(source.getJSONArray("episodes"),
+                        data.getJSONArray("episodes"), selected, "sortOrder", changed, true);
+                // 完成状态是服务端字段：草稿未给时按规划态补齐，模型漏填不该让整批分集作废。
+                for (int index = 0; index < episodes.size(); index++) {
+                    JSONObject episode = episodes.getJSONObject(index);
+                    if (!StringUtils.hasText(episode.getString("completionStatus"))) {
+                        episode.put("completionStatus", "planning");
+                    }
+                }
+                merged.put("episodes", episodes);
+            }
+            case "episode" -> {
+                JSONObject oldEpisode = source.getJSONObject("episode");
+                JSONObject newEpisode = data.getJSONObject("episode");
+                JSONObject episode = selected.contains(draft.targetId()) ? newEpisode : oldEpisode;
+                if (selected.contains(draft.targetId())) changed.add(draft.targetId());
+                merged.put("episode", episode);
+                // 重新生成整集时模型会重排场次、把已有正文块搬到别的场次，旧场次的标识与归属都不再适用；
+                // 全量应用按整套替换（旧场次不参与合并），只勾选部分场次时才按标识逐条合并。
+                JSONArray base = coversAll(selected, "episode", source) ? new JSONArray() : source.getJSONArray("scenes");
+                JSONArray scenes = mergeArray(base, data.getJSONArray("scenes"), selected,
+                        "sortOrder", changed, false, true);
+                for (int i = 0; i < scenes.size(); i++) {
+                    JSONObject scene = scenes.getJSONObject(i);
+                    scene.put("sceneNumber", i + 1);
+                    JSONArray blocks = scene.getJSONArray("blocks");
+                    if (blocks != null) for (int j = 0; j < blocks.size(); j++) blocks.getJSONObject(j).put("sortOrder", j);
+                }
+                merged.put("scenes", scenes);
+            }
+            default -> throw invalid("小说改编草稿目标类型不受支持");
+        }
+        if (!selected.isEmpty()) {
+            Set<String> known = new HashSet<>();
+            switch (draft.targetType()) {
+                case "overview" -> known.add(OVERVIEW_TARGET_ID);
+                case "characters" -> collectIds(source.getJSONArray("characters"), known);
+                case "world" -> {
+                    known.add(WORLD_SETTING_TARGET_ID);
+                    collectIds(source.getJSONArray("worldItems"), known);
+                    collectIds(source.getJSONArray("locations"), known);
+                }
+                case "outline" -> {
+                    collectIds(source.getJSONArray("sections"), known);
+                    collectIds(source.getJSONArray("events"), known);
+                }
+                case "episodes" -> collectIds(source.getJSONArray("episodes"), known);
+                case "episode" -> {
+                    collectIds(source.getJSONArray("scenes"), known);
+                    JSONObject episode = source.getJSONObject("episode");
+                    if (episode != null) known.add(episode.getString("id"));
+                }
+                default -> { }
+            }
+            if (!known.containsAll(selected)) throw invalid("选择的更新目标与当前改编阶段不匹配，请刷新后重试");
+        }
+        return new MergedAdaptationDraft(merged, changed.stream().distinct().toList());
+    }
+
+    /**
+     * 把草稿条目的标识对齐到现有正式条目：名称（或关系两端）一致的复用旧标识。
+     *
+     * <p>草稿标识由模型生成，与库中已有标识必然不同。若不归一化，合并只会不断追加新条目，
+     * 重新生成一次就把人物、地点翻一倍。归一化后同名条目按标识命中并被更新，人工手写的条目
+     * 因不在草稿里而天然保留。</p>
+     *
+     * @param targetType 目标类型
+     * @param source 应用时的正式内容快照
+     * @param data 待归一化的草稿数据，就地改写
+     */
+    private void normalizeDraftIds(String targetType, JSONObject source, JSONObject data) {
+        switch (targetType) {
+            case "characters" -> {
+                Map<String, String> remapped = normalizeIdsByName(source.getJSONArray("characters"), data.getJSONArray("characters"));
+                remapRelationEndpoints(data.getJSONArray("relations"), remapped);
+                normalizeRelationIds(source, data);
+            }
+            case "world" -> {
+                normalizeIdsByName(source.getJSONArray("worldItems"), data.getJSONArray("worldItems"));
+                normalizeIdsByName(source.getJSONArray("locations"), data.getJSONArray("locations"));
+            }
+            default -> { }
+        }
+    }
+
+    /** 按名称把草稿条目标识改写为现有同名条目的标识，返回被改写条目的原标识到现有标识的映射。 */
+    private Map<String, String> normalizeIdsByName(JSONArray source, JSONArray proposed) {
+        Map<String, String> remapped = new java.util.HashMap<>();
+        if (source == null || proposed == null) return remapped;
+        Map<String, JSONObject> existingByName = new java.util.HashMap<>();
+        for (int i = 0; i < source.size(); i++) {
+            JSONObject item = source.getJSONObject(i);
+            String name = item.getString("name");
+            if (name != null) existingByName.putIfAbsent(name.trim(), item);
+        }
+        for (int i = 0; i < proposed.size(); i++) {
+            JSONObject item = proposed.getJSONObject(i);
+            String name = item.getString("name");
+            JSONObject existing = name == null ? null : existingByName.get(name.trim());
+            if (existing == null) continue;
+            String existingId = existing.getString("id");
+            String draftId = item.getString("id");
+            if (existingId.equals(draftId)) continue;
+            remapped.put(draftId, existingId);
+            item.put("id", existingId);
+        }
+        return remapped;
+    }
+
+    /** 人物标识改写后同步更新草稿关系的两端引用，避免关系指向已不存在的标识。 */
+    private void remapRelationEndpoints(JSONArray relations, Map<String, String> remapped) {
+        if (relations == null || remapped.isEmpty()) return;
+        for (int i = 0; i < relations.size(); i++) {
+            JSONObject relation = relations.getJSONObject(i);
+            String source = relation.getString("sourceCharacterId");
+            String target = relation.getString("targetCharacterId");
+            if (source != null && remapped.containsKey(source)) relation.put("sourceCharacterId", remapped.get(source));
+            if (target != null && remapped.containsKey(target)) relation.put("targetCharacterId", remapped.get(target));
+        }
+    }
+
+    /** 按关系两端（忽略方向）把草稿关系标识改写为现有同端点关系的标识。 */
+    private void normalizeRelationIds(JSONObject source, JSONObject data) {
+        JSONArray existing = source.getJSONArray("relations");
+        JSONArray proposed = data.getJSONArray("relations");
+        if (existing == null || proposed == null) return;
+        Map<String, String> idByEndpoints = new java.util.HashMap<>();
+        for (int i = 0; i < existing.size(); i++) {
+            JSONObject relation = existing.getJSONObject(i);
+            idByEndpoints.putIfAbsent(endpointKey(relation), relation.getString("id"));
+        }
+        for (int i = 0; i < proposed.size(); i++) {
+            JSONObject relation = proposed.getJSONObject(i);
+            String existingId = idByEndpoints.get(endpointKey(relation));
+            if (existingId != null) relation.put("id", existingId);
+        }
+    }
+
+    /** 关系端点键，忽略源头与目标的方向差异。 */
+    private String endpointKey(JSONObject relation) {
+        String source = relation.getString("sourceCharacterId");
+        String target = relation.getString("targetCharacterId");
+        if (source == null || target == null) return "";
+        return source.compareTo(target) <= 0 ? source + "\u0000" + target : target + "\u0000" + source;
+    }
+
+    /** 关系跟随两端人物：只有两端都被勾选的现有关系才允许被草稿覆盖，避免人工拉好的连线被静默改写。 */
+    private Set<String> selectedRelationIds(JSONObject source, Set<String> selectedCharacters) {
+        Set<String> ids = new HashSet<>();
+        JSONArray relations = source.getJSONArray("relations");
+        if (relations == null) return ids;
+        for (int i = 0; i < relations.size(); i++) {
+            JSONObject relation = relations.getJSONObject(i);
+            if (selectedCharacters.contains(relation.getString("sourceCharacterId"))
+                    && selectedCharacters.contains(relation.getString("targetCharacterId"))) {
+                ids.add(relation.getString("id"));
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * 草稿可更新的全部正式目标标识，用于一键应用改编草稿时默认全量覆盖。
+     *
+     * @param draft 待应用的剧本AI草稿
+     * @return List&lt;String&gt; 正式目标标识
+     */
+    public List<String> allAiDraftTargetIds(ScriptDtos.AiDraft draft) {
+        return allAiDraftTargetIds(draft.targetType(), draft.sourceData());
+    }
+
+    /**
+     * 提取给定正式内容快照中的全部可更新目标，供批量应用使用当前内容合并。
+     *
+     * @param targetType String 草稿目标类型
+     * @param source JSONObject 当前正式内容快照
+     * @return List&lt;String&gt; 正式目标标识
+     */
+    private List<String> allAiDraftTargetIds(String targetType, JSONObject source) {
+        Set<String> ids = new HashSet<>();
+        if (source == null) source = new JSONObject();
+        switch (targetType) {
+            case "overview" -> ids.add(OVERVIEW_TARGET_ID);
+            case "characters" -> collectIds(source.getJSONArray("characters"), ids);
+            case "world" -> {
+                ids.add(WORLD_SETTING_TARGET_ID);
+                collectIds(source.getJSONArray("worldItems"), ids);
+                collectIds(source.getJSONArray("locations"), ids);
+            }
+            case "outline" -> {
+                collectIds(source.getJSONArray("sections"), ids);
+                collectIds(source.getJSONArray("events"), ids);
+            }
+            case "episodes" -> collectIds(source.getJSONArray("episodes"), ids);
+            case "episode" -> {
+                collectIds(source.getJSONArray("scenes"), ids);
+                JSONObject episode = source.getJSONObject("episode");
+                if (episode != null) ids.add(episode.getString("id"));
+            }
+            default -> { }
+        }
+        return new ArrayList<>(ids);
+    }
+
+    /** 按稳定标识合并数组并连续重排，新增条目排在已有正式条目之后。 */
+    private JSONArray mergeArray(JSONArray source, JSONArray proposed, Set<String> selected, String orderField,
+                                 List<String> changed, boolean episodeNumbers) {
+        return mergeArray(source, proposed, selected, orderField, changed, episodeNumbers, false);
+    }
+
+    /** 按稳定标识合并普通条目数组。 */
+    private JSONArray mergeArray(JSONArray source, JSONArray proposed, Set<String> selected, String orderField,
+                                 List<String> changed) {
+        return mergeArray(source, proposed, selected, orderField, changed, false, false);
+    }
+
+    /** 按稳定标识合并数组，并可为场次重排编号。 */
+    private JSONArray mergeArray(JSONArray source, JSONArray proposed, Set<String> selected, String orderField,
+                                 List<String> changed, boolean episodeNumbers, boolean scenes) {
+        JSONArray result = new JSONArray();
+        Map<String, JSONObject> oldById = new java.util.LinkedHashMap<>();
+        Map<String, JSONObject> proposedById = new java.util.LinkedHashMap<>();
+        if (source != null) for (int i = 0; i < source.size(); i++) oldById.put(source.getJSONObject(i).getString("id"), source.getJSONObject(i));
+        if (proposed != null) for (int i = 0; i < proposed.size(); i++) proposedById.put(proposed.getJSONObject(i).getString("id"), proposed.getJSONObject(i));
+        for (Map.Entry<String, JSONObject> entry : oldById.entrySet()) {
+            String id = entry.getKey();
+            JSONObject value = selected.contains(id) && proposedById.containsKey(id) ? proposedById.get(id) : entry.getValue();
+            if (value != entry.getValue()) changed.add(id);
+            result.add(value);
+        }
+        for (Map.Entry<String, JSONObject> entry : proposedById.entrySet()) {
+            if (!oldById.containsKey(entry.getKey())) {
+                result.add(entry.getValue());
+                changed.add(entry.getKey());
+            }
+        }
+        for (int i = 0; i < result.size(); i++) {
+            JSONObject value = result.getJSONObject(i);
+            value.put(orderField, i);
+            if (episodeNumbers) value.put("episodeNumber", i + 1);
+            if (scenes) value.put("sceneNumber", i + 1);
+        }
+        return result;
+    }
+
+    /** 收集结构条目中的稳定标识。 */
+    private void collectIds(JSONArray items, Set<String> ids) {
+        if (items != null) for (int i = 0; i < items.size(); i++) ids.add(items.getJSONObject(i).getString("id"));
+    }
+
+    /**
+     * 勾选范围是否覆盖了现有内容的全部目标标识。
+     * <p>
+     * 覆盖全部时本次应用视为整套替换，未出现在草稿里的旧条目不再保留；只勾选一部分时仍按稳定标识逐条合并。
+     * 现有内容为空时同样成立——此时本来就没有需要保留的旧内容。标识集合沿用
+     * {@link #allAiDraftTargetIds(String, JSONObject)}，与 {@code selected} 的计算口径保持一处。
+     *
+     * @param selected Set&lt;String&gt; 本次勾选的目标标识
+     * @param targetType String 草稿目标类型
+     * @param source JSONObject 当前正式内容快照
+     * @return boolean 是否覆盖全部
+     */
+    private boolean coversAll(Set<String> selected, String targetType, JSONObject source) {
+        return selected.containsAll(allAiDraftTargetIds(targetType, source));
+    }
+
+    /** 合并结果。 */
+    private record MergedAdaptationDraft(JSONObject data, List<String> changedTargetIds) { }
 
     /**
      * 提取AI目标当前内容，用于草稿生成与应用前冲突校验。
@@ -678,10 +1124,85 @@ public class ScriptService {
     public Mono<ScriptDtos.AiDraft> saveAiDraft(Long userId, String projectId, long revision, String actionType,
                                                 String targetType, String targetId, String instruction, String model,
                                                 int chargedCredits, JSONObject sourceData, JSONObject draftData) {
+        // 单集草稿的场次与正文块标识由模型自造，必须在落库前换成唯一标识，否则应用时必然撞上其他项目。
+        if ("episode".equals(targetType)) assignEpisodeIds(draftData);
+        normalizeBlockOrigins(targetType, draftData);
         String draftId = UUID.randomUUID().toString();
         ScriptDtos.AiDraft draft = new ScriptDtos.AiDraft(draftId, projectId, actionType, targetType, targetId,
                 revision, text(instruction), sourceData, draftData, model, chargedCredits, "pending", OffsetDateTime.now());
         return repository.createAiDraft(userId, draft).thenReturn(draft);
+    }
+
+    /**
+     * 给单集草稿的场次与正文块分配服务端生成的唯一标识。
+     *
+     * <p>场次与正文块的标识是全局主键，模型自造的 {@code scene-1}、{@code block-1} 这类顺序短标识会撞上
+     * 其他项目已占用的行（提示「场次标识已属于其他项目」）。而重新生成整集时模型还会重排场次、
+     * 把已有正文块搬到别的场次，此时沿用模型回填的旧标识会撞上「标识已属于其他分集／场次」——
+     * 只要保留旧标识就存在这种错位风险，因此这里一律换新。旧的一场场次与正文由
+     * {@code mergeAdaptationDraft} 在勾选全量时按整套替换，不会因为换新标识而变成叠加。</p>
+     *
+     * @param draftData JSONObject 模型产出的单集草稿
+     * @return void 无返回值
+     */
+    private void assignEpisodeIds(JSONObject draftData) {
+        JSONArray scenes = draftData == null ? null : draftData.getJSONArray("scenes");
+        if (scenes == null) return;
+        for (int index = 0; index < scenes.size(); index++) {
+            JSONObject scene = scenes.getJSONObject(index);
+            scene.put("id", UUID.randomUUID().toString());
+            JSONArray blocks = scene.getJSONArray("blocks");
+            if (blocks == null) continue;
+            for (int blockIndex = 0; blockIndex < blocks.size(); blockIndex++) {
+                blocks.getJSONObject(blockIndex).put("id", UUID.randomUUID().toString());
+            }
+        }
+    }
+
+    /**
+     * 把草稿正文块里的改编标记摘出来，改成结构化的来源字段。
+     *
+     * <p>此前提示词要求模型在正文里写「【改编创作】」，标记于是跟着正文进了正式剧本，还会被
+     * 分集工作台与后续配音、成片链路一起带走；现在来源由 {@code origin} 字段表达，正文只放剧本内容。
+     * 模型沿用旧习惯写出标记时，标记本身就是「这段是新增创作」的声明，据此补上 {@code adapted} 再摘掉标记。</p>
+     *
+     * @param targetType String 草稿目标类型
+     * @param draftData JSONObject 模型产出的草稿
+     * @return void 无返回值
+     */
+    private void normalizeBlockOrigins(String targetType, JSONObject draftData) {
+        if (draftData == null) return;
+        switch (targetType) {
+            case "episode" -> {
+                JSONArray scenes = draftData.getJSONArray("scenes");
+                if (scenes == null) break;
+                for (int index = 0; index < scenes.size(); index++) {
+                    normalizeBlockOrigin(scenes.getJSONObject(index).getJSONArray("blocks"));
+                }
+            }
+            case "scene" -> normalizeBlockOrigin(draftData.getJSONArray("blocks"));
+            case "block" -> normalizeBlockOrigin(draftData);
+            default -> { }
+        }
+    }
+
+    /** 逐个正文块归一来源。 */
+    private void normalizeBlockOrigin(JSONArray blocks) {
+        if (blocks == null) return;
+        for (int index = 0; index < blocks.size(); index++) {
+            normalizeBlockOrigin(blocks.getJSONObject(index));
+        }
+    }
+
+    /** 单个正文块：正文里的改编标记转成来源字段，并从正文摘掉；其余一律按原著事实处理。 */
+    private void normalizeBlockOrigin(JSONObject block) {
+        String content = block.getString("content");
+        if (content != null && ADAPTATION_MARK.matcher(content).find()) {
+            block.put("origin", ORIGIN_ADAPTED);
+            block.put("content", ADAPTATION_MARK.matcher(content).replaceAll("").trim());
+            return;
+        }
+        if (!ORIGIN_ADAPTED.equals(block.getString("origin"))) block.put("origin", ORIGIN_ORIGINAL);
     }
 
     /**
@@ -740,6 +1261,8 @@ public class ScriptService {
      */
     private Mono<Void> applyDraftData(Long userId, ScriptDtos.AiDraft draft, JSONObject draftData,
                                       ScriptDtos.ProjectSnapshot snapshot, long expectedRevision) {
+        // 保存草稿时已归一，这里兜住仍在草稿里保留旧标记的存量草稿，保证正文落库前一定是干净的。
+        normalizeBlockOrigins(draft.targetType(), draftData);
         try {
             return switch (draft.targetType()) {
                 case "overview" -> "storyDirections".equals(draft.actionType())

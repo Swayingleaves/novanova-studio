@@ -124,6 +124,7 @@ class CanvasProfileTest {
         properties.getAi().getSystemPrompt().setAgentCanvasFile(promptDirectory.resolve("agent-canvas.md").toUri().toString());
         properties.getAi().getSystemPrompt().setAgentStoryboardFile(promptDirectory.resolve("agent-storyboard.md").toUri().toString());
         properties.getAi().getSystemPrompt().setAgentScriptFile(promptDirectory.resolve("agent-script.md").toUri().toString());
+        properties.getAi().getSystemPrompt().setAgentStoryBibleFile(promptDirectory.resolve("agent-story-bible.md").toUri().toString());
         properties.getAi().getSystemPrompt().setImageStoryboardAssetFile(promptDirectory.resolve("image-storyboard-asset.md").toUri().toString());
         SystemPromptTemplateService service = new SystemPromptTemplateService(properties, new org.springframework.core.io.DefaultResourceLoader());
         service.loadTemplates();

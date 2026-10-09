@@ -10,9 +10,9 @@ import styles from "./script-outline-workspace.module.css";
 
 const saveStatusLabels = {
     idle: "暂无修改",
-    dirty: "等待自动保存",
-    saving: "自动保存中",
-    saved: "已自动保存",
+    dirty: "有未保存修改",
+    saving: "保存中",
+    saved: "已保存",
     error: "保存失败",
     conflict: "版本冲突",
 } as const;

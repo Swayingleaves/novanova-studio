@@ -362,7 +362,7 @@ class AbstractTaskProfileTest {
 
         Assertions.assertNotNull(result);
         Assertions.assertFalse(result.ok());
-        Assertions.assertEquals("无法识别历史参考素材类型，请重新上传图片或视频素材", result.message());
+        Assertions.assertEquals("无法识别历史参考素材类型，请重新上传图片、视频或MP3/WAV音频", result.message());
         verify(aiTaskService, never()).createTaskForUser(anyLong(), any(AiTaskDtos.CreateAiTaskRequest.class), any(Function.class));
     }
 

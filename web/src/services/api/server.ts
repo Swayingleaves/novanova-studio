@@ -1298,7 +1298,7 @@ export async function serverGet<T>(path: string, options?: { auth?: boolean }) {
     return serverFetch<T>(path, { method: "GET" }, options);
 }
 
-export async function serverPost<T = string>(path: string, body: unknown, options?: { auth?: boolean }) {
+export async function serverPost<T = string>(path: string, body: unknown, options?: { auth?: boolean; allowEmpty?: boolean }) {
     return serverFetch<T>(
         path,
         {
@@ -1310,9 +1310,15 @@ export async function serverPost<T = string>(path: string, body: unknown, option
     );
 }
 
-async function serverFetch<T>(path: string, init: RequestInit, options: { auth?: boolean } = {}) {
+export function serverUpload<T = string>(path: string, formData: FormData) {
+    return serverFetch<T>(path, { method: "POST", body: formData });
+}
+
+async function serverFetch<T>(path: string, init: RequestInit, options: { auth?: boolean; allowEmpty?: boolean } = {}) {
     const response = await requestServer(path, init, options);
     const payload = (await response.json().catch(() => null)) as ApiResponse<T> | null;
+    // 允许空响应体的查询接口（例如“项目最近一次任务”没有任务时）返回 undefined，而不是抛错。
+    if (!payload && options.allowEmpty && response.ok) return undefined as T;
     if (!response.ok || !payload) {
         throw new ServerApiError(payload?.msg || `服务端请求失败：${response.status}`, response.status, payload?.code ?? -1);
     }

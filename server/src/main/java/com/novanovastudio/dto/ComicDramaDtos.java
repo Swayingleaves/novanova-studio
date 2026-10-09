@@ -326,11 +326,20 @@ public final class ComicDramaDtos {
                                     @NotBlank @Size(max = 64) String mediaId) {
     }
 
-    /** 确认处理上游变化请求。 */
+    /**
+     * 确认处理上游变化请求。
+     *
+     * @param scope 处理范围：{@code all} 或某个目标类型
+     * @param targetId 只处理该目标，空表示不限
+     * @param sourceType 只处理来自该来源类型的变更，空表示不限
+     * @param sourceId 只处理来自该来源标识的变更，空表示不限
+     */
     public record ConfirmUpdateRequest(@NotBlank @Size(max = 64) String projectId,
                                        @Min(0) long expectedRevision,
                                        @NotBlank @Size(max = 24) String scope,
                                        @Size(max = 64) String targetId,
+                                       @Size(max = 24) String sourceType,
+                                       @Size(max = 64) String sourceId,
                                        @NotBlank @jakarta.validation.constraints.Pattern(regexp = "keepOld|update",
                                                message = "resolution仅支持keepOld或update") String resolution,
                                        @AssertTrue boolean confirmed) {

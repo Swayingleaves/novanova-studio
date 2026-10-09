@@ -1,6 +1,7 @@
 package com.novanovastudio.agent;
 
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -74,13 +75,14 @@ class AgentActivityServiceTest {
     @Test
     void shouldPersistActivitiesForSpecifiedRound() {
         service.record(AgentEvent.toolExecute("conversation-1", "round-1", "generate_video", Map.of("seconds", 5)));
-        when(repository.saveGenerationRoundActivities(9L, "conversation-1", "round-1", anyString()))
+        when(repository.saveGenerationRoundActivities(eq(9L), eq("conversation-1"), eq("round-1"), anyString()))
                 .thenReturn(Mono.just(1L));
 
         service.persistRoundActivities(9L, "conversation-1", "round-1").block();
 
         ArgumentCaptor<String> activitiesCaptor = ArgumentCaptor.forClass(String.class);
-        verify(repository).saveGenerationRoundActivities(9L, "conversation-1", "round-1", activitiesCaptor.capture());
+        verify(repository).saveGenerationRoundActivities(eq(9L), eq("conversation-1"), eq("round-1"),
+                activitiesCaptor.capture());
         JSONObject activity = JSON.parseArray(activitiesCaptor.getValue()).getJSONObject(0);
         Assertions.assertEquals("tool-round-1", activity.getString("id"));
         Assertions.assertEquals("5 秒", activity.getString("description"));
@@ -92,13 +94,14 @@ class AgentActivityServiceTest {
     @Test
     void shouldPersistTerminalStatusForRunningPlanTaskActivity() {
         service.record(AgentEvent.planTaskStatus("conversation-1", "plan-1", "round-1", "running", "子Agent正在准备任务"));
-        when(repository.saveGenerationRoundActivities(9L, "conversation-1", "round-1", anyString()))
+        when(repository.saveGenerationRoundActivities(eq(9L), eq("conversation-1"), eq("round-1"), anyString()))
                 .thenReturn(Mono.just(1L));
 
         service.persistRoundActivities(9L, "conversation-1", "round-1", "failed").block();
 
         ArgumentCaptor<String> activitiesCaptor = ArgumentCaptor.forClass(String.class);
-        verify(repository).saveGenerationRoundActivities(9L, "conversation-1", "round-1", activitiesCaptor.capture());
+        verify(repository).saveGenerationRoundActivities(eq(9L), eq("conversation-1"), eq("round-1"),
+                activitiesCaptor.capture());
         JSONObject activity = JSON.parseArray(activitiesCaptor.getValue()).getJSONObject(0);
         Assertions.assertEquals("failed", activity.getString("status"));
         Assertions.assertEquals("子Agent正在准备任务", activity.getString("description"));

@@ -698,6 +698,9 @@ public class NovanovaProperties {
         /** 剧本Agent配置 */
         private ScriptAgent scriptAgent = new ScriptAgent();
 
+        /** 故事知识库分析Agent配置，复用剧本Agent的超时配置结构 */
+        private ScriptAgent storyBibleAgent = new ScriptAgent();
+
         /** AI图片结果配置 */
         private Image image = new Image();
 
@@ -774,6 +777,24 @@ public class NovanovaProperties {
          */
         public void setScriptAgent(ScriptAgent scriptAgent) {
             this.scriptAgent = scriptAgent;
+        }
+
+        /**
+         * 获取故事知识库分析Agent配置。
+         *
+         * @return ScriptAgent 故事知识库分析Agent配置
+         */
+        public ScriptAgent getStoryBibleAgent() {
+            return storyBibleAgent;
+        }
+
+        /**
+         * 设置故事知识库分析Agent配置。
+         *
+         * @param storyBibleAgent ScriptAgent 故事知识库分析Agent配置
+         */
+        public void setStoryBibleAgent(ScriptAgent storyBibleAgent) {
+            this.storyBibleAgent = storyBibleAgent;
         }
 
         /**
@@ -1357,6 +1378,9 @@ public class NovanovaProperties {
             /** 剧本创作Agent文件路径 */
             private String agentScriptFile = "";
 
+            /** 故事知识库分析Agent文件路径 */
+            private String agentStoryBibleFile = "";
+
             /** 分镜资产图片提示词模板文件路径 */
             private String imageStoryboardAssetFile = "";
 
@@ -1520,6 +1544,24 @@ public class NovanovaProperties {
              */
             public void setAgentScriptFile(String agentScriptFile) {
                 this.agentScriptFile = agentScriptFile;
+            }
+
+            /**
+             * 获取故事知识库分析Agent文件路径。
+             *
+             * @return String 故事知识库分析Agent文件路径
+             */
+            public String getAgentStoryBibleFile() {
+                return agentStoryBibleFile;
+            }
+
+            /**
+             * 设置故事知识库分析Agent文件路径。
+             *
+             * @param agentStoryBibleFile String 故事知识库分析Agent文件路径
+             */
+            public void setAgentStoryBibleFile(String agentStoryBibleFile) {
+                this.agentStoryBibleFile = agentStoryBibleFile;
             }
 
             /**

@@ -887,32 +887,14 @@ public class ComicDramaRepository {
             case "character", "world" -> "a.source_entity_id=:sourceId";
             default -> "FALSE";
         };
-        String assetMediaPredicate = switch (sourceType) {
-            case "overview", "versionRestore" -> "TRUE";
-            case "character", "world" -> "a.source_entity_id=:sourceId";
-            case "asset" -> "a.id=:sourceId";
-            case "assetVersion" -> "av.id=:sourceId";
-            default -> "FALSE";
-        };
+        // 只登记独立生产物：镜头与视觉资产。提示词版本、生成结果、声音轨都是挂在镜头下的派生物，
+        // 镜头既然已经记为需要更新，它们本来就该重做，再单独登记一条只会把待办列表撑大而不增加信息。
         String targetQuery = """
                 SELECT 'shot' target_type,sh.id target_id FROM comic_drama_shots sh
                     WHERE sh.script_project_id=:projectId AND (%s)
                 UNION ALL SELECT 'asset',a.id FROM comic_drama_assets a
                     WHERE a.script_project_id=:projectId AND (%s)
-                UNION ALL SELECT 'promptVersion',p.id FROM comic_drama_prompt_versions p
-                    JOIN comic_drama_shots sh ON sh.id=p.shot_id WHERE p.script_project_id=:projectId AND (%s)
-                UNION ALL SELECT 'media',m.id FROM comic_drama_media_results m
-                    LEFT JOIN comic_drama_shots sh ON m.target_type='shot' AND sh.id=m.target_id
-                    LEFT JOIN comic_drama_asset_versions av ON m.target_type='assetVersion' AND av.id=m.target_id
-                    LEFT JOIN comic_drama_assets a ON a.id=av.asset_id
-                    WHERE m.script_project_id=:projectId AND ((sh.id IS NOT NULL AND (%s)) OR (a.id IS NOT NULL AND (%s))
-                        OR (m.target_type='assetVersion' AND m.target_id=:sourceId))
-                UNION ALL SELECT 'voiceTrack',v.id FROM comic_drama_voice_tracks v
-                    LEFT JOIN comic_drama_shots sh ON sh.id=v.shot_id
-                    WHERE v.script_project_id=:projectId AND ((sh.id IS NOT NULL AND (%s))
-                        OR (:sourceType='character' AND v.character_id=:sourceId)
-                        OR :sourceType IN ('overview','versionRestore'))
-                """.formatted(shotPredicate, assetTargetPredicate, shotPredicate, shotPredicate, assetMediaPredicate, shotPredicate);
+                """.formatted(shotPredicate, assetTargetPredicate);
         JSONObject snapshot = new JSONObject();
         snapshot.put("sourceId", sourceId);
         // 只登记影响项供用户在「待更新项」里确认，绝不改动下游实体自身的状态：
@@ -932,15 +914,31 @@ public class ComicDramaRepository {
                 .bind("summary", summary).bind("snapshot", snapshot.toJSONString()).fetch().rowsUpdated();
     }
 
-    /** 确认更新或保留旧结果并关闭影响项。 */
-    public Mono<Long> resolveImpacts(String projectId, String scope, String targetId, String resolution) {
+    /**
+     * 确认更新或保留旧结果并关闭影响项。
+     * <p>
+     * 来源过滤为空时不限来源；一次上游变更会为每个受影响目标各插一条影响项，界面按变更分组处理，
+     * 因此这里必须支持「只关掉某一次变更产生的那些项」，否则用户只能逐条点击。
+     *
+     * @param scope String 处理范围：{@code all} 或某个目标类型
+     * @param targetId String 只处理该目标，空表示不限
+     * @param sourceType String 只处理来自该来源类型的变更，空表示不限
+     * @param sourceId String 只处理来自该来源标识的变更，空表示不限
+     * @return Mono&lt;Long&gt; 已处理行数
+     */
+    public Mono<Long> resolveImpacts(String projectId, String scope, String targetId, String sourceType,
+                                     String sourceId, String resolution) {
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
                 UPDATE comic_drama_change_impacts SET status=:status,resolved_at=CURRENT_TIMESTAMP
                 WHERE script_project_id=:projectId AND status='pending'
                     AND (:scope='all' OR target_type=:scope) AND (:targetId IS NULL OR target_id=:targetId)
+                    AND (:sourceType IS NULL OR source_type=:sourceType)
+                    AND (:sourceId IS NULL OR source_id=:sourceId)
                 """).bind("projectId", projectId).bind("scope", scope)
                 .bind("status", "keepOld".equals(resolution) ? "keptOld" : "accepted");
         spec = bindNullable(spec, "targetId", targetId, String.class);
+        spec = bindNullable(spec, "sourceType", sourceType, String.class);
+        spec = bindNullable(spec, "sourceId", sourceId, String.class);
         return spec.fetch().rowsUpdated();
     }
 

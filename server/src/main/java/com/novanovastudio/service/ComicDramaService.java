@@ -277,41 +277,41 @@ public class ComicDramaService {
                     return repository.listShots(request.projectId(), null, null).collectList().flatMap(existing -> {
                         StoryboardDtos.GenerateStoryboardResponse response = draft.draftData()
                                 .toJavaObject(StoryboardDtos.GenerateStoryboardResponse.class);
-                        Map<String, DraftAssetPlan> assetPlans = buildDraftAssetPlans(request.draftId(), response);
                         String sourceEpisodeId = text(draft.draftData().getString("sourceEpisodeId"));
                         String sourceSceneId = text(draft.draftData().getString("sourceSceneId"));
-                        return repository.validateShotSourceReferences(request.projectId(),
-                                        sourceEpisodeId.isEmpty() ? null : sourceEpisodeId,
-                                        sourceSceneId.isEmpty() ? null : sourceSceneId)
-                                .flatMap(valid -> valid ? Mono.just(existing.size())
-                                        : Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
-                                                "镜头草稿的来源分集或场次不属于当前项目")))
-                                .flatMap(start -> transactionalOperator.transactional(
-                                        persistDraftAssets(request.projectId(), assetPlans.values())
-                                        .thenMany(Flux.fromIterable(response.shots()).index())
-                                        .concatMap(item -> {
-                                            StoryboardDtos.StoryboardShot source = item.getT2();
-                                            List<String> assetVersionIds = source.assetIds().stream()
-                                                    .map(assetId -> assetPlans.get(assetId).version().id()).toList();
-                                            ComicDramaDtos.Shot shot = new ComicDramaDtos.Shot(id(),
-                                                    sourceEpisodeId.isEmpty() ? null : sourceEpisodeId,
-                                                    sourceSceneId.isEmpty() ? null : sourceSceneId,
-                                                    text(draft.draftData().getString("sourceScriptExcerpt")),
-                                                    start + item.getT1().intValue() + 1, start + item.getT1().intValue(),
-                                                    BigDecimal.valueOf(source.durationSeconds()), source.shotSize(), "",
-                                                    source.visualDescription(), "", source.cameraMovement(), source.lightingAtmosphere(),
-                                                    source.dialogueVoiceover(), source.soundEffect(), "", "draft",
-                                                    assetVersionIds, 0, null, null);
-                                            return repository.saveShot(request.projectId(), shot).switchIfEmpty(conflict())
-                                                    .then(repository.replaceShotAssetVersions(
-                                                            request.projectId(), shot.id(), assetVersionIds))
-                                                    .flatMap(inserted -> inserted == assetVersionIds.size()
-                                                            ? Mono.empty() : conflict());
-                                        }).then(repository.confirmShotDraft(request.projectId(), request.draftId())
-                                                .flatMap(count -> count == 1 ? Mono.empty() : conflict()))
-                                        .then(advance(userId, request.projectId(), request.expectedRevision()))
-                                        .then(repository.refreshProjectProductionStatus(request.projectId()))
-                                        .then(requireProject(userId, request.projectId())).map(this::mutationResult)));
+                        return buildDraftAssetPlans(request.projectId(), request.draftId(), scriptProject, response)
+                                .flatMap(assetPlans -> repository.validateShotSourceReferences(request.projectId(),
+                                                sourceEpisodeId.isEmpty() ? null : sourceEpisodeId,
+                                                sourceSceneId.isEmpty() ? null : sourceSceneId)
+                                        .flatMap(valid -> valid ? Mono.just(existing.size())
+                                                : Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
+                                                        "镜头草稿的来源分集或场次不属于当前项目")))
+                                        .flatMap(start -> transactionalOperator.transactional(
+                                                persistDraftAssets(request.projectId(), assetPlans.values())
+                                                .thenMany(Flux.fromIterable(response.shots()).index())
+                                                .concatMap(item -> {
+                                                    StoryboardDtos.StoryboardShot source = item.getT2();
+                                                    List<String> assetVersionIds = source.assetIds().stream()
+                                                            .map(assetId -> assetPlans.get(assetId).version().id()).toList();
+                                                    ComicDramaDtos.Shot shot = new ComicDramaDtos.Shot(id(),
+                                                            sourceEpisodeId.isEmpty() ? null : sourceEpisodeId,
+                                                            sourceSceneId.isEmpty() ? null : sourceSceneId,
+                                                            text(draft.draftData().getString("sourceScriptExcerpt")),
+                                                            start + item.getT1().intValue() + 1, start + item.getT1().intValue(),
+                                                            BigDecimal.valueOf(source.durationSeconds()), source.shotSize(), "",
+                                                            source.visualDescription(), "", source.cameraMovement(), source.lightingAtmosphere(),
+                                                            source.dialogueVoiceover(), source.soundEffect(), "", "draft",
+                                                            assetVersionIds, 0, null, null);
+                                                    return repository.saveShot(request.projectId(), shot).switchIfEmpty(conflict())
+                                                            .then(repository.replaceShotAssetVersions(
+                                                                    request.projectId(), shot.id(), assetVersionIds))
+                                                            .flatMap(inserted -> inserted == assetVersionIds.size()
+                                                                    ? Mono.empty() : conflict());
+                                                }).then(repository.confirmShotDraft(request.projectId(), request.draftId())
+                                                        .flatMap(count -> count == 1 ? Mono.empty() : conflict()))
+                                                .then(advance(userId, request.projectId(), request.expectedRevision()))
+                                                .then(repository.refreshProjectProductionStatus(request.projectId()))
+                                                .then(requireProject(userId, request.projectId())).map(this::mutationResult))));
                     });
                 })));
     }
@@ -583,7 +583,8 @@ public class ComicDramaService {
     public Mono<ComicDramaDtos.MutationResult> confirmUpdate(ComicDramaDtos.ConfirmUpdateRequest request) {
         return currentUserProvider.currentUserId().flatMap(userId -> transactionalOperator.transactional(
                 requireProjectRevision(userId, request.projectId(), request.expectedRevision())
-                        .then(repository.resolveImpacts(request.projectId(), request.scope(), request.targetId(), request.resolution()))
+                        .then(repository.resolveImpacts(request.projectId(), request.scope(), request.targetId(),
+                                request.sourceType(), request.sourceId(), request.resolution()))
                         .then(advance(userId, request.projectId(), request.expectedRevision()))
                         .then(repository.refreshProjectProductionStatus(request.projectId()))
                         .then(requireProject(userId, request.projectId())).map(this::mutationResult)));
@@ -996,22 +997,57 @@ public class ComicDramaService {
     private record GenerationPlan(ComicDramaDtos.MediaResult media, String prompt, List<AiTaskDtos.AiTaskMediaReference> references) {
     }
 
-    /** 校验镜头草稿的资产引用并构建项目资产与初始版本。 */
-    private Map<String, DraftAssetPlan> buildDraftAssetPlans(
-            String draftId, StoryboardDtos.GenerateStoryboardResponse response) {
+    /**
+     * 校验镜头草稿的资产引用，并构建项目资产与初始版本。
+     * <p>
+     * 资产必须先按剧本实体对齐再复用：分镜 Agent 每次拆分都会自己编一套资产标识，直接按该标识插入的话，
+     * 同一个「姜浩」会被拆出多条资产。这里先按名称匹配剧本人物 / 地点写入 {@code sourceEntityId}，
+     * 再优先按「类型 + 实体标识」、其次按「类型 + 名称」复用项目已有资产，只为其追加一个新版本。
+     */
+    private Mono<Map<String, DraftAssetPlan>> buildDraftAssetPlans(String projectId, String draftId,
+                                                                   ScriptDtos.ProjectDetail scriptProject,
+                                                                   StoryboardDtos.GenerateStoryboardResponse response) {
         Map<String, StoryboardDtos.StoryboardAsset> sources = validateDraftAssetReferences(response);
-        Map<String, DraftAssetPlan> plans = new LinkedHashMap<>();
-        for (StoryboardDtos.StoryboardAsset source : sources.values()) {
-            JSONObject attributes = new JSONObject();
-            attributes.put("source", "shotDraft");
-            attributes.put("draftId", draftId);
-            ComicDramaDtos.Asset asset = new ComicDramaDtos.Asset(source.id(), source.kind(), null,
-                    source.name().trim(), text(source.description()), new JSONObject(), "active", 0, null, null);
-            ComicDramaDtos.AssetVersion version = new ComicDramaDtos.AssetVersion(id(), source.id(), "初始版本",
-                    "default", text(source.description()), List.of(), attributes, "active", 0, null, null);
-            plans.put(source.id(), new DraftAssetPlan(asset, version));
-        }
-        return plans;
+        return repository.listAssets(projectId, null).collectList().map(existing -> {
+            Map<String, String> characterIds = new LinkedHashMap<>();
+            scriptProject.characters().forEach(character -> characterIds.putIfAbsent(character.name().trim(), character.id()));
+            Map<String, String> locationIds = new LinkedHashMap<>();
+            scriptProject.locations().forEach(location -> locationIds.putIfAbsent(location.name().trim(), location.id()));
+            Map<String, ComicDramaDtos.Asset> byEntity = new LinkedHashMap<>();
+            Map<String, ComicDramaDtos.Asset> byName = new LinkedHashMap<>();
+            for (ComicDramaDtos.Asset asset : existing) {
+                if (StringUtils.hasText(asset.sourceEntityId())) {
+                    byEntity.putIfAbsent(asset.assetType() + "\u0000" + asset.sourceEntityId(), asset);
+                }
+                byName.putIfAbsent(asset.assetType() + "\u0000" + asset.name().trim(), asset);
+            }
+            Map<String, DraftAssetPlan> plans = new LinkedHashMap<>();
+            for (StoryboardDtos.StoryboardAsset source : sources.values()) {
+                String name = source.name().trim();
+                // 道具在剧本里没有对应实体，只能靠名称复用。
+                String sourceEntityId = switch (source.kind()) {
+                    case "character" -> characterIds.get(name);
+                    case "scene" -> locationIds.get(name);
+                    default -> null;
+                };
+                ComicDramaDtos.Asset reused = sourceEntityId == null ? null
+                        : byEntity.get(source.kind() + "\u0000" + sourceEntityId);
+                if (reused == null) {
+                    reused = byName.get(source.kind() + "\u0000" + name);
+                }
+                String assetId = reused == null ? source.id() : reused.id();
+                JSONObject attributes = new JSONObject();
+                attributes.put("source", "shotDraft");
+                attributes.put("draftId", draftId);
+                ComicDramaDtos.Asset asset = new ComicDramaDtos.Asset(assetId, source.kind(), sourceEntityId, name,
+                        text(source.description()), new JSONObject(), "active",
+                        reused == null ? 0 : reused.revision(), null, null);
+                ComicDramaDtos.AssetVersion version = new ComicDramaDtos.AssetVersion(id(), assetId, "初始版本",
+                        "default", text(source.description()), List.of(), attributes, "active", 0, null, null);
+                plans.put(source.id(), new DraftAssetPlan(asset, version, reused != null));
+            }
+            return plans;
+        });
     }
 
     /** 校验镜头草稿资产与镜头引用是一致的封闭集合。 */
@@ -1047,17 +1083,20 @@ public class ComicDramaService {
 
     /** 在镜头确认事务内持久化草稿资产及其初始版本。 */
     private Mono<Void> persistDraftAssets(String projectId, java.util.Collection<DraftAssetPlan> plans) {
-        return Flux.fromIterable(plans).concatMap(plan -> repository.createShotDraftAsset(projectId, plan.asset())
-                        .flatMap(inserted -> inserted == 1 ? Mono.empty()
-                                : Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT,
-                                        "镜头草稿资产标识已存在，请重新生成草稿")))
-                        .then(repository.createShotDraftAssetVersion(plan.version()))
-                        .flatMap(inserted -> inserted == 1 ? Mono.empty() : conflict()))
-                .then();
+        return Flux.fromIterable(plans).concatMap(plan -> {
+            // 复用已有资产时只追加新版本，不再插入资产行，否则同一个实体每次拆分都会多出一个资产。
+            Mono<Void> assetStep = plan.reused() ? Mono.empty()
+                    : repository.createShotDraftAsset(projectId, plan.asset())
+                            .flatMap(inserted -> inserted == 1 ? Mono.<Void>empty()
+                                    : Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT,
+                                            "镜头草稿资产标识已存在，请重新生成草稿")));
+            return assetStep.then(repository.createShotDraftAssetVersion(plan.version()))
+                    .flatMap(inserted -> inserted == 1 ? Mono.<Void>empty() : conflict());
+        }).then();
     }
 
-    /** 镜头草稿资产与其项目初始版本。 */
-    private record DraftAssetPlan(ComicDramaDtos.Asset asset, ComicDramaDtos.AssetVersion version) {
+    /** 镜头草稿资产与其项目初始版本；复用已有资产时 reused 为真，只需追加版本。 */
+    private record DraftAssetPlan(ComicDramaDtos.Asset asset, ComicDramaDtos.AssetVersion version, boolean reused) {
     }
 
     /** 执行带项目乐观锁的通用写操作。 */

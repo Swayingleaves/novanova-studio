@@ -1,6 +1,7 @@
 package com.novanovastudio.common;
 
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.core.io.buffer.DataBufferLimitException;
 import org.springframework.web.reactive.resource.NoResourceFoundException;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -104,6 +105,19 @@ public class GlobalExceptionHandler {
         // 不存在的接口不做错误日志，避免被扫描请求刷屏；仅 debug 级别记录
         log.error("不存在的接口请求: {}", exception.getMessage());
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.fail(ErrorCode.RESOURCE_NOT_FOUND, "接口不存在"));
+    }
+
+    /**
+     * 处理上传文件超过服务端单文件上限
+     *
+     * @param exception DataBufferLimitException 缓冲区超限异常
+     * @return ResponseEntity<ApiResponse<Void>> 响应
+     */
+    @ExceptionHandler(DataBufferLimitException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataBufferLimitException(DataBufferLimitException exception) {
+        // 多部分上传在超过 max-in-memory-size / max-disk-usage-per-part 时抛出，给出可读提示而非系统错误。
+        log.error("上传文件超过服务端上限: {}", exception.getMessage());
+        return ResponseEntity.badRequest().body(ApiResponse.fail(ErrorCode.PARAM_INVALID, "上传文件超过 50 MB 上限，请压缩后重试"));
     }
 
     /**

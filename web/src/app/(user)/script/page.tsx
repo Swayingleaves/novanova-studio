@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { App, Alert, Button, Checkbox, Empty, Input, Modal, Pagination, Progress, Select, Spin, Tag } from "antd";
-import { BookOpenText, Clock3, FilePlus2, Search, Trash2 } from "lucide-react";
+import { BookOpenText, Clock3, FilePlus2, Search, Trash2, Upload } from "lucide-react";
 
 import { createScriptProject, deleteScriptProjects, listScriptTemplates } from "@/services/api/script";
+import { ScriptSourceUploadModal } from "./components/script-source-upload-modal";
 import { useScriptStore } from "@/features/script/stores/use-script-store";
 import type { ScriptContentType, ScriptStage, ScriptTemplate } from "@/features/script/types";
 
@@ -41,6 +42,7 @@ export default function ScriptPage() {
     const [contentType, setContentType] = useState("");
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [createOpen, setCreateOpen] = useState(false);
+    const [uploadOpen, setUploadOpen] = useState(false);
     const [creating, setCreating] = useState(false);
     const [templates, setTemplates] = useState<ScriptTemplate[]>([]);
     const [title, setTitle] = useState("");
@@ -126,7 +128,10 @@ export default function ScriptPage() {
                         <h1 className="studio-title mt-2 text-2xl font-semibold">剧本创作</h1>
                         <p className="studio-subtitle mt-2 text-sm">从故事创意到分集分场，集中管理可持续修改的结构化剧本。</p>
                     </div>
-                    <Button type="primary" icon={<FilePlus2 className="size-4" />} onClick={() => void openCreate()}>新建剧本</Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Button icon={<Upload className="size-4" />} onClick={() => setUploadOpen(true)}>上传剧本/小说</Button>
+                        <Button type="primary" icon={<FilePlus2 className="size-4" />} onClick={() => void openCreate()}>新建剧本</Button>
+                    </div>
                 </header>
 
                 <section className="studio-glass flex flex-col gap-3 rounded-xl border border-[var(--studio-line)] p-4 lg:flex-row lg:items-center" aria-label="项目筛选">
@@ -170,6 +175,8 @@ export default function ScriptPage() {
                     <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">一句话创意（可选）<Input.TextArea value={logline} rows={3} maxLength={2000} showCount onChange={(event) => setLogline(event.target.value)} placeholder="用一句话写清主角、目标与主要阻力" /></label>
                 </div>
             </Modal>
+
+            <ScriptSourceUploadModal open={uploadOpen} onClose={() => setUploadOpen(false)} />
         </main>
     );
 }

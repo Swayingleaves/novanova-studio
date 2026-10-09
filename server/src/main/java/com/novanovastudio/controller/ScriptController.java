@@ -66,7 +66,7 @@ public class ScriptController {
             @RequestParam(defaultValue = "") String stage,
             @RequestParam(defaultValue = "") String contentType,
             ServerHttpRequest httpRequest) {
-        log.info("剧本项目列表请求: url={}, headers={}, page={}, pageSize={}, keyword={}, stage={}, contentType={}",
+        log.debug("剧本项目列表请求: url={}, headers={}, page={}, pageSize={}, keyword={}, stage={}, contentType={}",
                 httpRequest.getURI(), sanitizedHeaders(httpRequest), page, pageSize, keyword, stage, contentType);
         return scriptService.listProjects(page, pageSize, keyword, stage, contentType).map(ApiResponse::ok)
                 .doOnNext(response -> log.debug("剧本项目列表响应: response={}", response));
@@ -80,9 +80,9 @@ public class ScriptController {
      */
     @GetMapping("/listTemplates")
     public Mono<ApiResponse<java.util.List<ScriptDtos.ScriptTemplate>>> listTemplates(ServerHttpRequest httpRequest) {
-        log.info("剧本模板列表请求: url={}, headers={}", httpRequest.getURI(), sanitizedHeaders(httpRequest));
+        log.debug("剧本模板列表请求: url={}, headers={}", httpRequest.getURI(), sanitizedHeaders(httpRequest));
         return scriptService.listTemplates().map(ApiResponse::ok)
-                .doOnNext(response -> log.info("剧本模板列表响应: response={}", response));
+                .doOnNext(response -> log.debug("剧本模板列表响应: response={}", response));
     }
 
     /**
@@ -412,7 +412,7 @@ public class ScriptController {
      */
     private <T> Mono<ApiResponse<T>> execute(String operationName, ServerHttpRequest httpRequest,
                                              Object request, Mono<T> operation) {
-        log.info("{}请求: url={}, headers={}, request={}", operationName, httpRequest.getURI(),
+        log.debug("{}请求: url={}, headers={}, request={}", operationName, httpRequest.getURI(),
                 sanitizedHeaders(httpRequest), request);
         return operation.map(ApiResponse::ok).doOnNext(response -> log.debug("{}响应: response={}", operationName, response));
     }

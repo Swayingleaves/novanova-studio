@@ -197,7 +197,9 @@ export function StageShots() {
 
     // Open AI shot split modal
     const openSplitModal = () => {
-        setSplitEpisodeId(episodes[0]?.id || "");
+        // 与手动新建镜头保持同一套默认值：优先用镜头清单当前筛选的分集，而不是固定第一集，
+        // 否则在筛选到第 5 集时点「AI 自动拆分镜头」，默认拆的却是第 1 集。
+        setSplitEpisodeId(selectedEpisodeId !== "all" ? selectedEpisodeId : episodes[0]?.id || "");
         setSplitSceneId("");
         setSplitModel(config.textModel || "");
         setSplitModalOpen(true);

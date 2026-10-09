@@ -87,7 +87,7 @@ public final class ScriptDtos {
             @Size(max = 8000) String motivation, @Size(max = 12000) String appearanceDescription,
             @Size(max = 8000) String habits, @Size(max = 8000) String speechStyle,
             @Size(max = 16000) String backgroundStory, @Size(max = 16000) String characterArc,
-            double graphPositionX, double graphPositionY, @Min(0) int sortOrder) {
+            @Min(0) int sortOrder) {
     }
 
     /** 人物关系。 */
@@ -130,11 +130,16 @@ public final class ScriptDtos {
                                  @Min(0) int sortOrder) {
     }
 
-    /** 结构化剧本正文块。 */
+    /**
+     * 结构化剧本正文块。
+     *
+     * @param origin 内容来源：{@code original} 来自原著事实，{@code adapted} 为 AI 新增的改编创作。
+     *               由服务端归一，模型填其他值或留空都按 {@code original} 处理，避免整批草稿作废。
+     */
     public record ScriptBlock(@NotBlank @Size(max = 64) String id,
                               @NotBlank @Pattern(regexp = "action|dialogue|narration|transition") String blockType,
                               @Size(max = 64) String characterId, @Size(max = 30000) String content,
-                              @Min(0) int sortOrder) {
+                              String origin, @Min(0) int sortOrder) {
     }
 
     /** 剧本场次。 */
@@ -253,7 +258,7 @@ public final class ScriptDtos {
 
     /** 保存人物设定与关系请求。 */
     public record SaveCharactersRequest(@NotBlank @Size(max = 64) String projectId, @Min(0) long expectedRevision,
-                                        @NotNull @Size(max = 300) List<@Valid Character> characters,
+                                        @NotNull @Size(max = 2000) List<@Valid Character> characters,
                                         @NotNull @Size(max = 2000) List<@Valid CharacterRelation> relations) {
     }
 
@@ -317,7 +322,11 @@ public final class ScriptDtos {
 
     /** 应用AI草稿请求。 */
     public record ApplyAiDraftRequest(@NotBlank @Size(max = 64) String projectId, @Min(0) long expectedRevision,
-                                      @NotBlank @Size(max = 64) String draftId, @NotNull JSONObject draftData) {
+                                      @NotBlank @Size(max = 64) String draftId, @NotNull JSONObject draftData,
+                                      @Size(max = 500) List<@NotBlank @Size(max = 64) String> selectedTargetIds) {
+        public ApplyAiDraftRequest(String projectId, long expectedRevision, String draftId, JSONObject draftData) {
+            this(projectId, expectedRevision, draftId, draftData, List.of());
+        }
     }
 
     /** 放弃AI草稿请求。 */

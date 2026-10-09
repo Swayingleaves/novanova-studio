@@ -140,8 +140,9 @@ export function listComicDramaImpacts(projectId: string) {
     return serverGet<ComicDramaChangeImpact[]>(`${COMIC_DRAMA_PATH}/listImpacts?projectId=${encodeURIComponent(projectId)}`);
 }
 
-export function confirmComicDramaUpdate(projectId: string, expectedRevision: number, scope: string, targetId: string, resolution: "keepOld" | "update", confirmed: boolean) {
-    return serverPost<ComicDramaMutationResult>(`${COMIC_DRAMA_PATH}/confirmUpdate`, { projectId, expectedRevision, scope, targetId, resolution, confirmed });
+/** 确认处理上游变化；sourceType/sourceId 用于只关掉某一次上游变更产生的影响项。 */
+export function confirmComicDramaUpdate(projectId: string, expectedRevision: number, scope: string, targetId: string | null, resolution: "keepOld" | "update", confirmed: boolean, source?: { sourceType: string; sourceId: string }) {
+    return serverPost<ComicDramaMutationResult>(`${COMIC_DRAMA_PATH}/confirmUpdate`, { projectId, expectedRevision, scope, targetId, resolution, confirmed, sourceType: source?.sourceType ?? null, sourceId: source?.sourceId ?? null });
 }
 
 export function listComicDramaVoiceTracks(projectId: string, shotId?: string) {
