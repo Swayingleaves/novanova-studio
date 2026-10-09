@@ -383,13 +383,6 @@ public final class ScriptDtos {
     public record GeneratedScriptBlockDraft(@NotNull @Valid ScriptBlock draftData) {
     }
 
-    /** 生成剧本分析请求。 */
-    public record AnalyzeScriptRequest(
-            @NotBlank @Size(max = 64) String projectId, @Min(0) long expectedRevision,
-            @NotBlank @Size(max = 20) String scopeType, @Size(max = 64) String scopeId,
-            @Size(max = 12000) String instruction, @NotBlank @Size(max = 256) String model) {
-    }
-
     /** Agent返回的分析问题。 */
     public record GeneratedAnalysisIssue(
             @NotBlank @Size(max = 32) String category,

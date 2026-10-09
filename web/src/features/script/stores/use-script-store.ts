@@ -8,7 +8,6 @@ import {
     getScriptProject,
     deleteScriptEpisode,
     listScriptAiDrafts,
-    listScriptAnalysisReports,
     listScriptProjects,
     listScriptVersions,
     saveScriptCharacters,
@@ -21,7 +20,6 @@ import {
 
 import { createScriptSaveScheduler } from "../services/script-save-scheduler";
 import type {
-    AnalysisReport,
     CharacterRelation,
     EpisodeDetail,
     MutationResult,
@@ -47,7 +45,6 @@ type ScriptStore = {
     project: ScriptProjectDetail | null;
     episodes: Record<string, EpisodeDetail>;
     drafts: ScriptAiDraft[];
-    analysisReports: AnalysisReport[];
     versions: ScriptVersionSummary[];
     aiTarget: { targetType: string; targetId?: string; label: string } | null;
     loading: boolean;
@@ -73,7 +70,6 @@ type ScriptStore = {
     deleteEpisode: (episodeId: string) => Promise<void>;
     setAiTarget: (target: { targetType: string; targetId?: string; label: string } | null) => void;
     replaceDrafts: (drafts: ScriptAiDraft[]) => void;
-    replaceAnalysisReports: (reports: AnalysisReport[]) => void;
     replaceVersions: (versions: ScriptVersionSummary[]) => void;
     retrySave: () => void;
     reset: () => void;
@@ -117,7 +113,6 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
     project: null,
     episodes: {},
     drafts: [],
-    analysisReports: [],
     versions: [],
     aiTarget: null,
     loading: false,
@@ -142,7 +137,7 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
     loadProject: async (projectId) => {
         const loadGeneration = ++projectLoadGeneration;
         saveScheduler.reset();
-        set({ project: null, loading: true, error: "", saveStatus: "idle", saveError: "", hasUnsaved: false, episodes: {}, drafts: [], analysisReports: [], versions: [], aiTarget: null });
+        set({ project: null, loading: true, error: "", saveStatus: "idle", saveError: "", hasUnsaved: false, episodes: {}, drafts: [], versions: [], aiTarget: null });
         try {
             const project = await getScriptProject(projectId);
             if (loadGeneration === projectLoadGeneration) set({ project, loading: false });
@@ -184,12 +179,11 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
         const projectId = get().project?.id;
         if (!projectId) return;
         try {
-            const [drafts, analysisReports, versions] = await Promise.all([
+            const [drafts, versions] = await Promise.all([
                 listScriptAiDrafts(projectId),
-                listScriptAnalysisReports(projectId),
                 listScriptVersions(projectId),
             ]);
-            if (get().project?.id === projectId) set({ drafts, analysisReports, versions, error: "" });
+            if (get().project?.id === projectId) set({ drafts, versions, error: "" });
         } catch (error) {
             if (get().project?.id === projectId) {
                 const message = error instanceof Error ? error.message : "未知错误";
@@ -323,7 +317,6 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
     },
     setAiTarget: (aiTarget) => set({ aiTarget }),
     replaceDrafts: (drafts) => set({ drafts }),
-    replaceAnalysisReports: (analysisReports) => set({ analysisReports }),
     replaceVersions: (versions) => set({ versions }),
     retrySave: () => saveScheduler.retry(),
     /** 执行所有待保存区块。返回是否全部成功，供「保存并离开」这类场景判断。 */
@@ -341,7 +334,7 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
         projectLoadGeneration += 1;
         projectListLoadGeneration += 1;
         saveScheduler.reset();
-        set({ projects: [], projectTotal: 0, project: null, episodes: {}, drafts: [], analysisReports: [], versions: [], aiTarget: null, loading: false, error: "", saveStatus: "idle", saveError: "", hasUnsaved: false });
+        set({ projects: [], projectTotal: 0, project: null, episodes: {}, drafts: [], versions: [], aiTarget: null, loading: false, error: "", saveStatus: "idle", saveError: "", hasUnsaved: false });
     },
 }));
 

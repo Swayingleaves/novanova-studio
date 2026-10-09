@@ -202,16 +202,6 @@ class ScriptAgentServiceTest {
     }
 
     /**
-     * 验证不支持的专业分析范围在访问用户数据前被拒绝。
-     */
-    @Test
-    void shouldRejectUnsupportedAnalysisScope() {
-        assertThrows(BusinessException.class, () -> service.analyzeScript(
-                new ScriptDtos.AnalyzeScriptRequest("project-a", 0L, "scene", "scene-a", "", "text-model")));
-        verifyNoInteractions(creditService, modelFactory, scriptService);
-    }
-
-    /**
      * 验证全项目分析允许不绑定分集、场次或正文块的项目级问题。
      */
     @Test

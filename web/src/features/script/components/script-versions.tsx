@@ -4,48 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { App, Button, Empty, Input, Modal, Tag, Timeline } from "antd";
 import { FileClock, GitCompare, RotateCcw } from "lucide-react";
 
-import { createScriptVersion, getScriptAnalysisReport, getScriptVersion, restoreScriptVersion } from "@/services/api/script";
+import { createScriptVersion, getScriptVersion, restoreScriptVersion } from "@/services/api/script";
 import { diffScriptVersion } from "../lib/script-version-diff";
 import { useScriptStore } from "../stores/use-script-store";
-import type { AnalysisReport, ScriptVersionDetail, ScriptWorkspaceSection } from "../types";
+import type { ScriptVersionDetail } from "../types";
 
-/** 分析报告与版本历史面板。 */
-export function ScriptAnalysisVersions({ mode }: { mode: ScriptWorkspaceSection }) {
-    return mode === "analysis" ? <AnalysisPanel /> : <VersionsPanel />;
-}
-
-function AnalysisPanel() {
-    const { message } = App.useApp();
-    const project = useScriptStore((state) => state.project);
-    const reports = useScriptStore((state) => state.analysisReports);
-    const [selected, setSelected] = useState<AnalysisReport | null>(null);
-    const [loadingId, setLoadingId] = useState("");
-    const loadGeneration = useRef(0);
-    useEffect(() => {
-        loadGeneration.current += 1;
-        setSelected(null);
-        setLoadingId("");
-    }, [project?.id]);
-    const open = async (report: AnalysisReport) => {
-        if (!project) return;
-        const projectId = project.id;
-        const generation = ++loadGeneration.current;
-        setLoadingId(report.id);
-        try {
-            const detail = await getScriptAnalysisReport(projectId, report.id);
-            if (generation === loadGeneration.current && useScriptStore.getState().project?.id === projectId) setSelected(detail);
-        } catch (error) {
-            if (generation === loadGeneration.current && useScriptStore.getState().project?.id === projectId) {
-                message.error(error instanceof Error ? error.message : "分析报告加载失败，请重试");
-            }
-        } finally {
-            if (generation === loadGeneration.current) setLoadingId("");
-        }
-    };
-    return <section><header className="mb-5 border-b border-[var(--studio-line)] pb-4"><h2 className="text-xl font-semibold text-[var(--studio-ink)]">专业分析</h2><p className="mt-1 text-sm text-[var(--studio-muted)]">从剧情、人物动机、节奏与逻辑一致性定位具体问题。请在右侧AI助手发起新分析。</p></header>{reports.length ? <div className="space-y-3">{reports.map((report) => <button type="button" key={report.id} className="w-full rounded-xl border border-[var(--studio-line)] p-4 text-left transition-colors hover:border-[var(--studio-primary-line)]" onClick={() => void open(report)} disabled={loadingId === report.id}><div className="flex items-center justify-between gap-3"><strong className="text-[var(--studio-ink)]">{report.scopeType === "project" ? "全项目分析" : "单集分析"}</strong><span className="text-xs text-[var(--studio-faint)]">{new Date(report.createdAt).toLocaleString("zh-CN")}</span></div><p className="mt-2 line-clamp-2 text-sm leading-6 text-[var(--studio-muted)]">{report.summary}</p></button>)}</div> : <Empty description="还没有分析报告" />}<Modal width={760} title="剧本专业分析" open={Boolean(selected)} footer={null} onCancel={() => setSelected(null)}>{selected ? <div><p className="rounded-lg bg-[var(--studio-surface-soft)] p-4 text-sm leading-7 text-[var(--studio-text)]">{selected.summary}</p><div className="mt-4 space-y-3">{selected.issues.map((issue) => <article key={issue.id} className="rounded-lg border border-[var(--studio-line)] p-4"><div className="flex flex-wrap items-center gap-2"><Tag color={issue.severity === "important" ? "red" : issue.severity === "warning" ? "gold" : "blue"}>{issue.severity}</Tag><Tag>{issue.category}</Tag><strong>{issue.title}</strong></div><p className="mt-3 text-sm leading-6 text-[var(--studio-muted)]"><b>原因：</b>{issue.reason}</p><p className="mt-2 text-sm leading-6 text-[var(--studio-text)]"><b>建议：</b>{issue.suggestion}</p><p className="mt-2 text-xs text-[var(--studio-faint)]">定位：分集 {issue.episodeId || "-"} / 场次 {issue.sceneId || "-"} / 正文块 {issue.blockId || "-"}</p></article>)}</div></div> : null}</Modal></section>;
-}
-
-function VersionsPanel() {
+/** 命名版本记录面板。 */
+export function ScriptVersions() {
     const { message, modal } = App.useApp();
     const project = useScriptStore((state) => state.project);
     const versions = useScriptStore((state) => state.versions);

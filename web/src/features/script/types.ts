@@ -182,7 +182,7 @@ export type AnalysisReport = { id: string; projectId: string; scopeType: "projec
 export type ReadinessItem = { key: string; status: "ready" | "suggested" | "missing"; title: string; description: string; targetSection: string };
 export type ProductionReadiness = { projectId: string; ready: boolean; items: ReadinessItem[] };
 
-export type ScriptWorkspaceSection = "overview" | "outline" | "characters" | "world" | "episodes" | "source" | "storyBible" | "adaptation" | "analysis" | "versions";
+export type ScriptWorkspaceSection = "overview" | "outline" | "characters" | "world" | "episodes" | "source" | "storyBible" | "adaptation" | "versions";
 
 export type NovelAdaptationSettings = {
     format: ScriptContentType;

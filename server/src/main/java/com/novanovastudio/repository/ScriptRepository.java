@@ -896,52 +896,6 @@ public class ScriptRepository {
     }
 
     /**
-     * 查询分析报告摘要列表。
-     *
-     * @param projectId 剧本项目标识
-     * @return 分析报告摘要数据流
-     */
-    public Flux<ScriptDtos.AnalysisReport> listAnalysisReports(String projectId) {
-        return databaseClient.sql("SELECT * FROM script_analysis_reports WHERE project_id=:projectId ORDER BY created_at DESC,id")
-                .bind("projectId", projectId).map((row, metadata) -> new ScriptDtos.AnalysisReport(
-                        row.get("id", String.class), row.get("project_id", String.class), row.get("scope_type", String.class),
-                        row.get("scope_id", String.class), row.get("summary", String.class), row.get("model", String.class),
-                        value(row, "charged_credits", Integer.class, 0), value(row, "source_revision", Long.class, 0L),
-                        row.get("created_at", OffsetDateTime.class), List.of())).all();
-    }
-
-    /**
-     * 查询分析报告。
-     *
-     * @param projectId 剧本项目标识
-     * @param reportId 分析报告标识
-     * @return 分析报告
-     */
-    public Mono<ScriptDtos.AnalysisReport> getAnalysisReport(String projectId, String reportId) {
-        return databaseClient.sql("SELECT * FROM script_analysis_reports WHERE id=:reportId AND project_id=:projectId")
-                .bind("reportId", reportId).bind("projectId", projectId).map((row, metadata) -> new ScriptDtos.AnalysisReport(
-                        row.get("id", String.class), row.get("project_id", String.class), row.get("scope_type", String.class),
-                        row.get("scope_id", String.class), row.get("summary", String.class), row.get("model", String.class),
-                        value(row, "charged_credits", Integer.class, 0), value(row, "source_revision", Long.class, 0L),
-                        row.get("created_at", OffsetDateTime.class), List.of())).one();
-    }
-
-    /**
-     * 查询分析报告问题。
-     *
-     * @param reportId 分析报告标识
-     * @return 分析问题数据流
-     */
-    public Flux<ScriptDtos.AnalysisIssue> listAnalysisIssues(String reportId) {
-        return databaseClient.sql("SELECT * FROM script_analysis_issues WHERE report_id=:reportId ORDER BY sort_order,id")
-                .bind("reportId", reportId).map((row, metadata) -> new ScriptDtos.AnalysisIssue(
-                        row.get("id", String.class), row.get("category", String.class), row.get("severity", String.class),
-                        row.get("episode_id", String.class), row.get("scene_id", String.class), row.get("block_id", String.class),
-                        row.get("title", String.class), row.get("reason", String.class), row.get("suggestion", String.class),
-                        value(row, "sort_order", Integer.class, 0))).all();
-    }
-
-    /**
      * 插入故事事件。
      *
      * @param projectId 剧本项目标识

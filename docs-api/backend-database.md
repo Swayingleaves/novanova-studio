@@ -15,7 +15,7 @@
 | `script_scene_characters`、`script_blocks` | 场次人物与动作/对白/旁白/转场正文块 | 人物反查、场次+正文顺序、对白人物索引 |
 | `script_versions` | 手动命名版本与 AI 修改前完整快照 | 项目+创建时间倒序；`snapshot_data` 必须为 JSON 对象 |
 | `script_ai_drafts` | 待确认、已应用或已放弃的结构化 AI 草稿 | 项目+状态+时间、用户+时间；保存目标原内容用于冲突检查 |
-| `script_analysis_reports`、`script_analysis_issues` | 全项目或单集分析及具体问题锚点 | 项目+时间、报告+问题顺序 |
+| `script_analysis_reports`、`script_analysis_issues` | 小说改编一致性分析报告及具体问题锚点 | 项目+时间、报告+问题顺序 |
 
 正式实体使用不超过 64 字符的稳定标识。人物和地点仍被场次或对白引用时禁止删除；场次和正文块保存采用稳定标识更新，只有请求中明确缺失的实体才会删除。
 

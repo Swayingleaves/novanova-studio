@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
 import { App, Alert, Button, Drawer, Progress, Spin, Tag } from "antd";
-import { ArrowLeft, Bot, BookOpenText, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, FileClock, FileText, Globe2, Library, ListTree, Plus, Save, ScrollText, Sparkles, Users, WandSparkles } from "lucide-react";
+import { ArrowLeft, Bot, BookOpenText, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, FileClock, FileText, Globe2, Library, ListTree, Plus, Save, ScrollText, Sparkles, Users } from "lucide-react";
 
 import { enterComicDrama, getScriptProductionReadiness } from "@/services/api/script";
 import { ScriptAiPanel } from "@/features/script/components/script-ai-panel";
@@ -29,7 +29,6 @@ const NAVIGATION_GROUPS: Array<{ label: string; items: Array<{ key: ScriptWorksp
             { key: "characters", label: "人物设定", icon: Users },
             { key: "world", label: "世界观与地点", icon: Globe2 },
             { key: "episodes", label: "分集剧本", icon: ScrollText },
-            { key: "analysis", label: "专业分析", icon: WandSparkles },
             { key: "versions", label: "版本记录", icon: FileClock },
         ],
     },

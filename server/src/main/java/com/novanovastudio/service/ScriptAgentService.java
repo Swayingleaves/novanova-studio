@@ -32,7 +32,7 @@ import org.springframework.util.StringUtils;
 import reactor.core.publisher.Mono;
 
 /**
- * 剧本专用Agent编排、草稿持久化、专业分析与独立积分计费服务。
+ * 剧本专用Agent编排、草稿持久化、改编一致性分析与独立积分计费服务。
  *
  * @author   zhenglin.cn.cq@gmail.com
  * @date     2026-09-20 15:00
@@ -288,32 +288,6 @@ public class ScriptAgentService {
     }
 
     /**
-     * 对全项目或单集执行专业分析并持久化问题报告。
-     *
-     * @param request AnalyzeScriptRequest 分析请求
-     * @return Mono&lt;AnalysisReport&gt; 已持久化的分析报告
-     */
-    public Mono<ScriptDtos.AnalysisReport> analyzeScript(ScriptDtos.AnalyzeScriptRequest request) {
-        validateAnalysisRequest(request);
-        return currentUserProvider.currentUserId().flatMap(userId -> scriptService
-                .getSnapshotForUser(userId, request.projectId(), request.expectedRevision())
-                .flatMap(snapshot -> {
-                    if (snapshot.episodeDetails().isEmpty()) {
-                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "请先完成至少一个分集，再执行专业分析"));
-                    }
-                    Object context = buildAnalysisContext(snapshot, request.scopeType(), request.scopeId());
-                    validateContextSize(context, request.scopeType());
-                    return modelFactory.resolveTextModel(request.model()).flatMap(model -> executeChargedOperation(
-                            userId, model.creditCost(), "剧本专业分析", operationId -> callAnalysisAgent(
-                                    userId, operationId, model, request, context)
-                                    .map(generated -> validateAnalysis(generated, snapshot, request.scopeType(), request.scopeId()))
-                                    .flatMap(generated -> scriptService.saveAnalysisReport(userId, request.projectId(),
-                                            request.scopeType(), request.scopeId(), model.modelValue(), model.creditCost(),
-                                            request.expectedRevision(), generated))));
-                }));
-    }
-
-    /**
      * 应用用户确认并编辑后的AI草稿。
      *
      * @param request ApplyAiDraftRequest 草稿应用请求
@@ -415,28 +389,6 @@ public class ScriptAgentService {
     }
 
     /**
-     * 调用剧本Agent生成专业分析报告。
-     *
-     * @param userId Long 当前用户ID
-     * @param operationId String 稳定操作标识
-     * @param model TextModelSelection 已解析文本模型
-     * @param request AnalyzeScriptRequest 分析请求
-     * @param context Object 服务端读取的正式剧本上下文
-     * @return Mono&lt;GeneratedAnalysis&gt; Agent结构化分析
-     */
-    private Mono<ScriptDtos.GeneratedAnalysis> callAnalysisAgent(Long userId, String operationId,
-                                                                  AgentScopeModelFactory.TextModelSelection model,
-                                                                  ScriptDtos.AnalyzeScriptRequest request, Object context) {
-        Map<String, Object> input = new LinkedHashMap<>();
-        input.put("requestType", "analysis");
-        input.put("scopeType", request.scopeType());
-        input.put("scopeId", request.scopeId());
-        input.put("instruction", request.instruction());
-        input.put("context", context);
-        return callAgent(userId, operationId, model, input, ScriptDtos.GeneratedAnalysis.class);
-    }
-
-    /**
      * 使用固定剧本Agent执行结构化调用。
      *
      * @param userId Long 当前用户ID
@@ -515,21 +467,6 @@ public class ScriptAgentService {
     }
 
     /**
-     * 校验分析范围与单集标识。
-     *
-     * @param request AnalyzeScriptRequest 分析请求
-     * @return void 无返回值
-     */
-    private void validateAnalysisRequest(ScriptDtos.AnalyzeScriptRequest request) {
-        if (!Set.of("project", "episode").contains(request.scopeType())) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "分析范围仅支持全项目或单集");
-        }
-        if ("episode".equals(request.scopeType()) && !StringUtils.hasText(request.scopeId())) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, "单集分析必须指定分集");
-        }
-    }
-
-    /**
      * 构建草稿生成上下文；局部动作只携带必要设定与目标单集。
      *
      * @param snapshot ProjectSnapshot 完整项目快照
@@ -545,22 +482,6 @@ public class ScriptAgentService {
         context.put("episode", episode);
         context.put("target", scriptService.targetSnapshot(snapshot, targetType, targetId));
         return context;
-    }
-
-    /**
-     * 构建全项目或单集分析上下文。
-     *
-     * @param snapshot ProjectSnapshot 完整项目快照
-     * @param scopeType String 分析范围
-     * @param scopeId String 分集标识
-     * @return Object Agent分析上下文
-     */
-    private Object buildAnalysisContext(ScriptDtos.ProjectSnapshot snapshot, String scopeType, String scopeId) {
-        if ("project".equals(scopeType)) return snapshot;
-        ScriptDtos.EpisodeDetail episode = snapshot.episodeDetails().stream()
-                .filter(item -> item.episode().id().equals(scopeId)).findFirst()
-                .orElseThrow(() -> new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "分析目标分集不存在"));
-        return Map.of("project", snapshot.project(), "episode", episode);
     }
 
     /**

@@ -587,32 +587,6 @@ public class ScriptService {
     }
 
     /**
-     * 查询当前用户项目的分析报告列表。
-     *
-     * @param projectId 剧本项目标识
-     * @return 分析报告摘要列表
-     */
-    public Mono<List<ScriptDtos.AnalysisReport>> listAnalysisReports(String projectId) {
-        return currentUserProvider.currentUserId().flatMap(userId -> requireProject(userId, projectId)
-                .then(repository.listAnalysisReports(projectId).collectList()));
-    }
-
-    /**
-     * 查询分析报告及问题明细。
-     *
-     * @param projectId 剧本项目标识
-     * @param reportId 分析报告标识
-     * @return 分析报告详情
-     */
-    public Mono<ScriptDtos.AnalysisReport> getAnalysisReport(String projectId, String reportId) {
-        return currentUserProvider.currentUserId().flatMap(userId -> requireProject(userId, projectId)
-                .then(repository.getAnalysisReport(projectId, reportId)).switchIfEmpty(notFound("分析报告不存在"))
-                .flatMap(report -> repository.listAnalysisIssues(report.id()).collectList().map(issues -> new ScriptDtos.AnalysisReport(
-                        report.id(), report.projectId(), report.scopeType(), report.scopeId(), report.summary(), report.model(),
-                        report.chargedCredits(), report.sourceRevision(), report.createdAt(), issues))));
-    }
-
-    /**
      * 为已完成鉴权的AI服务读取指定用户项目快照。
      *
      * @param userId Long 当前用户ID

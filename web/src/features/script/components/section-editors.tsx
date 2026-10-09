@@ -9,7 +9,7 @@ import { createScriptScene, moveScriptBlock, removeScriptBlock, replaceScriptBlo
 import { useScriptStore } from "../stores/use-script-store";
 import type { EpisodeDetail, ScriptBlock, ScriptCharacter, ScriptLocation, ScriptOverview, ScriptScene, ScriptWorkspaceSection, WorldItem } from "../types";
 import { CharactersEditor } from "./characters-editor";
-import { ScriptAnalysisVersions } from "./script-analysis-versions";
+import { ScriptVersions } from "./script-versions";
 
 type ScriptSectionEditorProps = { section: Exclude<ScriptWorkspaceSection, "episodes" | "source"> };
 
@@ -42,7 +42,7 @@ export function ScriptSectionEditor({ section }: ScriptSectionEditorProps) {
     if (section === "outline") return <OutlineEditor />;
     if (section === "characters") return <CharactersEditor />;
     if (section === "world") return <WorldEditor />;
-    return <ScriptAnalysisVersions mode={section} />;
+    return <ScriptVersions />;
 }
 
 function SectionHeader({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) {

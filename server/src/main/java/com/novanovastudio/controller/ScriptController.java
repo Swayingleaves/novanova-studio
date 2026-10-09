@@ -333,47 +333,6 @@ public class ScriptController {
     }
 
     /**
-     * 执行全项目或单集专业分析。
-     *
-     * @param request 专业分析请求
-     * @param httpRequest 当前HTTP请求
-     * @return 已持久化的分析报告
-     */
-    @PostMapping("/analyzeScript")
-    public Mono<ApiResponse<ScriptDtos.AnalysisReport>> analyzeScript(
-            @Valid @RequestBody ScriptDtos.AnalyzeScriptRequest request, ServerHttpRequest httpRequest) {
-        return execute("分析剧本", httpRequest, request, scriptAgentService.analyzeScript(request));
-    }
-
-    /**
-     * 查询项目分析报告列表。
-     *
-     * @param projectId 剧本项目标识
-     * @param httpRequest 当前HTTP请求
-     * @return 分析报告摘要列表
-     */
-    @GetMapping("/listAnalysisReports")
-    public Mono<ApiResponse<java.util.List<ScriptDtos.AnalysisReport>>> listAnalysisReports(
-            @RequestParam String projectId, ServerHttpRequest httpRequest) {
-        return execute("查询剧本分析报告", httpRequest, projectId, scriptService.listAnalysisReports(projectId));
-    }
-
-    /**
-     * 查询分析报告及其问题明细。
-     *
-     * @param projectId 剧本项目标识
-     * @param reportId 分析报告标识
-     * @param httpRequest 当前HTTP请求
-     * @return 分析报告详情
-     */
-    @GetMapping("/getAnalysisReport")
-    public Mono<ApiResponse<ScriptDtos.AnalysisReport>> getAnalysisReport(
-            @RequestParam String projectId, @RequestParam String reportId, ServerHttpRequest httpRequest) {
-        return execute("查询剧本分析详情", httpRequest, projectId + ":" + reportId,
-                scriptService.getAnalysisReport(projectId, reportId));
-    }
-
-    /**
      * 查询进入漫剧创作前的生产准备度。
      *
      * @param request 项目标识请求
