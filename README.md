@@ -15,13 +15,19 @@
 </p>
 
 <p align="center">
-  <img src="github_images/nova-s1.png" alt="Novanova Studio 首页截图">
+  <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/nova-s1.png" alt="Novanova Studio 首页截图">
 </p>
 <p align="center">
-  <img src="github_images/nova-s2.png" alt="Novanova Studio 画布截图">
+  <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/nova-s2.png" alt="Novanova Studio 画布截图">
 </p>
 <p align="center">
-  <img src="github_images/fgk.png" alt="Novanova Studio 画布截图">
+  <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/fgk.png" alt="Novanova Studio 画布截图">
+</p>
+<p align="center">
+  <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/jbcz.png" alt="Novanova Studio 剧本创作">
+</p>
+<p align="center">
+  <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/mjcz.png" alt="Novanova Studio 漫剧创作">
 </p>
 
 ## 联系我

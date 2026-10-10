@@ -1,0 +1,20 @@
+:root {
+  --studio-page: #050606;
+  --studio-surface: #0c0e0d;
+  --studio-raised: #121512;
+  --studio-ink: #f3f6f0;
+  --studio-text: #c2c9c0;
+  --studio-muted: #858d84;
+  --studio-line: #242824;
+  --studio-action: #c7f36b;
+  --studio-action-foreground: #11170a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+
+/* 视频独立复用项目品牌色，不影响业务页面样式。 */
+.scene { font-family: "Microsoft YaHei", "Arial", sans-serif; color: var(--studio-ink); background: var(--studio-page); overflow: hidden; }
+.eyebrow { font-size: 25px; letter-spacing: 5px; color: var(--studio-action); font-weight: 700; }
+.headline { font-size: 94px; line-height: 1.2; letter-spacing: -5px; font-weight: 700; margin: 26px 0; }
+.support { font-size: 40px; line-height: 1.65; color: var(--studio-text); }
+.panel { border: 1px solid var(--studio-line); border-radius: 18px; background: var(--studio-surface); overflow: hidden; }
