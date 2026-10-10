@@ -43,6 +43,7 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -218,7 +219,18 @@ public class PersistenceService {
                     record.setCustomModelConfig(JSON.toJSONString(normalizeCustomModelConfig(request.modelType(), isCustomModel, capabilities, request.customModelConfig())));
                     record.setDisplayName(normalizeDisplayName(request.displayName(), request.modelName()));
                     record.setModelIcon(normalizeModelIcon(request.modelIcon()));
-                    return repository.createPlatformAiModelConfig(record).thenReturn(modelConfigDto(record));
+                    return repository.createPlatformAiModelConfig(record)
+                            .onErrorMap(DuplicateKeyException.class, exception -> {
+                                // 数据库约束仍负责并发保护，只把同渠道同类型同名模型冲突转换为业务提示。
+                                if (exception.getMessage() == null || !exception.getMessage().contains("uk_platform_ai_model_configs_model")) {
+                                    return exception;
+                                }
+                                log.error("模型配置重复: 渠道={}, 模型={}, 类型={}", request.channelId(), request.modelName(), request.modelType(), exception);
+                                return new BusinessException(ErrorCode.PARAM_INVALID,
+                                        "渠道“" + channel.getName() + "”的模型“" + request.modelName()
+                                                + "”（类型：" + request.modelType() + "）已存在，请重新读取模型配置后编辑已有模型");
+                            })
+                            .thenReturn(modelConfigDto(record));
                 });
     }
 

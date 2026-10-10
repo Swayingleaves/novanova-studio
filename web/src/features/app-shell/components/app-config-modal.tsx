@@ -1,6 +1,6 @@
 "use client";
 
-import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Switch, Tabs } from "antd";
+import { Alert, App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Switch, Tabs } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { nanoid } from "nanoid";
 import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
@@ -52,6 +52,7 @@ import {
     type ServerModelConfig,
 } from "@/services/api/server";
 import type { ObjectStorageConfig, ObjectStorageProvider } from "@/shared/types/object-storage";
+import { blockingModelConfigDependencyIssues, createDraftModelConfigs, modelConfigDependencyIssues, reconcileModelConfigDraft, updateModelConfigSelection } from "./model-config-draft";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -248,8 +249,14 @@ export function AppConfigModal() {
         if (user?.role !== "admin" && isConfigOpen) setConfigDialogOpen(false);
     }, [isConfigOpen, setConfigDialogOpen, user?.role]);
 
-    const draftConfig = useMemo(() => configFromModelConfigs(draftChannels, draftModelConfigs, config), [config, draftChannels, draftModelConfigs]);
-    const modelOptions = useMemo(() => draftConfig.models.map((model) => ({ label: modelOptionLabelWithRealName(draftConfig, model), value: model })), [draftConfig]);
+    const draftConfig = useMemo(() => {
+        const nextConfig = configFromModelConfigs(draftChannels, draftModelConfigs, config);
+        // 管理界面保留失效配置，允许用户看见并移除；业务模型目录仍只展示可用模型。
+        for (const group of modelGroups) nextConfig[group.modelsKey] = draftModelConfigs.filter((item) => item.modelType === group.capability).map(modelConfigValue);
+        return nextConfig;
+    }, [config, draftChannels, draftModelConfigs]);
+    const dependencyIssues = useMemo(() => modelConfigDependencyIssues(channelBaseline, draftModelConfigs), [channelBaseline, draftModelConfigs]);
+    const modelOptions = useMemo(() => uniqueModels([...draftConfig.models, ...draftModelConfigs.map(modelConfigValue)]).map((model) => ({ label: modelOptionLabelWithRealName(draftConfig, model), value: model })), [draftConfig, draftModelConfigs]);
     const channelsDirty = !sameValue(draftChannels, channelBaseline);
     const modelConfigsDirty = !sameValue(draftModelConfigs, modelConfigBaseline);
     const objectStoragesDirty = !sameValue(draftObjectStorages, objectStorageBaseline);
@@ -356,17 +363,7 @@ export function AppConfigModal() {
             message.warning("请先在“我的渠道”中添加模型，再配置可选模型");
             return;
         }
-        setDraftModelConfigs((configs) => {
-            const existing = new Map(configs.filter((configItem) => configItem.modelType === group.capability).map((configItem) => [modelConfigValue(configItem), configItem]));
-            const next = values.map((value) => {
-                const [channelId, modelName] = value.split("::");
-                return existing.get(value) || createDraftModelConfig(channelId, modelName, group.capability);
-            });
-            const added = next.filter((configItem) => !existing.has(modelConfigValue(configItem))).reverse();
-            const selected = new Set(values);
-            const retained = configs.filter((configItem) => configItem.modelType === group.capability && selected.has(modelConfigValue(configItem)));
-            return [...configs.filter((configItem) => configItem.modelType !== group.capability), ...added, ...retained];
-        });
+        setDraftModelConfigs((configs) => updateModelConfigSelection(configs, modelConfigBaseline, group.capability, values, createDraftModelConfig));
     };
 
     const openModelConfigEditor = (configItem: ServerModelConfig) => {
@@ -422,25 +419,20 @@ export function AppConfigModal() {
     };
 
     const saveModelConfigs = async () => {
-        const persistedChannels = new Map(channelBaseline.map((channel) => [channel.id, channel]));
-        const hasUnsavedChannelDependency = draftModelConfigs.some((configItem) => {
-            const channel = persistedChannels.get(configItem.channelId);
-            return !channel || !channel.models.includes(configItem.modelName);
-        });
-        if (hasUnsavedChannelDependency) {
-            message.error("模型配置引用了未保存的渠道或模型，请先保存“我的渠道”");
+        const baselineById = new Map(modelConfigBaseline.map((configItem) => [configItem.id, configItem]));
+        // 未修改的旧失效配置不阻塞其他模型，新增、修改或设置默认时仍必须校验依赖。
+        const blockingIssues = blockingModelConfigDependencyIssues(channelBaseline, draftModelConfigs, modelConfigBaseline, sameModelConfigForUpdate);
+        if (blockingIssues.length) {
+            message.error(`无法保存：${blockingIssues.map(({ configuration, channelName, reason }) => `${channelName} / ${configuration.modelName}（${reason}）`).join("；")}。请先保存对应渠道或移除该模型配置`);
             return;
         }
-        const baselineById = new Map(modelConfigBaseline.map((configItem) => [configItem.id, configItem]));
         const draftIds = new Set(draftModelConfigs.map((configItem) => configItem.id));
         let nextDrafts = draftModelConfigs;
         setSavingTab("models");
         try {
-            const createdConfigIds = new Map<string, string>();
-            for (const configItem of draftModelConfigs) {
-                if (baselineById.has(configItem.id)) continue;
+            nextDrafts = await createDraftModelConfigs(draftModelConfigs, modelConfigBaseline, async (configItem) => {
                 const normalizedConfig = normalizeModelConfigForSave(configItem);
-                const saved = await createModelConfig({
+                return createModelConfig({
                     channelId: normalizedConfig.channelId,
                     modelName: normalizedConfig.modelName,
                     modelType: normalizedConfig.modelType,
@@ -458,20 +450,17 @@ export function AppConfigModal() {
                     isCustomModel: normalizedConfig.isCustomModel,
                     customModelConfig: normalizedConfig.customModelConfig,
                 });
-                createdConfigIds.set(configItem.id, saved.id);
-            }
-            if (createdConfigIds.size) {
-                nextDrafts = draftModelConfigs.map((configItem) => {
-                    const id = createdConfigIds.get(configItem.id);
-                    return id ? { ...configItem, id } : configItem;
-                });
+            }, (configurations, saved) => {
+                nextDrafts = configurations;
+                baselineById.set(saved.id, saved);
                 setDraftModelConfigs(nextDrafts);
-            }
+                setModelConfigBaseline([...baselineById.values()]);
+            });
             for (const configItem of nextDrafts) {
                 const baseline = baselineById.get(configItem.id);
                 if (baseline && !sameModelConfigForUpdate(configItem, baseline)) {
                     const normalizedConfig = normalizeModelConfigForSave(configItem);
-                    await updateModelConfig({
+                    const saved = await updateModelConfig({
                         id: normalizedConfig.id,
                         modelType: normalizedConfig.modelType,
                         capabilities: normalizedConfig.capabilities,
@@ -488,6 +477,7 @@ export function AppConfigModal() {
                         isCustomModel: normalizedConfig.isCustomModel,
                         customModelConfig: normalizedConfig.customModelConfig,
                     });
+                    baselineById.set(saved.id, saved);
                 }
             }
             for (const group of modelGroups) {
@@ -496,16 +486,28 @@ export function AppConfigModal() {
                 if (nextDefault && nextDefault.id !== currentDefault?.id) await setDefaultModel(nextDefault.id, group.capability);
             }
             for (const configItem of modelConfigBaseline) {
-                if (!draftIds.has(configItem.id)) await deleteModelConfig(configItem.id);
+                if (!draftIds.has(configItem.id)) {
+                    await deleteModelConfig(configItem.id);
+                    baselineById.delete(configItem.id);
+                }
             }
             await refreshModelConfiguration();
             resetModelConfigDraft();
             message.success("模型配置已保存");
         } catch (error) {
-            await refreshModelConfiguration().catch(() => undefined);
-            setModelConfigBaseline(cloneModelConfigs(useConfigStore.getState().modelConfigs));
+            let refreshMessage = "";
+            try {
+                await refreshModelConfiguration();
+                const persisted = cloneModelConfigs(useConfigStore.getState().modelConfigs);
+                setModelConfigBaseline(persisted);
+                nextDrafts = reconcileModelConfigDraft(nextDrafts, persisted);
+            } catch {
+                // 读取失败时只保留已经由创建响应确认的结果，不把旧缓存当作新快照。
+                setModelConfigBaseline([...baselineById.values()]);
+                refreshMessage = "；重新读取配置失败，已保留草稿和已成功保存的模型";
+            }
             setDraftModelConfigs(nextDrafts);
-            message.error(error instanceof Error ? error.message : "保存模型配置失败");
+            message.error(`${error instanceof Error ? error.message : "保存模型配置失败"}${refreshMessage}`);
         } finally {
             setSavingTab("");
         }
@@ -823,6 +825,25 @@ export function AppConfigModal() {
                             label: "我的模型",
                             children: (
                                 <Form layout="vertical" requiredMark={false}>
+                                    {dependencyIssues.length ? (
+                                        <Alert
+                                            className="mb-4"
+                                            type="warning"
+                                            showIcon
+                                            title="部分模型与已保存的渠道列表不一致"
+                                            description={(
+                                                <div className="space-y-2">
+                                                    <div>已有且未修改的失效配置不会阻塞其他模型保存。请保存对应渠道，或移除失效配置后点击保存。</div>
+                                                    {dependencyIssues.map(({ configuration, channelName, reason }) => (
+                                                        <div key={configuration.id} className="flex flex-wrap items-center justify-between gap-2">
+                                                            <span className="break-all">{channelName} / {configuration.modelName}（{reason}）</span>
+                                                            <Button size="small" danger disabled={isSaving} aria-label={`移除${channelName}的${configuration.modelName}配置`} onClick={() => setDraftModelConfigs((configurations) => configurations.filter((item) => item.id !== configuration.id))}>移除</Button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        />
+                                    ) : null}
                                     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
                                         <div>
                                             <div className="text-sm font-semibold">默认模型和可选项</div>

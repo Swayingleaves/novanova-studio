@@ -32,6 +32,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DuplicateKeyException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -562,6 +563,43 @@ class PersistenceServiceTest {
         PersistenceDtos.ModelConfig listed = service.listModelConfigs().block().getFirst();
         Assertions.assertTrue(listed.thinkingEnabled());
         Assertions.assertEquals("high", listed.reasoningEffort());
+    }
+
+    /**
+     * 同渠道同类型同名模型的数据库并发冲突应返回明确的业务提示。
+     */
+    @Test
+    void shouldExplainDuplicateModelConfiguration() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setName("测试渠道");
+        channel.setModels("[\"known-model\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Mono.error(new DuplicateKeyException("duplicate key: uk_platform_ai_model_configs_model")));
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(
+                new PersistenceDtos.CreateModelConfigRequest("channel-1", "known-model", "text", List.of(), 0, 0, true, "high")).block());
+
+        Assertions.assertTrue(exception.getMessage().contains("测试渠道"));
+        Assertions.assertTrue(exception.getMessage().contains("known-model"));
+        Assertions.assertTrue(exception.getMessage().contains("已存在"));
+    }
+
+    /**
+     * 其他唯一约束异常必须保留，不能误报为同名模型重复。
+     */
+    @Test
+    void shouldPreserveUnrelatedDuplicateKeyFailure() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"known-model\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        DuplicateKeyException failure = new DuplicateKeyException("duplicate key: platform_ai_model_configs_model_config_id_key");
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.error(failure));
+
+        DuplicateKeyException exception = Assertions.assertThrows(DuplicateKeyException.class, () -> service.createModelConfig(
+                new PersistenceDtos.CreateModelConfigRequest("channel-1", "known-model", "text", List.of(), 0, 0, true, "high")).block());
+
+        Assertions.assertSame(failure, exception);
     }
 
     /**
