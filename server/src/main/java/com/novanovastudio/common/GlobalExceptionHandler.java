@@ -43,9 +43,7 @@ public class GlobalExceptionHandler {
             case ErrorCode.PARAM_ERROR, ErrorCode.PARAM_INVALID, ErrorCode.PARAM_MISSING -> HttpStatus.BAD_REQUEST;
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
-        // 业务异常是可预期的调用结果（参数、权限、资源状态等），只记录一行错误日志，
-        // 不把异常对象传给日志，避免打印堆栈（Reactor 还会补一段 checkpoint 提示，噪音很大）。
-        log.error("业务异常: code={}, message={}", exception.getCode(), exception.getMessage());
+        log.error("业务异常: code={}, message={}", exception.getCode(), exception.getMessage(), exception);
         return ResponseEntity.status(status).body(ApiResponse.fail(exception.getCode(), exception.getMessage()));
     }
 
