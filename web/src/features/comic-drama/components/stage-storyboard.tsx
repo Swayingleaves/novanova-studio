@@ -488,6 +488,8 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
     const textWasDraggedRef = useRef(false);
     const tlBodyRef = useRef<HTMLDivElement>(null);
     const tlContentRef = useRef<HTMLDivElement>(null);
+    /** 「生成配置」面板的内容滚动容器，用于把两侧留白区的滚轮转发进来 */
+    const configScrollRef = useRef<HTMLDivElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
     const isScrubbingRef = useRef<boolean>(false);
     const scrubStartRef = useRef({ clientX: 0, time: 0 });
@@ -1162,6 +1164,17 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         } else if (Math.abs(e.deltaY) > Math.abs(e.deltaX) && tlBodyRef.current) {
             tlBodyRef.current.scrollLeft += e.deltaY;
         }
+    };
+
+    /**
+     * 「生成配置」面板内容区被 max-w-5xl 收窄在中间，两侧留白仍属于面板但不在滚动容器内，
+     * 鼠标停在那里滚轮会完全没反应（滚动条也不会出现）。这里把留白区的滚轮转发给内容滚动容器，
+     * 内容区自身的滚动交回浏览器原生行为，避免滚两倍。
+     */
+    const handleConfigPanelWheel = (event: React.WheelEvent) => {
+        const scroller = configScrollRef.current;
+        if (!scroller || scroller.contains(event.target as Node)) return;
+        scroller.scrollTop += event.deltaY;
     };
 
     // Open edit modal for active shot
@@ -1858,10 +1871,10 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                 </section>
 
                                 {/* BACK FACE: Generation Configuration & Shot Details */}
-                                <section className="absolute inset-0 overflow-hidden bg-[var(--studio-panel-solid)] [backface-visibility:hidden] [transform:rotateY(180deg)]">
+                                <section className="absolute inset-0 overflow-hidden bg-[var(--studio-panel-solid)] [backface-visibility:hidden] [transform:rotateY(180deg)]" onWheel={handleConfigPanelWheel}>
                                     <div className="mx-auto flex h-full max-w-5xl flex-col">
                                         {/* Scrollable Content Area */}
-                                        <div className="flex-1 overflow-y-auto px-8 pb-6 pt-16 hover-scrollbar">
+                                        <div ref={configScrollRef} className="flex-1 overflow-y-auto px-8 pb-6 pt-16 hover-scrollbar">
                                             {/* Shot Header Bar: Badges, Status & Episode info */}
                                             <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--studio-line)] pb-4">
                                                 <div className="flex flex-wrap items-center gap-2">
