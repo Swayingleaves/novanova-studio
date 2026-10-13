@@ -8,6 +8,8 @@ docs/node_modules
 docs/out
 web/.next
 web/node_modules
+web/.pnpm-store
+server/.maven-repository
 web/out
 *.log
 .env*

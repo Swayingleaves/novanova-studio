@@ -15,7 +15,7 @@ ENV NEXT_PUBLIC_GITHUB_URL=${NEXT_PUBLIC_GITHUB_URL}
 
 RUN corepack enable
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/.npmrc ./
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=novanova-studio-pro-pnpm,target=/app/web/.pnpm-store pnpm install --frozen-lockfile
 
 COPY web/ ./
 COPY docs/ /app/docs/

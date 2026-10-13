@@ -3,9 +3,10 @@ FROM maven:3.9.11-eclipse-temurin-21 AS builder
 WORKDIR /app
 COPY maven-settings.xml /opt/maven/settings.xml
 COPY pom.xml .
-RUN --mount=type=cache,target=/root/.m2 mvn -q -s /opt/maven/settings.xml -DskipTests dependency:go-offline
+COPY .mvn ./.mvn
+RUN --mount=type=cache,id=novanova-studio-pro-maven,target=/app/.maven-repository mvn -q -s /opt/maven/settings.xml -DskipTests dependency:go-offline
 COPY src ./src
-RUN --mount=type=cache,target=/root/.m2 mvn -q -s /opt/maven/settings.xml -DskipTests package
+RUN --mount=type=cache,id=novanova-studio-pro-maven,target=/app/.maven-repository mvn -q -s /opt/maven/settings.xml -DskipTests package
 
 FROM eclipse-temurin:21-jre
 

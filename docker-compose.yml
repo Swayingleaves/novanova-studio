@@ -1,3 +1,5 @@
+name: novanova-studio-pro
+
 services:
   postgres:
     image: postgres:17
@@ -69,20 +71,21 @@ services:
   nginx:
     image: nginx:1.27-alpine
     container_name: novanovastudio-pro-nginx
-    network_mode: host
+    ports:
+      - "127.0.0.1:${NGINX_PORT:-15554}:80"
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - ${NGINX_CONFIG_DIRECTORY:-/etc/nginx/conf.d}:/etc/nginx/conf.d:ro
-      - ${NGINX_STATIC_DIRECTORY:-/usr/share/nginx/html}:/usr/share/nginx/html:ro
+      - ${NGINX_CONFIG_DIRECTORY:-./nginx}:/etc/nginx/conf.d:ro
+      - ${NGINX_STATIC_DIRECTORY:-./volume/nginx_static}:/usr/share/nginx/html:ro
       - ${NGINX_LOG_DIRECTORY:-./logs/nginx}:/var/log/nginx
-      - ${NGINX_SSL_DIRECTORY:-/etc/nginx/ssl}:/etc/nginx/ssl:ro
+      - ${NGINX_SSL_DIRECTORY:-./volume/nginx_ssl}:/etc/nginx/ssl:ro
     depends_on:
       - web
       - server
     restart: unless-stopped
 
   web:
-    image: novanovastudio-web:${IMAGE_TAG:-latest}
+    image: novanovastudio-pro-web:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: web/Dockerfile
@@ -103,7 +106,7 @@ services:
     restart: unless-stopped
 
   server:
-    image: novanovastudio-server:${IMAGE_TAG:-latest}
+    image: novanovastudio-pro-server:${IMAGE_TAG:-latest}
     build:
       context: ./server
       dockerfile: Dockerfile

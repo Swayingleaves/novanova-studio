@@ -10,8 +10,8 @@ export const THEME_PREFERENCES: readonly ThemePreference[] = ["system", "light",
 /** 主题偏好本地存储键。 */
 export const THEME_STORAGE_KEY = "novanova:theme";
 
-/** 主题偏好 Cookie 键。 */
-export const THEME_COOKIE_KEY = "novanova_theme";
+/** 企业版主题偏好 Cookie 键，避免同一域名下不同端口与开源版共用。 */
+export const THEME_COOKIE_KEY = "novanova_studio_pro_theme";
 
 /** 主题偏好 Cookie 保存时长：一年。 */
 export const THEME_COOKIE_MAX_AGE = 31_536_000;

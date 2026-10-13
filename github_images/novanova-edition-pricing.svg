@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title description">
   <title id="title">Novanova Studio 开源授权版、单机企业版与集群企业版价格对比</title>
-  <desc id="description">开源授权版一次性费用2800元；企业版分两种，单机企业版一次性费用19800元，集群企业版一次性费用29800元。两种企业版均包含开源版全部能力并含一年技术支持，集群企业版相比单机企业版仅增加分布式微服务、服务拆分与 Kubernetes（K8s）集群部署支持。</desc>
+  <desc id="description">促销价：开源授权版一次性费用1200元（原价2800元），单机企业版一次性费用6600元（原价19800元），集群企业版一次性费用9800元（原价29800元）。两种企业版均包含开源版全部能力并含一年技术支持，集群企业版相比单机企业版仅增加分布式微服务、服务拆分与 Kubernetes（K8s）集群部署支持。</desc>
 
   <defs>
     <!-- 品牌渐变 -->
@@ -87,7 +87,9 @@
     <text x="0" y="124" class="secondary-text" font-size="17">适合具备自主开发与部署能力的团队</text>
 
     <text x="0" y="200" fill="#FFFFFF" font-size="28" font-weight="700">¥</text>
-    <text x="34" y="200" fill="#FFFFFF" font-size="54" font-weight="850" letter-spacing="-2">2,800</text>
+    <text x="34" y="200" fill="#FFFFFF" font-size="54" font-weight="850" letter-spacing="-2">1,200</text>
+    <text x="186" y="193" class="secondary-text" font-size="19" font-weight="500">2,800</text>
+    <line x1="184" y1="186" x2="241" y2="186" stroke="#A9A7B5" stroke-width="1.5"/>
     <text x="357" y="200" class="secondary-text" font-size="16" text-anchor="end">一次性费用</text>
 
     <line x1="0" y1="236" x2="357" y2="236" stroke="#343342" stroke-width="1"/>
@@ -129,7 +131,9 @@
     <text x="0" y="124" fill="#C8B8CD" font-size="17">适合希望快速部署、直接运营的团队</text>
 
     <text x="0" y="200" fill="#FFFFFF" font-size="28" font-weight="700">¥</text>
-    <text x="34" y="200" fill="url(#brandGradient)" font-size="54" font-weight="850" letter-spacing="-2">19,800</text>
+    <text x="34" y="200" fill="url(#brandGradient)" font-size="54" font-weight="850" letter-spacing="-2">6,600</text>
+    <text x="186" y="193" fill="#C8B8CD" font-size="19" font-weight="500">19,800</text>
+    <line x1="184" y1="186" x2="241" y2="186" stroke="#C8B8CD" stroke-width="1.5"/>
     <text x="357" y="200" fill="#C8B8CD" font-size="16" text-anchor="end">一次性费用</text>
 
     <line x1="0" y1="236" x2="357" y2="236" stroke="#3B2C45" stroke-width="1"/>
@@ -182,7 +186,9 @@
     <text x="0" y="124" fill="#C8B8CD" font-size="17">适合大规模运营、需要集群部署的团队</text>
 
     <text x="0" y="200" fill="#FFFFFF" font-size="28" font-weight="700">¥</text>
-    <text x="34" y="200" fill="url(#enterpriseGradient)" font-size="54" font-weight="850" letter-spacing="-2">29,800</text>
+    <text x="34" y="200" fill="url(#enterpriseGradient)" font-size="54" font-weight="850" letter-spacing="-2">9,800</text>
+    <text x="186" y="193" fill="#C8B8CD" font-size="19" font-weight="500">29,800</text>
+    <line x1="184" y1="186" x2="241" y2="186" stroke="#C8B8CD" stroke-width="1.5"/>
     <text x="357" y="200" fill="#C8B8CD" font-size="16" text-anchor="end">一次性费用</text>
 
     <line x1="0" y1="236" x2="357" y2="236" stroke="#403248" stroke-width="1"/>

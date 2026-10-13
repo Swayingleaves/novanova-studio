@@ -1,3 +1,5 @@
+name: novanova-studio-pro
+
 services:
   postgres:
     image: postgres:17
@@ -81,7 +83,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: novanovastudio-web:${IMAGE_TAG:-latest}
+    image: novanovastudio-pro-web:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: web/Dockerfile
@@ -100,7 +102,7 @@ services:
     restart: unless-stopped
 
   server:
-    image: novanovastudio-server:${IMAGE_TAG:-latest}
+    image: novanovastudio-pro-server:${IMAGE_TAG:-latest}
     build:
       context: ./server
       dockerfile: Dockerfile

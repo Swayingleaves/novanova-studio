@@ -1,3 +1,7 @@
+storeDir: .pnpm-store
+packageImportMethod: copy
+enableGlobalVirtualStore: false
+
 allowBuilds:
   esbuild: true
   sharp: true
