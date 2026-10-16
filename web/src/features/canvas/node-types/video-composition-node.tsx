@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { memo, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
@@ -12,6 +15,7 @@ import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface } from "./sh
 
 /** 画布视频合成节点。 */
 export const VideoCompositionNode = memo(function VideoCompositionNode({ data, selected }: NodeProps<Node<CanvasVideoCompositionNode>>) {
+    const translate = useTranslation();
     const actions = useNodeActions();
     const theme = useCanvasTheme();
     const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
@@ -80,11 +84,11 @@ export const VideoCompositionNode = memo(function VideoCompositionNode({ data, s
                 className="relative flex select-none flex-col overflow-visible rounded-2xl border-2"
                 style={{ width: "100%", height: "100%", background: theme.node.fill, borderColor, boxShadow: selected ? `0 0 0 1px ${theme.node.activeStroke}55` : undefined }}
             >
-                <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle="合成视频" onTitleChange={actions.onTitleChange} />
+                <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.composeVideo")} onTitleChange={actions.onTitleChange} />
                 <div className="flex items-center justify-between gap-3 border-b px-3 py-2.5" style={{ borderColor: theme.node.stroke }}>
                     <span className="inline-flex min-w-0 items-center gap-2 text-sm font-semibold" style={{ color: theme.node.text }}>
                         <Clapperboard className="size-4 shrink-0" style={{ color: theme.node.activeStroke }} />
-                        <span className="truncate">合成视频</span>
+                        <span className="truncate">{translate("canvas.composeVideo")}</span>
                     </span>
                     <CompositionStatus node={data} valid={canCompose} />
                 </div>
@@ -106,7 +110,7 @@ export const VideoCompositionNode = memo(function VideoCompositionNode({ data, s
                     ) : (
                         <div className="flex h-28 flex-col items-center justify-center gap-2 px-4 text-center text-xs" style={{ color: theme.node.placeholder }}>
                             <Video className="size-5 opacity-50" />
-                            <span>从视频节点拖出连线后，视频会按接入顺序显示在这里</span>
+                            <span>{translate("canvas.connectVideoNodesToArrangeClipsHereInConnection")}</span>
                         </div>
                     )}
                 </div>
@@ -123,7 +127,7 @@ export const VideoCompositionNode = memo(function VideoCompositionNode({ data, s
                         className="nodrag nopan flex h-9 w-full items-center justify-center gap-2 rounded-lg text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-45"
                         style={{ background: theme.node.activeStroke, color: theme.node.panel }}
                         disabled={!canCompose || isRunning}
-                        title={isRunning ? "正在合成视频" : canCompose ? "合成视频" : "至少需要2段已完成且已保存的视频"}
+                        title={isRunning ? translate("canvas.composingVideo") : canCompose ? translate("canvas.composeVideo") : translate("canvas.atLeast2CompletedAndSavedVideosRequired")}
                         onPointerDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                             event.stopPropagation();
@@ -131,7 +135,7 @@ export const VideoCompositionNode = memo(function VideoCompositionNode({ data, s
                         }}
                     >
                         {isRunning ? <LoaderCircle className="size-4 animate-spin" /> : <Clapperboard className="size-4" />}
-                        {isRunning ? `合成中 ${Math.max(0, data.execution.progress || 0)}%` : "合成"}
+                        {isRunning ? translate("canvas.composing", { value0: Math.max(0, data.execution.progress || 0) }) : translate("canvas.compose")}
                     </button>
                 </div>
                 <CanvasConnectionHandles />
@@ -158,6 +162,7 @@ function VideoInputRow({
     onDragStart: (event: ReactPointerEvent<HTMLButtonElement>, nodeId: string) => void;
     onPreview: () => void;
 }) {
+    const translate = useTranslation();
     const theme = useCanvasTheme();
     const status = videoStatus(video);
     return (
@@ -175,8 +180,8 @@ function VideoInputRow({
                 className="grid size-6 shrink-0 place-items-center rounded text-xs disabled:cursor-not-allowed disabled:opacity-35"
                 style={{ color: theme.node.muted }}
                 disabled={disabled}
-                title={disabled ? "合成中不能调整顺序" : "拖动调整合成顺序"}
-                aria-label={`拖动第${index + 1}段视频调整合成顺序`}
+                title={disabled ? translate("canvas.cannotReorderWhileComposing") : translate("canvas.dragToReorderComposition")}
+                aria-label={translate("canvas.dragVideoToReorderComposition", { value0: index + 1 })}
                 onPointerDown={(event) => onDragStart(event, video.id)}
             >
                 <GripVertical className="size-4" />
@@ -184,7 +189,7 @@ function VideoInputRow({
             <button
                 type="button"
                 className="relative h-10 w-16 shrink-0 overflow-hidden rounded bg-black"
-                title="放大查看视频"
+                title={translate("canvas.viewEnlargedVideo")}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                     event.stopPropagation();
@@ -196,7 +201,7 @@ function VideoInputRow({
             </button>
             <div className="min-w-0 flex-1">
                 <div className="truncate text-xs font-medium" style={{ color: theme.node.text }}>
-                    {index + 1}. {video.title || "视频"}
+                    {index + 1}. {video.title || translate("canvas.video")}
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-[11px]" style={{ color: status.color }}>
                     {status.icon}
@@ -210,41 +215,39 @@ function VideoInputRow({
 
 /** 合成节点状态标签。 */
 function CompositionStatus({ node, valid }: { node: CanvasVideoCompositionNode; valid: boolean }) {
+    const translate = useTranslation();
     const theme = useCanvasTheme();
     if (node.execution.phase === "running")
         return (
             <span className="inline-flex shrink-0 items-center gap-1 text-[11px]" style={{ color: theme.node.activeStroke }}>
                 <LoaderCircle className="size-3 animate-spin" />
-                处理中
-            </span>
+                {translate("canvas.processing_694b71")}</span>
         );
     if (node.execution.phase === "failed")
         return (
             <span className="inline-flex shrink-0 items-center gap-1 text-[11px] text-red-400">
                 <XCircle className="size-3" />
-                失败
-            </span>
+                {translate("canvas.failed")}</span>
         );
     if (node.execution.phase === "succeeded")
         return (
             <span className="inline-flex shrink-0 items-center gap-1 text-[11px]" style={{ color: theme.node.activeStroke }}>
                 <CheckCircle2 className="size-3" />
-                已完成
-            </span>
+                {translate("canvas.completed")}</span>
         );
     return (
         <span className="text-[11px]" style={{ color: valid ? theme.node.activeStroke : theme.node.muted }}>
-            {valid ? "可合成" : "待补齐"}
+            {valid ? translate("canvas.readyToCompose") : translate("canvas.needsDetails")}
         </span>
     );
 }
 
 /** 视频输入的展示状态。 */
 function videoStatus(video: CanvasVideoNode) {
-    if (video.execution.phase === "succeeded" && video.content.storageKey) return { label: "已就绪", color: "#16a34a", icon: <CheckCircle2 className="size-3" /> };
-    if (video.execution.phase === "running") return { label: "生成中", color: "#2563eb", icon: <LoaderCircle className="size-3 animate-spin" /> };
-    if (video.execution.phase === "failed") return { label: "生成失败", color: "#ef4444", icon: <XCircle className="size-3" /> };
-    return { label: video.content.storageKey ? "待完成" : "未保存", color: "#6b7280", icon: <Video className="size-3" /> };
+    if (video.execution.phase === "succeeded" && video.content.storageKey) return { label: translate("canvas.ready"), color: "#16a34a", icon: <CheckCircle2 className="size-3" /> };
+    if (video.execution.phase === "running") return { label: translate("canvas.generating_969ef4"), color: "#2563eb", icon: <LoaderCircle className="size-3 animate-spin" /> };
+    if (video.execution.phase === "failed") return { label: translate("canvas.generationFailed"), color: "#ef4444", icon: <XCircle className="size-3" /> };
+    return { label: video.content.storageKey ? translate("canvas.incomplete") : translate("canvas.unsaved"), color: "#6b7280", icon: <Video className="size-3" /> };
 }
 
 /** 格式化视频时长。 */
@@ -252,5 +255,5 @@ function formatDuration(milliseconds: number): string {
     const totalSeconds = Math.max(0, Math.round(milliseconds / 1000));
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
-    return minutes ? `${minutes}:${String(seconds).padStart(2, "0")}` : `${seconds} 秒`;
+    return minutes ? `${minutes}:${String(seconds).padStart(2, "0")}` : translate("canvas.s_c6a166", { value0: seconds });
 }

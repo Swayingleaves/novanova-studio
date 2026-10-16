@@ -1,36 +1,38 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { CanvasDirectorDeskActionPreset, CanvasDirectorDeskJoint, CanvasDirectorDeskPose, CanvasDirectorDeskVector3 } from "@/features/canvas/types";
 
 /** 关节顺序同时用于骨骼映射、编辑面板与姿势校验。 */
 export const DIRECTOR_DESK_JOINTS: CanvasDirectorDeskJoint[] = ["body", "spine", "neck", "head", "leftShoulder", "rightShoulder", "leftElbow", "rightElbow", "leftWrist", "rightWrist", "leftHip", "rightHip", "leftKnee", "rightKnee", "leftAnkle", "rightAnkle"];
 
 export const JOINT_LABELS: Record<CanvasDirectorDeskJoint, string> = {
-    body: "身体", spine: "躯干", neck: "颈部", head: "头部", leftShoulder: "左肩", rightShoulder: "右肩", leftElbow: "左肘", rightElbow: "右肘", leftWrist: "左腕", rightWrist: "右腕", leftHip: "左髋", rightHip: "右髋", leftKnee: "左膝", rightKnee: "右膝", leftAnkle: "左踝", rightAnkle: "右踝",
+    get body() { return translate("directorDesk.body"); }, get spine() { return translate("directorDesk.torso"); }, get neck() { return translate("directorDesk.neck"); }, get head() { return translate("directorDesk.head"); }, get leftShoulder() { return translate("directorDesk.leftShoulder"); }, get rightShoulder() { return translate("directorDesk.rightShoulder"); }, get leftElbow() { return translate("directorDesk.leftElbow"); }, get rightElbow() { return translate("directorDesk.rightElbow"); }, get leftWrist() { return translate("directorDesk.leftWrist"); }, get rightWrist() { return translate("directorDesk.rightWrist"); }, get leftHip() { return translate("directorDesk.leftHip"); }, get rightHip() { return translate("directorDesk.rightHip"); }, get leftKnee() { return translate("directorDesk.leftKnee"); }, get rightKnee() { return translate("directorDesk.rightKnee"); }, get leftAnkle() { return translate("directorDesk.leftAnkle"); }, get rightAnkle() { return translate("directorDesk.rightAnkle"); },
 };
 
 type ActionDefinition = { label: string; durationMilliseconds: number; loop: boolean };
 
 /** 持续动作循环播放，入姿及单次动作到达终点后保持。 */
 export const CHARACTER_ACTIONS: Record<CanvasDirectorDeskActionPreset, ActionDefinition> = {
-    idle: { label: "站立", durationMilliseconds: 2400, loop: true },
-    tPose: { label: "T 型", durationMilliseconds: 2400, loop: true },
-    walk: { label: "行走", durationMilliseconds: 900, loop: true },
-    run: { label: "跑步", durationMilliseconds: 600, loop: true },
-    sit: { label: "坐姿", durationMilliseconds: 1100, loop: false },
-    crouch: { label: "蹲下", durationMilliseconds: 1000, loop: false },
-    kneelSingle: { label: "单膝跪", durationMilliseconds: 1300, loop: false },
-    kneelDouble: { label: "双膝跪", durationMilliseconds: 1300, loop: false },
-    handsOnHips: { label: "叉腰", durationMilliseconds: 850, loop: false },
-    lean: { label: "倚靠", durationMilliseconds: 1000, loop: false },
-    bow: { label: "鞠躬", durationMilliseconds: 1600, loop: false },
-    think: { label: "思考", durationMilliseconds: 1000, loop: false },
-    fight: { label: "格斗", durationMilliseconds: 1000, loop: true },
-    kick: { label: "踢球", durationMilliseconds: 1200, loop: false },
-    throw: { label: "投掷", durationMilliseconds: 1400, loop: false },
-    push: { label: "推进", durationMilliseconds: 1300, loop: false },
-    wave: { label: "招手", durationMilliseconds: 800, loop: true },
-    reach: { label: "伸手", durationMilliseconds: 900, loop: false },
-    crossArms: { label: "抱臂", durationMilliseconds: 1000, loop: false },
-    phone: { label: "看手机", durationMilliseconds: 1000, loop: false },
+    idle: { get label() { return translate("directorDesk.stand"); }, durationMilliseconds: 2400, loop: true },
+    tPose: { get label() { return translate("directorDesk.tPose"); }, durationMilliseconds: 2400, loop: true },
+    walk: { get label() { return translate("directorDesk.walk"); }, durationMilliseconds: 900, loop: true },
+    run: { get label() { return translate("directorDesk.run"); }, durationMilliseconds: 600, loop: true },
+    sit: { get label() { return translate("directorDesk.sit"); }, durationMilliseconds: 1100, loop: false },
+    crouch: { get label() { return translate("directorDesk.crouch"); }, durationMilliseconds: 1000, loop: false },
+    kneelSingle: { get label() { return translate("directorDesk.kneelOnOneKnee"); }, durationMilliseconds: 1300, loop: false },
+    kneelDouble: { get label() { return translate("directorDesk.kneel"); }, durationMilliseconds: 1300, loop: false },
+    handsOnHips: { get label() { return translate("directorDesk.handsOnHips"); }, durationMilliseconds: 850, loop: false },
+    lean: { get label() { return translate("directorDesk.lean"); }, durationMilliseconds: 1000, loop: false },
+    bow: { get label() { return translate("directorDesk.bow"); }, durationMilliseconds: 1600, loop: false },
+    think: { get label() { return translate("directorDesk.thinking"); }, durationMilliseconds: 1000, loop: false },
+    fight: { get label() { return translate("directorDesk.fighting"); }, durationMilliseconds: 1000, loop: true },
+    kick: { get label() { return translate("directorDesk.kickBall"); }, durationMilliseconds: 1200, loop: false },
+    throw: { get label() { return translate("directorDesk.throw"); }, durationMilliseconds: 1400, loop: false },
+    push: { get label() { return translate("directorDesk.dollyIn"); }, durationMilliseconds: 1300, loop: false },
+    wave: { get label() { return translate("directorDesk.wave"); }, durationMilliseconds: 800, loop: true },
+    reach: { get label() { return translate("directorDesk.reachOut"); }, durationMilliseconds: 900, loop: false },
+    crossArms: { get label() { return translate("directorDesk.armsCrossed"); }, durationMilliseconds: 1000, loop: false },
+    phone: { get label() { return translate("directorDesk.lookingAtPhone"); }, durationMilliseconds: 1000, loop: false },
 };
 
 /** 创建独立的零偏移姿势，避免多个角色或关键帧共享可变关节对象。 */
@@ -57,7 +59,7 @@ function smooth(value: number): number {
 /** 通过解剖学关节角度按绝对时间求动作，不依赖之前播放过的帧。 */
 export function evaluateCharacterAction(preset: CanvasDirectorDeskActionPreset, elapsedMilliseconds: number): CanvasDirectorDeskPose {
     const definition = CHARACTER_ACTIONS[preset];
-    if (!definition) throw new Error("人物动作预设不存在");
+    if (!definition) throw new Error(translate("directorDesk.posePresetNotFound"));
     const elapsed = Math.max(0, elapsedMilliseconds);
     const progress = definition.loop ? (elapsed % definition.durationMilliseconds) / definition.durationMilliseconds : Math.min(1, elapsed / definition.durationMilliseconds);
     const phase = progress * Math.PI * 2;
@@ -198,6 +200,6 @@ export function degreesToRadians(value: number): number { return value * Math.PI
 
 /** 各关节旋转轴的中文标签。 */
 export function jointAxisLabel(joint: CanvasDirectorDeskJoint, axis: keyof CanvasDirectorDeskVector3): string {
-    if (joint.endsWith("Elbow") || joint.endsWith("Knee")) return axis === "x" ? "弯曲" : axis === "y" ? "扭转" : "侧弯";
-    return axis === "x" ? "前倾 / 前举" : axis === "y" ? "转身 / 扭转" : "侧倾 / 外展";
+    if (joint.endsWith("Elbow") || joint.endsWith("Knee")) return axis === "x" ? translate("directorDesk.bend") : axis === "y" ? translate("directorDesk.twist") : translate("directorDesk.sideBend");
+    return axis === "x" ? translate("directorDesk.leanRaiseForward") : axis === "y" ? translate("directorDesk.turnTwist") : translate("directorDesk.tiltAbduction");
 }

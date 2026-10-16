@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.CreditDtos;
@@ -150,7 +152,7 @@ public class CreditService {
                     return creditRepository.claimInvitationRewardTransaction(
                                     inviterUserId, invitedUserId, rewardCredits, "邀请新用户注册奖励")
                             .flatMap(transactionId -> creditRepository.changeBalance(inviterUserId, rewardCredits)
-                                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邀请人积分账户不存在")))
+                                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.inviterCreditAccountNotFound"))))
                                     .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)
                                             .doOnSuccess(ignored -> log.info("邀请注册奖励已发放: inviterUserId={}, invitedUserId={}, credits={}, balanceAfter={}",
                                                     inviterUserId, invitedUserId, rewardCredits, balance))))
@@ -175,7 +177,7 @@ public class CreditService {
         }
         return creditRepository.claimTaskTransaction(userId, taskId, TRANSACTION_TASK_CHARGE, -credits, taskReason(taskType, "扣费"), generationSource)
                 .flatMap(transactionId -> creditGrantService.consumeCredits(userId, credits)
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分不足，无法创建生成任务")))
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.insufficientCreditsToCreateGenerationTask"))))
                         .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
                 .then();
     }
@@ -210,7 +212,7 @@ public class CreditService {
      */
     public Mono<Void> chargeOperation(Long userId, String operationId, int credits, String operationName) {
         if (credits < 0) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "积分扣费金额不能小于0"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.creditChargeMustNotBeNegative")));
         }
         if (credits == 0) {
             return Mono.empty();
@@ -218,7 +220,7 @@ public class CreditService {
         String chargeReason = operationReason(operationName, "扣费", operationId);
         return creditRepository.claimOperationTransaction(userId, operationId, TRANSACTION_TASK_CHARGE, -credits, chargeReason)
                 .flatMap(transactionId -> creditGrantService.consumeCredits(userId, credits)
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分不足，无法执行" + operationName)))
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.insufficientCreditsFor", operationName))))
                         .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
                 .then()
                 .as(transactionalOperator::transactional);
@@ -235,7 +237,7 @@ public class CreditService {
     public Mono<Void> refundOperation(Long userId, String operationId, String operationName) {
         String chargeReason = operationReason(operationName, "扣费", operationId);
         return creditRepository.getOperationChargeAmount(userId, chargeReason)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "未找到需要退款的" + operationName + "扣费流水")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.noChargeFoundToRefund", operationName))))
                 .flatMap(credits -> refundOperationAmount(userId, operationId, operationName, credits))
                 .then()
                 .as(transactionalOperator::transactional);
@@ -256,7 +258,7 @@ public class CreditService {
         }
         if (credits == 0) return Mono.empty();
         return creditRepository.getOperationChargeAmount(userId, operationReason(operationName, "扣费", operationId))
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "未找到需要退款的" + operationName + "扣费流水")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.noChargeFoundToRefund", operationName))))
                 .flatMap(charged -> credits <= charged
                         ? refundOperationAmount(userId, operationId, operationName, credits)
                         : Mono.<Void>error(new BusinessException(ErrorCode.PARAM_INVALID, "退款积分不能超过原始扣费")))
@@ -289,7 +291,7 @@ public class CreditService {
         return creditRepository.claimOperationTransaction(userId, operationId, TRANSACTION_TASK_REFUND, credits,
                         operationReason(operationName, "退款", operationId))
                 .flatMap(transactionId -> creditRepository.changeBalance(userId, credits)
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, operationName + "退款失败")))
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.refundFailed", operationName))))
                         .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
                 .then();
     }
@@ -305,13 +307,13 @@ public class CreditService {
      */
     public Mono<CreditDtos.CreditBalanceResponse> adjustUserCredits(Long userId, Long operatorUserId, int changeAmount, String reason) {
         if (changeAmount == 0) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "积分变动值不能为0"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.creditChangeMustNotBeZero")));
         }
         Mono<Integer> balanceChange = changeAmount > 0
                 ? creditRepository.changeBalance(userId, changeAmount)
                 : creditGrantService.consumeCredits(userId, -changeAmount);
         return balanceChange
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分不足，无法完成扣减")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.insufficientCreditsForDeduction"))))
                 .flatMap(balance -> creditRepository.createTransaction(userId, TRANSACTION_ADMIN_ADJUSTMENT, operatorUserId, changeAmount, balance, reason.trim())
                         .thenReturn(new CreditDtos.CreditBalanceResponse(userId, balance)))
                 .as(transactionalOperator::transactional);
@@ -359,7 +361,7 @@ public class CreditService {
      */
     public Mono<CreditDtos.UserCreditTransactionListResponse> listCreditTransactions(LocalDate startDate, LocalDate endDate, String direction, String source, int page, int pageSize) {
         if (page < 1 || pageSize < 1 || pageSize > 100) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "分页参数不合法"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidPaginationParameters")));
         }
         return currentUserProvider.currentUserId().flatMap(userId -> {
             CreditRepository.UserCreditQuery query = createUserCreditQuery(userId, startDate, endDate, direction, source);
@@ -392,7 +394,7 @@ public class CreditService {
      */
     public Mono<CreditDtos.AdminCreditTransactionListResponse> listAdminCreditTransactions(Long userId, LocalDate startDate, LocalDate endDate, String generationType, int page, int pageSize) {
         if (page < 1 || pageSize < 1 || pageSize > 100) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "分页参数不合法"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidPaginationParameters")));
         }
         return Mono.defer(() -> {
             CreditRepository.UserCreditQuery query = createUserCreditQuery(userId, startDate, endDate, null, generationType);
@@ -437,10 +439,10 @@ public class CreditService {
      */
     private CreditRepository.CreditConsumptionQuery createConsumptionQuery(Long userId, LocalDate startDate, LocalDate endDate, String generationType) {
         if (startDate == null || endDate == null || startDate.isAfter(endDate)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "积分筛选日期不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidCreditDateFilter"));
         }
         if (generationType != null && !List.of("image", "video").contains(generationType)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "积分筛选类型仅支持image或video");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.generationTypeFilterMustBeImageOrVideo"));
         }
         OffsetDateTime startAt = startDate.atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime();
         OffsetDateTime endAt = endDate.plusDays(1).atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime();
@@ -459,13 +461,13 @@ public class CreditService {
      */
     private CreditRepository.UserCreditQuery createUserCreditQuery(Long userId, LocalDate startDate, LocalDate endDate, String direction, String source) {
         if (startDate == null || endDate == null || startDate.isAfter(endDate)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "积分筛选日期不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidCreditDateFilter"));
         }
         if (direction != null && !List.of("all", "add", "spend").contains(direction)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "积分方向仅支持all、add或spend");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.creditDirectionMustBeAllAddOrSpend"));
         }
         if (source != null && !List.of("image", "video", "task_refund", "card_redeem", "admin_adjustment", "initial_grant", "invitation_reward", TRANSACTION_DAILY_CHECK_IN, TRANSACTION_CREDIT_EXPIRED).contains(source)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "积分来源筛选不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidCreditSourceFilter"));
         }
         OffsetDateTime startAt = startDate.atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime();
         OffsetDateTime endAt = endDate.plusDays(1).atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime();
@@ -480,7 +482,7 @@ public class CreditService {
      */
     private void validateTrendUnit(String trendUnit) {
         if (!TREND_UNIT_DAY.equals(trendUnit) && !TREND_UNIT_MONTH.equals(trendUnit)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "积分趋势单位仅支持day或month");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.trendUnitMustBeDayOrMonth"));
         }
     }
 
@@ -583,7 +585,7 @@ public class CreditService {
         String normalizedName = operationName == null ? "业务操作" : operationName.trim();
         String normalizedId = operationId == null ? "" : operationId.trim();
         if (normalizedName.isEmpty() || normalizedId.isEmpty()) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "业务积分操作标识不能为空");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.creditOperationIDIsRequired"));
         }
         return normalizedName + action + "（操作ID：" + normalizedId + "）";
     }

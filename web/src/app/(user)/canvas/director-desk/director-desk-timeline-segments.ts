@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { CanvasDirectorDeskActionClip, CanvasDirectorDeskActionPreset, CanvasDirectorDeskProject } from "@/features/canvas/types";
 
 export interface TimelineInterval {
@@ -16,7 +18,7 @@ export interface DirectorDeskTimelineSegmentReference {
 export function resizeTimelineSegment(segments: Array<TimelineInterval & { id: string }>, segmentId: string, edge: "start" | "end", timeMilliseconds: number, durationMilliseconds: number): TimelineInterval {
     const sorted = [...segments].sort((first, second) => first.startTimeMilliseconds - second.startTimeMilliseconds);
     const index = sorted.findIndex((segment) => segment.id === segmentId);
-    if (index < 0) throw new Error("要调整的时间轨道片段不存在");
+    if (index < 0) throw new Error(translate("directorDesk.timelineClipToAdjustNotFound"));
     const segment = sorted[index];
     const frame = (time: number) => Math.round(time * 30 / 1000);
     const minimumFrame = edge === "start" ? frame(sorted[index - 1]?.endTimeMilliseconds || 0) : frame(segment.startTimeMilliseconds) + 1;
@@ -28,17 +30,17 @@ export function resizeTimelineSegment(segments: Array<TimelineInterval & { id: s
 /** 删除或调整指定轨道片段，保留其他轨道和场景数据，具体时间合法性由统一工程校验处理。 */
 export function editDirectorDeskTimelineSegment(project: CanvasDirectorDeskProject, reference: DirectorDeskTimelineSegmentReference, interval: TimelineInterval | null): CanvasDirectorDeskProject {
     const editSegments = <Segment extends TimelineInterval & { id: string }>(segments: Segment[]): Segment[] => {
-        if (!segments.some((segment) => segment.id === reference.segmentId)) throw new Error("要编辑的时间轨道片段不存在");
+        if (!segments.some((segment) => segment.id === reference.segmentId)) throw new Error(translate("directorDesk.timelineClipToEditNotFound"));
         return (interval ? segments.map((segment) => segment.id === reference.segmentId ? { ...segment, ...interval } : segment) : segments.filter((segment) => segment.id !== reference.segmentId))
             .sort((first, second) => first.startTimeMilliseconds - second.startTimeMilliseconds);
     };
     if (reference.kind === "cameraPath") {
-        if (!project.cameras.some((camera) => camera.id === reference.ownerId)) throw new Error("要编辑的时间轨道机位不存在");
+        if (!project.cameras.some((camera) => camera.id === reference.ownerId)) throw new Error(translate("directorDesk.timelineCameraToEditNotFound"));
         return { ...project, cameras: project.cameras.map((camera) => camera.id === reference.ownerId ? { ...camera, motionPaths: editSegments(camera.motionPaths || []) } : camera) };
     }
     const owner = project.objects.find((object) => object.id === reference.ownerId);
-    if (!owner) throw new Error("要编辑的时间轨道对象不存在");
-    if (owner.locked) throw new Error("已锁定对象不能编辑时间轨道");
+    if (!owner) throw new Error(translate("directorDesk.timelineObjectToEditNotFound"));
+    if (owner.locked) throw new Error(translate("directorDesk.lockedObjectsCannotEditTimeline"));
     return { ...project, objects: project.objects.map((object) => object.id === reference.ownerId ? {
         ...object, track: { position: [], rotation: [], ...object.track, ...(reference.kind === "action" ? { actionClips: editSegments(object.track?.actionClips || []) } : { motionPaths: editSegments(object.track?.motionPaths || []) }) },
     } : object) };
@@ -61,6 +63,6 @@ export function setTimelineCharacterAction(clips: CanvasDirectorDeskActionClip[]
     const active = findActiveTimelineSegment(clips, timeMilliseconds, durationMilliseconds);
     if (active) return clips.map((clip) => clip.id === active.id ? { ...clip, preset } : clip);
     const interval = getEmptyTimelineInterval(clips, timeMilliseconds, durationMilliseconds);
-    if (!interval) throw new Error("请将播放头移到时间轴内的空白区间，再添加动作");
+    if (!interval) throw new Error(translate("directorDesk.movePlayheadToAnEmptyTimelineIntervalToAdd"));
     return [...clips, { id: newClipId, preset, ...interval, speed: 1 }].sort((first, second) => first.startTimeMilliseconds - second.startTimeMilliseconds);
 }

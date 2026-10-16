@@ -1,5 +1,7 @@
 package com.novanovastudio.ai.provider;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -66,7 +68,7 @@ public class GeminiProviderAdapter implements AiProviderAdapter {
         return switch (context.task().getTaskType()) {
             case AiTaskTypes.TEXT -> executeTextTask(context);
             case AiTaskTypes.IMAGE -> executeImageTask(context);
-            default -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "Gemini 调用格式暂不支持" + context.task().getTaskType() + "任务"));
+            default -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.geminiFormatDoesNotSupportTasks", context.task().getTaskType())));
         };
     }
 
@@ -120,7 +122,7 @@ public class GeminiProviderAdapter implements AiProviderAdapter {
                 .flatMap(response -> {
                     List<JSONObject> imageItems = parseGeminiImages(response);
                     if (imageItems.isEmpty()) {
-                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "Gemini 接口没有返回图片"));
+                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.geminiReturnedNoImage")));
                     }
                     return Flux.fromIterable(imageItems)
                             .concatMap(item -> mediaSupport.storeGeneratedImageItem(context.task().getUserId(), item, null, null, 0)
@@ -177,7 +179,7 @@ public class GeminiProviderAdapter implements AiProviderAdapter {
     private Map<String, Object> toGeminiImagePart(String dataUrl) {
         int commaIndex = dataUrl.indexOf(',');
         if (commaIndex < 0 || !dataUrl.substring(0, commaIndex).contains(";base64")) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "Gemini参考图片data URL必须是base64格式");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.geminiImageDataURLMustBeBase64"));
         }
         String mimeType = AiTaskParameterReader.firstNonEmpty(dataUrl.substring(5, commaIndex).split(";")[0], "image/png");
         String base64 = dataUrl.substring(commaIndex + 1);

@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useMemo, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button, Input, Modal, Popover, Skeleton, Tooltip } from "antd";
@@ -27,6 +29,7 @@ type GenerationStyleMenuProps = {
 };
 
 export function useGenerationStyles(generationType?: GenerationStyleType) {
+    const translate = useTranslation();
     const [styles, setStyles] = useState<GenerationStyleOption[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
@@ -44,7 +47,7 @@ export function useGenerationStyles(generationType?: GenerationStyleType) {
             .catch((reason) => {
                 if (!active) return;
                 setStyles([]);
-                setError(reason instanceof Error ? reason.message : "风格加载失败");
+                setError(reason instanceof Error ? reason.message : translate("generation.failedToLoadStyles"));
             })
             .finally(() => {
                 if (active) setLoading(false);
@@ -58,6 +61,7 @@ export function useGenerationStyles(generationType?: GenerationStyleType) {
 }
 
 export function GenerationStyleChips({ styles, onRemove, className = "" }: { styles: GenerationStyleSelection[]; onRemove?: (id: number) => void; className?: string }) {
+    const translate = useTranslation();
     if (!styles.length) return null;
     return (
         <div className={`flex flex-wrap gap-2 ${className}`}>
@@ -70,7 +74,7 @@ export function GenerationStyleChips({ styles, onRemove, className = "" }: { sty
                             type="button"
                             className="grid size-4 place-items-center rounded-sm text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]"
                             onClick={() => onRemove(style.id)}
-                            aria-label={`移除风格${style.name}`}
+                            aria-label={translate("generation.removeStyle", { value0: style.name })}
                         >
                             <X className="size-3" />
                         </button>
@@ -98,12 +102,13 @@ export function GenerationStyleMenu({
     placement = "topLeft",
     iconOnly = false,
 }: GenerationStyleMenuProps) {
+    const translate = useTranslation();
     const [internalQuery, setInternalQuery] = useState("");
     const [category, setCategory] = useState(ALL_GENERATION_STYLE_CATEGORY);
     const [previewStyle, setPreviewStyle] = useState<GenerationStyleSelection | null>(null);
     const effectiveQuery = query ?? internalQuery;
-    const categories = useMemo(() => collectGenerationStyleCategories(styles), [styles]);
-    const filtered = useMemo(() => filterGenerationStyles(styles, effectiveQuery, category), [category, effectiveQuery, styles]);
+    const categories = useMemo(() => collectGenerationStyleCategories(styles), [styles, translate.locale]);
+    const filtered = useMemo(() => filterGenerationStyles(styles, effectiveQuery, category), [category, effectiveQuery, styles, translate.locale]);
 
     useEffect(() => {
         if (!open) {
@@ -165,7 +170,7 @@ export function GenerationStyleMenu({
         <div
             className="w-[min(39.1rem,calc(100vw-24px))] p-1"
             role="dialog"
-            aria-label="风格库"
+            aria-label={translate("generation.styleLibrary")}
             onKeyDown={(event) => {
                 if (event.key !== "Escape") return;
                 event.preventDefault();
@@ -175,14 +180,14 @@ export function GenerationStyleMenu({
             <div className="flex items-center justify-between gap-3 px-2 pb-2 pt-1">
                 <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-[var(--studio-ink)]">
                     <Palette className="size-4 shrink-0 text-[var(--studio-action)]" />
-                    <span>风格库</span>
+                    <span>{translate("generation.styleLibrary")}</span>
                 </div>
-                <span className="text-xs text-[var(--studio-muted)]">最多 {MAX_GENERATION_STYLE_SELECTION_COUNT} 个</span>
+                <span className="text-xs text-[var(--studio-muted)]">{translate("generation.maximum")}{MAX_GENERATION_STYLE_SELECTION_COUNT} {translate("generation.items")}</span>
             </div>
             <Input
                 value={effectiveQuery}
                 prefix={<Search className="size-3.5 text-[var(--studio-muted)]" />}
-                placeholder={grouped ? "搜索图片或视频风格" : "搜索风格名、分类"}
+                placeholder={grouped ? translate("generation.searchImageOrVideoStyles") : translate("generation.searchStyleNameOrCategory")}
                 className="mb-2"
                 autoFocus
                 onChange={(event) => updateQuery(event.target.value)}
@@ -196,8 +201,7 @@ export function GenerationStyleMenu({
                         onHighlightedIndexChange?.(0);
                     }}
                 >
-                    全部
-                </CategoryButton>
+                    {translate("generation.all")}</CategoryButton>
                 {categories.map((item) => (
                     <CategoryButton
                         key={item}
@@ -216,7 +220,7 @@ export function GenerationStyleMenu({
             ) : error ? (
                 <StyleLibraryState icon={<ImageOff className="size-5" />} text={error} />
             ) : filtered.length ? (
-                <div className="thin-scrollbar grid max-h-[min(34.5rem,calc(100vh-190px))] grid-cols-3 gap-2 overflow-y-auto pr-1 min-[400px]:grid-cols-4" role="listbox" aria-label="风格列表">
+                <div className="thin-scrollbar grid max-h-[min(34.5rem,calc(100vh-190px))] grid-cols-3 gap-2 overflow-y-auto pr-1 min-[400px]:grid-cols-4" role="listbox" aria-label={translate("generation.styles")}>
                     {filtered.map((style, index) => {
                         const isSelected = isGenerationStyleSelected(style.id, selected);
                         return (
@@ -229,7 +233,7 @@ export function GenerationStyleMenu({
                                     type="button"
                                     role="option"
                                     aria-selected={isSelected}
-                                    aria-label={`${style.name}，${style.generationType === "video" ? "视频" : "图片"}风格${isSelected ? "，已选择" : ""}`}
+                                    aria-label={translate("generation.style", { value0: style.name, value1: style.generationType === "video" ? translate("generation.video") : translate("generation.image_d24c10"), value2: isSelected ? translate("generation.selected") : "" })}
                                     className={`relative w-full overflow-hidden rounded-md border text-left transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--studio-action)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--studio-surface)] ${isSelected ? "border-[var(--studio-action)] bg-[var(--studio-primary-soft)]" : index === highlightedIndex ? "border-[var(--studio-line-strong)] bg-[var(--studio-surface-hover)]" : "border-[var(--studio-line)] bg-[var(--studio-surface)] hover:border-[var(--studio-line-strong)] hover:bg-[var(--studio-surface-hover)]"}`}
                                     onClick={() => selectStyle(style)}
                                 >
@@ -250,7 +254,7 @@ export function GenerationStyleMenu({
                     })}
                 </div>
             ) : (
-                <StyleLibraryState icon={<Search className="size-5" />} text="暂无匹配风格" />
+                <StyleLibraryState icon={<Search className="size-5" />} text={translate("generation.noMatchingStyles")} />
             )}
         </div>
     );
@@ -273,9 +277,9 @@ export function GenerationStyleMenu({
                 }}
             >
                 <span className="inline-flex">
-                    <Tooltip title="选择风格">
-                        <Button size="small" className={`creation-composer-action ${iconOnly ? "creation-composer-action-icon" : ""}`} icon={<Palette className="size-3.5" />} aria-expanded={open} aria-haspopup="dialog" aria-label="选择风格">
-                            {iconOnly ? null : "风格"}
+                    <Tooltip title={translate("generation.selectStyle")}>
+                        <Button size="small" className={`creation-composer-action ${iconOnly ? "creation-composer-action-icon" : ""}`} icon={<Palette className="size-3.5" />} aria-expanded={open} aria-haspopup="dialog" aria-label={translate("generation.selectStyle")}>
+                            {iconOnly ? null : translate("generation.style_1bfde6")}
                         </Button>
                     </Tooltip>
                 </span>
@@ -287,6 +291,7 @@ export function GenerationStyleMenu({
 
 /** 风格封面，空地址和加载失败时使用默认图标或调用方指定的默认内容。 */
 export function GenerationStyleCover({ style, className = "", fallbackIcon }: { style: Pick<GenerationStyleSelection, "coverUrl" | "name">; className?: string; fallbackIcon?: ReactNode }) {
+    const translate = useTranslation();
     const [failed, setFailed] = useState(false);
     useEffect(() => setFailed(false), [style.coverUrl]);
     const useDefaultCover = failed || usesGenerationStyleDefaultCover(style);
@@ -294,7 +299,7 @@ export function GenerationStyleCover({ style, className = "", fallbackIcon }: { 
         return (
             <span className={`grid place-items-center bg-[var(--studio-surface-raised)] text-[var(--studio-muted)] ${className}`}>
                 {fallbackIcon ?? <ImageOff className="size-5" />}
-                <span className="sr-only">{style.name}默认封面</span>
+                <span className="sr-only">{style.name}{translate("generation.defaultCover")}</span>
             </span>
         );
     }
@@ -302,6 +307,7 @@ export function GenerationStyleCover({ style, className = "", fallbackIcon }: { 
 }
 
 function StylePreviewStack({ style, onPreview }: { style: GenerationStyleSelection; onPreview: (style: GenerationStyleSelection) => void }) {
+    const translate = useTranslation();
     const frameClasses = ["z-[1] -rotate-[8deg] -translate-y-1", "z-[3] -ml-5 rotate-[5deg] translate-y-1", "z-[2] -ml-5 -rotate-[4deg] -translate-y-2"];
     return (
         <span className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
@@ -311,7 +317,7 @@ function StylePreviewStack({ style, onPreview }: { style: GenerationStyleSelecti
                     key={index}
                     className={`pointer-events-none relative size-9 overflow-hidden rounded-sm border border-white/80 bg-[var(--studio-surface-raised)] shadow-sm transition-[transform,opacity,border-color,box-shadow] duration-200 ease-out ${frameClasses[index]} translate-x-5 opacity-0 group-hover:pointer-events-auto group-hover:translate-x-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-x-0 group-focus-within:opacity-100 hover:z-10 hover:-translate-y-3 hover:rotate-0 hover:scale-110 hover:border-[var(--studio-action)] hover:shadow-lg focus-visible:z-10 focus-visible:-translate-y-3 focus-visible:rotate-0 focus-visible:scale-110 focus-visible:border-[var(--studio-action)] focus-visible:shadow-lg focus-visible:outline-none`}
                     style={{ transitionDelay: `${index * 50}ms` }}
-                    aria-label={`查看${style.name}大图预览${index + 1}`}
+                    aria-label={translate("generation.viewEnlargedPreview", { value0: style.name, value1: index + 1 })}
                     onClick={(event) => {
                         event.stopPropagation();
                         onPreview(style);

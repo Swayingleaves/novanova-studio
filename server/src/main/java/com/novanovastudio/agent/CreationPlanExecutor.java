@@ -1,5 +1,7 @@
 package com.novanovastudio.agent;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiErrorDetails;
@@ -461,7 +463,7 @@ public class CreationPlanExecutor {
         if (!decision.nodeIds().isEmpty()) arguments.put("recoveryNodeIds", decision.nodeIds());
         String preparingStatus = "ADJUST_AND_RETRY".equals(decision.action()) ? "adjusting" : "retrying";
         emit(userId, AgentEvent.planTaskStatus(sessionId, plan.planId(), task.taskId(), preparingStatus, decision.reason()));
-        emit(userId, AgentEvent.planTaskStatus(sessionId, plan.planId(), task.taskId(), "retrying", "正在执行唯一一次恢复重试"));
+        emit(userId, AgentEvent.planTaskStatus(sessionId, plan.planId(), task.taskId(), "retrying", "正在执行唯一一次恢复重试").withSystemMessage(SystemMessage.of("business.runningTheSingleRecoveryRetry")));
 
         Mono<TaskExecutionResult> execution;
         if (CreationEntrySource.CANVAS.equals(plan.entrySource())) {
@@ -504,9 +506,10 @@ public class CreationPlanExecutor {
         AiErrorDetails error = AiErrorSupport.fromThrowable(exception, "agent", "agent");
         Map<String, Object> data = AiErrorSupport.errorData(error);
         log.error("Agent恢复重试失败: planId={}, taskId={}", plan.planId(), task.taskId(), exception);
-        emit(userId, AgentEvent.planTaskStatus(sessionId, plan.planId(), task.taskId(), "failed", error.message()));
+        SystemMessage systemMessage = SystemMessage.fromThrowable(exception);
+        emit(userId, AgentEvent.planTaskStatus(sessionId, plan.planId(), task.taskId(), "failed", error.message()).withSystemMessage(systemMessage));
         return Mono.just(new TaskExecutionResult(task.taskId(), "failed", error.message(), data,
-                promptStrategy, prompt, new LinkedHashMap<>(arguments), error, 1));
+                promptStrategy, prompt, new LinkedHashMap<>(arguments), error, 1).withSystemMessage(systemMessage));
     }
 
     /**
@@ -525,7 +528,7 @@ public class CreationPlanExecutor {
                 decision);
         TaskExecutionResult audited = new TaskExecutionResult(retryResult.taskId(), retryResult.status(),
                 retryResult.message(), data, retryResult.promptStrategy(), retryResult.actualPrompt(),
-                retryResult.toolArguments(), retryResult.error(), 1);
+                retryResult.toolArguments(), retryResult.error(), 1).withSystemMessage(retryResult.systemMessage());
         return planRepository.updateTask(plan.planId(), audited.taskId(), audited.status(), audited.promptStrategy(),
                         audited.actualPrompt(), audited.data(), "success".equals(audited.status()) ? "" : audited.message())
                 .thenReturn(audited);
@@ -786,7 +789,7 @@ public class CreationPlanExecutor {
         if (executionRegistry.isCancelRequested(sessionId)) {
             return canceledTask(userId, sessionId, plan.planId(), task);
         }
-        emit(userId, AgentEvent.planTaskStatus(sessionId, plan.planId(), task.taskId(), "running", "子Agent正在准备任务"));
+        emit(userId, AgentEvent.planTaskStatus(sessionId, plan.planId(), task.taskId(), "running", "子Agent正在准备任务").withSystemMessage(SystemMessage.of("business.agentIsPreparingTheTask")));
         return planRepository.updateTask(plan.planId(), task.taskId(), "running", "", "", null, "")
                 .then(Mono.defer(() -> "canvas".equals(task.taskType())
                         ? executeCanvasTask(userId, sessionId, plan, request, task)
@@ -891,7 +894,7 @@ public class CreationPlanExecutor {
             try {
                 skillId = Long.valueOf(request.skillId());
             } catch (NumberFormatException exception) {
-                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "技能ID不合法"));
+                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidSkillID")));
             }
             return skillService.findEnabledSkill(skillId)
                     .map(skill -> {
@@ -1200,11 +1203,11 @@ public class CreationPlanExecutor {
     private void validateSettingGraphTask(AgentChatRequest request, CreationTask task) {
         if (request == null || !StringUtils.hasText(request.settingGraphNodeId())) return;
         if (task == null || !"canvas_run_generation".equals(task.toolName())) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "设定图请求只能调用已有节点生成工具");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceSheetsMayOnlyGenerateAnExistingNode"));
         }
         Object nodeId = task.toolArguments() == null ? null : task.toolArguments().get("nodeId");
         if (!request.settingGraphNodeId().equals(String.valueOf(nodeId))) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "设定图生成目标节点不匹配");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceSheetTargetNodeDoesNotMatch"));
         }
     }
 
@@ -1236,7 +1239,7 @@ public class CreationPlanExecutor {
         if ("image".equals(task.taskType())) {
             boolean workflowImage = workflowDefinition != null && workflowDefinition.usesWorkflowImageModel(task);
             if (workflowImage && !StringUtils.hasText(settings.imageModel())) {
-                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "视频工作流图片阶段未配置图片模型");
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.imageModelIsNotConfiguredForThisWorkflow"));
             }
             String model = workflowImage ? settings.imageModel() : settings.model();
             if (StringUtils.hasText(model)) arguments.put("model", model);
@@ -1269,15 +1272,15 @@ public class CreationPlanExecutor {
         String configuredMode = VideoGenerationMode.defaultIfBlank(settings == null ? null : settings.videoGenerationMode());
         VideoWorkflowDefinition definition = workflowDefinition(plan).orElse(null);
         if (definition == null || task == null || !"video".equals(task.taskType())) return Mono.just(configuredMode);
-        if (settings == null) return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "视频工作流缺少生成设置"));
+        if (settings == null) return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoWorkflowHasNoGenerationSettings")));
         String selectedModel = StringUtils.hasText(settings.videoModel()) ? settings.videoModel() : settings.model();
         if (!StringUtils.hasText(selectedModel)) {
-            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "视频工作流未配置视频模型"));
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoModelIsNotConfiguredForThisWorkflow")));
         }
         return persistenceService.getPlatformModelConfigs().map(configs -> configs.stream()
                 .filter(config -> selectedModel.equals(config.channelId() + "::" + config.modelName()) || selectedModel.equals(config.modelName()))
                 .findFirst()
-                .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "工作流视频模型未找到能力配置"))
+                .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoModelCapabilitiesNotFound")))
         ).map(modelConfig -> {
             Set<String> capabilities = modelConfig.capabilities() == null ? Set.of() : Set.copyOf(modelConfig.capabilities());
             List<String> modes = definition.videoGenerationModes(task, configuredMode, capabilities);
@@ -1288,8 +1291,7 @@ public class CreationPlanExecutor {
                             && modelConfig.videoBillingConfiguration().modePrices().get(mode) != null
                             && modelConfig.videoBillingConfiguration().modePrices().get(mode).containsKey(resolution))
                     .findFirst()
-                    .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR,
-                            "当前工作流视频模式未配置" + resolution + "分辨率价格"));
+                    .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.noPriceForResolutionInThisWorkflowMode", resolution)));
         });
     }
 
@@ -1514,11 +1516,12 @@ public class CreationPlanExecutor {
         String message = error.message();
         Map<String, Object> data = AiErrorSupport.errorData(error);
         log.error("Agent计划子任务执行失败: planId={}, taskId={}", planId, task.taskId(), exception);
-        emit(userId, AgentEvent.planTaskStatus(sessionId, planId, task.taskId(), "failed", message));
+        SystemMessage systemMessage = SystemMessage.fromThrowable(exception);
+        emit(userId, AgentEvent.planTaskStatus(sessionId, planId, task.taskId(), "failed", message).withSystemMessage(systemMessage));
         return planRepository.updateTask(planId, task.taskId(), "failed", "", task.prompt(), data, message)
                 .thenReturn(new TaskExecutionResult(task.taskId(), "failed", message, data,
                         "", task.prompt(), task.toolArguments() == null ? Map.of() : new LinkedHashMap<>(task.toolArguments()),
-                        error, 0));
+                        error, 0).withSystemMessage(systemMessage));
     }
 
     /**
@@ -1528,12 +1531,13 @@ public class CreationPlanExecutor {
      * @param sessionId String 会话ID
      * @param planId String 计划ID
      * @param task CreationTask 计划任务
+     * @param message SystemMessage 跳过原因
      * @return Mono<TaskExecutionResult> 跳过结果
      */
-    private Mono<TaskExecutionResult> skipTask(Long userId, String sessionId, String planId, CreationTask task, String message) {
-        emit(userId, AgentEvent.planTaskStatus(sessionId, planId, task.taskId(), "skipped", message));
-        return planRepository.updateTask(planId, task.taskId(), "skipped", "", "", null, message)
-                .thenReturn(new TaskExecutionResult(task.taskId(), "skipped", message, Map.of()));
+    private Mono<TaskExecutionResult> skipTask(Long userId, String sessionId, String planId, CreationTask task, SystemMessage message) {
+        emit(userId, AgentEvent.planTaskStatus(sessionId, planId, task.taskId(), "skipped", message.diagnostic()).withSystemMessage(message));
+        return planRepository.updateTask(planId, task.taskId(), "skipped", "", "", null, message.diagnostic())
+                .thenReturn(new TaskExecutionResult(task.taskId(), "skipped", message.diagnostic(), Map.of()).withSystemMessage(message));
     }
 
     /**
@@ -1546,9 +1550,10 @@ public class CreationPlanExecutor {
      * @return Mono<TaskExecutionResult> 取消结果
      */
     private Mono<TaskExecutionResult> canceledTask(Long userId, String sessionId, String planId, CreationTask task) {
-        emit(userId, AgentEvent.planTaskStatus(sessionId, planId, task.taskId(), "canceled", "已停止生成"));
+        emit(userId, AgentEvent.planTaskStatus(sessionId, planId, task.taskId(), "canceled", "已停止生成").withSystemMessage(SystemMessage.of("system.taskCanceled")));
         return planRepository.updateTask(planId, task.taskId(), "canceled", "", "", null, "已停止生成")
-                .thenReturn(new TaskExecutionResult(task.taskId(), "canceled", "已停止生成", Map.of()));
+                .thenReturn(new TaskExecutionResult(task.taskId(), "canceled", "已停止生成", Map.of())
+                        .withSystemMessage(SystemMessage.of("system.taskCanceled")));
     }
 
     /**
@@ -1579,14 +1584,14 @@ public class CreationPlanExecutor {
                                                     List<GenerationStyleDtos.GenerationStyleSnapshot> styles, CreationTask task,
                                                     Map<String, Object> skillSnapshot) {
         if (settings == null) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "生成任务缺少页面生成设置");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.pageGenerationSettingsAreMissing"));
         }
         Map<String, Object> arguments = new LinkedHashMap<>();
         arguments.put("prompt", finalPrompt);
         VideoWorkflowDefinition definition = workflowDefinition(plan).orElse(null);
         boolean workflowImage = definition != null && definition.usesWorkflowImageModel(task);
         if (workflowImage && !StringUtils.hasText(settings.imageModel())) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "视频工作流图片阶段未配置图片模型");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.imageModelIsNotConfiguredForThisWorkflow"));
         }
         String model = workflowImage ? settings.imageModel()
                 : "video".equals(task == null ? null : task.taskType()) && StringUtils.hasText(settings.videoModel())
@@ -1662,15 +1667,15 @@ public class CreationPlanExecutor {
      * @param plan CreationPlan 创作计划
      * @param task CreationTask 当前任务
      * @param completed Map<String, TaskExecutionResult> 前置任务结果
-     * @return String 跳过原因
+     * @return SystemMessage 语言中立跳过原因
      */
-    private String dependencySkipReason(CreationPlan plan, CreationTask task, Map<String, TaskExecutionResult> completed) {
-        if (!StringUtils.hasText(plan.workflowType())) return "前置任务失败、取消或被跳过，当前任务未执行";
+    private SystemMessage dependencySkipReason(CreationPlan plan, CreationTask task, Map<String, TaskExecutionResult> completed) {
+        if (!StringUtils.hasText(plan.workflowType())) return SystemMessage.of("system.dependencyTaskUnavailable");
         boolean invalidOutput = dependencies(task).stream().anyMatch(dependency -> {
             TaskExecutionResult result = completed.get(dependency);
             return result != null && "success".equals(result.status()) && !hasValidMediaOutput(result);
         });
-        return invalidOutput ? "前置任务完成但没有有效媒体输出，当前任务未执行" : "前置任务失败、取消或被跳过，当前任务未执行";
+        return SystemMessage.of(invalidOutput ? "system.dependencyMediaMissing" : "system.dependencyTaskUnavailable");
     }
 
     /**
@@ -1738,13 +1743,16 @@ public class CreationPlanExecutor {
         String status = canceledCount == results.size() ? "canceled"
                 : successCount == results.size() ? "success"
                 : successCount > 0 ? "partial_failed" : "failed";
-        String prefix = CreationEntrySource.CANVAS.equals(plan.entrySource()) ? "画布计划已执行" : "生成计划已完成";
-        String message = prefix + "：成功 " + successCount + " 个，未成功 " + (results.size() - successCount) + " 个。";
-        String failureDetails = results.stream()
+        SystemMessage failureDetails = results.stream()
                 .filter(result -> !"success".equals(result.status()) && StringUtils.hasText(result.message()))
-                .map(TaskExecutionResult::message).distinct().limit(3).reduce((left, right) -> left + "；" + right).orElse("");
-        if (StringUtils.hasText(failureDetails)) message += " " + failureDetails;
-        return new PlanExecutionSummary(plan.planId(), status, message, results);
+                .collect(java.util.stream.Collectors.toMap(TaskExecutionResult::message,
+                        result -> result.systemMessage() == null ? SystemMessage.of("system.externalFailure", result.message()) : result.systemMessage(),
+                        (first, duplicate) -> first, LinkedHashMap::new)).values().stream().limit(3)
+                .reduce((left, right) -> SystemMessage.of("system.messagePair", left, right)).orElse(null);
+        SystemMessage message = SystemMessage.of(CreationEntrySource.CANVAS.equals(plan.entrySource())
+                ? "system.canvasPlanSummary" : "system.generationPlanSummary", successCount,
+                results.size() - successCount, failureDetails == null ? "" : failureDetails);
+        return new PlanExecutionSummary(plan.planId(), status, message.diagnostic(), results, message);
     }
 
     /**
@@ -2067,6 +2075,7 @@ public class CreationPlanExecutor {
      * @param toolArguments Map<String, Object> 实际工具参数
      * @param error AiErrorDetails 结构化错误
      * @param recoveryAttempt int 已执行恢复次数
+     * @param systemMessage SystemMessage 语言中立说明，原始工具诊断可为空
      */
     public record TaskExecutionResult(
             String taskId,
@@ -2077,7 +2086,8 @@ public class CreationPlanExecutor {
             String actualPrompt,
             Map<String, Object> toolArguments,
             AiErrorDetails error,
-            int recoveryAttempt
+            int recoveryAttempt,
+            SystemMessage systemMessage
     ) {
 
         /**
@@ -2088,6 +2098,34 @@ public class CreationPlanExecutor {
             promptStrategy = promptStrategy == null ? "" : promptStrategy;
             actualPrompt = actualPrompt == null ? "" : actualPrompt;
             toolArguments = toolArguments == null ? Map.of() : toolArguments;
+        }
+
+        /**
+         * 保留原始工具诊断，创建尚未绑定系统消息的任务结果。
+         * @param taskId String 任务ID
+         * @param status String 状态
+         * @param message String 原始诊断
+         * @param data Map<String, Object> 工具数据
+         * @param promptStrategy String 提示词策略
+         * @param actualPrompt String 原始提示词
+         * @param toolArguments Map<String, Object> 工具参数
+         * @param error AiErrorDetails 原始错误详情
+         * @param recoveryAttempt int 恢复次数
+         */
+        public TaskExecutionResult(String taskId, String status, String message, Map<String, Object> data,
+                                   String promptStrategy, String actualPrompt, Map<String, Object> toolArguments,
+                                   AiErrorDetails error, int recoveryAttempt) {
+            this(taskId, status, message, data, promptStrategy, actualPrompt, toolArguments, error, recoveryAttempt, null);
+        }
+
+        /**
+         * 绑定明确的系统说明，原始诊断保持不变。
+         * @param value SystemMessage 系统消息，可为空
+         * @return TaskExecutionResult 新任务结果
+         */
+        public TaskExecutionResult withSystemMessage(SystemMessage value) {
+            return new TaskExecutionResult(taskId, status, message, data, promptStrategy, actualPrompt,
+                    toolArguments, error, recoveryAttempt, value);
         }
 
         /**
@@ -2110,7 +2148,9 @@ public class CreationPlanExecutor {
      * @param status String 计划状态
      * @param message String 汇总说明
      * @param tasks List<TaskExecutionResult> 子任务结果
+     * @param systemMessage SystemMessage 语言中立汇总说明
      */
-    public record PlanExecutionSummary(String planId, String status, String message, List<TaskExecutionResult> tasks) {
+    public record PlanExecutionSummary(String planId, String status, String message, List<TaskExecutionResult> tasks,
+                                       SystemMessage systemMessage) {
     }
 }

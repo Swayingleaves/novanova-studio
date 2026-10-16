@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { nanoid } from "nanoid";
 
 import { buildImageReferencePromptText } from "@/features/generation/lib/image-reference-prompt";
@@ -10,7 +12,7 @@ import { normalizeImageTaskResult } from "./image-task-result";
 
 export async function requestServerGeneratedImages(config: AiConfig, prompt: string, references: ReferenceImage[], mask: ReferenceImage | undefined, generationSource: ServerGenerationSource, options?: ImageRequestOptions) {
     if (options?.signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    if (mask) throw new Error("服务端任务系统暂不支持蒙版编辑");
+    if (mask) throw new Error(translate("generation.serverTasksDoNotSupportMaskEditingYet"));
     const model = config.model || config.imageModel;
     const count = normalizeImageCount(config.count);
     const task = await createAiTask({

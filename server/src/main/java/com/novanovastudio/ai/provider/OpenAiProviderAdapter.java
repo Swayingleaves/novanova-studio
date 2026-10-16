@@ -1,5 +1,7 @@
 package com.novanovastudio.ai.provider;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -72,7 +74,7 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
             case AiTaskTypes.TEXT -> executeTextTask(context);
             case AiTaskTypes.IMAGE -> executeImageTask(context);
             case AiTaskTypes.VIDEO -> executeVideoTask(context);
-            default -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "OpenAI兼容渠道不支持该任务类型"));
+            default -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.openAICompatibleChannelDoesNotSupportThisTaskType")));
         };
     }
 
@@ -133,7 +135,7 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
     private Mono<JSONObject> executeVideoTask(AiTaskExecutionContext context) {
         // OpenAI兼容视频接口只支持提示词和图片参考。
         if (!AiTaskParameterReader.safeReferences(context.request().videoReferences()).isEmpty()) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "OpenAI兼容视频接口暂不支持参考视频"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.openAICompatibleVideoDoesNotSupportVideoReferences")));
         }
         return Flux.fromIterable(AiTaskParameterReader.safeReferences(context.request().references()).stream().limit(7).toList())
                 .concatMap(reference -> mediaSupport.resolveReferenceUrl(context.task().getUserId(), reference))
@@ -161,7 +163,7 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
                     JSONObject createdPayload = AiJsonUtils.responsePayload(created);
                     String providerTaskId = AiTaskParameterReader.firstNonEmpty(createdPayload.getString("id"), createdPayload.getString("task_id"));
                     if (!StringUtils.hasText(providerTaskId)) {
-                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "视频接口没有返回任务ID"));
+                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.videoAPIReturnedNoTaskID")));
                     }
                     return context.updateRunningProgress(20)
                             .then(pollVideoTask(context, providerTaskId))
@@ -254,7 +256,7 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
                         .then(context.isCancelRequested())
                         .flatMap(cancelRequested -> {
                             if (Boolean.TRUE.equals(cancelRequested)) {
-                                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "任务已取消"));
+                                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCanceled")));
                             }
                             return aiHttpClient.sendJsonRequest(context.channel(), "GET", "/videos/" + providerTaskId, null)
                                     .map(AiJsonUtils::responsePayload)
@@ -343,11 +345,11 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
             case "1k" -> 1024;
             case "2k" -> 2048;
             case "4k" -> 4096;
-            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "图片清晰度只支持1K、2K、4K");
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageResolutionMustBe1K2KOr4K"));
         };
         String[] ratioParts = size.split(":");
         if (ratioParts.length != 2) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "图片比例必须是正数，例如9:16");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageAspectRatioMustBePositiveEG916"));
         }
         try {
             double widthRatio = Double.parseDouble(ratioParts[0]);
@@ -361,7 +363,7 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
             int shortSide = Math.max(16, (int) (Math.round(longSide / longRatio / 16) * 16));
             return landscape ? longSide + "x" + shortSide : shortSide + "x" + longSide;
         } catch (NumberFormatException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "图片比例必须是正数，例如9:16");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageAspectRatioMustBePositiveEG916"));
         }
     }
 

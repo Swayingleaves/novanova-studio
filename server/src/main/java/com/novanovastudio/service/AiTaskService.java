@@ -1,5 +1,9 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.WebsiteLanguage;
+
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AudioInputSupport;
@@ -157,22 +161,30 @@ public class AiTaskService {
      * @return Mono<VideoWorkflowQuoteResponse> 报价结果
      */
     public Mono<AiTaskDtos.VideoWorkflowQuoteResponse> quoteVideoWorkflow(AiTaskDtos.VideoWorkflowQuoteRequest request) {
+        return WebsiteLanguage.current().flatMap(locale -> quoteVideoWorkflow(request, locale));
+    }
+
+    /** 按当前请求语言生成工作流报价说明。
+     * @param request AiTaskDtos.VideoWorkflowQuoteRequest 报价参数
+     * @param locale Locale 请求语言
+     * @return Mono<AiTaskDtos.VideoWorkflowQuoteResponse> 报价结果
+     */
+    private Mono<AiTaskDtos.VideoWorkflowQuoteResponse> quoteVideoWorkflow(AiTaskDtos.VideoWorkflowQuoteRequest request, Locale locale) {
         if (request == null || !StringUtils.hasText(request.workflowType())) {
-            return Mono.just(unavailable("未选择视频工作流", null));
+            return Mono.just(unavailable(SystemMessage.of("business.noVideoWorkflowSelected").render(locale), null));
         }
         VideoWorkflowDefinition definition;
         try {
             definition = videoWorkflowRegistry.require(request.workflowType());
         } catch (BusinessException exception) {
-            return Mono.just(unavailable(exception.getMessage(), request.workflowType()));
+            return Mono.just(unavailable(exception.getSystemMessage().render(locale), request.workflowType()));
         }
         VideoWorkflowDefinition.VideoWorkflowQuotePlan quotePlan;
         try {
             quotePlan = definition.buildQuotePlan(request)
-                    .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR,
-                            "工作流暂未提供报价定义：" + definition.workflowType()));
+                    .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.workflowHasNoQuoteDefinition", definition.workflowType())));
         } catch (BusinessException exception) {
-            return Mono.just(unavailable(exception.getMessage(), request.workflowType()));
+            return Mono.just(unavailable(exception.getSystemMessage().render(locale), request.workflowType()));
         }
         java.util.LinkedHashSet<String> capabilitySet = quotePlan.stages().stream()
                 .flatMap(stage -> java.util.stream.Stream.concat(stage.requiredCapabilities().stream(),
@@ -180,12 +192,12 @@ public class AiTaskService {
                 .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
         List<VideoWorkflowDefinition.VideoWorkflowQuoteStage> stages = quoteStages(quotePlan, request.stage());
         if (stages.isEmpty()) {
-            return Mono.just(unavailable("工作流报价阶段不受支持", request.workflowType()));
+            return Mono.just(unavailable(SystemMessage.of("business.unsupportedWorkflowQuoteStage").render(locale), request.workflowType()));
         }
         return Flux.fromIterable(stages)
                 .concatMap(stage -> quoteStage(request, stage)
-                        .map(quote -> new StageQuoteAttempt(quote, null))
-                        .onErrorResume(BusinessException.class, exception -> Mono.just(new StageQuoteAttempt(null, exception.getMessage()))))
+                        .map(quote -> new StageQuoteAttempt(new AiTaskDtos.VideoWorkflowStageQuote(quote.role(), workflowStageLabel(quote.role(), quote.displayName(), locale), quote.taskType(), quote.model(), quote.taskCount(), quote.credits(), quote.videoGenerationMode()), null))
+                        .onErrorResume(BusinessException.class, exception -> Mono.just(new StageQuoteAttempt(null, exception.getSystemMessage().render(locale)))))
                 .collectList()
                 .map(attempts -> {
                     List<AiTaskDtos.VideoWorkflowStageQuote> succeeded = attempts.stream()
@@ -201,7 +213,7 @@ public class AiTaskService {
                             continue;
                         }
                         VideoWorkflowDefinition.VideoWorkflowQuoteStage declared = stages.get(index);
-                        stageSkeleton.add(new AiTaskDtos.VideoWorkflowStageQuote(declared.role(), declared.displayName(),
+                        stageSkeleton.add(new AiTaskDtos.VideoWorkflowStageQuote(declared.role(), workflowStageLabel(declared.role(), declared.displayName(), locale),
                                 declared.taskType(), null, declared.taskCount(), null, null));
                     }
                     if (StringUtils.hasText(firstError)) {
@@ -241,19 +253,18 @@ public class AiTaskService {
             AiTaskDtos.VideoWorkflowQuoteRequest request, VideoWorkflowDefinition.VideoWorkflowQuoteStage stage) {
         String selectedModel = "image".equals(stage.modelType()) ? request.imageModel() : request.model();
         if (!StringUtils.hasText(selectedModel)) {
-            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
-                    ("image".equals(stage.modelType()) ? "图片" : "视频") + "工作流阶段必须明确选择模型"));
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.selectAModelForWorkflowStage", SystemMessage.of("image".equals(stage.modelType()) ? "business.image" : "business.video"))));
         }
         String taskType = stage.taskType();
         return resolveModel(taskType, selectedModel).map(model -> {
             Set<String> capabilities = model.capabilities() == null ? Set.of() : Set.copyOf(model.capabilities());
             if (!capabilities.containsAll(stage.requiredCapabilities())) {
                 String missing = stage.requiredCapabilities().stream().filter(capability -> !capabilities.contains(capability)).findFirst().orElse("所需");
-                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前" + ("image".equals(stage.modelType()) ? "图片" : "视频") + "模型未配置" + missing + "能力");
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.currentModelLacks", SystemMessage.of("image".equals(stage.modelType()) ? "business.image" : "business.video"), missing));
             }
             List<String> modes = stage.videoGenerationModes().stream().filter(capabilities::contains).toList();
             if (TYPE_VIDEO.equals(taskType) && modes.isEmpty()) {
-                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前视频模型未配置工作流要求的视频生成能力");
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoModelLacksRequiredWorkflowCapabilities"));
             }
             List<AiTaskDtos.AiTaskMediaReference> references = stage.referenceRoles().stream()
                     .map(role -> new AiTaskDtos.AiTaskMediaReference(role, role, "image/png", role,
@@ -272,7 +283,7 @@ public class AiTaskService {
                 } catch (BusinessException exception) {
                     if (firstException == null) firstException = exception;
                 } catch (ArithmeticException exception) {
-                    throw new BusinessException(ErrorCode.PARAM_INVALID, "工作流报价积分计算超出范围");
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.workflowQuoteCreditCalculationExceedsRange"));
                 }
             }
             throw firstException;
@@ -352,7 +363,7 @@ public class AiTaskService {
             Long userId,
             AiTaskDtos.CreateAiTaskRequest request,
             Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
-        if (!TYPE_VIDEO.equals(request.taskType()) && request.audioReferences() != null && !request.audioReferences().isEmpty()) return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "音频输入仅支持视频生成任务"));
+        if (!TYPE_VIDEO.equals(request.taskType()) && request.audioReferences() != null && !request.audioReferences().isEmpty()) return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.audioInputIsSupportedForVideoTasksOnly")));
         AiTaskDtos.CreateAiTaskRequest normalizedRequest = normalizeVideoGenerationMode(request);
         Mono<Void> videoPreflight = TYPE_VIDEO.equals(normalizedRequest.taskType())
                 ? resolveModel(normalizedRequest.taskType(), normalizedRequest.model())
@@ -400,7 +411,7 @@ public class AiTaskService {
                                 .subscribeOn(Schedulers.boundedElastic())
                                 .then(Mono.defer(() -> eventPublisher.publish(userId, new AiTaskDtos.AiTaskEvent(EVENT_TASK, response))
                                         .then(dispatchTask(task, resolvedModel))
-                                        .onErrorResume(exception -> finishTaskWithRefund(task, STATUS_FAILED, "任务入队失败: " + empty(exception.getMessage()), null)
+                                        .onErrorResume(exception -> finishTaskWithRefund(task, STATUS_FAILED, SystemMessage.fromThrowable(exception), null)
                                                 .flatMap(updated -> Boolean.TRUE.equals(updated)
                                                         ? getTaskResponse(taskId, userId)
                                                                 .flatMap(failedTask -> eventPublisher.publish(userId, new AiTaskDtos.AiTaskEvent(EVENT_TASK, failedTask)))
@@ -454,7 +465,7 @@ public class AiTaskService {
         List<GenerationStyleDtos.GenerationStyleSnapshot> snapshots = request.generationStyleSnapshots() == null ? List.of() : request.generationStyleSnapshots();
         if (ids.isEmpty() && snapshots.isEmpty()) return Mono.just(request);
         if (!TYPE_IMAGE.equals(request.taskType()) && !TYPE_VIDEO.equals(request.taskType())) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "风格只支持图片或视频任务"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.stylesSupportImageAndVideoTasksOnly")));
         }
         return generationStyleService.resolveStyles(request.taskType(), ids, snapshots)
                 .flatMap(styles -> promptOptimizationService.optimizeAndWait(userId, request.taskType(), request.prompt(), styles, response -> Mono.empty())
@@ -488,7 +499,7 @@ public class AiTaskService {
             return taskQueue.enqueue(task.getId());
         }
         if (!StringUtils.hasText(task.getModelConfigId())) {
-            return failRecoveredTask(task, new BusinessException(ErrorCode.BUSINESS_ERROR, "任务缺少模型配置ID"));
+            return failRecoveredTask(task, new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskHasNoModelConfigurationID")));
         }
         return modelTaskExecutionDispatcher.enqueue(task.getModelConfigId(), task.getId())
                 .onErrorResume(exception -> failRecoveredTask(task, exception));
@@ -502,7 +513,7 @@ public class AiTaskService {
      * @return Mono<Void> 失败处理结果
      */
     private Mono<Void> failRecoveredTask(AiGenerationTask task, Throwable exception) {
-        String message = "任务恢复失败: " + empty(exception.getMessage());
+        SystemMessage message = SystemMessage.of("system.taskRecoveredFailed", SystemMessage.fromThrowable(exception));
         return finishTaskWithRefund(task, STATUS_FAILED, message, null)
                 .flatMap(updated -> Boolean.TRUE.equals(updated)
                         ? getTaskResponse(task.getId(), task.getUserId())
@@ -554,7 +565,7 @@ public class AiTaskService {
     public Mono<AiTaskDtos.AiGenerationTaskResponse> getTaskForUser(Long userId, String taskId) {
         return repository.getTask(userId, taskId)
                 .map(this::taskResponse)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "任务不存在")));
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.taskNotFound"))));
     }
 
     /**
@@ -576,10 +587,10 @@ public class AiTaskService {
      */
     public Mono<AiTaskDtos.AiGenerationTaskResponse> cancelTaskForUser(Long userId, String taskId) {
         return repository.getTask(userId, taskId)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "任务不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.taskNotFound"))))
                 .flatMap(task -> {
                     Mono<Void> update = isTerminal(task.getStatus()) ? Mono.empty() : eventPublisher.markCancelRequested(taskId)
-                            .then(finishTaskWithRefund(task, STATUS_CANCELED, "任务已取消", null))
+                            .then(finishTaskWithRefund(task, STATUS_CANCELED, SystemMessage.of("system.taskCanceled"), null))
                             .then();
                     return update.then(getTaskResponse(taskId, userId))
                             .flatMap(response -> eventPublisher.publish(userId, new AiTaskDtos.AiTaskEvent(EVENT_TASK, response)).thenReturn(response));
@@ -661,7 +672,7 @@ public class AiTaskService {
                                 return eventPublisher.isCancelRequested(taskId)
                                         .flatMap(cancelRequested -> {
                                             if (Boolean.TRUE.equals(cancelRequested)) {
-                                                return updateTaskState(taskId, STATUS_CANCELED, 100, "任务已取消", null);
+                                                return updateTaskState(taskId, STATUS_CANCELED, 100, SystemMessage.of("system.taskCanceled"), null);
                                             }
                                             AiTaskDtos.CreateAiTaskRequest request = JSON.parseObject(task.getRequestData(), AiTaskDtos.CreateAiTaskRequest.class);
                                             log.info("读取AI任务请求快照: taskId={}, imageCount={}, videoCount={}, audioCount={}",
@@ -690,7 +701,7 @@ public class AiTaskService {
                                                                 resolvedModel.customBodyParameters(),
                                                                 request,
                                                                 () -> eventPublisher.isCancelRequested(taskId),
-                                                                progress -> updateTaskState(taskId, STATUS_RUNNING, progress, "", null),
+                                                                progress -> updateTaskState(taskId, STATUS_RUNNING, progress, null, null),
                                                                 delta -> publishTextDelta(task, delta),
                                                                 resolvedModel.isCustomModel(),
                                                                 resolvedModel.customModelConfig()
@@ -698,7 +709,7 @@ public class AiTaskService {
                                                         return adapter.execute(context);
                                                         }));
                                                     })
-                                                    .flatMap(result -> updateTaskState(taskId, STATUS_SUCCESS, 100, "", toJson(result)))
+                                                    .flatMap(result -> updateTaskState(taskId, STATUS_SUCCESS, 100, null, toJson(result)))
                                                     .doOnSuccess(ignored -> log.info("AI生成任务执行成功: taskId={}", taskId));
                                         });
                             });
@@ -706,11 +717,11 @@ public class AiTaskService {
                 .onErrorResume(exception -> eventPublisher.isCancelRequested(taskId).flatMap(cancelRequested -> {
                     if (Boolean.TRUE.equals(cancelRequested)) {
                         log.info("AI生成任务已取消: taskId={}", taskId);
-                        return updateTaskState(taskId, STATUS_CANCELED, 100, "任务已取消", null);
+                        return updateTaskState(taskId, STATUS_CANCELED, 100, SystemMessage.of("system.taskCanceled"), null);
                     }
                     log.error("AI生成任务执行失败: taskId={}", taskId, exception);
                     AiErrorDetails error = AiErrorSupport.fromThrowable(exception, "task", "execution");
-                    return updateTaskState(taskId, STATUS_FAILED, 100, error.message(),
+                    return updateTaskState(taskId, STATUS_FAILED, 100, SystemMessage.fromThrowable(exception),
                             toJson(AiErrorSupport.errorData(error)));
                 }));
     }
@@ -725,14 +736,14 @@ public class AiTaskService {
      * @param resultData String 结果JSON
      * @return Mono<Void> 更新结果
      */
-    private Mono<Void> updateTaskState(String taskId, String status, int progress, String errorMessage, String resultData) {
+    private Mono<Void> updateTaskState(String taskId, String status, int progress, SystemMessage errorMessage, String resultData) {
         // 更新前重新读取任务，避免任务被删除后继续发布事件。
         return repository.getTaskById(taskId)
                 .flatMap(task -> {
                     Map<String, Object> values = new java.util.LinkedHashMap<>();
                     values.put("status", status);
                     values.put("progress", progress);
-                    values.put("error_message", errorMessage == null ? "" : errorMessage);
+                    SystemMessage.putTaskFields(values, errorMessage);
                     if (STATUS_RUNNING.equals(status) && task.getStartedAt() == null) {
                         values.put("started_at", OffsetDateTime.now());
                     }
@@ -761,11 +772,11 @@ public class AiTaskService {
      * @param resultData String 结果JSON
      * @return Mono<Boolean> 是否成功从未结束状态更新
      */
-    private Mono<Boolean> finishTaskWithRefund(AiGenerationTask task, String status, String errorMessage, String resultData) {
+    private Mono<Boolean> finishTaskWithRefund(AiGenerationTask task, String status, SystemMessage errorMessage, String resultData) {
         Map<String, Object> values = new java.util.LinkedHashMap<>();
         values.put("status", status);
         values.put("progress", 100);
-        values.put("error_message", errorMessage == null ? "" : errorMessage);
+        SystemMessage.putTaskFields(values, errorMessage);
         values.put("completed_at", OffsetDateTime.now());
         return repository.updateTaskIfNotTerminal(task.getId(), values, resultData)
                 .flatMap(updated -> Boolean.TRUE.equals(updated)
@@ -784,7 +795,7 @@ public class AiTaskService {
     private Mono<Void> publishTextDelta(AiGenerationTask task, String delta) {
         // 携带精简任务快照用于前端关联taskId，delta字段携带增量文本片段。
         AiTaskDtos.AiGenerationTaskResponse snapshot = new AiTaskDtos.AiGenerationTaskResponse(
-                task.getId(), task.getTaskType(), task.getModel(), task.getProvider(), task.getStatus(), task.getProgress(), null, null, "", "", "", "", "");
+                task.getId(), task.getTaskType(), task.getModel(), task.getProvider(), task.getStatus(), task.getProgress(), null, null, "", null, "", "", "", "");
         return eventPublisher.publish(task.getUserId(), new AiTaskDtos.AiTaskEvent(EVENT_TEXT_DELTA, snapshot, delta));
     }
 
@@ -799,7 +810,7 @@ public class AiTaskService {
         // 按任务ID和用户ID获取最新响应。
         return repository.getTask(userId, taskId)
                 .map(this::taskResponse)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "任务不存在")));
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.taskNotFound"))));
     }
 
     /**
@@ -809,7 +820,7 @@ public class AiTaskService {
      * @return AiGenerationTaskResponse 任务响应
      */
     private AiTaskDtos.AiGenerationTaskResponse taskResponse(AiGenerationTask task) {
-        return new AiTaskDtos.AiGenerationTaskResponse(task.getId(), task.getTaskType(), task.getModel(), task.getProvider(), task.getStatus(), task.getProgress(), parseJson(task.getRequestData()), parseJson(task.getResultData()), empty(task.getErrorMessage()), formatTime(task.getStartedAt()), formatTime(task.getCompletedAt()), formatTime(task.getCreatedAt()), formatTime(task.getUpdatedAt()));
+        return new AiTaskDtos.AiGenerationTaskResponse(task.getId(), task.getTaskType(), task.getModel(), task.getProvider(), task.getStatus(), task.getProgress(), parseJson(task.getRequestData()), parseJson(task.getResultData()), empty(task.getErrorMessage()), SystemMessage.stored(task.getErrorMessageKey(), task.getErrorMessageArguments()), formatTime(task.getStartedAt()), formatTime(task.getCompletedAt()), formatTime(task.getCreatedAt()), formatTime(task.getUpdatedAt()));
     }
 
     /**
@@ -820,7 +831,7 @@ public class AiTaskService {
     private void validateTaskType(String taskType) {
         // 当前统一任务系统支持文本、图片和视频三类任务。
         if (!List.of(TYPE_TEXT, TYPE_IMAGE, TYPE_VIDEO).contains(taskType)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "任务类型必须是text、image或video");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.taskTypeMustBeTextImageOrVideo"));
         }
     }
 
@@ -833,10 +844,10 @@ public class AiTaskService {
      */
     private void validateGenerationSource(String taskType, String generationSource) {
         if (!TYPE_TEXT.equals(taskType) && !AiTaskSources.isSupported(generationSource)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "图片或视频生成任务必须提供有效来源");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageAndVideoTasksRequireAValidSource"));
         }
         if (AiTaskSources.STORYBOARD.equals(generationSource) && !List.of(TYPE_IMAGE, TYPE_VIDEO).contains(taskType)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "分镜来源仅支持图片或视频生成任务");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.storyboardSourceSupportsImageOrVideoTasksOnly"));
         }
     }
 
@@ -859,18 +870,18 @@ public class AiTaskService {
                             .findFirst()
                             .orElse(null);
                     if (defaultConfig == null || !hasCompleteChannel(tuple.getT1(), defaultConfig)) {
-                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员配置默认" + capabilityLabel(capability) + "模型");
+                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.askTheAdministratorToConfigureADefaultModel", capabilityLabel(capability)));
                     }
                     PersistenceDtos.ModelConfig selectedConfig;
                     if (StringUtils.hasText(selectedModel)) {
                         selectedConfig = allowedModels.stream()
                                 .filter(config -> selectedModel.equals(config.channelId() + "::" + config.modelName()) || selectedModel.equals(config.modelName()))
                                 .findFirst()
-                                .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "所选模型未在管理员启用的模型中配置"));
+                                .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.selectedModelIsNotEnabledByTheAdministrator")));
                     } else {
                         selectedConfig = allowedModels.stream().filter(config -> Boolean.TRUE.equals(config.defaultModel()))
                                 .findFirst()
-                                .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员配置默认" + capabilityLabel(capability) + "模型"));
+                                .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.askTheAdministratorToConfigureADefaultModel", capabilityLabel(capability))));
                     }
                     ResolvedModel resolvedModel = resolveModel(capability, selectedConfig.channelId() + "::" + selectedConfig.modelName(), tuple.getT1());
                     return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.id(), selectedConfig.creditCost(), selectedConfig.creditUnit(),
@@ -895,19 +906,19 @@ public class AiTaskService {
             return resolveModel(task.getTaskType(), firstNonEmpty(request.model(), task.getModel()));
         }
         if (!StringUtils.hasText(task.getModelConfigId())) {
-            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "任务缺少模型配置ID"));
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskHasNoModelConfigurationID")));
         }
         return Mono.zip(persistenceService.getPlatformAiChannels(), persistenceService.getPlatformModelConfigs())
                 .map(tuple -> {
                     PersistenceDtos.ModelConfig modelConfig = tuple.getT2().stream()
                             .filter(config -> task.getModelConfigId().equals(config.id()))
                             .findFirst()
-                            .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "任务使用的模型配置不存在"));
+                            .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskModelConfigurationNotFound")));
                     if (!task.getTaskType().equals(modelConfig.modelType())) {
-                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "任务使用的模型配置类型不匹配");
+                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskModelConfigurationTypeMismatch"));
                     }
                     if (!task.getModel().equals(modelConfig.modelName())) {
-                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "任务使用的模型配置与任务模型不匹配");
+                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskModelDoesNotMatchItsConfiguration"));
                     }
                     ResolvedModel channelModel = resolveModel(task.getTaskType(), modelConfig.channelId() + CHANNEL_MODEL_SEPARATOR + modelConfig.modelName(), tuple.getT1());
                     return new ResolvedModel(channelModel.channel(), channelModel.model(), modelConfig.id(), modelConfig.creditCost(),
@@ -949,7 +960,7 @@ public class AiTaskService {
         // 外层已校验模型来自全站目录，这里只按渠道编码定位完整连接信息。
         ChannelModelSelection selection = decodeChannelModel(selectedModel);
         if (selection == null) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "所选模型不可用，请联系管理员检查模型配置");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.selectedModelUnavailableAskTheAdministratorToCheckIt"));
         }
         return resolveUserChannelModel(selection.channelId(), selection.model(), capability, userChannels);
     }
@@ -968,9 +979,9 @@ public class AiTaskService {
         AiTaskDtos.AiChannelConfig channel = userChannels.stream()
                 .filter(item -> channelId.equals(item.id()))
                 .findFirst()
-                .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, "未找到已选择的AI渠道: " + channelId));
+                .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.selectedAIChannelNotFound", channelId)));
         if (channel.models() == null || !channel.models().contains(model)) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "渠道" + channelDisplayName(channel) + "未配置模型: " + model);
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.channelHasNoModel", channelDisplayName(channel), model));
         }
         validateChannelSupport(channel, capability);
         validateUserChannelAccess(channel);
@@ -997,10 +1008,10 @@ public class AiTaskService {
     private void validateUserChannelAccess(AiTaskDtos.AiChannelConfig channel) {
         // 平台渠道必须具备完整连接参数，避免延迟到真正发请求时才失败。
         if (!StringUtils.hasText(channel.baseUrl())) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员完整配置渠道" + channelDisplayName(channel));
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.askTheAdministratorToCompleteChannel", channelDisplayName(channel)));
         }
         if (!StringUtils.hasText(channel.apiKey())) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员完整配置渠道" + channelDisplayName(channel));
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.askTheAdministratorToCompleteChannel", channelDisplayName(channel)));
         }
     }
 
@@ -1106,14 +1117,14 @@ public class AiTaskService {
         }
         Integer unitCost = resolvedModel.creditCost();
         if (unitCost == null || unitCost < 0) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "模型积分配置不合法");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.invalidModelCredits"));
         }
         String creditUnit = resolvedModel.creditUnit();
         if (!CREDIT_UNIT_GENERATION.equals(creditUnit) && !CREDIT_UNIT_SECOND.equals(creditUnit)) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "模型积分计费单位不合法");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.invalidModelBillingUnit"));
         }
         if (CREDIT_UNIT_SECOND.equals(creditUnit) && !TYPE_VIDEO.equals(request.taskType())) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "只有视频模型可以按秒计费");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.onlyVideoModelsSupportPerSecondBilling"));
         }
         int count = TYPE_IMAGE.equals(request.taskType()) ? imageCount(request.parameters()) : 1;
         try {
@@ -1122,7 +1133,7 @@ public class AiTaskService {
                     ? Math.multiplyExact(total, videoSeconds(request.parameters()))
                     : total;
         } catch (ArithmeticException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "本次生成积分计算超出范围");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.generationCreditCalculationExceedsRange"));
         }
     }
 
@@ -1136,84 +1147,84 @@ public class AiTaskService {
     private VideoBillingQuote validateVideoTask(AiTaskDtos.CreateAiTaskRequest request, ResolvedModel resolvedModel) {
         String mode = VideoGenerationMode.defaultIfBlank(request.videoGenerationMode());
         if (!VideoGenerationMode.isSupported(mode)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedVideoGenerationMode"));
         }
         List<AiTaskDtos.AiTaskMediaReference> imageReferences = request.references() == null ? List.of() : request.references();
         List<AiTaskDtos.AiTaskMediaReference> videoReferences = request.videoReferences() == null ? List.of() : request.videoReferences();
         List<AiTaskDtos.AiTaskMediaReference> audioReferences = request.audioReferences() == null ? List.of() : request.audioReferences();
         if (!audioReferences.isEmpty()) {
-            if (resolvedModel.capabilities() == null || !resolvedModel.capabilities().contains(AudioInputSupport.CAPABILITY)) throw new BusinessException(ErrorCode.PARAM_INVALID, "当前模型未开启音频输入能力");
+            if (resolvedModel.capabilities() == null || !resolvedModel.capabilities().contains(AudioInputSupport.CAPABILITY)) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.audioInputIsDisabledForThisModel"));
             AudioInputSupport.validateCapability(TYPE_VIDEO, resolvedModel.capabilities());
-            if (!VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode)) throw new BusinessException(ErrorCode.PARAM_INVALID, "音频输入仅支持全能参考模式");
-            if (audioReferences.size() > 3) throw new BusinessException(ErrorCode.PARAM_INVALID, "最多支持3段参考音频");
-            if (audioReferences.stream().anyMatch(reference -> reference == null || !AudioInputSupport.isAudioMimeType(reference.mimeType()))) throw new BusinessException(ErrorCode.PARAM_INVALID, "音频参考列表只能包含 MP3、WAV");
-            if ("evolink".equals(resolvedModel.channel().apiFormat()) && imageReferences.isEmpty() && videoReferences.isEmpty()) throw new BusinessException(ErrorCode.PARAM_INVALID, "Evolink 音频参考必须同时提供图片或视频");
+            if (!VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode)) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.audioInputRequiresUniversalReferenceMode"));
+            if (audioReferences.size() > 3) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.atMost3ReferenceAudioClips"));
+            if (audioReferences.stream().anyMatch(reference -> reference == null || !AudioInputSupport.isAudioMimeType(reference.mimeType()))) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.audioReferencesMustBeMP3OrWAV"));
+            if ("evolink".equals(resolvedModel.channel().apiFormat()) && imageReferences.isEmpty() && videoReferences.isEmpty()) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.evolinkAudioReferencesAlsoRequireAnImageOrVideo"));
         }
         if (imageReferences.stream().anyMatch(reference -> reference == null || !isImageMimeType(reference.mimeType()))) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "图片参考列表只能包含图片素材");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageReferencesMustContainImagesOnly"));
         }
         if (videoReferences.stream().anyMatch(reference -> reference == null || !isVideoMimeType(reference.mimeType()))) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频参考列表只能包含视频素材");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoReferencesMustContainVideosOnly"));
         }
         switch (mode) {
             case VideoGenerationMode.TEXT_TO_VIDEO -> {
                 if (!imageReferences.isEmpty() || !videoReferences.isEmpty()) {
-                    throw new BusinessException(ErrorCode.PARAM_INVALID, "文生视频不能携带图片或视频参考素材");
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.textToVideoCannotIncludeImageOrVideoReferences"));
                 }
             }
             case VideoGenerationMode.IMAGE_TO_VIDEO -> {
                 if (imageReferences.isEmpty()) {
-                    throw new BusinessException(ErrorCode.PARAM_INVALID, "图生视频至少需要一张图片参考素材");
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageToVideoNeedsAtLeastOneImage"));
                 }
                 if (!videoReferences.isEmpty()) {
-                    throw new BusinessException(ErrorCode.PARAM_INVALID, "图生视频不能携带视频参考素材");
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageToVideoCannotIncludeVideoReferences"));
                 }
             }
             case VideoGenerationMode.REFERENCE_TO_VIDEO -> {
                 if (imageReferences.isEmpty() && videoReferences.isEmpty() && audioReferences.isEmpty()) {
-                    throw new BusinessException(ErrorCode.PARAM_INVALID, "全能参考至少需要一个图片、视频或音频参考素材");
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.universalReferenceNeedsAnImageVideoOrAudio"));
                 }
             }
             case VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO -> {
                 if (!videoReferences.isEmpty() || imageReferences.size() != 2) {
-                    throw new BusinessException(ErrorCode.PARAM_INVALID, "首尾帧原生视频必须按顺序提供两张图片");
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.nativeFirstLastFrameModeRequiresTwoOrderedImages"));
                 }
                 if (!"first_frame".equals(imageReferences.get(0).role()) || !"last_frame".equals(imageReferences.get(1).role())) {
-                    throw new BusinessException(ErrorCode.PARAM_INVALID, "首尾帧原生视频的图片角色必须依次为首帧和尾帧");
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageRolesMustBeFirstFrameFollowedByLastFrame"));
                 }
             }
-            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持");
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedVideoGenerationMode"));
         }
         if (resolvedModel.capabilities() == null || !resolvedModel.capabilities().contains(mode)) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前模型未配置" + videoModeLabel(mode) + "能力");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.thisModelLacks", videoModeLabel(mode)));
         }
         VideoBillingConfiguration configuration = resolvedModel.videoBillingConfiguration();
         if (configuration == null) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前视频模型未配置分档计费价格");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoTierPricingIsNotConfigured"));
         }
         if ((!CREDIT_UNIT_GENERATION.equals(configuration.billingUnit()) && !CREDIT_UNIT_SECOND.equals(configuration.billingUnit()))
                 || configuration.minimumDurationSeconds() == null || configuration.minimumDurationSeconds() < 1) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前视频模型分档计费配置不合法");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.invalidVideoTierPricing"));
         }
         String resolution = videoResolution(request.parameters());
         Map<String, Integer> modePrices = configuration.modePrices() == null ? null : configuration.modePrices().get(mode);
         if (modePrices == null || !modePrices.containsKey(resolution)) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前模式未配置" + resolution + "分辨率价格");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.noPriceForResolutionInThisMode", resolution));
         }
         int seconds = videoSeconds(request.parameters());
         if (seconds < configuration.minimumDurationSeconds()) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频时长不能小于模型要求的最短时长" + configuration.minimumDurationSeconds() + "秒");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoDurationMustBeAtLeastSeconds", configuration.minimumDurationSeconds()));
         }
         Integer unitPrice = modePrices.get(resolution);
         if (unitPrice == null || unitPrice < 0) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前视频模型分辨率价格配置不合法");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.invalidVideoResolutionPrices"));
         }
         try {
             int chargedCredits = CREDIT_UNIT_SECOND.equals(configuration.billingUnit())
                     ? Math.multiplyExact(unitPrice, seconds) : unitPrice;
             return new VideoBillingQuote(mode, resolution, configuration.billingUnit(), unitPrice, seconds, chargedCredits);
         } catch (ArithmeticException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "本次生成积分计算超出范围");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.generationCreditCalculationExceedsRange"));
         }
     }
 
@@ -1241,11 +1252,11 @@ public class AiTaskService {
     private Mono<Void> validateAudioReferences(Long userId, List<AiTaskDtos.AiTaskMediaReference> references) {
         return Flux.fromIterable(references == null ? List.<AiTaskDtos.AiTaskMediaReference>of() : references)
                 .concatMap(reference -> {
-                    if (reference == null || !StringUtils.hasText(reference.storageKey())) return Mono.<PersistenceDtos.UploadedMediaResponse>error(new BusinessException(ErrorCode.PARAM_INVALID, "参考音频必须先上传并提供存储标识"));
+                    if (reference == null || !StringUtils.hasText(reference.storageKey())) return Mono.<PersistenceDtos.UploadedMediaResponse>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.uploadAudioAndProvideItsStorageIDFirst")));
                     return persistenceService.getMediaInfoForUser(userId, reference.storageKey().trim())
-                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "参考音频不存在或不属于当前用户")))
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.referenceAudioNotFoundOrOwnedByAnotherUser"))))
                             .map(media -> {
-                                if (!isHttpReferenceUrl(media.url())) throw new BusinessException(ErrorCode.PARAM_INVALID, "参考音频没有可访问的地址");
+                                if (!isHttpReferenceUrl(media.url())) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceAudioHasNoAccessibleURL"));
                                 return media;
                             });
                 }).collectList().doOnNext(media -> AudioInputSupport.validateMedia(media, references == null ? List.of() : references)).then();
@@ -1282,37 +1293,31 @@ public class AiTaskService {
             boolean imageReference) {
         String referenceLabel = imageReference ? "图片" : "视频";
         if (reference == null) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, referenceLabel + "参考素材不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceIsRequired", referenceLabel)));
         }
         if (StringUtils.hasText(reference.storageKey())) {
             String storageKey = reference.storageKey().trim();
             Mono<PersistenceDtos.UploadedMediaResponse> mediaInfo = persistenceService.getMediaInfoForUser(userId, storageKey);
             if (mediaInfo == null) {
-                return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
-                        "参考" + referenceLabel + "不存在或不属于当前用户"));
+                return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.referenceNotFoundOrOwnedByAnotherUser_c1ffb3", referenceLabel)));
             }
             return mediaInfo
-                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
-                            "参考" + referenceLabel + "不存在或不属于当前用户")))
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.referenceNotFoundOrOwnedByAnotherUser_c1ffb3", referenceLabel))))
                     .onErrorMap(exception -> exception instanceof BusinessException
-                            ? new BusinessException(((BusinessException) exception).getCode(),
-                            "参考" + referenceLabel + "不存在或不属于当前用户")
+                            ? new BusinessException(((BusinessException) exception).getCode(), SystemMessage.of("business.referenceNotFoundOrOwnedByAnotherUser_c1ffb3", referenceLabel))
                             : exception)
                     .flatMap(media -> {
                         if (media == null || !matchesReferenceMimeType(media.mimeType(), imageReference)) {
-                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
-                                    "参考" + referenceLabel + "素材类型与声明不一致"));
+                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceTypeDoesNotMatchItsDeclaration", referenceLabel)));
                         }
                         if (!isReferenceUrl(media.url())) {
-                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
-                                    "参考" + referenceLabel + "素材没有可访问的http或https地址"));
+                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceHasNoAccessibleHTTPHTTPSURL", referenceLabel)));
                         }
                         return Mono.empty();
                     });
         }
         if (!isHttpReferenceUrl(reference.url())) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
-                    "参考" + referenceLabel + "素材必须提供storageKey或合法http/https URL"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceNeedsStorageKeyOrAValidHTTPHTTPSURL", referenceLabel)));
         }
         return Mono.empty();
     }
@@ -1401,11 +1406,11 @@ public class AiTaskService {
     private String videoResolution(Map<String, Object> parameters) {
         Object rawResolution = parameters == null ? null : parameters.get("resolution");
         if (rawResolution == null || rawResolution.toString().isBlank()) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频任务必须指定分辨率");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoResolutionIsRequired"));
         }
         String resolution = rawResolution.toString().trim().toLowerCase(Locale.ROOT);
         if (!VideoResolution.isSupported(resolution)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频分辨率不受支持，不能自动降级");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedVideoResolutionAutomaticDowngradeIsDisabled"));
         }
         return resolution;
     }
@@ -1416,13 +1421,13 @@ public class AiTaskService {
      * @param mode String 视频模式
      * @return String 中文名称
      */
-    private String videoModeLabel(String mode) {
+    private SystemMessage videoModeLabel(String mode) {
         return switch (mode) {
-            case VideoGenerationMode.TEXT_TO_VIDEO -> "文生视频";
-            case VideoGenerationMode.IMAGE_TO_VIDEO -> "图生视频";
-            case VideoGenerationMode.REFERENCE_TO_VIDEO -> "全能参考";
-            case VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO -> "首尾帧原生生成";
-            default -> "视频";
+            case VideoGenerationMode.TEXT_TO_VIDEO -> SystemMessage.of("business.textToVideo");
+            case VideoGenerationMode.IMAGE_TO_VIDEO -> SystemMessage.of("business.imageToVideo");
+            case VideoGenerationMode.REFERENCE_TO_VIDEO -> SystemMessage.of("business.universalReference");
+            case VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO -> SystemMessage.of("business.nativeFirstAndLastFrames");
+            default -> SystemMessage.of("business.video");
         };
     }
 
@@ -1436,7 +1441,7 @@ public class AiTaskService {
     private int videoSeconds(Map<String, Object> parameters) {
         Object rawSeconds = parameters == null ? null : parameters.get("seconds");
         if (rawSeconds == null) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频任务必须指定正整数时长");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoDurationMustBeAPositiveInteger"));
         }
         try {
             int seconds;
@@ -1455,7 +1460,7 @@ public class AiTaskService {
             }
             return seconds;
         } catch (NumberFormatException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频任务必须指定正整数时长");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoDurationMustBeAPositiveInteger"));
         }
     }
 
@@ -1487,7 +1492,7 @@ public class AiTaskService {
             }
             return count;
         } catch (NumberFormatException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "图片数量必须是大于0的整数");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageCountMustBeAPositiveInteger"));
         }
     }
 
@@ -1515,7 +1520,7 @@ public class AiTaskService {
         try {
             return JSON.toJSONString(value);
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "序列化JSON失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToSerializeJSON", exception.getMessage()));
         }
     }
 
@@ -1617,5 +1622,21 @@ public class AiTaskService {
      */
     private record VideoBillingQuote(String mode, String resolution, String billingUnit, int unitPrice,
                                      int durationSeconds, int chargedCredits) {
+    }
+    /**
+     * 翻译当前已注册工作流的固定阶段名称。
+     * @param role String 阶段标识
+     * @param displayName String 扩展提供的展示名称
+     * @param locale Locale 当前语言
+     * @return String 展示名称
+     */
+    private String workflowStageLabel(String role, String displayName, Locale locale) {
+        String key = switch (role) {
+            case "first_frame" -> "business.generateFirstFrame";
+            case "last_frame" -> "business.generateLastFrame";
+            case "video" -> "business.composeVideo";
+            default -> null;
+        };
+        return key == null ? displayName : SystemMessage.of(key).render(locale);
     }
 }

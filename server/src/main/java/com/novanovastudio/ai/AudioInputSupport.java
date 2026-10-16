@@ -1,5 +1,7 @@
 package com.novanovastudio.ai;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.PersistenceDtos;
@@ -30,7 +32,7 @@ public final class AudioInputSupport {
     public static void validateCapability(String modelType, List<String> capabilities) {
         if (capabilities == null || !capabilities.contains(CAPABILITY)) return;
         if (!"video".equals(modelType) || !capabilities.contains(VideoGenerationMode.REFERENCE_TO_VIDEO)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "音频输入仅支持已开启全能参考的视频模型");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.audioInputRequiresAVideoModelWithUniversalReference"));
         }
     }
 
@@ -60,24 +62,24 @@ public final class AudioInputSupport {
      */
     public static void validateMedia(List<PersistenceDtos.UploadedMediaResponse> media,
                                      List<com.novanovastudio.dto.AiTaskDtos.AiTaskMediaReference> references) {
-        if (media.size() > 3) throw new BusinessException(ErrorCode.PARAM_INVALID, "最多支持3段参考音频");
+        if (media.size() > 3) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.atMost3ReferenceAudioClips"));
         long totalDuration = 0;
         for (int index = 0; index < media.size(); index++) {
             PersistenceDtos.UploadedMediaResponse item = media.get(index);
-            if (!isAudioMimeType(item.mimeType())) throw new BusinessException(ErrorCode.PARAM_INVALID, "参考音频仅支持 MP3、WAV");
+            if (!isAudioMimeType(item.mimeType())) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceAudioSupportsMP3AndWAVOnly"));
             if (item.bytes() == null || item.bytes() <= 0 || item.bytes() > 15L * 1024 * 1024) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "参考音频大小无效或超过15 MB");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidReferenceAudioSizeOrOver15MB"));
             }
             var reference = index < references.size() ? references.get(index) : null;
             long startMs = reference == null || reference.trimStartMs() == null ? 0 : reference.trimStartMs();
             long endMs = reference == null || reference.trimEndMs() == null ? item.durationMs() == null ? 0 : item.durationMs() : reference.trimEndMs();
             if (item.durationMs() == null || item.durationMs() < 1 || startMs < 0 || endMs > item.durationMs() || endMs <= startMs) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "参考音频裁剪区间无效或缺少时长信息");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidAudioTrimRangeOrMissingDuration"));
             }
             long effectiveDuration = endMs - startMs;
-            if (effectiveDuration < 2000 || effectiveDuration > 15000) throw new BusinessException(ErrorCode.PARAM_INVALID, "每段参考音频必须为2～15秒");
+            if (effectiveDuration < 2000 || effectiveDuration > 15000) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.eachReferenceAudioMustBe215Seconds"));
             totalDuration += effectiveDuration;
         }
-        if (totalDuration > 15000) throw new BusinessException(ErrorCode.PARAM_INVALID, "参考音频总时长不能超过15秒");
+        if (totalDuration > 15000) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.totalReferenceAudioDurationMustNotExceed15Seconds"));
     }
 }

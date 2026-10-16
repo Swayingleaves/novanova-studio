@@ -1,4 +1,9 @@
 "use client";
+import { currentLanguageTag } from "@/features/locale/translate";
+
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { BookOpen, CloudUpload, Download, FolderPlus, Link2, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, TriangleAlert, Upload } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -102,6 +107,7 @@ type Conversation = GenerationLogStatusFields & {
 };
 
 export default function ImagePage() {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const uploadChoiceInputRef = useRef<HTMLInputElement>(null);
@@ -165,7 +171,7 @@ export default function ImagePage() {
                 if (!cancelled) setStyleOptions(result.styles);
             })
             .catch((error) => {
-                if (!cancelled) setStyleError(error instanceof Error ? error.message : "图片风格加载失败");
+                if (!cancelled) setStyleError(error instanceof Error ? error.message : translate("image.failedToLoadImageStyles"));
             })
             .finally(() => {
                 if (!cancelled) setStyleLoading(false);
@@ -184,7 +190,7 @@ export default function ImagePage() {
                 if (!cancelled) setSkillOptions(result.skills);
             })
             .catch((error) => {
-                if (!cancelled) setSkillError(error instanceof Error ? error.message : "技能加载失败");
+                if (!cancelled) setSkillError(error instanceof Error ? error.message : translate("image.failedToLoadSkills"));
             })
             .finally(() => {
                 if (!cancelled) setSkillLoading(false);
@@ -296,7 +302,7 @@ export default function ImagePage() {
                         return next;
                     });
                 }
-                const toolText = call.name === "generate_image" ? "正在生成图片..." : "正在编辑图片...";
+                const toolText = call.name === "generate_image" ? translate("image.generatingImage") : translate("image.editingImage");
                 setChatMessages((prev) => {
                     const toolMessage = { id: call.callId, role: "tool" as const, text: toolText, detail: call };
                     const next = prev.some((item) => item.id === call.callId)
@@ -351,7 +357,7 @@ export default function ImagePage() {
             // 将流式文本保存为持久消息
             const streamed = streamingTextRef.current;
             setChatMessages((prev) => {
-                let next = finishRoundAgentActivities(prev, text || "已完成");
+                let next = finishRoundAgentActivities(prev, text || translate("image.completed"));
                 if (streamed && streamed.text) {
                     const assistantMessage = { id: streamed.messageId, role: "assistant" as const, text: streamed.text, ...(action ? { action } : {}) };
                     next = next.some((item) => item.id === streamed.messageId)
@@ -401,8 +407,8 @@ export default function ImagePage() {
                 const next = upsertAgentActivityMessage(prev, {
                     id: `plan-${planId}`,
                     type: "plan-created",
-                    title: "创建创作计划",
-                    description: `${summary}，共 ${taskCount} 个任务`,
+                    title: translate("image.createCreativePlan"),
+                    description: translate("image.tasksTotal", { value0: summary, value1: taskCount }),
                     status: "success",
                 });
                 chatMessagesRef.current = next;
@@ -421,8 +427,8 @@ export default function ImagePage() {
                 const next = upsertAgentActivityMessage(prev, {
                     id: `prompt-${planId}-${taskId}`,
                     type: "prompt-prepared",
-                    title: strategy === "OPTIMIZE" ? "优化生成提示词" : "准备生成提示词",
-                    description: strategy === "OPTIMIZE" ? "已根据创作目标优化提示词" : "沿用原始提示词",
+                    title: strategy === "OPTIMIZE" ? translate("image.optimizeGenerationPrompt") : translate("image.prepareGenerationPrompt"),
+                    description: strategy === "OPTIMIZE" ? translate("image.promptOptimizedForYourCreativeGoal") : translate("image.keepOriginalPrompt"),
                     status: "success",
                 });
                 chatMessagesRef.current = next;
@@ -523,7 +529,7 @@ export default function ImagePage() {
                     );
                 } catch (error) {
                     setReferences((current) => current.filter((reference) => reference.id !== placeholder.id));
-                    message.error(error instanceof Error ? error.message : `上传参考图 ${placeholder.name} 失败`);
+                    message.error(error instanceof Error ? error.message : translate("image.failedToUploadReference", { value0: placeholder.name }));
                 } finally {
                     URL.revokeObjectURL(placeholder.dataUrl);
                     setUploadingReferenceIds((current) => current.filter((id) => id !== placeholder.id));
@@ -537,7 +543,7 @@ export default function ImagePage() {
         if (isStreaming || isQueued) return;
         const text = prompt.trim();
         if (!text) {
-            message.error("请输入生图提示词");
+            message.error(translate("image.enterImagePrompt"));
             return;
         }
 
@@ -584,7 +590,7 @@ export default function ImagePage() {
         if (!files?.length) return;
         const uploaded = await addReferences(files);
         if (!uploaded.length || isStreaming || isQueued) return;
-        const text = "已上传产品图片";
+        const text = translate("image.productImageUploaded");
         const attachments = imageReferenceAttachments(uploaded);
         const chatAttachments = attachments.map((attachment, index) => ({
             id: `uploaded-${index}-${attachment.url || "unknown"}`,
@@ -618,7 +624,7 @@ export default function ImagePage() {
 
     const newConversation = () => {
         if (!canChangeSession()) {
-            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            message.warning(translate("image.generationIsRunningStopItOrWait"));
             return;
         }
         setActiveId(null);
@@ -643,7 +649,7 @@ export default function ImagePage() {
 
     const selectConversation = (conversation: Conversation) => {
         if (!canChangeSession()) {
-            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            message.warning(translate("image.generationIsRunningStopItOrWait"));
             return;
         }
         if (getGenerationConversationStatus(conversation) !== "none" && conversation.generationStatus !== "running") {
@@ -675,7 +681,7 @@ export default function ImagePage() {
 
     const deleteSelected = () => {
         if (activeIdRef.current && selectedIds.includes(activeIdRef.current) && !canChangeSession()) {
-            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            message.warning(translate("image.generationIsRunningStopItOrWait"));
             return;
         }
         const imageKeys = conversations
@@ -701,7 +707,7 @@ export default function ImagePage() {
         try {
             await downloadMedia(image, `image-${index + 1}.png`);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "图片下载失败");
+            message.error(error instanceof Error ? error.message : translate("image.failedToDownloadImage"));
         }
     };
 
@@ -729,20 +735,20 @@ export default function ImagePage() {
                     objectStorage: stored.objectStorage || image.objectStorage,
                 },
             ]);
-            message.success("已加入参考图");
+            message.success(translate("image.referenceImageAdded"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "加入参考图失败");
+            message.error(error instanceof Error ? error.message : translate("image.failedToAddReference"));
         }
     };
 
     const saveResultToAssets = (image: GeneratedImage, index: number) => {
         if (!image.storageKey) {
-            message.error("生成图片缺少媒体存储键，请重新生成后再添加素材");
+            message.error(translate("image.generatedImageHasNoStorageKeyRegenerateItFirst"));
             return;
         }
         addAsset({
             kind: "image",
-            title: `生成结果 ${index + 1}`,
+            title: translate("image.generationResult", { value0: index + 1 }),
             coverUrl: image.dataUrl,
             tags: [],
             source: "生图工作台",
@@ -759,16 +765,16 @@ export default function ImagePage() {
                 source: "image-page",
             },
         });
-        message.success("已加入我的资产");
+        message.success(translate("image.addedToMyAssets"));
     };
 
     const uploadResultToObjectStorage = async (image: GeneratedImage, index: number) => {
         if (image.objectStorage?.url) {
             try {
                 await navigator.clipboard.writeText(image.objectStorage.url);
-                message.success("云储存地址已复制");
+                message.success(translate("image.cloudStorageURLCopied"));
             } catch {
-                message.error("云储存地址复制失败");
+                message.error(translate("image.failedToCopyCloudStorageURL"));
             }
             return;
         }
@@ -790,9 +796,9 @@ export default function ImagePage() {
                     })),
                 })),
             );
-            message.success("已上传到云储存，地址已保存");
+            message.success(translate("image.uploadedToCloudURLSaved"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "上传到云储存失败");
+            message.error(error instanceof Error ? error.message : translate("image.failedToUploadToCloudStorage"));
         } finally {
             setUploadingObjectStorageId("");
         }
@@ -803,7 +809,7 @@ export default function ImagePage() {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
             if (!payload.storageKey) {
-                message.error("图片素材缺少媒体存储键，请重新上传后再使用");
+                message.error(translate("image.imageAssetHasNoMediaStorageKeyUploadIt"));
             } else {
                 setReferences((current) => [
                     ...current,
@@ -818,7 +824,7 @@ export default function ImagePage() {
                 ]);
             }
         } else {
-            message.warning("生图工作台只能使用文本或图片素材");
+            message.warning(translate("image.imageWorkspaceAcceptsTextOrImageReferences"));
         }
         setAssetPickerOpen(false);
     };
@@ -834,7 +840,7 @@ export default function ImagePage() {
 
     const deleteConversation = async (conversationId: string) => {
         if (activeIdRef.current === conversationId && !canChangeSession()) {
-            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            message.warning(translate("image.generationIsRunningStopItOrWait"));
             return;
         }
         const conversation = conversationsRef.current.find((item) => item.id === conversationId);
@@ -851,7 +857,7 @@ export default function ImagePage() {
         const uploading = uploadingReferenceIds.includes(reference.id);
         return {
             id: reference.id,
-            label: uploading ? `${imageReferenceLabel(index)} 上传中` : imageReferenceLabel(index),
+            label: uploading ? translate("image.uploading", { value0: imageReferenceLabel(index) }) : imageReferenceLabel(index),
             preview: (
                 <div className="relative size-11">
                     <Image
@@ -861,7 +867,7 @@ export default function ImagePage() {
                         height={44}
                         style={{ objectFit: "cover" }}
                         className="rounded-xl"
-                        preview={uploading ? false : { mask: "预览" }}
+                        preview={uploading ? false : { mask: translate("image.preview") }}
                     />
                     {uploading ? (
                         <span className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl bg-black/35 text-white">
@@ -876,26 +882,26 @@ export default function ImagePage() {
     const addRecentReference = (url: string) => {
         setReferences((current) => {
             if (current.some((reference) => reference.dataUrl === url)) return current;
-            return [...current, { id: nanoid(), name: "最近上传的参考图", type: "image/*", dataUrl: url }];
+            return [...current, { id: nanoid(), name: translate("image.recentReferenceImages"), type: "image/*", dataUrl: url }];
         });
     };
     const composerActions: CreationComposerAction[] = [
         {
             key: "upload",
-            label: "参考图",
+            label: translate("image.referenceImage"),
             icon: <Upload className="size-3.5" />,
             popoverContent: <RecentReferenceImagePicker urls={recentReferenceImageUrls} selectedUrls={references.map((reference) => reference.dataUrl)} onSelect={addRecentReference} />,
             onClick: () => fileInputRef.current?.click(),
         },
         {
             key: "prompt-library",
-            label: "提示词库",
+            label: translate("image.promptLibrary"),
             icon: <BookOpen className="size-3.5" />,
             onClick: () => setPromptDialogOpen(true),
         },
         {
             key: "optimize-prompt",
-            label: "AI优化提示词",
+            label: translate("image.optimizePromptWithAI"),
             icon: <Sparkles className="size-3.5" />,
             placement: "submit",
             iconOnly: true,
@@ -905,13 +911,13 @@ export default function ImagePage() {
         },
         {
             key: "assets",
-            label: "资产库",
+            label: translate("image.assetLibrary"),
             icon: <FolderPlus className="size-3.5" />,
             onClick: () => setAssetPickerOpen(true),
         },
         {
             key: "settings",
-            label: settingsSummary || "更多设置",
+            label: settingsSummary || translate("image.moreSettings"),
             className: settingsSummary ? "creation-composer-action-settings" : undefined,
             icon: <Cog className="size-3.5" />,
             onClick: () => setSettingsOpen(true),
@@ -998,7 +1004,7 @@ export default function ImagePage() {
 
             <CreationWorkspace
                 sidebar={{
-                    heading: "开启创作",
+                    heading: translate("image.startCreating"),
                     items: conversationItems,
                     managementMode,
                     hasSelection: selectedIds.length > 0,
@@ -1039,7 +1045,7 @@ export default function ImagePage() {
                                         <br />
                                         <span className="text-transparent [-webkit-text-stroke:1px_var(--studio-ink)]">Agent</span>
                                     </h2>
-                                    <p className="mt-7 max-w-lg text-base leading-7 text-[var(--studio-text)]">从一个提示词开始组织构图、材质与光线。生成结果会按轮次保留在这里，便于继续比较与细化。</p>
+                                    <p className="mt-7 max-w-lg text-base leading-7 text-[var(--studio-text)]">{translate("image.startWithAPromptToShapeCompositionMaterialsAnd")}</p>
                                 </div>
                             </div>
                         </div>
@@ -1048,7 +1054,7 @@ export default function ImagePage() {
                 composer={{
                     agentLabel: "Image Agent",
                     value: prompt,
-                    placeholder: "描述画面主体、风格、构图、光线和用途...",
+                    placeholder: translate("image.describeSubjectStyleCompositionLightingAndPurpose"),
                     references: referenceChips,
                     styleOptions,
                     selectedStyles,
@@ -1076,13 +1082,13 @@ export default function ImagePage() {
                 }}
                 settings={{
                     open: settingsOpen,
-                    title: "图片设置",
+                    title: translate("image.imageSettings"),
                     onClose: () => setSettingsOpen(false),
                     content: (
                         <div className="space-y-4">
                             <ImageSettingsPanel config={config} onConfigChange={handleImageSettingsChange} theme={theme} showTitle={false} showCount={false} className="space-y-4 px-0 py-0" />
                             <div>
-                                <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">模型</label>
+                                <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">{translate("image.model")}</label>
                                 <ModelPicker
                                     config={effectiveConfig}
                                     value={historyModel || model}
@@ -1094,7 +1100,7 @@ export default function ImagePage() {
                                     }}
                                     capability="image"
                                     fullWidth
-                                    onMissingConfig={() => (userRole === "admin" ? openConfigDialog(false) : message.error("请联系管理员配置默认生图模型"))}
+                                    onMissingConfig={() => (userRole === "admin" ? openConfigDialog(false) : message.error(translate("image.askTheAdministratorToConfigureAnImageModel")))}
                                 />
                             </div>
                         </div>
@@ -1104,9 +1110,8 @@ export default function ImagePage() {
 
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
-            <Modal title="删除对话" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelected} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
-                确定删除选中的 {selectedIds.length} 条对话吗？
-            </Modal>
+            <Modal title={translate("image.deleteConversation")} open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelected} okText={translate("image.delete")} okButtonProps={{ danger: true }} cancelText={translate("image.cancel")}>
+                {translate("image.deleteSelected")}{selectedIds.length} {translate("image.conversations")}</Modal>
             <ResultDetailDialog detail={resultDetail} onClose={() => setResultDetail(null)} />
         </>
     );
@@ -1231,7 +1236,7 @@ function buildImageConversationItems(conversations: Conversation[], activeId: st
         return {
             id: conversation.id,
             title: conversation.title,
-            subtitle: `${formatConversationTime(conversation.updatedAt)} · ${conversation.rounds.length} 轮`,
+            subtitle: translate("image.rounds", { value0: formatConversationTime(conversation.updatedAt), value1: conversation.rounds.length }),
             preview: <MediaPreview kind="image" src={latestImage?.dataUrl} className="size-10 rounded-xl object-cover" />,
             active: activeId === conversation.id,
             selected: selectedIds.includes(conversation.id),
@@ -1266,7 +1271,7 @@ function buildImageThreadSections(
                     <div className="space-y-2">
                         {round.skill ? (
                             <div className="flex flex-wrap gap-2">
-                                <span className="inline-flex max-w-52 items-center gap-1.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]" title={`技能：${round.skill.name}`}>
+                                <span className="inline-flex max-w-52 items-center gap-1.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]" title={translate("image.skill", { value0: round.skill.name })}>
                                     <Sparkles className="size-3.5 shrink-0 text-[var(--studio-action)]" />
                                     <span className="truncate">{round.skill.name}</span>
                                 </span>
@@ -1298,7 +1303,7 @@ function buildImageThreadSections(
                                 onRegenerate={() => void handlers.onRegenerate(round)}
                             />
                         ) : result.status === "failed" || result.status === "canceled" ? (
-                            <FailedCard key={result.id} error={result.error || "生成失败"} canceled={result.status === "canceled"} />
+                            <FailedCard key={result.id} error={result.error || translate("image.generationFailed")} canceled={result.status === "canceled"} />
                         ) : (
                             <ImageGeneratingCard key={result.id} size={round.config.size} />
                         ),
@@ -1352,16 +1357,16 @@ function buildImageStatusText(round: Round): string {
     const canceledCount = round.results.filter((result) => result.status === "canceled").length;
 
     if (pendingCount) {
-        return "生成中";
+        return translate("image.generating");
     }
     if (successCount && failedCount) {
-        return `已完成 ${successCount} 张，失败 ${failedCount} 张`;
+        return translate("image.completedImagesFailed", { value0: successCount, value1: failedCount });
     }
     if (successCount) {
-        return canceledCount ? `已完成 ${successCount} 张，已停止 ${canceledCount} 张` : `已完成 ${successCount} 张`;
+        return canceledCount ? translate("image.completedImagesStopped", { value0: successCount, value1: canceledCount }) : translate("image.completedImages", { value0: successCount });
     }
-    if (canceledCount) return "已停止生成";
-    return round.results.length ? "生成失败" : "";
+    if (canceledCount) return translate("image.generationStopped");
+    return round.results.length ? translate("image.generationFailed") : "";
 }
 
 function buildImageAssistantText(round: Round): string {
@@ -1372,15 +1377,15 @@ function buildImageAssistantText(round: Round): string {
     const failedCount = round.results.filter((result) => result.status === "failed").length;
     const canceledCount = round.results.filter((result) => result.status === "canceled").length;
 
-    if (pendingCount) return "生成中…";
-    if (successCount && failedCount) return `已完成 ${successCount} 张，失败 ${failedCount} 张`;
-    if (successCount) return canceledCount ? `已完成 ${successCount} 张，已停止 ${canceledCount} 张` : `已完成 ${successCount} 张`;
-    if (canceledCount) return "已停止生成，你可以直接重新生成。";
-    return round.results.length ? "生成失败" : "";
+    if (pendingCount) return translate("image.generating_43d266");
+    if (successCount && failedCount) return translate("image.completedImagesFailed", { value0: successCount, value1: failedCount });
+    if (successCount) return canceledCount ? translate("image.completedImagesStopped", { value0: successCount, value1: canceledCount }) : translate("image.completedImages", { value0: successCount });
+    if (canceledCount) return translate("image.generationStoppedYouCanGenerateAgain");
+    return round.results.length ? translate("image.generationFailed") : "";
 }
 
 function formatConversationTime(value: number): string {
-    return new Date(value).toLocaleString("zh-CN", {
+    return new Date(value).toLocaleString(currentLanguageTag(), {
         month: "short",
         day: "numeric",
         hour: "2-digit",
@@ -1398,12 +1403,12 @@ function formatThreadSectionLabel(value: number): string {
     yesterday.setDate(yesterday.getDate() - 1);
 
     if (date >= today && date < tomorrow) {
-        return "今天";
+        return translate("image.today");
     }
     if (date >= yesterday && date < today) {
-        return "昨天";
+        return translate("image.yesterday");
     }
-    return date.toLocaleDateString("zh-CN", {
+    return date.toLocaleDateString(currentLanguageTag(), {
         month: "long",
         day: "numeric",
     });
@@ -1430,6 +1435,7 @@ function ResultCard({
     onOpenDetail?: (image: GeneratedImage, index: number) => void;
     onRegenerate?: () => void;
 }) {
+    const translate = useTranslation();
     const [loadedMeta, setLoadedMeta] = useState<{ width: number; height: number; bytes: number }>({ width: image.width, height: image.height, bytes: image.bytes });
     const [isDownloading, setIsDownloading] = useState(false);
     const copyText = useCopyText();
@@ -1485,9 +1491,9 @@ function ResultCard({
         >
             <div className="relative overflow-hidden bg-[var(--studio-media)]" style={{ aspectRatio: previewAspectRatio }}>
                 {onOpenDetail ? (
-                    <img src={preview.displaySrc} alt={`结果 ${index + 1}`} className="block size-full cursor-zoom-in object-contain" onClick={() => onOpenDetail(image, index)} onError={preview.onError} />
+                    <img src={preview.displaySrc} alt={translate("image.result", { value0: index + 1 })} className="block size-full cursor-zoom-in object-contain" onClick={() => onOpenDetail(image, index)} onError={preview.onError} />
                 ) : (
-                    <Image src={image.dataUrl} fallback={MEDIA_FALLBACK_IMAGE} alt={`结果 ${index + 1}`} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
+                    <Image src={image.dataUrl} fallback={MEDIA_FALLBACK_IMAGE} alt={translate("image.result", { value0: index + 1 })} style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} />
                 )}
                 <div className="absolute left-2 top-2 rounded-full bg-black/60 px-2.5 py-0.5 text-xs font-medium text-white">#{index + 1}</div>
             </div>
@@ -1501,33 +1507,32 @@ function ResultCard({
                     {hasBytes ? <span>{formatBytes(displayBytes)}</span> : null}
                     {image.objectStorage?.url ? (
                         <Tag className="!m-0 !text-[10px]" color="blue">
-                            云储存
-                        </Tag>
+                            {translate("image.cloudStorage")}</Tag>
                     ) : null}
                 </div>
                 <div className="flex items-center gap-1 text-xs text-amber-500">
                     <TriangleAlert className="size-3.5 shrink-0" />
-                    <span>请尽快下载生成结果，超时将无法下载</span>
+                    <span>{translate("image.downloadResultsBeforeTheyExpire")}</span>
                 </div>
                 <div className="flex gap-1">
-                    <Tooltip title="拷贝链接">
-                        <Button aria-label="拷贝链接" size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<Link2 className="size-3.5" />} onClick={() => copyText(image.objectStorage?.url || image.dataUrl, "链接已复制")} />
+                    <Tooltip title={translate("image.copyLink")}>
+                        <Button aria-label={translate("image.copyLink")} size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<Link2 className="size-3.5" />} onClick={() => copyText(image.objectStorage?.url || image.dataUrl, translate("image.linkCopied"))} />
                     </Tooltip>
-                    <Tooltip title={image.objectStorage?.url ? "复制云储存地址" : "上传到云储存"}>
+                    <Tooltip title={image.objectStorage?.url ? translate("image.copyCloudStorageURL") : translate("image.uploadToCloudStorage")}>
                         <Button size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" loading={uploadingObjectStorage} icon={<CloudUpload className="size-3.5" />} onClick={() => void onUploadObjectStorage(image, index)} />
                     </Tooltip>
-                    <Tooltip title="添加到素材">
+                    <Tooltip title={translate("image.addToAssets")}>
                         <Button size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<FolderPlus className="size-3.5" />} onClick={() => void onSaveAsset(image, index)} />
                     </Tooltip>
-                    <Tooltip title="加入参考图">
+                    <Tooltip title={translate("image.addReference")}>
                         <Button size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<PenLine className="size-3.5" />} onClick={() => void onEdit(image, index)} />
                     </Tooltip>
-                    <Tooltip title="下载">
+                    <Tooltip title={translate("image.download")}>
                         <Button size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<Download className="size-3.5" />} loading={isDownloading} disabled={isDownloading} onClick={() => void downloadResult()} />
                     </Tooltip>
                     {onRegenerate ? (
-                        <Tooltip title="重新生成">
-                            <Button aria-label="重新生成" size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<RefreshCw className="size-3.5" />} onClick={onRegenerate} />
+                        <Tooltip title={translate("image.regenerate")}>
+                            <Button aria-label={translate("image.regenerate")} size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<RefreshCw className="size-3.5" />} onClick={onRegenerate} />
                         </Tooltip>
                     ) : null}
                 </div>
@@ -1555,10 +1560,11 @@ async function readImageContentLength(url: string): Promise<number> {
 }
 
 function FailedCard({ error, canceled }: { error: string; canceled?: boolean }) {
+    const translate = useTranslation();
     return (
         <div className="w-full overflow-hidden rounded-xl border border-red-300/40 bg-red-500/10 sm:w-[240px]">
             <div className="flex aspect-square flex-col items-center justify-center gap-3 p-5 text-center">
-                <div className="rounded-full bg-[var(--studio-panel-solid)] px-3 py-1 text-sm font-medium text-red-500">{canceled ? "已停止生成" : "生成失败"}</div>
+                <div className="rounded-full bg-[var(--studio-panel-solid)] px-3 py-1 text-sm font-medium text-red-500">{canceled ? translate("image.generationStopped") : translate("image.generationFailed")}</div>
                 <Typography.Paragraph ellipsis={{ rows: 3 }} className="!mb-0 !text-xs !text-red-400">
                     {error}
                 </Typography.Paragraph>
@@ -1615,7 +1621,7 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
 
     return {
         id: raw.id || nanoid(),
-        title: raw.title || "未命名",
+        title: raw.title || translate("image.untitled"),
         rounds,
         createdAt: raw.createdAt || Date.now(),
         updatedAt: raw.updatedAt || raw.createdAt || Date.now(),

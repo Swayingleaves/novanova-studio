@@ -1,5 +1,7 @@
 package com.novanovastudio.ai.provider;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiErrorSupport;
 import com.novanovastudio.ai.AiHttpClient;
@@ -117,7 +119,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
     @Override
     public Mono<JSONObject> execute(AiTaskExecutionContext context) {
         if (!supports(context.task().getTaskType())) {
-            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "MiniMax 调用格式仅支持视频任务"));
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.miniMaxSupportsVideoTasksOnly")));
         }
         validateModel(context.model());
         List<AiTaskDtos.AiTaskMediaReference> imageReferences =
@@ -168,7 +170,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
                     String providerTaskId = AiTaskParameterReader.firstNonEmpty(created.getString("task_id"));
                     if (!StringUtils.hasText(providerTaskId)) {
                         return Mono.error(new BusinessException(
-                                ErrorCode.THIRD_PARTY_CALL_ERROR, "MiniMax H3 接口没有返回任务ID"));
+                                ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.miniMaxH3ReturnedNoTaskID")));
                     }
                     return context.updateRunningProgress(20)
                             .then(pollMiniMaxVideoTask(context, providerTaskId))
@@ -228,7 +230,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
                                     task, miniMaxFailureMessage(task, status)));
                         }
                         return Mono.error(new BusinessException(
-                                ErrorCode.THIRD_PARTY_CALL_ERROR, "MiniMax H3 返回了未知任务状态: " + status));
+                                ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.unknownMiniMaxH3TaskStatus", status)));
                     }));
                 });
     }
@@ -250,7 +252,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
                 .doOnError(exception -> log.error(
                         "取消MiniMax H3视频任务失败: taskId={}, providerTaskId={}",
                         context.task().getId(), providerTaskId, exception))
-                .then(Mono.<JSONObject>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "任务已取消")));
+                .then(Mono.<JSONObject>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCanceled"))));
     }
 
     /**
@@ -278,7 +280,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
             return Mono.empty();
         }
         return Mono.error(new BusinessException(
-                ErrorCode.THIRD_PARTY_CALL_ERROR, "MiniMax H3 返回了未知任务状态: " + status));
+                ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.unknownMiniMaxH3TaskStatus", status)));
     }
 
     /**
@@ -295,7 +297,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
         String videoUrl = content == null ? "" : AiTaskParameterReader.firstNonEmpty(content.getString("url"));
         if (!StringUtils.hasText(videoUrl)) {
             return Mono.error(new BusinessException(
-                    ErrorCode.THIRD_PARTY_CALL_ERROR, "MiniMax H3 任务成功但没有返回视频URL"));
+                    ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.miniMaxH3TaskSucceededWithoutVideoURL")));
         }
         Integer duration = task.getInteger("duration");
         Integer durationMilliseconds = duration == null ? null : duration * 1000;
@@ -354,13 +356,13 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
         validateReferenceCounts(imageUrls.size(), videoUrls.size());
         String mode = VideoGenerationMode.defaultIfBlank(videoGenerationMode);
         if (!VideoGenerationMode.isSupported(mode)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedVideoGenerationMode"));
         }
         boolean imageToVideo = VideoGenerationMode.IMAGE_TO_VIDEO.equals(mode);
         String ratio = imageToVideo ? "adaptive"
                 : normalizeRatio(AiTaskParameterReader.parameterText(parameters, "size", "16:9"));
         if (imageUrls.isEmpty() && videoUrls.isEmpty() && "adaptive".equals(ratio)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "MiniMax H3 文生视频必须指定非自适应比例");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.miniMaxH3TextToVideoRequiresAFixedAspectRatio"));
         }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", MINIMAX_H3_MODEL);
@@ -397,10 +399,10 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
         validatePrompt(prompt);
         validateReferenceCounts(imageUrls.size(), videoUrls.size());
         String mode = VideoGenerationMode.defaultIfBlank(videoGenerationMode);
-        if (!VideoGenerationMode.isSupported(mode)) throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持");
+        if (!VideoGenerationMode.isSupported(mode)) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedVideoGenerationMode"));
         boolean imageToVideo = VideoGenerationMode.IMAGE_TO_VIDEO.equals(mode);
         String ratio = imageToVideo ? "adaptive" : normalizeRatio(AiTaskParameterReader.parameterText(parameters, "size", "16:9"));
-        if (imageUrls.isEmpty() && videoUrls.isEmpty() && audioUrls.isEmpty() && "adaptive".equals(ratio)) throw new BusinessException(ErrorCode.PARAM_INVALID, "MiniMax H3 文生视频必须指定非自适应比例");
+        if (imageUrls.isEmpty() && videoUrls.isEmpty() && audioUrls.isEmpty() && "adaptive".equals(ratio)) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.miniMaxH3TextToVideoRequiresAFixedAspectRatio"));
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", MINIMAX_H3_MODEL);
         List<Map<String, Object>> content = buildContent(prompt, imageUrls, videoUrls, imageToVideo, imageRoles);
@@ -423,10 +425,10 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
      */
     private static void validatePrompt(String prompt) {
         if (!StringUtils.hasText(prompt)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "MiniMax H3 视频提示词不能为空");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.miniMaxH3VideoPromptIsRequired"));
         }
         if (prompt.codePointCount(0, prompt.length()) > 7000) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "MiniMax H3 视频提示词不能超过7000个字符");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.miniMaxH3PromptMustNotExceed7000Characters"));
         }
     }
 
@@ -478,7 +480,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
     static JSONObject taskPayload(JSONObject response) {
         JSONObject task = response == null ? null : response.getJSONObject("task");
         if (task == null) {
-            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "MiniMax H3 查询响应没有返回任务数据");
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.miniMaxH3QueryReturnedNoTaskData"));
         }
         return task;
     }
@@ -492,7 +494,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
      */
     private static void validateModel(String model) {
         if (!MINIMAX_H3_MODEL.equalsIgnoreCase(model == null ? "" : model.trim())) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "MiniMax 调用格式当前仅支持 " + MINIMAX_H3_MODEL);
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.miniMaxFormatOnlySupports", MINIMAX_H3_MODEL));
         }
     }
 
@@ -506,12 +508,10 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
      */
     private static void validateReferenceCounts(int imageCount, int videoCount) {
         if (imageCount > MAXIMUM_REFERENCE_IMAGE_COUNT) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID,
-                    "MiniMax H3 参考图片最多" + MAXIMUM_REFERENCE_IMAGE_COUNT + "个");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.atMostMiniMaxH3ReferenceImages", MAXIMUM_REFERENCE_IMAGE_COUNT));
         }
         if (videoCount > MAXIMUM_REFERENCE_VIDEO_COUNT) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID,
-                    "MiniMax H3 参考视频最多" + MAXIMUM_REFERENCE_VIDEO_COUNT + "个");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.atMostMiniMaxH3ReferenceVideos", MAXIMUM_REFERENCE_VIDEO_COUNT));
         }
     }
 
@@ -534,7 +534,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
         if (presetRatio != null) {
             return presetRatio;
         }
-        throw new BusinessException(ErrorCode.PARAM_INVALID, "MiniMax H3 视频比例不支持: " + value);
+        throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedMiniMaxH3AspectRatio", value));
     }
 
     /**
@@ -552,7 +552,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
         if ("2k".equals(normalized)) {
             return "2K";
         }
-        throw new BusinessException(ErrorCode.PARAM_INVALID, "MiniMax H3 视频分辨率只支持768P或2K");
+        throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.miniMaxH3ResolutionMustBe768POr2K"));
     }
 
     /**
@@ -566,11 +566,11 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
         try {
             int duration = Integer.parseInt(value == null ? "" : value.trim());
             if (duration < 4 || duration > 15) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "MiniMax H3 视频时长只支持4到15秒");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.miniMaxH3DurationMustBe415Seconds"));
             }
             return duration;
         } catch (NumberFormatException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "MiniMax H3 视频时长必须是4到15之间的整数");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.miniMaxH3DurationMustBeAnIntegerFrom4To"));
         }
     }
 
@@ -597,7 +597,7 @@ public class MiniMaxProviderAdapter implements AiProviderAdapter {
         if ("false".equals(normalized)) {
             return false;
         }
-        throw new BusinessException(ErrorCode.PARAM_INVALID, "MiniMax H3 水印参数必须为 true 或 false");
+        throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.miniMaxH3WatermarkMustBeTrueOrFalse"));
     }
 
     /**

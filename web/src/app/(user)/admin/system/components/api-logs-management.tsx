@@ -1,4 +1,8 @@
 "use client";
+import { currentLanguageTag } from "@/features/locale/translate";
+
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import React, { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -15,6 +19,7 @@ const PAGE_SIZE = 20;
  * @returns 接口记录页面内容
  */
 export function ApiLogsManagement() {
+    const translate = useTranslation();
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(PAGE_SIZE);
     const [keywordInput, setKeywordInput] = useState("");
@@ -63,7 +68,7 @@ export function ApiLogsManagement() {
 
     const columns: TableProps<ServerApiLog>["columns"] = [
         {
-            title: "接口",
+            title: translate("administration.endpoint"),
             dataIndex: "requestPath",
             key: "requestPath",
             width: columnWidths.requestPath,
@@ -76,7 +81,7 @@ export function ApiLogsManagement() {
             ),
         },
         {
-            title: "客户端 IP",
+            title: translate("administration.clientIP"),
             dataIndex: "clientIp",
             key: "clientIp",
             width: columnWidths.clientIp,
@@ -84,7 +89,7 @@ export function ApiLogsManagement() {
             render: (value: string) => <span className="font-mono text-xs">{value}</span>,
         },
         {
-            title: "用户 ID",
+            title: translate("administration.userID"),
             dataIndex: "userId",
             key: "userId",
             width: columnWidths.userId,
@@ -92,7 +97,7 @@ export function ApiLogsManagement() {
             render: (value: number | null) => value ? <span className="font-mono tabular-nums">{value}</span> : <span className="text-[var(--studio-faint)]">-</span>,
         },
         {
-            title: "状态码",
+            title: translate("administration.statusCode"),
             dataIndex: "statusCode",
             key: "statusCode",
             width: columnWidths.statusCode,
@@ -100,23 +105,23 @@ export function ApiLogsManagement() {
             render: (value: number) => <Tag color={value < 400 ? "green" : "red"}>{value}</Tag>,
         },
         {
-            title: "成功",
+            title: translate("administration.success"),
             dataIndex: "success",
             key: "success",
             width: columnWidths.success,
             onHeaderCell: () => ({ width: columnWidths.success, onResize: handleResize("success") }),
-            render: (value: boolean) => <Tag color={value ? "green" : "default"}>{value ? "成功" : "失败"}</Tag>,
+            render: (value: boolean) => <Tag color={value ? "green" : "default"}>{value ? translate("administration.success") : translate("administration.failed")}</Tag>,
         },
         {
-            title: "错误",
+            title: translate("administration.error"),
             dataIndex: "hasError",
             key: "hasError",
             width: columnWidths.hasError,
             onHeaderCell: () => ({ width: columnWidths.hasError, onResize: handleResize("hasError") }),
-            render: (value: boolean) => <Tag color={value ? "red" : "default"}>{value ? "有错误" : "无"}</Tag>,
+            render: (value: boolean) => <Tag color={value ? "red" : "default"}>{value ? translate("administration.hasErrors") : translate("administration.none")}</Tag>,
         },
         {
-            title: "错误内容",
+            title: translate("administration.errorDetails"),
             dataIndex: "errorContent",
             key: "errorContent",
             width: columnWidths.errorContent,
@@ -131,7 +136,7 @@ export function ApiLogsManagement() {
                 ),
         },
         {
-            title: "耗时",
+            title: translate("administration.duration"),
             dataIndex: "durationMs",
             key: "durationMs",
             width: columnWidths.durationMs,
@@ -139,19 +144,19 @@ export function ApiLogsManagement() {
             render: (value: number) => <span className="tabular-nums">{value} ms</span>,
         },
         {
-            title: "时间",
+            title: translate("administration.time"),
             dataIndex: "createdAt",
             key: "createdAt",
             width: columnWidths.createdAt,
             onHeaderCell: () => ({ width: columnWidths.createdAt, onResize: handleResize("createdAt") }),
-            render: (value: string) => (value ? new Date(value).toLocaleString("zh-CN") : "-"),
+            render: (value: string) => (value ? new Date(value).toLocaleString(currentLanguageTag()) : "-"),
         },
         {
-            title: "操作",
+            title: translate("administration.actions"),
             key: "operation",
             width: columnWidths.operation,
             onHeaderCell: () => ({ width: columnWidths.operation, onResize: handleResize("operation") }),
-            render: (_, record) => <Button type="link" size="small" onClick={() => setSelected(record)}>详情</Button>,
+            render: (_, record) => <Button type="link" size="small" onClick={() => setSelected(record)}>{translate("administration.details")}</Button>,
         },
     ];
 
@@ -173,12 +178,12 @@ export function ApiLogsManagement() {
                         setKeyword(keywordInput);
                         setPage(1);
                     }}
-                    placeholder="关键字：IP / 接口地址 / 用户 ID"
+                    placeholder={translate("administration.keywordIPEndpointUserID")}
                     className="w-72"
                 />
                 <Select<"success" | "error" | undefined>
                     allowClear
-                    placeholder="全部结果"
+                    placeholder={translate("administration.allResults")}
                     value={result}
                     onChange={(value) => {
                         setResult(value);
@@ -186,11 +191,11 @@ export function ApiLogsManagement() {
                     }}
                     className="w-36"
                     options={[
-                        { value: "success", label: "成功" },
-                        { value: "error", label: "错误" },
+                        { value: "success", label: translate("administration.success") },
+                        { value: "error", label: translate("administration.error") },
                     ]}
                 />
-                <Button icon={<RefreshCw className="size-4" />} onClick={() => void query.refetch()}>刷新</Button>
+                <Button icon={<RefreshCw className="size-4" />} onClick={() => void query.refetch()}>{translate("administration.refresh")}</Button>
             </div>
 
             <Table<ServerApiLog>
@@ -219,23 +224,23 @@ export function ApiLogsManagement() {
                 </div>
             ) : null}
 
-            <Drawer title="接口访问详情" open={Boolean(selected)} onClose={() => setSelected(null)} styles={{ wrapper: { width: 680 } }}>
+            <Drawer title={translate("administration.aPIAccessDetails")} open={Boolean(selected)} onClose={() => setSelected(null)} styles={{ wrapper: { width: 680 } }}>
                 {selected && (
                     <div className="space-y-4">
-                        <DetailRow label="方法">{selected.httpMethod}</DetailRow>
-                        <DetailRow label="接口地址"><span className="font-mono break-all">{selected.requestPath}</span></DetailRow>
-                        <DetailRow label="客户端 IP"><span className="font-mono">{selected.clientIp}</span></DetailRow>
-                        <DetailRow label="用户 ID">{selected.userId ?? "-"}</DetailRow>
-                        <DetailRow label="状态码"><Tag color={selected.statusCode < 400 ? "green" : "red"}>{selected.statusCode}</Tag></DetailRow>
-                        <DetailRow label="是否成功">{selected.success ? "成功" : "失败"}</DetailRow>
-                        <DetailRow label="耗时">{selected.durationMs} ms</DetailRow>
-                        <DetailRow label="时间">{new Date(selected.createdAt).toLocaleString("zh-CN")}</DetailRow>
+                        <DetailRow label={translate("administration.method")}>{selected.httpMethod}</DetailRow>
+                        <DetailRow label={translate("administration.endpointURL")}><span className="font-mono break-all">{selected.requestPath}</span></DetailRow>
+                        <DetailRow label={translate("administration.clientIP")}><span className="font-mono">{selected.clientIp}</span></DetailRow>
+                        <DetailRow label={translate("administration.userID")}>{selected.userId ?? "-"}</DetailRow>
+                        <DetailRow label={translate("administration.statusCode")}><Tag color={selected.statusCode < 400 ? "green" : "red"}>{selected.statusCode}</Tag></DetailRow>
+                        <DetailRow label={translate("administration.successful")}>{selected.success ? translate("administration.success") : translate("administration.failed")}</DetailRow>
+                        <DetailRow label={translate("administration.duration")}>{selected.durationMs} ms</DetailRow>
+                        <DetailRow label={translate("administration.time")}>{new Date(selected.createdAt).toLocaleString(currentLanguageTag())}</DetailRow>
                         <div>
-                            <div className="mb-1 text-sm font-medium text-[var(--studio-muted)]">请求体</div>
+                            <div className="mb-1 text-sm font-medium text-[var(--studio-muted)]">{translate("administration.requestBody")}</div>
                             <pre className="max-h-60 overflow-auto rounded bg-[var(--studio-surface)] p-3 font-mono text-xs">{selected.requestBody || "-"}</pre>
                         </div>
                         <div>
-                            <div className="mb-1 text-sm font-medium text-[var(--studio-muted)]">错误内容</div>
+                            <div className="mb-1 text-sm font-medium text-[var(--studio-muted)]">{translate("administration.errorDetails")}</div>
                             <pre className="max-h-60 overflow-auto rounded bg-[var(--studio-surface)] p-3 font-mono text-xs">{selected.errorContent || "-"}</pre>
                         </div>
                     </div>

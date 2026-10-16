@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BookOpenText, ChevronRight, Clapperboard, GripVertical, ImageIcon, List, LoaderCircle, Video } from "lucide-react";
@@ -102,7 +105,7 @@ export function buildAgentChatHistory(messages: CanvasAssistantMessage[]) {
                 return [{ role: item.role, text: withStyles }];
             }
             const references = item.references.map((reference) => `- ${reference.title}：${reference.text || ""}`).join("\n");
-            return [{ role: item.role, text: `${withStyles}\n\n选中节点：\n${references}` }];
+            return [{ role: item.role, text: translate("canvas.selectedNodes", { value0: withStyles, value1: references }) }];
         })
         .slice(-AGENT_HISTORY_MESSAGE_LIMIT);
 }
@@ -159,6 +162,7 @@ export function ConnectionCreateMenu({
     onCreateSettingGraph: (skill: SkillOption) => void;
     onClose: () => void;
 }) {
+    const translate = useTranslation();
     const theme = useCanvasTheme();
     const menuRef = useRef<HTMLDivElement>(null);
     const dragRef = useRef<{ pointerId: number; startX: number; startY: number; position: CanvasPoint } | null>(null);
@@ -196,8 +200,8 @@ export function ConnectionCreateMenu({
                     type="button"
                     className="flex min-h-7 flex-1 cursor-grab touch-none select-none items-center gap-1.5 rounded text-left text-sm font-medium active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]"
                     style={{ color: theme.node.muted }}
-                    aria-label="移动引用生成面板"
-                    title="拖动移动面板"
+                    aria-label={translate("canvas.moveReferenceGenerationPanel")}
+                    title={translate("canvas.dragToMovePanel")}
                     onPointerDown={(event) => {
                         if (event.button !== 0 || !event.isPrimary) return;
                         event.preventDefault();
@@ -227,27 +231,26 @@ export function ConnectionCreateMenu({
                     }}
                 >
                     <GripVertical className="size-4 shrink-0" aria-hidden="true" />
-                    引用该节点生成
-                </button>
-                <button type="button" className="grid size-7 place-items-center rounded-lg text-base opacity-55 transition hover:bg-black/5 hover:opacity-100" onClick={onClose} aria-label="关闭">
+                    {translate("canvas.generateFromThisNode")}</button>
+                <button type="button" className="grid size-7 place-items-center rounded-lg text-base opacity-55 transition hover:bg-black/5 hover:opacity-100" onClick={onClose} aria-label={translate("canvas.close")}>
                     ×
                 </button>
             </div>
             <div className="grid gap-1">
-                <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title="文本生成" description="脚本、广告词、品牌文案" onClick={() => onCreate("text")} />
-                <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title="图片生成" onClick={() => onCreate("image")} />
-                <ConnectionCreateOption theme={theme} icon={<Video className="size-5" />} title="视频生成" onClick={() => onCreate("video")} />
+                <ConnectionCreateOption theme={theme} icon={<List className="size-5" />} title={translate("canvas.textGeneration")} description={translate("canvas.scriptsAdCopyBrandCopy")} onClick={() => onCreate("text")} />
+                <ConnectionCreateOption theme={theme} icon={<ImageIcon className="size-5" />} title={translate("canvas.imageGeneration")} onClick={() => onCreate("image")} />
+                <ConnectionCreateOption theme={theme} icon={<Video className="size-5" />} title={translate("canvas.videoGeneration")} onClick={() => onCreate("video")} />
                 <ConnectionCreateSettingGraphOption theme={theme} sourceNode={sourceNode} onSelect={onCreateSettingGraph} />
                 <ConnectionCreateOption
                     theme={theme}
                     icon={<Clapperboard className="size-5" />}
-                    title="合成视频"
-                    description={sourceNode && isVideoNode(sourceNode) ? "按拖拽顺序拼接多个视频" : "仅支持视频节点"}
+                    title={translate("canvas.composeVideo")}
+                    description={sourceNode && isVideoNode(sourceNode) ? translate("canvas.joinVideosInDragOrder") : translate("canvas.videoNodesOnly")}
                     disabled={!sourceNode || !isVideoNode(sourceNode)}
-                    disabledReason="仅支持视频节点"
+                    disabledReason={translate("canvas.videoNodesOnly")}
                     onClick={() => onCreate("videoComposition")}
                 />
-                {sourceNode && isTextNode(sourceNode) ? <ConnectionCreateOption theme={theme} icon={<Clapperboard className="size-5" />} title="分镜脚本" description="根据剧本生成镜头和资产清单" onClick={() => onCreate("storyboard")} /> : null}
+                {sourceNode && isTextNode(sourceNode) ? <ConnectionCreateOption theme={theme} icon={<Clapperboard className="size-5" />} title={translate("canvas.storyboardScript")} description={translate("canvas.generateShotsAndAssetsFromAScript")} onClick={() => onCreate("storyboard")} /> : null}
             </div>
         </div>
     );
@@ -262,12 +265,13 @@ function ConnectionCreateSettingGraphOption({
     sourceNode: CanvasNode | null;
     onSelect: (skill: SkillOption) => void;
 }) {
+    const translate = useTranslation();
     const [open, setOpen] = useState(false);
     const [loading, setLoading] = useState(false);
     const [skills, setSkills] = useState<SkillOption[]>([]);
     const [error, setError] = useState<string | null>(null);
     const available = Boolean(sourceNode && (isTextNode(sourceNode) || isImageNode(sourceNode)));
-    const disabledReason = sourceNode ? settingGraphDisabledReason(sourceNode) : "设定图仅支持文本或图片节点";
+    const disabledReason = sourceNode ? settingGraphDisabledReason(sourceNode) : translate("canvas.referenceSheetsSupportTextAndImageNodes");
     const menuButtonRef = useRef<HTMLButtonElement>(null);
     const skillButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
     const [highlightedIndex, setHighlightedIndex] = useState(0);
@@ -284,7 +288,7 @@ function ConnectionCreateSettingGraphOption({
             const response = await listSkills("canvasSettingGraph");
             setSkills(response.skills);
         } catch (reason) {
-            setError(reason instanceof Error ? reason.message : "设定图技能加载失败");
+            setError(reason instanceof Error ? reason.message : translate("canvas.failedToLoadReferenceSheetSkills"));
         } finally {
             setLoading(false);
         }
@@ -301,7 +305,7 @@ function ConnectionCreateSettingGraphOption({
                 disabled={!available}
                 className="flex h-16 w-full items-center gap-3 rounded-2xl px-3 text-left transition disabled:cursor-not-allowed"
                 style={{ color: theme.node.text, opacity: available ? 1 : 0.45, background: open ? theme.node.fill : "transparent" }}
-                title={available ? "设定图" : disabledReason}
+                title={available ? translate("canvas.referenceSheet_649580") : disabledReason}
                 onMouseEnter={() => {
                     setOpen(true);
                     void load();
@@ -330,17 +334,16 @@ function ConnectionCreateSettingGraphOption({
                     <BookOpenText className="size-5" />
                 </span>
                 <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2 text-base font-semibold leading-5">设定图</span>
+                    <span className="flex items-center gap-2 text-base font-semibold leading-5">{translate("canvas.referenceSheet_649580")}</span>
                     <span className="mt-1 block truncate text-sm" style={{ color: theme.node.muted }}>
-                        角色与场景设计参考
-                    </span>
+                        {translate("canvas.characterAndSceneReference")}</span>
                 </span>
                 <ChevronRight className="size-4 shrink-0" aria-hidden="true" />
             </button>
             {open && available ? (
                 <div
                     role="menu"
-                    aria-label="设定图类型"
+                    aria-label={translate("canvas.referenceSheetType")}
                     className="absolute left-full top-0 z-[130] min-w-56 rounded-2xl border p-2 shadow-2xl"
                     style={{ background: theme.node.panel, borderColor: theme.node.stroke, color: theme.node.text }}
                     onPointerDown={(event) => event.stopPropagation()}
@@ -348,8 +351,7 @@ function ConnectionCreateSettingGraphOption({
                     {loading ? (
                         <div className="flex h-24 items-center justify-center gap-2 text-xs" style={{ color: theme.node.muted }}>
                             <LoaderCircle className="size-4 animate-spin" />
-                            加载设定图技能…
-                        </div>
+                            {translate("canvas.loadingReferenceSheetSkills")}</div>
                     ) : error ? (
                         <div className="px-3 py-4 text-xs" style={{ color: theme.node.muted }}>{error}</div>
                     ) : skills.length ? skills.map((skill, index) => (
@@ -378,7 +380,7 @@ function ConnectionCreateSettingGraphOption({
                         >
                             <span className="min-w-0 truncate">{skill.name}</span>
                         </button>
-                    )) : <div className="px-3 py-4 text-xs" style={{ color: theme.node.muted }}>暂无可用设定图技能</div>}
+                    )) : <div className="px-3 py-4 text-xs" style={{ color: theme.node.muted }}>{translate("canvas.noReferenceSheetSkills")}</div>}
                 </div>
             ) : null}
         </div>
@@ -432,11 +434,11 @@ function ConnectionCreateOption({
 
 function settingGraphDisabledReason(sourceNode: CanvasNode): string {
     if (isTextNode(sourceNode) || isImageNode(sourceNode)) return "";
-    if (isVideoNode(sourceNode)) return "视频节点暂不支持设定图";
-    if (isStoryboardNode(sourceNode)) return "分镜节点暂不支持设定图";
-    if (isBackgroundNode(sourceNode)) return "背景板节点暂不支持设定图";
-    if (isVideoCompositionNode(sourceNode)) return "合成视频节点暂不支持设定图";
-    return "当前节点类型暂不支持设定图";
+    if (isVideoNode(sourceNode)) return translate("canvas.videoNodesDoNotSupportReferenceSheets");
+    if (isStoryboardNode(sourceNode)) return translate("canvas.storyboardNodesDoNotSupportReferenceSheets");
+    if (isBackgroundNode(sourceNode)) return translate("canvas.backgroundNodesDoNotSupportReferenceSheets");
+    if (isVideoCompositionNode(sourceNode)) return translate("canvas.compositionNodesDoNotSupportReferenceSheets");
+    return translate("canvas.thisNodeDoesNotSupportReferenceSheets");
 }
 
 export function PendingConnectionLine({

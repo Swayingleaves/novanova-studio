@@ -1,4 +1,8 @@
 "use client";
+import { currentLanguageTag } from "@/features/locale/translate";
+
+import { translateMessage as translate } from "@/features/locale/translate";
+
 
 import { useEffect, useRef } from "react";
 import * as echarts from "echarts/core";
@@ -99,7 +103,7 @@ function createPieOption(data: CreditChartDataItem[], theme: ChartTheme): EChart
             backgroundColor: theme.surface,
             borderColor: theme.line,
             textStyle: { color: theme.text },
-            valueFormatter: (value: string | number) => `${Number(value).toLocaleString("zh-CN")} 积分`,
+            valueFormatter: (value: string | number) => translate("credits.credits", { value0: Number(value).toLocaleString(currentLanguageTag()) }),
         },
         legend: {
             type: "scroll",
@@ -134,7 +138,7 @@ function createBarOption(data: CreditChartDataItem[], theme: ChartTheme): EChart
             backgroundColor: theme.surface,
             borderColor: theme.line,
             textStyle: { color: theme.text },
-            valueFormatter: (value: string | number) => `${Number(value).toLocaleString("zh-CN")} 积分`,
+            valueFormatter: (value: string | number) => translate("credits.credits", { value0: Number(value).toLocaleString(currentLanguageTag()) }),
         },
         grid: { left: 12, right: 12, top: 18, bottom: 32, containLabel: true },
         xAxis: {

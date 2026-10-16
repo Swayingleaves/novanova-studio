@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { memo, useState } from "react";
 import { NodeResizer, type NodeProps, type Node } from "@xyflow/react";
@@ -9,6 +11,7 @@ import { CanvasConnectionHandles, CanvasNodeTitle, MediaDownloadHint, NodeError,
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 
 export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<Node<CanvasVideoNode>>) {
+    const translate = useTranslation();
     const actions = useNodeActions();
     const theme = useCanvasTheme();
     const hasContent = Boolean(data.content.source);
@@ -46,7 +49,7 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
                 onMouseEnter={() => setHovered(true)}
                 onMouseLeave={() => setHovered(false)}
             >
-                <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle="视频" onTitleChange={actions.onTitleChange} />
+                <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.video")} onTitleChange={actions.onTitleChange} />
                 {isLoading ? (
                     <NodeLoading />
                 ) : isError ? (
@@ -64,7 +67,7 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
                                     className="flex h-14 w-14 items-center justify-center rounded-full shadow-lg transition hover:scale-105"
                                     style={{ background: theme.node.panel, color: theme.node.text }}
                                     onClick={() => actions.onViewVideo(data)}
-                                    aria-label="放大播放视频"
+                                    aria-label={translate("canvas.playEnlargedVideo")}
                                 >
                                     <Play className="size-7 ml-0.5" />
                                 </button>
@@ -74,7 +77,7 @@ export const VideoNode = memo(function VideoNode({ data, selected }: NodeProps<N
                 ) : (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-sm" style={{ color: theme.node.placeholder }}>
                         <Video className="size-7 opacity-35" />
-                        <span>空视频节点</span>
+                        <span>{translate("canvas.emptyVideoNode")}</span>
                     </div>
                 )}
                 <CanvasConnectionHandles />

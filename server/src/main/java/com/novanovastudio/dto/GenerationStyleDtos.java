@@ -95,11 +95,11 @@ public final class GenerationStyleDtos {
      * @param status 状态
      * @param sortOrder 排序值
      */
-    public record CreateStyleRequest(@NotBlank(message = "风格类型不能为空") String generationType,
-                                     @NotBlank(message = "风格名称不能为空") String name,
-                                     @NotBlank(message = "风格提示词不能为空") String stylePrompt,
-                                     @NotBlank(message = "风格封面不能为空") String coverUrl,
-                                     @NotBlank(message = "风格分类不能为空") String category,
+    public record CreateStyleRequest(@NotBlank(message = "business.styleTypeIsRequired") String generationType,
+                                     @NotBlank(message = "business.styleNameIsRequired") String name,
+                                     @NotBlank(message = "business.stylePromptIsRequired") String stylePrompt,
+                                     @NotBlank(message = "business.styleCoverIsRequired") String coverUrl,
+                                     @NotBlank(message = "business.styleCategoryIsRequired") String category,
                                      Integer status, Integer sortOrder) {
     }
 
@@ -115,11 +115,11 @@ public final class GenerationStyleDtos {
      * @param status 状态
      * @param sortOrder 排序值
      */
-    public record UpdateStyleRequest(Long id, @NotBlank(message = "风格类型不能为空") String generationType,
-                                     @NotBlank(message = "风格名称不能为空") String name,
-                                     @NotBlank(message = "风格提示词不能为空") String stylePrompt,
-                                     @NotBlank(message = "风格封面不能为空") String coverUrl,
-                                     @NotBlank(message = "风格分类不能为空") String category,
+    public record UpdateStyleRequest(Long id, @NotBlank(message = "business.styleTypeIsRequired") String generationType,
+                                     @NotBlank(message = "business.styleNameIsRequired") String name,
+                                     @NotBlank(message = "business.stylePromptIsRequired") String stylePrompt,
+                                     @NotBlank(message = "business.styleCoverIsRequired") String coverUrl,
+                                     @NotBlank(message = "business.styleCategoryIsRequired") String category,
                                      Integer status, Integer sortOrder) {
     }
 

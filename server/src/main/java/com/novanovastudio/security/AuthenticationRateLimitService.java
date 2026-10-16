@@ -1,5 +1,7 @@
 package com.novanovastudio.security;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
@@ -121,14 +123,14 @@ public class AuthenticationRateLimitService {
                         return Mono.<Void>empty();
                     }
                     log.info("认证接口触发限流: scope={}", scope);
-                    return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "操作过于频繁，请稍后再试"));
+                    return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.tooManyRequestsTryAgainLater")));
                 })
                 .onErrorMap(exception -> {
                     if (exception instanceof BusinessException) {
                         return exception;
                     }
                     log.error("认证接口限流服务异常: scope={}", scope, exception);
-                    return new BusinessException(ErrorCode.BUSINESS_ERROR, "认证服务暂不可用，请稍后再试");
+                    return new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.authenticationServiceUnavailableTryAgainLater"));
                 });
     }
 

@@ -1,8 +1,11 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { Drawer } from "antd";
 import Link from "next/link";
 
+import { LanguageMenu } from "@/features/locale/components/language-menu";
 import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
 import { NAV_GROUPS, navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
 import { cn } from "@/shared/lib/utils";
@@ -15,18 +18,19 @@ type MobileNavDrawerProps = {
 };
 
 export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDrawerProps) {
+    const translate = useTranslation();
     const user = useUserStore((state) => state.user);
     const visibleNavigationTools = navigationTools.filter((tool) => !tool.adminOnly || user?.role === "admin");
 
     return (
-        <Drawer title="创作导航" placement="left" size={292} open={open} onClose={onClose} className="md:hidden">
+        <Drawer title={translate("appShell.navigation")} placement="left" size={292} open={open} onClose={onClose} className="md:hidden">
             <div className="space-y-5">
                 {NAV_GROUPS.map((group) => {
                     const tools = visibleNavigationTools.filter((tool) => tool.group === group.key);
                     if (!tools.length) return null;
                     return (
                         <section key={group.key}>
-                            <div className="mb-2 px-1 text-xs font-medium text-[var(--studio-faint)]">{group.label}</div>
+                            <div className="mb-2 px-1 text-xs font-medium text-[var(--studio-faint)]">{translate(group.labelKey)}</div>
                             <div className="grid grid-cols-2 gap-2">
                                 {tools.map((tool) => {
                                     const Icon = tool.icon;
@@ -44,8 +48,8 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                                             )}
                                         >
                                             <Icon className="size-5" />
-                                            <span className="text-sm">{tool.label}</span>
-                                            {tool.pro ? <span className="pro-badge right-2 top-2" title="企业版功能">PRO</span> : null}
+                                            <span className="text-sm">{translate(tool.labelKey)}</span>
+                                            {tool.pro ? <span className="pro-badge right-2 top-2" title={translate("common.enterpriseFeature")}>PRO</span> : null}
                                         </Link>
                                     );
                                 })}
@@ -54,7 +58,8 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                     );
                 })}
                 <section className="border-t border-[var(--studio-line)] pt-5">
-                    <div className="mb-2 px-1 text-xs font-medium text-[var(--studio-faint)]">界面主题</div>
+                    <div className="mb-2 px-1 text-xs font-medium text-[var(--studio-faint)]">{translate("appShell.theme")}</div>
+                    <LanguageMenu />
                     <ThemePreferenceMenu variant="drawer" onAfterSelect={onClose} />
                 </section>
             </div>

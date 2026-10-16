@@ -1,4 +1,9 @@
 "use client";
+import { currentLanguageTag } from "@/features/locale/translate";
+
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { BookOpen, CloudUpload, Download, FolderPlus, Cog, HelpCircle, Link2, LoaderCircle, Palette, Play, RefreshCw, Sparkles, TriangleAlert, Upload, VideoIcon } from "lucide-react";
 import React, { useCallback, useEffect, useRef, useState } from "react";
@@ -195,6 +200,7 @@ type Conversation = GenerationLogStatusFields & {
 };
 
 export default function VideoPage() {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const uploadChoiceInputRef = useRef<HTMLInputElement>(null);
@@ -266,7 +272,7 @@ export default function VideoPage() {
                 if (!cancelled) setStyleOptions(result.styles);
             })
             .catch((error) => {
-                if (!cancelled) setStyleError(error instanceof Error ? error.message : "视频风格加载失败");
+                if (!cancelled) setStyleError(error instanceof Error ? error.message : translate("video.failedToLoadVideoStyles"));
             })
             .finally(() => {
                 if (!cancelled) setStyleLoading(false);
@@ -285,7 +291,7 @@ export default function VideoPage() {
                 if (!cancelled) setSkillOptions(result.skills);
             })
             .catch((error) => {
-                if (!cancelled) setSkillError(error instanceof Error ? error.message : "技能加载失败");
+                if (!cancelled) setSkillError(error instanceof Error ? error.message : translate("video.failedToLoadSkills"));
             })
             .finally(() => {
                 if (!cancelled) setSkillLoading(false);
@@ -498,7 +504,7 @@ export default function VideoPage() {
                         return next;
                     });
                 }
-                const toolText = call.name === "generate_video" ? "正在生成视频..." : call.name === "edit_video" ? "正在编辑视频..." : call.name === "generate_image" ? "正在生成图片..." : "正在编辑图片...";
+                const toolText = call.name === "generate_video" ? translate("video.generatingVideo") : call.name === "edit_video" ? translate("video.editingVideo") : call.name === "generate_image" ? translate("video.generatingImage") : translate("video.editingImage");
                 setChatMessages((prev) => {
                     const toolMessage = { id: pendingCall.callId, role: "tool" as const, text: toolText, detail: pendingCall };
                     const next = prev.some((item) => item.id === pendingCall.callId) ? prev.map((item) => (item.id === pendingCall.callId ? toolMessage : item)) : [...prev, toolMessage];
@@ -548,7 +554,7 @@ export default function VideoPage() {
         onTaskComplete: (messageId, text, action) => {
             const streamed = streamingTextRef.current;
             setChatMessages((prev) => {
-                let next = finishRoundAgentActivities(prev, text || "已完成");
+                let next = finishRoundAgentActivities(prev, text || translate("video.completed"));
                 if (streamed && streamed.text) {
                     const assistantMessage = { id: streamed.messageId, role: "assistant" as const, text: streamed.text, ...(action ? { action } : {}) };
                     next = next.some((item) => item.id === streamed.messageId) ? next.map((item) => (item.id === streamed.messageId ? { ...item, ...(action ? { action } : {}) } : item)) : [...next, assistantMessage];
@@ -606,8 +612,8 @@ export default function VideoPage() {
                 const next = upsertAgentActivityMessage(prev, {
                     id: `plan-${planId}`,
                     type: "plan-created",
-                    title: "创建创作计划",
-                    description: `${summary}，共 ${taskCount} 个任务`,
+                    title: translate("video.createCreativePlan"),
+                    description: translate("video.tasksTotal", { value0: summary, value1: taskCount }),
                     status: "success",
                 });
                 chatMessagesRef.current = next;
@@ -626,8 +632,8 @@ export default function VideoPage() {
                 const next = upsertAgentActivityMessage(prev, {
                     id: `prompt-${planId}-${taskId}`,
                     type: "prompt-prepared",
-                    title: strategy === "OPTIMIZE" ? "优化生成提示词" : "准备生成提示词",
-                    description: strategy === "OPTIMIZE" ? "已根据创作目标优化提示词" : "沿用原始提示词",
+                    title: strategy === "OPTIMIZE" ? translate("video.optimizeGenerationPrompt") : translate("video.prepareGenerationPrompt"),
+                    description: strategy === "OPTIMIZE" ? translate("video.promptOptimizedForYourCreativeGoal") : translate("video.keepOriginalPrompt"),
                     status: "success",
                 });
                 chatMessagesRef.current = next;
@@ -671,7 +677,7 @@ export default function VideoPage() {
                 if (!cancelled) setServerWorkflowQuote(quote);
             })
             .catch((error) => {
-                if (!cancelled) setServerWorkflowQuote({ available: false, stages: [], reason: error instanceof Error ? error.message : "工作流报价请求失败", requiredCapabilities: [] });
+                if (!cancelled) setServerWorkflowQuote({ available: false, stages: [], reason: error instanceof Error ? error.message : translate("video.workflowQuoteRequestFailed"), requiredCapabilities: [] });
             });
         return () => {
             cancelled = true;
@@ -683,14 +689,14 @@ export default function VideoPage() {
         ? ({
               available: Boolean(serverWorkflowQuote?.available && workflowVideoStageQuote.credits != null),
               credits: workflowVideoStageQuote.credits ?? 0,
-              reason: serverWorkflowQuote?.available ? undefined : serverWorkflowQuote?.reason || "视频工作流报价不可用",
+              reason: serverWorkflowQuote?.available ? undefined : serverWorkflowQuote?.reason || translate("video.videoWorkflowQuoteUnavailable"),
               stages: serverWorkflowQuote?.stages ?? [],
           } as { available: boolean; credits: number; reason?: string; stages: ServerVideoWorkflowStageQuote[] })
         : null;
     const activeQuote = selectedSkill?.workflowType
         ? workflowChargingNext
-            ? (serverWorkflowQuote ?? { available: false as const, reason: "正在获取工作流报价" })
-            : (workflowImageConfirmQuote ?? (workflowImageConfirmNext ? { available: false as const, reason: "正在获取工作流报价" } : null))
+            ? (serverWorkflowQuote ?? { available: false as const, reason: translate("video.fetchingWorkflowQuote") })
+            : (workflowImageConfirmQuote ?? (workflowImageConfirmNext ? { available: false as const, reason: translate("video.fetchingWorkflowQuote") } : null))
         : videoQuote;
     // 素材要求单独校验，用于「可生成」判定与提示，不阻断价格预览。
     const referenceIssue = videoGenerationReferenceIssue(config.videoGenerationMode, references.length, videoReferences.length);
@@ -723,7 +729,7 @@ export default function VideoPage() {
             ),
         ];
         if (!taskIds.length) {
-            message.warning("没有可停止的生成任务");
+            message.warning(translate("video.noActiveGenerationToStop"));
             return;
         }
         setPendingStopping(true);
@@ -776,16 +782,16 @@ export default function VideoPage() {
             const selectedFiles = Array.from(files || []);
             const unsupportedFiles = selectedFiles.filter((file) => !file.type.startsWith("image/") && !file.type.startsWith("video/"));
             if (unsupportedFiles.length) {
-                message.warning("已忽略不支持的参考素材");
+                message.warning(translate("video.unsupportedReferencesIgnored"));
             }
 
             const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.images - references.length);
             const videoFiles = selectedFiles.filter((file) => file.type.startsWith("video/") && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.videos - videoReferences.length);
             if (selectedFiles.some((file) => file.type.startsWith("image/") && file.size > SEEDANCE_REFERENCE_LIMITS.imageMaxBytes)) {
-                message.warning("已忽略超过 30MB 的参考图");
+                message.warning(translate("video.referenceImagesOver30MBIgnored"));
             }
             if (selectedFiles.some((file) => file.type.startsWith("video/") && file.size > SEEDANCE_REFERENCE_LIMITS.videoMaxBytes)) {
-                message.warning("已忽略超过 50MB 的参考视频");
+                message.warning(translate("video.referenceVideosOver50MBIgnored"));
             }
 
             const imagePlaceholders = imageFiles.map((file) => ({
@@ -828,7 +834,7 @@ export default function VideoPage() {
                         setReferences((current) => current.map((reference) => (reference.id === placeholder.id ? uploadedReference : reference)));
                     } catch (error) {
                         setReferences((current) => current.filter((reference) => reference.id !== placeholder.id));
-                        message.error(error instanceof Error ? error.message : `上传参考图 ${placeholder.name} 失败`);
+                        message.error(error instanceof Error ? error.message : translate("video.failedToUploadReference", { value0: placeholder.name }));
                     } finally {
                         URL.revokeObjectURL(placeholder.dataUrl);
                         setUploadingReferenceIds((current) => current.filter((id) => id !== placeholder.id));
@@ -853,7 +859,7 @@ export default function VideoPage() {
                         setVideoReferences((current) => current.map((reference) => (reference.id === placeholder.id ? uploadedReference : reference)));
                     } catch (error) {
                         setVideoReferences((current) => current.filter((reference) => reference.id !== placeholder.id));
-                        message.error(error instanceof Error ? error.message : `上传参考视频 ${placeholder.name} 失败`);
+                        message.error(error instanceof Error ? error.message : translate("video.failedToUploadReferenceVideo", { value0: placeholder.name }));
                     } finally {
                         URL.revokeObjectURL(placeholder.url);
                         setUploadingReferenceIds((current) => current.filter((id) => id !== placeholder.id));
@@ -862,7 +868,7 @@ export default function VideoPage() {
             ]);
             return { images: uploadedImages, videos: uploadedVideos };
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "上传参考素材失败");
+            message.error(error instanceof Error ? error.message : translate("video.failedToUploadReference_893885"));
             return { images: [], videos: [] };
         }
     };
@@ -871,7 +877,7 @@ export default function VideoPage() {
         if (isStreaming || isQueued) return;
         const text = prompt.trim();
         if (!text) {
-            message.error("请输入视频提示词");
+            message.error(translate("video.enterVideoPrompt"));
             return;
         }
 
@@ -900,32 +906,32 @@ export default function VideoPage() {
         if (shouldValidateQuote) {
             // 每次确认生成都必须先显式选择图片模型与参数
             if (workflowChargingNext && !workflowImageSelectionComplete) {
-                message.warning("请先选择本次生成使用的图片模型与参数");
+                message.warning(translate("video.selectTheImageModelAndParametersFirst"));
                 return;
             }
             // 图片确认轮：先确认视频参数，再校验视频阶段报价与余额（图片已生成）
             if (workflowImageConfirmNext) {
                 if (!workflowVideoSelectionComplete) {
-                    message.warning("请先确认视频比例、清晰度和时长");
+                    message.warning(translate("video.confirmVideoAspectRatioResolutionAndDuration"));
                     return;
                 }
                 const videoQuote = workflowVideoStageQuote;
                 if (!videoQuote || videoQuote.credits == null) {
-                    message.error("视频工作流报价尚未完成，请稍候重试");
+                    message.error(translate("video.videoWorkflowQuoteIsPendingRetryShortly"));
                     return;
                 }
                 if (serverWorkflowQuote && !serverWorkflowQuote.available) {
-                    message.error(serverWorkflowQuote.reason || "视频工作流报价不可用");
+                    message.error(serverWorkflowQuote.reason || translate("video.videoWorkflowQuoteUnavailable"));
                     return;
                 }
                 if (typeof videoQuote.credits === "number" && typeof creditBalance === "number" && videoQuote.credits > creditBalance) {
-                    message.error(`积分不足，生成视频需要 ${videoQuote.credits} 积分，当前可用 ${creditBalance} 积分`);
+                    message.error(translate("video.insufficientCreditsVideoNeedsAvailable", { value0: videoQuote.credits, value1: creditBalance }));
                     return;
                 }
             } else {
                 const selectedQuote = selectedSkill?.workflowType ? serverWorkflowQuote : selectedVideoQuote;
                 if (!selectedQuote) {
-                    message.error("工作流报价尚未完成");
+                    message.error(translate("video.workflowQuoteIsPending"));
                     return;
                 }
                 if (!selectedQuote.available) {
@@ -933,7 +939,7 @@ export default function VideoPage() {
                     return;
                 }
                 if (selectedSkill?.workflowType && typeof creditCost === "number" && typeof creditBalance === "number" && creditCost > creditBalance) {
-                    message.error(`积分不足，本次工作流需要 ${creditCost} 积分，当前可用 ${creditBalance} 积分`);
+                    message.error(translate("video.insufficientCreditsWorkflowNeedsAvailable", { value0: creditCost, value1: creditBalance }));
                     return;
                 }
             }
@@ -974,7 +980,7 @@ export default function VideoPage() {
         // 点击"确认生成"即真实扣费：报价不可用或余额不足时拦截；调整提示词等其余选项免费
         if (workflowChargingNext && text === "确认生成") {
             if (!workflowImageSelectionComplete) {
-                message.warning("请先选择本次生成使用的图片模型与参数");
+                message.warning(translate("video.selectTheImageModelAndParametersFirst"));
                 return;
             }
             if (serverWorkflowQuote && !serverWorkflowQuote.available) {
@@ -982,28 +988,28 @@ export default function VideoPage() {
                 return;
             }
             if (typeof creditCost === "number" && typeof creditBalance === "number" && creditCost > creditBalance) {
-                message.error(`积分不足，本次工作流需要 ${creditCost} 积分，当前可用 ${creditBalance} 积分`);
+                message.error(translate("video.insufficientCreditsWorkflowNeedsAvailable", { value0: creditCost, value1: creditBalance }));
                 return;
             }
         }
         // 图片确认轮点击"用这些图片生成视频"即真实扣费：先确认视频参数，再校验视频阶段报价与余额；"修改提示词重新生成"免费
         if (workflowImageConfirmNext && text === "用这些图片生成视频") {
             if (!workflowVideoSelectionComplete) {
-                message.warning("请先确认视频比例、清晰度和时长");
+                message.warning(translate("video.confirmVideoAspectRatioResolutionAndDuration"));
                 return;
             }
             const videoQuote = workflowVideoStageQuote;
             if (!videoQuote || videoQuote.credits == null) {
-                message.error("视频工作流报价尚未完成，请稍候重试");
+                message.error(translate("video.videoWorkflowQuoteIsPendingRetryShortly"));
                 return;
             }
             if (serverWorkflowQuote && !serverWorkflowQuote.available) {
-                message.error(serverWorkflowQuote.reason || "视频工作流报价不可用");
+                message.error(serverWorkflowQuote.reason || translate("video.videoWorkflowQuoteUnavailable"));
                 return;
             }
             const videoCost = videoQuote.credits;
             if (typeof videoCost === "number" && typeof creditBalance === "number" && videoCost > creditBalance) {
-                message.error(`积分不足，生成视频需要 ${videoCost} 积分，当前可用 ${creditBalance} 积分`);
+                message.error(translate("video.insufficientCreditsVideoNeedsAvailable", { value0: videoCost, value1: creditBalance }));
                 return;
             }
         }
@@ -1054,15 +1060,15 @@ export default function VideoPage() {
         const values = promptEditValue;
         if (promptEditMode === "three") {
             if (![values.firstFrame, values.lastFrame, values.video].some((item) => item.trim())) {
-                message.warning("请至少填写一段提示词");
+                message.warning(translate("video.enterAtLeastOnePrompt"));
                 return;
             }
             setPromptEditDialogOpen(false);
-            void handleActionReply(`请按以下修改后的提示词重新生成：\n首帧提示词：${values.firstFrame.trim()}\n尾帧提示词：${values.lastFrame.trim()}\n视频提示词：${values.video.trim()}`);
+            void handleActionReply(translate("video.regenerateUsingRevisedPromptsFirstFrameLastFrameVideo", { value0: values.firstFrame.trim(), value1: values.lastFrame.trim(), value2: values.video.trim() }));
             return;
         }
         if (!values.video.trim()) {
-            message.warning("请输入修改后的提示词");
+            message.warning(translate("video.enterRevisedPrompt"));
             return;
         }
         setPromptEditDialogOpen(false);
@@ -1080,7 +1086,7 @@ export default function VideoPage() {
         const seconds = config.videoSeconds || "5";
         const quality = config.vquality || "720p";
         const watermark = config.videoWatermark ?? true;
-        const text = "已上传产品图片";
+        const text = translate("video.productImageUploaded");
         const selectedVideoQuote = quoteVideoGeneration({
             config: effectiveConfig,
             model: videoModel,
@@ -1162,7 +1168,7 @@ export default function VideoPage() {
 
     const newConversation = () => {
         if (!canChangeSession()) {
-            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            message.warning(translate("video.generationIsRunningStopItOrWait"));
             return;
         }
         setActiveId(null);
@@ -1188,7 +1194,7 @@ export default function VideoPage() {
 
     const selectConversation = (conversation: Conversation) => {
         if (!canChangeSession()) {
-            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            message.warning(translate("video.generationIsRunningStopItOrWait"));
             return;
         }
         if (getGenerationConversationStatus(conversation) !== "none" && conversation.generationStatus !== "running") {
@@ -1220,7 +1226,7 @@ export default function VideoPage() {
 
     const deleteSelected = () => {
         if (activeIdRef.current && selectedIds.includes(activeIdRef.current) && !canChangeSession()) {
-            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            message.warning(translate("video.generationIsRunningStopItOrWait"));
             return;
         }
         const mediaKeys = conversations.filter((conversation) => selectedIds.includes(conversation.id)).flatMap((conversation) => collectRoundMediaKeys(conversation.rounds));
@@ -1247,7 +1253,7 @@ export default function VideoPage() {
             const storageKey = video.storageKey || (await uploadMediaFile(video.url, "video", { mimeType: video.mimeType })).storageKey;
             await downloadMedia({ storageKey }, "video.mp4");
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "视频下载失败");
+            message.error(error instanceof Error ? error.message : translate("video.failedToDownloadVideo"));
         }
     };
 
@@ -1265,7 +1271,7 @@ export default function VideoPage() {
     const saveResultToAssets = (video: GeneratedVideo) => {
         addAsset({
             kind: "video",
-            title: "生成视频",
+            title: translate("video.generateVideo"),
             coverUrl: "",
             tags: [],
             source: "视频创作台",
@@ -1282,16 +1288,16 @@ export default function VideoPage() {
                 source: "video-page",
             },
         });
-        message.success("已加入我的资产");
+        message.success(translate("video.addedToMyAssets"));
     };
 
     const uploadResultToObjectStorage = async (video: GeneratedVideo) => {
         if (video.objectStorage?.url) {
             try {
                 await navigator.clipboard.writeText(video.objectStorage.url);
-                message.success("云储存地址已复制");
+                message.success(translate("video.cloudStorageURLCopied"));
             } catch {
-                message.error("云储存地址复制失败");
+                message.error(translate("video.failedToCopyCloudStorageURL"));
             }
             return;
         }
@@ -1310,9 +1316,9 @@ export default function VideoPage() {
                     rounds: conversation.rounds.map((round) => updateRoundVideoObjectStorage(round, video.id, file)),
                 })),
             );
-            message.success("已上传到云储存，地址已保存");
+            message.success(translate("video.uploadedToCloudURLSaved"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "上传到云储存失败");
+            message.error(error instanceof Error ? error.message : translate("video.failedToUploadToCloudStorage"));
         } finally {
             setUploadingObjectStorageId("");
         }
@@ -1323,7 +1329,7 @@ export default function VideoPage() {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
             if (!payload.storageKey) {
-                message.error("图片素材缺少媒体存储键，请重新上传后再使用");
+                message.error(translate("video.imageAssetHasNoMediaStorageKeyUploadIt"));
             } else {
                 setReferences((current) =>
                     [
@@ -1342,7 +1348,7 @@ export default function VideoPage() {
             }
         } else if (payload.kind === "video") {
             if (!hasPlayableVideoUrl(payload.url)) {
-                message.error("视频素材地址为空，无法插入");
+                message.error(translate("video.videoAssetURLIsEmpty"));
                 return;
             }
             setVideoReferences((current) =>
@@ -1376,7 +1382,7 @@ export default function VideoPage() {
 
     const deleteConversation = async (conversationId: string) => {
         if (activeIdRef.current === conversationId && !canChangeSession()) {
-            message.warning("当前生成任务尚未结束，请先停止或等待完成");
+            message.warning(translate("video.generationIsRunningStopItOrWait"));
             return;
         }
         const conversation = conversationsRef.current.find((item) => item.id === conversationId);
@@ -1395,10 +1401,10 @@ export default function VideoPage() {
             const uploading = uploadingReferenceIds.includes(reference.id);
             return {
                 id: reference.id,
-                label: uploading ? `${seedanceReferenceLabel("image", index)} 上传中` : seedanceReferenceLabel("image", index),
+                label: uploading ? translate("video.uploading", { value0: seedanceReferenceLabel("image", index) }) : seedanceReferenceLabel("image", index),
                 preview: (
                     <div className="relative size-11">
-                        <Image src={reference.dataUrl} alt={reference.name} width={44} height={44} style={{ objectFit: "cover" }} className="rounded-xl" preview={uploading ? false : { mask: "预览" }} />
+                        <Image src={reference.dataUrl} alt={reference.name} width={44} height={44} style={{ objectFit: "cover" }} className="rounded-xl" preview={uploading ? false : { mask: translate("video.preview") }} />
                         {uploading ? (
                             <span className="absolute inset-0 grid place-items-center rounded-xl bg-black/35 text-white">
                                 <LoaderCircle className="size-4 animate-spin" />
@@ -1415,7 +1421,7 @@ export default function VideoPage() {
                 const uploading = uploadingReferenceIds.includes(reference.id);
                 return {
                     id: reference.id,
-                    label: uploading ? `${seedanceReferenceLabel("video", index)} 上传中` : seedanceReferenceLabel("video", index),
+                    label: uploading ? translate("video.uploading", { value0: seedanceReferenceLabel("video", index) }) : seedanceReferenceLabel("video", index),
                     preview: (
                         <div
                             className={`group relative size-11 ${uploading ? "" : "cursor-pointer"}`}
@@ -1442,32 +1448,32 @@ export default function VideoPage() {
     ];
     const addRecentReference = (url: string) => {
         if (references.length >= SEEDANCE_REFERENCE_LIMITS.images) {
-            message.warning(`最多可添加 ${SEEDANCE_REFERENCE_LIMITS.images} 张参考图`);
+            message.warning(translate("video.addUpToReferenceImages", { value0: SEEDANCE_REFERENCE_LIMITS.images }));
             return;
         }
         setReferences((current) => {
             if (current.some((reference) => reference.dataUrl === url)) return current;
-            return [...current, { id: nanoid(), name: "最近上传的参考图", type: "image/*", dataUrl: url }];
+            return [...current, { id: nanoid(), name: translate("video.recentReferenceImages"), type: "image/*", dataUrl: url }];
         });
         autoSwitchModeForReferences(1, 0);
     };
     const composerActions: CreationComposerAction[] = [
         {
             key: "upload",
-            label: "素材",
+            label: translate("video.assets"),
             icon: <Upload className="size-3.5" />,
             popoverContent: <RecentReferenceImagePicker urls={recentReferenceImageUrls} selectedUrls={references.map((reference) => reference.dataUrl)} disabled={references.length >= SEEDANCE_REFERENCE_LIMITS.images} onSelect={addRecentReference} />,
             onClick: () => fileInputRef.current?.click(),
         },
         {
             key: "prompt-library",
-            label: "提示词库",
+            label: translate("video.promptLibrary"),
             icon: <BookOpen className="size-3.5" />,
             onClick: () => setPromptDialogOpen(true),
         },
         {
             key: "optimize-prompt",
-            label: "AI优化提示词",
+            label: translate("video.optimizePromptWithAI"),
             icon: <Sparkles className="size-3.5" />,
             placement: "submit",
             iconOnly: true,
@@ -1477,13 +1483,13 @@ export default function VideoPage() {
         },
         {
             key: "assets",
-            label: "资产库",
+            label: translate("video.assetLibrary"),
             icon: <FolderPlus className="size-3.5" />,
             onClick: () => setAssetPickerOpen(true),
         },
         {
             key: "settings",
-            label: settingsSummary || "更多设置",
+            label: settingsSummary || translate("video.moreSettings"),
             className: settingsSummary ? "creation-composer-action-settings" : undefined,
             icon: <Cog className="size-3.5" />,
             onClick: () => setSettingsOpen(true),
@@ -1493,8 +1499,8 @@ export default function VideoPage() {
     // 设置项与图片生成页"更多设置"保持一致（画质/清晰度/比例 + 模型），卡片作为消息内联在草案轮下方展示。
     const workflowImageSettingsNode = workflowChargingNext ? (
         <div className="space-y-4 rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
-            <div className="text-sm font-semibold text-[var(--studio-ink)]">图片生成设置</div>
-            <p className="text-xs leading-relaxed text-[var(--studio-muted)]">请为本次生成选择画质、清晰度、比例和模型，选择后才能确认生成。</p>
+            <div className="text-sm font-semibold text-[var(--studio-ink)]">{translate("video.imageGenerationSettings")}</div>
+            <p className="text-xs leading-relaxed text-[var(--studio-muted)]">{translate("video.selectQualityResolutionAspectRatioAndModelBeforeConfirming")}</p>
             <ImageSettingsPanel
                 config={{ ...effectiveConfig, size: workflowImageSize, quality: workflowImageQuality, imageResolution: workflowImageResolution }}
                 onConfigChange={handleWorkflowImageSettingChange}
@@ -1504,14 +1510,14 @@ export default function VideoPage() {
                 className="space-y-4 px-0 py-0"
             />
             <div>
-                <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">模型</label>
+                <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">{translate("video.model")}</label>
                 <ModelPicker
                     config={effectiveConfig}
                     value={workflowImageModel}
                     onChange={(value) => updateWorkflowImageSelection({ imageModel: value })}
                     capability="image"
                     fullWidth
-                    onMissingConfig={() => (userRole === "admin" ? openConfigDialog(false) : message.error("请联系管理员配置默认生图模型"))}
+                    onMissingConfig={() => (userRole === "admin" ? openConfigDialog(false) : message.error(translate("video.askTheAdministratorToConfigureAnImageModel")))}
                 />
             </div>
         </div>
@@ -1520,8 +1526,8 @@ export default function VideoPage() {
     // 设置项与视频设置面板保持一致（比例/清晰度/时长），卡片作为消息内联在图片确认轮下方展示。
     const workflowVideoSettingsNode = workflowImageConfirmNext ? (
         <div className="space-y-4 rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
-            <div className="text-sm font-semibold text-[var(--studio-ink)]">视频生成设置</div>
-            <p className="text-xs leading-relaxed text-[var(--studio-muted)]">请为本次生成确认视频比例、清晰度和时长，确认后生成视频。</p>
+            <div className="text-sm font-semibold text-[var(--studio-ink)]">{translate("video.videoGenerationSettings")}</div>
+            <p className="text-xs leading-relaxed text-[var(--studio-muted)]">{translate("video.confirmVideoAspectRatioResolutionAndDurationToGenerate")}</p>
             <VideoSettingsPanel
                 config={{ ...effectiveConfig, size: workflowVideoSize, vquality: workflowVideoResolution, videoSeconds: workflowVideoSeconds }}
                 onConfigChange={handleWorkflowVideoSettingChange}
@@ -1537,15 +1543,15 @@ export default function VideoPage() {
     // 图片确认轮要求先确认视频参数（比例/清晰度/时长），再校验视频报价与余额。
     const workflowConfirmDisabledReasons =
         workflowChargingNext && !workflowImageSelectionComplete
-            ? { 确认生成: "请先选择图片模型与参数" }
+            ? { 确认生成: translate("video.selectImageModelAndParametersFirst") }
             : workflowImageConfirmNext
               ? (() => {
-                    if (!workflowVideoSelectionComplete) return { 用这些图片生成视频: "请先确认视频比例、清晰度和时长" };
+                    if (!workflowVideoSelectionComplete) return { 用这些图片生成视频: translate("video.confirmVideoAspectRatioResolutionAndDuration") };
                     const videoQuote = workflowVideoStageQuote;
-                    if (!videoQuote || videoQuote.credits == null) return { 用这些图片生成视频: "正在获取视频报价" };
-                    if (serverWorkflowQuote && !serverWorkflowQuote.available) return { 用这些图片生成视频: serverWorkflowQuote.reason || "视频工作流报价不可用" };
+                    if (!videoQuote || videoQuote.credits == null) return { 用这些图片生成视频: translate("video.fetchingVideoQuote") };
+                    if (serverWorkflowQuote && !serverWorkflowQuote.available) return { 用这些图片生成视频: serverWorkflowQuote.reason || translate("video.videoWorkflowQuoteUnavailable") };
                     if (typeof videoQuote.credits === "number" && typeof creditBalance === "number" && videoQuote.credits > creditBalance) {
-                        return { 用这些图片生成视频: `积分不足，生成视频需要 ${videoQuote.credits} 积分` };
+                        return { 用这些图片生成视频: translate("video.insufficientCreditsVideoNeedsCredits", { value0: videoQuote.credits }) };
                     }
                     return undefined;
                 })()
@@ -1659,7 +1665,7 @@ export default function VideoPage() {
 
             <CreationWorkspace
                 sidebar={{
-                    heading: "开启创作",
+                    heading: translate("video.startCreating"),
                     items: conversationItems,
                     managementMode,
                     hasSelection: selectedIds.length > 0,
@@ -1701,7 +1707,7 @@ export default function VideoPage() {
                                         <br />
                                         <span className="text-transparent [-webkit-text-stroke:1px_var(--studio-ink)]">Agent</span>
                                     </h2>
-                                    <p className="mt-7 max-w-lg text-base leading-7 text-[var(--studio-text)]">从一个提示词开始组织镜头运动、主体动作与场景氛围。生成结果会按轮次保留在这里，便于继续比较与细化。</p>
+                                    <p className="mt-7 max-w-lg text-base leading-7 text-[var(--studio-text)]">{translate("video.startWithAPromptForCameraMotionSubjectAction")}</p>
                                 </div>
                             </div>
                         </div>
@@ -1710,7 +1716,7 @@ export default function VideoPage() {
                 composer={{
                     agentLabel: "Video Agent",
                     value: prompt,
-                    placeholder: "描述镜头运动、主体动作、场景氛围和画面风格...",
+                    placeholder: translate("video.describeCameraMotionSubjectActionAtmosphereAndVisualStyle"),
                     references: referenceChips,
                     styleOptions,
                     selectedStyles,
@@ -1738,7 +1744,7 @@ export default function VideoPage() {
                 }}
                 settings={{
                     open: settingsOpen,
-                    title: "视频设置",
+                    title: translate("video.videoSettings"),
                     onClose: () => setSettingsOpen(false),
                     content: (
                         <div className="space-y-4">
@@ -1746,25 +1752,24 @@ export default function VideoPage() {
                             {activeQuote !== null && (!activeQuote.available || (!selectedSkill?.workflowType && referenceIssue) || workflowBalanceInsufficient) ? (
                                 <div className="flex items-start gap-1.5 text-xs leading-relaxed" style={{ color: theme.node.muted }}>
                                     <HelpCircle className="mt-px size-3.5 shrink-0" />
-                                    <span>{workflowBalanceInsufficient ? `积分不足，本次工作流需要 ${creditCost} 积分，当前可用 ${creditBalance} 积分` : activeQuote.available ? referenceIssue : activeQuote.reason}</span>
+                                    <span>{workflowBalanceInsufficient && typeof creditCost === "number" && typeof creditBalance === "number" ? translate("video.insufficientCreditsWorkflowNeedsAvailable", { value0: creditCost, value1: creditBalance }) : activeQuote.available ? referenceIssue : activeQuote.reason}</span>
                                 </div>
                             ) : null}
                             {workflowChargingNext && serverWorkflowQuote?.available ? (
                                 <div className="flex items-start gap-1.5 text-xs leading-relaxed" style={{ color: theme.node.muted }}>
                                     <HelpCircle className="mt-px size-3.5 shrink-0" />
-                                    <span>工作流阶段报价：{serverWorkflowQuote.stages.map((stage) => `${stage.displayName} ${stage.credits} 积分`).join("，")}</span>
+                                    <span>{translate("video.workflowStageQuote")}{serverWorkflowQuote.stages.map((stage) => translate("video.credits", { value0: stage.displayName, value1: String(stage.credits) })).join("，")}</span>
                                 </div>
                             ) : null}
                             {workflowImageConfirmNext && workflowVideoStageQuote?.credits != null ? (
                                 <div className="flex items-start gap-1.5 text-xs leading-relaxed" style={{ color: theme.node.muted }}>
                                     <HelpCircle className="mt-px size-3.5 shrink-0" />
                                     <span>
-                                        生成视频报价：{workflowVideoStageQuote.displayName} {workflowVideoStageQuote.credits} 积分
-                                    </span>
+                                        {translate("video.videoGenerationQuote")}{workflowVideoStageQuote.displayName} {workflowVideoStageQuote.credits} {translate("video.credits_10939f")}</span>
                                 </div>
                             ) : null}
                             <div>
-                                <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">模型</label>
+                                <label className="mb-1.5 block text-sm font-semibold text-[var(--studio-ink)]">{translate("video.model")}</label>
                                 <ModelPicker
                                     config={effectiveConfig}
                                     value={model}
@@ -1777,7 +1782,7 @@ export default function VideoPage() {
                                     capability="video"
                                     modelOptions={availableVideoModelsForMode(effectiveConfig, config.videoGenerationMode)}
                                     fullWidth
-                                    onMissingConfig={() => (userRole === "admin" ? openConfigDialog(false) : message.error("请联系管理员配置默认生视频模型"))}
+                                    onMissingConfig={() => (userRole === "admin" ? openConfigDialog(false) : message.error(translate("video.askTheAdministratorToConfigureAVideoModel")))}
                                 />
                             </div>
                         </div>
@@ -1786,31 +1791,30 @@ export default function VideoPage() {
             />
 
             <PromptSelectDialog open={promptDialogOpen} onOpenChange={setPromptDialogOpen} onSelect={setPrompt} />
-            <Modal title="修改提示词重新生成" open={promptEditDialogOpen} onOk={submitPromptEdit} onCancel={() => setPromptEditDialogOpen(false)} okText="提交修改" cancelText="取消" destroyOnHidden>
+            <Modal title={translate("video.editPromptAndRegenerate")} open={promptEditDialogOpen} onOk={submitPromptEdit} onCancel={() => setPromptEditDialogOpen(false)} okText={translate("video.submitChanges")} cancelText={translate("video.cancel")} destroyOnHidden>
                 {promptEditMode === "three" ? (
                     <div className="space-y-4">
                         <div>
-                            <label className="mb-1 block text-sm font-medium">首帧提示词</label>
+                            <label className="mb-1 block text-sm font-medium">{translate("video.firstFramePrompt")}</label>
                             <Input.TextArea rows={5} value={promptEditValue.firstFrame} onChange={(event) => setPromptEditValue((current) => ({ ...current, firstFrame: event.target.value }))} />
                         </div>
                         <div>
-                            <label className="mb-1 block text-sm font-medium">尾帧提示词</label>
+                            <label className="mb-1 block text-sm font-medium">{translate("video.lastFramePrompt")}</label>
                             <Input.TextArea rows={5} value={promptEditValue.lastFrame} onChange={(event) => setPromptEditValue((current) => ({ ...current, lastFrame: event.target.value }))} />
                         </div>
                         <div>
-                            <label className="mb-1 block text-sm font-medium">视频提示词</label>
+                            <label className="mb-1 block text-sm font-medium">{translate("video.videoPrompt")}</label>
                             <Input.TextArea rows={5} value={promptEditValue.video} onChange={(event) => setPromptEditValue((current) => ({ ...current, video: event.target.value }))} />
                         </div>
                     </div>
                 ) : (
-                    <Input.TextArea rows={6} autoFocus value={promptEditValue.video} onChange={(event) => setPromptEditValue((current) => ({ ...current, video: event.target.value }))} placeholder="输入修改后的提示词" />
+                    <Input.TextArea rows={6} autoFocus value={promptEditValue.video} onChange={(event) => setPromptEditValue((current) => ({ ...current, video: event.target.value }))} placeholder={translate("video.enterRevisedPrompt_48af09")} />
                 )}
             </Modal>
             <AssetPickerModal open={assetPickerOpen} defaultTab="my-assets" onInsert={(payload) => void insertPickedAsset(payload)} onClose={() => setAssetPickerOpen(false)} />
-            <Modal title="删除对话" open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelected} okText="删除" okButtonProps={{ danger: true }} cancelText="取消">
-                确定删除选中的 {selectedIds.length} 条对话吗？
-            </Modal>
-            <Modal open={Boolean(videoPreviewUrl)} title="参考视频预览" footer={null} onCancel={() => setVideoPreviewUrl(null)} width={720} centered destroyOnHidden>
+            <Modal title={translate("video.deleteConversation")} open={deleteConfirmOpen} onCancel={() => setDeleteConfirmOpen(false)} onOk={deleteSelected} okText={translate("video.delete")} okButtonProps={{ danger: true }} cancelText={translate("video.cancel")}>
+                {translate("video.deleteSelected")}{selectedIds.length} {translate("video.conversations")}</Modal>
+            <Modal open={Boolean(videoPreviewUrl)} title={translate("video.referenceVideoPreview")} footer={null} onCancel={() => setVideoPreviewUrl(null)} width={720} centered destroyOnHidden>
                 {videoPreviewUrl ? <video src={videoPreviewUrl} controls autoPlay className="max-h-[70vh] w-full rounded-xl bg-black" /> : null}
             </Modal>
             <ResultDetailDialog detail={resultDetail} onClose={() => setResultDetail(null)} />
@@ -1845,7 +1849,7 @@ function workflowResultImageReferences(data: Record<string, unknown>): Reference
         const role = typeof reference.role === "string" ? reference.role : "";
         return [{
             id: typeof reference.id === "string" && reference.id ? reference.id : storageKey || `workflow-reference-${index}`,
-            name: typeof reference.name === "string" && reference.name ? reference.name : frameRoleLabel(role) || `引用图片 ${index + 1}`,
+            name: typeof reference.name === "string" && reference.name ? reference.name : frameRoleLabel(role) || translate("video.referenceImage", { value0: index + 1 }),
             type: typeof reference.mimeType === "string" && reference.mimeType ? reference.mimeType : "image/*",
             dataUrl,
             ...(storageKey ? { storageKey } : {}),
@@ -1869,9 +1873,9 @@ function parseWorkflowDraftPrompts(text?: string, draftedPrompts?: Record<string
         return match?.[1]?.trim() || "";
     };
     return {
-        firstFrame: read("首帧提示词", ["尾帧提示词", "视频提示词"]),
-        lastFrame: read("尾帧提示词", ["视频提示词"]),
-        video: read("视频提示词", []),
+        firstFrame: read(translate("video.firstFramePrompt"), [translate("video.lastFramePrompt"), translate("video.videoPrompt")]),
+        lastFrame: read(translate("video.lastFramePrompt"), [translate("video.videoPrompt")]),
+        video: read(translate("video.videoPrompt"), []),
     };
 }
 
@@ -1921,17 +1925,18 @@ function readFrameRole(call: ToolCallState, item: Record<string, unknown>): stri
 }
 
 function frameRoleLabel(role?: string): string | undefined {
-    if (role === "first_frame") return "首帧";
-    if (role === "last_frame") return "尾帧";
+    if (role === "first_frame") return translate("video.firstFrame");
+    if (role === "last_frame") return translate("video.lastFrame");
     return undefined;
 }
 
 function FrameImagePreview({ url, role }: { url: string; role?: string }) {
+    const translate = useTranslation();
     const label = frameRoleLabel(role);
     return (
         <div className="relative w-48 shrink-0 overflow-hidden rounded-xl border border-[var(--studio-line)] sm:w-56">
             {label ? <span className="absolute left-2 top-2 z-10 rounded-md bg-black/65 px-2 py-1 text-xs font-semibold text-white backdrop-blur-sm">{label}</span> : null}
-            <Image src={url} fallback={MEDIA_FALLBACK_IMAGE} alt={label || "工作流图片结果"} className="w-full object-cover" preview={{ mask: "查看大图" }} />
+            <Image src={url} fallback={MEDIA_FALLBACK_IMAGE} alt={label || translate("video.workflowImages")} className="w-full object-cover" preview={{ mask: translate("video.viewFullSize") }} />
         </div>
     );
 }
@@ -2004,7 +2009,7 @@ function buildVideoConversationItems(conversations: Conversation[], activeId: st
         return {
             id: conversation.id,
             title: conversation.title,
-            subtitle: `${formatConversationTime(conversation.updatedAt)} · ${conversation.rounds.length} 轮`,
+            subtitle: translate("video.rounds", { value0: formatConversationTime(conversation.updatedAt), value1: conversation.rounds.length }),
             preview: <MediaPreview kind="video" src={latestVideo?.url} className="size-10 rounded-xl object-cover" />,
             active: activeId === conversation.id,
             selected: selectedIds.includes(conversation.id),
@@ -2044,7 +2049,7 @@ function buildVideoThreadSections(
                             <div className="flex flex-wrap gap-2">
                                 <span
                                     className="inline-flex max-w-52 items-center gap-1.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]"
-                                    title={`技能：${round.skill.name}`}
+                                    title={translate("video.skill", { value0: round.skill.name })}
                                 >
                                     <Sparkles className="size-3.5 shrink-0 text-[var(--studio-action)]" />
                                     <span className="truncate">{round.skill.name}</span>
@@ -2079,7 +2084,7 @@ function buildVideoThreadSections(
                                         onRegenerate={() => void handlers.onRegenerate(round)}
                                     />
                                 ) : result.status === "failed" || result.status === "canceled" ? (
-                                    <FailedCard key={result.id} error={result.error || "生成失败"} canceled={result.status === "canceled"} />
+                                    <FailedCard key={result.id} error={result.error || translate("video.generationFailed")} canceled={result.status === "canceled"} />
                                 ) : (
                                     <VideoGeneratingCard key={result.id} size={round.config.size} progress={result.progress} />
                                 ),
@@ -2105,7 +2110,7 @@ function renderVideoRoundReferences(round: Round) {
     return (
         <div className="flex flex-wrap gap-2">
             {visibleImageReferences.map((reference, index) => (
-                <Image key={reference.id} src={reference.dataUrl} alt={reference.name} title={seedanceReferenceLabel("image", index)} width={112} height={112} style={{ objectFit: "contain" }} className="rounded-xl" preview={{ mask: "查看大图" }} />
+                <Image key={reference.id} src={reference.dataUrl} alt={reference.name} title={seedanceReferenceLabel("image", index)} width={112} height={112} style={{ objectFit: "contain" }} className="rounded-xl" preview={{ mask: translate("video.viewFullSize") }} />
             ))}
             {visibleVideoReferences.map((reference, index) => (
                 <video key={reference.id} src={reference.url} className="size-16 rounded-xl object-cover ring-1 ring-[var(--studio-line)]" muted title={seedanceReferenceLabel("video", index)} />
@@ -2161,7 +2166,7 @@ function renderWorkflowStages(
                             <div className={compactFramePreview ? "flex flex-wrap gap-3" : "grid gap-3 sm:grid-cols-2"}>
                                 {images.map((image, index) =>
                                     image.url ? (
-                                        compactFramePreview ? <FrameImagePreview key={image.id || image.storageKey || index} url={image.url} role={stage.role} /> : <Image key={image.id || image.storageKey || index} src={image.url} alt={stage.displayName} className="w-full rounded-xl border border-[var(--studio-line)] object-cover" preview={{ mask: "查看大图" }} />
+                                        compactFramePreview ? <FrameImagePreview key={image.id || image.storageKey || index} url={image.url} role={stage.role} /> : <Image key={image.id || image.storageKey || index} src={image.url} alt={stage.displayName} className="w-full rounded-xl border border-[var(--studio-line)] object-cover" preview={{ mask: translate("video.viewFullSize") }} />
                                     ) : null,
                                 )}
                             </div>
@@ -2180,7 +2185,7 @@ function renderWorkflowStages(
                                 />
                             ))}
                         {stage.status === "failed" || stage.status === "canceled" || stage.status === "skipped" ? (
-                            <FailedCard error={stage.error || (stage.status === "skipped" ? "依赖阶段未成功完成，当前阶段已跳过" : "生成失败")} canceled={stage.status === "canceled"} skipped={stage.status === "skipped"} />
+                            <FailedCard error={stage.error || (stage.status === "skipped" ? translate("video.dependencyStageFailedThisStageWasSkipped") : translate("video.generationFailed"))} canceled={stage.status === "canceled"} skipped={stage.status === "skipped"} />
                         ) : null}
                         {["pending", "running"].includes(stage.status) ? <VideoGeneratingCard size={round.config.size} progress={stage.progress} /> : null}
                     </div>
@@ -2213,58 +2218,58 @@ function workflowVideos(round: Round): GeneratedVideo[] {
 function buildVideoStatusText(round: Round): string {
     if (round.stages?.length) {
         const stages = round.stages;
-        if (round.workflowStatus === "clarifying") return "等待补充信息";
-        if (round.workflowStatus === "image_pending_confirm") return "图片已生成，等待确认";
+        if (round.workflowStatus === "clarifying") return translate("video.moreInformationNeeded");
+        if (round.workflowStatus === "image_pending_confirm") return translate("video.imageGeneratedAwaitingConfirmation");
         if (stages.some((stage) => stage.status === "pending" || stage.status === "running")) {
             const running = stages.find((stage) => stage.status === "running") || stages.find((stage) => stage.status === "pending");
-            return running?.progress ? `${running.displayName} ${running.progress}%` : `${running?.displayName || "工作流"}进行中`;
+            return running?.progress ? `${running.displayName} ${running.progress}%` : translate("video.inProgress", { value0: running?.displayName || translate("video.workflow") });
         }
-        if (stages.some((stage) => stage.status === "failed")) return "工作流执行失败";
-        if (stages.some((stage) => stage.status === "canceled")) return "工作流已停止";
-        if (stages.some((stage) => stage.status === "skipped")) return "部分阶段已跳过";
-        return "工作流已完成";
+        if (stages.some((stage) => stage.status === "failed")) return translate("video.workflowExecutionFailed");
+        if (stages.some((stage) => stage.status === "canceled")) return translate("video.workflowStopped");
+        if (stages.some((stage) => stage.status === "skipped")) return translate("video.someStagesSkipped");
+        return translate("video.workflowCompleted");
     }
     if (!round.result) {
         return "";
     }
     if (round.result.status === "pending") {
-        return round.result.progress != null && round.result.progress > 0 ? `生成中 ${round.result.progress}%` : "生成中";
+        return round.result.progress != null && round.result.progress > 0 ? translate("video.generating", { value0: round.result.progress }) : translate("video.generating_969ef4");
     }
     if (round.result.status === "failed") {
-        return "生成失败";
+        return translate("video.generationFailed");
     }
     if (round.result.status === "canceled") {
-        return "已停止生成";
+        return translate("video.generationStopped");
     }
-    return "已完成";
+    return translate("video.completed");
 }
 
 function buildVideoAssistantText(round: Round): string {
     if (round.stages?.length) {
-        if (round.workflowStatus === "clarifying") return round.assistantText || "请补充工作流所需信息。";
-        if (round.workflowStatus === "image_pending_confirm") return round.assistantText || "首帧和尾帧图片已生成，请确认是否用这些图片生成视频，或修改提示词重新生成。";
-        if (round.stages.some((stage) => stage.status === "pending")) return "我正在执行视频工作流，请稍等。";
-        if (round.stages.some((stage) => stage.status === "failed")) return "工作流中有阶段失败，你可以重新生成。";
-        if (round.stages.some((stage) => stage.status === "canceled")) return "工作流已停止，你可以重新生成。";
-        return "视频工作流结果已经准备好了。";
+        if (round.workflowStatus === "clarifying") return round.assistantText || translate("video.completeTheRequiredWorkflowDetails");
+        if (round.workflowStatus === "image_pending_confirm") return round.assistantText || translate("video.firstAndLastFramesAreReadyConfirmVideoGeneration");
+        if (round.stages.some((stage) => stage.status === "pending")) return translate("video.runningTheVideoWorkflowPleaseWait");
+        if (round.stages.some((stage) => stage.status === "failed")) return translate("video.aWorkflowStageFailedYouCanGenerateAgain");
+        if (round.stages.some((stage) => stage.status === "canceled")) return translate("video.workflowStoppedYouCanGenerateAgain");
+        return translate("video.videoWorkflowResultsAreReady");
     }
     if (!round.result) {
         return round.assistantText || "";
     }
     if (round.result.status === "pending") {
-        return "我正在整理这一轮视频结果，请稍等。";
+        return translate("video.organizingThisRoundOfVideosPleaseWait");
     }
     if (round.result.status === "failed") {
-        return "这轮视频生成失败了，你可以直接重新生成。";
+        return translate("video.videoGenerationFailedYouCanGenerateAgain");
     }
     if (round.result.status === "canceled") {
-        return "已停止生成，你可以直接重新生成。";
+        return translate("video.generationStoppedYouCanGenerateAgain");
     }
-    return "视频结果已经准备好了，你可以继续追加镜头、动作或风格调整。";
+    return translate("video.videoReadyAddMoreShotsActionOrStyleAdjustments");
 }
 
 function formatConversationTime(value: number): string {
-    return new Date(value).toLocaleString("zh-CN", {
+    return new Date(value).toLocaleString(currentLanguageTag(), {
         month: "short",
         day: "numeric",
         hour: "2-digit",
@@ -2282,12 +2287,12 @@ function formatThreadSectionLabel(value: number): string {
     yesterday.setDate(yesterday.getDate() - 1);
 
     if (date >= today && date < tomorrow) {
-        return "今天";
+        return translate("video.today");
     }
     if (date >= yesterday && date < today) {
-        return "昨天";
+        return translate("video.yesterday");
     }
-    return date.toLocaleDateString("zh-CN", {
+    return date.toLocaleDateString(currentLanguageTag(), {
         month: "long",
         day: "numeric",
     });
@@ -2310,11 +2315,12 @@ function ResultCard({
     onOpenDetail: (video: GeneratedVideo) => void;
     onRegenerate?: () => void;
 }) {
+    const translate = useTranslation();
     const [isDownloading, setIsDownloading] = useState(false);
     const copyText = useCopyText();
     const preview = useMediaFallback(video.url);
     if (!hasPlayableVideoUrl(video.url)) {
-        return <FailedCard error="视频地址为空，无法播放" />;
+        return <FailedCard error={translate("video.videoURLIsEmpty")} />;
     }
 
     const hasSize = video.width > 0 && video.height > 0;
@@ -2340,7 +2346,7 @@ function ResultCard({
                 }}
             >
                 {preview.missing ? (
-                    <img src={preview.displaySrc} alt="生成视频无法加载" className="max-h-96 w-full object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} />
+                    <img src={preview.displaySrc} alt={translate("video.generatedVideoCannotBeLoaded")} className="max-h-96 w-full object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} />
                 ) : (
                     <video src={video.url} muted preload="metadata" playsInline className="pointer-events-none max-h-96 w-full object-contain" style={{ aspectRatio: video.width && video.height ? `${video.width}/${video.height}` : undefined }} onError={preview.onError} />
                 )}
@@ -2363,43 +2369,43 @@ function ResultCard({
                     {hasDuration ? <span>{formatDuration(video.durationMs)}</span> : null}
                     {video.objectStorage?.url ? (
                         <Tag className="!m-0 !text-[10px]" color="blue">
-                            云储存
-                        </Tag>
+                            {translate("video.cloudStorage")}</Tag>
                     ) : null}
                 </div>
                 <div className="flex gap-1">
-                    <Tooltip title="拷贝链接">
-                        <Button aria-label="拷贝链接" size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<Link2 className="size-3.5" />} onClick={() => copyText(video.objectStorage?.url || video.url, "链接已复制")} />
+                    <Tooltip title={translate("video.copyLink")}>
+                        <Button aria-label={translate("video.copyLink")} size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<Link2 className="size-3.5" />} onClick={() => copyText(video.objectStorage?.url || video.url, translate("video.linkCopied"))} />
                     </Tooltip>
-                    <Tooltip title={video.objectStorage?.url ? "复制云储存地址" : "上传到云储存"}>
+                    <Tooltip title={video.objectStorage?.url ? translate("video.copyCloudStorageURL") : translate("video.uploadToCloudStorage")}>
                         <Button size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" loading={uploadingObjectStorage} icon={<CloudUpload className="size-3.5" />} onClick={() => void onUploadObjectStorage(video)} />
                     </Tooltip>
-                    <Tooltip title="添加到素材">
+                    <Tooltip title={translate("video.addToAssets")}>
                         <Button size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<FolderPlus className="size-3.5" />} onClick={() => onSaveAsset(video)} />
                     </Tooltip>
-                    <Tooltip title="下载">
+                    <Tooltip title={translate("video.download")}>
                         <Button size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<Download className="size-3.5" />} loading={isDownloading} disabled={isDownloading} onClick={() => void downloadResult()} />
                     </Tooltip>
                     {onRegenerate ? (
-                        <Tooltip title="重新生成">
-                            <Button aria-label="重新生成" size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<RefreshCw className="size-3.5" />} onClick={onRegenerate} />
+                        <Tooltip title={translate("video.regenerate")}>
+                            <Button aria-label={translate("video.regenerate")} size="small" className="!h-7 !w-7 !min-w-0 !rounded-full !p-0" icon={<RefreshCw className="size-3.5" />} onClick={onRegenerate} />
                         </Tooltip>
                     ) : null}
                 </div>
             </div>
             <div className="flex items-center gap-1 border-t border-[var(--studio-line)] px-3 py-2 text-xs text-amber-500">
                 <TriangleAlert className="size-3.5 shrink-0" />
-                <span>请尽快下载生成结果，超时将无法下载</span>
+                <span>{translate("video.downloadResultsBeforeTheyExpire")}</span>
             </div>
         </div>
     );
 }
 
 function FailedCard({ error, canceled, skipped }: { error: string; canceled?: boolean; skipped?: boolean }) {
+    const translate = useTranslation();
     return (
         <div className="overflow-hidden rounded-xl border border-red-300/40 bg-red-500/10">
             <div className="flex aspect-video flex-col items-center justify-center gap-3 p-5 text-center">
-                <div className="rounded-full bg-[var(--studio-panel-solid)] px-3 py-1 text-sm font-medium text-red-500">{canceled ? "已停止生成" : skipped ? "已跳过" : "生成失败"}</div>
+                <div className="rounded-full bg-[var(--studio-panel-solid)] px-3 py-1 text-sm font-medium text-red-500">{canceled ? translate("video.generationStopped") : skipped ? translate("video.skipped") : translate("video.generationFailed")}</div>
                 <Typography.Paragraph ellipsis={{ rows: 3 }} className="!mb-0 !text-xs !text-red-400">
                     {error}
                 </Typography.Paragraph>
@@ -2486,7 +2492,7 @@ async function normalizeConversation(raw: Partial<Conversation>): Promise<Conver
 
     return {
         id: raw.id || nanoid(),
-        title: raw.title || "未命名",
+        title: raw.title || translate("video.untitled"),
         rounds,
         createdAt: raw.createdAt || Date.now(),
         updatedAt: raw.updatedAt || raw.createdAt || Date.now(),

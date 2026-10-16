@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { createContext, useContext, type ReactNode } from "react";
 
@@ -22,9 +24,10 @@ export function CanvasThemeProvider({ children, theme }: { children: ReactNode; 
  * @return CanvasTheme 当前画布主题
  */
 export function useCanvasTheme(): CanvasTheme {
+    const translate = useTranslation();
     const theme = useContext(CanvasThemeContext);
     if (!theme) {
-        throw new Error("画布主题上下文缺失，请确认组件已包裹在 CanvasThemeProvider 中。");
+        throw new Error(translate("canvas.canvasThemeContextIsMissingWrapComponentsInCanvasThemeProvider"));
     }
     return theme;
 }

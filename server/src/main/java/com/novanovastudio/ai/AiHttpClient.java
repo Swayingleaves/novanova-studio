@@ -1,5 +1,7 @@
 package com.novanovastudio.ai;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -130,7 +132,7 @@ public class AiHttpClient {
     public Flux<String> sendStreamingJsonRequest(AiTaskDtos.AiChannelConfig channel, String path, Object payload) {
         // SSE为长连接流式响应，使用sendAsync配合BodyHandlers.ofLines，避免send阻塞调用线程直到流结束。
         if (!StringUtils.hasText(channel.apiKey())) {
-            return Flux.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "服务端AI渠道未配置API Key"));
+            return Flux.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.serverAIChannelHasNoAPIKey")));
         }
         HttpRequest request = baseBearerRequest(channel, path)
                 .header("Content-Type", "application/json")
@@ -153,7 +155,7 @@ public class AiHttpClient {
                         try (var lines = response.body()) {
                             lines.close();
                         }
-                        return Flux.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "渠道不支持stream流式响应"));
+                        return Flux.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.channelDoesNotSupportStreaming")));
                     }
                     // SSE响应体按行推送，每条data行去除前缀后作为JSON文本发出，空行和注释行被过滤。
                     return Flux.using(response::body, Flux::fromStream, stream -> stream.close())
@@ -177,7 +179,7 @@ public class AiHttpClient {
      */
     public Flux<AnthropicStreamEvent> sendAnthropicStreamingRequest(AiTaskDtos.AiChannelConfig channel, String path, Object payload) {
         if (!StringUtils.hasText(channel.apiKey())) {
-            return Flux.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "服务端AI渠道未配置API Key"));
+            return Flux.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.serverAIChannelHasNoAPIKey")));
         }
         HttpRequest request = HttpRequest.newBuilder(URI.create(buildAnthropicUrl(channel.baseUrl(), path)))
                 .timeout(Duration.ofMinutes(10))
@@ -204,7 +206,7 @@ public class AiHttpClient {
                         try (var lines = response.body()) {
                             lines.close();
                         }
-                        return Flux.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "Anthropic渠道不支持stream流式响应"));
+                        return Flux.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.anthropicChannelDoesNotSupportStreaming")));
                     }
                     return Flux.using(response::body, Flux::fromStream, stream -> stream.close())
                             .map(String::strip)
@@ -236,7 +238,7 @@ public class AiHttpClient {
     public Mono<JSONObject> sendAnthropicJsonRequest(AiTaskDtos.AiChannelConfig channel, String path, Object payload) {
         return callBlocking(() -> {
             if (!StringUtils.hasText(channel.apiKey())) {
-                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "服务端AI渠道未配置API Key");
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.serverAIChannelHasNoAPIKey"));
             }
             String url = buildAnthropicUrl(channel.baseUrl(), path);
             String jsonBody = AiJsonUtils.toJson(payload);
@@ -340,7 +342,7 @@ public class AiHttpClient {
     public Mono<JSONObject> sendBearerJsonUrlRequest(AiTaskDtos.AiChannelConfig channel, String method, String url, Object payload) {
         return callBlocking(() -> {
             if (!StringUtils.hasText(channel.apiKey())) {
-                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "服务端AI渠道未配置API Key");
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.serverAIChannelHasNoAPIKey"));
             }
             String normalizedMethod = normalizeRequestMethod(method);
             String jsonBody = "POST".equals(normalizedMethod) ? AiJsonUtils.toJson(payload) : "";
@@ -371,7 +373,7 @@ public class AiHttpClient {
             case "POST" -> builder.POST(HttpRequest.BodyPublishers.ofString(jsonBody));
             case "GET" -> builder.GET();
             case "DELETE" -> builder.DELETE();
-            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "AI接口不支持HTTP方法: " + method);
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedAIHTTPMethod", method));
         }
     }
 
@@ -384,7 +386,7 @@ public class AiHttpClient {
     private static String normalizeRequestMethod(String method) {
         String normalizedMethod = StringUtils.hasText(method) ? method.trim().toUpperCase(Locale.ROOT) : "";
         if (!Set.of("GET", "POST", "DELETE").contains(normalizedMethod)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "AI接口不支持HTTP方法: " + normalizedMethod);
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedAIHTTPMethod", normalizedMethod));
         }
         return normalizedMethod;
     }
@@ -400,7 +402,7 @@ public class AiHttpClient {
     public Mono<JSONObject> sendGeminiJsonRequest(AiTaskDtos.AiChannelConfig channel, String path, Object payload) {
         return callBlocking(() -> {
             if (!StringUtils.hasText(channel.apiKey())) {
-                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "服务端AI渠道未配置API Key");
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.serverAIChannelHasNoAPIKey"));
             }
             HttpRequest request = HttpRequest.newBuilder(URI.create(buildGeminiUrl(channel.baseUrl(), path)))
                     .timeout(Duration.ofMinutes(10))
@@ -447,17 +449,15 @@ public class AiHttpClient {
         return Mono.defer(() -> {
             String normalizedFormat = normalizeModelApiFormat(apiFormat);
             if ("minimax".equals(normalizedFormat)) {
-                return Mono.<List<String>>error(new BusinessException(ErrorCode.PARAM_INVALID,
-                        "MiniMax 渠道不支持自动拉取模型，请手动配置 MiniMax-H3"));
+                return Mono.<List<String>>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.miniMaxCannotFetchModelsConfigureMiniMaxH3Manually")));
             }
             if ("custom".equals(normalizedFormat)) {
-                return Mono.<List<String>>error(new BusinessException(ErrorCode.PARAM_INVALID,
-                        "自定义格式渠道不支持自动拉取模型，请手动配置模型列表"));
+                return Mono.<List<String>>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.customChannelsCannotFetchModelsConfigureThemManually")));
             }
             return callBlocking(() -> {
                 URI uri = buildModelListUri(baseUrl, normalizedFormat);
                 if (!StringUtils.hasText(apiKey)) {
-                    throw new BusinessException(ErrorCode.PARAM_MISSING, "API Key不能为空");
+                    throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.aPIKeyIsRequired"));
                 }
                 HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(uri)
                         .timeout(Duration.ofSeconds(30))
@@ -483,8 +483,7 @@ public class AiHttpClient {
                     log.info("渠道模型拉取响应: apiFormat={}, url={}, status={}, body={}", normalizedFormat, uri,
                             response.statusCode(), abbreviateModelResponse(safeResponseBody));
                     if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                        throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
-                                "拉取模型失败: HTTP " + response.statusCode() + "，" + readModelErrorMessage(safeResponseBody));
+                        throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.failedToFetchModelsHTTP", response.statusCode(), readModelErrorMessage(safeResponseBody)));
                     }
                     List<String> models;
                     try {
@@ -493,16 +492,16 @@ public class AiHttpClient {
                         throw new BusinessException(exception.getCode(), sanitizeModelResponse(exception.getMessage(), apiKey));
                     }
                     if (models.isEmpty()) {
-                        throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "渠道没有返回可用模型");
+                        throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.channelReturnedNoAvailableModels"));
                     }
                     return models;
                 } catch (BusinessException exception) {
                     throw exception;
                 } catch (InterruptedException exception) {
                     Thread.currentThread().interrupt();
-                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "拉取模型失败: 请求已中断");
+                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.modelRequestInterrupted"));
                 } catch (Exception exception) {
-                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "拉取模型失败: " + exception.getMessage());
+                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.failedToFetchModels", exception.getMessage()));
                 }
             });
         });
@@ -526,7 +525,7 @@ public class AiHttpClient {
                 }
                 long contentLength = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
                 if (contentLength > MAXIMUM_REMOTE_MEDIA_BYTES) {
-                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, "远程媒体文件超过100MB限制");
+                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.remoteMediaExceeds100MB"));
                 }
                 String mimeType = response.headers().firstValue("Content-Type").orElse(defaultMimeType);
                 return new GeneratedBinary(readLimitedMediaData(inputStream), AiTaskParameterReader.firstNonEmpty(mimeType, defaultMimeType));
@@ -548,7 +547,7 @@ public class AiHttpClient {
     public Mono<RemoteMediaFile> downloadRemoteMediaToFile(String url, String defaultMimeType, Path target, long maximumBytes) {
         return callBlocking(() -> {
             if (maximumBytes < 1) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "远程媒体最大字节数必须大于0");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.maximumRemoteMediaBytesMustBePositive"));
             }
             URI uri = validateRemoteMediaUri(url);
             HttpRequest request = HttpRequest.newBuilder(uri).timeout(Duration.ofMinutes(10)).GET().build();
@@ -561,7 +560,7 @@ public class AiHttpClient {
             long contentLength = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
             if (contentLength > maximumBytes) {
                 try (InputStream inputStream = response.body()) {
-                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, "源视频文件超过允许大小限制");
+                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.sourceVideoExceedsTheSizeLimit"));
                 }
             }
             String mimeType = AiTaskParameterReader.firstNonEmpty(response.headers().firstValue("Content-Type").orElse(defaultMimeType), defaultMimeType);
@@ -573,7 +572,7 @@ public class AiHttpClient {
                 while ((readBytes = inputStream.read(buffer)) != -1) {
                     bytes += readBytes;
                     if (bytes > maximumBytes) {
-                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "源视频文件超过允许大小限制");
+                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.sourceVideoExceedsTheSizeLimit"));
                     }
                     outputStream.write(buffer, 0, readBytes);
                 }
@@ -652,16 +651,16 @@ public class AiHttpClient {
      */
     private URI validateRemoteMediaUri(String url) {
         if (!StringUtils.hasText(url)) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, "远程媒体地址不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.remoteMediaURLIsRequired"));
         }
         URI uri;
         try {
             uri = URI.create(url.trim());
         } catch (IllegalArgumentException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "远程媒体地址格式不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidRemoteMediaURL"));
         }
         if ((!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme())) || !StringUtils.hasText(uri.getHost())) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "远程媒体仅支持HTTP或HTTPS地址");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.remoteMediaSupportsHTTPAndHTTPSOnly"));
         }
         return uri;
     }
@@ -675,12 +674,12 @@ public class AiHttpClient {
      */
     private String normalizeModelApiFormat(String apiFormat) {
         if (!StringUtils.hasText(apiFormat)) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, "接口格式不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.aPIFormatIsRequired"));
         }
         String normalizedFormat = apiFormat.trim().toLowerCase(Locale.ROOT);
         Set<String> supportedFormats = Set.of("openai", "newapi", "evolink", "gemini", "anthropic", "agnes", "seedance", "minimax", "custom");
         if (!supportedFormats.contains(normalizedFormat)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "不支持的接口格式: " + normalizedFormat);
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedAPIFormat", normalizedFormat));
         }
         return normalizedFormat;
     }
@@ -695,7 +694,7 @@ public class AiHttpClient {
      */
     private URI buildModelListUri(String baseUrl, String apiFormat) {
         if (!StringUtils.hasText(baseUrl)) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, "Base URL不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.baseURLIsRequired"));
         }
         String url = switch (apiFormat) {
             case "gemini" -> buildGeminiUrl(baseUrl, "/models");
@@ -706,13 +705,13 @@ public class AiHttpClient {
             URI uri = URI.create(url);
             if ((!"http".equalsIgnoreCase(uri.getScheme()) && !"https".equalsIgnoreCase(uri.getScheme()))
                     || !StringUtils.hasText(uri.getHost())) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "Base URL仅支持HTTP或HTTPS地址");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.baseURLSupportsHTTPAndHTTPSOnly"));
             }
             return uri;
         } catch (BusinessException exception) {
             throw exception;
         } catch (IllegalArgumentException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "Base URL格式不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidBaseURL"));
         }
     }
 
@@ -736,7 +735,7 @@ public class AiHttpClient {
             }
             JSONArray values = response.getJSONArray("gemini".equals(apiFormat) ? "models" : "data");
             if (values == null) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "渠道模型列表响应格式不正确");
+                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.invalidChannelModelListFormat"));
             }
             TreeSet<String> models = new TreeSet<>();
             String modelField = "gemini".equals(apiFormat) ? "name" : "id";
@@ -762,7 +761,7 @@ public class AiHttpClient {
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "渠道模型列表响应不是合法JSON");
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.channelModelListIsNotValidJSON"));
         }
     }
 
@@ -831,7 +830,7 @@ public class AiHttpClient {
             while ((readBytes = inputStream.read(buffer)) != -1) {
                 totalBytes += readBytes;
                 if (totalBytes > MAXIMUM_REMOTE_MEDIA_BYTES) {
-                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, "远程媒体文件超过100MB限制");
+                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.remoteMediaExceeds100MB"));
                 }
                 outputStream.write(buffer, 0, readBytes);
             }
@@ -890,7 +889,7 @@ public class AiHttpClient {
      */
     private HttpRequest.Builder baseBearerRequest(AiTaskDtos.AiChannelConfig channel, String path) {
         if (!StringUtils.hasText(channel.apiKey())) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "服务端AI渠道未配置API Key");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.serverAIChannelHasNoAPIKey"));
         }
         return HttpRequest.newBuilder(URI.create(buildAiUrl(channel.baseUrl(), path)))
                 .timeout(Duration.ofMinutes(10))

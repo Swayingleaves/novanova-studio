@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { memo, useEffect, useRef, useState, type CompositionEvent, type KeyboardEvent, type MouseEvent } from "react";
 import { Clapperboard, ExternalLink, LoaderCircle, RefreshCw } from "lucide-react";
@@ -14,6 +16,7 @@ import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface } from "./sh
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 
 export const StoryboardNode = memo(function StoryboardNode({ data: rawData, selected }: NodeProps) {
+    const translate = useTranslation();
     const data = rawData as unknown as CanvasStoryboardNode;
     const actions = useNodeActions();
     const { modal } = App.useApp();
@@ -28,9 +31,9 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
     const failed = data.execution.phase === "failed";
     const model = data.content.model || config.textModel;
     const creditCost = readStoryboardModelCost(config.modelCosts, model);
-    const statusText = running ? "处理中" : generated ? "已生成" : failed ? "操作失败" : "待生成";
+    const statusText = running ? translate("canvas.processing_694b71") : generated ? translate("canvas.generated") : failed ? translate("canvas.operationFailed") : translate("canvas.notGenerated");
     const statusColor = running || generated ? theme.node.activeStroke : failed ? "var(--studio-danger)" : theme.node.muted;
-    const creditLabel = `${generated ? "重新生成" : "首次生成"} ${creditCost} 积分`;
+    const creditLabel = translate("canvas.credits_5c15b9", { value0: generated ? translate("canvas.regenerate") : translate("canvas.firstGeneration"), value1: creditCost });
 
     useEffect(() => {
         if (!isInstructionComposingRef.current) setInstructionDraft(data.content.instruction);
@@ -79,10 +82,10 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
             return;
         }
         modal.confirm({
-            title: "重新生成分镜脚本",
-            content: "重新生成会覆盖当前镜头、资产和已合成提示词，确定继续吗？",
-            okText: "重新生成",
-            cancelText: "取消",
+            title: translate("canvas.regenerateStoryboard"),
+            content: translate("canvas.regeneratingWillReplaceTheCurrentShotsAssetsAndComposed"),
+            okText: translate("canvas.regenerate"),
+            cancelText: translate("canvas.cancel"),
             okButtonProps: { danger: true },
             onOk: () => actions.onGenerateStoryboard?.(data),
         });
@@ -109,12 +112,11 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
                     boxShadow: selected ? `0 0 0 1px ${theme.node.activeStroke}55` : undefined,
                 }}
             >
-                <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle="分镜脚本" onTitleChange={actions.onTitleChange} />
+                <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.storyboardScript")} onTitleChange={actions.onTitleChange} />
                 <div className="flex items-center gap-2 border-b px-3 py-2.5" style={{ borderColor: theme.node.stroke }}>
                     <Clapperboard className="size-4" style={{ color: theme.node.activeStroke }} />
                     <span className="text-sm font-medium" style={{ color: theme.node.text }}>
-                        分镜脚本
-                    </span>
+                        {translate("canvas.storyboardScript")}</span>
                     <span className="ml-auto flex items-center gap-1 text-[11px]" style={{ color: statusColor }}>
                         {running ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
                         {statusText}
@@ -123,13 +125,12 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
                 <div className="min-h-0 flex flex-1 flex-col gap-3 overflow-auto px-3 py-3">
                     <label className="block space-y-1.5">
                         <span className="block text-[11px] font-medium" style={{ color: theme.node.muted }}>
-                            分镜描述
-                        </span>
+                            {translate("canvas.shotDescription")}</span>
                         <textarea
                             rows={generated ? 2 : 4}
                             className={`nodrag nopan nowheel block w-full resize-none select-text rounded-md border p-2 text-xs leading-5 outline-none transition focus:ring-2 ${generated ? "min-h-[52px] max-h-24" : "min-h-24"}`}
                             style={{ color: theme.node.text, background: theme.node.fill, borderColor: theme.node.stroke, caretColor: theme.node.text }}
-                            placeholder="说明希望怎么分镜：取剧本哪段、拆几个镜头、节奏与重点（剧本内容填在上游文本节点）"
+                            placeholder={translate("canvas.describeScriptSectionShotCountPacingAndEmphasisEnter")}
                             value={instructionDraft}
                             disabled={running}
                             onChange={(event) => handleInstructionChange(event.target.value)}
@@ -144,13 +145,12 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
                     </label>
                     <label className="block space-y-1.5">
                         <span className="block text-[11px] font-medium" style={{ color: theme.node.muted }}>
-                            视觉风格
-                        </span>
+                            {translate("canvas.visualStyle")}</span>
                         <textarea
                             rows={generated ? 2 : 3}
                             className={`nodrag nopan nowheel block w-full resize-none select-text rounded-md border p-2 text-xs leading-5 outline-none transition focus:ring-2 ${generated ? "min-h-[52px] max-h-24" : "min-h-[72px]"}`}
                             style={{ color: theme.node.text, background: theme.node.fill, borderColor: theme.node.stroke, caretColor: theme.node.text }}
-                            placeholder="例如：国风二次元韩漫厚涂，电影级手绘质感"
+                            placeholder={translate("canvas.eGChineseAnimeKoreanComicPainterlyCinematic")}
                             value={visualStyleDraft}
                             disabled={running}
                             onChange={(event) => handleVisualStyleChange(event.target.value)}
@@ -165,14 +165,13 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
                     </label>
                     <div className="flex min-w-0 items-center gap-2 border-b pb-2" style={{ borderColor: theme.node.stroke }}>
                         <span className="shrink-0 text-[11px]" style={{ color: theme.node.muted }}>
-                            模型
-                        </span>
+                            {translate("canvas.model")}</span>
                         <ModelPicker
                             config={config}
                             value={model}
                             capability="text"
                             className="!h-7 !min-w-0 !flex-1 !rounded-md"
-                            placeholder="选择文本模型"
+                            placeholder={translate("canvas.selectTextModel")}
                             onChange={(value) => actions.onStoryboardModelChange?.(data.id, value)}
                             onMissingConfig={actions.onMissingTextModelConfig}
                         />
@@ -189,16 +188,14 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
                         <dl className="mt-auto grid grid-cols-2 overflow-hidden rounded-md border" style={{ background: theme.node.fill, borderColor: theme.node.stroke }}>
                             <div className="flex items-center justify-between gap-2 px-3 py-2">
                                 <dt className="text-[11px]" style={{ color: theme.node.muted }}>
-                                    镜头
-                                </dt>
+                                    {translate("canvas.shot")}</dt>
                                 <dd className="text-lg font-semibold tabular-nums" style={{ color: theme.node.text }}>
                                     {data.storyboard.shots.length}
                                 </dd>
                             </div>
                             <div className="flex items-center justify-between gap-2 border-l px-3 py-2" style={{ borderColor: theme.node.stroke }}>
                                 <dt className="text-[11px]" style={{ color: theme.node.muted }}>
-                                    资产
-                                </dt>
+                                    {translate("canvas.assets")}</dt>
                                 <dd className="text-lg font-semibold tabular-nums" style={{ color: theme.node.text }}>
                                     {data.storyboard.assets.length}
                                 </dd>
@@ -218,8 +215,7 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
                             }}
                         >
                             <ExternalLink className="size-4" />
-                            打开分镜脚本
-                        </button>
+                            {translate("canvas.openStoryboard")}</button>
                     ) : null}
                     <button
                         type="button"
@@ -229,7 +225,7 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
                         onClick={requestStoryboardGeneration}
                     >
                         {running ? <LoaderCircle className="size-4 animate-spin" /> : generated ? <RefreshCw className="size-4" /> : <Clapperboard className="size-4" />}
-                        {running ? "正在生成分镜脚本" : generated ? "重新生成分镜脚本" : "开始生成"}
+                        {running ? translate("canvas.generatingStoryboard") : generated ? translate("canvas.regenerateStoryboard") : translate("canvas.generate_59dd45")}
                     </button>
                 </div>
                 <CanvasConnectionHandles />

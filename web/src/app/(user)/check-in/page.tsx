@@ -1,4 +1,9 @@
 "use client";
+import { currentLanguageTag } from "@/features/locale/translate";
+
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -11,29 +16,29 @@ import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { getCheckInStatus, submitCheckIn } from "@/services/api/server";
 
 const CHECK_IN_STATUS_QUERY_KEY = "check-in-status";
-const WEEKDAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+const WEEKDAY_LABELS = () => ([translate("checkIn.mon"), translate("checkIn.tue"), translate("checkIn.wed"), translate("checkIn.thu"), translate("checkIn.fri"), translate("checkIn.sat"), translate("checkIn.sun")]);
 
 /**
  * 签到成功后的随机祝福语。
  * <p>
  * 保持创作工具调性：只谈灵感、画面与作品，不使用抽奖、欧气一类游戏化措辞。
  */
-const CHECK_IN_BLESSINGS = [
-    "愿今天的灵感不卡壳，想要的画面一次就成。",
-    "好镜头留给有耐心的人，慢慢调，慢慢好。",
-    "新的一天，从一条想清楚的 prompt 开始。",
-    "别急着生成，先把脑子里的画面看清楚。",
-    "愿你今天的每一次导出，都比昨天更接近想象。",
-    "灵感不会准时到，但你可以先坐下开工。",
-    "把想讲的故事，剪成别人愿意看完的样子。",
-    "光线、构图、节奏，今天全听你的。",
-    "记下此刻冒出来的念头，它可能是下一个作品的开头。",
-    "重复的是流程，不是作品——今天也做点新的。",
-    "愿你少返工一次，把时间留给真正的创作。",
-    "想法先落地，完美留给后面的迭代。",
-    "今天适合开一个新项目，哪怕只写一行设定。",
-    "慢慢来，好作品都长在耐心里。",
-];
+const CHECK_IN_BLESSINGS = () => ([
+    translate("checkIn.mayTodaySIdeasFlowAndYourVisualsCome"),
+    translate("checkIn.greatShotsTakePatienceAdjustRefineAndEnjoy"),
+    translate("checkIn.aNewDayStartsWithAThoughtfulPrompt"),
+    translate("checkIn.beforeGeneratingPictureWhatYouWantToCreate"),
+    translate("checkIn.mayEveryExportBringYouCloserToYourVision"),
+    translate("checkIn.inspirationMayArriveLateYouCanStartNow"),
+    translate("checkIn.editYourStoryIntoSomethingWorthWatchingToThe"),
+    translate("checkIn.lightCompositionRhythmYoursToDirectToday"),
+    translate("checkIn.writeDownThatThoughtItMayBeginYourNext"),
+    translate("checkIn.repeatTheProcessCreateSomethingNew"),
+    translate("checkIn.oneLessRevisionLeavesMoreTimeToCreate"),
+    translate("checkIn.startWithAnIdeaRefineItAlongTheWay"),
+    translate("checkIn.startANewProjectTodayEvenWithOneLine"),
+    translate("checkIn.takeYourTimeGreatWorkGrowsWithPatience"),
+]);
 
 /**
  * 随机取一条签到祝福语。
@@ -41,7 +46,7 @@ const CHECK_IN_BLESSINGS = [
  * @return 今日祝福语
  */
 function pickBlessing() {
-    return CHECK_IN_BLESSINGS[Math.floor(Math.random() * CHECK_IN_BLESSINGS.length)] ?? "";
+    return CHECK_IN_BLESSINGS()[Math.floor(Math.random() * CHECK_IN_BLESSINGS().length)] ?? "";
 }
 
 /**
@@ -51,7 +56,7 @@ function pickBlessing() {
  * @return 带千分位的积分文本
  */
 function formatCredits(credits: number | null | undefined) {
-    return (credits ?? 0).toLocaleString("zh-CN");
+    return (credits ?? 0).toLocaleString(currentLanguageTag());
 }
 
 /**
@@ -60,6 +65,7 @@ function formatCredits(credits: number | null | undefined) {
  * @return 签到页面
  */
 export default function CheckInPage() {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const queryClient = useQueryClient();
     const setCreditBalance = useUserStore((state) => state.setCreditBalance);
@@ -84,25 +90,25 @@ export default function CheckInPage() {
                 setRewardBurst({ id, credits: result.earnedCredits });
                 setRewardCard({ id, credits: result.earnedCredits, blessing: pickBlessing() });
             } else {
-                message.success("今日已签到");
+                message.success(translate("checkIn.checkedInToday"));
             }
         },
         onError: (error) => {
             void queryClient.invalidateQueries({ queryKey: [CHECK_IN_STATUS_QUERY_KEY] });
-            message.error(error instanceof Error ? error.message : "签到失败，请稍后重试");
+            message.error(error instanceof Error ? error.message : translate("checkIn.checkInFailedTryAgainLater"));
         },
     });
 
-    const monthStart = useMemo(() => dayjs(`${month}-01`), [month]);
+    const monthStart = useMemo(() => dayjs(`${month}-01`), [month, translate.locale]);
     const monthCells = useMemo(() => {
         const leadingBlanks = (monthStart.day() + 6) % 7;
         return [
             ...Array.from({ length: leadingBlanks }, () => null),
             ...Array.from({ length: monthStart.daysInMonth() }, (_, index) => index + 1),
         ];
-    }, [monthStart]);
+    }, [monthStart, translate.locale]);
 
-    const checkedDates = useMemo(() => new Set(status?.monthCheckedDates || []), [status?.monthCheckedDates]);
+    const checkedDates = useMemo(() => new Set(status?.monthCheckedDates || []), [status?.monthCheckedDates, translate.locale]);
     const checkedInToday = Boolean(status?.checkedInToday);
     const canSwitchNextMonth = Boolean(status && monthStart.isBefore(dayjs(status.today).startOf("month")));
 
@@ -115,8 +121,8 @@ export default function CheckInPage() {
         <main className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 lg:px-8">
             <header className="relative overflow-hidden rounded-2xl border border-[var(--studio-line)] p-6 md:p-7" style={{ background: "linear-gradient(135deg, var(--studio-primary-soft), transparent 58%, var(--studio-accent-soft))" }}>
                 <div className="relative z-10 min-w-0">
-                    <h1 className="text-2xl font-semibold text-[var(--studio-ink)]">每日签到</h1>
-                    <p className="mt-2 text-sm leading-6 text-[var(--studio-muted)]">每天签到一次即可领取积分，签到积分自签到起 24 小时内有效</p>
+                    <h1 className="text-2xl font-semibold text-[var(--studio-ink)]">{translate("checkIn.dailyCheckIn")}</h1>
+                    <p className="mt-2 text-sm leading-6 text-[var(--studio-muted)]">{translate("checkIn.checkInOnceDailyToEarnCreditsValidFor")}</p>
                 </div>
                 <GiftIllustration />
             </header>
@@ -126,8 +132,8 @@ export default function CheckInPage() {
                     className="mt-5"
                     type="error"
                     showIcon
-                    title="签到信息加载失败"
-                    action={<Button size="small" onClick={() => void statusQuery.refetch()}>重新加载</Button>}
+                    title={translate("checkIn.failedToLoadCheckInDetails")}
+                    action={<Button size="small" onClick={() => void statusQuery.refetch()}>{translate("checkIn.reload")}</Button>}
                 />
             ) : null}
 
@@ -139,33 +145,33 @@ export default function CheckInPage() {
                                 type="button"
                                 className="inline-flex size-8 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] disabled:cursor-not-allowed disabled:opacity-40"
                                 onClick={() => setMonth(monthStart.subtract(1, "month").format("YYYY-MM"))}
-                                aria-label="上一个月"
+                                aria-label={translate("checkIn.previousMonth")}
                             >
                                 <ChevronLeft className="size-4" />
                             </button>
                             <h2 id="check-in-calendar-title" className="min-w-[7.5rem] text-center text-base font-semibold tabular-nums text-[var(--studio-ink)]">
-                                {monthStart.format("YYYY年M月")}
+                                {monthStart.format(translate("checkIn.mMMYYYY"))}
                             </h2>
                             <button
                                 type="button"
                                 className="inline-flex size-8 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] disabled:cursor-not-allowed disabled:opacity-40"
                                 disabled={!canSwitchNextMonth}
                                 onClick={() => setMonth(monthStart.add(1, "month").format("YYYY-MM"))}
-                                aria-label="下一个月"
+                                aria-label={translate("checkIn.nextMonth")}
                             >
                                 <ChevronRight className="size-4" />
                             </button>
                         </div>
                         <div className="inline-flex items-center gap-2 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-3 py-1 text-xs font-medium text-[var(--studio-ink)]">
                             <CalendarCheck className="size-3.5 text-[var(--studio-primary)]" aria-hidden />
-                            <span>本月已签到</span>
+                            <span>{translate("checkIn.daysCheckedInThisMonth")}</span>
                             <strong className="tabular-nums">{status?.monthCheckedCount ?? 0}</strong>
-                            <span>天</span>
+                            <span>{translate("checkIn.days")}</span>
                         </div>
                     </div>
 
                     <div className="mt-5 grid grid-cols-7 gap-1.5 text-center text-xs text-[var(--studio-faint)] md:gap-2">
-                        {WEEKDAY_LABELS.map((label) => (
+                        {WEEKDAY_LABELS().map((label) => (
                             <span key={label}>{label}</span>
                         ))}
                     </div>
@@ -188,7 +194,7 @@ export default function CheckInPage() {
                                         type="button"
                                         disabled={!claimable || checkInMutation.isPending}
                                         onClick={handleCheckIn}
-                                        aria-label={claimable ? `签到领取${date.format("M月D日")}积分` : dateText}
+                                        aria-label={claimable ? translate("checkIn.checkInForCredits", { value0: date.format(translate("checkIn.mMMD")) }) : dateText}
                                         className={`flex min-h-16 flex-col items-center justify-center gap-1 rounded-xl border px-1 py-2 transition ${
                                             isCheckedIn
                                                 ? "text-[var(--studio-success)]"
@@ -210,22 +216,22 @@ export default function CheckInPage() {
                                             <Check className="size-4" strokeWidth={3} aria-hidden />
                                         ) : null}
                                         <span className={`text-[13px] font-medium tabular-nums ${isToday ? "text-[var(--studio-ink)]" : ""}`}>{day}</span>
-                                        {isToday ? <span className="text-[10px] leading-3 text-[var(--studio-muted)]">{claimable ? "点击领取" : "今天"}</span> : null}
+                                        {isToday ? <span className="text-[10px] leading-3 text-[var(--studio-muted)]">{claimable ? translate("checkIn.claim") : translate("checkIn.today")}</span> : null}
                                     </button>
                                 );
                             })}
                         </div>
                     )}
 
-                    <p className="mt-4 text-xs leading-5 text-[var(--studio-muted)]">签到积分自签到起 24 小时内有效，到期未使用的部分自动作废。</p>
+                    <p className="mt-4 text-xs leading-5 text-[var(--studio-muted)]">{translate("checkIn.checkInCreditsExpireAfter24HoursUnusedCredits")}</p>
                 </section>
 
                 <div className="flex min-w-0 flex-col gap-5 lg:grid lg:grid-rows-2">
                     <section className="rounded-2xl border border-[var(--studio-line)] bg-[var(--studio-surface)] p-5 lg:flex lg:flex-col lg:justify-center" aria-labelledby="check-in-reward-title">
-                        <h2 id="check-in-reward-title" className="text-base font-semibold text-[var(--studio-ink)]">签到奖励</h2>
-                        <p className="mt-1.5 text-xs leading-5 text-[var(--studio-muted)]">每天签到一次即可获得，签到积分自签到起 24 小时内有效：</p>
+                        <h2 id="check-in-reward-title" className="text-base font-semibold text-[var(--studio-ink)]">{translate("checkIn.checkInReward")}</h2>
+                        <p className="mt-1.5 text-xs leading-5 text-[var(--studio-muted)]">{translate("checkIn.checkInOnceDailyCreditsExpire24HoursAfter")}</p>
                         <ul className="mt-4 flex flex-col gap-3">
-                            <RewardRow icon={<Coins className="size-4" />} label="每日签到" value={status ? `创作积分 +${formatCredits(status.dailyCredits)}` : "—"} />
+                            <RewardRow icon={<Coins className="size-4" />} label={translate("checkIn.dailyCheckIn")} value={status ? translate("checkIn.creationCredits", { value0: formatCredits(status.dailyCredits) }) : "—"} />
                         </ul>
                     </section>
 
@@ -233,7 +239,7 @@ export default function CheckInPage() {
                         {rewardBurst && rewardBurst.credits > 0 ? <RewardBurst key={rewardBurst.id} credits={rewardBurst.credits} /> : null}
                         <div className="flex items-center gap-2">
                             <Gift className="size-4 text-[var(--studio-primary)]" aria-hidden />
-                            <h2 id="check-in-today-title" className="text-base font-semibold text-[var(--studio-ink)]">今日签到</h2>
+                            <h2 id="check-in-today-title" className="text-base font-semibold text-[var(--studio-ink)]">{translate("checkIn.dailyCheckIn_c1d4a2")}</h2>
                         </div>
                         {statusQuery.isLoading ? (
                             <Skeleton active className="mt-4" paragraph={{ rows: 3 }} />
@@ -241,20 +247,18 @@ export default function CheckInPage() {
                             <div className="mt-4">
                                 <div className="flex items-center gap-2 text-sm font-semibold text-[var(--studio-success)]">
                                     <Check className="size-4" strokeWidth={3} aria-hidden />
-                                    今日已签到
-                                </div>
+                                    {translate("checkIn.checkedInToday")}</div>
                                 <div className="mt-3 text-sm text-[var(--studio-text)]">
-                                    获得创作积分 <strong className="font-semibold tabular-nums text-[var(--studio-ink)]">+{formatCredits(status?.todayCredits ?? 0)}</strong>
+                                    {translate("checkIn.earnCreativeCredits")}<strong className="font-semibold tabular-nums text-[var(--studio-ink)]">+{formatCredits(status?.todayCredits ?? 0)}</strong>
                                 </div>
-                                <p className="mt-2 text-xs leading-5 text-[var(--studio-muted)]">明天继续签到，领取更多奖励</p>
+                                <p className="mt-2 text-xs leading-5 text-[var(--studio-muted)]">{translate("checkIn.checkInTomorrowForMoreRewards")}</p>
                             </div>
                         ) : (
                             <div className="mt-4">
-                                <div className="text-xs text-[var(--studio-muted)]">今日奖励</div>
+                                <div className="text-xs text-[var(--studio-muted)]">{translate("checkIn.todaySReward")}</div>
                                 <div className="mt-2 flex items-center gap-2 text-sm text-[var(--studio-text)]">
                                     <Coins className="size-4 text-[var(--studio-primary)]" aria-hidden />
-                                    创作积分
-                                    <strong className="font-semibold tabular-nums text-[var(--studio-ink)]">+{formatCredits(status?.dailyCredits ?? 0)}</strong>
+                                    {translate("checkIn.creativeCredits")}<strong className="font-semibold tabular-nums text-[var(--studio-ink)]">+{formatCredits(status?.dailyCredits ?? 0)}</strong>
                                 </div>
                                 <Button
                                     type="primary"
@@ -265,9 +269,8 @@ export default function CheckInPage() {
                                     icon={<Gift className="size-4" />}
                                     onClick={handleCheckIn}
                                 >
-                                    立即签到
-                                </Button>
-                                <p className="mt-2 text-center text-xs leading-5 text-[var(--studio-muted)]">签到积分自签到起 24 小时内有效，到期自动作废</p>
+                                    {translate("checkIn.checkInNow")}</Button>
+                                <p className="mt-2 text-center text-xs leading-5 text-[var(--studio-muted)]">{translate("checkIn.checkInCreditsExpire24HoursAfterCheckIn")}</p>
                             </div>
                         )}
                     </section>
@@ -353,6 +356,7 @@ function GiftIllustration() {
  * @return 签到成功奖励弹层
  */
 function CheckInRewardCard({ credits, blessing, onClose }: { credits: number; blessing: string; onClose: () => void }) {
+    const translate = useTranslation();
     const [visible, setVisible] = useState(false);
     const [reduceMotion, setReduceMotion] = useState(false);
     const closingRef = useRef(false);
@@ -399,7 +403,7 @@ function CheckInRewardCard({ credits, blessing, onClose }: { credits: number; bl
             destroyOnHidden
             mask={{ closable: true }}
             onCancel={handleClose}
-            title={<span className="sr-only">签到成功</span>}
+            title={<span className="sr-only">{translate("checkIn.checkedIn")}</span>}
             styles={{
                 mask: { backdropFilter: "blur(8px)" },
                 container: { padding: 0, overflow: "hidden", background: "transparent", boxShadow: "none" },
@@ -437,13 +441,12 @@ function CheckInRewardCard({ credits, blessing, onClose }: { credits: number; bl
                                 <Check className="size-6" strokeWidth={3} aria-hidden />
                             </span>
                             <h2 className="text-[28px] font-semibold leading-tight sm:text-[34px]">
-                                签到成功
-                            </h2>
+                                {translate("checkIn.checkedIn")}</h2>
                         </div>
 
                         <div className="mt-7 flex flex-wrap items-baseline gap-x-3 gap-y-1">
                             <strong className="text-5xl font-semibold leading-none tabular-nums text-[var(--studio-action)] sm:text-6xl">+{formatCredits(credits)}</strong>
-                            <span className="text-base font-medium sm:text-lg">创作积分</span>
+                            <span className="text-base font-medium sm:text-lg">{translate("checkIn.creativeCredits")}</span>
                         </div>
 
                         <p
@@ -451,7 +454,7 @@ function CheckInRewardCard({ credits, blessing, onClose }: { credits: number; bl
                             style={{ color: "color-mix(in srgb, var(--studio-brand-shine) 68%, transparent)" }}
                         >
                             <Clock3 className="mt-0.5 size-4 shrink-0" aria-hidden />
-                            <span>签到积分 24 小时内有效，到期自动作废</span>
+                            <span>{translate("checkIn.checkInCreditsExpireAfter24Hours")}</span>
                         </p>
                     </div>
 
@@ -471,22 +474,20 @@ function CheckInRewardCard({ credits, blessing, onClose }: { credits: number; bl
                         <span className="absolute inset-y-4 left-0 w-1 rounded-r-full bg-[var(--studio-accent)]" aria-hidden />
                         <div className="flex items-center gap-2 text-sm font-semibold text-[var(--studio-accent)]">
                             <Sparkles className="size-4" aria-hidden />
-                            今日祝福
-                        </div>
+                            {translate("checkIn.todaySBlessing")}</div>
                         <p className="mt-3 max-w-[31rem] text-base leading-7 text-[var(--studio-ink)]">{blessing}</p>
                     </div>
 
                     <div className="mt-8 border-t border-[var(--studio-line)] pt-6">
                         <Button type="primary" size="large" block className="min-h-12" icon={<Sprout className="size-5" aria-hidden />} onClick={handleClose}>
-                            收下祝福
-                        </Button>
+                            {translate("checkIn.acceptBlessing")}</Button>
                     </div>
                 </section>
 
                 <button
                     type="button"
                     onClick={handleClose}
-                    aria-label="关闭签到成功弹窗"
+                    aria-label={translate("checkIn.closeCheckInDialog")}
                     className="absolute right-3 top-3 z-20 inline-flex size-11 items-center justify-center rounded-full border border-[var(--studio-brand-shine-soft)] bg-[var(--studio-brand-shine-soft)] text-[var(--studio-brand-shine)] transition hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--studio-action)] motion-reduce:transition-none sm:right-4 sm:top-4"
                 >
                     <X className="size-5" strokeWidth={2} aria-hidden />

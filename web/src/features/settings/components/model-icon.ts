@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { ApiCallFormat } from "@/features/settings/stores/use-config-store";
 
 export function resolveModelIcon(model: string, apiFormat?: ApiCallFormat): string {
@@ -28,11 +30,12 @@ export function isMonochromeModelIcon(model: string, apiFormat?: ApiCallFormat):
  * 模型展示图标可选项：空串表示自动匹配（按模型名/渠道解析），clapperboard 表示默认图标。
  * 供管理端「模型能力配置」编辑弹窗选择使用。
  */
-export const MODEL_ICON_OPTIONS: Array<{ value: string; label: string; path: string }> = [
-    { value: "", label: "自动匹配", path: "" },
-    { value: "clapperboard", label: "默认（Clapperboard）", path: "" },
+/** 按调用方语言生成显示文案，业务值保持不变。 */
+export const createModelIconOptions = (translator: typeof translate = translate): Array<{ value: string; label: string; path: string }> => ([
+    { value: "", get label() { return translator("settings.autoMatch"); }, path: "" },
+    { value: "clapperboard", get label() { return translator("settings.defaultClapperboard"); }, path: "" },
     { value: "agnes", label: "Agnes", path: "/icons/agnes.svg" },
-    { value: "seedance", label: "Seedance（字节跳动）", path: "/icons/bytedance.svg" },
+    { value: "seedance", get label() { return translator("settings.seedanceByteDance"); }, path: "/icons/bytedance.svg" },
     { value: "claude", label: "Claude", path: "/icons/claude.svg" },
     { value: "openai", label: "OpenAI", path: "/icons/openai.svg" },
     { value: "gemini", label: "Gemini", path: "/icons/gemini.svg" },
@@ -40,7 +43,9 @@ export const MODEL_ICON_OPTIONS: Array<{ value: string; label: string; path: str
     { value: "glm", label: "GLM", path: "/icons/glm.svg" },
     { value: "grok", label: "Grok", path: "/icons/grok.svg" },
     { value: "minimax", label: "MiniMax", path: "/icons/minimax.svg" },
-];
+]);
+
+export const MODEL_ICON_OPTIONS = createModelIconOptions();
 
 /** 按配置的图标标识解析 SVG 路径，自动匹配/默认图标返回空串。 */
 export function resolveModelIconByKey(key: string | null | undefined): string {

@@ -1,5 +1,8 @@
 package com.novanovastudio.security;
 
+import com.novanovastudio.common.SystemMessage;
+import com.novanovastudio.common.WebsiteLanguage;
+
 import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.common.ApiResponse;
 import com.novanovastudio.common.BusinessException;
@@ -89,7 +92,7 @@ public class TokenAuthenticationWebFilter implements WebFilter {
         try {
             TokenService.TokenClaims claims = tokenService.parse(token);
             return userRepository.findById(claims.userId())
-                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, "用户不存在")))
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, SystemMessage.of("business.userNotFound"))))
                     .flatMap(user -> authenticateUser(exchange, chain, user, claims))
                     .onErrorResume(BusinessException.class, exception -> writeAuthError(exchange, exception));
         } catch (BusinessException exception) {
@@ -109,10 +112,10 @@ public class TokenAuthenticationWebFilter implements WebFilter {
     private Mono<Void> authenticateUser(ServerWebExchange exchange, WebFilterChain chain, User user, TokenService.TokenClaims claims) {
         // 确认账号仍处于启用状态，再把当前用户写入Reactor上下文。
         if (user.getStatus() == null || user.getStatus() != 1) {
-            return Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, "账号已被禁用"));
+            return Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, SystemMessage.of("business.accountDisabled")));
         }
         if (!Objects.equals(claims.tokenVersion(), user.getTokenVersion())) {
-            return Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, "登录已失效，请重新登录"));
+            return Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, SystemMessage.of("business.sessionInvalidSignInAgain")));
         }
         CurrentUser currentUser = new CurrentUser(user.getId(), user.getEmail(), user.getRole(), user.getStatus());
         return chain.filter(exchange).contextWrite(context -> MappedDiagnosticContext.put(
@@ -141,7 +144,7 @@ public class TokenAuthenticationWebFilter implements WebFilter {
         log.debug("未登录请求受保护接口: uri={}", exchange.getRequest().getURI().getPath());
         exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
         exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
-        byte[] bytes = JSON.toJSONString(ApiResponse.fail(ErrorCode.TOKEN_INVALID, "请先登录")).getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = JSON.toJSONString(ApiResponse.fail(ErrorCode.TOKEN_INVALID, SystemMessage.of("business.pleaseSignIn").render(WebsiteLanguage.resolve(exchange)))).getBytes(StandardCharsets.UTF_8);
         DataBuffer buffer = exchange.getResponse().bufferFactory().wrap(bytes);
         return exchange.getResponse().writeWith(Mono.just(buffer));
     }
@@ -158,7 +161,7 @@ public class TokenAuthenticationWebFilter implements WebFilter {
         log.error("Token认证失败: uri={}, code={}, message={}", exchange.getRequest().getURI().getPath(), exception.getCode(), exception.getMessage(), exception);
         exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
         exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
-        byte[] bytes = JSON.toJSONString(ApiResponse.fail(exception.getCode(), exception.getMessage())).getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = JSON.toJSONString(ApiResponse.fail(exception.getCode(), exception.getSystemMessage().render(WebsiteLanguage.resolve(exchange)))).getBytes(StandardCharsets.UTF_8);
         DataBuffer buffer = exchange.getResponse().bufferFactory().wrap(bytes);
         return exchange.getResponse().writeWith(Mono.just(buffer));
     }

@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useMemo, useState } from "react";
 import { App, Button, Form, Input, Tabs } from "antd";
@@ -34,6 +36,7 @@ type AuthFormProps = {
 };
 
 export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormProps) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const router = useRouter();
     const [activeKey, setActiveKey] = useState(invitationCode ? "register" : "login");
@@ -59,19 +62,19 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
     }, []);
 
     const codeButtonText = useMemo(() => {
-        if (sendingCode) return "发送中...";
-        if (codeCooldownSeconds > 0) return `${codeCooldownSeconds}s 后重发`;
-        return "发送验证码";
-    }, [codeCooldownSeconds, sendingCode]);
+        if (sendingCode) return translate("auth.sending");
+        if (codeCooldownSeconds > 0) return translate("auth.resendInS", { value0: codeCooldownSeconds });
+        return translate("auth.sendCode");
+    }, [codeCooldownSeconds, sendingCode, translate.locale]);
 
     const sendCode = async () => {
         const email = registerForm.getFieldValue("email");
         if (!email) {
-            message.warning("请先输入邮箱");
+            message.warning(translate("auth.enterYourEmailFirst"));
             return;
         }
         if (codeCooldownSeconds > 0) {
-            message.warning(`请在 ${codeCooldownSeconds} 秒后再次发送`);
+            message.warning(translate("auth.sendAgainInSeconds", { value0: codeCooldownSeconds }));
             return;
         }
         setSendingCode(true);
@@ -79,9 +82,9 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
             await sendEmailCode(email);
             startEmailCodeCooldown();
             setCodeCooldownSeconds(EMAIL_CODE_COOLDOWN_SECONDS);
-            message.success("验证码已发送，请查看邮箱");
+            message.success(translate("auth.codeSentCheckYourInbox"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "发送验证码失败");
+            message.error(error instanceof Error ? error.message : translate("auth.failedToSendCode"));
         } finally {
             setSendingCode(false);
         }
@@ -92,10 +95,10 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
         try {
             const result = await loginByEmail(values);
             setSession(result);
-            message.success("登录成功");
+            message.success(translate("auth.signedIn"));
             onSuccess?.();
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "登录失败");
+            message.error(error instanceof Error ? error.message : translate("auth.signInFailed"));
         } finally {
             setSubmitting(false);
         }
@@ -106,10 +109,10 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
         try {
             const result = await registerByEmail({ ...values, invitationCode });
             setSession(result);
-            message.success("注册成功");
+            message.success(translate("auth.signedUp"));
             onSuccess?.();
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "注册失败");
+            message.error(error instanceof Error ? error.message : translate("auth.signUpFailed"));
         } finally {
             setSubmitting(false);
         }
@@ -128,54 +131,51 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
                 items={[
                 {
                     key: "login",
-                    label: "登录",
+                    label: translate("auth.signIn_1e2df9"),
                     children: (
                         <Form form={loginForm} layout="vertical" requiredMark={false} onFinish={login} className="pt-2">
-                            <Form.Item name="email" label="邮箱" rules={[{ required: true, message: "请输入邮箱" }, { type: "email", message: "邮箱格式不正确" }]}>
+                            <Form.Item name="email" label={translate("auth.email")} rules={[{ required: true, message: translate("auth.enterAnEmailAddress") }, { type: "email", message: translate("auth.invalidEmailAddress") }]}>
                                 <Input size="large" autoComplete="email" placeholder="name@example.com" />
                             </Form.Item>
-                            <Form.Item name="password" label="密码" rules={[{ required: true, message: "请输入密码" }]}>
-                                <Input.Password size="large" autoComplete="current-password" placeholder="请输入密码" />
+                            <Form.Item name="password" label={translate("auth.password")} rules={[{ required: true, message: translate("auth.enterAPassword") }]}>
+                                <Input.Password size="large" autoComplete="current-password" placeholder={translate("auth.enterAPassword")} />
                             </Form.Item>
                             <div className="-mt-2 mb-2 flex justify-end">
                                 <Button type="link" className="min-h-11 px-0" onClick={goToForgotPassword}>
-                                    忘记密码
-                                </Button>
+                                    {translate("auth.forgotPassword")}</Button>
                             </div>
                             <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<ArrowRight className="size-4" />} iconPlacement="end">
-                                登录
-                            </Button>
+                                {translate("auth.signIn_1e2df9")}</Button>
                             <OAuth2LoginOptions redirectPath={redirectPath} invitationCode={invitationCode} />
                         </Form>
                     ),
                 },
                 {
                     key: "register",
-                    label: "注册",
+                    label: translate("auth.signUp"),
                     children: (
                         <Form form={registerForm} layout="vertical" requiredMark={false} onFinish={register} className="pt-2">
-                            <Form.Item name="email" label="邮箱" rules={[{ required: true, message: "请输入邮箱" }, { type: "email", message: "邮箱格式不正确" }]}>
+                            <Form.Item name="email" label={translate("auth.email")} rules={[{ required: true, message: translate("auth.enterAnEmailAddress") }, { type: "email", message: translate("auth.invalidEmailAddress") }]}>
                                 <Input size="large" autoComplete="email" placeholder="name@example.com" />
                             </Form.Item>
-                            <Form.Item label="验证码" required>
+                            <Form.Item label={translate("auth.verificationCode")} required>
                                 <div className="grid grid-cols-[1fr_auto] gap-2">
-                                    <Form.Item name="code" noStyle rules={[{ required: true, message: "请输入验证码" }]}>
-                                        <Input size="large" autoComplete="one-time-code" placeholder="6 位验证码" />
+                                    <Form.Item name="code" noStyle rules={[{ required: true, message: translate("auth.enterVerificationCode") }]}>
+                                        <Input size="large" autoComplete="one-time-code" placeholder={translate("auth.6DigitCode")} />
                                     </Form.Item>
                                     <Button size="large" loading={sendingCode} disabled={codeCooldownSeconds > 0} onClick={sendCode}>
                                         {codeButtonText}
                                     </Button>
                                 </div>
                             </Form.Item>
-                            <Form.Item name="nickname" label="昵称">
-                                <Input size="large" autoComplete="nickname" placeholder="可选" />
+                            <Form.Item name="nickname" label={translate("auth.displayName")}>
+                                <Input size="large" autoComplete="nickname" placeholder={translate("auth.optional")} />
                             </Form.Item>
-                            <Form.Item name="password" label="密码" rules={[{ required: true, message: "请输入密码" }, { min: 8, message: "密码至少 8 位" }]}>
-                                <Input.Password size="large" autoComplete="new-password" placeholder="至少 8 位" />
+                            <Form.Item name="password" label={translate("auth.password")} rules={[{ required: true, message: translate("auth.enterAPassword") }, { min: 8, message: translate("auth.atLeast8Characters") }]}>
+                                <Input.Password size="large" autoComplete="new-password" placeholder={translate("auth.atLeast8Characters_d482f2")} />
                             </Form.Item>
                             <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<ArrowRight className="size-4" />} iconPlacement="end">
-                                注册并登录
-                            </Button>
+                                {translate("auth.signUpAndSignIn")}</Button>
                             <OAuth2LoginOptions redirectPath={redirectPath} invitationCode={invitationCode} />
                         </Form>
                     ),

@@ -1,5 +1,7 @@
 package com.novanovastudio.agent.workflow;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import java.util.List;
@@ -63,7 +65,7 @@ public class VideoWorkflowRegistry {
     public VideoWorkflowDefinition require(String workflowType) {
         VideoWorkflowDefinition definition = definitions.get(workflowType == null ? "" : workflowType.toLowerCase(Locale.ROOT));
         if (definition == null) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "视频技能声明的工作流未注册：" + workflowType);
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoSkillWorkflowIsNotRegistered", workflowType));
         }
         return definition;
     }

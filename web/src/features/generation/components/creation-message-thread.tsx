@@ -1,4 +1,7 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+import { useActionLabel } from "@/features/locale/use-action-label";
+
 
 import { Button, Input, Modal, Tooltip } from "antd";
 import { ArrowRight, Copy, PenLine } from "lucide-react";
@@ -17,6 +20,8 @@ import { storeInitialPromptForNavigation } from "@/shared/lib/initial-prompt";
 const AT_BOTTOM_THRESHOLD = 180;
 
 export function CreationMessageThread({ sections, emptyState, onAtBottomChange, onActionReply, onPromptEdit, onUploadImage }: CreationMessageThreadProps) {
+    const translate = useTranslation();
+    const actionLabel = useActionLabel();
     const scrollRef = useRef<HTMLDivElement>(null);
     const keepPinnedToBottomRef = useRef(true);
     const latestFreshUserRoundIdRef = useRef<string | null>(null);
@@ -83,7 +88,7 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                                     {round.userAttachments ? <div className="mb-3">{round.userAttachments}</div> : null}
                                                     {round.userText ? (
                                                         <div className="relative rounded-[28px] bg-[rgba(83,96,116,0.08)] px-5 py-4 pr-14">
-                                                            <MessageCopyButton side="right" placement="inside" onClick={() => copyText(round.userCopyText || round.userText, "用户消息已复制")} />
+                                                            <MessageCopyButton side="right" placement="inside" onClick={() => copyText(round.userCopyText || round.userText, translate("generation.userMessageCopied"))} />
                                                             <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--studio-ink)] sm:text-[15px]">{round.userText}</p>
                                                         </div>
                                                     ) : null}
@@ -103,7 +108,7 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                                             <ReactMarkdown>{round.assistantText}</ReactMarkdown>
                                                         </div>
                                                     </div>
-                                                    <MessageCopyButton side="right" placement="inline" onClick={() => copyText(round.assistantText || "", "助手消息已复制")} />
+                                                    <MessageCopyButton side="right" placement="inline" onClick={() => copyText(round.assistantText || "", translate("generation.assistantMessageCopied"))} />
                                                 </div>
                                             ) : null}
                                             {round.resultContent}
@@ -121,7 +126,7 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                                             router.push(action.href);
                                                         }}
                                                     >
-                                                        {round.action.label}
+                                                        {actionLabel(round.action)}
                                                     </Button>
                                                 </div>
                                             ) : null}
@@ -170,6 +175,8 @@ function ChoiceGroup({
     /** 需要禁用的选项及禁用原因，key 为选项 value。 */
     disabledReasons?: Record<string, string>;
 }) {
+    const translate = useTranslation();
+    const actionLabel = useActionLabel();
     const multiple = options.some((option) => option.multiple);
     const [selected, setSelected] = useState<string[]>([]);
     const [customOpen, setCustomOpen] = useState(false);
@@ -177,7 +184,7 @@ function ChoiceGroup({
 
     /** 识别"上传图片"类选项：优先 action=upload_image，兜底按按钮文案（label）以"上传"开头判定；
      *  不能用 value 判断——"确认生成"按钮的 value 是完整提示词，可能包含"上传"字样（如"以用户上传的产品图片为基准"）。 */
-    const isUploadOption = (option: { label: string; value: string; multiple?: boolean; action?: string }) => option.action === "upload_image" || option.label.startsWith("上传");
+    const isUploadOption = (option: { label: string; value: string; multiple?: boolean; action?: string }) => option.action === "upload_image" || /^(上传|upload\b)/i.test(option.label);
 
     /** 点击选项：上传类选项直接触发参考图上传；否则单选发送或多选切换选中。 */
     const handleOptionClick = (option: { label: string; value: string; multiple?: boolean; action?: string }) => {
@@ -224,12 +231,11 @@ function ChoiceGroup({
                 setCustomOpen(true);
             }}
         >
-            自定义
-        </Button>
+            {translate("generation.custom")}</Button>
     );
     const customModal = (
-        <Modal title="自定义输入" open={customOpen} onOk={submitCustom} onCancel={() => setCustomOpen(false)} okText="发送" cancelText="取消" destroyOnHidden>
-            <Input.TextArea value={customValue} rows={4} autoFocus placeholder="输入您想要的风格、内容或其它补充说明，将作为消息发送给助手" onChange={(event) => setCustomValue(event.target.value)} />
+        <Modal title={translate("generation.customInput")} open={customOpen} onOk={submitCustom} onCancel={() => setCustomOpen(false)} okText={translate("generation.send")} cancelText={translate("generation.cancel")} destroyOnHidden>
+            <Input.TextArea value={customValue} rows={4} autoFocus placeholder={translate("generation.enterStyleContentOrAdditionalInstructionsToSendTo")} onChange={(event) => setCustomValue(event.target.value)} />
         </Modal>
     );
 
@@ -240,7 +246,7 @@ function ChoiceGroup({
                     const disabledReason = disabledReasons?.[option.value];
                     const button = (
                         <Button key={option.value} className="creation-choice-button" disabled={Boolean(disabledReason)} onClick={() => handleOptionClick(option)}>
-                            {option.label}
+                            {actionLabel(option)}
                         </Button>
                     );
                     return disabledReason ? (
@@ -269,7 +275,7 @@ function ChoiceGroup({
                             disabled={Boolean(disabledReason)}
                             onClick={() => handleOptionClick(option)}
                         >
-                            {option.label}
+                            {actionLabel(option)}
                         </Button>
                     );
                     return disabledReason ? (
@@ -283,7 +289,7 @@ function ChoiceGroup({
             </div>
             <div className="flex flex-wrap items-center gap-2.5">
                 <Button type="primary" size="small" disabled={!selected.length} onClick={submitMulti}>
-                    {selected.length ? `确认（已选 ${selected.length} 项）` : "确认选择"}
+                    {selected.length ? translate("generation.confirmSelected", { value0: selected.length }) : translate("generation.confirmSelection")}
                 </Button>
                 {customButton}
             </div>
@@ -294,11 +300,12 @@ function ChoiceGroup({
 
 /** 历史记录中的只读选项条：展示该轮系统给出的选项，不可再点击。 */
 export function ChoiceHistoryBar({ choices }: { choices: { label: string; value: string; multiple?: boolean; action?: string }[] }) {
+    const actionLabel = useActionLabel();
     return (
         <div className="flex flex-wrap items-center gap-2.5 pt-2">
             {choices.map((choice) => (
                 <Button key={choice.value} className="creation-choice-button creation-choice-readonly" disabled>
-                    {choice.label}
+                    {actionLabel(choice)}
                 </Button>
             ))}
         </div>
@@ -306,6 +313,7 @@ export function ChoiceHistoryBar({ choices }: { choices: { label: string; value:
 }
 
 function MessageCopyButton({ onClick, side, placement = "edge" }: { onClick: () => void; side: "left" | "right"; placement?: "inside" | "edge" | "inline" }) {
+    const translate = useTranslation();
     const positionStyle: CSSProperties | undefined =
         placement === "inline"
             ? undefined
@@ -321,8 +329,8 @@ function MessageCopyButton({ onClick, side, placement = "edge" }: { onClick: () 
             ? "!relative !mt-1 !h-8 !w-8 !min-w-0 !shrink-0 !self-start !rounded-full !border !border-[var(--studio-line)] !bg-[var(--studio-panel-solid)] !p-0 !text-[var(--studio-muted)] opacity-0 pointer-events-none shadow-sm transition group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto hover:!border-[var(--studio-primary-line)] hover:!text-[var(--studio-ink)]"
             : "!absolute z-10 !h-8 !w-8 !min-w-0 !rounded-full !border !border-[var(--studio-line)] !bg-[var(--studio-panel-solid)] !p-0 !text-[var(--studio-muted)] opacity-0 pointer-events-none shadow-sm transition group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto hover:!border-[var(--studio-primary-line)] hover:!text-[var(--studio-ink)]";
     return (
-        <Tooltip title="复制消息">
-            <Button size="small" type="text" aria-label="复制消息" style={positionStyle} className={className} icon={<Copy className="size-3.5" />} onClick={onClick} />
+        <Tooltip title={translate("generation.copyMessage")}>
+            <Button size="small" type="text" aria-label={translate("generation.copyMessage")} style={positionStyle} className={className} icon={<Copy className="size-3.5" />} onClick={onClick} />
         </Tooltip>
     );
 }

@@ -1,8 +1,7 @@
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { localeFromAcceptLanguage } from "@/features/docs/docs";
+import { getWebsiteLocale } from "@/features/locale/server";
 
 export default async function DocsRedirectPage() {
-    const locale = localeFromAcceptLanguage((await headers()).get("accept-language"));
+    const locale = await getWebsiteLocale();
     redirect(`/docs/${locale}`);
 }

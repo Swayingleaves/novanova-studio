@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
@@ -15,6 +17,7 @@ import { MobileNavDrawer } from "@/features/app-shell/components/mobile-nav-draw
 import { navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
 
 export function AppShell({ children }: { children: ReactNode }) {
+    const translate = useTranslation();
     const pathname = usePathname();
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -35,7 +38,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                         type="button"
                         className="studio-glass fixed left-3 top-3 z-30 inline-flex size-9 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:text-[var(--studio-ink)] md:hidden"
                         onClick={() => setMobileNavOpen(true)}
-                        aria-label="打开导航菜单"
+                        aria-label={translate("appShell.openNavigation")}
                     >
                         <Menu className="size-4" />
                     </button>
@@ -48,16 +51,16 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <Link
                         href="/editions"
                         className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]"
-                        aria-label="版本对比"
-                        title="版本对比"
+                        aria-label={translate("appShell.compareEditions")}
+                        title={translate("appShell.compareEditions")}
                     >
                         <Layers3 className="size-4" aria-hidden="true" />
                     </Link>
                     <Link
-                        href="/docs"
+                        href={`/docs/${translate.locale}`}
                         className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]"
-                        aria-label="文档"
-                        title="文档"
+                        aria-label={translate("appShell.docs")}
+                        title={translate("appShell.docs")}
                     >
                         <BookOpen className="size-4" aria-hidden="true" />
                     </Link>

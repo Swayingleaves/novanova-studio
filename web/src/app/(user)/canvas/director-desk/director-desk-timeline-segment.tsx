@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { Dropdown } from "antd";
@@ -14,12 +16,13 @@ export function DirectorDeskTimelineSegment({ segment, siblings, label, duration
     segment: Segment; siblings: Segment[]; label: string; durationMilliseconds: number; disabled: boolean; selected?: boolean; style: CSSProperties;
     onSelect: () => void; onEditingStart: () => void; onChange: (interval: TimelineInterval | null) => void;
 }) {
+    const translate = useTranslation();
     const theme = useCanvasTheme();
     const [preview, setPreview] = useState<TimelineInterval | null>(null);
     const [menuOpen, setMenuOpen] = useState(false);
     const gesture = useRef<{ pointerId: number; edge: ResizeEdge; initialClientX: number; width: number; original: Segment; preview: TimelineInterval } | null>(null);
     const current = preview || segment;
-    const rangeLabel = `${(current.startTimeMilliseconds / 1000).toFixed(2)}–${(current.endTimeMilliseconds / 1000).toFixed(2)} 秒`;
+    const rangeLabel = translate("directorDesk.s_44a6da", { value0: (current.startTimeMilliseconds / 1000).toFixed(2), value1: (current.endTimeMilliseconds / 1000).toFixed(2) });
     const resetResize = () => { gesture.current = null; setPreview(null); };
 
     useEffect(() => {
@@ -72,10 +75,10 @@ export function DirectorDeskTimelineSegment({ segment, siblings, label, duration
         onEditingStart(); onChange(interval);
     };
 
-    return <Dropdown trigger={["contextMenu"]} disabled={disabled || Boolean(preview)} open={menuOpen} onOpenChange={setMenuOpen} menu={{ items: [{ key: "remove", label: "删除片段", danger: true, icon: <Trash2 className="size-3.5" /> }], onClick: ({ domEvent }) => { domEvent.stopPropagation(); setMenuOpen(false); onEditingStart(); onChange(null); } }}>
+    return <Dropdown trigger={["contextMenu"]} disabled={disabled || Boolean(preview)} open={menuOpen} onOpenChange={setMenuOpen} menu={{ items: [{ key: "remove", label: translate("directorDesk.deleteClip"), danger: true, icon: <Trash2 className="size-3.5" /> }], onClick: ({ domEvent }) => { domEvent.stopPropagation(); setMenuOpen(false); onEditingStart(); onChange(null); } }}>
         <div className={`group absolute h-6 min-w-px rounded-sm border ${preview ? "z-30" : "z-10"}`} style={{ ...style, left: `${current.startTimeMilliseconds / durationMilliseconds * 100}%`, width: `${(current.endTimeMilliseconds - current.startTimeMilliseconds) / durationMilliseconds * 100}%` }} onContextMenu={(event) => event.stopPropagation()}>
-            <button type="button" disabled={disabled} aria-label={`${label}，${rangeLabel}，右键删除，拖动两端调整时间`} aria-pressed={selected} title={`${label} · ${rangeLabel}；右键删除，拖动两端调整时间`} className="block h-full w-full cursor-pointer truncate px-2 text-left text-[10px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" onClick={onSelect} onKeyDown={(event) => { if (!disabled && event.key === "Delete") { event.preventDefault(); event.stopPropagation(); onEditingStart(); onChange(null); } }}>{label}</button>
-            {(["start", "end"] as const).map((edge) => <button key={edge} type="button" role="slider" aria-label={`${label}${edge === "start" ? "开始" : "结束"}时间，左右箭头调整一帧`} aria-valuemin={0} aria-valuemax={durationMilliseconds / 1000} aria-valuenow={(edge === "start" ? current.startTimeMilliseconds : current.endTimeMilliseconds) / 1000} aria-valuetext={rangeLabel} disabled={disabled} className={`absolute inset-y-0 w-2 max-w-[50%] touch-none cursor-ew-resize select-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${edge === "start" ? "left-0" : "right-0"}`} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => startResize(event, edge)} onPointerMove={moveResize} onPointerUp={finishResize} onPointerCancel={resetResize} onLostPointerCapture={resetResize} onKeyDown={(event) => resizeWithKeyboard(event, edge)}><span className={`pointer-events-none absolute inset-y-1 ${edge === "start" ? "left-0.5" : "right-0.5"} border-l border-current opacity-40 group-hover:opacity-100`} /></button>)}
+            <button type="button" disabled={disabled} aria-label={translate("directorDesk.rightClickToDeleteDragEdgesToAdjust", { value0: label, value1: rangeLabel })} aria-pressed={selected} title={translate("directorDesk.rightClickToDeleteDragEdgesToAdjust_3d9f64", { value0: label, value1: rangeLabel })} className="block h-full w-full cursor-pointer truncate px-2 text-left text-[10px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" onClick={onSelect} onKeyDown={(event) => { if (!disabled && event.key === "Delete") { event.preventDefault(); event.stopPropagation(); onEditingStart(); onChange(null); } }}>{label}</button>
+            {(["start", "end"] as const).map((edge) => <button key={edge} type="button" role="slider" aria-label={translate("directorDesk.timeArrowKeysAdjustOneFrame", { value0: label, value1: edge === "start" ? translate("directorDesk.start") : translate("directorDesk.end") })} aria-valuemin={0} aria-valuemax={durationMilliseconds / 1000} aria-valuenow={(edge === "start" ? current.startTimeMilliseconds : current.endTimeMilliseconds) / 1000} aria-valuetext={rangeLabel} disabled={disabled} className={`absolute inset-y-0 w-2 max-w-[50%] touch-none cursor-ew-resize select-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${edge === "start" ? "left-0" : "right-0"}`} onClick={(event) => event.stopPropagation()} onPointerDown={(event) => startResize(event, edge)} onPointerMove={moveResize} onPointerUp={finishResize} onPointerCancel={resetResize} onLostPointerCapture={resetResize} onKeyDown={(event) => resizeWithKeyboard(event, edge)}><span className={`pointer-events-none absolute inset-y-1 ${edge === "start" ? "left-0.5" : "right-0.5"} border-l border-current opacity-40 group-hover:opacity-100`} /></button>)}
             {preview ? <span className="pointer-events-none absolute bottom-full left-0 mb-1 whitespace-nowrap rounded border px-1.5 py-1 text-[10px] tabular-nums" style={{ background: theme.node.panel, color: theme.node.text, borderColor: theme.node.stroke }}>{rangeLabel}</span> : null}
         </div>
     </Dropdown>;

@@ -1,8 +1,12 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
 
+
+import { useLocale } from "next-intl";
 import { useCallback, useEffect, useRef } from "react";
 
-import { agentChat, agentSubscribeEvents, agentSubmitToolResult, cancelAgentChat, type AgentChatHistoryMessage, type AgentEvent, type CreationSettings } from "@/features/canvas/api/agent";
+import { agentChat, agentRequestStatus, agentReplayPendingTools, agentSubscribeEvents, agentSubmitToolResult, cancelAgentChat, type AgentChatHistoryMessage, type AgentEvent, type CreationSettings } from "@/features/canvas/api/agent";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { isTerminalAgentRequestStatus, matchesAgentRequest, shouldApplyAgentQueueStatus, type AgentQueueStatus } from "@/features/chat/agent-event-match";
 import { readAiTaskError } from "@/services/api/server";
@@ -36,6 +40,9 @@ interface UseAgentSSEProps {
  * 画布写操作工具通过 onApplyOps 应用到画布，并将执行结果回传后端继续 Agent Loop。
  */
 export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, onThoughtDelta, onThoughtComplete, onTaskComplete, onCanceled, onPlanCreated, onPlanTaskStatus, onPromptPrepared, onQueueStatus, onRequestFinished, onError }: UseAgentSSEProps) {
+    const translate = useTranslation();
+  const locale = useLocale();
+  const subscribedLocale = useRef(locale);
   const sessionIdRef = useRef<string | undefined>(undefined);
   const requestIdRef = useRef<string | undefined>(undefined);
   const eventSourceRef = useRef<EventSource | null>(null);
@@ -186,7 +193,7 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
         try {
           onToolExecuteRef.current?.();
           const execution = resolveCanvasAgentTool(data.name!, data.arguments);
-          if (!execution) throw new Error(`不支持的画布工具: ${data.name}`);
+          if (!execution) throw new Error(translate("canvas.unsupportedCanvasTool", { value0: data.name! }));
           let result = execution.result;
           if (execution.ops.length > 0 && result.ok) {
             const application = await onApplyOpsRef.current(execution.ops, controller.signal);
@@ -208,7 +215,7 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
               callId: data.callId!,
               result: {
                 ok: false,
-                message: err instanceof Error ? err.message : "工具执行失败",
+                message: err instanceof Error ? err.message : translate("canvas.toolExecutionFailed"),
                 data: { error: readAiTaskError(err) },
               },
             }).catch(() => undefined);
@@ -232,7 +239,7 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
     es.addEventListener("canceled", (e: MessageEvent) => {
       const data = readCurrentEvent(e);
       if (!data) return;
-      finishCanceledRequest(data.requestId || "", data.text || "已停止生成");
+      finishCanceledRequest(data.requestId || "", data.text || translate("canvas.generationStopped"));
     });
 
     es.addEventListener("tool-cancel", (e: MessageEvent) => {
@@ -285,9 +292,9 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
         activeRequestRef.current = false;
         queueStatusRef.current = null;
         markRequestTerminal(data.requestId);
-        onErrorRef.current(data.errorMessage || "未知错误");
+        onErrorRef.current(data.errorMessage || translate("canvas.unknownError"));
       } catch {
-        onErrorRef.current("未知错误");
+        onErrorRef.current(translate("canvas.unknownError"));
       }
     });
 
@@ -366,7 +373,7 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
         if (cancelRequestedRef.current && !isTerminalAgentRequestStatus(status)) {
           try {
             await cancelAgentChat(sessionId, requestId);
-            finishCanceledRequest(requestId, "已停止生成");
+            finishCanceledRequest(requestId, translate("canvas.generationStopped"));
           } catch (error) {
             cancelRequestedRef.current = false;
             throw error;
@@ -412,7 +419,7 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
     }
     try {
       await cancelAgentChat(sessionIdRef.current, requestIdRef.current);
-      finishCanceledRequest(requestIdRef.current, "已停止生成");
+      finishCanceledRequest(requestIdRef.current, translate("canvas.generationStopped"));
     } catch (error) {
       if (!sendingRef.current) cancelRequestedRef.current = false;
       throw error;
@@ -484,6 +491,35 @@ export function useAgentSSE({ snapshot, onApplyOps, onToolExecute, onTextDelta, 
       activeToolControllersRef.current.clear();
     };
   }, [token, clearReconnectTimer, connectSSE]);
+
+  // 切换语言只重建事件连接，保持请求游标和正在执行的前端工具。
+  useEffect(() => {
+    if (subscribedLocale.current === locale) return;
+    subscribedLocale.current = locale;
+    if (!sseEnabledRef.current) return;
+    connectSSERef.current();
+    const source = eventSourceRef.current;
+    source?.addEventListener("open", () => {
+      const requestId = requestIdRef.current;
+      const sessionId = sessionIdRef.current;
+      if (!requestId || !sessionId || !activeRequestRef.current) return;
+      // 重连后查询终态并补放尚未执行的工具；已经执行中的工具保持原样。
+      void agentRequestStatus(requestId).then((result) => {
+        if (requestIdRef.current !== requestId || eventSourceRef.current !== source) return;
+        if (result.status === "queued" || result.status === "running") {
+          return agentReplayPendingTools({ sessionId, requestId, activeToolCallIds: Array.from(activeToolControllersRef.current.keys()) });
+        }
+        if (result.status === "canceled") finishCanceledRequest(requestId, result.message);
+        else {
+          activeRequestRef.current = false;
+          queueStatusRef.current = null;
+          markRequestTerminal(requestId);
+          if (result.status === "failed" || result.status === "interrupted") onErrorRef.current(result.message);
+          onRequestFinishedRef.current?.();
+        }
+      }).catch((error) => console.error("切换语言后恢复Agent订阅失败", error));
+    }, { once: true });
+  }, [locale, finishCanceledRequest, markRequestTerminal]);
 
   return { sendMessage, cancelMessage, resetSession, attachRequest, detachRequest, readActiveToolCallIds, readAttachedRequestId };
 }

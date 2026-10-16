@@ -1,5 +1,7 @@
 package com.novanovastudio.ai;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.BusinessException;
@@ -46,7 +48,7 @@ public final class AudioMediaProbe {
      */
     public static ProbeResult probe(byte[] data, String fileName, NovanovaProperties properties) {
         if (data == null || data.length == 0) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "音频不能为空");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.audioIsRequired"));
         }
         Path input = null;
         try {
@@ -65,11 +67,11 @@ public final class AudioMediaProbe {
                 process.destroyForcibly();
                 process.waitFor(5, TimeUnit.SECONDS);
                 outputReader.join(1000);
-                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "读取音频媒体信息超时");
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.audioMetadataReadTimedOut"));
             }
             outputReader.join(1000);
             if (process.exitValue() != 0) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "音频解析失败，请选择有效的 MP3 或 WAV 文件");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.failedToParseAudioChooseAValidMP3OrWAV"));
             }
             JSONObject root = JSONObject.parseObject(output.toString());
             JSONArray streams = root == null ? null : root.getJSONArray("streams");
@@ -79,7 +81,7 @@ public final class AudioMediaProbe {
                     String codecType = streams.getJSONObject(index).getString("codec_type");
                     if ("audio".equals(codecType)) hasAudio = true;
                     if ("video".equals(codecType)) {
-                        throw new BusinessException(ErrorCode.PARAM_INVALID, "音频仅支持 MP3、WAV 格式");
+                        throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.onlyMP3AndWAVAudioSupported"));
                     }
                 }
             }
@@ -91,18 +93,18 @@ public final class AudioMediaProbe {
             double durationSeconds = format == null ? 0 : Double.parseDouble(format.getString("duration"));
             long durationMilliseconds = Math.round(durationSeconds * 1000D);
             if (!hasAudio || !supportedContainer || durationMilliseconds < 1 || durationMilliseconds > Integer.MAX_VALUE) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "音频仅支持有效的 MP3、WAV 文件");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.audioMustBeValidMP3OrWAV"));
             }
             return new ProbeResult((int) durationMilliseconds, detectMimeType(formatName));
         } catch (BusinessException exception) {
             throw exception;
         } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "服务端未安装 FFprobe 或 FFprobe 路径配置错误");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.fFprobeIsMissingOrMisconfigured"));
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "读取音频媒体信息已中断");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.audioMetadataReadInterrupted"));
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "音频解析失败，请选择有效的 MP3 或 WAV 文件");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.failedToParseAudioChooseAValidMP3OrWAV"));
         } finally {
             if (input != null) {
                 try {

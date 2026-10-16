@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { App, Button, Checkbox, Modal, Tag } from "antd";
@@ -38,6 +41,7 @@ type StoryboardVideoGenerationModalProps = {
 
 /** 分镜镜头批量视频生成选择弹窗。 */
 export function StoryboardVideoGenerationModal({ open, node, generating, referenceVideos = [], onClose, onGenerate, onMissingVideoModelConfig }: StoryboardVideoGenerationModalProps) {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const theme = useCanvasTheme();
     const effectiveConfig = useEffectiveConfig();
@@ -47,16 +51,16 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
     const [videoModel, setVideoModel] = useState("");
     const [videoSettings, setVideoSettings] = useState<StoryboardVideoGenerationSettings>(() => readVideoSettings(effectiveConfig));
 
-    const videoConfig = useMemo(() => ({ ...effectiveConfig, ...videoSettings, model: videoModel, videoModel, count: "1", canvasVideoCount: "1" }), [effectiveConfig, videoModel, videoSettings]);
-    const isAgnesVideo = useMemo(() => isAgnesVideoConfig(videoConfig), [videoConfig]);
+    const videoConfig = useMemo(() => ({ ...effectiveConfig, ...videoSettings, model: videoModel, videoModel, count: "1", canvasVideoCount: "1" }), [effectiveConfig, videoModel, videoSettings, translate.locale]);
+    const isAgnesVideo = useMemo(() => isAgnesVideoConfig(videoConfig), [videoConfig, translate.locale]);
     const shotStates = useMemo(() => {
         const assets = node?.storyboard.assets || [];
         return (node?.storyboard.shots || []).map((shot) => {
             const referenceImageCount = readStoryboardShotReferenceImages(shot, assets).length;
             return { shot, referenceImageCount, referenceVideoCount: referenceVideos.length, issue: readShotIssue(shot, assets, videoModel, videoConfig, referenceVideos) };
         });
-    }, [node?.storyboard.assets, node?.storyboard.shots, referenceVideos, videoConfig, videoModel]);
-    const selectableShotIds = useMemo(() => shotStates.filter((item) => !item.issue).map((item) => item.shot.id), [shotStates]);
+    }, [node?.storyboard.assets, node?.storyboard.shots, referenceVideos, videoConfig, videoModel, translate.locale]);
+    const selectableShotIds = useMemo(() => shotStates.filter((item) => !item.issue).map((item) => item.shot.id), [shotStates, translate.locale]);
     const selectableShotIdsKey = selectableShotIds.join("|");
 
     useEffect(() => {
@@ -75,12 +79,12 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
     const selectedShots = useMemo(() => {
         const selectedShotIdSet = new Set(selectedShotIds);
         return shotStates.filter((item) => !item.issue && selectedShotIdSet.has(item.shot.id)).map((item) => item.shot);
-    }, [selectedShotIds, shotStates]);
-    const automaticModes = useMemo(() => readStoryboardVideoGenerationModes(node?.storyboard.shots || [], node?.storyboard.assets || [], referenceVideos), [node?.storyboard.assets, node?.storyboard.shots, referenceVideos]);
-    const storyboardModelOptions = useMemo(() => effectiveConfig.videoModels.filter((model) => automaticModes.every((mode) => videoModelSupportsMode(effectiveConfig, model, mode))), [automaticModes, effectiveConfig]);
+    }, [selectedShotIds, shotStates, translate.locale]);
+    const automaticModes = useMemo(() => readStoryboardVideoGenerationModes(node?.storyboard.shots || [], node?.storyboard.assets || [], referenceVideos), [node?.storyboard.assets, node?.storyboard.shots, referenceVideos, translate.locale]);
+    const storyboardModelOptions = useMemo(() => effectiveConfig.videoModels.filter((model) => automaticModes.every((mode) => videoModelSupportsMode(effectiveConfig, model, mode))), [automaticModes, effectiveConfig, translate.locale]);
     const storyboardResolutionOptions = useMemo(
         () => readStoryboardVideoResolutionOptions(effectiveConfig, videoModel, selectedShots.length ? selectedShots : node?.storyboard.shots || [], node?.storyboard.assets || [], referenceVideos),
-        [effectiveConfig, node?.storyboard.assets, node?.storyboard.shots, referenceVideos, selectedShots, videoModel],
+        [effectiveConfig, node?.storyboard.assets, node?.storyboard.shots, referenceVideos, selectedShots, videoModel, translate.locale],
     );
     const modelReady = Boolean(videoModel && storyboardModelOptions.includes(videoModel) && isAiConfigReady(effectiveConfig, videoModel));
     const videoQuote = readStoryboardVideoCost(effectiveConfig, videoModel, videoConfig, selectedShots, node?.storyboard.assets || [], referenceVideos);
@@ -100,12 +104,12 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
     const confirmGenerate = () => {
         if (!node || generating) return;
         if (!selectedShots.length) {
-            message.warning("请至少选择一个可生成视频的镜头");
+            message.warning(translate("canvas.selectAtLeastOneEligibleVideoShot"));
             return;
         }
         if (!modelReady) {
             onMissingVideoModelConfig?.();
-            message.error("请选择可用的视频模型后再生成");
+            message.error(translate("canvas.selectAnAvailableVideoModelFirst"));
             return;
         }
         if (!videoQuote.available) {
@@ -113,14 +117,14 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
             return;
         }
         if (balanceInsufficient) {
-            message.error(`积分不足，生成 ${selectedShots.length} 个视频需要 ${totalCredits} 积分，当前可用 ${creditBalance} 积分`);
+            message.error(translate("canvas.insufficientCreditsVideosNeedAvailable", { value0: selectedShots.length, value1: totalCredits, value2: creditBalance }));
             return;
         }
         modal.confirm({
-            title: "确认批量生成分镜视频",
-            content: `将使用所选模型、${videoConfig.size || "自动"}比例和${videoConfig.vquality || "默认"}清晰度，为 ${selectedShots.length} 个镜头分别创建视频任务，预计消耗 ${totalCredits} 积分。是否继续？`,
-            okText: "确认生成",
-            cancelText: "取消",
+            title: translate("canvas.confirmBatchVideoGeneration"),
+            content: translate("canvas.confirmBatchVideoGenerationDetails", { value0: videoConfig.size || translate("canvas.auto"), value1: videoConfig.vquality || translate("canvas.default"), value2: selectedShots.length, value3: totalCredits }),
+            okText: translate("canvas.confirmGeneration"),
+            cancelText: translate("canvas.cancel"),
             onOk: () => {
                 onGenerate(
                     node.id,
@@ -135,17 +139,16 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
 
     return (
         <Modal
-            title="批量生成分镜视频"
+            title={translate("canvas.generateStoryboardVideosInBatch")}
             open={open && Boolean(node)}
             onCancel={onClose}
             width={1180}
             destroyOnHidden={false}
             footer={[
                 <Button key="cancel" onClick={onClose}>
-                    取消
-                </Button>,
+                    {translate("canvas.cancel")}</Button>,
                 <Button key="generate" type="primary" icon={<Clapperboard className="size-4" />} loading={generating} disabled={!selectedShots.length || !modelReady || !videoQuote.available || balanceInsufficient} onClick={confirmGenerate}>
-                    生成已选镜头（{selectedShots.length} 个，{totalCredits === null ? "不可报价" : `${totalCredits} 积分`}）
+                    {translate("canvas.generateSelectedShots")}{selectedShots.length} {translate("canvas.items_d98006")}{totalCredits === null ? translate("canvas.quoteUnavailable") : translate("canvas.credits", { value0: totalCredits })}）
                 </Button>,
             ]}
         >
@@ -153,33 +156,32 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
                 <section className="min-w-0 space-y-4">
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3" style={{ borderColor: theme.node.stroke }}>
                         <Checkbox checked={allSelected} indeterminate={partiallySelected} disabled={!selectableShotIds.length || generating} onChange={toggleAll}>
-                            全选可生成镜头（{selectableShotIds.length} 个）
-                        </Checkbox>
-                        <span className="text-xs text-[var(--studio-muted)]">已选择 {selectedShots.length} 个</span>
+                            {translate("canvas.selectAllEligibleShots")}{selectableShotIds.length} {translate("canvas.items_22ba27")}</Checkbox>
+                        <span className="text-xs text-[var(--studio-muted)]">{translate("canvas.selected")}{selectedShots.length} {translate("canvas.items_3a1168")}</span>
                     </div>
                     <div className="max-h-[58vh] space-y-2 overflow-y-auto pr-1">
                         {shotStates.map(({ shot, referenceImageCount, referenceVideoCount, issue }) => {
                             const selectable = !issue;
                             const referenceLabel =
-                                [referenceImageCount === 0 ? "" : isAgnesVideo && referenceImageCount >= 2 && referenceImageCount <= 3 ? `${referenceImageCount} 张关键帧` : `${referenceImageCount} 张参考图`, referenceVideoCount > 0 ? `${referenceVideoCount} 个视频参考` : ""].filter(Boolean).join("，") || "无参考素材";
+                                [referenceImageCount === 0 ? "" : isAgnesVideo && referenceImageCount >= 2 && referenceImageCount <= 3 ? translate("canvas.keyframes", { value0: referenceImageCount }) : translate("canvas.referenceImages", { value0: referenceImageCount }), referenceVideoCount > 0 ? translate("canvas.videoReferences", { value0: referenceVideoCount }) : ""].filter(Boolean).join("，") || translate("canvas.noReferences");
                             return (
                                 <div key={shot.id} className="flex min-w-0 items-start gap-3 rounded-md border px-3 py-2.5" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
                                     <Checkbox
                                         className="mt-0.5"
-                                        aria-label={`选择镜号 ${shot.shotNumber}`}
+                                        aria-label={translate("canvas.selectShot", { value0: shot.shotNumber })}
                                         checked={selectable && selectedShotIds.includes(shot.id)}
                                         disabled={!selectable || generating}
                                         onChange={(event) => toggleShot(shot.id, event.target.checked)}
                                     />
                                     <div className="min-w-0 flex-1">
                                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                                            <span className="font-semibold">镜号 {shot.shotNumber}</span>
-                                            <span className="text-[var(--studio-muted)]">{shot.durationSeconds} 秒</span>
+                                            <span className="font-semibold">{translate("canvas.shotNo")}{shot.shotNumber}</span>
+                                            <span className="text-[var(--studio-muted)]">{shot.durationSeconds} {translate("canvas.s")}</span>
                                             <Tag className="m-0">{shot.shotSize}</Tag>
                                             <span className="text-[var(--studio-muted)]">{referenceLabel}</span>
-                                            {issue ? <span className="text-red-500">{issue}</span> : <span className="text-emerald-600">可生成</span>}
+                                            {issue ? <span className="text-red-500">{issue}</span> : <span className="text-emerald-600">{translate("canvas.readyToGenerate")}</span>}
                                         </div>
-                                        <p className="mt-1 line-clamp-2 text-sm text-[var(--studio-muted)]">{shot.visualDescription || "未填写画面描述"}</p>
+                                        <p className="mt-1 line-clamp-2 text-sm text-[var(--studio-muted)]">{shot.visualDescription || translate("canvas.noVisualDescription")}</p>
                                         {shot.finalPrompt.trim() ? <p className="mt-1 line-clamp-2 text-xs text-[var(--studio-muted)]">{shot.finalPrompt}</p> : null}
                                     </div>
                                 </div>
@@ -189,11 +191,11 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
                 </section>
                 <aside className="max-h-[58vh] space-y-5 overflow-y-auto rounded-md border p-4" style={{ borderColor: theme.node.stroke, background: theme.node.fill }}>
                     <div>
-                        <h3 className="text-sm font-semibold">视频设置</h3>
-                        <p className="mt-1 text-xs text-[var(--studio-muted)]">比例和清晰度可单独设置，时长固定使用每个镜头的分镜定义。</p>
+                        <h3 className="text-sm font-semibold">{translate("canvas.videoSettings")}</h3>
+                        <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("canvas.aspectRatioAndResolutionAreConfigurableDurationFollowsEach")}</p>
                     </div>
                     <div className="space-y-2">
-                        <label className="text-xs font-semibold text-[var(--studio-muted)]">视频模型</label>
+                        <label className="text-xs font-semibold text-[var(--studio-muted)]">{translate("canvas.videoModel")}</label>
                         <ModelPicker config={effectiveConfig} value={videoModel} capability="video" modelOptions={storyboardModelOptions} fullWidth onChange={setVideoModel} onMissingConfig={onMissingVideoModelConfig} />
                     </div>
                     <VideoSettingsPanel
@@ -208,21 +210,21 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
                     />
                     <div className="space-y-2 border-t pt-4 text-sm" style={{ borderColor: theme.node.stroke }}>
                         <div className="flex items-center justify-between gap-3">
-                            <span className="text-[var(--studio-muted)]">自动模式</span>
-                            <span>{automaticModes.map(videoGenerationModeLabel).join(" / ") || "不可生成"}</span>
+                            <span className="text-[var(--studio-muted)]">{translate("canvas.autoMode")}</span>
+                            <span>{automaticModes.map(videoGenerationModeLabel).join(" / ") || translate("canvas.cannotGenerate")}</span>
                         </div>
                         <div className="flex items-center justify-between gap-3">
-                            <span className="text-[var(--studio-muted)]">计费方式</span>
-                            <span>{creditUnit === "second" ? "按秒计费" : creditUnit === "generation" ? "按次计费" : "不可报价"}</span>
+                            <span className="text-[var(--studio-muted)]">{translate("canvas.billingMethod")}</span>
+                            <span>{creditUnit === "second" ? translate("canvas.perSecond") : creditUnit === "generation" ? translate("canvas.perRun") : translate("canvas.quoteUnavailable")}</span>
                         </div>
                         <div className="flex items-center justify-between gap-3 font-semibold">
-                            <span>预计消耗</span>
-                            <span>{totalCredits === null ? "不可报价" : `${totalCredits} 积分`}</span>
+                            <span>{translate("canvas.estimatedCost")}</span>
+                            <span>{totalCredits === null ? translate("canvas.quoteUnavailable") : translate("canvas.credits", { value0: totalCredits })}</span>
                         </div>
                     </div>
-                    {!modelReady ? <p className="text-xs text-red-500">请选择已启用且已配置价格的视频模型</p> : null}
+                    {!modelReady ? <p className="text-xs text-red-500">{translate("canvas.selectAnEnabledVideoModelWithPricing")}</p> : null}
                     {!videoQuote.available ? <p className="text-xs text-red-500">{videoQuote.reason}</p> : null}
-                    {balanceInsufficient ? <p className="text-xs text-red-500">积分不足，当前可用 {creditBalance ?? 0} 积分</p> : null}
+                    {balanceInsufficient ? <p className="text-xs text-red-500">{translate("canvas.insufficientCreditsAvailable")}{creditBalance ?? 0} {translate("canvas.credits_10939f")}</p> : null}
                 </aside>
             </div>
         </Modal>
@@ -240,8 +242,8 @@ function readVideoSettings(config: AiConfig): StoryboardVideoGenerationSettings 
 }
 
 function readShotIssue(shot: CanvasStoryboardShot, assets: CanvasStoryboardAsset[], videoModel: string, videoConfig: AiConfig, referenceVideos: ReferenceVideo[]): string {
-    if (!shot.finalPrompt.trim()) return "请先生成最终提示词";
-    if (!Number.isSafeInteger(shot.durationSeconds) || shot.durationSeconds < 1) return "镜头时长无效";
+    if (!shot.finalPrompt.trim()) return translate("canvas.generateFinalPromptFirst");
+    if (!Number.isSafeInteger(shot.durationSeconds) || shot.durationSeconds < 1) return translate("canvas.invalidShotDuration");
     if (!videoModel) return "";
     const issue = readStoryboardVideoShotIssue(shot, videoConfig) || readStoryboardVideoReferenceIssue(shot, assets, videoConfig);
     if (issue) return issue;

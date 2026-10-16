@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useId, useMemo, useState } from "react";
 import { Clapperboard } from "lucide-react";
@@ -24,11 +27,12 @@ type ModelPickerProps = {
     showRealName?: boolean;
 };
 
-export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = "选择模型", onMissingConfig, modelOptions, showRealName = false }: ModelPickerProps) {
+export function ModelPicker({ config, value, onChange, capability, className, fullWidth = false, placeholder = translate("settings.selectModel"), onMissingConfig, modelOptions, showRealName = false }: ModelPickerProps) {
+    const translate = useTranslation();
     const pickerId = useId();
     const [open, setOpen] = useState(false);
     const current = value || "";
-    const options = useMemo(() => createModelOptions(config, capability, value, modelOptions), [capability, config, modelOptions, value]);
+    const options = useMemo(() => createModelOptions(config, capability, value, modelOptions), [capability, config, modelOptions, value, translate.locale]);
     const modelLabel = (model: string) => (showRealName ? modelOptionLabelWithRealName(config, model) : modelOptionLabel(config, model));
 
     useEffect(() => {
@@ -102,20 +106,20 @@ function isFilledText(value: string | undefined): value is string {
 }
 
 function emptyModelLabel(config: AiConfig, capability?: ModelCapability): string {
-    if (capability && config.models.length) return "请先在上方配置可选模型";
-    if (!config.models.length) return "请先到配置里添加渠道和模型";
+    if (capability && config.models.length) return translate("settings.configureModelOptionsAboveFirst");
+    if (!config.models.length) return translate("settings.addAChannelAndModelInSettingsFirst");
     const label = capabilityLabel(capability);
-    return label ? `暂无匹配的${label}模型` : "暂无可用模型";
+    return label ? translate("settings.noMatchingModels", { value0: label }) : translate("settings.noAvailableModels");
 }
 
 function capabilityLabel(capability?: ModelCapability): string {
     switch (capability) {
         case "image":
-            return "生图";
+            return translate("settings.generateImage");
         case "video":
-            return "视频";
+            return translate("settings.video");
         case "text":
-            return "文本";
+            return translate("settings.text");
         default:
             return "";
     }

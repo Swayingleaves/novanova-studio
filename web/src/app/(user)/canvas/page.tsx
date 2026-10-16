@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -16,10 +19,8 @@ import { setImageBlob } from "@/features/storage/services/image-storage";
 import { readZip } from "@/shared/lib/zip";
 import { readInitialPromptFromLocation, storeInitialPromptForNavigation } from "@/shared/lib/initial-prompt";
 
-const NEW_PROJECT_TITLE_PREFIX = "无限画布";
-const IMPORT_ERROR_MESSAGE = "导入失败，请选择有效的画布压缩包";
-
 export default function CanvasPage() {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const router = useRouter();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -38,17 +39,17 @@ export default function CanvasPage() {
         const initialPrompt = readInitialPromptFromLocation();
         if (!initialPrompt) return;
         initialPromptHandledRef.current = true;
-        const documentId = createDocument(`${NEW_PROJECT_TITLE_PREFIX} ${documents.length + 1}`);
+        const documentId = createDocument(`${translate("canvas.infiniteCanvas")} ${documents.length + 1}`);
         storeInitialPromptForNavigation(initialPrompt);
         router.replace(`/canvas/${documentId}`);
-    }, [createDocument, documents.length, hydrated, router]);
+    }, [createDocument, documents.length, hydrated, router, translate]);
 
     const openProject = (projectId: string) => {
         router.push(`/canvas/${projectId}`);
     };
 
     const createAndOpenProject = () => {
-        const documentId = createDocument(`${NEW_PROJECT_TITLE_PREFIX} ${documents.length + 1}`);
+        const documentId = createDocument(`${translate("canvas.infiniteCanvas")} ${documents.length + 1}`);
         const initialPrompt = readInitialPromptFromLocation();
         if (initialPrompt) storeInitialPromptForNavigation(initialPrompt);
         router.push(`/canvas/${documentId}`);
@@ -62,9 +63,9 @@ export default function CanvasPage() {
             const exportFile = await readArchiveExportFile(archive);
             await restoreArchiveFiles(archive, exportFile);
             exportFile.documents.forEach((item) => importDocument(item.document));
-            message.success(`已导入 ${exportFile.documents.length} 个画布`);
+            message.success(translate("canvas.importedCanvases", { value0: exportFile.documents.length }));
         } catch {
-            message.error(IMPORT_ERROR_MESSAGE);
+            message.error(translate("canvas.invalidCanvasArchiveChooseAnotherFile"));
         } finally {
             setIsImporting(false);
             resetFileInput(fileInputRef.current);
@@ -77,10 +78,10 @@ export default function CanvasPage() {
         try {
             await exportCanvasDocuments(
                 documents.filter((document) => selectedDocumentIds.includes(document.identity.id)),
-                `无限画布-${selectedDocumentIds.length}个项目`,
+                translate("canvas.infiniteCanvasProjects", { value0: selectedDocumentIds.length }),
             );
         } catch {
-            message.error("导出失败，请稍后重试");
+            message.error(translate("canvas.exportFailedTryAgainLater"));
         } finally {
             setIsExporting(false);
         }
@@ -91,9 +92,9 @@ export default function CanvasPage() {
             <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-5 py-5 md:px-8 md:py-8">
                 <header className="flex flex-wrap items-end justify-between gap-4">
                     <div className="min-w-0">
-                        <p className="studio-caption text-xs">画布库</p>
-                        <h1 className="studio-title mt-2 text-3xl font-semibold">无限画布</h1>
-                        <p className="studio-subtitle mt-2 text-sm">保存创作上下文，继续组织节点、连线和生成结果。</p>
+                        <p className="studio-caption text-xs">{translate("canvas.canvasLibrary")}</p>
+                        <h1 className="studio-title mt-2 text-3xl font-semibold">{translate("canvas.infiniteCanvas")}</h1>
+                        <p className="studio-subtitle mt-2 text-sm">{translate("canvas.keepCreativeContextNodesConnectionsAndGeneratedResults")}</p>
                     </div>
                     <div className="studio-glass flex flex-wrap items-center gap-2 rounded-[10px] p-2">
                         {selectedDocumentIds.length ? (
@@ -104,24 +105,20 @@ export default function CanvasPage() {
                                     loading={isExporting}
                                     onClick={() => void exportSelectedCanvasArchives()}
                                 >
-                                    导出选中
-                                </Button>
+                                    {translate("canvas.exportSelected")}</Button>
                                 <Button disabled={!hydrated} onClick={() => requestDocumentDeletion(selectedDocumentIds)}>
-                                    删除选中
-                                </Button>
+                                    {translate("canvas.deleteSelected")}</Button>
                             </>
                         ) : null}
                         <Button disabled={!hydrated || isImporting || isExporting} icon={<FileUp className="size-4" />} loading={isImporting} onClick={() => fileInputRef.current?.click()}>
-                            导入画布
-                        </Button>
+                            {translate("canvas.importCanvas")}</Button>
                         <Button disabled={!hydrated} type="primary" icon={<Plus className="size-4" />} onClick={createAndOpenProject}>
-                            新建画布
-                        </Button>
+                            {translate("canvas.newCanvas")}</Button>
                     </div>
                 </header>
 
                 {!hydrated ? (
-                    <section className="studio-empty flex min-h-[360px] items-center justify-center text-sm">正在加载画布...</section>
+                    <section className="studio-empty flex min-h-[360px] items-center justify-center text-sm">{translate("canvas.loadingCanvas")}</section>
                 ) : documents.length ? (
                     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                         {documents.map((document) => (
@@ -130,11 +127,10 @@ export default function CanvasPage() {
                     </div>
                 ) : (
                     <section className="studio-empty flex min-h-[360px] flex-col items-center justify-center text-center">
-                        <h2 className="studio-title text-xl font-medium">还没有画布</h2>
-                        <p className="studio-subtitle mt-3 text-sm">新建一个画布后，就可以独立保存节点、连线和画布外观。</p>
+                        <h2 className="studio-title text-xl font-medium">{translate("canvas.noCanvasesYet")}</h2>
+                        <p className="studio-subtitle mt-3 text-sm">{translate("canvas.createACanvasToSaveItsNodesConnectionsAnd")}</p>
                         <Button type="primary" className="mt-6" icon={<Plus className="size-4" />} onClick={createAndOpenProject}>
-                            新建画布
-                        </Button>
+                            {translate("canvas.newCanvas")}</Button>
                     </section>
                 )}
             </div>
@@ -148,11 +144,11 @@ export default function CanvasPage() {
 async function readArchiveExportFile(archive: Awaited<ReturnType<typeof readZip>>) {
     const manifestFile = archive.get(CANVAS_EXPORT_MANIFEST_NAME);
     if (!manifestFile) {
-        throw new Error("缺少项目清单");
+        throw new Error(translate("canvas.missingProjectManifest"));
     }
     const parsedFile = JSON.parse(await manifestFile.text()) as CanvasExportFile;
     if (parsedFile.app !== CANVAS_EXPORT_APP_ID || parsedFile.version !== CANVAS_EXPORT_VERSION || !Array.isArray(parsedFile.documents)) {
-        throw new Error("画布压缩包格式无效");
+        throw new Error(translate("canvas.invalidCanvasArchive"));
     }
     return parsedFile;
 }

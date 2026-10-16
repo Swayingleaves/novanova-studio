@@ -1,5 +1,7 @@
 package com.novanovastudio.ai.provider;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.*;
 import com.novanovastudio.common.BusinessException;
@@ -62,7 +64,7 @@ public class AnthropicProviderAdapter implements AiProviderAdapter {
     public Mono<JSONObject> execute(AiTaskExecutionContext context) {
         return switch (context.task().getTaskType()) {
             case AiTaskTypes.TEXT -> executeTextTask(context);
-            default -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "Anthropic 调用格式暂不支持" + context.task().getTaskType() + "任务"));
+            default -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.anthropicFormatDoesNotSupportTasks", context.task().getTaskType())));
         };
     }
 
@@ -103,7 +105,7 @@ public class AnthropicProviderAdapter implements AiProviderAdapter {
                                 JSONObject data = tuple.getT2().data();
                                 return context.isCancelRequested().flatMap(cancelRequested -> {
                                     if (Boolean.TRUE.equals(cancelRequested)) {
-                                        return Mono.<String>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "任务已取消"));
+                                        return Mono.<String>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCanceled")));
                                     }
                                     // 从content_block_delta事件中提取文本增量。
                                     JSONObject delta = data.getJSONObject("delta");

@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { CanvasStoryboardAsset, CanvasStoryboardAssetGenerationSettings, CanvasStoryboardAssetGenerationState, CanvasStoryboardAssetKind, CanvasStoryboardNode, CanvasStoryboardShot, CanvasStoryboardShotSize } from "../types";
 import { isAgnesVideoConfig, readAgnesVideoReferenceImageIssue } from "@/features/generation/lib/agnes-video";
 import { isVideoDurationSupported, readVideoDurationRange } from "@/features/generation/lib/video-duration";
@@ -6,30 +8,37 @@ import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceVideo } from "@/features/generation/types/media";
 import type { AiConfig, VideoGenerationMode, VideoResolution } from "@/features/settings/stores/use-config-store";
 
-export const STORYBOARD_SHOT_SIZES: Array<{
+/** 按调用方语言生成显示文案，业务值保持不变。 */
+export const createStoryboardShotSizes = (translator: typeof translate = translate): Array<{
     value: CanvasStoryboardShotSize;
+    label: string;
     englishPrompt: string;
     frameRange: string;
     promptExample: string;
     usage: string;
-}> = [
-    { value: "大特写", englishPrompt: "Extreme Close Up (ECU)", frameRange: "局部细节（眼睛、嘴唇、手指、物体纹理）", promptExample: "extreme close-up of eyes, cinematic lighting", usage: "情绪、细节、悬念" },
-    { value: "特写", englishPrompt: "Close Up (CU)", frameRange: "头部或关键物体占满画面", promptExample: "close-up portrait of a woman", usage: "表情、情感表达" },
-    { value: "近景", englishPrompt: "Medium Close Up (MCU)", frameRange: "胸部以上（头加肩加部分身体）", promptExample: "medium close-up shot, upper body", usage: "对话、人物情绪" },
-    { value: "头肩景", englishPrompt: "Head and Shoulders Shot", frameRange: "头部加肩膀", promptExample: "head and shoulders portrait shot", usage: "采访、角色介绍" },
-    { value: "中景", englishPrompt: "Medium Shot (MS)", frameRange: "腰部以上", promptExample: "medium shot of a man standing", usage: "人物动作、交流" },
-    { value: "中远景", englishPrompt: "Medium Long Shot (MLS) / Cowboy Shot", frameRange: "膝盖以上或大腿以上", promptExample: "medium long shot, full character movement", usage: "动作展示" },
-    { value: "全景", englishPrompt: "Full Shot (FS) / Full Body Shot", frameRange: "人物完整身体", promptExample: "full body shot of a warrior", usage: "人物造型、动作" },
-    { value: "远景", englishPrompt: "Long Shot (LS) / Wide Shot (WS)", frameRange: "人物较小，环境占主要部分", promptExample: "wide shot of a person in a forest", usage: "环境关系" },
-    { value: "大远景", englishPrompt: "Extreme Long Shot (ELS)", frameRange: "人物很小，突出环境", promptExample: "extreme wide shot of mountains and tiny figure", usage: "史诗感、开场" },
-    { value: "大全景", englishPrompt: "Extreme Wide Shot", frameRange: "最大范围空间", promptExample: "cinematic extreme wide landscape shot", usage: "世界观建立" },
-];
+}> => ([
+    { value: "大特写", get label() { return translator("canvas.extremeCloseUp"); }, englishPrompt: "Extreme Close Up (ECU)", get frameRange() { return translator("canvas.closeDetailEyesLipsFingersTexture"); }, promptExample: "extreme close-up of eyes, cinematic lighting", get usage() { return translator("canvas.emotionDetailSuspense"); } },
+    { value: "特写", get label() { return translator("canvas.closeUp"); }, englishPrompt: "Close Up (CU)", get frameRange() { return translator("canvas.headOrKeyObjectFillsTheFrame"); }, promptExample: "close-up portrait of a woman", get usage() { return translator("canvas.expressionAndEmotion"); } },
+    { value: "近景", get label() { return translator("canvas.mediumCloseUp"); }, englishPrompt: "Medium Close Up (MCU)", get frameRange() { return translator("canvas.chestUpHeadShouldersAndUpperBody"); }, promptExample: "medium close-up shot, upper body", get usage() { return translator("canvas.dialogueCharacterEmotion"); } },
+    { value: "头肩景", get label() { return translator("canvas.headAndShoulders_f5d030"); }, englishPrompt: "Head and Shoulders Shot", get frameRange() { return translator("canvas.headAndShoulders"); }, promptExample: "head and shoulders portrait shot", get usage() { return translator("canvas.interviewCharacterIntroduction"); } },
+    { value: "中景", get label() { return translator("canvas.mediumShot"); }, englishPrompt: "Medium Shot (MS)", get frameRange() { return translator("canvas.waistUp"); }, promptExample: "medium shot of a man standing", get usage() { return translator("canvas.characterActionInteraction"); } },
+    { value: "中远景", get label() { return translator("canvas.mediumLongShot"); }, englishPrompt: "Medium Long Shot (MLS) / Cowboy Shot", get frameRange() { return translator("canvas.aboveKneesOrThighs"); }, promptExample: "medium long shot, full character movement", get usage() { return translator("canvas.motionPreview"); } },
+    { value: "全景", get label() { return translator("canvas.fullShot"); }, englishPrompt: "Full Shot (FS) / Full Body Shot", get frameRange() { return translator("canvas.fullBody"); }, promptExample: "full body shot of a warrior", get usage() { return translator("canvas.characterDesignAction"); } },
+    { value: "远景", get label() { return translator("canvas.longShot"); }, englishPrompt: "Long Shot (LS) / Wide Shot (WS)", get frameRange() { return translator("canvas.smallCharacterEnvironmentDominates"); }, promptExample: "wide shot of a person in a forest", get usage() { return translator("canvas.environment"); } },
+    { value: "大远景", get label() { return translator("canvas.extremeLongShot"); }, englishPrompt: "Extreme Long Shot (ELS)", get frameRange() { return translator("canvas.smallCharacterEmphasizeEnvironment"); }, promptExample: "extreme wide shot of mountains and tiny figure", get usage() { return translator("canvas.epicOpening"); } },
+    { value: "大全景", get label() { return translator("canvas.extremeWideShot"); }, englishPrompt: "Extreme Wide Shot", get frameRange() { return translator("canvas.maximumSpace"); }, promptExample: "cinematic extreme wide landscape shot", get usage() { return translator("canvas.worldBuilding"); } },
+]);
 
-export const STORYBOARD_ASSET_KIND_LABELS: Record<CanvasStoryboardAssetKind, string> = {
-    character: "角色",
-    scene: "场景",
-    prop: "道具",
-};
+export const STORYBOARD_SHOT_SIZES = createStoryboardShotSizes();
+
+/** 按调用方语言生成显示文案，业务值保持不变。 */
+export const createStoryboardAssetKindLabels = (translator: typeof translate = translate): Record<CanvasStoryboardAssetKind, string> => ({
+    get character() { return translator("canvas.character"); },
+    get scene() { return translator("canvas.scene"); },
+    get prop() { return translator("canvas.prop"); },
+});
+
+export const STORYBOARD_ASSET_KIND_LABELS = createStoryboardAssetKindLabels();
 
 export function readStoryboardModelCost(modelCosts: Array<{ model: string; taskType: string; credits: number }>, model: string): number {
     return modelCosts.find((item) => item.taskType === "text" && item.model === model)?.credits ?? 0;
@@ -82,8 +91,8 @@ export function readStoryboardVideoCost(config: AiConfig, model: string, videoCo
     let credits = 0;
     for (const shot of shots) {
         const quote = quoteStoryboardVideo(config, model, videoConfig, shot, assets, referenceVideos);
-        if (!quote.available) return { available: false, reason: `镜号 ${shot.shotNumber} 无法报价：${quote.reason}` };
-        if (!Number.isSafeInteger(credits + quote.credits)) return { available: false, reason: "分镜视频积分计算超出范围" };
+        if (!quote.available) return { available: false, reason: translate("canvas.cannotQuoteShot", { value0: shot.shotNumber, value1: quote.reason }) };
+        if (!Number.isSafeInteger(credits + quote.credits)) return { available: false, reason: translate("canvas.storyboardVideoCreditCalculationExceedsRange") };
         credits += quote.credits;
     }
     return { available: true, credits };
@@ -91,11 +100,11 @@ export function readStoryboardVideoCost(config: AiConfig, model: string, videoCo
 
 /** 返回镜头无法生成视频的原因；空字符串表示可以生成。 */
 export function readStoryboardVideoShotIssue(shot: CanvasStoryboardShot, config: AiConfig): string {
-    if (!shot.finalPrompt.trim()) return "请先生成最终提示词";
-    if (!isPositiveDurationSeconds(shot.durationSeconds)) return "镜头时长无效";
+    if (!shot.finalPrompt.trim()) return translate("canvas.generateFinalPromptFirst");
+    if (!isPositiveDurationSeconds(shot.durationSeconds)) return translate("canvas.invalidShotDuration");
     if (isVideoDurationSupported(config, shot.durationSeconds)) return "";
     const range = readVideoDurationRange(config);
-    return `当前模型仅支持 ${range.min}-${range.max} 秒视频`;
+    return translate("canvas.thisModelOnlySupportsSecondVideos", { value0: range.min, value1: range.max });
 }
 
 /** 读取镜头关联且已生成图片的资产，作为视频生成参考图。 */
@@ -112,7 +121,7 @@ export function readStoryboardShotReferenceImages(shot: CanvasStoryboardShot, as
         if (!asset || !image?.source.trim()) continue;
         references.push({
             id: asset.id,
-            name: `${STORYBOARD_ASSET_KIND_LABELS[asset.kind]}-${asset.name.trim() || "未命名资产"}`,
+            name: `${STORYBOARD_ASSET_KIND_LABELS[asset.kind]}-${asset.name.trim() || translate("canvas.untitledAsset")}`,
             type: image.mimeType?.trim() || "image/png",
             dataUrl: image.source,
             storageKey: image.storageKey,

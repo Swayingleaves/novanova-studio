@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { ReferenceImage } from "@/features/generation/types/image";
 
 /**
@@ -7,7 +9,7 @@ import type { ReferenceImage } from "@/features/generation/types/image";
  * @return 如 "图片1"、"图片2"
  */
 export function imageReferenceLabel(index: number): string {
-    return `图片${index + 1}`;
+    return translate("generation.image_062894", { value0: index + 1 });
 }
 
 /**
@@ -24,6 +26,6 @@ export function buildImageReferencePromptText(prompt: string, references: Refere
     if (references.length === 0) {
         return text;
     }
-    const labels = references.map((_, index) => imageReferenceLabel(index));
+    const labels = references.map((_, index) => `图片${index + 1}`);
     return `参考图片编号：${labels.join("、")}。请按这些编号理解提示词中的图片引用。\n\n${text}`;
 }

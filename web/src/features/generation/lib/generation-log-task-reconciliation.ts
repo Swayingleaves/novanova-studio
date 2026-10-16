@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { getAiTaskInfo, saveGenerationLog, type ServerAiTask, type ServerAiTaskStatus } from "@/services/api/server";
 
 type GenerationLogType = "image" | "video";
@@ -129,12 +131,12 @@ function updatePendingResult(result: JsonRecord, task: ServerAiTask): JsonRecord
         ...result,
         status,
         progress: status === "success" || status === "failed" || status === "canceled" ? 100 : task.progress,
-        ...(status === "failed" || status === "canceled" ? { error: task.errorMessage || (status === "canceled" ? "任务已取消" : "生成失败") } : {}),
+        ...(status === "failed" || status === "canceled" ? { error: task.errorMessage || (status === "canceled" ? translate("generation.taskCanceled") : translate("generation.generationFailed")) } : {}),
     };
 }
 
 function updateMissingTaskResult(result: JsonRecord): JsonRecord {
-    return { ...result, status: "failed", progress: 100, error: "生成任务标识缺失，无法查询任务状态" };
+    return { ...result, status: "failed", progress: 100, error: translate("generation.missingGenerationTaskID") };
 }
 
 function findPendingTaskIds(log: GenerationTaskLog): string[] {

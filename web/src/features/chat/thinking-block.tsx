@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { ChevronDown, ChevronRight, Brain } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -22,6 +24,7 @@ export type ThinkingBlockAppearance = {
  * streaming 时显示"思考中..."动画；完成后折叠并显示耗时。
  */
 export function ThinkingBlock({ block, streaming = false, appearance }: Props) {
+    const translate = useTranslation();
   const [collapsed, setCollapsed] = useState(streaming ? false : block.collapsed);
 
   useEffect(() => {
@@ -38,9 +41,9 @@ export function ThinkingBlock({ block, streaming = false, appearance }: Props) {
       >
         <Brain className="size-3.5" />
         {streaming ? (
-          <span className="animate-pulse">思考中...</span>
+          <span className="animate-pulse">{translate("chat.thinking")}</span>
         ) : (
-          <span>思考过程 ({formatMs(block.durationMs)})</span>
+          <span>{translate("chat.thinking_548b0e")}{formatMs(block.durationMs)})</span>
         )}
         {collapsed ? <ChevronRight className="size-3" /> : <ChevronDown className="size-3" />}
       </button>

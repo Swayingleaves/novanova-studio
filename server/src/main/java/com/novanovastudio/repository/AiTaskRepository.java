@@ -64,7 +64,7 @@ public class AiTaskRepository {
         // 前端查询任务时限定用户ID，避免跨用户读取。
         return databaseClient.sql("""
                 SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
-                       error_message, started_at, completed_at, created_at, updated_at
+                       error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE user_id = :userId AND id = :taskId
                 """)
@@ -84,7 +84,7 @@ public class AiTaskRepository {
         // 异步执行线程按任务ID读取任务，不依赖请求上下文。
         return databaseClient.sql("""
                 SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
-                       error_message, started_at, completed_at, created_at, updated_at
+                       error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE id = :taskId
                 """)
@@ -104,7 +104,7 @@ public class AiTaskRepository {
         // 基础查询限定用户ID。
         String sql = """
                 SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
-                       error_message, started_at, completed_at, created_at, updated_at
+                       error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE user_id = :userId
                 """;
@@ -132,7 +132,7 @@ public class AiTaskRepository {
         }
         // 更新字段由服务层固定Map构造，避免外部输入控制列名。
         StringBuilder sql = new StringBuilder("UPDATE ai_generation_tasks SET updated_at = CURRENT_TIMESTAMP");
-        values.keySet().forEach(column -> sql.append(", ").append(column).append(" = :").append(column));
+        values.keySet().forEach(column -> sql.append(", ").append(column).append(" = ").append("error_message_arguments".equals(column) ? "CAST(:error_message_arguments AS jsonb)" : ":" + column));
         sql.append(" WHERE id = :taskId");
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(sql.toString()).bind("taskId", taskId);
         for (Map.Entry<String, Object> entry : values.entrySet()) {
@@ -152,7 +152,7 @@ public class AiTaskRepository {
     public Mono<Void> updateTaskJson(String taskId, Map<String, Object> values, String resultData) {
         // 更新字段由服务层固定Map构造，resultData单独按jsonb写入。
         StringBuilder sql = new StringBuilder("UPDATE ai_generation_tasks SET updated_at = CURRENT_TIMESTAMP");
-        values.keySet().forEach(column -> sql.append(", ").append(column).append(" = :").append(column));
+        values.keySet().forEach(column -> sql.append(", ").append(column).append(" = ").append("error_message_arguments".equals(column) ? "CAST(:error_message_arguments AS jsonb)" : ":" + column));
         if (resultData != null) {
             sql.append(", result_data = CAST(:resultData AS jsonb)");
         }
@@ -178,7 +178,7 @@ public class AiTaskRepository {
     public Mono<Boolean> updateTaskIfNotTerminal(String taskId, Map<String, Object> values, String resultData) {
         // 未结束状态条件由数据库保证，避免多个消费者并发更新时覆盖已结束任务。
         StringBuilder sql = new StringBuilder("UPDATE ai_generation_tasks SET updated_at = CURRENT_TIMESTAMP");
-        values.keySet().forEach(column -> sql.append(", ").append(column).append(" = :").append(column));
+        values.keySet().forEach(column -> sql.append(", ").append(column).append(" = ").append("error_message_arguments".equals(column) ? "CAST(:error_message_arguments AS jsonb)" : ":" + column));
         if (resultData != null) {
             sql.append(", result_data = CAST(:resultData AS jsonb)");
         }
@@ -224,7 +224,7 @@ public class AiTaskRepository {
         // 恢复时需要保留模型配置ID，才能返回对应的模型并发队列。
         return databaseClient.sql("""
                 SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
-                       error_message, started_at, completed_at, created_at, updated_at
+                       error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
                 WHERE status = 'pending'
                    OR (status = 'running' AND updated_at < :runningRecoverBefore)
@@ -246,7 +246,7 @@ public class AiTaskRepository {
         // 只恢复超时running任务，pending任务保持原状态等待消费。
         return databaseClient.sql("""
                 UPDATE ai_generation_tasks
-                SET status = 'pending', progress = 0, error_message = '', started_at = NULL,
+                SET status = 'pending', progress = 0, error_message = '', error_message_key = '', error_message_arguments = '[]'::jsonb, started_at = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE status = 'running' AND updated_at < :runningRecoverBefore
                 """)
@@ -266,7 +266,7 @@ public class AiTaskRepository {
         // 只有pending或running任务允许进入执行，终态任务不会被重复拉起。
         return databaseClient.sql("""
                 UPDATE ai_generation_tasks
-                SET status = 'running', progress = 5, error_message = '',
+                SET status = 'running', progress = 5, error_message = '', error_message_key = '', error_message_arguments = '[]'::jsonb,
                     started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = :taskId AND status IN ('pending', 'running')

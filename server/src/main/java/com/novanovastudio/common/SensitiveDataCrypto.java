@@ -52,7 +52,7 @@ public final class SensitiveDataCrypto {
             buffer.put(nonce).put(ciphertext);
             return ENCRYPTED_VALUE_PREFIX + Base64.getEncoder().encodeToString(buffer.array());
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "加密敏感数据失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToEncryptSensitiveData", exception.getMessage()));
         }
     }
 
@@ -68,7 +68,7 @@ public final class SensitiveDataCrypto {
             return "";
         }
         if (!encryptedValue.startsWith(ENCRYPTED_VALUE_PREFIX)) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "敏感数据不是受支持的加密格式");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.unsupportedEncryptedDataFormat"));
         }
         try {
             byte[] payload = Base64.getDecoder().decode(encryptedValue.substring(ENCRYPTED_VALUE_PREFIX.length()));
@@ -83,7 +83,7 @@ public final class SensitiveDataCrypto {
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "解密敏感数据失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToDecryptSensitiveData", exception.getMessage()));
         }
     }
 
@@ -95,12 +95,12 @@ public final class SensitiveDataCrypto {
      */
     public static String sha256Hex(String value) {
         if (value == null) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, "敏感文本不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.sensitiveTextIsRequired"));
         }
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "生成敏感文本摘要失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToHashSensitiveText", exception.getMessage()));
         }
     }
 
@@ -112,12 +112,12 @@ public final class SensitiveDataCrypto {
      */
     private static byte[] deriveKey(String applicationSecretKey) {
         if (applicationSecretKey == null || applicationSecretKey.isBlank()) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "APP_SECRET_KEY未配置，无法保护敏感数据");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.aPPSECRETKEYIsNotConfigured"));
         }
         try {
             return MessageDigest.getInstance("SHA-256").digest(applicationSecretKey.getBytes(StandardCharsets.UTF_8));
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "生成敏感数据加密密钥失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToCreateEncryptionKey", exception.getMessage()));
         }
     }
 }

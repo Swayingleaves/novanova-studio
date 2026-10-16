@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiTaskPollingSupport;
@@ -333,7 +335,7 @@ public class VideoCompositionTaskService {
     public Mono<VideoCompositionDtos.VideoCompositionTaskResponse> getTask(String taskId) {
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> repository.getTask(userId, taskId)
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "视频合成任务不存在")))
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.videoCompositionTaskNotFound"))))
                         .map(this::taskResponse));
     }
 
@@ -345,7 +347,7 @@ public class VideoCompositionTaskService {
      */
     public Mono<VideoCompositionDtos.VideoCompositionTaskResponse> cancelTask(String taskId) {
         return currentUserProvider.currentUserId().flatMap(userId -> repository.getTask(userId, taskId)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "视频合成任务不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.videoCompositionTaskNotFound"))))
                 .flatMap(task -> {
                     if (isTerminal(task.getStatus())) {
                         return Mono.just(taskResponse(task));
@@ -580,10 +582,10 @@ public class VideoCompositionTaskService {
                 .onErrorReturn(false)
                 .flatMap(cancelRequested -> {
                     if (Boolean.TRUE.equals(cancelRequested)) {
-                        return repository.finishRunningTask(task.getId(), STATUS_CANCELED, "{}", "任务已取消")
+                        return repository.finishRunningTask(task.getId(), STATUS_CANCELED, "{}", SystemMessage.of("system.taskCanceled"))
                                 .then(persistenceService.deleteMediaForUser(task.getUserId(), List.of(media.storageKey())));
                     }
-                    return repository.finishRunningTask(task.getId(), STATUS_SUCCEEDED, result.toJSONString(), "")
+                    return repository.finishRunningTask(task.getId(), STATUS_SUCCEEDED, result.toJSONString(), null)
                             .flatMap(updated -> {
                                 if (Boolean.TRUE.equals(updated)) {
                                     log.info("视频合成任务执行成功: taskId={}, storageKey={}", task.getId(), media.storageKey());
@@ -608,9 +610,9 @@ public class VideoCompositionTaskService {
                 .onErrorReturn(false)
                 .flatMap(cancelRequested -> {
                     if (canceled || Boolean.TRUE.equals(cancelRequested)) {
-                        return repository.finishRunningTask(task.getId(), STATUS_CANCELED, "{}", "任务已取消").then();
+                        return repository.finishRunningTask(task.getId(), STATUS_CANCELED, "{}", SystemMessage.of("system.taskCanceled")).then();
                     }
-                    String message = errorMessage(exception);
+                    SystemMessage message = SystemMessage.fromThrowable(exception);
                     log.error("视频合成任务执行失败: taskId={}", task.getId(), exception);
                     return repository.finishRunningTask(task.getId(), STATUS_FAILED, "{}", message).then();
                 });
@@ -624,18 +626,18 @@ public class VideoCompositionTaskService {
      */
     private List<String> normalizeSourceStorageKeys(List<String> sourceStorageKeys) {
         if (sourceStorageKeys == null || sourceStorageKeys.size() < 2) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "至少需要两个视频才能合成");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.atLeastTwoVideosAreRequiredForComposition"));
         }
         if (sourceStorageKeys.size() > MAXIMUM_SOURCE_VIDEO_COUNT) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "单次最多合成20个视频");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.atMost20VideosPerComposition"));
         }
         List<String> normalized = sourceStorageKeys.stream().map(value -> value == null ? "" : value.trim()).toList();
         if (normalized.stream().anyMatch(value -> !StringUtils.hasText(value))) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频媒体存储键不能为空");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoStorageKeyIsRequired"));
         }
         Set<String> uniqueStorageKeys = new HashSet<>(normalized);
         if (uniqueStorageKeys.size() != normalized.size()) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "同一视频不能重复参与合成");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.theSameVideoCannotBeComposedTwice"));
         }
         return normalized;
     }
@@ -652,7 +654,7 @@ public class VideoCompositionTaskService {
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "视频合成任务缺少有效的源视频快照");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.compositionTaskHasNoValidSourceVideoSnapshot"));
         }
     }
 
@@ -666,7 +668,7 @@ public class VideoCompositionTaskService {
         return new VideoCompositionDtos.VideoCompositionTaskResponse(
                 task.getId(), task.getStatus(), task.getProgress(),
                 "storyboardExport".equals(task.getTaskType()) ? List.of() : parseSourceStorageKeys(task.getSourceStorageKeys()),
-                parseJsonObject(task.getResultData()), task.getErrorMessage(), formatTime(task.getStartedAt()),
+                parseJsonObject(task.getResultData()), task.getErrorMessage(), SystemMessage.stored(task.getErrorMessageKey(), task.getErrorMessageArguments()), formatTime(task.getStartedAt()),
                 formatTime(task.getCompletedAt()), formatTime(task.getCreatedAt()), formatTime(task.getUpdatedAt())
         );
     }

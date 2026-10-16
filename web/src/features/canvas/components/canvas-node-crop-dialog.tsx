@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Button, Modal } from "antd";
@@ -41,6 +43,7 @@ const MIN_EDGE = 0.06;
 const INITIAL_RECT: CanvasImageCropRect = { x: 0.12, y: 0.12, width: 0.76, height: 0.76 };
 
 export function CanvasNodeCropDialog({ dataUrl, open, loading, onClose, onConfirm }: CropDialogProps) {
+    const translate = useTranslation();
     const stageRef = useRef<HTMLDivElement>(null);
     const [rect, setRect] = useState<CanvasImageCropRect>(INITIAL_RECT);
     const [aspectLocked, setAspectLocked] = useState(false);
@@ -82,7 +85,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, loading, onClose, onConfir
     };
 
     return (
-        <Modal title="裁剪图片" open={open && Boolean(dataUrl)} onCancel={loading ? undefined : onClose} footer={null} width={780} centered destroyOnHidden mask={{ closable: !loading }} keyboard={!loading} closable={!loading}>
+        <Modal title={translate("canvas.cropImage")} open={open && Boolean(dataUrl)} onCancel={loading ? undefined : onClose} footer={null} width={780} centered destroyOnHidden mask={{ closable: !loading }} keyboard={!loading} closable={!loading}>
             <div className="space-y-4">
                 <div className={`flex justify-center ${loading ? "pointer-events-none opacity-70" : ""}`}>
                     <div ref={stageRef} className="relative inline-block max-w-full overflow-hidden rounded-lg bg-black select-none">
@@ -100,7 +103,7 @@ export function CanvasNodeCropDialog({ dataUrl, open, loading, onClose, onConfir
                                     className="absolute size-3 rounded-full border border-[var(--studio-ink)] bg-[var(--studio-primary)] shadow-[0_0_0_1px_rgba(15,23,42,0.18)]"
                                     style={anchorOffset(anchor)}
                                     onPointerDown={(event) => beginDrag("scale", event, anchor)}
-                                    aria-label="调整裁剪框"
+                                    aria-label={translate("canvas.adjustCropArea")}
                                 />
                             ))}
                         </div>
@@ -109,26 +112,25 @@ export function CanvasNodeCropDialog({ dataUrl, open, loading, onClose, onConfir
 
                 <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border px-3 py-2">
                     <div className="flex flex-wrap items-center gap-3 text-sm opacity-80">
-                        <span>裁剪尺寸 {measuredPixels ? `${measuredPixels.width} x ${measuredPixels.height}` : "未知"}</span>
-                        <span>比例 {measuredPixels ? reduceRatio(measuredPixels.width, measuredPixels.height) : "未知"}</span>
+                        <span>{translate("canvas.cropDimensions")}{measuredPixels ? `${measuredPixels.width} x ${measuredPixels.height}` : translate("canvas.unknown")}</span>
+                        <span>{translate("canvas.aspectRatio")}{measuredPixels ? reduceRatio(measuredPixels.width, measuredPixels.height) : translate("canvas.unknown")}</span>
                         {shape ? (
                             <span>
-                                原图 {shape.width} x {shape.height}
+                                {translate("canvas.original")}{shape.width} x {shape.height}
                             </span>
                         ) : null}
                     </div>
                     <Button icon={aspectLocked ? <Lock className="size-4" /> : <LockOpen className="size-4" />} disabled={loading} onClick={() => setAspectLocked((value) => !value)}>
-                        {aspectLocked ? "锁定比例" : "自由比例"}
+                        {aspectLocked ? translate("canvas.lockAspectRatio") : translate("canvas.freeAspectRatio")}
                     </Button>
                 </div>
 
                 <div className="flex items-center justify-end gap-2">
-                    <Button disabled={loading} onClick={() => setRect(INITIAL_RECT)}>重置</Button>
+                    <Button disabled={loading} onClick={() => setRect(INITIAL_RECT)}>{translate("canvas.reset")}</Button>
                     <Button icon={<X className="size-4" />} disabled={loading} onClick={onClose}>
-                        取消
-                    </Button>
+                        {translate("canvas.cancel")}</Button>
                     <Button type="primary" icon={<Check className="size-4" />} loading={loading} onClick={() => onConfirm(rect)}>
-                        {loading ? "正在处理" : "确认裁剪"}
+                        {loading ? translate("canvas.processing") : translate("canvas.confirmCrop")}
                     </Button>
                 </div>
             </div>

@@ -39,8 +39,8 @@ public final class InvitationDtos {
      * @param invitationRewardCredits 每名新用户注册后发给邀请人的积分
      */
     public record UpdateInvitationRewardSettingsRequest(
-            @NotNull(message = "邀请奖励积分不能为空")
-            @Min(value = 0, message = "邀请奖励积分不能小于0") Integer invitationRewardCredits) {
+            @NotNull(message = "business.referralCreditsAreRequired")
+            @Min(value = 0, message = "business.referralCreditsMustNotBeNegative") Integer invitationRewardCredits) {
     }
 }
 

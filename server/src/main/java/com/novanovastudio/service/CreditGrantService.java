@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.repository.CreditRepository;
@@ -52,7 +54,7 @@ public class CreditGrantService {
     public Mono<Integer> grantExpiringCredits(Long userId, String sourceType, String sourceRef, int credits, OffsetDateTime expiresAt) {
         return creditRepository.createExpiringGrant(userId, sourceType, sourceRef, credits, expiresAt)
                 .then(creditRepository.changeBalance(userId, credits))
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分账户不存在，无法发放积分")));
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.creditAccountNotFoundCannotGrantCredits"))));
     }
 
     /**
@@ -67,7 +69,7 @@ public class CreditGrantService {
      */
     public Mono<Integer> consumeCredits(Long userId, int credits) {
         if (credits <= 0) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "扣减积分必须大于0"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.creditDeductionMustBePositive")));
         }
         OffsetDateTime now = OffsetDateTime.now(CREDIT_TIME_ZONE);
         return creditRepository.listActiveGrantsForUpdate(userId).collectList()
@@ -176,7 +178,7 @@ public class CreditGrantService {
         }
         int expiredCredits = expiredGrants.stream().mapToInt(CreditRepository.ExpiringGrant::remainingAmount).sum();
         return creditRepository.changeBalance(userId, -expiredCredits)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分账户异常，无法作废过期积分")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.creditAccountErrorCannotExpireCredits"))))
                 .flatMap(balance -> creditRepository.createTransaction(userId, CreditService.TRANSACTION_CREDIT_EXPIRED, null, -expiredCredits, balance, "签到积分过期")
                         .then(Mono.fromRunnable(() -> log.info("积分过期作废: userId={}, expiredCredits={}, balanceAfter={}", userId, expiredCredits, balance))))
                 .then();

@@ -1,4 +1,6 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+
 
 import { saveAs } from "file-saver";
 import { downloadServerMedia } from "@/services/api/server";
@@ -13,7 +15,7 @@ export async function downloadMedia(media: { storageKey?: string; dataUrl?: stri
     if (media.storageKey) {
         const blob = await downloadServerMedia(media.storageKey);
         if (!blob?.size) {
-            throw new Error("下载文件为空");
+            throw new Error(translate("storage.downloadedFileIsEmpty"));
         }
         saveAs(blob, fileName);
         return;
@@ -21,7 +23,7 @@ export async function downloadMedia(media: { storageKey?: string; dataUrl?: stri
     if (media.dataUrl?.startsWith("data:")) {
         const blob = await (await fetch(media.dataUrl)).blob();
         if (!blob.size) {
-            throw new Error("下载文件为空");
+            throw new Error(translate("storage.downloadedFileIsEmpty"));
         }
         saveAs(blob, fileName);
         return;
@@ -31,7 +33,7 @@ export async function downloadMedia(media: { storageKey?: string; dataUrl?: stri
         downloadRemoteMedia(sourceUrl, fileName);
         return;
     }
-    throw new Error("下载媒体缺少存储标识或可访问地址");
+    throw new Error(translate("storage.mediaHasNoStorageIDOrAccessibleURL"));
 }
 
 function downloadRemoteMedia(sourceUrl: string, fileName: string) {

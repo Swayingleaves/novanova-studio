@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useMemo, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
@@ -16,19 +19,7 @@ import {
     type ServerUserCreditTransaction,
 } from "@/services/api/server";
 
-import {
-    CREDIT_DIRECTION_OPTIONS,
-    CREDIT_SOURCE_OPTIONS,
-    CREDIT_TRANSACTION_PAGE_SIZE,
-    creditTransactionDetail,
-    creditTransactionIcon,
-    creditTransactionTypeLabel,
-    formatCreditChange,
-    formatCredits,
-    formatCreditTime,
-    normalizeGenerationDistribution,
-    normalizeModelDistribution,
-} from "./credit-page-utils";
+import { createCreditDirectionOptions, createCreditSourceOptions, CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactionIcon, creditTransactionTypeLabel, formatCreditChange, formatCredits, formatCreditTime, normalizeGenerationDistribution, normalizeModelDistribution } from "./credit-page-utils";
 
 const CreditChart = dynamic(() => import("./components/credit-chart").then((module) => module.CreditChart), {
     ssr: false,
@@ -38,9 +29,9 @@ const CreditChart = dynamic(() => import("./components/credit-chart").then((modu
 type GenerationTypeFilter = "all" | "image" | "video";
 type TrendUnit = "day" | "month";
 
-const CREDIT_TRANSACTION_COLUMNS: TableProps<ServerUserCreditTransaction>["columns"] = [
+const createCreditTransactionColumns = (translator: typeof translate = translate): TableProps<ServerUserCreditTransaction>["columns"] => ([
     {
-        title: "类型",
+        get title() { return translator("credits.type"); },
         dataIndex: "transactionType",
         width: 132,
         render: (transactionType: ServerUserCreditTransaction["transactionType"], record) => {
@@ -49,32 +40,32 @@ const CREDIT_TRANSACTION_COLUMNS: TableProps<ServerUserCreditTransaction>["colum
         },
     },
     {
-        title: "详情",
+        get title() { return translator("credits.details"); },
         dataIndex: "reason",
         ellipsis: true,
         render: (_, record) => <span className="text-[var(--studio-muted)]">{creditTransactionDetail(record.transactionType, record.generationType, record.model, record.reason)}</span>,
     },
     {
-        title: "积分变动",
+        get title() { return translator("credits.creditChange"); },
         dataIndex: "changeAmount",
         width: 128,
         align: "right",
         render: (changeAmount: number) => <span className={`font-medium tabular-nums ${changeAmount > 0 ? "text-[var(--studio-primary)]" : "text-[var(--studio-ink)]"}`}>{formatCreditChange(changeAmount)}</span>,
     },
     {
-        title: "余额快照",
+        get title() { return translator("credits.balanceSnapshot"); },
         dataIndex: "balanceAfter",
         width: 128,
         align: "right",
         render: (balanceAfter: number) => <span className="tabular-nums text-[var(--studio-muted)]">{formatCredits(balanceAfter)}</span>,
     },
     {
-        title: "时间",
+        get title() { return translator("credits.time"); },
         dataIndex: "createdAt",
         width: 176,
         render: (createdAt: string) => <span className="tabular-nums text-[var(--studio-muted)]">{formatCreditTime(createdAt)}</span>,
     },
-];
+]);
 
 /**
  * 渲染用户积分消耗统计页面。
@@ -82,6 +73,7 @@ const CREDIT_TRANSACTION_COLUMNS: TableProps<ServerUserCreditTransaction>["colum
  * @return 积分统计页面
  */
 export default function CreditsPage() {
+    const translate = useTranslation();
     const user = useUserStore((state) => state.user);
     const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")]);
     const [generationType, setGenerationType] = useState<GenerationTypeFilter>("all");
@@ -95,14 +87,14 @@ export default function CreditsPage() {
         startDate: dateRange[0].format("YYYY-MM-DD"),
         endDate: dateRange[1].format("YYYY-MM-DD"),
         generationType: generationType === "all" ? undefined : generationType,
-    }), [dateRange, generationType]);
+    }), [dateRange, generationType, translate.locale]);
 
     const detailFilters = useMemo(() => ({
         startDate: detailDateRange[0].format("YYYY-MM-DD"),
         endDate: detailDateRange[1].format("YYYY-MM-DD"),
         direction: detailDirection === "all" ? undefined : detailDirection,
         source: detailSource === "all" ? undefined : detailSource,
-    }), [detailDateRange, detailDirection, detailSource]);
+    }), [detailDateRange, detailDirection, detailSource, translate.locale]);
 
     const overviewQuery = useQuery({
         queryKey: ["credit-overview", filters.startDate, filters.endDate, filters.generationType, trendUnit],
@@ -115,9 +107,9 @@ export default function CreditsPage() {
 
     const overview = overviewQuery.data;
     const transactions = transactionsQuery.data;
-    const generationDistribution = useMemo(() => normalizeGenerationDistribution(overview?.generationTypeDistribution || []), [overview?.generationTypeDistribution]);
-    const modelDistribution = useMemo(() => normalizeModelDistribution(overview?.modelDistribution || []), [overview?.modelDistribution]);
-    const trend = useMemo(() => (overview?.trend || []).map((item) => ({ name: item.period, value: item.consumedCredits })), [overview?.trend]);
+    const generationDistribution = useMemo(() => normalizeGenerationDistribution(overview?.generationTypeDistribution || []), [overview?.generationTypeDistribution, translate.locale]);
+    const modelDistribution = useMemo(() => normalizeModelDistribution(overview?.modelDistribution || []), [overview?.modelDistribution, translate.locale]);
+    const trend = useMemo(() => (overview?.trend || []).map((item) => ({ name: item.period, value: item.consumedCredits })), [overview?.trend, translate.locale]);
     const totalConsumed = trend.reduce((total, item) => total + item.value, 0);
     const hasOverviewError = overviewQuery.isError || transactionsQuery.isError;
 
@@ -125,10 +117,10 @@ export default function CreditsPage() {
         <main className="mx-auto w-full max-w-[1400px] px-4 py-6 md:px-6 lg:px-8">
             <header className="flex flex-col gap-5 border-b border-[var(--studio-line)] pb-5 lg:flex-row lg:items-end lg:justify-between">
                 <div>
-                    <h1 className="text-2xl font-semibold text-[var(--studio-ink)]">积分</h1>
+                    <h1 className="text-2xl font-semibold text-[var(--studio-ink)]">{translate("credits.credits_10939f")}</h1>
                     <div className="mt-2 inline-flex items-center gap-2 text-sm text-[var(--studio-muted)]">
                         <Zap className="size-4 fill-current text-[var(--studio-primary)]" />
-                        <span>可用积分</span>
+                        <span>{translate("credits.availableCredits")}</span>
                         <strong className="font-semibold tabular-nums text-[var(--studio-ink)]">{formatCredits(user?.creditBalance || 0)}</strong>
                     </div>
                 </div>
@@ -138,10 +130,10 @@ export default function CreditsPage() {
                         allowClear={false}
                         disabledDate={(date) => date.isAfter(dayjs(), "day")}
                         presets={[
-                            { label: "今日", value: [dayjs().startOf("day"), dayjs().endOf("day")] },
-                            { label: "近7天", value: [dayjs().subtract(6, "day"), dayjs()] },
-                            { label: "近30天", value: [dayjs().subtract(29, "day"), dayjs()] },
-                            { label: "本月", value: [dayjs().startOf("month"), dayjs()] },
+                            { label: translate("credits.today"), value: [dayjs().startOf("day"), dayjs().endOf("day")] },
+                            { label: translate("credits.last7Days"), value: [dayjs().subtract(6, "day"), dayjs()] },
+                            { label: translate("credits.last30Days"), value: [dayjs().subtract(29, "day"), dayjs()] },
+                            { label: translate("credits.thisMonth"), value: [dayjs().startOf("month"), dayjs()] },
                         ]}
                         onChange={(nextDateRange) => {
                             if (!nextDateRange?.[0] || !nextDateRange[1]) return;
@@ -152,9 +144,9 @@ export default function CreditsPage() {
                     <Segmented
                         value={generationType}
                         options={[
-                            { label: "全部", value: "all" },
-                            { label: "生图", value: "image" },
-                            { label: "生视频", value: "video" },
+                            { label: translate("credits.all"), value: "all" },
+                            { label: translate("credits.generateImage"), value: "image" },
+                            { label: translate("credits.generateVideo"), value: "video" },
                         ]}
                         onChange={(value) => {
                             setGenerationType(value as GenerationTypeFilter);
@@ -169,33 +161,33 @@ export default function CreditsPage() {
                     className="mt-5"
                     type="error"
                     showIcon
-                    title="积分数据加载失败"
-                    action={<Button size="small" onClick={() => { void overviewQuery.refetch(); void transactionsQuery.refetch(); }}>重新加载</Button>}
+                    title={translate("credits.failedToLoadCreditData")}
+                    action={<Button size="small" onClick={() => { void overviewQuery.refetch(); void transactionsQuery.refetch(); }}>{translate("credits.reload")}</Button>}
                 />
             ) : null}
 
             <section className="mt-7" aria-labelledby="credit-statistics-title">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                     <div>
-                        <h2 id="credit-statistics-title" className="text-base font-semibold text-[var(--studio-ink)]">消耗统计</h2>
-                        <p className="mt-1 text-sm text-[var(--studio-muted)]">本期共消耗 {formatCredits(totalConsumed)} 积分</p>
+                        <h2 id="credit-statistics-title" className="text-base font-semibold text-[var(--studio-ink)]">{translate("credits.usageStatistics")}</h2>
+                        <p className="mt-1 text-sm text-[var(--studio-muted)]">{translate("credits.totalUsageThisPeriod")}{formatCredits(totalConsumed)} {translate("credits.credits_10939f")}</p>
                     </div>
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
-                    <ChartPanel title="生图与生视频消耗分布" loading={overviewQuery.isLoading} empty={!generationDistribution.length}>
-                        <CreditChart type="pie" data={generationDistribution} ariaLabel="生图与生视频积分消耗分布图" />
+                    <ChartPanel title={translate("credits.imageVsVideoUsage")} loading={overviewQuery.isLoading} empty={!generationDistribution.length}>
+                        <CreditChart type="pie" data={generationDistribution} ariaLabel={translate("credits.imageAndVideoCreditUsageChart")} />
                     </ChartPanel>
-                    <ChartPanel title="模型消耗分布" loading={overviewQuery.isLoading} empty={!modelDistribution.length}>
-                        <CreditChart type="pie" data={modelDistribution} ariaLabel="模型积分消耗分布图" />
+                    <ChartPanel title={translate("credits.usageByModel")} loading={overviewQuery.isLoading} empty={!modelDistribution.length}>
+                        <CreditChart type="pie" data={modelDistribution} ariaLabel={translate("credits.creditUsageByModel")} />
                     </ChartPanel>
                     <ChartPanel
                         className="lg:col-span-2"
-                        title="积分消耗趋势"
+                        title={translate("credits.creditUsageTrend")}
                         loading={overviewQuery.isLoading}
                         empty={!trend.some((item) => item.value > 0)}
-                        extra={<Segmented value={trendUnit} size="small" options={[{ label: "按日", value: "day" }, { label: "按月", value: "month" }]} onChange={(value) => setTrendUnit(value as TrendUnit)} />}
+                        extra={<Segmented value={trendUnit} size="small" options={[{ label: translate("credits.daily"), value: "day" }, { label: translate("credits.monthly"), value: "month" }]} onChange={(value) => setTrendUnit(value as TrendUnit)} />}
                     >
-                        <CreditChart type="bar" data={trend} ariaLabel="积分消耗趋势柱状图" />
+                        <CreditChart type="bar" data={trend} ariaLabel={translate("credits.creditUsageBarChart")} />
                     </ChartPanel>
                 </div>
             </section>
@@ -203,10 +195,10 @@ export default function CreditsPage() {
             <section className="mt-8 border-t border-[var(--studio-line)] pt-6" aria-labelledby="credit-transactions-title">
                 <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                     <div>
-                        <h2 id="credit-transactions-title" className="text-base font-semibold text-[var(--studio-ink)]">积分明细</h2>
-                        <p className="mt-1 text-sm text-[var(--studio-muted)]">包含积分增加与消耗记录，明细筛选独立于上方消耗统计</p>
+                        <h2 id="credit-transactions-title" className="text-base font-semibold text-[var(--studio-ink)]">{translate("credits.creditDetails")}</h2>
+                        <p className="mt-1 text-sm text-[var(--studio-muted)]">{translate("credits.includesCreditGrantsAndUsageFiltersAreIndependentOf")}</p>
                     </div>
-                    <span className="text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} 条记录</span>
+                    <span className="text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} {translate("credits.records")}</span>
                 </div>
 
                 <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -222,7 +214,7 @@ export default function CreditsPage() {
                     />
                     <Segmented
                         value={detailDirection}
-                        options={CREDIT_DIRECTION_OPTIONS}
+                        options={createCreditDirectionOptions(translate)}
                         onChange={(value) => {
                             setDetailDirection(value as "all" | ServerCreditDirection);
                             setPage(1);
@@ -230,7 +222,7 @@ export default function CreditsPage() {
                     />
                     <Select
                         value={detailSource}
-                        options={CREDIT_SOURCE_OPTIONS}
+                        options={createCreditSourceOptions(translate)}
                         className="w-40"
                         onChange={(value) => {
                             setDetailSource(value as "all" | ServerCreditSource);
@@ -242,16 +234,16 @@ export default function CreditsPage() {
                 <div className="hidden md:block">
                     <Table<ServerUserCreditTransaction>
                         rowKey="id"
-                        columns={CREDIT_TRANSACTION_COLUMNS}
+                        columns={createCreditTransactionColumns(translate)}
                         dataSource={transactions?.transactions || []}
                         loading={transactionsQuery.isLoading}
                         pagination={false}
-                        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="所选范围没有积分记录" /> }}
+                        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("credits.noTransactionsInThisPeriod")} /> }}
                     />
                 </div>
                 <div className="md:hidden">
                     {transactionsQuery.isLoading ? <Skeleton active paragraph={{ rows: 8 }} /> : null}
-                    {!transactionsQuery.isLoading && !transactions?.transactions.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="所选范围没有积分记录" /> : null}
+                    {!transactionsQuery.isLoading && !transactions?.transactions.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("credits.noTransactionsInThisPeriod")} /> : null}
                     {transactions?.transactions.map((transaction) => {
                         const Icon = creditTransactionIcon(transaction);
                         return (
@@ -262,7 +254,7 @@ export default function CreditsPage() {
                                 </div>
                                 <div className="mt-2 grid gap-1 text-xs text-[var(--studio-muted)]">
                                     <span className="truncate">{creditTransactionDetail(transaction.transactionType, transaction.generationType, transaction.model, transaction.reason)}</span>
-                                    <span className="tabular-nums">余额 {formatCredits(transaction.balanceAfter)} · {formatCreditTime(transaction.createdAt)}</span>
+                                    <span className="tabular-nums">{translate("credits.balance")}{formatCredits(transaction.balanceAfter)} · {formatCreditTime(transaction.createdAt)}</span>
                                 </div>
                             </article>
                         );
@@ -285,6 +277,7 @@ export default function CreditsPage() {
  * @return 图表面板
  */
 function ChartPanel({ title, loading, empty, extra, className, children }: { title: string; loading: boolean; empty: boolean; extra?: ReactNode; className?: string; children: ReactNode }) {
+    const translate = useTranslation();
     return (
         <section className={`min-w-0 border border-[var(--studio-line)] bg-[var(--studio-surface)] p-4 md:p-5 ${className || ""}`}>
             <div className="flex items-center justify-between gap-3">
@@ -293,7 +286,7 @@ function ChartPanel({ title, loading, empty, extra, className, children }: { tit
             </div>
             <div className="mt-2">
                 {loading ? <Skeleton active className="py-5" paragraph={{ rows: 6 }} /> : null}
-                {!loading && empty ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="所选范围暂无消耗数据" className="py-9" /> : null}
+                {!loading && empty ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("credits.noUsageDataInThisPeriod")} className="py-9" /> : null}
                 {!loading && !empty ? children : null}
             </div>
         </section>

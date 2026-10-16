@@ -1,0 +1,8 @@
+{
+    "openCanvas": "去画布操作",
+    "chooseAnOption": "请选择",
+    "generateVideoWithTheseImages": "用这些图片生成视频",
+    "adjustPrompt": "调整提示词",
+    "editPromptAndRegenerate": "修改提示词重新生成",
+    "confirmGeneration": "确认生成"
+}

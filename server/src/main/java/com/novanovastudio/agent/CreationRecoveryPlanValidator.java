@@ -1,5 +1,7 @@
 package com.novanovastudio.agent;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.agent.dto.CreationPlan;
 import com.novanovastudio.agent.dto.CreationRecoveryPlan;
 import com.novanovastudio.agent.dto.CreationTask;
@@ -58,12 +60,12 @@ public class CreationRecoveryPlanValidator {
                                          List<RecoveryTaskContext> contexts) {
         if (candidate == null || !StringUtils.hasText(candidate.message())
                 || candidate.decisions() == null || contexts == null || contexts.isEmpty()) {
-            throw invalid("主Agent未返回完整恢复计划");
+            throw invalid(SystemMessage.of("business.agentReturnedNoCompleteRecoveryPlan"));
         }
         Map<String, RecoveryTaskContext> contextByTaskId = new LinkedHashMap<>();
         for (RecoveryTaskContext context : contexts) {
             if (context == null || !StringUtils.hasText(context.taskId()) || context.recoveryAttempt() != 0) {
-                throw invalid("恢复任务上下文不合法");
+                throw invalid(SystemMessage.of("business.invalidRecoveryTaskContext"));
             }
             contextByTaskId.put(context.taskId(), context);
         }
@@ -71,11 +73,11 @@ public class CreationRecoveryPlanValidator {
         for (RecoveryTaskDecision decision : candidate.decisions()) {
             if (decision == null || !contextByTaskId.containsKey(decision.taskId())
                     || decisionByTaskId.putIfAbsent(decision.taskId(), decision) != null) {
-                throw invalid("恢复计划包含未知或重复任务");
+                throw invalid(SystemMessage.of("business.recoveryPlanHasUnknownOrDuplicateTasks"));
             }
         }
         if (!decisionByTaskId.keySet().equals(contextByTaskId.keySet())) {
-            throw invalid("恢复计划必须覆盖本层全部失败任务");
+            throw invalid(SystemMessage.of("business.recoveryPlanMustCoverAllFailedTasksAtThisLevel"));
         }
 
         List<RecoveryTaskDecision> normalized = new ArrayList<>();
@@ -96,9 +98,9 @@ public class CreationRecoveryPlanValidator {
     private RecoveryTaskDecision validateDecision(CreationPlan plan, RecoveryTaskContext context,
                                                    RecoveryTaskDecision decision) {
         String action = decision.action() == null ? "" : decision.action().trim();
-        if (!ACTIONS.contains(action)) throw invalid("恢复动作不受支持");
+        if (!ACTIONS.contains(action)) throw invalid(SystemMessage.of("business.unsupportedRecoveryAction"));
         if (context.allowedActions() == null || !context.allowedActions().contains(action)) {
-            throw invalid("恢复动作超出服务端允许范围");
+            throw invalid(SystemMessage.of("business.recoveryActionExceedsServerPermissions"));
         }
         List<String> nodeIds = validateNodeIds(context, decision.nodeIds());
         Map<String, Object> argumentPatch = decision.adjustedToolArguments() == null
@@ -107,22 +109,22 @@ public class CreationRecoveryPlanValidator {
 
         if ("ASK_USER".equals(action) || "STOP".equals(action)) {
             if (StringUtils.hasText(adjustedPrompt) || !argumentPatch.isEmpty()) {
-                throw invalid("停止或询问用户时不能携带调整参数");
+                throw invalid(SystemMessage.of("business.stopAndAskActionsCannotIncludeAdjustmentParameters"));
             }
             return new RecoveryTaskDecision(context.taskId(), nodeIds, action, "", Map.of(),
                     requiredReason(decision.reason()));
         }
         if (context.error() == null || !Boolean.TRUE.equals(context.error().safeToRetry())) {
-            throw invalid("当前错误不允许创建新的重试任务");
+            throw invalid(SystemMessage.of("business.thisErrorDoesNotPermitANewRetryTask"));
         }
         if (CreationEntrySource.CANVAS.equals(plan.entrySource())
                 && CANVAS_GENERATION_TOOLS.contains(context.toolName()) && nodeIds.isEmpty()) {
-            throw invalid("画布生成重试缺少可复用的失败节点");
+            throw invalid(SystemMessage.of("business.canvasRetryHasNoReusableFailedNode"));
         }
         if ("RETRY_UNCHANGED".equals(action)) {
             if (!canRetryUnchanged(context.error())
                     || StringUtils.hasText(adjustedPrompt) || !argumentPatch.isEmpty()) {
-                throw invalid("当前错误不允许原样重试");
+                throw invalid(SystemMessage.of("business.thisErrorDoesNotPermitAnUnchangedRetry"));
             }
             return new RecoveryTaskDecision(context.taskId(), nodeIds, action, "", Map.of(),
                     requiredReason(decision.reason()));
@@ -135,12 +137,12 @@ public class CreationRecoveryPlanValidator {
                 && "prompt".equals(context.error().parameter()));
         if (promptChanged && (!promptError || "用户硬约束".equals(
                 context.argumentSources() == null ? null : context.argumentSources().get("prompt")))) {
-            throw invalid("当前错误不允许自动修改提示词");
+            throw invalid(SystemMessage.of("business.thisErrorDoesNotPermitAutomaticPromptEdits"));
         }
         validateArgumentPatch(context, argumentPatch);
-        if (!promptChanged && argumentPatch.isEmpty()) throw invalid("调整重试必须修改提示词或允许参数");
+        if (!promptChanged && argumentPatch.isEmpty()) throw invalid(SystemMessage.of("business.adjustedRetryMustChangeThePromptOrAllowedParameters"));
         if ("prompt_policy_violation".equals(context.error().category()) && !promptChanged) {
-            throw invalid("提示词内容策略错误必须修改提示词");
+            throw invalid(SystemMessage.of("business.contentPolicyErrorsRequireARevisedPrompt"));
         }
         validateReplacementPlan(plan, context, promptChanged ? adjustedPrompt : context.actualPrompt(), argumentPatch);
         return new RecoveryTaskDecision(context.taskId(), nodeIds, action,
@@ -157,20 +159,20 @@ public class CreationRecoveryPlanValidator {
     private List<String> validateNodeIds(RecoveryTaskContext context, List<String> candidateNodeIds) {
         List<String> failedNodeIds = context.failedNodeIds() == null ? List.of() : context.failedNodeIds();
         if (failedNodeIds.isEmpty()) {
-            if (candidateNodeIds != null && !candidateNodeIds.isEmpty()) throw invalid("非画布任务不能指定恢复节点");
+            if (candidateNodeIds != null && !candidateNodeIds.isEmpty()) throw invalid(SystemMessage.of("business.onlyCanvasTasksMaySpecifyRecoveryNodes"));
             return List.of();
         }
         if (candidateNodeIds == null || candidateNodeIds.isEmpty()) {
-            throw invalid("恢复计划必须明确列出全部失败节点");
+            throw invalid(SystemMessage.of("business.recoveryPlanMustListAllFailedNodes"));
         }
         List<String> nodeIds = candidateNodeIds;
         Set<String> unique = new HashSet<>(nodeIds);
         if (unique.size() != nodeIds.size() || !unique.equals(new HashSet<>(failedNodeIds))) {
-            throw invalid("恢复节点必须完整覆盖首次失败节点");
+            throw invalid(SystemMessage.of("business.recoveryNodesMustCoverAllInitiallyFailedNodes"));
         }
         if (context.successfulNodeIds() != null
                 && context.successfulNodeIds().stream().anyMatch(unique::contains)) {
-            throw invalid("已成功节点不能再次生成");
+            throw invalid(SystemMessage.of("business.successfulNodesCannotBeGeneratedAgain"));
         }
         return List.copyOf(nodeIds);
     }
@@ -185,7 +187,7 @@ public class CreationRecoveryPlanValidator {
         if (argumentPatch.isEmpty()) return;
         if (!"invalid_parameter".equals(context.error().category())
                 || !StringUtils.hasText(context.error().parameter())) {
-            throw invalid("供应商未明确指出可调整参数");
+            throw invalid(SystemMessage.of("business.providerHasNotIdentifiedAdjustableParameters"));
         }
         for (Map.Entry<String, Object> entry : argumentPatch.entrySet()) {
             if (!entry.getKey().equals(context.error().parameter())
@@ -193,7 +195,7 @@ public class CreationRecoveryPlanValidator {
                     || !context.agentGeneratedArguments().contains(entry.getKey())
                     || entry.getValue() == null
                     || Objects.equals(context.toolArguments().get(entry.getKey()), entry.getValue())) {
-                throw invalid("恢复计划试图修改用户硬约束或未确认参数");
+                throw invalid(SystemMessage.of("business.recoveryPlanChangesUserConstraintsOrUnconfirmedParameters"));
             }
         }
     }
@@ -245,17 +247,17 @@ public class CreationRecoveryPlanValidator {
      * @return String 非空原因
      */
     private String requiredReason(String reason) {
-        if (!StringUtils.hasText(reason)) throw invalid("恢复决策缺少原因");
+        if (!StringUtils.hasText(reason)) throw invalid(SystemMessage.of("business.recoveryDecisionRequiresAReason"));
         return reason.trim();
     }
 
     /**
      * 创建参数无效业务异常。
      *
-     * @param message String 错误说明
+     * @param message SystemMessage 错误说明
      * @return BusinessException 参数异常
      */
-    private BusinessException invalid(String message) {
+    private BusinessException invalid(SystemMessage message) {
         return new BusinessException(ErrorCode.PARAM_INVALID, message);
     }
 }

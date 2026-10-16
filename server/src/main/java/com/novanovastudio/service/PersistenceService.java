@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -141,9 +143,9 @@ public class PersistenceService {
 
     /** 修改全站渠道。 */
     public Mono<AiTaskDtos.AiChannelConfig> updateChannel(PersistenceDtos.ChannelMutationRequest request) {
-        if (!StringUtils.hasText(request.id())) return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "渠道ID不能为空"));
+        if (!StringUtils.hasText(request.id())) return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.channelIDIsRequired")));
         return repository.getPlatformAiChannel(request.id())
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "渠道不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.channelNotFound"))))
                 .flatMap(existing -> (StringUtils.hasText(request.apiKey()) ? encryptSecret(request.apiKey()) : Mono.just(existing.getApiKeyEncrypted()))
                         .flatMap(encrypted -> {
                             PersistenceRecords.UserAiChannelRecord record = channelRecord(request.id(), request, encrypted);
@@ -168,7 +170,7 @@ public class PersistenceService {
     public Mono<Void> deleteChannel(String channelId) {
         return repository.existsPlatformModelConfigByChannel(channelId)
                 .flatMap(referenced -> referenced
-                        ? Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "渠道仍被全站模型引用，请先删除关联模型配置"))
+                        ? Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.channelIsReferencedBySiteModelsDeleteLinkedModelsFirst")))
                         : repository.deletePlatformAiChannel(channelId).then());
     }
 
@@ -186,10 +188,10 @@ public class PersistenceService {
     public Mono<PersistenceDtos.ModelConfig> createModelConfig(PersistenceDtos.CreateModelConfigRequest request) {
         validateModelType(request.modelType());
         return repository.getPlatformAiChannel(request.channelId())
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "所属渠道不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.parentChannelNotFound"))))
                 .flatMap(channel -> {
                     if (!parseStringList(channel.getModels()).contains(request.modelName())) {
-                        return Mono.<PersistenceDtos.ModelConfig>error(new BusinessException(ErrorCode.PARAM_INVALID, "模型不在所属渠道的模型列表中"));
+                        return Mono.<PersistenceDtos.ModelConfig>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.modelIsNotInItsChannelModelList")));
                     }
                     PersistenceRecords.UserAiModelConfigRecord record = new PersistenceRecords.UserAiModelConfigRecord();
                     record.setModelConfigId(UUID.randomUUID().toString());
@@ -227,9 +229,7 @@ public class PersistenceService {
                                     return exception;
                                 }
                                 log.error("模型配置重复: 渠道={}, 模型={}, 类型={}", request.channelId(), request.modelName(), request.modelType(), exception);
-                                return new BusinessException(ErrorCode.PARAM_INVALID,
-                                        "渠道“" + channel.getName() + "”的模型“" + request.modelName()
-                                                + "”（类型：" + request.modelType() + "）已存在，请重新读取模型配置后编辑已有模型");
+                                return new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.modelOfChannelAlreadyExistsReloadAndEditIt", channel.getName(), request.modelName(), request.modelType()));
                             })
                             .thenReturn(modelConfigDto(record));
                 });
@@ -239,7 +239,7 @@ public class PersistenceService {
     public Mono<PersistenceDtos.ModelConfig> updateModelConfig(PersistenceDtos.UpdateModelConfigRequest request) {
         validateModelType(request.modelType());
         return repository.getPlatformAiModelConfig(request.id())
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "模型配置不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.modelConfigurationNotFound"))))
                 .flatMap(record -> {
                     List<String> capabilities = normalizeModelCapabilities(request.modelType(), request.capabilities());
                     VideoBillingConfiguration existingVideoBillingConfiguration = parseVideoBillingConfiguration(record.getVideoBillingConfiguration());
@@ -284,7 +284,7 @@ public class PersistenceService {
     public Mono<Void> deleteModelConfig(String id) {
         return aiTaskRepository.existsExecutableTasksByModelConfig(id)
                 .flatMap(hasExecutableTasks -> Boolean.TRUE.equals(hasExecutableTasks)
-                        ? Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "模型仍有关联的等待或运行任务，暂不能删除"))
+                        ? Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.modelHasQueuedOrRunningTasksCannotDelete")))
                         : repository.deletePlatformAiModelConfig(id).then());
     }
 
@@ -293,10 +293,10 @@ public class PersistenceService {
     public Mono<Void> setDefaultModel(PersistenceDtos.SetDefaultModelRequest request) {
         validateModelType(request.modelType());
         return repository.getPlatformAiModelConfig(request.id())
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "模型配置不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.modelConfigurationNotFound"))))
                 .flatMap(record -> {
                     if (!request.modelType().equals(record.getModelType())) {
-                        return Mono.<Void>error(new BusinessException(ErrorCode.PARAM_INVALID, "默认模型类型与模型配置不一致"));
+                        return Mono.<Void>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.defaultModelTypeDoesNotMatchConfiguration")));
                     }
                     return repository.setDefaultPlatformAiModel(request.modelType(), request.id());
                 });
@@ -373,25 +373,25 @@ public class PersistenceService {
                                                                           VideoBillingConfiguration configuration) {
         if (!"video".equals(modelType)) {
             if (configuration != null) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "只有视频模型支持视频分档计费配置");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.onlyVideoModelsSupportTierPricing"));
             }
             return null;
         }
         if (configuration == null) return null;
         if (!StringUtils.hasText(configuration.billingUnit())) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频模型必须选择按次或按秒计费方式");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoModelMustSelectPerRunOrPerSecondBilling"));
         }
         String billingUnit = configuration.billingUnit().trim();
         if (!Set.of(CREDIT_UNIT_GENERATION, CREDIT_UNIT_SECOND).contains(billingUnit)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频模型计费方式只支持按次或按秒");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoBillingMustBePerRunOrPerSecond"));
         }
         Integer minimumDurationSeconds = configuration.minimumDurationSeconds();
         if (minimumDurationSeconds == null || minimumDurationSeconds < 1) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频最短生成时长必须是正整数秒");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.minimumVideoDurationMustBePositiveIntegerSeconds"));
         }
         Map<String, Map<String, Integer>> inputPrices = configuration.modePrices() == null ? Map.of() : configuration.modePrices();
         if (inputPrices.keySet().stream().anyMatch(mode -> !VideoGenerationMode.isSupported(mode))) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频价格表包含不支持的生成模式");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoPriceTableContainsAnUnsupportedMode"));
         }
         Map<String, Map<String, Integer>> normalizedPrices = new LinkedHashMap<>();
         for (String mode : List.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO,
@@ -400,14 +400,14 @@ public class PersistenceService {
             Map<String, Integer> normalizedModePrices = new LinkedHashMap<>();
             if (prices != null) {
                 if (!prices.isEmpty() && !capabilities.contains(mode)) {
-                    throw new BusinessException(ErrorCode.PARAM_INVALID, "视频价格表只能配置已勾选的生成模式能力");
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.onlySelectedModesMayHavePrices"));
                 }
                 for (Map.Entry<String, Integer> entry : prices.entrySet()) {
                     if (!VideoResolution.isSupported(entry.getKey())) {
-                        throw new BusinessException(ErrorCode.PARAM_INVALID, "视频价格表包含不支持的分辨率");
+                        throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoPriceTableContainsAnUnsupportedResolution"));
                     }
                     if (entry.getValue() == null || entry.getValue() < 0) {
-                        throw new BusinessException(ErrorCode.PARAM_INVALID, "视频分辨率价格必须是不小于0的整数");
+                        throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoResolutionPriceMustBeANonnegativeInteger"));
                     }
                     normalizedModePrices.put(entry.getKey(), entry.getValue());
                 }
@@ -434,7 +434,7 @@ public class PersistenceService {
             return normalized;
         }
         if (normalized.stream().anyMatch(capability -> !VideoGenerationMode.isSupported(capability) && !AudioInputSupport.CAPABILITY.equals(capability))) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频模型能力包含不支持的生成模式");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoCapabilitiesContainAnUnsupportedMode"));
         }
         return normalized;
     }
@@ -450,7 +450,7 @@ public class PersistenceService {
         try {
             return JSON.parseObject(value, VideoBillingConfiguration.class);
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频分档计费配置格式不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidVideoTierPricingFormat"));
         }
     }
 
@@ -501,13 +501,13 @@ public class PersistenceService {
         Map<String, PersistenceDtos.CustomModelGroupConfig> input = config == null ? Map.of() : config;
         if ("text".equals(modelType)) {
             if (isCustomModel || !input.isEmpty()) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "文本模型不支持自定义模型");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.textModelsDoNotSupportCustomModelConfiguration"));
             }
             return Map.of();
         }
         if (!isCustomModel) {
             if (!input.isEmpty()) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "未启用自定义模型时不能配置自定义请求模板");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.customTemplatesRequireCustomModelMode"));
             }
             return Map.of();
         }
@@ -519,40 +519,40 @@ public class PersistenceService {
         for (Map.Entry<String, PersistenceDtos.CustomModelGroupConfig> entry : input.entrySet()) {
             String key = entry.getKey() == null ? "" : entry.getKey().trim();
             if (!allowedKeys.contains(key)) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "自定义模型配置包含不支持的能力或模式: " + entry.getKey());
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedCustomCapabilityOrMode", entry.getKey()));
             }
             if (!capabilities.contains(key)) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "自定义模型配置只能包含已勾选的能力或模式: " + key);
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.customConfigurationMayOnlyIncludeSelectedCapabilitiesOrModes", key));
             }
             PersistenceDtos.CustomModelGroupConfig group = entry.getValue();
             if (group == null) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]的自定义模型配置不能为空");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.customConfigurationForIsRequired", key));
             }
             String requestPath = group.requestPath() == null ? "" : group.requestPath().trim();
             if (!StringUtils.hasText(requestPath) || !requestPath.startsWith("/")) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]的请求路径不能为空，且需以 / 开头");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.requestPathForIsRequiredAndMustStartWith", key));
             }
             String requestMethod = normalizeCustomRequestMethod(group.requestMethod());
             if (!"GET".equals(requestMethod) && !StringUtils.hasText(group.requestTemplate()) && !StringUtils.hasText(group.aiRequestPrompt())) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]使用POST请求时必须配置请求示例或AI构造提示词");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.pOSTRequiresAnExampleOrAIPrompt", key));
             }
             if (!StringUtils.hasText(group.resultPath())) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]的结果路径不能为空");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.resultPathForIsRequired", key));
             }
             boolean queryEnabled = StringUtils.hasText(group.queryPath())
                     || StringUtils.hasText(group.queryRequestTemplate()) || StringUtils.hasText(group.aiQueryPrompt());
             if (queryEnabled) {
                 if (!StringUtils.hasText(group.queryPath())) {
-                    throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]配置了异步查询时必须配置查询路径");
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.asyncRequiresAQueryPath", key));
                 }
                 if (!StringUtils.hasText(group.queryResultPath())) {
-                    throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]配置了异步查询时必须配置查询结果路径");
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.asyncRequiresAQueryResultPath", key));
                 }
             }
             String queryMethod = normalizeCustomRequestMethod(group.queryMethod());
             if (queryEnabled && !"GET".equals(queryMethod) && !StringUtils.hasText(group.queryRequestTemplate())
                     && !StringUtils.hasText(group.aiQueryPrompt())) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "能力或模式[" + key + "]使用POST查询时必须配置查询请求示例或AI构造提示词");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.pOSTQueryRequiresAnExampleOrAIPrompt", key));
             }
             normalized.put(key, new PersistenceDtos.CustomModelGroupConfig(
                     requestPath, requestMethod, group.requestModelName(), group.requestTemplate(), group.aiRequestPrompt(),
@@ -578,7 +578,7 @@ public class PersistenceService {
     private String normalizeCustomRequestMethod(String method) {
         String normalized = StringUtils.hasText(method) ? method.trim().toUpperCase() : "POST";
         if (!Set.of("GET", "POST").contains(normalized)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "自定义模型请求方法只支持GET或POST");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.customRequestMethodMustBeGETOrPOST"));
         }
         return normalized;
     }
@@ -587,7 +587,7 @@ public class PersistenceService {
     private JSONObject normalizeCustomBodyParameters(String value) {
         if (!StringUtils.hasText(value)) return new JSONObject();
         JSONObject parameters = parseJson(value);
-        if (parameters == null) throw new BusinessException(ErrorCode.PARAM_INVALID, "模型自定义JSON必须是对象");
+        if (parameters == null) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.customModelJSONMustBeAnObject"));
         return parameters;
     }
 
@@ -602,10 +602,10 @@ public class PersistenceService {
     private String normalizeCreditUnit(String modelType, String creditUnit) {
         String value = StringUtils.hasText(creditUnit) ? creditUnit : CREDIT_UNIT_GENERATION;
         if (!Set.of(CREDIT_UNIT_GENERATION, CREDIT_UNIT_SECOND).contains(value)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "积分计费单位只支持generation、second");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.billingUnitMustBeGenerationOrSecond"));
         }
         if (!"video".equals(modelType) && CREDIT_UNIT_SECOND.equals(value)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "只有视频模型可以按秒计费");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.onlyVideoModelsSupportPerSecondBilling"));
         }
         return value;
     }
@@ -619,7 +619,7 @@ public class PersistenceService {
     private int normalizeRequestConcurrency(Integer requestConcurrency) {
         int value = requestConcurrency == null ? 1 : requestConcurrency;
         if (value < 1) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "模型同时并发数不能小于1");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.modelConcurrencyMustBeAtLeast1"));
         }
         return value;
     }
@@ -653,7 +653,7 @@ public class PersistenceService {
     private String reasoningEffort(String effort) {
         String value = StringUtils.hasText(effort) ? effort : "high";
         if (!Set.of("high", "max").contains(value)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "思考强度只支持high、max");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.thinkingIntensityMustBeHighOrMax"));
         }
         return value;
     }
@@ -661,7 +661,7 @@ public class PersistenceService {
     /** 校验模型类型。 */
     private void validateModelType(String modelType) {
         if (!Set.of("image", "video", "text").contains(modelType)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "模型类型只支持image、video、text");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.modelTypeMustBeImageVideoOrText"));
         }
     }
 
@@ -697,10 +697,10 @@ public class PersistenceService {
 
     /** 修改全站对象存储。 */
     public Mono<JSONObject> updateObjectStorage(PersistenceDtos.ObjectStorageConfig config) {
-        if (!StringUtils.hasText(config.id())) return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "对象存储ID不能为空"));
+        if (!StringUtils.hasText(config.id())) return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.objectStorageIDIsRequired")));
         objectStorageService.validate(config);
         return repository.getPlatformObjectStorage(config.id())
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "对象存储不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.objectStorageNotFound"))))
                 .flatMap(existing -> buildObjectStorageRecord(config, existing))
                 .flatMap(record -> repository.updatePlatformObjectStorage(record).then(decryptObjectStorage(record)))
                 .map(value -> JSON.parseObject(JSON.toJSONString(value)));
@@ -709,9 +709,9 @@ public class PersistenceService {
     /** 删除全站对象存储。 */
     public Mono<Void> deleteObjectStorage(String storageId) {
         return repository.getPlatformObjectStorage(storageId)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "对象存储不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.objectStorageNotFound"))))
                 .flatMap(record -> Boolean.TRUE.equals(record.getDefaultStorage())
-                        ? Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "默认对象存储不能删除，请先设置其他默认项"))
+                        ? Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.chooseAnotherDefaultBeforeDeletingThisStorage")))
                         : repository.deletePlatformObjectStorage(storageId).then());
     }
 
@@ -719,7 +719,7 @@ public class PersistenceService {
     @Transactional
     public Mono<Void> setDefaultObjectStorage(String storageId) {
         return repository.getPlatformObjectStorage(storageId)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "对象存储不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.objectStorageNotFound"))))
                 .then(repository.setDefaultPlatformObjectStorage(storageId));
     }
 
@@ -728,7 +728,7 @@ public class PersistenceService {
                                                                                         PersistenceRecords.UserObjectStorageRecord existing) {
         String provider = firstNonEmpty(config.provider(), "tencentCos");
         if (!objectStorageService.supports(provider)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "对象存储服务商不受支持"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedObjectStorageProvider")));
         }
         Mono<String> accessKey = StringUtils.hasText(config.accessKey()) ? encryptSecret(config.accessKey()) : Mono.just(existing == null ? "" : existing.getAccessKeyEncrypted());
         Mono<String> secretKey = StringUtils.hasText(config.secretKey()) ? encryptSecret(config.secretKey()) : Mono.just(existing == null ? "" : existing.getSecretKeyEncrypted());
@@ -784,7 +784,7 @@ public class PersistenceService {
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> repository.getProject(userId, id))
                 .map(record -> parseJson(record.getData()))
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "画布不存在")));
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.canvasNotFound"))));
     }
 
     /**
@@ -853,7 +853,7 @@ public class PersistenceService {
         SnapshotMetadata metadata = parseSnapshotMetadata(asset, "素材");
         String kind = textField(asset, "kind");
         if (!StringUtils.hasText(kind)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "素材类型不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.assetTypeIsRequired")));
         }
         return currentUserProvider.currentUserId().flatMap(userId -> {
             PersistenceRecords.SnapshotRecord record = new PersistenceRecords.SnapshotRecord();
@@ -907,7 +907,7 @@ public class PersistenceService {
     public Mono<Void> saveGenerationLog(String logType, JSONObject log) {
         // 生成记录当前只接受图片和视频两类。
         if (!"image".equals(logType) && !"video".equals(logType)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成记录类型必须是image或video"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.generationRecordTypeMustBeImageOrVideo")));
         }
         SnapshotMetadata metadata = parseSnapshotMetadata(log, "生成记录");
         return currentUserProvider.currentUserId().flatMap(userId -> repository.findGenerationLogById(userId, metadata.id())
@@ -929,20 +929,20 @@ public class PersistenceService {
     public Mono<Void> renameGenerationLogTitle(String id, String title) {
         String recordId = firstNonEmpty(id);
         if (!StringUtils.hasText(recordId)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "记录ID不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.recordIDIsRequired")));
         }
         String normalizedTitle = firstNonEmpty(title);
         if (!StringUtils.hasText(normalizedTitle)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "标题不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.titleIsRequired")));
         }
         if (normalizedTitle.length() > GENERATION_LOG_TITLE_MAX_LENGTH) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "标题不能超过100个字符"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.titleMustNotExceed100Characters")));
         }
         return currentUserProvider.currentUserId().flatMap(userId ->
                 repository.renameGenerationLogTitle(userId, recordId, normalizedTitle)
                         .flatMap(rowsUpdated -> {
                             if (rowsUpdated == null || rowsUpdated <= 0) {
-                                return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "生成记录不存在"));
+                                return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.generationRecordNotFound")));
                             }
                             log.info("修改生成记录标题成功: userId={}, id={}, title={}", userId, recordId, normalizedTitle);
                             return Mono.<Void>empty();
@@ -958,12 +958,12 @@ public class PersistenceService {
     public Mono<Void> markGenerationLogViewed(String id) {
         String recordId = firstNonEmpty(id);
         if (!StringUtils.hasText(recordId)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "记录ID不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.recordIDIsRequired")));
         }
         return currentUserProvider.currentUserId().flatMap(userId -> repository.markGenerationLogViewed(userId, recordId)
                 .flatMap(rowsUpdated -> {
                     if (rowsUpdated == null || rowsUpdated <= 0) {
-                        return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "生成记录不存在"));
+                        return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.generationRecordNotFound")));
                     }
                     log.info("标记生成记录已查看: userId={}, id={}", userId, recordId);
                     return Mono.<Void>empty();
@@ -986,7 +986,7 @@ public class PersistenceService {
     public Mono<Void> saveOrUpdateGenerationRound(Long userId, String sessionId, String logType, String title, JSONObject round) {
         String roundId = textField(round, "id");
         if (!StringUtils.hasText(roundId)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "生成轮次ID不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.generationRoundIDIsRequired")));
         }
         JSONArray activities = agentActivityService.activitiesForRound(sessionId, round);
         if (!activities.isEmpty()) {
@@ -1214,13 +1214,13 @@ public class PersistenceService {
                         .flatMap(fileBytes -> {
                             String kind = normalizeMediaKind(input.kind());
                             if ("avatar".equals(kind) && fileBytes.length > AVATAR_MAX_FILE_SIZE_BYTES) {
-                                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "头像图片不能超过 2MB"));
+                                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.avatarMustNotExceed2MB")));
                             }
                             return getPlatformObjectStorageConfig().flatMap(objectStorageConfig -> {
                                 String mimeType = firstNonEmpty(input.mimeType(), file.headers().getContentType() == null ? null : file.headers().getContentType().toString(), URLConnection.guessContentTypeFromName(file.filename()), "application/octet-stream");
                                 if ("audio".equals(kind)) {
                                     if (fileBytes.length < 1 || fileBytes.length > 15L * 1024 * 1024) {
-                                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "音频不能为空，且单文件不能超过15 MB"));
+                                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.audioIsRequiredAndMustNotExceed15MB")));
                                     }
                                 }
                                 String storageKey = firstNonEmpty(input.storageKey(), kind + ":" + newId());
@@ -1273,10 +1273,10 @@ public class PersistenceService {
     public Mono<PersistenceDtos.UploadedMediaResponse> registerRemoteMedia(PersistenceDtos.RegisterRemoteMediaRequest input) {
         // 远程媒体只登记URL和元数据，不执行文件上传。
         if (!StringUtils.hasText(input.sourceUrl())) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "远程URL不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.remoteURLIsRequired")));
         }
         if ("audio".equalsIgnoreCase(input.kind())) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "音频必须通过上传接口校验真实格式和时长"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.uploadAudioToValidateItsFormatAndDuration")));
         }
         return currentUserProvider.currentUserId().flatMap(userId -> registerRemoteMediaForUser(userId, input));
     }
@@ -1291,10 +1291,10 @@ public class PersistenceService {
     public Mono<PersistenceDtos.UploadedMediaResponse> registerRemoteMediaForUser(Long userId, PersistenceDtos.RegisterRemoteMediaRequest input) {
         // AI异步任务没有请求上下文时，通过显式用户ID登记第三方返回的原始媒体URL，不上传对象存储。
         if (!StringUtils.hasText(input.sourceUrl())) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "远程URL不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.remoteURLIsRequired")));
         }
         if ("audio".equalsIgnoreCase(input.kind())) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "音频必须通过上传接口校验真实格式和时长"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.uploadAudioToValidateItsFormatAndDuration")));
         }
         String sourceUrl = input.sourceUrl().trim();
         return aiHttpClient.validateRemoteMediaUrl(sourceUrl)
@@ -1447,7 +1447,7 @@ public class PersistenceService {
         // 媒体查询同时限定用户ID和媒体存储键。
         return repository.getMedia(userId, storageKey)
                 .map(this::mediaResponse)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "媒体不存在")));
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.mediaNotFound"))));
     }
 
     /**
@@ -1461,17 +1461,17 @@ public class PersistenceService {
     public Mono<DownloadedMediaFile> downloadVideoMediaToFileForUser(Long userId, String storageKey, Path target) {
         String normalizedStorageKey = firstNonEmpty(storageKey);
         if (!StringUtils.hasText(normalizedStorageKey)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "视频媒体存储键不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.videoStorageKeyIsRequired")));
         }
         return repository.getMedia(userId, normalizedStorageKey)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "视频媒体不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.videoMediaNotFound"))))
                 .flatMap(record -> {
                     if (!"video".equals(normalizeMediaKind(record.getKind()))) {
-                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "合成输入必须是视频媒体"));
+                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.compositionInputsMustBeVideos")));
                     }
                     String sourceUrl = firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl());
                     if (!StringUtils.hasText(sourceUrl)) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "视频媒体没有可下载的地址"));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoHasNoDownloadURL")));
                     }
                     String mimeType = firstNonEmpty(record.getMimeType(), "video/mp4");
                     long maximumBytes = Math.max(1L, properties.getAi().getVideoComposition().getMaximumInputBytes());
@@ -1490,14 +1490,14 @@ public class PersistenceService {
      */
     public Mono<DownloadedMediaFile> downloadAudioMediaToFileForUser(Long userId, String storageKey, Path target) {
         return repository.getMedia(userId, storageKey)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "音频媒体不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.audioMediaNotFound"))))
                 .flatMap(record -> {
                     if (!"audio".equals(normalizeMediaKind(record.getKind()))) {
                         return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "分镜音轨必须使用音频媒体"));
                     }
                     String sourceUrl = firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl());
                     if (!StringUtils.hasText(sourceUrl)) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "音频媒体没有可下载的地址"));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.audioMediaHasNoDownloadURL")));
                     }
                     return aiHttpClient.downloadRemoteMediaToFile(sourceUrl, firstNonEmpty(record.getMimeType(), "audio/mpeg"),
                                     target, Math.max(1L, properties.getAi().getVideoComposition().getMaximumInputBytes()))
@@ -1515,16 +1515,16 @@ public class PersistenceService {
     public Mono<Void> validateVideoMediaForUser(Long userId, String storageKey) {
         String normalizedStorageKey = firstNonEmpty(storageKey);
         if (!StringUtils.hasText(normalizedStorageKey)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "视频媒体存储键不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.videoStorageKeyIsRequired")));
         }
         return repository.getMedia(userId, normalizedStorageKey)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "视频媒体不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.videoMediaNotFound"))))
                 .flatMap(record -> {
                     if (!"video".equals(normalizeMediaKind(record.getKind()))) {
-                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "合成输入必须是视频媒体"));
+                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.compositionInputsMustBeVideos")));
                     }
                     if (!StringUtils.hasText(firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl()))) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "视频媒体没有可下载的地址"));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoHasNoDownloadURL")));
                     }
                     return Mono.empty();
                 });
@@ -1541,14 +1541,14 @@ public class PersistenceService {
     public Mono<PersistenceDtos.DownloadedMedia> downloadMedia(String storageKey) {
         String normalizedStorageKey = firstNonEmpty(storageKey);
         if (!StringUtils.hasText(normalizedStorageKey)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "媒体存储键不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.mediaStorageKeyIsRequired")));
         }
         return currentUserProvider.currentUserId().flatMap(userId -> repository.getMedia(userId, normalizedStorageKey)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "媒体不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.mediaNotFound"))))
                 .flatMap(record -> {
                     String sourceUrl = firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl());
                     if (!StringUtils.hasText(sourceUrl)) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "媒体没有可下载的地址"));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.mediaHasNoDownloadURL")));
                     }
                     String defaultMimeType = firstNonEmpty(record.getMimeType(), "application/octet-stream");
                     log.info("开始下载媒体: userId={}, storageKey={}", userId, normalizedStorageKey);
@@ -1592,17 +1592,17 @@ public class PersistenceService {
     public Mono<PersistenceDtos.UploadedMediaResponse> uploadRemoteMediaToObjectStorage(String storageKey) {
         String normalizedStorageKey = firstNonEmpty(storageKey);
         if (!StringUtils.hasText(normalizedStorageKey)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "媒体存储键不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.mediaStorageKeyIsRequired")));
         }
         log.info("开始转存远程媒体到默认对象存储: storageKey={}", normalizedStorageKey);
         return currentUserProvider.currentUserId().flatMap(userId -> repository.getMedia(userId, normalizedStorageKey)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "媒体不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.mediaNotFound"))))
                 .flatMap(record -> {
                     if (StringUtils.hasText(record.getObjectStorageUrl())) {
                         return Mono.just(mediaResponse(record));
                     }
                     if (!StringUtils.hasText(record.getSourceUrl())) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "媒体没有可转存的远程地址"));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.mediaHasNoRemoteURLToStore")));
                     }
                     String originalMimeType = firstNonEmpty(record.getMimeType(), "application/octet-stream");
                     return aiHttpClient.downloadRemoteBinary(record.getSourceUrl(), originalMimeType)
@@ -1682,13 +1682,13 @@ public class PersistenceService {
     public Mono<PersistenceDtos.ObjectStorageConfig> getPlatformObjectStorageConfig() {
         // 仅在服务端解密密钥，普通用户永远无法读取对象存储密钥。
         return repository.getDefaultPlatformObjectStorage()
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员配置默认对象存储")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.askTheAdministratorToConfigureDefaultObjectStorage"))))
                 .flatMap(record -> decryptObjectStorage(record).map(config -> {
             try {
                 objectStorageService.validate(config);
             } catch (BusinessException exception) {
                 log.info("全站默认对象存储配置不完整: storageId={}", record.getStorageId());
-                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员完整配置默认对象存储");
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.askTheAdministratorToCompleteDefaultObjectStorageConfiguration"));
             }
             return config;
         }));
@@ -1764,7 +1764,7 @@ public class PersistenceService {
     /** 创建对象存储空地址错误，避免上传适配器返回null时静默结束响应式链路。 */
     private <T> Mono<T> uploadedObjectUrlMissing(String objectKey) {
         log.error("对象存储上传未返回公开访问地址: key={}", objectKey);
-        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "对象存储上传成功但未返回公开访问地址"));
+        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.uploadSucceededWithoutAPublicURL")));
     }
 
     /** 校验对象存储上传结果，避免空地址被响应式链路转换为空信号。 */
@@ -1854,11 +1854,11 @@ public class PersistenceService {
     private SnapshotMetadata parseSnapshotMetadata(JSONObject data, String label) {
         // 快照类数据必须是JSON对象，并且必须包含ID。
         if (data == null) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "JSON数据格式不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidJSONData"));
         }
         String id = textField(data, "id");
         if (!StringUtils.hasText(id)) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, label + "ID不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.iDIsRequired", label));
         }
         return new SnapshotMetadata(id, firstNonEmpty(textField(data, "title"), "未命名"));
     }
@@ -1877,7 +1877,7 @@ public class PersistenceService {
                 return exception;
             }
             log.error("加密敏感配置失败", exception);
-            return new BusinessException(ErrorCode.SYSTEM_ERROR, "加密敏感配置失败: " + exception.getMessage());
+            return new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToEncryptSensitiveConfiguration", exception.getMessage()));
         });
     }
 
@@ -1898,7 +1898,7 @@ public class PersistenceService {
                 return exception;
             }
             log.error("解密敏感配置失败", exception);
-            return new BusinessException(ErrorCode.SYSTEM_ERROR, "解密敏感配置失败: " + exception.getMessage());
+            return new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToDecryptSensitiveConfiguration", exception.getMessage()));
         });
     }
 
@@ -2129,7 +2129,7 @@ public class PersistenceService {
             // 空字符串按空对象处理，保证前端读取旧空数据时不报错。
             return JSON.parseObject(StringUtils.hasText(value) ? value : "{}");
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "解析JSON失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToParseJSON", exception.getMessage()));
         }
     }
 
@@ -2144,7 +2144,7 @@ public class PersistenceService {
             // 空节点按空对象序列化，避免数据库写入null。
             return JSON.toJSONString(value == null ? new JSONObject() : value);
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "序列化JSON失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToSerializeJSON", exception.getMessage()));
         }
     }
 

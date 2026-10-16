@@ -1,15 +1,20 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { resolveModelRequestConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 
 export type AgnesVideoResolution = "480p" | "720p" | "1080p";
 export type AgnesVideoRatio = "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
 
-export const agnesVideoRatioOptions: Array<{ value: AgnesVideoRatio; label: string }> = [
-    { value: "16:9", label: "横屏" },
-    { value: "9:16", label: "竖屏" },
-    { value: "1:1", label: "方形" },
-    { value: "4:3", label: "标准横屏" },
-    { value: "3:4", label: "标准竖屏" },
-];
+/** 按调用方语言生成显示文案，业务值保持不变。 */
+export const createAgnesVideoRatioOptions = (translator: typeof translate = translate): Array<{ value: AgnesVideoRatio; label: string }> => ([
+    { value: "16:9", get label() { return translator("generation.landscape"); } },
+    { value: "9:16", get label() { return translator("generation.portrait"); } },
+    { value: "1:1", get label() { return translator("generation.square"); } },
+    { value: "4:3", get label() { return translator("generation.standardLandscape"); } },
+    { value: "3:4", get label() { return translator("generation.standardPortrait"); } },
+]);
+
+export const agnesVideoRatioOptions = createAgnesVideoRatioOptions();
 
 export const agnesVideoDurationOptions = [3, 5, 10, 18];
 

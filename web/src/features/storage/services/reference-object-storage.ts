@@ -1,4 +1,6 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+
 
 import { getImageBlob } from "@/features/storage/services/image-storage";
 import { uploadObjectToStorage, uploadRemoteObjectToStorage } from "@/features/storage/services/object-storage";
@@ -25,7 +27,7 @@ export async function uploadMissingReferenceImagesToObjectStorage(references: Re
                 return;
             }
             const blob = await readReferenceImageBlob(image);
-            if (!blob) throw new Error(`${image.name || `参考图${index + 1}`}读取失败，请重新添加后再生成视频`);
+            if (!blob) throw new Error(translate("storage.failedToReadAddItAgainBeforeGenerating", { value0: image.name || `参考图${index + 1}` }));
             const objectStorage = await uploadObjectToStorage({
                 body: blob,
                 kind: "image",
@@ -50,7 +52,7 @@ export async function uploadMissingReferenceAudiosToObjectStorage(references: Re
     await Promise.all(
         missing.map(async (audio, index) => {
             if (!audio.storageKey || !audio.url) {
-                throw new Error(`${audio.name || `参考音频${index + 1}`}缺少已上传媒体，无法转存到云储存`);
+                throw new Error(translate("storage.hasNoUploadedMediaForCloudStorage", { value0: audio.name || `参考音频${index + 1}` }));
             }
             const objectStorage = await uploadRemoteObjectToStorage({ storageKey: audio.storageKey, sourceUrl: audio.url, kind: "audio", mimeType: audio.type });
             uploadedById.set(audio.id, { ...audio, objectStorage });

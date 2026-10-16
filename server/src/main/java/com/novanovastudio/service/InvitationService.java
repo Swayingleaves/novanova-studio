@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.InvitationDtos;
@@ -62,7 +64,7 @@ public class InvitationService {
         }
         String normalizedCode = invitationCode.trim().toUpperCase();
         return invitationRepository.findInviterUserId(normalizedCode)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邀请码无效")));
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.invalidInvitationCode"))));
     }
 
     /**
@@ -73,7 +75,7 @@ public class InvitationService {
     public Mono<InvitationDtos.InvitationInfoResponse> getInvitationInfo() {
         return currentUserProvider.currentUserId()
                 .flatMap(invitationRepository::findInvitationCode)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "用户不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.userNotFound"))))
                 .map(InvitationDtos.InvitationInfoResponse::new);
     }
 }

@@ -1,0 +1,10 @@
+{
+    "thinking": "Thinking...",
+    "thinking_548b0e": "Thinking (",
+    "generationStopped": "Generation stopped",
+    "failedToStopGeneration": "Failed to stop generation",
+    "unknownError": "Unknown error",
+    "generationConnectionClosedGenerateAgain": "Generation connection closed; generate again",
+    "failedToSend": "Failed to send",
+    "generationFailed": "Generation failed"
+}

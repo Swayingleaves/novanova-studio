@@ -1,4 +1,8 @@
 "use client";
+import { currentLanguageTag } from "@/features/locale/translate";
+
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { App, Button, Input, Popover, Tooltip } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
@@ -8,7 +12,7 @@ import { ArrowUp, BookOpenText, Bot, LoaderCircle, Square, X } from "lucide-reac
 import type { CreationComposerProps } from "@/features/generation/components/creation-workspace-types";
 import { CreditCostDisplay } from "@/features/generation/constants/credits";
 import { GenerationStyleCover, GenerationStyleMenu } from "@/features/generation/components/generation-style-picker";
-import { filterGenerationStyles, GENERATION_STYLE_SELECTION_LIMIT_MESSAGE, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
+import { filterGenerationStyles, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { getStyleCommandRange, parseGenerationStyleMessage, removeStyleCommand } from "@/features/generation/lib/style-command";
 import type { SkillOption } from "@/services/api/server";
 
@@ -43,6 +47,7 @@ export function CreationComposer({
     onStop,
     notice,
 }: CreationComposerProps) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const inputRef = useRef<TextAreaRef>(null);
     const focusedValueRef = useRef(false);
@@ -59,7 +64,7 @@ export function CreationComposer({
     const availableSkills = skillOptions ?? [];
     const filteredStyles = useMemo(() => {
         return filterGenerationStyles(availableStyles, styleQuery);
-    }, [availableStyles, styleQuery]);
+    }, [availableStyles, styleQuery, translate.locale]);
 
     useEffect(() => {
         if (!focusWhenValueSet || !value.trim() || focusedValueRef.current) return;
@@ -86,7 +91,7 @@ export function CreationComposer({
 
     const chooseStyle = (style: NonNullable<CreationComposerProps["styleOptions"]>[number]) => {
         if (activeStyles.some((selected) => selected.id === style.id)) {
-            message.info("该风格已选择");
+            message.info(translate("generation.styleAlreadySelected"));
             return;
         }
         onStyleSelect?.(style);
@@ -128,7 +133,7 @@ export function CreationComposer({
         const additions = parsed.styles.filter((style) => !activeStyles.some((selected) => selected.id === style.id));
         const remaining = Math.max(0, MAX_GENERATION_STYLE_SELECTION_COUNT - activeStyles.length);
         if (additions.length > remaining) {
-            message.warning(GENERATION_STYLE_SELECTION_LIMIT_MESSAGE);
+            message.warning(translate("generation.selectUpToStyles", { value0: MAX_GENERATION_STYLE_SELECTION_COUNT }));
         }
         const nextValue = `${value.slice(0, start)}${parsed.prompt}${value.slice(end)}`;
         additions.slice(0, remaining).forEach((style) => onStyleSelect(style));
@@ -179,10 +184,10 @@ export function CreationComposer({
                                 <Bot className="size-3.5" strokeWidth={1.6} />
                                 <span className="size-1.5 rounded-full bg-[var(--studio-action)] shadow-[0_0_0_3px_var(--studio-primary-soft)]" />
                             </span>
-                            <span className="sr-only">Agent 已就绪</span>
+                            <span className="sr-only">{translate("generation.agentReady")}</span>
                             <span className="truncate">{agentLabel}</span>
                         </span>
-                        <span>{queued ? "排队中" : running ? "生成中" : `${value.length} / 2000`}</span>
+                        <span>{queued ? translate("generation.queued") : running ? translate("generation.generating") : `${value.length} / 2000`}</span>
                     </div>
                     {notice}
 
@@ -192,7 +197,7 @@ export function CreationComposer({
                                 <div className="creation-composer-chip">
                                     <GenerationStyleCover style={selectedSkill} className="size-5 shrink-0 overflow-hidden rounded-sm" />
                                     <span className="min-w-0 max-w-32 truncate text-xs font-medium text-[var(--studio-muted)]">{selectedSkill.name}</span>
-                                    <button type="button" className="creation-composer-chip-remove" onClick={onSkillRemove} aria-label={`移除技能${selectedSkill.name}`}>
+                                    <button type="button" className="creation-composer-chip-remove" onClick={onSkillRemove} aria-label={translate("generation.removeSkill", { value0: selectedSkill.name })}>
                                         <X className="size-3.5" />
                                     </button>
                                 </div>
@@ -201,7 +206,7 @@ export function CreationComposer({
                                 <div key={`style-${style.id}`} className="creation-composer-chip">
                                     <GenerationStyleCover style={style} className="size-5 shrink-0 overflow-hidden rounded-sm" />
                                     <span className="min-w-0 max-w-32 truncate text-xs font-medium text-[var(--studio-muted)]">{style.name}</span>
-                                    <button type="button" className="creation-composer-chip-remove" onClick={() => onStyleRemove?.(style.id)} aria-label={`移除风格${style.name}`}>
+                                    <button type="button" className="creation-composer-chip-remove" onClick={() => onStyleRemove?.(style.id)} aria-label={translate("generation.removeStyle", { value0: style.name })}>
                                         <X className="size-3.5" />
                                     </button>
                                 </div>
@@ -210,7 +215,7 @@ export function CreationComposer({
                                 <div key={item.id} className="creation-composer-chip">
                                     <div className="shrink-0">{item.preview}</div>
                                     <span className="min-w-0 max-w-32 truncate text-xs font-medium text-[var(--studio-muted)]">{item.label}</span>
-                                    <button type="button" className="creation-composer-chip-remove" onClick={item.onRemove} aria-label={`移除${item.label}`}>
+                                    <button type="button" className="creation-composer-chip-remove" onClick={item.onRemove} aria-label={translate("generation.remove", { value0: item.label })}>
                                         <X className="size-3.5" />
                                     </button>
                                 </div>
@@ -306,7 +311,7 @@ export function CreationComposer({
                         <div className="flex shrink-0 items-center gap-2">
                             {submitActions.map(renderAction)}
                             {requestActive && onStop ? (
-                                <Tooltip title={queued ? "取消排队" : "停止生成"}>
+                                <Tooltip title={queued ? translate("generation.leaveQueue") : translate("generation.stopGeneration")}>
                                     <Button
                                         type="primary"
                                         size="small"
@@ -314,7 +319,7 @@ export function CreationComposer({
                                         disabled={stopping}
                                         loading={stopping}
                                         onClick={onStop}
-                                        aria-label={stopping ? "正在停止生成" : queued ? "取消排队" : "停止生成"}
+                                        aria-label={stopping ? translate("generation.stoppingGeneration") : queued ? translate("generation.leaveQueue") : translate("generation.stopGeneration")}
                                         icon={<Square className="size-3.5 fill-current" strokeWidth={2.2} />}
                                     />
                                 </Tooltip>
@@ -324,13 +329,13 @@ export function CreationComposer({
                                     className="creation-composer-submit-trigger creation-composer-submit-trigger-cost"
                                     disabled={!canSubmit || requestActive}
                                     onClick={onSubmit}
-                                    aria-label={queued ? "排队中" : running ? "生成中" : creditCost === undefined ? "生成" : creditCost === null ? "当前配置无法报价" : `生成，当前会消耗 ${creditCost.toLocaleString()} 积分`}
+                                    aria-label={queued ? translate("generation.queued") : running ? translate("generation.generating") : creditCost === undefined ? translate("generation.generate") : creditCost === null ? translate("generation.quoteUnavailableForThisConfiguration") : translate("generation.generateCostsCredits", { value0: creditCost.toLocaleString(currentLanguageTag()) })}
                                 >
                                     {queued || running ? (
-                                        queued ? "排队中" : "生成中"
+                                        queued ? translate("generation.queued") : translate("generation.generating")
                                     ) : (
                                         <>
-                                            {creditCost === undefined ? null : creditCost === null ? <span className="text-xs font-medium">不可报价</span> : <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />}
+                                            {creditCost === undefined ? null : creditCost === null ? <span className="text-xs font-medium">{translate("generation.quoteUnavailable")}</span> : <CreditCostDisplay creditCost={creditCost} className="text-xs font-medium" />}
                                             <ArrowUp className="size-[18px] shrink-0" strokeWidth={2.1} />
                                         </>
                                     )}
@@ -362,18 +367,19 @@ function SkillMenu({
     onOpenChange: (open: boolean) => void;
     onSelect?: (skill: SkillOption) => void;
 }) {
+    const translate = useTranslation();
     const content = (
-        <div className="w-[min(24rem,calc(100vw-24px))] p-1" role="dialog" aria-label="技能列表">
+        <div className="w-[min(24rem,calc(100vw-24px))] p-1" role="dialog" aria-label={translate("generation.skills")}>
             <div className="flex items-center justify-between gap-3 px-2 pb-2 pt-1">
                 <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-[var(--studio-ink)]">
                     <BookOpenText className="size-4 shrink-0 text-[var(--studio-action)]" />
-                    <span>技能</span>
+                    <span>{translate("generation.skill_99aea2")}</span>
                 </div>
             </div>
             {loading ? (
                 <div className="flex min-h-28 flex-col items-center justify-center gap-2 text-xs text-[var(--studio-muted)]">
                     <LoaderCircle className="size-5 animate-spin" />
-                    <span>技能加载中</span>
+                    <span>{translate("generation.loadingSkills")}</span>
                 </div>
             ) : error ? (
                 <div className="flex min-h-28 flex-col items-center justify-center gap-2 text-xs text-[var(--studio-muted)]">
@@ -408,7 +414,7 @@ function SkillMenu({
             ) : (
                 <div className="flex min-h-28 flex-col items-center justify-center gap-2 text-xs text-[var(--studio-muted)]">
                     <BookOpenText className="size-5" />
-                    <span>暂无可用技能</span>
+                    <span>{translate("generation.noAvailableSkills")}</span>
                 </div>
             )}
         </div>
@@ -430,10 +436,9 @@ function SkillMenu({
             }}
         >
             <span className="inline-flex">
-                <Tooltip title={selectedSkill ? `已选择技能：${selectedSkill.name}` : "选择技能"}>
+                <Tooltip title={selectedSkill ? translate("generation.selectedSkill", { value0: selectedSkill.name }) : translate("generation.selectSkill")}>
                     <Button size="small" className="creation-composer-action" icon={<BookOpenText className="size-3.5" />} aria-expanded={open} aria-haspopup="dialog">
-                        技能
-                    </Button>
+                        {translate("generation.skill_99aea2")}</Button>
                 </Tooltip>
             </span>
         </Popover>

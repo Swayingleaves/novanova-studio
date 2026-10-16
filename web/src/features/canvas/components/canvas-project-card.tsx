@@ -1,4 +1,9 @@
 "use client";
+import { currentLanguageTag } from "@/features/locale/translate";
+
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { Check, Download, Pencil, Trash2, X } from "lucide-react";
 import { useState } from "react";
@@ -16,6 +21,7 @@ type CanvasProjectCardProps = {
 };
 
 export function CanvasProjectCard({ document }: CanvasProjectCardProps) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const router = useRouter();
     const renameDocument = useCanvasStore((state) => state.renameDocument);
@@ -38,9 +44,9 @@ export function CanvasProjectCard({ document }: CanvasProjectCardProps) {
         if (isExporting) return;
         setIsExporting(true);
         try {
-            await exportCanvasDocuments([document], document.identity.title || "无限画布");
+            await exportCanvasDocuments([document], document.identity.title || translate("canvas.infiniteCanvas"));
         } catch {
-            message.error("导出失败，请稍后重试");
+            message.error(translate("canvas.exportFailedTryAgainLater"));
         } finally {
             setIsExporting(false);
         }
@@ -48,7 +54,7 @@ export function CanvasProjectCard({ document }: CanvasProjectCardProps) {
 
     return (
         <article className="studio-panel-solid flex flex-col gap-3 p-3 transition hover:border-[var(--studio-primary-line)] hover:shadow-[0_8px_22px_rgba(46,16,101,0.08)]">
-            <button type="button" className="overflow-hidden rounded-lg text-left" onClick={openDocument} aria-label={`打开画布 ${document.identity.title}`}>
+            <button type="button" className="overflow-hidden rounded-lg text-left" onClick={openDocument} aria-label={translate("canvas.openCanvas", { value0: document.identity.title })}>
                 <CanvasProjectPreview document={document} />
             </button>
 
@@ -58,14 +64,14 @@ export function CanvasProjectCard({ document }: CanvasProjectCardProps) {
                     className="mt-1 size-4 accent-[var(--studio-primary)]"
                     checked={selectedDocumentIds.includes(documentId)}
                     onChange={(event) => setDocumentSelected(documentId, event.target.checked)}
-                    aria-label={`选择 ${document.identity.title}`}
+                    aria-label={translate("canvas.select", { value0: document.identity.title })}
                 />
                 <div className="min-w-0 flex-1">
                     {editing ? (
                         <Input
                             autoFocus
                             value={renameDraft.title}
-                            aria-label="画布名称"
+                            aria-label={translate("canvas.canvasName")}
                             onChange={(event) => changeRenameTitle(event.target.value)}
                             onKeyDown={(event) => {
                                 if (event.key === "Enter") saveRename();
@@ -88,14 +94,14 @@ export function CanvasProjectCard({ document }: CanvasProjectCardProps) {
                 <div className="flex items-center gap-1">
                     {editing ? (
                         <>
-                            <Button type="text" size="small" icon={<Check className="size-4" />} onClick={saveRename}>保存</Button>
-                            <Button type="text" size="small" icon={<X className="size-4" />} onClick={endRename}>取消</Button>
+                            <Button type="text" size="small" icon={<Check className="size-4" />} onClick={saveRename}>{translate("canvas.save")}</Button>
+                            <Button type="text" size="small" icon={<X className="size-4" />} onClick={endRename}>{translate("canvas.cancel")}</Button>
                         </>
                     ) : (
                         <>
-                            <Button type="text" size="small" icon={<Download className="size-4" />} loading={isExporting} disabled={isExporting} onClick={() => void exportDocument()}>导出</Button>
-                            <Button type="text" size="small" icon={<Pencil className="size-4" />} onClick={() => beginRename(documentId, document.identity.title)} aria-label="重命名" />
-                            <Button danger type="text" size="small" icon={<Trash2 className="size-4" />} onClick={() => requestDocumentDeletion([documentId])} aria-label="删除" />
+                            <Button type="text" size="small" icon={<Download className="size-4" />} loading={isExporting} disabled={isExporting} onClick={() => void exportDocument()}>{translate("canvas.export")}</Button>
+                            <Button type="text" size="small" icon={<Pencil className="size-4" />} onClick={() => beginRename(documentId, document.identity.title)} aria-label={translate("canvas.rename")} />
+                            <Button danger type="text" size="small" icon={<Trash2 className="size-4" />} onClick={() => requestDocumentDeletion([documentId])} aria-label={translate("canvas.delete")} />
                         </>
                     )}
                 </div>
@@ -105,13 +111,13 @@ export function CanvasProjectCard({ document }: CanvasProjectCardProps) {
 }
 
 function describeCanvasDocument(document: CanvasDocument): string {
-    const nodeText = `${document.scene.nodes.length} 个节点`;
-    const connectionText = `${document.scene.connections.length} 条连线`;
+    const nodeText = translate("canvas.nodes_4f04bf", { value0: document.scene.nodes.length });
+    const connectionText = translate("canvas.connections", { value0: document.scene.connections.length });
     return `${nodeText}，${connectionText}`;
 }
 
 function formatCanvasDocumentTime(value: string): string {
     const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "更新时间未知";
-    return `更新于 ${new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date)}`;
+    if (Number.isNaN(date.getTime())) return translate("canvas.updateTimeUnknown");
+    return translate("canvas.updated", { value0: new Intl.DateTimeFormat(currentLanguageTag(), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date) });
 }

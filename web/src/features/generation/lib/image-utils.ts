@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { ReferenceImage } from "@/features/generation/types/image";
 
 /** 字节单位阶梯，1024 进制。 */
@@ -40,9 +42,9 @@ export function formatDuration(ms: number): string {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     if (minutes === 0) {
-        return `${seconds}秒`;
+        return translate("generation.s_9c8168", { value0: seconds });
     }
-    return `${minutes}分${String(seconds).padStart(2, "0")}秒`;
+    return translate("generation.mS", { value0: minutes, value1: String(seconds).padStart(2, "0") });
 }
 
 /**
@@ -73,7 +75,7 @@ export function readFileAsDataUrl(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result ?? ""));
-        reader.onerror = () => reject(new Error("读取图片失败"));
+        reader.onerror = () => reject(new Error(translate("generation.failedToReadImage")));
         reader.readAsDataURL(file);
     });
 }

@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 export const MAX_CONVERSATION_TITLE_LENGTH = 100;
 
 /**
@@ -19,10 +21,10 @@ export function normalizeConversationTitle(value) {
 export function validateConversationTitle(value) {
     const normalizedTitle = normalizeConversationTitle(value);
     if (!normalizedTitle) {
-        return "标题不能为空";
+        return translate("generation.titleIsRequired");
     }
     if (normalizedTitle.length > MAX_CONVERSATION_TITLE_LENGTH) {
-        return `标题不能超过 ${MAX_CONVERSATION_TITLE_LENGTH} 个字符`;
+        return translate("generation.titleMustNotExceedCharacters", { value0: MAX_CONVERSATION_TITLE_LENGTH });
     }
     return "";
 }

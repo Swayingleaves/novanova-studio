@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { CanvasDirectorDeskProject } from "@/features/canvas/types";
 import { evaluateDirectorDeskProject } from "./director-desk-evaluator";
 
@@ -6,8 +8,8 @@ export function removeDirectorDeskObjects(project: CanvasDirectorDeskProject, ob
     const identifiers = new Set(objectIds);
     for (const identifier of identifiers) {
         const object = project.objects.find((item) => item.id === identifier);
-        if (!object) throw new Error("要删除的场景对象不存在");
-        if (object.locked) throw new Error("已锁定对象不能删除");
+        if (!object) throw new Error(translate("directorDesk.sceneObjectToDeleteNotFound"));
+        if (object.locked) throw new Error(translate("directorDesk.lockedObjectsCannotBeDeleted"));
     }
     const followingCameras = project.cameras.filter((camera) => camera.targetObjectId && identifiers.has(camera.targetObjectId));
     const evaluatedCameras = followingCameras.length ? evaluateDirectorDeskProject(project, timeMilliseconds).cameras : [];

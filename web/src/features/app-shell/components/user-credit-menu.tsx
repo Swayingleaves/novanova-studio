@@ -1,4 +1,8 @@
 "use client";
+import { currentLanguageTag } from "@/features/locale/translate";
+
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useState } from "react";
 import type { MenuProps } from "antd";
@@ -11,7 +15,7 @@ import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { logoutCurrentUser } from "@/services/api/server";
 import { cn } from "@/shared/lib/utils";
 
-const creditNumberFormatter = new Intl.NumberFormat("zh-CN");
+const creditNumberFormatter = { format: (value: number) => new Intl.NumberFormat(currentLanguageTag()).format(value) };
 
 type UserCreditMenuProps = {
     className?: string;
@@ -24,6 +28,7 @@ type UserCreditMenuProps = {
  * 积分实时值直接订阅 useUserStore，SSE 刷新由 client-root-init 驱动，无需额外接入。
  */
 export function UserCreditMenu({ className }: UserCreditMenuProps) {
+    const translate = useTranslation();
     const pathname = usePathname();
     const router = useRouter();
     const { message } = App.useApp();
@@ -40,7 +45,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
             // 后端使用无状态 Token，退出登录以清理本地会话为准。
         }
         clearSession();
-        message.success("已退出登录");
+        message.success(translate("appShell.signedOut"));
         router.replace("/");
     };
 
@@ -54,10 +59,10 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
                     className,
                 )}
                 onClick={() => useUserStore.getState().openAuthModal()}
-                aria-label="登录"
+                aria-label={translate("appShell.signIn")}
             >
                 <UserCircle className="size-4" />
-                <span className="text-xs font-medium">登录</span>
+                <span className="text-xs font-medium">{translate("appShell.signIn")}</span>
             </button>
         );
     }
@@ -86,8 +91,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
                     onClick={() => setMenuOpen(false)}
                     className={cn("text-sm", pathname === "/profile" && "text-[var(--studio-ink)]")}
                 >
-                    个人信息
-                </Link>
+                    {translate("appShell.profile")}</Link>
             ),
         },
         { type: "divider" },
@@ -100,8 +104,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
                     onClick={() => setMenuOpen(false)}
                     className={cn("text-sm", pathname === "/check-in" && "text-[var(--studio-ink)]")}
                 >
-                    签到
-                </Link>
+                    {translate("appShell.checkIn")}</Link>
             ),
         },
         { type: "divider" },
@@ -114,8 +117,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
                     onClick={() => setMenuOpen(false)}
                     className={cn("text-sm", pathname === "/credits/purchase" && "text-[var(--studio-ink)]")}
                 >
-                    购买
-                </Link>
+                    {translate("appShell.purchase")}</Link>
             ),
         },
         {
@@ -127,8 +129,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
                     onClick={() => setMenuOpen(false)}
                     className={cn("text-sm", pathname === "/credits/redeem" && "text-[var(--studio-ink)]")}
                 >
-                    兑换
-                </Link>
+                    {translate("appShell.redeem")}</Link>
             ),
         },
         {
@@ -140,8 +141,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
                     onClick={() => setMenuOpen(false)}
                     className={cn("text-sm", pathname === "/credits" && "text-[var(--studio-ink)]")}
                 >
-                    积分记录
-                </Link>
+                    {translate("appShell.creditRecords")}</Link>
             ),
         },
         ...(user.role === "admin"
@@ -151,8 +151,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
                       icon: <Users className="size-4" />,
                       label: (
                           <Link href="/admin/system" onClick={() => setMenuOpen(false)} className="text-sm">
-                              系统管理
-                          </Link>
+                              {translate("appShell.systemManagement")}</Link>
                       ),
                   },
               ]
@@ -161,7 +160,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
         {
             key: "logout",
             icon: <LogOut className="size-4" />,
-            label: "退出登录",
+            label: translate("appShell.signOut"),
             onClick: () => void handleLogout(),
         },
     ];
@@ -174,7 +173,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
                     "studio-glass inline-flex h-9 items-center gap-1.5 rounded-lg px-2 transition hover:bg-[var(--studio-surface-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]",
                     className,
                 )}
-                aria-label="用户菜单"
+                aria-label={translate("appShell.userMenu")}
             >
                 {creditBalance !== null ? (
                     <span className="inline-flex items-center gap-0.5 text-xs font-semibold tabular-nums text-[var(--studio-primary)]">

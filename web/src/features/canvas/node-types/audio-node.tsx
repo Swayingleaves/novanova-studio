@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { memo, useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
@@ -18,6 +20,7 @@ const AUDIO_SEEK_KEYS = ["ArrowLeft", "ArrowRight", "Home", "End"];
 
 /** 在画布内部播放音频，播放状态不写入文档，卸载时释放媒体资源。 */
 export const AudioNode = memo(function AudioNode({ data, selected }: NodeProps<Node<CanvasAudioNode>>) {
+    const translate = useTranslation();
     const theme = useCanvasTheme();
     const actions = useNodeActions();
     const { token } = antDesignTheme.useToken();
@@ -120,14 +123,14 @@ export const AudioNode = memo(function AudioNode({ data, selected }: NodeProps<N
             playbackRequestRef.current = false;
             if (error instanceof DOMException && error.name === "AbortError") return;
             setFailed(true);
-            message.error("音频播放失败，请重试或替换文件");
+            message.error(translate("canvas.audioPlaybackFailedRetryOrReplaceFile"));
         }
     };
 
     return <>
         <NodeResizer minWidth={280} minHeight={150} isVisible={selected} lineStyle={{ borderColor: theme.node.activeStroke }} handleStyle={{ borderColor: theme.node.activeStroke, backgroundColor: theme.node.panel }} onResizeEnd={(_, frame) => actions.onResize?.(data.id, frame.width, frame.height, { x: frame.x, y: frame.y })} />
         <NodeHoverSurface nodeId={data.id} className="relative flex h-full w-full select-none flex-col rounded-lg border p-3" style={{ background: theme.node.fill, borderColor: selected ? theme.node.activeStroke : theme.node.stroke, color: theme.node.text }}>
-            <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle="音频" onTitleChange={actions.onTitleChange} />
+            <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.audio")} onTitleChange={actions.onTitleChange} />
             {data.content.source ? <div className="nopan nowheel flex min-h-0 flex-1 flex-col gap-2" data-canvas-no-zoom onDoubleClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (AUDIO_SEEK_KEYS.includes(event.key)) event.stopPropagation(); }}>
                 <audio ref={audioRef} src={data.content.source} preload="metadata" onLoadedMetadata={(event) => { event.currentTarget.currentTime = trimStart; setCurrentTime(trimStart); }} onPlay={(event) => { if (!playbackRequestRef.current) { event.currentTarget.pause(); return; } playbackRequestRef.current = false; activateCanvasAudio(event.currentTarget); setPlaying(true); }} onPause={() => { playbackRequestRef.current = false; setPlaying(false); }} onEnded={() => { playbackRequestRef.current = false; setPlaying(false); setCurrentTime(trimEnd); }} onError={() => setFailed(true)} onTimeUpdate={(event) => { const time = event.currentTarget.currentTime; if (time >= trimEnd) { event.currentTarget.pause(); event.currentTarget.currentTime = trimEnd; } setCurrentTime(Math.min(trimEnd, Math.max(trimStart, time))); }} />
                 <div className="relative min-h-0 flex-1 overflow-hidden rounded-lg focus-within:outline focus-within:outline-2 focus-within:outline-offset-2" style={{ background: theme.node.panel }}>
@@ -136,7 +139,7 @@ export const AudioNode = memo(function AudioNode({ data, selected }: NodeProps<N
                     </svg>
                     <div className="nodrag nopan absolute inset-0 p-4">
                         <div ref={waveformRef} className="relative h-full w-full">
-                            <div role="slider" tabIndex={selected && duration ? 0 : -1} aria-label="音频播放进度" aria-valuemin={trimStart} aria-valuemax={trimEnd} aria-valuenow={Math.min(trimEnd, Math.max(trimStart, currentTime))} aria-valuetext={`${formatAudioTime(Math.max(0, currentTime - trimStart))} / ${formatAudioTime(duration)}`} className={`${selected ? "pointer-events-auto" : "pointer-events-none"} nodrag nopan absolute inset-y-0 z-10 w-4 -translate-x-1/2 cursor-ew-resize touch-none`} style={{ left: `${progress * 100}%` }} onPointerDown={handleSeekPointerDown} onPointerMove={handleSeekPointerMove} onPointerUp={handleSeekPointerUp} onPointerCancel={handleSeekPointerUp} onKeyDown={handleSeekKeyDown}>
+                            <div role="slider" tabIndex={selected && duration ? 0 : -1} aria-label={translate("canvas.audioProgress")} aria-valuemin={trimStart} aria-valuemax={trimEnd} aria-valuenow={Math.min(trimEnd, Math.max(trimStart, currentTime))} aria-valuetext={`${formatAudioTime(Math.max(0, currentTime - trimStart))} / ${formatAudioTime(duration)}`} className={`${selected ? "pointer-events-auto" : "pointer-events-none"} nodrag nopan absolute inset-y-0 z-10 w-4 -translate-x-1/2 cursor-ew-resize touch-none`} style={{ left: `${progress * 100}%` }} onPointerDown={handleSeekPointerDown} onPointerMove={handleSeekPointerMove} onPointerUp={handleSeekPointerUp} onPointerCancel={handleSeekPointerUp} onKeyDown={handleSeekKeyDown}>
                                 <span className="absolute left-1/2 top-0 h-full w-1 -translate-x-1/2 rounded-full" style={{ background: token.colorError }} />
                             </div>
                         </div>
@@ -144,10 +147,10 @@ export const AudioNode = memo(function AudioNode({ data, selected }: NodeProps<N
                 </div>
                 <div className="relative flex h-8 shrink-0 items-center justify-between text-sm tabular-nums" style={{ color: theme.node.muted }}>
                     <span>{formatAudioTime(Math.max(0, currentTime - trimStart))} / {formatAudioTime(duration)}</span>
-                    <button type="button" aria-label={playing ? "暂停音频" : failed ? "重试播放音频" : "播放音频"} title={playing ? "暂停" : "播放"} className="absolute left-1/2 grid size-8 -translate-x-1/2 place-items-center rounded-full border focus-visible:outline-2" style={{ borderColor: theme.node.stroke }} onPointerDown={(event) => { event.stopPropagation(); playbackPointerRef.current = { x: event.clientX, y: event.clientY, moved: false }; }} onPointerMove={(event) => { const pointer = playbackPointerRef.current; if (pointer && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 3) pointer.moved = true; }} onClick={(event) => { const pointer = playbackPointerRef.current; playbackPointerRef.current = null; if (pointer?.moved) return; void togglePlayback(); }}>{playing ? <Pause className="size-4" /> : <Play className="size-4" />}</button>
-                    {failed ? <button type="button" className="text-xs" onClick={() => actions.onUpload(data)}>播放失败，替换文件</button> : <AudioLines className="size-4" aria-hidden="true" />}
+                    <button type="button" aria-label={playing ? translate("canvas.pauseAudio") : failed ? translate("canvas.retryAudioPlayback") : translate("canvas.playAudio")} title={playing ? translate("canvas.pause") : translate("canvas.play_c33961")} className="absolute left-1/2 grid size-8 -translate-x-1/2 place-items-center rounded-full border focus-visible:outline-2" style={{ borderColor: theme.node.stroke }} onPointerDown={(event) => { event.stopPropagation(); playbackPointerRef.current = { x: event.clientX, y: event.clientY, moved: false }; }} onPointerMove={(event) => { const pointer = playbackPointerRef.current; if (pointer && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 3) pointer.moved = true; }} onClick={(event) => { const pointer = playbackPointerRef.current; playbackPointerRef.current = null; if (pointer?.moved) return; void togglePlayback(); }}>{playing ? <Pause className="size-4" /> : <Play className="size-4" />}</button>
+                    {failed ? <button type="button" className="text-xs" onClick={() => actions.onUpload(data)}>{translate("canvas.playbackFailedReplaceFile")}</button> : <AudioLines className="size-4" aria-hidden="true" />}
                 </div>
-            </div> : <button type="button" className="nodrag nopan flex flex-1 flex-col items-center justify-center gap-2 text-sm" style={{ color: theme.node.muted }} onClick={() => actions.onUpload(data)}><Upload className="size-6" />{data.execution.phase === "failed" ? "上传失败，重新上传" : "上传音频"}</button>}
+            </div> : <button type="button" className="nodrag nopan flex flex-1 flex-col items-center justify-center gap-2 text-sm" style={{ color: theme.node.muted }} onClick={() => actions.onUpload(data)}><Upload className="size-6" />{data.execution.phase === "failed" ? translate("canvas.uploadFailedTryAgain") : translate("canvas.uploadAudio")}</button>}
             <CanvasConnectionHandles />
         </NodeHoverSurface>
     </>;

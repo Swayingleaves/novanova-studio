@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { CatmullRomCurve3, CubicBezierCurve3, CurvePath, LineCurve3, Vector3, type Curve } from "three";
 import { nanoid } from "nanoid";
 
@@ -14,7 +16,7 @@ function vector(value: CanvasDirectorDeskVector3): Vector3 {
 export function getMotionPathCurve(path: CanvasDirectorDeskMotionPath): Curve<Vector3> {
     const cached = curveCache.get(path);
     if (cached) return cached;
-    if (path.anchors.length < 2) throw new Error("运动路径至少需要两个锚点");
+    if (path.anchors.length < 2) throw new Error(translate("directorDesk.aMotionPathNeedsAtLeastTwoAnchors"));
     let curve: Curve<Vector3>;
     if (path.kind === "pencil") {
         curve = new CatmullRomCurve3(path.anchors.map((anchor) => vector(anchor.position)), path.closed, "centripetal");

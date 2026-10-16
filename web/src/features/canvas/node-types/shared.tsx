@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { Handle, Position } from "@xyflow/react";
 import { LoaderCircle, AlertTriangle, TriangleAlert, ImageOff, VideoOff } from "lucide-react";
@@ -11,26 +13,27 @@ import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
 
 /** 共享加载状态组件 */
 export function NodeLoading() {
+    const translate = useTranslation();
     const t = useCanvasTheme();
     return (
         <div className="flex h-full w-full items-center justify-center gap-2" style={{ color: t.node.muted }}>
             <LoaderCircle className="size-5 animate-spin" />
-            <span className="text-sm">生成中...</span>
+            <span className="text-sm">{translate("canvas.generating")}</span>
         </div>
     );
 }
 
 /** 共享错误状态组件 */
 export function NodeError({ node, onRetry }: { node: CanvasNode; onRetry?: (node: CanvasNode) => void }) {
+    const translate = useTranslation();
     const t = useCanvasTheme();
     return (
         <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center" style={{ color: t.node.muted }}>
             <AlertTriangle className="size-6 text-red-400" />
-            <span className="text-xs text-red-400">{node.execution.errorMessage || "生成失败"}</span>
+            <span className="text-xs text-red-400">{node.execution.errorMessage || translate("canvas.generationFailed")}</span>
             {onRetry ? (
                 <button type="button" className="mt-1 rounded-full border border-red-400/40 px-3 py-0.5 text-xs text-red-400 transition hover:bg-red-400/10" onClick={() => onRetry(node)}>
-                    重试
-                </button>
+                    {translate("canvas.retry")}</button>
             ) : null}
         </div>
     );
@@ -42,9 +45,10 @@ export function NodeError({ node, onRetry }: { node: CanvasNode; onRetry?: (node
  * 图片或视频已经加载不出来时，用默认图标替换原始内容。
  */
 export function NodeMediaUnavailable({ kind, compact = false }: { kind: "image" | "video"; compact?: boolean }) {
+    const translate = useTranslation();
     const t = useCanvasTheme();
     const Icon = kind === "image" ? ImageOff : VideoOff;
-    const label = kind === "image" ? "图片加载失败" : "视频加载失败";
+    const label = kind === "image" ? translate("canvas.failedToLoadImage") : translate("canvas.failedToLoadVideo");
     if (compact) {
         return (
             <span role="img" aria-label={label} title={label} className="grid h-full w-full place-items-center" style={{ color: t.node.placeholder }}>
@@ -62,12 +66,13 @@ export function NodeMediaUnavailable({ kind, compact = false }: { kind: "image" 
 
 /** 媒体节点下载提示：生成结果有时效，超时将无法下载 */
 export function MediaDownloadHint() {
+    const translate = useTranslation();
     return (
         <div className="group/media-download-hint pointer-events-auto absolute bottom-2 left-2 z-10">
             <span
                 role="img"
                 tabIndex={0}
-                aria-label="请尽快下载生成结果，超时将无法下载"
+                aria-label={translate("canvas.downloadResultsBeforeTheyExpire")}
                 className="flex size-6 cursor-help items-center justify-center rounded-full text-amber-300 outline-none transition-colors hover:bg-black/70 focus-visible:bg-black/70 focus-visible:ring-2 focus-visible:ring-amber-300/80 motion-reduce:transition-none"
                 style={{ background: "rgba(0,0,0,0.55)" }}
                 onMouseDown={(event) => event.stopPropagation()}
@@ -82,8 +87,7 @@ export function MediaDownloadHint() {
                 className="pointer-events-none absolute bottom-full left-0 mb-1.5 w-max max-w-56 -translate-y-1 text-[11px] leading-4 text-white opacity-0 transition-[opacity,transform] duration-150 group-hover/media-download-hint:translate-y-0 group-hover/media-download-hint:opacity-100 group-focus-within/media-download-hint:translate-y-0 group-focus-within/media-download-hint:opacity-100 motion-reduce:transition-none"
                 style={{ background: "rgba(0,0,0,0.78)", padding: "5px 8px", borderRadius: 6 }}
             >
-                请尽快下载生成结果，超时将无法下载
-            </span>
+                {translate("canvas.downloadResultsBeforeTheyExpire")}</span>
         </div>
     );
 }
@@ -103,6 +107,7 @@ type CanvasNodeTitleProps = {
 
 /** 画布节点名称，默认常显，悬停后切换为可编辑输入框。 */
 export function CanvasNodeTitle({ nodeId, title, defaultTitle, onTitleChange }: CanvasNodeTitleProps) {
+    const translate = useTranslation();
     const theme = useCanvasTheme();
     const inputRef = useRef<HTMLInputElement>(null);
     const cancelRef = useRef(false);
@@ -169,7 +174,7 @@ export function CanvasNodeTitle({ nodeId, title, defaultTitle, onTitleChange }: 
                 <input
                     ref={inputRef}
                     value={draft}
-                    aria-label="节点名称"
+                    aria-label={translate("canvas.nodeName")}
                     className="nodrag nopan nowheel h-7 w-40 max-w-full rounded-md border px-2 text-xs font-medium outline-none transition-colors focus-visible:ring-2 motion-reduce:transition-none"
                     style={{ background: theme.node.panel, borderColor: theme.node.activeStroke, color: theme.node.text, outlineColor: theme.node.activeStroke }}
                     onChange={(event) => setDraft(event.target.value)}
@@ -186,7 +191,7 @@ export function CanvasNodeTitle({ nodeId, title, defaultTitle, onTitleChange }: 
                     onWheel={stopCanvasEvent}
                 />
             ) : (
-                <span className="block max-w-40 cursor-text truncate px-1 py-1 text-xs font-medium" title={`${title || defaultTitle}，双击编辑节点名称`} style={{ color: theme.node.text, textShadow: "0 1px 3px rgba(0,0,0,.55)" }}>
+                <span className="block max-w-40 cursor-text truncate px-1 py-1 text-xs font-medium" title={translate("canvas.doubleClickToRenameNode", { value0: title || defaultTitle })} style={{ color: theme.node.text, textShadow: "0 1px 3px rgba(0,0,0,.55)" }}>
                     {title || defaultTitle}
                 </span>
             )}
@@ -238,6 +243,7 @@ type NodeHoverSurfaceProps = {
 };
 
 export const NodeHoverSurface = forwardRef<HTMLDivElement, NodeHoverSurfaceProps>(function NodeHoverSurface({ nodeId, className, style, onMouseEnter, onMouseLeave, children }, ref) {
+    const translate = useTranslation();
     const actions = useNodeActions();
     const theme = useCanvasTheme();
     const uploading = useCanvasUiStore((state) => state.uploadingNodeIds.has(nodeId));
@@ -267,7 +273,7 @@ export const NodeHoverSurface = forwardRef<HTMLDivElement, NodeHoverSurfaceProps
                     onMouseDown={(event) => event.stopPropagation()}
                 >
                     <LoaderCircle className="size-5 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                    <span className="text-sm">上传中…</span>
+                    <span className="text-sm">{translate("canvas.uploading_ce1c9d")}</span>
                 </div>
             ) : null}
         </div>

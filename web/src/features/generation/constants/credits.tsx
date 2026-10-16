@@ -1,3 +1,7 @@
+"use client";
+
+import { currentLanguageTag } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
 import type { ComponentProps } from "react";
 import { Zap } from "lucide-react";
 import { Tooltip } from "antd";
@@ -28,8 +32,9 @@ export function CreditSymbol({ className, ...props }: ComponentProps<"span">) {
  * @return 积分图标与数值
  */
 export function CreditCostDisplay({ creditCost, className, ...props }: ComponentProps<"span"> & { creditCost: number }) {
-    const formattedCreditCost = creditCost.toLocaleString();
-    const description = `当前会消耗 ${formattedCreditCost} 积分`;
+    const translate = useTranslation();
+    const formattedCreditCost = creditCost.toLocaleString(currentLanguageTag());
+    const description = translate("generation.costsCredits", { value0: formattedCreditCost });
     return (
         <span {...props} className={`inline-flex items-center gap-1 tabular-nums ${className ?? ""}`}>
             <Tooltip title={description}>

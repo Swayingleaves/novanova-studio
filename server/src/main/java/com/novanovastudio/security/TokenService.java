@@ -1,5 +1,7 @@
 package com.novanovastudio.security;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -44,7 +46,7 @@ public class TokenService {
      */
     public SignedToken sign(Long userId, String role, Integer tokenVersion) {
         if (tokenVersion == null || tokenVersion < 0) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "登录令牌版本不合法");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.invalidTokenVersion"));
         }
         // 根据配置计算签发时间和过期时间。
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
@@ -56,7 +58,7 @@ public class TokenService {
             String encodedPayload = Base64.getUrlEncoder().withoutPadding().encodeToString(payload.getBytes(StandardCharsets.UTF_8));
             return new SignedToken(encodedPayload + "." + signature(encodedPayload), expiresAt);
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "签发令牌失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToIssueToken", exception.getMessage()));
         }
     }
 
@@ -69,30 +71,30 @@ public class TokenService {
     public TokenClaims parse(String token) {
         // 空Token直接视为未登录。
         if (!StringUtils.hasText(token)) {
-            throw new BusinessException(ErrorCode.TOKEN_INVALID, "请先登录");
+            throw new BusinessException(ErrorCode.TOKEN_INVALID, SystemMessage.of("business.pleaseSignIn"));
         }
         String[] parts = token.split("\\.", -1);
         // Token格式为payload.signature两段。
         if (parts.length != 2) {
-            throw new BusinessException(ErrorCode.TOKEN_INVALID, "登录令牌格式不合法");
+            throw new BusinessException(ErrorCode.TOKEN_INVALID, SystemMessage.of("business.invalidTokenFormat"));
         }
         // 使用同一密钥重新计算签名并比较。
         if (!MessageDigest.isEqual(signature(parts[0]).getBytes(StandardCharsets.US_ASCII), parts[1].getBytes(StandardCharsets.US_ASCII))) {
-            throw new BusinessException(ErrorCode.TOKEN_INVALID, "登录令牌签名不合法");
+            throw new BusinessException(ErrorCode.TOKEN_INVALID, SystemMessage.of("business.invalidTokenSignature"));
         }
         try {
             // 解码payload并校验用户ID和过期时间。
             byte[] payload = Base64.getUrlDecoder().decode(parts[0]);
             TokenClaims claims = JSON.parseObject(payload, TokenClaims.class);
             if (claims.userId() == null || claims.userId() <= 0 || claims.tokenVersion() == null || claims.tokenVersion() < 0 || claims.expiresAt() <= 0) {
-                throw new BusinessException(ErrorCode.TOKEN_INVALID, "登录令牌内容不合法");
+                throw new BusinessException(ErrorCode.TOKEN_INVALID, SystemMessage.of("business.invalidTokenContents"));
             }
             if (OffsetDateTime.now(ZoneOffset.UTC).toEpochSecond() > claims.expiresAt()) {
-                throw new BusinessException(ErrorCode.TOKEN_EXPIRED, "登录已过期");
+                throw new BusinessException(ErrorCode.TOKEN_EXPIRED, SystemMessage.of("business.sessionExpired"));
             }
             return claims;
         } catch (IllegalArgumentException exception) {
-            throw new BusinessException(ErrorCode.TOKEN_INVALID, "登录令牌内容不合法");
+            throw new BusinessException(ErrorCode.TOKEN_INVALID, SystemMessage.of("business.invalidTokenContents"));
         }
     }
 
@@ -126,11 +128,11 @@ public class TokenService {
         // 签名前必须存在应用密钥。
         String secretKey = properties.getApp().getSecretKey();
         if (!StringUtils.hasText(secretKey)) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "APP_SECRET_KEY不能为空");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.aPPSECRETKEYIsRequired"));
         }
         byte[] secretKeyBytes = secretKey.getBytes(StandardCharsets.UTF_8);
         if (secretKeyBytes.length < MINIMUM_SECRET_KEY_BYTES) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "APP_SECRET_KEY至少需要32字节随机值");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.aPPSECRETKEYRequiresAtLeast32RandomBytes"));
         }
         try {
             // 对编码后的payload计算HMAC-SHA256并使用URL安全Base64输出。
@@ -138,7 +140,7 @@ public class TokenService {
             mac.init(new SecretKeySpec(secretKeyBytes, HMAC_ALGORITHM));
             return Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(encodedPayload.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "计算令牌签名失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToSignToken", exception.getMessage()));
         }
     }
 

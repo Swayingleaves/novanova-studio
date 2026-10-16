@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Segmented, Slider } from "antd";
@@ -8,7 +11,7 @@ import { agnesVideoRatioOptions, isAgnesVideoConfig, normalizeAgnesVideoRatio, n
 import { isMiniMaxH3VideoConfig, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio } from "@/features/generation/lib/minimax-h3-video";
 import { isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/features/generation/lib/seedance-video";
 import { readVideoDurationRange } from "@/features/generation/lib/video-duration";
-import { VIDEO_GENERATION_MODE_OPTIONS, VIDEO_RESOLUTION_OPTIONS, availableVideoResolutions } from "@/features/generation/lib/video-billing";
+import { createVideoGenerationModeOptions, VIDEO_RESOLUTION_OPTIONS, availableVideoResolutions } from "@/features/generation/lib/video-billing";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import { resolveModelRequestConfig, type AiConfig, type VideoResolution } from "@/features/settings/stores/use-config-store";
 
@@ -70,6 +73,7 @@ export function VideoSettingsPanel({
     showCount = false,
     onCountChange,
 }: VideoSettingsPanelProps) {
+    const translate = useTranslation();
     const resolved = resolveModelRequestConfig(config, config.videoModel || config.model);
     const seedance = isSeedanceVideoConfig(resolved);
     const agnes = isAgnesVideoConfig(resolved);
@@ -121,15 +125,15 @@ export function VideoSettingsPanel({
     return (
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={stopDown}>
-                {showTitle ? <div className="text-base font-semibold">视频设置</div> : null}
+                {showTitle ? <div className="text-base font-semibold">{translate("generation.videoSettings")}</div> : null}
 
                 {showGenerationMode ? (
-                    <Field label="生成模式" theme={theme}>
-                        <Segmented block options={VIDEO_GENERATION_MODE_OPTIONS} value={config.videoGenerationMode} onChange={(value) => onConfigChange("videoGenerationMode", String(value))} />
+                    <Field label={translate("generation.generationMode")} theme={theme}>
+                        <Segmented block options={createVideoGenerationModeOptions(translate)} value={config.videoGenerationMode} onChange={(value) => onConfigChange("videoGenerationMode", String(value))} />
                     </Field>
                 ) : null}
 
-                <Field label="比例" theme={theme}>
+                <Field label={translate("generation.aspectRatio")} theme={theme}>
                     <div className="grid grid-cols-5 gap-2">
                         {RATIO_PRESETS.map((preset) => {
                             const disabled = !supportsRatio(preset.value, seedance, agnes, miniMaxH3);
@@ -138,13 +142,13 @@ export function VideoSettingsPanel({
                     </div>
                 </Field>
 
-                <Field label="清晰度" theme={theme}>
+                <Field label={translate("generation.resolution")} theme={theme}>
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                         {resolutionPresets.map((item) => {
                             const displayItem = item.label;
                             const configured = pricedResolutions.includes(item.value);
                             const disabled = !configured;
-                            const disabledReason = "当前模式未配置该分辨率价格";
+                            const disabledReason = translate("generation.noPriceForThisResolutionInThisMode");
                             return (
                                 <OptionButton key={item.value} active={resolution === item.value} disabled={disabled} disabledReason={disabledReason} theme={theme} onClick={() => onConfigChange("vquality", item.value)}>
                                     {displayItem}
@@ -153,18 +157,16 @@ export function VideoSettingsPanel({
                         })}
                         {!resolutionPresets.length ? (
                             <span className="text-xs" style={{ color: theme.node.muted }}>
-                                当前模式没有可用分辨率价格
-                            </span>
+                                {translate("generation.noResolutionPricesForThisMode")}</span>
                         ) : null}
                     </div>
                 </Field>
 
                 {showDuration ? (
-                    <Field label="视频时长" theme={theme}>
+                    <Field label={translate("generation.videoDuration")} theme={theme}>
                         {!durationRangeAvailable ? (
                             <div className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
-                                当前配置要求最少生成 {durationRange.min} 秒，但该模型最多支持 {durationRange.max} 秒，暂时无法生成
-                            </div>
+                                {translate("generation.minimumOutputCountForThisConfiguration")}{durationRange.min} {translate("generation.sButThisModelSupportsUpTo")}{durationRange.max} {translate("generation.sGenerationUnavailable")}</div>
                         ) : (
                             <div className="flex h-8 items-center gap-3">
                                 <div className="min-w-0 flex-1 px-0.5" onMouseDown={stopDown}>
@@ -175,7 +177,7 @@ export function VideoSettingsPanel({
                                     min={durationRange.min}
                                     max={durationRange.max}
                                     value={durationDraft}
-                                    aria-label="视频时长"
+                                    aria-label={translate("generation.videoDuration")}
                                     className="h-8 w-14 rounded-lg border bg-transparent px-2 text-center text-sm font-medium outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                                     style={{ borderColor: theme.node.stroke, color: theme.node.text, background: theme.node.fill }}
                                     onMouseDown={stopDown}
@@ -195,12 +197,11 @@ export function VideoSettingsPanel({
                 ) : null}
 
                 {showCount ? (
-                    <Field label="生成数量" theme={theme}>
+                    <Field label={translate("generation.outputCount")} theme={theme}>
                         <div className="grid grid-cols-3 gap-2">
                             {VIDEO_COUNT_PRESETS.map((item) => (
                                 <OptionButton key={item} active={count === item} theme={theme} onClick={() => onCountChange?.(String(item))}>
-                                    {item}个
-                                </OptionButton>
+                                    {item}{translate("generation.items")}</OptionButton>
                             ))}
                         </div>
                     </Field>
@@ -222,11 +223,12 @@ function Field({ label, theme, children }: { label: string; theme: CanvasTheme; 
 }
 
 function RatioButton({ preset, active, disabled, theme, onClick }: { preset: RatioPreset; active: boolean; disabled: boolean; theme: CanvasTheme; onClick: () => void }) {
+    const translate = useTranslation();
     return (
         <button
             type="button"
             disabled={disabled}
-            title={disabled ? "当前视频模型不支持该比例" : undefined}
+            title={disabled ? translate("generation.thisVideoModelDoesNotSupportThisAspectRatio") : undefined}
             className="flex h-[78px] min-w-0 flex-col items-center justify-center gap-2 rounded-lg border text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-35"
             style={{ borderColor: active ? theme.node.activeStroke : theme.node.stroke, color: theme.node.text, background: active ? theme.node.fill : "transparent" }}
             onMouseDown={stopDown}
@@ -354,7 +356,7 @@ export function videoSizeLabel(value: string): string {
 }
 
 export function videoSecondsLabel(value: string, config?: AiConfig): string {
-    if (String(value).trim() === "-1") return "智能";
+    if (String(value).trim() === "-1") return translate("generation.smart");
     if (config && isMiniMaxH3VideoConfig(config)) return `${normalizeMiniMaxH3Duration(value)}s`;
     if (config && isAgnesVideoConfig(config)) return `${normalizeAgnesVideoSeconds(value, config.vquality)}s`;
     return `${Math.max(1, Math.min(15, Math.floor(Number(value) || 6)))}s`;

@@ -1,0 +1,18 @@
+{
+    "onlyMP3AndWAVAudioSupported": "Only MP3 and WAV audio supported",
+    "audioIsRequiredAndMustNotExceed15MB": "Audio is required and must not exceed 15 MB",
+    "invalidAudioDuration": "Invalid audio duration",
+    "failedToParseAudioChooseAValidMP3Or": "Failed to parse audio; choose a valid MP3 or WAV",
+    "failedToReadImage": "Failed to read image",
+    "downloadedFileIsEmpty": "Downloaded file is empty",
+    "mediaHasNoStorageIDOrAccessibleURL": "Media has no storage ID or accessible URL",
+    "serverReturnedNoObjectStorageFile": "Server returned no object storage file",
+    "qiniuKodoRequiresAPublicURL": "Qiniu Kodo requires a public URL",
+    "objectStorageNotFound": "Object storage not found",
+    "enterAccessKeySecretKeyBucketAndRegion": "Enter access key, secret key, Bucket and Region",
+    "enterAlibabaCloudOSSEndpoint": "Enter Alibaba Cloud OSS Endpoint",
+    "enterQiniuKodoPublicURL": "Enter Qiniu Kodo public URL",
+    "incompleteObjectStorageConfiguration": "Incomplete object storage configuration",
+    "failedToReadAddItAgainBeforeGenerating": "Failed to read {value0}; add it again before generating",
+    "hasNoUploadedMediaForCloudStorage": "{value0} has no uploaded media for cloud storage"
+}

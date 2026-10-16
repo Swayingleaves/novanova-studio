@@ -1,6 +1,7 @@
 package com.novanovastudio.controller;
 
 import com.novanovastudio.common.ApiResponse;
+import com.novanovastudio.common.WebsiteLanguage;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.service.AiTaskService;
@@ -42,7 +43,7 @@ public class AiTaskController {
      */
     @PostMapping("/task/createTask")
     public Mono<ApiResponse<AiTaskDtos.AiGenerationTaskResponse>> createTask(@Valid @RequestBody AiTaskDtos.CreateAiTaskRequest request) {
-        return aiTaskService.createTask(request).map(ApiResponse::ok);
+        return aiTaskService.createTask(request).flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
     }
 
     /**
@@ -54,7 +55,7 @@ public class AiTaskController {
     @GetMapping("/task/listTasks")
     public Mono<ApiResponse<AiTaskDtos.AiTaskListResponse>> listTasks(@RequestParam(required = false) String status) {
         List<String> statuses = status == null || status.isBlank() ? List.of() : Arrays.stream(status.split(",")).map(String::trim).filter(item -> !item.isBlank()).toList();
-        return aiTaskService.listTasks(statuses).map(tasks -> ApiResponse.ok(new AiTaskDtos.AiTaskListResponse(tasks)));
+        return aiTaskService.listTasks(statuses).flatMap(tasks -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(new AiTaskDtos.AiTaskListResponse(tasks.stream().map(task -> task.withLocale(locale)).toList()))));
     }
 
     /**
@@ -67,7 +68,7 @@ public class AiTaskController {
     @GetMapping("/task/getTaskInfo")
     public Mono<ApiResponse<AiTaskDtos.AiGenerationTaskResponse>> getTaskInfo(@RequestParam(required = false) String taskId, @RequestParam(required = false) String id) {
         String resolvedId = taskId == null || taskId.isBlank() ? id : taskId;
-        return aiTaskService.getTask(resolvedId).map(ApiResponse::ok);
+        return aiTaskService.getTask(resolvedId).flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
     }
 
     /**
@@ -78,7 +79,7 @@ public class AiTaskController {
      */
     @PostMapping("/task/cancelTask")
     public Mono<ApiResponse<AiTaskDtos.AiGenerationTaskResponse>> cancelTask(@Valid @RequestBody AiTaskDtos.AiTaskIdRequest request) {
-        return aiTaskService.cancelTask(request.taskId()).map(ApiResponse::ok);
+        return aiTaskService.cancelTask(request.taskId()).flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
     }
 
     /**
@@ -88,7 +89,11 @@ public class AiTaskController {
      */
     @GetMapping(value = "/task/subscribe", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<AiTaskDtos.AiTaskEvent>> subscribe() {
-        return aiTaskService.subscribe();
+        return WebsiteLanguage.current().flatMapMany(locale -> aiTaskService.subscribe().map(event ->
+                ServerSentEvent.<AiTaskDtos.AiTaskEvent>builder()
+                        .event(event.event())
+                        .data(new AiTaskDtos.AiTaskEvent(event.data().type(), event.data().task() == null ? null : event.data().task().withLocale(locale), event.data().delta(), event.data().creditBalance()))
+                        .build()));
     }
 
     /**
@@ -110,7 +115,7 @@ public class AiTaskController {
     @PostMapping("/image/generate")
     public Mono<ApiResponse<AiTaskDtos.AiGenerationTaskResponse>> generateImage(@RequestBody AiTaskDtos.CreateAiTaskRequest request) {
         return aiTaskService.createTask(new AiTaskDtos.CreateAiTaskRequest("image", request.prompt(), request.model(), request.parameters(),
-                request.references(), request.videoReferences(), AiTaskSources.IMAGE_PAGE, null, null, null, request.audioReferences())).map(ApiResponse::ok);
+                request.references(), request.videoReferences(), AiTaskSources.IMAGE_PAGE, null, null, null, request.audioReferences())).flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
     }
 
     /**
@@ -122,7 +127,8 @@ public class AiTaskController {
     @PostMapping("/video/generate")
     public Mono<ApiResponse<AiTaskDtos.AiGenerationTaskResponse>> generateVideo(@RequestBody AiTaskDtos.CreateAiTaskRequest request) {
         return aiTaskService.createTask(new AiTaskDtos.CreateAiTaskRequest("video", request.prompt(), request.model(), request.parameters(),
-                request.references(), request.videoReferences(), AiTaskSources.VIDEO_PAGE, null, null, request.videoGenerationMode(), request.audioReferences())).map(ApiResponse::ok);
+                request.references(), request.videoReferences(), AiTaskSources.VIDEO_PAGE, null, null, request.videoGenerationMode(), request.audioReferences()))
+                .flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
     }
 
     /**
@@ -145,7 +151,7 @@ public class AiTaskController {
      */
     @GetMapping("/video/poll/{taskId}")
     public Mono<ApiResponse<AiTaskDtos.AiGenerationTaskResponse>> pollVideoTask(@PathVariable String taskId) {
-        return aiTaskService.getTask(taskId).map(ApiResponse::ok);
+        return aiTaskService.getTask(taskId).flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
     }
 
 }

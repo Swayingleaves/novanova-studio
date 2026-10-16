@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { nanoid } from "nanoid";
 
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
@@ -28,7 +30,7 @@ export async function requestGeminiConversation(config: AiConfig, messages: Resp
         body: JSON.stringify(createGeminiBody(config, messages, tools, toolChoice)),
         signal: options?.signal,
     });
-    if (!response.ok) throw new Error(await readFailedResponse(response, "请求失败"));
+    if (!response.ok) throw new Error(await readFailedResponse(response, translate("generation.requestFailed")));
     if (!response.body) return normalizeGeminiPayload(await response.json() as GeminiPayload);
 
     const reader = response.body.getReader();
@@ -95,7 +97,7 @@ function createGeminiToolConfig(tools: ResponseFunctionTool[], toolChoice: ToolC
 
 function normalizeGeminiPayload(payload: GeminiPayload): ToolResponseResult {
     if (payload.error?.message) throw new Error(payload.error.message);
-    if (payload.promptFeedback?.blockReason) throw new Error(`Gemini 拒绝了本次请求：${payload.promptFeedback.blockReason}`);
+    if (payload.promptFeedback?.blockReason) throw new Error(translate("generation.geminiRejectedThisRequest", { value0: payload.promptFeedback.blockReason }));
     const parts = payload.candidates?.flatMap((candidate) => candidate.content?.parts ?? []) ?? [];
     return {
         content: parts.map((part) => part.text || "").join(""),

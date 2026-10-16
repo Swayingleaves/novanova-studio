@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { Tooltip } from "antd";
 import { Check, ChevronDown, ChevronRight, Circle, CircleX, LoaderCircle, Minus, Square } from "lucide-react";
@@ -10,17 +13,18 @@ type AgentActivityTimelineProps = {
     activities: AgentActivityState[];
 };
 
-const STATUS_LABELS: Record<AgentActivityStatus, string> = {
-    pending: "等待中",
-    running: "执行中",
-    success: "已完成",
-    failed: "执行失败",
-    canceled: "已停止",
-    skipped: "已跳过",
-};
+const createStatusLabels = (translator: typeof translate = translate): Record<AgentActivityStatus, string> => ({
+    get pending() { return translator("generation.waiting"); },
+    get running() { return translator("generation.running"); },
+    get success() { return translator("generation.completed"); },
+    get failed() { return translator("generation.executionFailed"); },
+    get canceled() { return translator("generation.stopped"); },
+    get skipped() { return translator("generation.skipped"); },
+});
 
 /** 展示当前对话轮次中的 Agent 计划、准备和工具执行轨迹。 */
 export function AgentActivityTimeline({ activities }: AgentActivityTimelineProps) {
+    const translate = useTranslation();
     const hasRunningActivity = activities.some((activity) => activity.status === "running" || activity.status === "pending");
     const [collapsed, setCollapsed] = useState(false);
 
@@ -31,15 +35,15 @@ export function AgentActivityTimeline({ activities }: AgentActivityTimelineProps
     }, [hasRunningActivity]);
 
     const summary = hasRunningActivity
-        ? "执行中"
+        ? translate("generation.running")
         : activities.some((activity) => activity.status === "failed")
-          ? "执行失败"
+          ? translate("generation.executionFailed")
           : activities.some((activity) => activity.status === "canceled")
-            ? "已停止"
-            : "已完成";
+            ? translate("generation.stopped")
+            : translate("generation.completed");
 
     return (
-        <div className="max-w-3xl py-1" aria-label="Agent 执行过程" aria-live="polite">
+        <div className="max-w-3xl py-1" aria-label={translate("generation.agentExecution")} aria-live="polite">
             <button
                 type="button"
                 className="mb-2 flex min-h-7 w-full items-center gap-1.5 text-left text-[11px] font-semibold text-[var(--studio-muted)] transition-colors hover:text-[var(--studio-ink)]"
@@ -47,8 +51,8 @@ export function AgentActivityTimeline({ activities }: AgentActivityTimelineProps
                 onClick={() => setCollapsed((value) => !value)}
             >
                 {collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-                <span>执行过程</span>
-                <span className="font-normal">{summary}，共 {activities.length} 个步骤</span>
+                <span>{translate("generation.execution")}</span>
+                <span className="font-normal">{summary}{translate("generation.total")}{activities.length} {translate("generation.steps")}</span>
             </button>
             {!collapsed ? (
                 <ol className="space-y-1.5">
@@ -75,6 +79,7 @@ export function AgentActivityTimeline({ activities }: AgentActivityTimelineProps
 }
 
 function ActivityStatusIcon({ status }: { status: AgentActivityStatus }) {
+    const translate = useTranslation();
     const iconClassName = "size-3.5";
     const icon = status === "running"
         ? <LoaderCircle className={`${iconClassName} motion-safe:animate-spin`} />
@@ -93,8 +98,8 @@ function ActivityStatusIcon({ status }: { status: AgentActivityStatus }) {
           ? "border-emerald-300/70 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300"
           : "border-[var(--studio-line)] bg-[var(--studio-panel-solid)] text-[var(--studio-muted)]";
     return (
-        <Tooltip title={STATUS_LABELS[status]}>
-            <span className={`relative z-[1] grid size-6 shrink-0 place-items-center rounded-full border ${colorClassName}`} aria-label={STATUS_LABELS[status]}>
+        <Tooltip title={createStatusLabels(translate)[status]}>
+            <span className={`relative z-[1] grid size-6 shrink-0 place-items-center rounded-full border ${colorClassName}`} aria-label={createStatusLabels(translate)[status]}>
                 {icon}
             </span>
         </Tooltip>

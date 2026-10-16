@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
@@ -183,7 +185,7 @@ public class UserService {
         String email = normalizeEmail(request.email());
         log.info("发送邮箱验证码: email={}, purpose={}", email, CODE_PURPOSE_REGISTER);
         return userRepository.findByEmail(email)
-                .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱已注册")))
+                .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered"))))
                 .switchIfEmpty(Mono.defer(() -> {
                     String code = randomNumericCode();
                     return encodePassword(code)
@@ -198,7 +200,7 @@ public class UserService {
                                 return userRepository.createEmailCode(record)
                                         .flatMap(codeId -> sendEmailVerificationCode(email, code)
                                                 .onErrorResume(exception -> userRepository.markEmailCodeUsed(codeId)
-                                                        .then(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "发送验证码失败: " + exception.getMessage())))));
+                                                        .then(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.failedToSendVerificationCode", exception.getMessage()))))));
                             });
                 }))
                 .then();
@@ -219,13 +221,13 @@ public class UserService {
                 .map(Optional::of)
                 .defaultIfEmpty(Optional.empty())
                 .flatMap(inviterUserId -> userRepository.findByEmail(email)
-                .flatMap(existing -> Mono.<UserDtos.AuthResponse>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱已注册")))
+                .flatMap(existing -> Mono.<UserDtos.AuthResponse>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered"))))
                 .switchIfEmpty(userRepository.latestValidEmailCode(email, CODE_PURPOSE_REGISTER)
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱验证码无效或已过期")))
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailCodeIsInvalidOrExpired"))))
                         .flatMap(codeRecord -> matchesPassword(request.code().trim(), codeRecord.getCodeHash())
                                 .flatMap(matches -> {
                                     if (!matches) {
-                                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱验证码无效或已过期"));
+                                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailCodeIsInvalidOrExpired")));
                                     }
                                     return encodePassword(request.password())
                                             .flatMap(passwordHash -> {
@@ -260,7 +262,7 @@ public class UserService {
         String email = normalizeEmail(request.email());
         log.info("用户登录: email={}", email);
         return userRepository.findByEmail(email)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "邮箱或密码错误")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.incorrectEmailOrPassword"))))
                 .flatMap(user -> passwordLoginLockService.remainingLockDuration(user.getId())
                         .flatMap(duration -> Mono.<UserDtos.AuthResponse>error(passwordLockException(duration)))
                         .switchIfEmpty(matchesPassword(request.password(), user.getPassword()).flatMap(matches -> {
@@ -303,13 +305,13 @@ public class UserService {
             validatePassword(request.newPassword());
             String tokenHash = passwordResetTokenHash(request.token().trim());
             return userRepository.findActivePasswordResetToken(tokenHash)
-                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "重置链接已失效或已使用")))
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.resetLinkExpiredOrAlreadyUsed"))))
                     .flatMap(resetToken -> userRepository.findById(resetToken.getUserId())
                             .filter(this::isNormalUser)
-                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "重置链接已失效或已使用")))
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.resetLinkExpiredOrAlreadyUsed"))))
                             .flatMap(user -> encodePassword(request.newPassword())
                                     .flatMap(encodedPassword -> userRepository.consumePasswordResetToken(tokenHash)
-                                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "重置链接已失效或已使用")))
+                                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.resetLinkExpiredOrAlreadyUsed"))))
                                             .flatMap(userId -> userRepository.updatePasswordAfterReset(userId, encodedPassword))
                                             .thenReturn(user))))
                     .as(transactionalOperator::transactional)
@@ -326,7 +328,7 @@ public class UserService {
      */
     public Mono<UserDtos.AuthResponse> loginByUserId(Long userId) {
         return userRepository.findById(userId)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "用户不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.userNotFound"))))
                 .flatMap(this::completeLogin);
     }
 
@@ -339,7 +341,7 @@ public class UserService {
         // 从请求上下文读取当前用户ID，再查询数据库中的最新用户资料。
         return currentUserProvider.currentUserId()
                 .flatMap(userRepository::findById)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "用户不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.userNotFound"))))
                 .map(this::userProfile);
     }
 
@@ -357,14 +359,14 @@ public class UserService {
                 .flatMap(userId -> userRepository.updateCurrentUserProfile(userId, username, nickname, avatar)
                         .flatMap(updated -> {
                             if (!updated) {
-                                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "用户名已被占用"));
+                                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.usernameAlreadyTaken")));
                             }
                             return userRepository.findById(userId)
-                                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "用户不存在")))
+                                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.userNotFound"))))
                                     .map(this::userProfile);
                         })
                         .doOnSuccess(profile -> log.info("用户资料已更新: userId={}", userId)))
-                .onErrorMap(DataIntegrityViolationException.class, exception -> new BusinessException(ErrorCode.BUSINESS_ERROR, "用户名已被占用"));
+                .onErrorMap(DataIntegrityViolationException.class, exception -> new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.usernameAlreadyTaken")));
     }
 
     /**
@@ -380,11 +382,11 @@ public class UserService {
             validatePassword(request.newPassword());
             return currentUserProvider.currentUserId()
                     .flatMap(userId -> userRepository.findById(userId)
-                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "用户不存在")))
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.userNotFound"))))
                             .flatMap(user -> matchesPassword(request.currentPassword(), user.getPassword())
                                     .flatMap(matches -> {
                                         if (!matches) {
-                                            return Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "原密码错误"));
+                                            return Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.incorrectCurrentPassword")));
                                         }
                                         return encodePassword(request.newPassword())
                                                 .flatMap(encodedPassword -> userRepository.updateCurrentUserPassword(userId, encodedPassword));
@@ -456,14 +458,14 @@ public class UserService {
     public Mono<Void> updateUserStatus(UserDtos.UpdateUserStatusRequest request) {
         // 仅允许更新为正常或禁用两种状态。
         if (request.status() != STATUS_NORMAL && request.status() != STATUS_DISABLED) {
-            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "用户状态不合法"));
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.invalidUserStatus")));
         }
-        return Mono.zip(currentUserProvider.currentUserId(), userRepository.findById(request.userId()).switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "用户不存在"))))
+        return Mono.zip(currentUserProvider.currentUserId(), userRepository.findById(request.userId()).switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.userNotFound")))))
                 .flatMap(tuple -> {
                     Long currentUserId = tuple.getT1();
                     User user = tuple.getT2();
                     if (currentUserId.equals(user.getId()) && request.status() == STATUS_DISABLED) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "不能禁用当前登录管理员"));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.cannotDisableTheCurrentAdministrator")));
                     }
                     return userRepository.updateUserStatus(request.userId(), request.status());
                 });
@@ -478,14 +480,14 @@ public class UserService {
     public Mono<Void> updateUserRole(UserDtos.UpdateUserRoleRequest request) {
         // 角色只允许在普通用户和管理员之间切换。
         if (!ROLE_USER.equals(request.role()) && !ROLE_ADMIN.equals(request.role())) {
-            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "用户角色不合法"));
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.invalidUserRole")));
         }
-        return Mono.zip(currentUserProvider.currentUserId(), userRepository.findById(request.userId()).switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "用户不存在"))))
+        return Mono.zip(currentUserProvider.currentUserId(), userRepository.findById(request.userId()).switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.userNotFound")))))
                 .flatMap(tuple -> {
                     Long currentUserId = tuple.getT1();
                     User user = tuple.getT2();
                     if (currentUserId.equals(user.getId()) && !ROLE_ADMIN.equals(request.role())) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "不能移除当前登录管理员角色"));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.cannotRemoveTheCurrentAdministratorRole")));
                     }
                     return userRepository.updateUserRole(request.userId(), request.role());
                 });
@@ -500,7 +502,7 @@ public class UserService {
     public Mono<Void> adminCreateUser(UserDtos.AdminCreateUserRequest request) {
         String email = normalizeEmail(request.email());
         return userRepository.findByEmail(email)
-                .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "邮箱已注册")))
+                .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered"))))
                 .switchIfEmpty(encodePassword(request.password())
                         .flatMap(passwordHash -> {
                             User user = new User();
@@ -526,7 +528,7 @@ public class UserService {
      */
     public Mono<CreditDtos.CreditBalanceResponse> adjustUserCredits(CreditDtos.AdjustUserCreditsRequest request) {
         return Mono.zip(currentUserProvider.currentUserId(), userRepository.findById(request.userId())
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "用户不存在"))))
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.userNotFound")))))
                 .flatMap(tuple -> creditService.adjustUserCredits(request.userId(), tuple.getT1(), request.changeAmount(), request.reason()))
                 // 调整提交完成后向目标用户推送新余额，避免侧栏继续展示旧积分。
                 .flatMap(response -> eventPublisher.publish(response.userId(), new AiTaskDtos.AiTaskEvent("credit-balance", null, null, response.creditBalance()))
@@ -541,7 +543,7 @@ public class UserService {
      */
     public Mono<Void> unlockUserPassword(UserDtos.UnlockUserPasswordRequest request) {
         return Mono.zip(currentUserProvider.currentUserId(), userRepository.findById(request.userId())
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "用户不存在"))))
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.userNotFound")))))
                 .flatMap(tuple -> passwordLoginLockService.clear(tuple.getT2().getId())
                         .doOnSuccess(ignored -> log.info("管理员解除用户密码锁定: adminUserId={}, userId={}", tuple.getT1(), tuple.getT2().getId())));
     }
@@ -566,7 +568,7 @@ public class UserService {
      */
     private Mono<UserDtos.AuthResponse> completeLogin(User user) {
         if (user.getStatus() == null || user.getStatus() != STATUS_NORMAL) {
-            return Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "账号已被禁用"));
+            return Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.accountDisabled")));
         }
         OffsetDateTime loginTime = OffsetDateTime.now(ZoneOffset.UTC);
         return userRepository.updateLastLoginAt(user.getId()).then(Mono.fromSupplier(() -> {
@@ -618,7 +620,7 @@ public class UserService {
      */
     private BusinessException passwordLockException(java.time.Duration remainingLockDuration) {
         long remainingMinutes = Math.max(1, (remainingLockDuration.toSeconds() + 59) / 60);
-        return new BusinessException(ErrorCode.AUTH_ERROR, "账号已锁定，请" + remainingMinutes + "分钟后再试");
+        return new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.accountLockedTryAgainInMinutes", remainingMinutes));
     }
 
     /**
@@ -632,11 +634,11 @@ public class UserService {
             return passwordLockException(lockState.lockDuration());
         }
         return switch (lockState.failedAttempts()) {
-            case 5 -> new BusinessException(ErrorCode.AUTH_ERROR, "密码错误次数过多，请5分钟后再试");
-            case 6 -> new BusinessException(ErrorCode.AUTH_ERROR, "密码错误次数过多，请10分钟后再试");
+            case 5 -> new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.tooManyIncorrectPasswordsTryIn5Minutes"));
+            case 6 -> new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.tooManyIncorrectPasswordsTryIn10Minutes"));
             default -> lockState.failedAttempts() >= 7
-                    ? new BusinessException(ErrorCode.AUTH_ERROR, "密码错误次数过多，账号已被锁定2小时")
-                    : new BusinessException(ErrorCode.AUTH_ERROR, "邮箱或密码错误");
+                    ? new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.tooManyIncorrectPasswordsAccountLockedFor2Hours"))
+                    : new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.incorrectEmailOrPassword"));
         };
     }
 
@@ -650,7 +652,7 @@ public class UserService {
         // 统一小写并校验基础邮箱格式。
         String email = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
         if (!StringUtils.hasText(email) || !email.matches("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "邮箱格式不正确");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidEmailAddress"));
         }
         return email;
     }
@@ -663,7 +665,7 @@ public class UserService {
     private void validatePassword(String password) {
         // 通过码点数量判断长度，避免多字节字符被错误计算。
         if (password == null || password.codePointCount(0, password.length()) < MIN_PASSWORD_LENGTH) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "密码至少需要" + MIN_PASSWORD_LENGTH + "位");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.passwordNeedsAtLeastCharacters", MIN_PASSWORD_LENGTH));
         }
     }
 
@@ -761,7 +763,7 @@ public class UserService {
     private URI validateFrontendBaseUrl() {
         String frontendBaseUrl = properties.getApp().getFrontendBaseUrl();
         if (!StringUtils.hasText(frontendBaseUrl)) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "FRONTEND_BASE_URL未配置，无法发送密码重置邮件");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.fRONTENDBASEURLIsMissingCannotSendResetEmail"));
         }
         try {
             URI frontendUri = URI.create(frontendBaseUrl.trim());
@@ -773,11 +775,11 @@ public class UserService {
                     || StringUtils.hasText(frontendUri.getRawQuery())
                     || StringUtils.hasText(frontendUri.getRawFragment())
                     || (StringUtils.hasText(path) && !"/".equals(path))) {
-                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "FRONTEND_BASE_URL必须是无路径、无参数的HTTP(S)公开地址");
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.fRONTENDBASEURLMustBeAPublicHTTPSOrigin"));
             }
             return frontendUri;
         } catch (IllegalArgumentException exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "FRONTEND_BASE_URL格式不正确");
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.invalidFRONTENDBASEURL"));
         }
     }
 
@@ -803,7 +805,7 @@ public class UserService {
                 mailSender.send(message);
             } catch (MessagingException | RuntimeException exception) {
                 log.error("发送密码重置邮件失败，邮箱={}, 异常类型={}", email, exception.getClass().getName());
-                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "发送密码重置邮件失败");
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToSendPasswordResetEmail"));
             }
         }).subscribeOn(Schedulers.boundedElastic()).then();
     }
@@ -899,7 +901,7 @@ public class UserService {
                 mailSender.send(message);
             } catch (MessagingException exception) {
                 log.error("发送邮箱验证码失败，邮箱={}", email, exception);
-                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "发送邮箱验证码失败");
+                throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToSendEmailVerificationCode"));
             }
         }).subscribeOn(Schedulers.boundedElastic()).then();
     }

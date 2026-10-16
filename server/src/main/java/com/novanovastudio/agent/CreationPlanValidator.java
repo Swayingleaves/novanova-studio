@@ -1,5 +1,7 @@
 package com.novanovastudio.agent;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
@@ -63,10 +65,10 @@ public class CreationPlanValidator {
      */
     public CreationPlan validate(CreationPlan plan, String entrySource, CreationSettings settings) {
         if (plan == null) {
-            throw invalid("主Agent未返回创作计划");
+            throw invalid(SystemMessage.of("business.agentReturnedNoCreativePlan"));
         }
         if (!CreationEntrySource.supported(entrySource)) {
-            throw invalid("Agent计划入口来源与当前页面不一致");
+            throw invalid(SystemMessage.of("business.agentPlanEntryDoesNotMatchThisPage"));
         }
         // 入口来源是请求级硬约束，模型结构化输出偶尔会把该字段填错；按请求值纠正而非中断，
         // 后续任务类型校验（allowedTaskType）仍会拒绝与页面不符的任务。
@@ -92,10 +94,10 @@ public class CreationPlanValidator {
             boolean hasStyleSnapshots = settings.generationStyleSnapshots() != null
                     && !settings.generationStyleSnapshots().isEmpty();
             if (hasStyleIds && hasStyleIdsByTypeField) {
-                throw invalid("普通生成风格ID和按类型风格ID不能同时提交");
+                throw invalid(SystemMessage.of("business.cannotSubmitBothGeneralAndPerTypeStyleIDs"));
             }
             if ((hasStyleIds || hasStyleIdsByType) && hasStyleSnapshots) {
-                throw invalid("生成风格ID和历史风格快照不能同时提交");
+                throw invalid(SystemMessage.of("business.cannotSubmitBothStyleIDsAndHistoricalSnapshots"));
             }
             validateGenerationStyles(settings, hasStyleSnapshots);
         }
@@ -112,7 +114,7 @@ public class CreationPlanValidator {
         }
         if (Boolean.TRUE.equals(plan.canvasGuidance())) {
             if (!isGenerationPage(entrySource)) {
-                throw invalid("只有图片或视频页面允许引导用户前往画布");
+                throw invalid(SystemMessage.of("business.onlyImageAndVideoPagesMayGuideUsersToCanvas"));
             }
             return canvasGuidancePlan(plan, entrySource, settings);
         }
@@ -120,22 +122,22 @@ public class CreationPlanValidator {
             return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), plan.clarificationQuestion(), false, settings, List.of(), plan.choices());
         }
         if (tasks.isEmpty()) {
-            throw invalid("Agent计划任务数量不合法");
+            throw invalid(SystemMessage.of("business.invalidAgentPlanTaskCount"));
         }
         if (tasks.size() > 8) {
-            throw invalid("Agent计划任务数量不合法");
+            throw invalid(SystemMessage.of("business.invalidAgentPlanTaskCount"));
         }
         Set<String> taskIds = new HashSet<>();
         List<String> missingCanvasArguments = new ArrayList<>();
         for (CreationTask task : tasks) {
             if (task == null || !StringUtils.hasText(task.taskId()) || !taskIds.add(task.taskId())) {
-                throw invalid("Agent计划包含重复或空任务编号");
+                throw invalid(SystemMessage.of("business.agentPlanHasEmptyOrDuplicateTaskIDs"));
             }
             if (!allowedTaskType(entrySource, task.taskType())) {
-                throw invalid("当前页面不允许执行该类型的生成任务");
+                throw invalid(SystemMessage.of("business.thisPageDoesNotAllowThisTaskType"));
             }
             if (!StringUtils.hasText(task.prompt()) && !StringUtils.hasText(task.sourcePromptId())) {
-                throw invalid("Agent计划任务缺少提示词");
+                throw invalid(SystemMessage.of("business.agentTaskPromptIsMissing"));
             }
             if (CreationEntrySource.CANVAS.equals(entrySource)) {
                 missingCanvasArguments.addAll(validateCanvasTask(task));
@@ -154,7 +156,7 @@ public class CreationPlanValidator {
         for (CreationTask task : tasks) {
             List<String> dependencies = task.dependsOn() == null ? List.of() : task.dependsOn();
             if (dependencies.stream().anyMatch(dependency -> !taskIds.contains(dependency) || dependency.equals(task.taskId()))) {
-                throw invalid("Agent计划包含越权依赖");
+                throw invalid(SystemMessage.of("business.agentPlanHasUnauthorizedDependencies"));
             }
         }
         detectCycle(tasks);
@@ -171,38 +173,38 @@ public class CreationPlanValidator {
      */
     private CreationPlan validateVideoWorkflowPlan(CreationPlan plan, String entrySource, CreationSettings settings) {
         if (!CreationEntrySource.VIDEO_PAGE.equals(entrySource)) {
-            throw invalid("视频技能工作流只能从视频生成页面启动");
+            throw invalid(SystemMessage.of("business.videoSkillWorkflowsStartOnTheVideoPageOnly"));
         }
         if (videoWorkflowRegistry == null) {
-            throw invalid("视频技能工作流注册表未初始化");
+            throw invalid(SystemMessage.of("business.videoWorkflowRegistryIsNotInitialized"));
         }
         VideoWorkflowDefinition definition = videoWorkflowRegistry.require(plan.workflowType());
         if (StringUtils.hasText(plan.clarificationQuestion())) {
-            if (plan.tasks() != null && !plan.tasks().isEmpty()) throw invalid("澄清阶段不能创建生成任务");
+            if (plan.tasks() != null && !plan.tasks().isEmpty()) throw invalid(SystemMessage.of("business.cannotCreateGenerationTasksDuringClarification"));
             return new CreationPlan(plan.planId(), plan.intent(), entrySource, plan.summary(), plan.clarificationQuestion(),
                     false, settings, List.of(), plan.choices(), plan.workflowType());
         }
         if (settings == null || !StringUtils.hasText(settings.model())) {
-            throw invalid("请选择视频生成模型后再继续");
+            throw invalid(SystemMessage.of("business.selectAVideoModelToContinue"));
         }
         List<CreationTask> tasks = plan.tasks() == null ? List.of() : plan.tasks();
         if (!StringUtils.hasText(settings.size()) || !StringUtils.hasText(settings.resolution())
                 || !StringUtils.hasText(settings.quality()) || !StringUtils.hasText(settings.seconds())
                 || settings.watermark() == null) {
-            throw invalid("请补充视频尺寸、分辨率、质量、时长和水印设置后再继续");
+            throw invalid(SystemMessage.of("business.completeVideoSizeResolutionQualityDurationAndWatermarkSettings"));
         }
         if (tasks.stream().anyMatch(task -> task == null || !StringUtils.hasText(task.taskId())
                 || !StringUtils.hasText(task.taskRole()))) {
-            throw invalid("视频工作流任务缺少编号或角色");
+            throw invalid(SystemMessage.of("business.workflowTaskNeedsAnIDAndRole"));
         }
         if (tasks.stream().map(CreationTask::taskId).distinct().count() != tasks.size()) {
-            throw invalid("视频工作流任务编号不能重复");
+            throw invalid(SystemMessage.of("business.workflowTaskIDsMustBeUnique"));
         }
         if (tasks.stream().anyMatch(definition::usesWorkflowImageModel) && !StringUtils.hasText(settings.imageModel())) {
-            throw invalid("该视频技能需要选择图片生成模型");
+            throw invalid(SystemMessage.of("business.thisVideoSkillRequiresAnImageModel"));
         }
         if (tasks.stream().map(CreationTask::taskRole).distinct().count() != tasks.size()) {
-            throw invalid("视频工作流任务角色不能重复");
+            throw invalid(SystemMessage.of("business.workflowTaskRolesMustBeUnique"));
         }
         definition.validateTasks(tasks);
         validateDependencies(tasks);
@@ -222,10 +224,10 @@ public class CreationPlanValidator {
             List<String> dependencies = task.dependsOn() == null ? List.of() : task.dependsOn();
             if (dependencies.stream().anyMatch(dependency -> !StringUtils.hasText(dependency)
                     || !taskIds.contains(dependency) || dependency.equals(task.taskId()))) {
-                throw invalid("Agent计划包含越权依赖");
+                throw invalid(SystemMessage.of("business.agentPlanHasUnauthorizedDependencies"));
             }
             if (dependencies.stream().distinct().count() != dependencies.size()) {
-                throw invalid("Agent计划不能重复声明依赖任务");
+                throw invalid(SystemMessage.of("business.agentPlanHasDuplicateDependencies"));
             }
         }
         detectCycle(tasks);
@@ -242,7 +244,7 @@ public class CreationPlanValidator {
         if (settings.generationStyleIdsByType() != null) {
             Map<String, List<Long>> idsByType = settings.generationStyleIdsByType();
             if (idsByType.keySet().stream().anyMatch(type -> type == null || !Set.of("image", "video").contains(type))) {
-                throw invalid("按类型风格只支持image或video");
+                throw invalid(SystemMessage.of("business.perTypeStylesSupportImageAndVideoOnly"));
             }
             List<Long> ids = idsByType.values().stream()
                     .filter(Objects::nonNull)
@@ -255,7 +257,7 @@ public class CreationPlanValidator {
         if (hasStyleSnapshots) {
             List<GenerationStyleDtos.GenerationStyleSnapshot> snapshots = settings.generationStyleSnapshots();
             if (snapshots.size() > GenerationStyleService.MAX_HISTORY_STYLE_SNAPSHOT_COUNT) {
-                throw invalid("最多保留3个风格快照");
+                throw invalid(SystemMessage.of("business.atMost3StyleSnapshots"));
             }
             Set<Long> ids = new HashSet<>();
             for (var snapshot : snapshots) {
@@ -264,7 +266,7 @@ public class CreationPlanValidator {
                         || !StringUtils.hasText(snapshot.name())
                         || !StringUtils.hasText(snapshot.stylePrompt())
                         || snapshot.generationType() == null || !Set.of("image", "video").contains(snapshot.generationType())) {
-                    throw invalid("风格快照格式不合法");
+                    throw invalid(SystemMessage.of("business.invalidStyleSnapshot"));
                 }
             }
         }
@@ -273,13 +275,13 @@ public class CreationPlanValidator {
     /** 校验一组风格ID的数量、非空和重复约束。 */
     private void validateStyleIds(List<Long> ids) {
         if (ids.size() > GenerationStyleService.MAX_SELECTED_STYLE_COUNT) {
-            throw invalid("最多选择1个风格");
+            throw invalid(SystemMessage.of("business.selectAtMostOneStyle"));
         }
         if (ids.stream().anyMatch(Objects::isNull) || ids.stream().anyMatch(id -> id <= 0)) {
-            throw invalid("风格ID不合法");
+            throw invalid(SystemMessage.of("business.invalidStyleID"));
         }
         if (ids.stream().distinct().count() != ids.size()) {
-            throw invalid("风格不能重复选择");
+            throw invalid(SystemMessage.of("business.cannotSelectTheSameStyleTwice"));
         }
     }
 
@@ -325,7 +327,7 @@ public class CreationPlanValidator {
         if (hasVideoTask && settings != null && settings.videoGenerationMode() != null
                 && !settings.videoGenerationMode().isBlank()
                 && !VideoGenerationMode.isSupported(settings.videoGenerationMode())) {
-            throw invalid("视频生成模式不受支持");
+            throw invalid(SystemMessage.of("business.unsupportedVideoGenerationMode"));
         }
         if (CreationEntrySource.CANVAS.equals(entrySource)) {
             if (hasVideoTask && (settings == null || !StringUtils.hasText(settings.videoModel()))) {
@@ -335,7 +337,7 @@ public class CreationPlanValidator {
         }
         if (hasImageTask) {
             if (settings.count() != null && settings.count() < 1) {
-                throw invalid("图片生成数量必须为1");
+                throw invalid(SystemMessage.of("business.imageGenerationCountMustBe1"));
             }
             if (!StringUtils.hasText(settings.size()) || !StringUtils.hasText(settings.resolution())
                     || !StringUtils.hasText(settings.quality()) || settings.count() == null || settings.count() < 1) {
@@ -389,10 +391,10 @@ public class CreationPlanValidator {
      */
     private void validateGenerationPageTask(CreationTask task) {
         if (!("generate".equals(task.action()) || "edit".equals(task.action()))) {
-            throw invalid("Agent计划包含不支持的生成任务动作");
+            throw invalid(SystemMessage.of("business.unsupportedGenerationActionInAgentPlan"));
         }
         if (StringUtils.hasText(task.toolName()) || (task.toolArguments() != null && !task.toolArguments().isEmpty())) {
-            throw invalid("图片或视频页面不允许调用画布工具");
+            throw invalid(SystemMessage.of("business.imageAndVideoPagesCannotCallCanvasTools"));
         }
     }
 
@@ -405,18 +407,18 @@ public class CreationPlanValidator {
      */
     private List<String> validateCanvasTask(CreationTask task) {
         if (!StringUtils.hasText(task.toolName())) {
-            throw invalid("画布任务缺少Java注册工具名");
+            throw invalid(SystemMessage.of("business.canvasTaskHasNoRegisteredJavaToolName"));
         }
         AgentTool tool = toolRegistry.allTools().stream()
                 .filter(candidate -> task.toolName().equals(candidate.name()))
                 .findFirst()
-                .orElseThrow(() -> invalid("画布任务试图调用未注册工具"));
+                .orElseThrow(() -> invalid(SystemMessage.of("business.canvasTaskCallsAnUnregisteredTool")));
         if (!tool.frontend()) {
-            throw invalid("主Agent不能重复调用画布只读工具");
+            throw invalid(SystemMessage.of("business.agentCannotRepeatReadOnlyCanvasTools"));
         }
         Map<String, Object> arguments = task.toolArguments() == null ? Map.of() : task.toolArguments();
         if ("canvas_apply_ops".equals(task.toolName()) && containsGenerationOperation(arguments.get("ops"))) {
-            throw invalid("canvas_apply_ops不能执行生成，请使用专用生成工具");
+            throw invalid(SystemMessage.of("business.canvasApplyOpsCannotGenerateUseADedicatedGenerationTool"));
         }
         List<String> missing = new ArrayList<>(missingRequiredArguments(tool.parameters(), arguments));
         if ("canvas_create_generation_flow".equals(task.toolName())
@@ -432,10 +434,10 @@ public class CreationPlanValidator {
         String generationType = canvasGenerationType(task.toolName(), task.toolArguments());
         if (StringUtils.hasText(generationType)) {
             if (!generationType.equals(task.taskType()) || !"generate".equals(task.action())) {
-                throw invalid("画布生成工具与固定子Agent类型不匹配");
+                throw invalid(SystemMessage.of("business.canvasGenerationToolDoesNotMatchItsFixedAgentType"));
             }
         } else if (!("canvas".equals(task.taskType()) && "tool".equals(task.action()))) {
-            throw invalid("普通画布工具必须使用canvas任务类型和tool动作");
+            throw invalid(SystemMessage.of("business.canvasToolsRequireCanvasTaskTypeAndToolAction"));
         }
         return List.of();
     }
@@ -508,13 +510,13 @@ public class CreationPlanValidator {
         String type = schema.getString("type");
         if ("object".equals(type)) {
             if (!(value instanceof Map<?, ?> objectValue)) {
-                throw invalid(path + "必须是对象");
+                throw invalid(SystemMessage.of("business.mustBeAnObject", path));
             }
             JSONObject properties = schema.getJSONObject("properties");
             if (Boolean.FALSE.equals(schema.getBoolean("additionalProperties")) && properties != null) {
                 for (Object key : objectValue.keySet()) {
                     if (!properties.containsKey(String.valueOf(key))) {
-                        throw invalid(path + "包含未注册参数: " + key);
+                        throw invalid(SystemMessage.of("business.containsUnregisteredParameters", path, key));
                     }
                 }
             }
@@ -524,7 +526,7 @@ public class CreationPlanValidator {
                     Object requiredValue = objectValue.get(String.valueOf(requiredName));
                     if (!objectValue.containsKey(String.valueOf(requiredName)) || requiredValue == null
                             || requiredValue instanceof String text && !StringUtils.hasText(text)) {
-                        throw invalid(path + "缺少必填参数: " + requiredName);
+                        throw invalid(SystemMessage.of("business.isMissingRequiredParameters", path, requiredName));
                     }
                 }
             }
@@ -538,20 +540,20 @@ public class CreationPlanValidator {
             }
         } else if ("array".equals(type)) {
             if (!(value instanceof List<?> values)) {
-                throw invalid(path + "必须是数组");
+                throw invalid(SystemMessage.of("business.mustBeAnArray", path));
             }
             JSONObject itemSchema = schema.getJSONObject("items");
             for (int index = 0; itemSchema != null && index < values.size(); index++) {
                 validateSchemaValue(path + "[" + index + "]", values.get(index), itemSchema, false);
             }
         } else if ("string".equals(type) && !(value instanceof String)) {
-            throw invalid(path + "必须是字符串");
+            throw invalid(SystemMessage.of("business.mustBeAString", path));
         } else if ("boolean".equals(type) && !(value instanceof Boolean)) {
-            throw invalid(path + "必须是布尔值");
+            throw invalid(SystemMessage.of("business.mustBeBoolean", path));
         } else if ("number".equals(type) && !(value instanceof Number)) {
-            throw invalid(path + "必须是数字");
+            throw invalid(SystemMessage.of("business.mustBeANumber", path));
         } else if ("integer".equals(type) && !isInteger(value)) {
-            throw invalid(path + "必须是整数");
+            throw invalid(SystemMessage.of("business.mustBeAnInteger", path));
         }
         validateEnumAndRange(path, value, schema);
     }
@@ -567,7 +569,7 @@ public class CreationPlanValidator {
     private void validateEnumAndRange(String path, Object value, JSONObject schema) {
         JSONArray allowedValues = schema.getJSONArray("enum");
         if (allowedValues != null && !allowedValues.contains(value)) {
-            throw invalid(path + "不在允许值范围内");
+            throw invalid(SystemMessage.of("business.isOutsideAllowedValues", path));
         }
         if (!(value instanceof Number number)) {
             return;
@@ -576,10 +578,10 @@ public class CreationPlanValidator {
         BigDecimal minimum = schema.getBigDecimal("minimum");
         BigDecimal maximum = schema.getBigDecimal("maximum");
         if (minimum != null && actual.compareTo(minimum) < 0) {
-            throw invalid(path + "小于允许的最小值");
+            throw invalid(SystemMessage.of("business.isBelowTheMinimum", path));
         }
         if (maximum != null && actual.compareTo(maximum) > 0) {
-            throw invalid(path + "大于允许的最大值");
+            throw invalid(SystemMessage.of("business.exceedsTheMaximum", path));
         }
     }
 
@@ -625,7 +627,7 @@ public class CreationPlanValidator {
             return;
         }
         if (!visiting.add(taskId)) {
-            throw invalid("Agent计划存在循环依赖");
+            throw invalid(SystemMessage.of("business.agentPlanHasCircularDependencies"));
         }
         for (String dependency : taskMap.get(taskId).dependsOn() == null ? List.<String>of() : taskMap.get(taskId).dependsOn()) {
             visit(dependency, taskMap, visiting, visited);
@@ -637,10 +639,10 @@ public class CreationPlanValidator {
     /**
      * 创建统一的计划参数异常。
      *
-     * @param message String 异常消息
+     * @param message SystemMessage 异常消息
      * @return BusinessException 业务异常
      */
-    private BusinessException invalid(String message) {
+    private BusinessException invalid(SystemMessage message) {
         return new BusinessException(ErrorCode.PARAM_INVALID, message);
     }
 }

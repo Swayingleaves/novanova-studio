@@ -1,5 +1,7 @@
 package com.novanovastudio.ai;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.AiTaskDtos;
@@ -51,10 +53,10 @@ public class AiProviderAdapterRegistry {
         String apiFormat = normalizeApiFormat(channel.apiFormat());
         AiProviderAdapter adapter = adapters.get(apiFormat);
         if (adapter == null) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "服务端任务系统暂不支持" + apiFormat + "调用格式");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.serverTasksDoNotSupportFormat", apiFormat));
         }
         if (!adapter.supports(taskType)) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, apiFormat + "调用格式暂不支持" + taskType + "任务");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.formatDoesNotSupportTasks", apiFormat, taskType));
         }
         return adapter;
     }

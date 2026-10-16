@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { uploadMediaFile, type UploadedFile } from "@/features/storage/services/file-storage";
 import { boolConfig } from "@/features/generation/lib/seedance-video";
 import { createAiTask, getAiTaskInfo, waitAiTask, type GenerationStyleSnapshot, type ServerAiTask, type ServerAiTaskMediaReference, type ServerGenerationSource } from "@/services/api/server";
@@ -69,11 +71,11 @@ export async function pollVideoGenerationTask(_config: AiConfig, task: VideoGene
     const current = await getAiTaskInfo(task.id);
     options?.onProgress?.(current.progress);
     if (current.status === "pending" || current.status === "running") return { status: "pending" };
-    if (current.status !== "success") return { status: "failed", error: current.errorMessage || "视频生成失败" };
+    if (current.status !== "success") return { status: "failed", error: current.errorMessage || translate("generation.videoGenerationFailed") };
     try {
         return { status: "completed", result: videoResultFromTask(current) };
     } catch (error) {
-        return { status: "failed", error: error instanceof Error ? error.message : "视频任务没有返回结果" };
+        return { status: "failed", error: error instanceof Error ? error.message : translate("generation.videoTaskReturnedNoResult") };
     }
 }
 
@@ -81,15 +83,15 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
     if (result.uploadedFile) return result.uploadedFile;
     if (result.blob) {
         const file = await uploadMediaFile(result.blob, "video");
-        videoApiLog("视频已保存到后端媒体库", summarizeUploadedFile(file));
+        videoApiLog(translate("generation.videoSavedToServerMediaLibrary"), summarizeUploadedFile(file));
         return file;
     }
     if (result.url) {
         const file = await uploadMediaFile(result.url, "video", { mimeType: result.mimeType || "video/mp4" });
-        videoApiLog("视频远程结果已登记到媒体表", { 地址: safeLogUrl(result.url), 媒体类型: result.mimeType || file.mimeType });
+        videoApiLog(translate("generation.remoteVideoRegisteredInMediaLibrary"), { 地址: safeLogUrl(result.url), 媒体类型: result.mimeType || file.mimeType });
         return { ...file, mimeType: result.mimeType || file.mimeType };
     }
-    throw new Error("视频接口没有返回可播放的视频");
+    throw new Error(translate("generation.videoAPIReturnedNoPlayableVideo"));
 }
 
 async function createServerVideoTask(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], generationSource: ServerGenerationSource, options?: RequestOptions): Promise<ServerAiTask> {
@@ -124,7 +126,7 @@ async function createServerVideoTask(config: AiConfig, prompt: string, reference
 
 function videoResultFromTask(task: ServerAiTask): VideoGenerationResult {
     const item = readTaskResultItem(task.resultData);
-    if (!item?.url) throw new Error("视频任务没有返回结果");
+    if (!item?.url) throw new Error(translate("generation.videoTaskReturnedNoResult"));
     return {
         url: item.url,
         mimeType: item.mimeType || "video/mp4",

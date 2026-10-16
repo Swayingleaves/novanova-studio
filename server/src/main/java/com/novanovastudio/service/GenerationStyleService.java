@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.GenerationStyleDtos;
@@ -88,13 +90,13 @@ public class GenerationStyleService {
      */
     public Mono<Void> updateStyle(GenerationStyleDtos.UpdateStyleRequest request) {
         if (request.id() == null || request.id() <= 0) {
-            return Mono.error(invalid("风格ID不能为空"));
+            return Mono.error(invalid(SystemMessage.of("business.styleIDIsRequired")));
         }
         GenerationStyleRecords.StyleRecord record = buildRecord(
                 request.generationType(), request.name(), request.stylePrompt(), request.coverUrl(), request.category(), request.status(), request.sortOrder());
         record.setId(request.id());
         return repository.updateStyle(record)
-                .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "风格不存在")))
+                .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.styleNotFound"))))
                 .doOnSuccess(ignored -> log.info("更新生成风格成功: id={}", request.id()));
     }
 
@@ -106,11 +108,11 @@ public class GenerationStyleService {
      */
     public Mono<Void> updateStyleStatus(GenerationStyleDtos.UpdateStyleStatusRequest request) {
         if (request.id() == null || request.id() <= 0) {
-            return Mono.error(invalid("风格ID不能为空"));
+            return Mono.error(invalid(SystemMessage.of("business.styleIDIsRequired")));
         }
         int status = normalizeStatus(request.status());
         return repository.updateStyleStatus(request.id(), status)
-                .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "风格不存在")))
+                .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.styleNotFound"))))
                 .doOnSuccess(ignored -> log.info("更新生成风格状态成功: id={}, status={}", request.id(), status));
     }
 
@@ -127,7 +129,7 @@ public class GenerationStyleService {
                 .distinct()
                 .toList();
         if (ids.isEmpty()) {
-            return Mono.error(invalid("请选择要删除的风格"));
+            return Mono.error(invalid(SystemMessage.of("business.selectStylesToDelete")));
         }
         return repository.deleteStyles(ids).doOnSuccess(ignored -> log.info("删除生成风格成功: ids={}", ids));
     }
@@ -151,7 +153,7 @@ public class GenerationStyleService {
             List<GenerationStyleDtos.GenerationStyleSnapshot> history = snapshots == null
                     ? List.of() : new java.util.ArrayList<>(snapshots);
             if (!ids.isEmpty() && !history.isEmpty()) {
-                return Mono.<List<GenerationStyleDtos.GenerationStyleSnapshot>>error(invalid("风格ID和风格快照不能同时提交"));
+                return Mono.<List<GenerationStyleDtos.GenerationStyleSnapshot>>error(invalid(SystemMessage.of("business.cannotSubmitBothStyleIDsAndSnapshots")));
             }
             if (!history.isEmpty()) {
                 return Mono.fromCallable(() -> validateSnapshots(type, history));
@@ -165,7 +167,7 @@ public class GenerationStyleService {
                         List<Long> missing = ids.stream().filter(id -> !isUsableRecord(found.get(id), type)).toList();
                         if (!missing.isEmpty()) {
                             return Mono.<List<GenerationStyleDtos.GenerationStyleSnapshot>>error(
-                                    invalid("存在不可用或类型不匹配的风格ID: " + missing));
+                                    invalid(SystemMessage.of("business.unavailableOrMismatchedStyleIDs", missing)));
                         }
                         return Mono.just(ids.stream().map(id -> toSnapshot(found.get(id))).toList());
                     });
@@ -182,21 +184,21 @@ public class GenerationStyleService {
     private List<GenerationStyleDtos.GenerationStyleSnapshot> validateSnapshots(
             String generationType, List<GenerationStyleDtos.GenerationStyleSnapshot> snapshots) {
         if (snapshots.size() > MAX_HISTORY_STYLE_SNAPSHOT_COUNT) {
-            throw invalid("最多保留3个风格快照");
+            throw invalid(SystemMessage.of("business.atMost3StyleSnapshots"));
         }
         Map<Long, Boolean> ids = new LinkedHashMap<>();
         return snapshots.stream().map(snapshot -> {
             if (snapshot == null || snapshot.id() == null || snapshot.id() <= 0) {
-                throw invalid("风格快照ID不合法");
+                throw invalid(SystemMessage.of("business.invalidStyleSnapshotID"));
             }
             if (ids.put(snapshot.id(), Boolean.TRUE) != null) {
-                throw invalid("风格快照不能重复");
+                throw invalid(SystemMessage.of("business.styleSnapshotsMustBeUnique"));
             }
             if (!generationType.equals(snapshot.generationType())) {
-                throw invalid("风格快照类型与生成类型不匹配");
+                throw invalid(SystemMessage.of("business.styleSnapshotTypeDoesNotMatchGenerationType"));
             }
             if (!StringUtils.hasText(snapshot.name()) || !StringUtils.hasText(snapshot.stylePrompt())) {
-                throw invalid("风格快照缺少名称或提示词");
+                throw invalid(SystemMessage.of("business.styleSnapshotNeedsANameAndPrompt"));
             }
             return new GenerationStyleDtos.GenerationStyleSnapshot(snapshot.id(), snapshot.name().trim(), generationType, snapshot.stylePrompt().trim());
         }).toList();
@@ -208,17 +210,17 @@ public class GenerationStyleService {
             return List.of();
         }
         if (styleIds.stream().anyMatch(Objects::isNull)) {
-            throw invalid("风格ID不能为空");
+            throw invalid(SystemMessage.of("business.styleIDIsRequired"));
         }
         List<Long> ids = styleIds.stream().map(Long::valueOf).toList();
         if (ids.stream().anyMatch(id -> id <= 0)) {
-            throw invalid("风格ID不合法");
+            throw invalid(SystemMessage.of("business.invalidStyleID"));
         }
         if (ids.stream().distinct().count() != ids.size()) {
-            throw invalid("风格不能重复选择");
+            throw invalid(SystemMessage.of("business.cannotSelectTheSameStyleTwice"));
         }
         if (ids.size() > MAX_SELECTED_STYLE_COUNT) {
-            throw invalid("最多选择1个风格");
+            throw invalid(SystemMessage.of("business.selectAtMostOneStyle"));
         }
         return ids;
     }
@@ -227,7 +229,7 @@ public class GenerationStyleService {
     private String normalizeGenerationType(String generationType) {
         String type = generationType == null ? "" : generationType.trim().toLowerCase(Locale.ROOT);
         if (!GenerationStyleRecords.TYPE_IMAGE.equals(type) && !GenerationStyleRecords.TYPE_VIDEO.equals(type)) {
-            throw invalid("风格类型只支持image或video");
+            throw invalid(SystemMessage.of("business.styleTypeMustBeImageOrVideo"));
         }
         return type;
     }
@@ -236,7 +238,7 @@ public class GenerationStyleService {
     private int normalizeStatus(Integer status) {
         int value = status == null ? GenerationStyleRecords.STATUS_ENABLED : status;
         if (value != GenerationStyleRecords.STATUS_ENABLED && value != GenerationStyleRecords.STATUS_DISABLED) {
-            throw invalid("风格状态只支持启用或停用");
+            throw invalid(SystemMessage.of("business.styleStatusMustBeEnabledOrDisabled"));
         }
         return value;
     }
@@ -246,13 +248,13 @@ public class GenerationStyleService {
                                                            String category, Integer status, Integer sortOrder) {
         GenerationStyleRecords.StyleRecord record = new GenerationStyleRecords.StyleRecord();
         record.setGenerationType(normalizeGenerationType(generationType));
-        record.setName(required(name, "风格名称不能为空"));
-        record.setStylePrompt(required(stylePrompt, "风格提示词不能为空"));
-        record.setCoverUrl(required(coverUrl, "风格封面不能为空"));
-        record.setCategory(required(category, "风格分类不能为空"));
+        record.setName(required(name, SystemMessage.of("business.styleNameIsRequired")));
+        record.setStylePrompt(required(stylePrompt, SystemMessage.of("business.stylePromptIsRequired")));
+        record.setCoverUrl(required(coverUrl, SystemMessage.of("business.styleCoverIsRequired")));
+        record.setCategory(required(category, SystemMessage.of("business.styleCategoryIsRequired")));
         record.setStatus(normalizeStatus(status));
         if (sortOrder != null && sortOrder < 0) {
-            throw invalid("风格排序值不能小于0");
+            throw invalid(SystemMessage.of("business.styleSortOrderMustNotBeNegative"));
         }
         record.setSortOrder(sortOrder == null ? DEFAULT_SORT_ORDER : sortOrder);
         return record;
@@ -266,7 +268,7 @@ public class GenerationStyleService {
                 || "all".equalsIgnoreCase(source.generationType()) ? "all" : normalizeGenerationType(source.generationType());
         Integer status = source.status();
         if (status != null && status != 0 && status != 1) {
-            throw invalid("风格状态只支持启用或停用");
+            throw invalid(SystemMessage.of("business.styleStatusMustBeEnabledOrDisabled"));
         }
         return new GenerationStyleDtos.StyleListRequest(source.keyword() == null ? "" : source.keyword().trim(), type,
                 status, Math.max(1, source.page()), Math.min(MAX_PAGE_SIZE, Math.max(1, source.pageSize())));
@@ -298,7 +300,7 @@ public class GenerationStyleService {
     }
 
     /** 必填文本。 */
-    private String required(String value, String message) {
+    private String required(String value, SystemMessage message) {
         if (!StringUtils.hasText(value)) {
             throw invalid(message);
         }
@@ -311,7 +313,7 @@ public class GenerationStyleService {
     }
 
     /** 构建参数异常。 */
-    private BusinessException invalid(String message) {
+    private BusinessException invalid(SystemMessage message) {
         return new BusinessException(ErrorCode.PARAM_INVALID, message);
     }
 }

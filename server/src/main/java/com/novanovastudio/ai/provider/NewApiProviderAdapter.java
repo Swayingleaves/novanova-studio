@@ -1,5 +1,7 @@
 package com.novanovastudio.ai.provider;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -101,7 +103,7 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
         return switch (context.task().getTaskType()) {
             case AiTaskTypes.IMAGE -> executeImageTask(context);
             case AiTaskTypes.VIDEO -> executeVideoTask(context);
-            default -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "New API渠道仅支持图片和视频任务"));
+            default -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.newAPISupportsImageAndVideoTasksOnly")));
         };
     }
 
@@ -167,7 +169,7 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
         List<AiTaskDtos.AiTaskMediaReference> imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
         List<AiTaskDtos.AiTaskMediaReference> videoReferences = AiTaskParameterReader.safeReferences(context.request().videoReferences());
         if (imageReferences.size() > MAXIMUM_REFERENCE_IMAGE_COUNT || videoReferences.size() > MAXIMUM_REFERENCE_VIDEO_COUNT) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "New API最多支持9张参考图和3个参考视频"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.newAPISupportsUpTo9ImagesAnd3Videos")));
         }
         return Mono.zip(resolveReferenceUrls(context, imageReferences), resolveReferenceUrls(context, videoReferences))
                 .flatMap(urls -> createVideoTask(context, urls.getT1(), urls.getT2()));
@@ -205,7 +207,7 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
                 .flatMap(created -> {
                     String providerTaskId = AiTaskParameterReader.firstNonEmpty(created.getString("id"), created.getString("task_id"));
                     if (!StringUtils.hasText(providerTaskId)) {
-                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "New API视频接口没有返回任务ID"));
+                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.newAPIVideoRequestReturnedNoTaskID")));
                     }
                     return context.updateRunningProgress(10)
                             .then(pollVideoTask(context, providerTaskId))
@@ -227,7 +229,7 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
                 .concatMap(attempt -> Mono.delay(pollingInterval)
                         .then(context.isCancelRequested())
                         .flatMap(cancelled -> {
-                            if (Boolean.TRUE.equals(cancelled)) return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "任务已取消"));
+                            if (Boolean.TRUE.equals(cancelled)) return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCanceled")));
                             return aiHttpClient.sendJsonRequest(context.channel(), "GET", taskPath, null)
                                     .map(NewApiProviderAdapter::responseTaskPayload)
                                     .flatMap(response -> processVideoTaskStatus(context, response, attempt));
@@ -266,7 +268,7 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
             if (Set.of("completed", "success", "succeeded", "done").contains(status)) return Mono.just(response);
             if (PROCESSING_STATUSES.contains(status)) return Mono.empty();
             if (FAILURE_STATUSES.contains(status)) return Mono.error(AiErrorSupport.providerTaskFailure(response, "New API视频生成失败"));
-            return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "New API返回未知任务状态: " + status));
+            return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.unknownNewAPITaskStatus", status)));
         }));
     }
 
@@ -303,7 +305,7 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
     private Mono<JSONObject> storeVideoResult(AiTaskExecutionContext context, String providerTaskId, JSONObject response) {
         String resultUrl = resolveVideoResultUrl(readVideoResultUrl(response), context.channel().baseUrl());
         if (!mediaSupport.isHttpUrl(resultUrl)) {
-            return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "New API任务完成但没有返回视频地址"));
+            return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.newAPITaskCompletedWithoutVideoURL")));
         }
         Integer durationMilliseconds = parseDurationMilliseconds(response.getString("seconds"));
         return mediaSupport.registerGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, resultUrl, "video/mp4", null, null, durationMilliseconds)
@@ -409,10 +411,10 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
             case "1k" -> 1024;
             case "2k" -> 2048;
             case "4k" -> 4096;
-            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "图片清晰度只支持1K、2K、4K");
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageResolutionMustBe1K2KOr4K"));
         };
         String[] ratio = size.split(":");
-        if (ratio.length != 2) throw new BusinessException(ErrorCode.PARAM_INVALID, "图片比例必须是正数，例如9:16");
+        if (ratio.length != 2) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageAspectRatioMustBePositiveEG916"));
         try {
             double width = Double.parseDouble(ratio[0]);
             double height = Double.parseDouble(ratio[1]);
@@ -421,7 +423,7 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
             int shortSide = Math.max(16, (int) (Math.round(longSide / (landscape ? width / height : height / width) / 16) * 16));
             return landscape ? longSide + "x" + shortSide : shortSide + "x" + longSide;
         } catch (NumberFormatException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "图片比例必须是正数，例如9:16");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageAspectRatioMustBePositiveEG916"));
         }
     }
 

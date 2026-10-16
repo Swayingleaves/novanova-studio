@@ -62,7 +62,7 @@ public final class CheckInDtos {
      * @param checkInCredits 每日签到积分
      */
     public record UpdateCheckInRewardSettingsRequest(
-            @NotNull(message = "每日签到积分不能为空")
-            @Min(value = 0, message = "每日签到积分不能小于0") Integer checkInCredits) {
+            @NotNull(message = "business.dailyCheckInCreditsAreRequired")
+            @Min(value = 0, message = "business.dailyCheckInCreditsMustNotBeNegative") Integer checkInCredits) {
     }
 }

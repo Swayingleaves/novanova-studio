@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.common.SensitiveDataCrypto;
@@ -161,7 +163,7 @@ public class CreditCardService {
                                                                        String redeemedUserKeyword, boolean includeCode, int page, int pageSize) {
         validatePage(page, pageSize);
         if (status != null && !Set.of("available", "redeemed").contains(status)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "卡密状态仅支持available或redeemed");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.codeStatusMustBeAvailableOrRedeemed"));
         }
         CodeFilter codeFilter = codeFilter(cardCode);
         String normalizedUserKeyword = StringUtils.hasText(redeemedUserKeyword) ? redeemedUserKeyword.trim().toLowerCase(Locale.ROOT) : null;
@@ -181,12 +183,12 @@ public class CreditCardService {
         return transactionalOperator.transactional(
                         creditCardRepository.claimUnredeemedCard(codeHash, userId)
                                 .switchIfEmpty(Mono.defer(() -> creditCardRepository.findCardStatus(codeHash)
-                                        .flatMap(status -> Mono.<CreditCardRepository.ClaimedCard>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "卡密已兑换")))
-                                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "卡密不存在或格式不正确")))))
+                                        .flatMap(status -> Mono.<CreditCardRepository.ClaimedCard>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.codeAlreadyRedeemed"))))
+                                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.codeNotFoundOrInvalidFormat"))))))
                                 .flatMap(card -> creditRepository.changeBalance(userId, card.credits())
-                                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分账户不存在，无法兑换卡密")))
+                                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.creditAccountNotFoundCannotRedeem"))))
                                         .flatMap(balance -> creditRepository.createCardRedeemTransaction(userId, card.id(), card.credits(), balance, "兑换积分卡密")
-                                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR, "积分兑换流水写入失败")))
+                                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToWriteRedemptionTransaction"))))
                                                 .map(transactionId -> new CreditCardDtos.RedeemCreditsResponse(card.id(), card.codeMasked(), card.credits(), balance, formatTime(card.redeemedAt()))))))
                 .flatMap(response -> eventPublisher.publish(userId, new AiTaskDtos.AiTaskEvent("credit-balance", null, null, response.creditBalance()))
                         .thenReturn(response))
@@ -232,10 +234,10 @@ public class CreditCardService {
      */
     static void validateGeneration(int quantity, int creditsPerCard) {
         if (quantity < 1 || quantity > CreditCardDtos.MAX_QUANTITY) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "生成数量必须在1到1000之间");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.quantityMustBeBetween1And1000"));
         }
         if (creditsPerCard < 1) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "单卡积分必须为正整数");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.creditsPerCardMustBeAPositiveInteger"));
         }
     }
 
@@ -247,7 +249,7 @@ public class CreditCardService {
      */
     static String normalizeCardCode(String cardCode) {
         if (!StringUtils.hasText(cardCode)) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, "卡密不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.redemptionCodeIsRequired"));
         }
         return cardCode.replaceAll("[\\s-]", "").toUpperCase(Locale.ROOT);
     }
@@ -259,7 +261,7 @@ public class CreditCardService {
      */
     static void validateFullCardCode(String cardCode) {
         if (!CARD_CODE_PATTERN.matcher(cardCode).matches()) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "卡密必须为20位大写字符或数字");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.codeMustBe20UppercaseLettersOrDigits"));
         }
     }
 
@@ -290,7 +292,7 @@ public class CreditCardService {
         if (normalized.length() == 4 && CARD_SUFFIX_PATTERN.matcher(normalized).matches()) {
             return new CodeFilter(null, normalized);
         }
-        throw new BusinessException(ErrorCode.PARAM_INVALID, "卡密查询请输入完整卡密或末四位");
+        throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.searchWithAFullCodeOrItsLastFourCharacters"));
     }
 
     /**
@@ -301,7 +303,7 @@ public class CreditCardService {
      */
     private void validatePage(int page, int pageSize) {
         if (page < 1 || pageSize < 1 || pageSize > 100) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "分页参数不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidPaginationParameters"));
         }
     }
 
@@ -316,7 +318,7 @@ public class CreditCardService {
         LocalDate resolvedEndDate = endDate == null ? LocalDate.now(CREDIT_TIME_ZONE) : endDate;
         LocalDate resolvedStartDate = startDate == null ? resolvedEndDate.minusDays(29) : startDate;
         if (resolvedStartDate.isAfter(resolvedEndDate)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "兑换记录筛选日期不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidRedemptionDateFilter"));
         }
         return new DateRange(resolvedStartDate.atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime(), resolvedEndDate.plusDays(1).atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime());
     }

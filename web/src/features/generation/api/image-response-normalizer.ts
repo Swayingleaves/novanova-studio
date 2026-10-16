@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 export type ResponseToolCall = {
     id: string;
     type: "function";
@@ -26,7 +28,7 @@ export type ResponsePayload = {
 };
 
 export function normalizeResponsePayload(payload: ResponsePayload): ToolResponseResult {
-    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "请求失败");
+    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || translate("generation.requestFailed"));
     if (payload.error?.message) throw new Error(payload.error.message);
     const output = payload.output ?? [];
     const content = payload.output_text || output

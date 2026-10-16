@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { type CanvasAudioNode, type CanvasBackgroundNode, type CanvasDirectorDeskAspectRatio, type CanvasDirectorDeskCamera, type CanvasDirectorDeskNode, type CanvasDirectorDeskObject, type CanvasDirectorDeskProject, type CanvasExecutionState, type CanvasImageNode, type CanvasNodeFrame, type CanvasNodeKind, type CanvasPoint, type CanvasStoryboardNode, type CanvasTextNode, type CanvasVideoCompositionNode, type CanvasVideoNode } from "./types.ts";
 
 export interface CreateCanvasNodeInput {
@@ -15,49 +17,49 @@ export interface CanvasNodeTemplate {
 export const CANVAS_CONNECTION_HANDLE_SIZE = 16;
 
 const IMAGE_NODE_TEMPLATE: CanvasNodeTemplate = {
-    title: "图像",
+    get title() { return translate("canvas.image_37e4e4"); },
     width: 510,
     height: 360,
 };
 
 const TEXT_NODE_TEMPLATE: CanvasNodeTemplate = {
-    title: "文本",
+    get title() { return translate("canvas.text_dd8186"); },
     width: 600,
     height: 600,
 };
 
 const VIDEO_NODE_TEMPLATE: CanvasNodeTemplate = {
-    title: "视频",
+    get title() { return translate("canvas.video"); },
     width: 630,
     height: 354,
 };
 
 const VIDEO_COMPOSITION_NODE_TEMPLATE: CanvasNodeTemplate = {
-    title: "合成视频",
+    get title() { return translate("canvas.composeVideo"); },
     width: 440,
     height: 380,
 };
 
 const DIRECTOR_DESK_NODE_TEMPLATE: CanvasNodeTemplate = {
-    title: "3D 导演台",
+    get title() { return translate("canvas.3DDirectorDesk"); },
     width: 520,
     height: 360,
 };
 
 const STORYBOARD_NODE_TEMPLATE: CanvasNodeTemplate = {
-    title: "分镜脚本",
+    get title() { return translate("canvas.storyboardScript"); },
     width: 600,
     height: 600,
 };
 
 const BACKGROUND_NODE_TEMPLATE: CanvasNodeTemplate = {
-    title: "背景板",
+    get title() { return translate("canvas.background"); },
     width: 960,
     height: 640,
 };
 
 const CANVAS_NODE_TEMPLATES: Record<CanvasNodeKind, CanvasNodeTemplate> = {
-    audio: { title: "音频", width: 480, height: 200 },
+    audio: { get title() { return translate("canvas.audio"); }, width: 480, height: 200 },
     image: IMAGE_NODE_TEMPLATE,
     text: TEXT_NODE_TEMPLATE,
     video: VIDEO_NODE_TEMPLATE,
@@ -74,7 +76,7 @@ export const CANVAS_BACKGROUND_DEFAULT_COLOR = "var(--studio-surface-raised)";
 
 /** 创建空音频节点。 */
 export function createAudioNode(input: CreateCanvasNodeInput): CanvasAudioNode {
-    return { id: input.id, kind: "audio", title: input.title?.trim() || "音频", frame: createNodeFrame(CANVAS_NODE_TEMPLATES.audio, input.position), execution: createIdleExecution(), content: { source: "", waveformPeaks: [] } };
+    return { id: input.id, kind: "audio", title: input.title?.trim() || translate("canvas.audio"), frame: createNodeFrame(CANVAS_NODE_TEMPLATES.audio, input.position), execution: createIdleExecution(), content: { source: "", waveformPeaks: [] } };
 }
 
 export function createImageNode(input: CreateCanvasNodeInput): CanvasImageNode {
@@ -188,7 +190,7 @@ export function createVideoCompositionNode(input: CreateCanvasNodeInput): Canvas
 export function createDirectorDeskNode(input: CreateCanvasNodeInput): CanvasDirectorDeskNode {
     const camera: CanvasDirectorDeskCamera = {
         id: "camera-main",
-        name: "主机位",
+        name: translate("canvas.mainCamera"),
         position: { x: 4, y: 3, z: 6 },
         target: { x: 0, y: 1, z: 0 },
         fieldOfView: 42,
@@ -197,7 +199,7 @@ export function createDirectorDeskNode(input: CreateCanvasNodeInput): CanvasDire
     const objects: CanvasDirectorDeskObject[] = [
         {
             id: "ground-main",
-            name: "地面",
+            name: translate("canvas.ground"),
             kind: "ground",
             transform: {
                 position: { x: 0, y: 0, z: 0 },
@@ -209,7 +211,7 @@ export function createDirectorDeskNode(input: CreateCanvasNodeInput): CanvasDire
         },
         {
             id: "character-main",
-            name: "角色 A",
+            name: translate("canvas.characterA"),
             kind: "character",
             transform: {
                 position: { x: 0, y: 0, z: 0 },

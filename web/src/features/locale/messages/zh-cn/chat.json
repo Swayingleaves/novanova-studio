@@ -1,0 +1,10 @@
+{
+    "thinking": "思考中...",
+    "thinking_548b0e": "思考过程 (",
+    "generationStopped": "已停止生成",
+    "failedToStopGeneration": "停止生成失败",
+    "unknownError": "未知错误",
+    "generationConnectionClosedGenerateAgain": "生成连接已关闭，请重新生成",
+    "failedToSend": "发送失败",
+    "generationFailed": "生成失败"
+}

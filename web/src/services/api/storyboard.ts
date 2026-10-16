@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { CanvasStoryboardAsset, CanvasStoryboardAssetGenerationSettings, CanvasStoryboardAssetImage, CanvasStoryboardShot } from "@/features/canvas/types";
 import { serverPost, type ServerAiTask } from "./server";
 
@@ -51,7 +53,7 @@ export function readStoryboardAssetImage(task: ServerAiTask): CanvasStoryboardAs
           ? resultData.items[0] as Record<string, unknown>
           : null;
     const source = typeof item?.url === "string" ? item.url.trim() : "";
-    if (!source) throw new Error("图片任务已完成，但没有返回图片地址");
+    if (!source) throw new Error(translate("common.imageTaskCompletedWithoutAnImageURL"));
     return {
         source,
         ...(typeof item?.storageKey === "string" && item.storageKey.trim() ? { storageKey: item.storageKey } : {}),

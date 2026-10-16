@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, InputNumber, Modal, Segmented, Select, Tabs, Tooltip } from "antd";
@@ -30,16 +33,17 @@ type DirectorDeskWorkspaceProps = {
     onVideoExported?: (nodeId: string, video: UploadedFile, source: CanvasDirectorDeskExportSource) => void;
 };
 
-const OBJECT_LABELS: Record<CanvasDirectorDeskObjectKind, string> = {
-    ground: "地面",
-    cube: "立方体",
-    sphere: "球体",
-    character: "人偶",
-    glb: "GLB 道具",
-};
+const createObjectLabels = (translator: typeof translate = translate): Record<CanvasDirectorDeskObjectKind, string> => ({
+    get ground() { return translator("directorDesk.ground"); },
+    get cube() { return translator("directorDesk.cube"); },
+    get sphere() { return translator("directorDesk.sphere"); },
+    get character() { return translator("directorDesk.mannequin"); },
+    get glb() { return translator("directorDesk.gLBProp"); },
+});
 
 /** 导演台原生编辑器的首版工作区，负责工程编辑、时间轴预览和可复现求值。 */
 export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChangeProject, onChangeSettings, onImageExported, onVideoExported }: DirectorDeskWorkspaceProps) {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const theme = useCanvasTheme();
     const [timeMilliseconds, setTimeMilliseconds] = useState(0);
@@ -80,13 +84,13 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
             const source = previewPose ? { ...project, objects: project.objects.map((object) => object.id === selectedObjectId ? applyPoseAdjustment(object, previewPose, time, poseKeyframing) : object) } : project;
             return { state: evaluateDirectorDeskProject(source, timeMilliseconds), error: null };
         } catch (error) {
-            return { state: null, error: error instanceof Error ? error.message : "导演台场景求值失败" };
+            return { state: null, error: error instanceof Error ? error.message : translate("directorDesk.directorSceneEvaluationFailed") };
         }
-    }, [project, timeMilliseconds, previewPose, selectedObjectId, poseKeyframing]);
+    }, [project, timeMilliseconds, previewPose, selectedObjectId, poseKeyframing, translate.locale]);
     const evaluated = evaluation.state;
     const motionPaths = (editingCameraId ? project?.cameras.find((camera) => camera.id === editingCameraId)?.motionPaths : selectedObject?.track?.motionPaths) || [];
     const selectedMotionPath = motionPaths.find((path) => path.id === selectedMotionPathId) || findActiveTimelineSegment(motionPaths, timeMilliseconds, project?.timeline.durationMilliseconds || 0);
-    const poseAdjustment = useMemo(() => selectedObject ? (poseKeyframing ? readDirectorDeskPoseAdjustment(selectedObject, timeMilliseconds) : selectedObject.pose || createNeutralPose()) : createNeutralPose(), [selectedObject, timeMilliseconds, poseKeyframing]);
+    const poseAdjustment = useMemo(() => selectedObject ? (poseKeyframing ? readDirectorDeskPoseAdjustment(selectedObject, timeMilliseconds) : selectedObject.pose || createNeutralPose()) : createNeutralPose(), [selectedObject, timeMilliseconds, poseKeyframing, translate.locale]);
 
     /** 播放按钮与空格快捷键共用入口，预览不会修改工程数据。 */
     const changePlaying = useCallback((enabled: boolean) => {
@@ -188,7 +192,7 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
         const id = `${kind}-${nanoid(8)}`;
         const object: CanvasDirectorDeskObject = {
             id,
-            name: `${OBJECT_LABELS[kind]} ${project.objects.filter((item) => item.kind === kind).length + 1}`,
+            name: `${createObjectLabels(translate)[kind]} ${project.objects.filter((item) => item.kind === kind).length + 1}`,
             kind,
             ...(kind === "character" ? { pose: createNeutralPose() } : {}),
             transform: {
@@ -210,7 +214,7 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
             const uploaded = await uploadMediaFile(file, "glb", { mimeType: file.type || "model/gltf-binary" });
             const asset: CanvasDirectorDeskAsset = {
                 id: `asset-${nanoid(8)}`,
-                name: file.name || "GLB 道具",
+                name: file.name || translate("directorDesk.gLBProp"),
                 kind: "glb",
                 storageKey: uploaded.storageKey,
                 mimeType: uploaded.mimeType || file.type || "model/gltf-binary",
@@ -231,9 +235,9 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
             updateProject((current) => ({ ...current, assets: [...(current.assets || []), asset], objects: [...current.objects, object] }));
             setEditingCameraId(null);
             setSelectedObjectId(id);
-            message.success("GLB 道具已添加");
+            message.success(translate("directorDesk.gLBPropAdded"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "GLB 道具上传失败");
+            message.error(error instanceof Error ? error.message : translate("directorDesk.gLBUploadFailed"));
         } finally {
             setAssetUploading(false);
         }
@@ -244,7 +248,7 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
             const uploaded = await uploadImage(file);
             const asset: CanvasDirectorDeskAsset = {
                 id: `asset-${nanoid(8)}`,
-                name: file.name || "背景图片",
+                name: file.name || translate("directorDesk.backgroundImage"),
                 kind: "image",
                 storageKey: uploaded.storageKey,
                 mimeType: uploaded.mimeType || file.type || "image/png",
@@ -252,9 +256,9 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
                 ...(uploaded.objectStorage ? { objectStorage: uploaded.objectStorage } : {}),
             };
             updateProject((current) => ({ ...current, assets: [...(current.assets || []), asset], background: { assetId: asset.id } }));
-            message.success("背景图片已添加");
+            message.success(translate("directorDesk.backgroundImageAdded"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "背景图片上传失败");
+            message.error(error instanceof Error ? error.message : translate("directorDesk.failedToUploadBackground"));
         } finally {
             setAssetUploading(false);
         }
@@ -265,14 +269,14 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
         if (!object || object.locked || videoExporting || playing || assetUploading) return;
         const following = project.cameras.some((camera) => camera.targetObjectId === objectId);
         modal.confirm({
-            title: `删除“${object.name}”？`,
-            content: "将删除该对象及其全部运动轨迹、动作片段、姿势和关键帧。其他对象保留。" + (following ? "相关机位将停止跟随，并保持当前目标点。" : ""),
-            okText: "确认删除", cancelText: "取消", okButtonProps: { danger: true }, focusable: { autoFocusButton: "cancel" },
+            title: translate("directorDesk.delete", { value0: object.name }),
+            content: translate("directorDesk.deletesThisObjectAndAllItsMotionActionsPoses") + (following ? translate("directorDesk.linkedCamerasStopFollowingAndKeepTheirTarget") : ""),
+            okText: translate("directorDesk.confirmDeletion"), cancelText: translate("directorDesk.cancel"), okButtonProps: { danger: true }, focusable: { autoFocusButton: "cancel" },
             onOk: () => {
                 try {
                     const updated = updateProject((current) => removeDirectorDeskObjects(current, [objectId], timeMilliseconds));
                     if (updated && selectedObjectId === objectId) { cancelDrawing(); setPreviewPose(null); setSelectedMotionPathId(null); setSelectedObjectId(null); }
-                } catch (error) { message.error(error instanceof Error ? error.message : "删除场景对象失败"); }
+                } catch (error) { message.error(error instanceof Error ? error.message : translate("directorDesk.failedToDeleteSceneObject")); }
             },
         });
     };
@@ -370,7 +374,7 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
         try {
             const actionClips = setTimelineCharacterAction(clips, preset, frameTime, project.timeline.durationMilliseconds, nanoid());
             updateObject(selectedObject.id, (object) => ({ ...object, track: { position: [], rotation: [], ...object.track, actionClips } }));
-        } catch (error) { message.warning(error instanceof Error ? error.message : "添加动作失败"); }
+        } catch (error) { message.warning(error instanceof Error ? error.message : translate("directorDesk.failedToAddMotion")); }
     };
     const writePoseAdjustment = (pose: CanvasDirectorDeskPose, forceKeyframe = poseKeyframing) => {
         if (!selectedObject || selectedObject.locked) return;
@@ -406,7 +410,7 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
         const replacingKeyframes = camera ? camera.keyframes.some((keyframe) => (["x", "y", "z"] as const).some((axis) => keyframe.value.position[axis] !== camera.position[axis])) : Boolean(selectedObject?.track?.position.length);
         setDrawingTool(null);
         setDrawingInterval(null);
-        if (replacingPath || replacingKeyframes) modal.confirm({ title: replacingPath ? "重绘当前轨迹片段？" : "替换已有位置关键帧？", content: replacingPath ? "仅替换选中时间段的轨迹，其他轨迹片段和动作保持不变。" : "绑定路径将移除位置关键帧，保留旋转、姿势、动作及机位目标点与视场角。", okText: "替换", cancelText: "保留原运动", onOk: () => updateMotionPath(nextPath) });
+        if (replacingPath || replacingKeyframes) modal.confirm({ title: replacingPath ? translate("directorDesk.redrawThisMotionSegment") : translate("directorDesk.replacePositionKeyframe"), content: replacingPath ? translate("directorDesk.onlyThisSegmentSPathIsReplacedOtherMotion") : translate("directorDesk.bindingAPathRemovesPositionKeyframesKeepingRotationPose"), okText: translate("directorDesk.replace"), cancelText: translate("directorDesk.keepOriginalMotion"), onOk: () => updateMotionPath(nextPath) });
         else updateMotionPath(nextPath);
     };
     const cancelDrawing = () => { sceneRef.current?.cancelDrawing(); setDrawingTool(null); setDrawingInterval(null); };
@@ -416,7 +420,7 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
             const updated = updateProject((current) => editDirectorDeskTimelineSegment(current, reference, interval));
             const editingOwnerId = reference.kind === "cameraPath" ? editingCameraId : selectedObjectId;
             if (updated && !interval && reference.kind !== "action" && editingOwnerId === reference.ownerId && selectedMotionPath?.id === reference.segmentId) { setSelectedMotionPathId(null); setSelectedAnchor(0); }
-        } catch (error) { message.warning(error instanceof Error ? error.message : "编辑时间轨道片段失败"); }
+        } catch (error) { message.warning(error instanceof Error ? error.message : translate("directorDesk.failedToEditTimelineClip")); }
     };
     const seek = (time: number) => {
         cancelDrawing(); setPlaying(false); setPreviewPose(null); setSelectedMotionPathId(null); setSelectedAnchor(0);
@@ -430,12 +434,12 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
     };
     const appendMotionPath = () => {
         const time = Math.max(timeMilliseconds, ...motionPaths.map((path) => path.endTimeMilliseconds));
-        if (time >= project.timeline.durationMilliseconds) { message.info("请先增加工程时长，再追加轨迹片段"); return; }
+        if (time >= project.timeline.durationMilliseconds) { message.info(translate("directorDesk.extendProjectDurationBeforeAppendingMotion")); return; }
         seek(time); setInspectorTab("trajectory");
     };
     const startDrawing = (tool: CanvasDirectorDeskPathKind) => {
         const interval = selectedMotionPath || getEmptyTimelineInterval(motionPaths, timeMilliseconds, project.timeline.durationMilliseconds);
-        if (!interval) { message.info("请将播放头移到空白区间，或先增加工程时长"); return; }
+        if (!interval) { message.info(translate("directorDesk.movePlayheadToAnEmptyIntervalOrExtendDuration")); return; }
         setPlaying(false); setViewMode("director");
         const currentPosition = editingCameraId ? evaluated?.cameras.find((camera) => camera.id === editingCameraId)?.position : evaluated?.objects.find((object) => object.id === selectedObjectId)?.transform.position;
         setDrawingHeight(selectedMotionPath?.anchors[0].position.y ?? currentPosition?.y ?? 0);
@@ -461,7 +465,7 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
             ...(object.track?.position || []).map((keyframe) => keyframe.timeMilliseconds), ...(object.track?.rotation || []).map((keyframe) => keyframe.timeMilliseconds), ...(object.track?.pose || []).map((keyframe) => keyframe.timeMilliseconds),
             ...(object.track?.actionClips || []).map((clip) => clip.endTimeMilliseconds), ...(object.track?.motionPaths || []).map((path) => path.endTimeMilliseconds),
         ]), ...project.cameras.flatMap((camera) => [...(camera.motionPaths || []).map((path) => path.endTimeMilliseconds), ...camera.keyframes.map((keyframe) => keyframe.timeMilliseconds)]));
-        if (durationMilliseconds < latestTime) { modal.info({ title: "已有内容超出新时长", content: "请先调整轨迹、动作片段和关键帧的结束时间，再缩短工程时长。", okText: "知道了" }); return; }
+        if (durationMilliseconds < latestTime) { modal.info({ title: translate("directorDesk.existingContentExceedsNewDuration"), content: translate("directorDesk.adjustTheEndTimesOfPathsActionClipsAnd"), okText: translate("directorDesk.gotIt") }); return; }
         if (updateProject((current) => ({ ...current, timeline: { ...current.timeline, durationMilliseconds } }))) {
             seek(durationMilliseconds > project.timeline.durationMilliseconds ? project.timeline.durationMilliseconds : Math.min(timeMilliseconds, durationMilliseconds));
         }
@@ -471,7 +475,7 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
         try {
             const blob = await sceneRef.current.capturePng(node.director.exportSettings.width, node.director.exportSettings.height);
             const image = await uploadImage(blob);
-            const safeTitle = (node.title || "3D导演台").replace(/[\\/:*?"<>|]/g, "_");
+            const safeTitle = (node.title || translate("directorDesk.3DDirectorDesk")).replace(/[\\/:*?"<>|]/g, "_");
             saveAs(blob, `${safeTitle}-${Math.round(timeMilliseconds)}ms.png`);
             onImageExported?.(node.id, image, {
                 sourceCanvasDocumentId: projectId,
@@ -482,9 +486,9 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
                 sourceFrameRate: project.timeline.frameRate,
                 sourceTimeMilliseconds: Math.round(timeMilliseconds),
             });
-            message.success("导演台 PNG 已导出");
+            message.success(translate("directorDesk.directorPNGExported"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "导演台 PNG 导出失败");
+            message.error(error instanceof Error ? error.message : translate("directorDesk.directorPNGExportFailed"));
         }
     };
     /** 浏览器生成完整MP4后，只将最终文件上传云端，编码期间不发送图片帧。 */
@@ -507,14 +511,14 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
         try {
             const blob = await scene.captureVideo(snapshot, settings.width, settings.height, setVideoExportProgress);
             setVideoExportStage("uploading");
-            const title = (node.title || "3D导演台").replace(/[\\/:*?"<>|]/g, "_");
+            const title = (node.title || translate("directorDesk.3DDirectorDesk")).replace(/[\\/:*?"<>|]/g, "_");
             const file = new File([blob], title + ".mp4", { type: "video/mp4" });
             const uploaded = await uploadMediaFile(file, "video", { mimeType: "video/mp4", durationMs: snapshot.timeline.durationMilliseconds });
             onVideoExported?.(node.id, { ...uploaded, width: settings.width, height: settings.height, durationMs: snapshot.timeline.durationMilliseconds }, source);
-            message.success("视频已在浏览器合成并保存到云端");
+            message.success(translate("directorDesk.videoComposedInBrowserAndSavedToCloud"));
         } catch (error) {
             console.error("导演台本地视频导出失败", error);
-            message.error(error instanceof Error ? error.message : "导演台视频导出失败");
+            message.error(error instanceof Error ? error.message : translate("directorDesk.directorVideoExportFailed"));
         } finally {
             setVideoExporting(false);
             setVideoExportProgress(0);
@@ -525,7 +529,7 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
         setPlaying(false);
         cancelDrawing();
         if (videoExporting) {
-            message.info("视频导出进行中，请等待完成");
+            message.info(translate("directorDesk.videoExportInProgressPleaseWait"));
             return;
         }
         onClose();
@@ -539,57 +543,57 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
         tool={drawingTool} height={drawingTool ? drawingHeight : selectedMotionPath?.anchors[0].position.y ?? drawingHeight}
         selectedAnchor={selectedAnchor} durationMilliseconds={project.timeline.durationMilliseconds} disabled={editingDisabled} showDirection={!editingCameraId}
         onToolChange={startDrawing} onPathChange={updateMotionPath} onHeightChange={(height) => { setDrawingHeight(height); if (selectedMotionPath && !drawingTool) updateMotionPath(setMotionPathHeight(selectedMotionPath, height)); }}
-        onSelectAnchor={setSelectedAnchor} onFinish={(closed) => { if (!sceneRef.current?.finishDrawing(closed)) message.info(closed ? "闭合路径至少需要三个锚点" : "路径至少需要两个锚点"); }}
+        onSelectAnchor={setSelectedAnchor} onFinish={(closed) => { if (!sceneRef.current?.finishDrawing(closed)) message.info(closed ? translate("directorDesk.aClosedPathNeedsAtLeastThreeAnchors") : translate("directorDesk.aPathNeedsAtLeastTwoAnchors")); }}
         onCancel={cancelDrawing} onRemove={() => updateMotionPath(undefined)}
     />;
     const propertiesPanel = selectedObject && previewObject ? <div className="space-y-3">
-        <label className="block space-y-1 text-xs"><span>对象名称</span><input className="h-8 w-full rounded border bg-transparent px-2 outline-none focus-visible:ring-2" style={{ borderColor: theme.node.stroke }} value={selectedObject.name} disabled={editingDisabled} onChange={(event) => updateObject(selectedObject.id, (object) => ({ ...object, name: event.target.value }))} /></label>
-        {(["position", "rotation", "scale"] as const).map((field) => <DirectorDeskVectorInput key={field} label={field === "position" ? "位置" : field === "rotation" ? "旋转（弧度）" : "缩放"} value={previewObject.transform[field]} disabled={editingDisabled} onChange={(value) => applyObjectTransform(selectedObject.id, { ...previewObject.transform, [field]: value })} />)}
-        <Button size="small" disabled={editingDisabled} onClick={() => updateObject(selectedObject.id, (object) => ({ ...object, track: { ...object.track, position: (object.track?.position || []).filter((keyframe) => Math.round(keyframe.timeMilliseconds * 30 / 1000) !== currentFrame), rotation: (object.track?.rotation || []).filter((keyframe) => Math.round(keyframe.timeMilliseconds * 30 / 1000) !== currentFrame) } }))}>删除当前变换关键帧</Button>
-        <Button size="small" disabled={editingDisabled} icon={<KeyRound className="size-3.5" />} onClick={addObjectKeyframe}>记录变换关键帧</Button>
+        <label className="block space-y-1 text-xs"><span>{translate("directorDesk.objectName")}</span><input className="h-8 w-full rounded border bg-transparent px-2 outline-none focus-visible:ring-2" style={{ borderColor: theme.node.stroke }} value={selectedObject.name} disabled={editingDisabled} onChange={(event) => updateObject(selectedObject.id, (object) => ({ ...object, name: event.target.value }))} /></label>
+        {(["position", "rotation", "scale"] as const).map((field) => <DirectorDeskVectorInput key={field} label={field === "position" ? translate("directorDesk.position_1fb4d5") : field === "rotation" ? translate("directorDesk.rotationRadians") : translate("directorDesk.zoom")} value={previewObject.transform[field]} disabled={editingDisabled} onChange={(value) => applyObjectTransform(selectedObject.id, { ...previewObject.transform, [field]: value })} />)}
+        <Button size="small" disabled={editingDisabled} onClick={() => updateObject(selectedObject.id, (object) => ({ ...object, track: { ...object.track, position: (object.track?.position || []).filter((keyframe) => Math.round(keyframe.timeMilliseconds * 30 / 1000) !== currentFrame), rotation: (object.track?.rotation || []).filter((keyframe) => Math.round(keyframe.timeMilliseconds * 30 / 1000) !== currentFrame) } }))}>{translate("directorDesk.deleteTransformKeyframe")}</Button>
+        <Button size="small" disabled={editingDisabled} icon={<KeyRound className="size-3.5" />} onClick={addObjectKeyframe}>{translate("directorDesk.recordTransformKeyframe")}</Button>
     </div> : editingCameraId && selectedCamera ? <div className="space-y-3">
-        <DirectorDeskVectorInput label="机位位置" value={selectedCamera.position} disabled={editingDisabled} onChange={(position) => applyCameraTransform(editingCameraId, { position, target: selectedCamera.target })} />
-        <DirectorDeskVectorInput label="目标点" value={selectedCamera.target} disabled={editingDisabled || Boolean(selectedCamera.targetObjectId)} onChange={(target) => applyCameraTransform(editingCameraId, { position: selectedCamera.position, target })} />
-        <label className="flex items-center justify-between text-xs"><span>视场角</span><InputNumber size="small" min={1} max={179} value={selectedCamera.fieldOfView} disabled={editingDisabled} onChange={updateCameraFieldOfView} /></label>
-        <label className="block space-y-1 text-xs"><span>镜头目标</span><Select className="w-full!" size="small" value={selectedCamera.targetObjectId || "fixed"} disabled={editingDisabled} options={[{ label: "固定目标点", value: "fixed" }, ...project.objects.filter((object) => object.kind !== "ground").map((object) => ({ label: "跟随 " + object.name, value: object.id }))]} onChange={(value) => updateProject((current) => ({ ...current, cameras: current.cameras.map((camera) => camera.id === editingCameraId ? { ...camera, targetObjectId: value === "fixed" ? undefined : value, target: selectedCamera.target, targetOffset: { x: 0, y: value === "fixed" ? 0 : project.objects.find((object) => object.id === value)?.kind === "character" ? 1 : 0, z: 0 } } : camera) }))} /></label>
-        {selectedCamera.targetObjectId ? <DirectorDeskVectorInput label="目标位置偏移" value={selectedCamera.targetOffset || { x: 0, y: 1, z: 0 }} disabled={editingDisabled} onChange={(targetOffset) => updateProject((current) => ({ ...current, cameras: current.cameras.map((camera) => camera.id === editingCameraId ? { ...camera, targetOffset } : camera) }))} /> : null}
-        <div className="flex flex-wrap gap-2"><Button size="small" disabled={editingDisabled} onClick={() => writeCameraKeyframe(selectedCamera)}>记录机位关键帧</Button><Button size="small" disabled={editingDisabled} onClick={() => updateProject((current) => ({ ...current, cameras: current.cameras.map((camera) => camera.id === editingCameraId ? { ...camera, keyframes: camera.keyframes.filter((keyframe) => Math.round(keyframe.timeMilliseconds * 30 / 1000) !== currentFrame) } : camera) }))}>删除当前帧</Button></div>
-    </div> : <p className="text-xs text-[var(--studio-muted)]">选择场景对象或机位进行编辑。</p>;
+        <DirectorDeskVectorInput label={translate("directorDesk.cameraPosition_14221d")} value={selectedCamera.position} disabled={editingDisabled} onChange={(position) => applyCameraTransform(editingCameraId, { position, target: selectedCamera.target })} />
+        <DirectorDeskVectorInput label={translate("directorDesk.target")} value={selectedCamera.target} disabled={editingDisabled || Boolean(selectedCamera.targetObjectId)} onChange={(target) => applyCameraTransform(editingCameraId, { position: selectedCamera.position, target })} />
+        <label className="flex items-center justify-between text-xs"><span>{translate("directorDesk.fieldOfView")}</span><InputNumber size="small" min={1} max={179} value={selectedCamera.fieldOfView} disabled={editingDisabled} onChange={updateCameraFieldOfView} /></label>
+        <label className="block space-y-1 text-xs"><span>{translate("directorDesk.cameraTarget_39f37d")}</span><Select className="w-full!" size="small" value={selectedCamera.targetObjectId || "fixed"} disabled={editingDisabled} options={[{ label: translate("directorDesk.fixedTarget"), value: "fixed" }, ...project.objects.filter((object) => object.kind !== "ground").map((object) => ({ label: translate("directorDesk.follow") + object.name, value: object.id }))]} onChange={(value) => updateProject((current) => ({ ...current, cameras: current.cameras.map((camera) => camera.id === editingCameraId ? { ...camera, targetObjectId: value === "fixed" ? undefined : value, target: selectedCamera.target, targetOffset: { x: 0, y: value === "fixed" ? 0 : project.objects.find((object) => object.id === value)?.kind === "character" ? 1 : 0, z: 0 } } : camera) }))} /></label>
+        {selectedCamera.targetObjectId ? <DirectorDeskVectorInput label={translate("directorDesk.targetPositionOffset")} value={selectedCamera.targetOffset || { x: 0, y: 1, z: 0 }} disabled={editingDisabled} onChange={(targetOffset) => updateProject((current) => ({ ...current, cameras: current.cameras.map((camera) => camera.id === editingCameraId ? { ...camera, targetOffset } : camera) }))} /> : null}
+        <div className="flex flex-wrap gap-2"><Button size="small" disabled={editingDisabled} onClick={() => writeCameraKeyframe(selectedCamera)}>{translate("directorDesk.recordCameraKeyframe")}</Button><Button size="small" disabled={editingDisabled} onClick={() => updateProject((current) => ({ ...current, cameras: current.cameras.map((camera) => camera.id === editingCameraId ? { ...camera, keyframes: camera.keyframes.filter((keyframe) => Math.round(keyframe.timeMilliseconds * 30 / 1000) !== currentFrame) } : camera) }))}>{translate("directorDesk.deleteCurrentFrame")}</Button></div>
+    </div> : <p className="text-xs text-[var(--studio-muted)]">{translate("directorDesk.selectAnObjectOrCameraToEdit")}</p>;
     return (
         <Modal title={null} open={open} onCancel={handleClose} footer={null} closable={false} width="calc(100vw - 24px)" style={{ top: 12 }} styles={{ body: { height: "calc(100dvh - 72px)", padding: 0, overflow: "hidden" } }} destroyOnHidden>
             <div ref={workspaceRef} className="flex h-full min-h-0 flex-col" style={{ background: theme.node.panel, color: theme.node.text }}>
                 <header className="flex shrink-0 flex-wrap items-center gap-3 border-b px-4 py-2" style={{ borderColor: theme.node.stroke }}>
-                    <Box className="size-4" aria-hidden="true" /><h2 className="text-sm font-semibold">{node.title || "3D 导演台"}</h2>
-                    <Segmented size="small" disabled={videoExporting || Boolean(drawingTool)} value={viewMode} options={[{ label: "导演视角", value: "director" }, { label: "机位视角", value: "camera" }]} onChange={(value) => setViewMode(value as "director" | "camera")} />
-                    <Select size="small" className="min-w-28" disabled={videoExporting} aria-label="拍摄机位" value={project.selectedCameraId} options={project.cameras.map((camera) => ({ label: camera.name, value: camera.id }))} onChange={updateCamera} />
+                    <Box className="size-4" aria-hidden="true" /><h2 className="text-sm font-semibold">{node.title || translate("directorDesk.3DDirectorDesk_41e832")}</h2>
+                    <Segmented size="small" disabled={videoExporting || Boolean(drawingTool)} value={viewMode} options={[{ label: translate("directorDesk.directorView"), value: "director" }, { label: translate("directorDesk.cameraView"), value: "camera" }]} onChange={(value) => setViewMode(value as "director" | "camera")} />
+                    <Select size="small" className="min-w-28" disabled={videoExporting} aria-label={translate("directorDesk.shootingCamera")} value={project.selectedCameraId} options={project.cameras.map((camera) => ({ label: camera.name, value: camera.id }))} onChange={updateCamera} />
                     <div className="ml-auto flex items-center gap-2">
-                        <Button size="small" icon={<Download className="size-3.5" />} disabled={!sceneReady || Boolean(evaluation.error) || videoExporting || assetUploading || playing || Boolean(drawingTool)} onClick={() => void exportPng()}>导出 PNG</Button>
-                        <Button size="small" loading={videoExporting} disabled={!sceneReady || Boolean(evaluation.error) || assetUploading || playing || Boolean(drawingTool)} onClick={() => void exportVideo()}>{videoExporting ? videoExportStage === "uploading" ? "正在保存云端…" : `本地编码 ${videoExportProgress}%` : "导出视频"}</Button>
-                        <Button size="small" type="text" icon={<X className="size-4" />} aria-label="关闭导演台" onClick={handleClose} />
+                        <Button size="small" icon={<Download className="size-3.5" />} disabled={!sceneReady || Boolean(evaluation.error) || videoExporting || assetUploading || playing || Boolean(drawingTool)} onClick={() => void exportPng()}>{translate("directorDesk.exportPNG")}</Button>
+                        <Button size="small" loading={videoExporting} disabled={!sceneReady || Boolean(evaluation.error) || assetUploading || playing || Boolean(drawingTool)} onClick={() => void exportVideo()}>{videoExporting ? videoExportStage === "uploading" ? translate("directorDesk.savingToCloud") : translate("directorDesk.encodingLocally", { value0: videoExportProgress }) : translate("directorDesk.exportVideo")}</Button>
+                        <Button size="small" type="text" icon={<X className="size-4" />} aria-label={translate("directorDesk.closeDirectorDesk")} onClick={handleClose} />
                     </div>
                 </header>
                 <div className="grid min-h-0 flex-1 grid-cols-[176px_minmax(0,1fr)_292px] max-[1100px]:grid-cols-[136px_minmax(0,1fr)_260px]">
                     <aside className="min-h-0 overflow-y-auto border-r p-3" style={{ borderColor: theme.node.stroke }}>
-                        <h3 className="mb-2 text-xs font-medium">场景</h3>
+                        <h3 className="mb-2 text-xs font-medium">{translate("directorDesk.scene")}</h3>
                         <div className="space-y-1">{project.cameras.map((camera) => <button key={camera.id} type="button" disabled={videoExporting || playing} className="flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs" style={{ background: editingCameraId === camera.id ? theme.toolbar.activeBg : undefined, color: editingCameraId === camera.id ? theme.toolbar.activeText : undefined }} onClick={() => selectCamera(camera.id)}><Camera className="size-3.5 shrink-0" /><span className="truncate">{camera.name}</span></button>)}
                             {project.objects.map((object) => <div key={object.id} className="flex items-center rounded" style={{ background: selectedObjectId === object.id ? theme.toolbar.activeBg : undefined, color: selectedObjectId === object.id ? theme.toolbar.activeText : undefined }}>
                                 <button type="button" disabled={videoExporting || playing} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-xs" onClick={() => selectObject(object.id)}>{object.kind === "character" ? <PersonStanding className="size-3.5 shrink-0" /> : <Cuboid className="size-3.5 shrink-0" />}<span className="truncate">{object.name}</span></button>
-                                {object.kind !== "ground" ? <Tooltip title={`删除${object.name}`}><Button size="small" type="text" danger className="size-6! shrink-0" disabled={videoExporting || playing || assetUploading || object.locked} aria-label={`删除${object.name}`} icon={<X className="size-3.5" />} onClick={(event) => { event.stopPropagation(); confirmRemoveObject(object.id); }} /></Tooltip> : null}
+                                {object.kind !== "ground" ? <Tooltip title={translate("directorDesk.delete_cea126", { value0: object.name })}><Button size="small" type="text" danger className="size-6! shrink-0" disabled={videoExporting || playing || assetUploading || object.locked} aria-label={translate("directorDesk.delete_cea126", { value0: object.name })} icon={<X className="size-3.5" />} onClick={(event) => { event.stopPropagation(); confirmRemoveObject(object.id); }} /></Tooltip> : null}
                             </div>)}
                         </div>
                         <fieldset disabled={videoExporting || playing} className="mt-4 space-y-2">
-                            <div className="grid grid-cols-2 gap-1">{(["character", "cube", "sphere", "glb"] as const).map((kind) => <Button key={kind} className="px-1!" size="small" onClick={() => addObject(kind)}>{OBJECT_LABELS[kind]}</Button>)}</div>
+                            <div className="grid grid-cols-2 gap-1">{(["character", "cube", "sphere", "glb"] as const).map((kind) => <Button key={kind} className="px-1!" size="small" onClick={() => addObject(kind)}>{createObjectLabels(translate)[kind]}</Button>)}</div>
                             <Button size="small" block icon={<Plus className="size-3" />} onClick={() => {
                                 const id = "camera-" + nanoid(8);
-                                updateProject((current) => ({ ...current, selectedCameraId: id, cameras: [...current.cameras, { id, name: `机位 ${current.cameras.length + 1}`, position: { x: 4, y: 3, z: 6 }, target: { x: 0, y: 1, z: 0 }, fieldOfView: 42, keyframes: [] }] }));
+                                updateProject((current) => ({ ...current, selectedCameraId: id, cameras: [...current.cameras, { id, name: translate("directorDesk.camera_5b6671", { value0: current.cameras.length + 1 }), position: { x: 4, y: 3, z: 6 }, target: { x: 0, y: 1, z: 0 }, fieldOfView: 42, keyframes: [] }] }));
                                 setSelectedObjectId(null); setEditingCameraId(id);
-                            }}>添加机位</Button>
-                            <div className="border-t pt-3" style={{ borderColor: theme.node.stroke }}><h3 className="mb-2 text-xs font-medium">场景素材</h3>
+                            }}>{translate("directorDesk.addCamera")}</Button>
+                            <div className="border-t pt-3" style={{ borderColor: theme.node.stroke }}><h3 className="mb-2 text-xs font-medium">{translate("directorDesk.sceneAssets")}</h3>
                                 <input ref={glbInputRef} hidden type="file" accept=".glb,model/gltf-binary" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void addGlbAsset(file); }} />
                                 <input ref={backgroundInputRef} hidden type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void setBackgroundImage(file); }} />
-                                <div className="space-y-2"><Button size="small" block loading={assetUploading} onClick={() => glbInputRef.current?.click()}>上传 GLB</Button><Button size="small" block loading={assetUploading} onClick={() => backgroundInputRef.current?.click()}>设置背景</Button>{project.background ? <Button size="small" block onClick={clearBackground}>移除背景</Button> : null}</div>
+                                <div className="space-y-2"><Button size="small" block loading={assetUploading} onClick={() => glbInputRef.current?.click()}>{translate("directorDesk.uploadGLB")}</Button><Button size="small" block loading={assetUploading} onClick={() => backgroundInputRef.current?.click()}>{translate("directorDesk.setBackground")}</Button>{project.background ? <Button size="small" block onClick={clearBackground}>{translate("directorDesk.removeBackground")}</Button> : null}</div>
                             </div>
-                            <div className="border-t pt-3" style={{ borderColor: theme.node.stroke }}><h3 className="mb-2 text-xs font-medium">导出画幅</h3><Select className="w-full!" size="small" disabled={videoExporting || playing} value={node.director.exportSettings.aspectRatio} options={[{ value: "16:9", label: "横屏 16:9" }, { value: "9:16", label: "竖屏 9:16" }, { value: "1:1", label: "方形 1:1" }]} onChange={(aspectRatio) => onChangeSettings(node.id, (current) => ({ ...current, director: { ...current.director, exportSettings: { ...current.director.exportSettings, aspectRatio, width: aspectRatio === "16:9" ? 1280 : 720, height: aspectRatio === "9:16" ? 1280 : 720 } } }))} /></div>
+                            <div className="border-t pt-3" style={{ borderColor: theme.node.stroke }}><h3 className="mb-2 text-xs font-medium">{translate("directorDesk.exportAspectRatio")}</h3><Select className="w-full!" size="small" disabled={videoExporting || playing} value={node.director.exportSettings.aspectRatio} options={[{ value: "16:9", label: translate("directorDesk.landscape169") }, { value: "9:16", label: translate("directorDesk.portrait916") }, { value: "1:1", label: translate("directorDesk.square11") }]} onChange={(aspectRatio) => onChangeSettings(node.id, (current) => ({ ...current, director: { ...current.director, exportSettings: { ...current.director.exportSettings, aspectRatio, width: aspectRatio === "16:9" ? 1280 : 720, height: aspectRatio === "9:16" ? 1280 : 720 } } }))} /></div>
                         </fieldset>
                     </aside>
                     <main className="relative min-h-0 overflow-hidden" style={{ containerType: "size", background: theme.canvas.background }}>
@@ -605,21 +609,21 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
                             </div>
                         </div>
                         <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
-                            <Segmented size="small" disabled={editingDisabled || Boolean(drawingTool) || inspectorTab === "pose" || Boolean(editingCameraId)} value={transformMode} onChange={(value) => setTransformMode(value as DirectorDeskTransformMode)} options={[{ value: "translate", label: <Tooltip title="移动"><Move className="size-3.5" aria-label="移动" /></Tooltip> }, { value: "rotate", label: <Tooltip title="旋转"><RotateCw className="size-3.5" aria-label="旋转" /></Tooltip> }, { value: "scale", label: <Tooltip title="缩放"><Scaling className="size-3.5" aria-label="缩放" /></Tooltip> }]} />
+                            <Segmented size="small" disabled={editingDisabled || Boolean(drawingTool) || inspectorTab === "pose" || Boolean(editingCameraId)} value={transformMode} onChange={(value) => setTransformMode(value as DirectorDeskTransformMode)} options={[{ value: "translate", label: <Tooltip title={translate("directorDesk.move")}><Move className="size-3.5" aria-label={translate("directorDesk.move")} /></Tooltip> }, { value: "rotate", label: <Tooltip title={translate("directorDesk.rotate")}><RotateCw className="size-3.5" aria-label={translate("directorDesk.rotate")} /></Tooltip> }, { value: "scale", label: <Tooltip title={translate("directorDesk.zoom")}><Scaling className="size-3.5" aria-label={translate("directorDesk.zoom")} /></Tooltip> }]} />
                         </div>
-                        {drawingTool ? <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 gap-2 rounded px-2 py-1" style={{ background: theme.node.panel }}><Button size="small" onClick={cancelDrawing}>取消绘制</Button>{drawingTool === "pen" ? <><Button size="small" onClick={() => { if (!sceneRef.current?.finishDrawing()) message.info("路径至少需要两个锚点"); }}>完成</Button><Button size="small" onClick={() => { if (!sceneRef.current?.finishDrawing(true)) message.info("闭合路径至少需要三个锚点"); }}>闭合</Button></> : null}</div> : null}
+                        {drawingTool ? <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 gap-2 rounded px-2 py-1" style={{ background: theme.node.panel }}><Button size="small" onClick={cancelDrawing}>{translate("directorDesk.cancelDrawing")}</Button>{drawingTool === "pen" ? <><Button size="small" onClick={() => { if (!sceneRef.current?.finishDrawing()) message.info(translate("directorDesk.aPathNeedsAtLeastTwoAnchors")); }}>{translate("directorDesk.done")}</Button><Button size="small" onClick={() => { if (!sceneRef.current?.finishDrawing(true)) message.info(translate("directorDesk.aClosedPathNeedsAtLeastThreeAnchors")); }}>{translate("directorDesk.closePath_f82f34")}</Button></> : null}</div> : null}
                     </main>
                     <aside className="flex min-h-0 flex-col overflow-hidden border-l px-3 pb-3" style={{ borderColor: theme.node.stroke }}>
-                        <h3 className="shrink-0 pt-3 text-xs font-medium">{selectedObject?.name || (editingCameraId ? selectedCamera?.name : "属性")}</h3>
+                        <h3 className="shrink-0 pt-3 text-xs font-medium">{selectedObject?.name || (editingCameraId ? selectedCamera?.name : translate("directorDesk.properties"))}</h3>
                         <Tabs className="min-h-0 flex-1 [&>.ant-tabs-content-holder]:overflow-y-auto" size="small" activeKey={inspectorTab} onChange={(tab) => { cancelDrawing(); setInspectorTab(tab); }} items={[
-                            { key: "properties", label: "属性", children: propertiesPanel },
-                            ...(selectedObject?.kind === "character" ? [{ key: "pose", label: "姿势", children: <DirectorDeskPosePanel object={selectedObject} adjustment={poseAdjustment} selectedJoint={selectedJoint} keyframing={poseKeyframing} durationMilliseconds={project.timeline.durationMilliseconds} disabled={editingDisabled}
+                            { key: "properties", label: translate("directorDesk.properties"), children: propertiesPanel },
+                            ...(selectedObject?.kind === "character" ? [{ key: "pose", label: translate("directorDesk.pose_94049d"), children: <DirectorDeskPosePanel object={selectedObject} adjustment={poseAdjustment} selectedJoint={selectedJoint} keyframing={poseKeyframing} durationMilliseconds={project.timeline.durationMilliseconds} disabled={editingDisabled}
                                 onPreset={applyCharacterAction} onClipsChange={(actionClips) => updateObject(selectedObject.id, (object) => ({ ...object, track: { position: [], rotation: [], ...object.track, actionClips } }))}
                                 onAdjustmentChange={writePoseAdjustment} onPreviewAdjustment={setPreviewPose} onSelectJoint={setSelectedJoint} onKeyframingChange={(enabled) => { setPreviewPose(null); setPoseKeyframing(enabled); }} onRecord={() => { writePoseAdjustment(poseAdjustment, true); setPoseKeyframing(true); }}
                                 onRemoveKeyframe={() => updateObject(selectedObject.id, (object) => ({ ...object, track: { position: [], rotation: [], ...object.track, pose: (object.track?.pose || []).filter((keyframe) => Math.round(keyframe.timeMilliseconds * 30 / 1000) !== currentFrame) } }))} /> }] : []),
-                            { key: "trajectory", label: "运动轨迹", children: selectedObject || editingCameraId ? pathPanel : null },
+                            { key: "trajectory", label: translate("directorDesk.motionPath"), children: selectedObject || editingCameraId ? pathPanel : null },
                         ]} />
-                        {inspectorTab === "properties" && selectedObject && selectedObject.kind !== "ground" ? <div className="shrink-0 border-t pt-3" style={{ borderColor: theme.node.stroke }}><Button block size="small" danger icon={<Trash2 className="size-3.5" />} disabled={editingDisabled || assetUploading} onClick={() => confirmRemoveObject(selectedObject.id)}>删除当前对象</Button></div> : null}
+                        {inspectorTab === "properties" && selectedObject && selectedObject.kind !== "ground" ? <div className="shrink-0 border-t pt-3" style={{ borderColor: theme.node.stroke }}><Button block size="small" danger icon={<Trash2 className="size-3.5" />} disabled={editingDisabled || assetUploading} onClick={() => confirmRemoveObject(selectedObject.id)}>{translate("directorDesk.deleteCurrentObject")}</Button></div> : null}
                     </aside>
                 </div>
                 <DirectorDeskTimeline project={project} timeMilliseconds={timeMilliseconds} playing={playing} loop={loop} disabled={videoExporting} selectedId={editingCameraId || selectedObjectId} selectedPathId={selectedMotionPath?.id}

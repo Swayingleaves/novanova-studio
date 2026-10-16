@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import type { ComponentProps } from "react";
 import { Button } from "antd";
@@ -15,11 +17,12 @@ type CanvasTheme = (typeof canvasThemes)[keyof typeof canvasThemes];
 type MarkdownComponents = NonNullable<ComponentProps<typeof ReactMarkdown>["components"]>;
 
 export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveTool }: { item: CanvasAgentChatMessage; theme: CanvasTheme; user: LocalUser | null; onRejectTool?: (id: string) => void; onApproveTool?: (id: string) => void }) {
+    const translate = useTranslation();
     if (item.role === "system") return <SystemMessage item={item} theme={theme} />;
     if (item.role === "tool") {
         return readToolStatus(item.detail) === "pending"
             ? <AgentPendingToolCard summary={item.text} detail={item.detail} theme={theme} onReject={() => onRejectTool?.(item.id)} onApprove={() => onApproveTool?.(item.id)} />
-            : <div className="flex items-start gap-3"><AssistantAvatar theme={theme} /><AgentToolCard title={item.title || "工具调用"} text={item.text} detail={item.detail} theme={theme} /></div>;
+            : <div className="flex items-start gap-3"><AssistantAvatar theme={theme} /><AgentToolCard title={item.title || translate("canvas.toolCall")} text={item.text} detail={item.detail} theme={theme} /></div>;
     }
 
     const userMessage = item.role === "user";
@@ -37,16 +40,17 @@ export function AgentChatMessage({ item, theme, user, onRejectTool, onApproveToo
 }
 
 export function AgentPendingToolCard({ summary, detail, theme, onReject, onApprove }: { summary: string; detail?: unknown; theme: CanvasTheme; onReject?: () => void; onApprove?: () => void }) {
+    const translate = useTranslation();
     return (
         <div className="flex items-start gap-3">
             <AssistantAvatar theme={theme} />
             <section className="min-w-0 flex-1 rounded-xl border p-4" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
-                <div className="flex items-center gap-2 text-sm font-medium"><CircleAlert className="size-4 text-amber-500" />等待确认</div>
+                <div className="flex items-center gap-2 text-sm font-medium"><CircleAlert className="size-4 text-amber-500" />{translate("canvas.awaitingConfirmation")}</div>
                 <p className="mt-2 text-sm leading-6">{summary}</p>
                 <ToolDetail detail={detail} theme={theme} />
                 <div className="mt-3 flex justify-end gap-2">
-                    <Button size="small" icon={<XCircle className="size-4" />} onClick={onReject}>拒绝</Button>
-                    <Button size="small" type="primary" icon={<CheckCircle2 className="size-4" />} onClick={onApprove}>执行</Button>
+                    <Button size="small" icon={<XCircle className="size-4" />} onClick={onReject}>{translate("canvas.deny")}</Button>
+                    <Button size="small" type="primary" icon={<CheckCircle2 className="size-4" />} onClick={onApprove}>{translate("canvas.execute")}</Button>
                 </div>
             </section>
         </div>
@@ -64,7 +68,8 @@ export function AgentToolCard({ title, text, detail, theme }: { title: string; t
 }
 
 export function AgentWorkingMessage({ theme }: { theme: CanvasTheme }) {
-    return <div className="flex items-center gap-3 text-sm" style={{ color: theme.node.muted }}><AssistantAvatar theme={theme} /><LoaderCircle className="size-4 animate-spin" />AI 正在处理画布任务…</div>;
+    const translate = useTranslation();
+    return <div className="flex items-center gap-3 text-sm" style={{ color: theme.node.muted }}><AssistantAvatar theme={theme} /><LoaderCircle className="size-4 animate-spin" />{translate("canvas.aIIsWorkingOnTheCanvas")}</div>;
 }
 
 function SystemMessage({ item, theme }: { item: CanvasAgentChatMessage; theme: CanvasTheme }) {
@@ -109,7 +114,8 @@ function AssistantAvatar({ theme }: { theme: CanvasTheme }) {
 }
 
 function UserAvatar({ user, theme }: { user: LocalUser | null; theme: CanvasTheme }) {
-    if (user?.avatarUrl) return <img src={user.avatarUrl} alt={user.displayName || "用户"} className="size-8 shrink-0 rounded-full object-cover" />;
+    const translate = useTranslation();
+    if (user?.avatarUrl) return <img src={user.avatarUrl} alt={user.displayName || translate("canvas.user")} className="size-8 shrink-0 rounded-full object-cover" />;
     return <span className="grid size-8 shrink-0 place-items-center rounded-full" style={{ background: theme.node.fill, color: theme.node.text }}><UserRound className="size-4" /></span>;
 }
 

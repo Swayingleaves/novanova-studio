@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { AgentActivityState, AgentActivityStatus, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 
 const PLAN_TASK_STATUS_MAP: Record<string, AgentActivityStatus> = {
@@ -15,9 +17,9 @@ const AGENT_ACTIVITY_TYPES = new Set(["plan-created", "plan-task-status", "promp
 const AGENT_ACTIVITY_STATUSES = new Set(["pending", "running", "success", "failed", "canceled", "skipped"]);
 
 const QUALITY_LABELS: Record<string, string> = {
-    low: "低质量",
-    medium: "标准质量",
-    high: "高质量",
+    get low() { return translate("generation.lowQuality"); },
+    get medium() { return translate("generation.standardQuality"); },
+    get high() { return translate("generation.highQuality"); },
 };
 
 /** 创建或覆盖同一条 Agent 执行活动，避免 SSE 重连后重复展示。 */
@@ -147,7 +149,7 @@ export function mergePlanTaskActivityMessage(
     return upsertAgentActivityMessage(messages, {
         id: activityId,
         type: "plan-task-status",
-        title: "执行创作任务",
+        title: translate("generation.runCreativeTask"),
         description: statusMessage,
         status: activityStatus,
     });
@@ -187,13 +189,13 @@ function activityMessageId(activityId: string): string {
 
 function toolTitle(toolName: string): string {
     const titles: Record<string, string> = {
-        generate_image: "调用图片生成工具",
-        edit_image: "调用图片编辑工具",
-        generate_video: "调用视频生成工具",
-        edit_video: "调用视频编辑工具",
-        query_history: "查询历史创作",
+        generate_image: translate("generation.callImageGenerationTool"),
+        edit_image: translate("generation.callImageEditingTool"),
+        generate_video: translate("generation.callVideoGenerationTool"),
+        edit_video: translate("generation.callVideoEditingTool"),
+        query_history: translate("generation.creationHistory"),
     };
-    return titles[toolName] || `调用工具：${toolName}`;
+    return titles[toolName] || translate("generation.callingTool", { value0: toolName });
 }
 
 function toolDescription(argumentsValue: Record<string, unknown>): string | undefined {
@@ -208,10 +210,10 @@ function toolDescription(argumentsValue: Record<string, unknown>): string | unde
         parts.push(QUALITY_LABELS[argumentsValue.quality]);
     }
     if (typeof argumentsValue.seconds === "string" || typeof argumentsValue.seconds === "number") {
-        parts.push(`${argumentsValue.seconds} 秒`);
+        parts.push(translate("generation.s", { value0: argumentsValue.seconds }));
     }
     if (typeof argumentsValue.count === "number") {
-        parts.push(`${argumentsValue.count} 个结果`);
+        parts.push(translate("generation.results", { value0: argumentsValue.count }));
     }
     return parts.length ? parts.join(" / ") : undefined;
 }

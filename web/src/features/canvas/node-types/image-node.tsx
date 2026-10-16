@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { memo, useLayoutEffect, useRef, useState } from "react";
 import { NodeResizer, useUpdateNodeInternals, type NodeProps, type Node } from "@xyflow/react";
@@ -11,6 +13,7 @@ import { useCanvasTheme } from "../components/canvas-theme-provider";
 const BATCH_COLLAPSE_TRANSITION_MS = 260;
 
 export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<Node<CanvasImageNode>>) {
+    const translate = useTranslation();
     const actions = useNodeActions();
     const theme = useCanvasTheme();
     const updateNodeInternals = useUpdateNodeInternals();
@@ -88,7 +91,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
         const progress = Math.max(0, Math.min(100, data.execution.progress || 0));
         const completedCount = Math.min(totalCount, Math.round((progress / 100) * totalCount));
         const batchImagePreviews = actions.batchImagePreviewsByRootId?.get(data.id) || [];
-        const statusText = isError ? data.execution.errorMessage || "生成失败" : data.execution.phase === "succeeded" ? `已完成 ${totalCount}/${totalCount}` : `生成中 ${completedCount}/${totalCount}`;
+        const statusText = isError ? data.execution.errorMessage || translate("canvas.generationFailed") : data.execution.phase === "succeeded" ? translate("canvas.completed_f0fecc", { value0: totalCount, value1: totalCount }) : translate("canvas.generating_b3e54f", { value0: completedCount, value1: totalCount });
 
         return (
             <>
@@ -115,7 +118,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                     }}
                 >
                     <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-[inherit] p-4">
-                        <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle="图像" onTitleChange={actions.onTitleChange} />
+                        <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.image_37e4e4")} onTitleChange={actions.onTitleChange} />
                         <div className="flex items-center justify-between gap-3">
                             <div className="flex min-w-0 items-center gap-2.5">
                                 <span className="grid size-8 shrink-0 place-items-center rounded-lg" style={{ background: theme.node.fill, color: theme.node.activeStroke }}>
@@ -123,12 +126,10 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                                 </span>
                                 <div className="min-w-0">
                                     <div className="truncate text-sm font-semibold" style={{ color: theme.node.text }}>
-                                        图片生成
-                                    </div>
+                                        {translate("canvas.imageGeneration")}</div>
                                     <div className="mt-0.5 flex items-center gap-1.5 text-[11px]" style={{ color: theme.node.muted }}>
                                         <Images className="size-3" />
-                                        {totalCount} 张结果
-                                    </div>
+                                        {totalCount} {translate("canvas.results")}</div>
                                 </div>
                             </div>
                             <span className="max-w-[130px] truncate text-[11px] font-medium" style={{ color: isError ? "#ef4444" : theme.node.muted }} title={statusText}>
@@ -137,21 +138,21 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                         </div>
 
                         <p className="mt-3 line-clamp-3 min-h-0 flex-1 text-xs leading-5" style={{ color: data.generation.prompt ? theme.node.text : theme.node.placeholder }}>
-                            {data.generation.prompt || "等待输入图片生成提示词"}
+                            {data.generation.prompt || translate("canvas.enterImageGenerationPrompt")}
                         </p>
 
                         <div className="mt-3 grid grid-cols-[44px_minmax(0,1fr)] gap-x-3 gap-y-1.5 border-t pt-3 text-[11px]" style={{ borderColor: theme.node.stroke }}>
-                            <span style={{ color: theme.node.muted }}>模型</span>
+                            <span style={{ color: theme.node.muted }}>{translate("canvas.model")}</span>
                             <span className="truncate text-right" style={{ color: theme.node.text }}>
-                                {data.generation.model || "未配置"}
+                                {data.generation.model || translate("canvas.notConfigured")}
                             </span>
-                            <span style={{ color: theme.node.muted }}>尺寸</span>
+                            <span style={{ color: theme.node.muted }}>{translate("canvas.dimensions")}</span>
                             <span className="text-right" style={{ color: theme.node.text }}>
-                                {data.generation.size || "自动"}
+                                {data.generation.size || translate("canvas.auto")}
                             </span>
                         </div>
 
-                        <div className="mt-3 h-1 overflow-hidden rounded-full" style={{ background: theme.node.fill }} role="progressbar" aria-label="图片生成进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+                        <div className="mt-3 h-1 overflow-hidden rounded-full" style={{ background: theme.node.fill }} role="progressbar" aria-label={translate("canvas.imageGenerationProgress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
                             <div className="h-full rounded-full transition-[width] duration-200" style={{ width: `${progress}%`, background: isError ? "#ef4444" : theme.node.activeStroke }} />
                         </div>
                     </div>
@@ -161,9 +162,9 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                             className="nodrag nopan absolute right-0 top-1/2 z-20 grid size-8 translate-x-[calc(100%+16px)] -translate-y-1/2 place-items-center rounded-lg border transition-colors disabled:cursor-default disabled:opacity-60"
                             style={{ color: theme.node.muted, background: theme.node.panel, borderColor: theme.node.stroke }}
                             disabled={isBatchTransitioning}
-                            aria-label={data.grouping.expanded ? "折叠生成结果" : "展开生成结果"}
+                            aria-label={data.grouping.expanded ? translate("canvas.collapseResults") : translate("canvas.expandResults")}
                             aria-expanded={data.grouping.expanded}
-                            title={data.grouping.expanded ? "折叠生成结果" : "展开生成结果"}
+                            title={data.grouping.expanded ? translate("canvas.collapseResults") : translate("canvas.expandResults")}
                             onPointerDown={(event) => event.stopPropagation()}
                             onMouseDown={(event) => event.stopPropagation()}
                             onMouseEnter={(event) => {
@@ -213,17 +214,17 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                         boxShadow: selected ? `0 0 0 1px ${theme.node.activeStroke}55` : undefined,
                     }}
                 >
-                    <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle="图像" onTitleChange={actions.onTitleChange} />
+                    <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.image_37e4e4")} onTitleChange={actions.onTitleChange} />
                     <div className="flex h-full w-full overflow-hidden rounded-[inherit]">
                         {isLoading ? (
                             <div className="flex h-full w-full items-center justify-center gap-2" style={{ color: theme.node.muted }}>
                                 <LoaderCircle className="size-5 animate-spin" />
-                                <span className="text-sm">生成中...</span>
+                                <span className="text-sm">{translate("canvas.generating")}</span>
                             </div>
                         ) : isError ? (
                             <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center" style={{ color: theme.node.muted }}>
                                 <AlertTriangle className="size-6 text-red-400" />
-                                <span className="text-xs text-red-400">{data.execution.errorMessage || "生成失败"}</span>
+                                <span className="text-xs text-red-400">{data.execution.errorMessage || translate("canvas.generationFailed")}</span>
                             </div>
                         ) : isMediaUnavailable ? (
                             <NodeMediaUnavailable kind="image" />
@@ -235,7 +236,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<N
                         ) : (
                             <div className="flex h-full w-full flex-col items-center justify-center gap-1 text-sm" style={{ color: theme.node.placeholder }}>
                                 <ImageIcon className="size-7 opacity-35" />
-                                <span>空图片节点</span>
+                                <span>{translate("canvas.emptyImageNode")}</span>
                             </div>
                         )}
                     </div>

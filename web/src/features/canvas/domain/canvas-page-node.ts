@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { CANVAS_BACKGROUND_DEFAULT_COLOR, CANVAS_BACKGROUND_MIN_HEIGHT, CANVAS_BACKGROUND_MIN_WIDTH, CANVAS_BACKGROUND_PADDING, getCanvasNodeTemplate } from "../constants.ts";
 import type { CanvasBackgroundNode, CanvasConnection, CanvasNode, CanvasPoint } from "../types.ts";
 import { MINIMUM_CONTENT_NODE_DIMENSION, nodeSizeFromRatio, nodeSizeFromRatioWithMinimum } from "../utils/canvas-node-size.ts";
@@ -57,7 +59,7 @@ export function resetInterruptedCanvasNodes(nodes: CanvasNode[]): CanvasNode[] {
         if (isImageNode(node) && node.grouping.isRoot && node.grouping.childIds.some((childId) => resumableNodeIds.has(childId))) return node;
         return updateCanvasNodeExecution(node, {
             phase: "failed",
-            errorMessage: "页面刷新后生成已中断，请重新生成。",
+            errorMessage: translate("canvas.generationInterruptedByRefreshGenerateAgain"),
         });
     });
 }
@@ -241,7 +243,7 @@ export function normalizeBackgroundBoardMembers(nodes: CanvasNode[]): CanvasNode
         if (!isBackgroundNode(node)) return node;
         const normalizedNode = {
             ...node,
-            title: node.title || "背景板",
+            title: node.title || translate("canvas.background"),
             backgroundColor: node.backgroundColor || CANVAS_BACKGROUND_DEFAULT_COLOR,
         };
         const memberNodeIds = Array.isArray(node.memberNodeIds) ? node.memberNodeIds : [];
@@ -304,7 +306,7 @@ export function synchronizeImageBatchRootExecution(nodes: CanvasNode[], rootId: 
     const completed = completedCount >= totalCount;
     const phase = completed ? failedCount > 0 ? "failed" : "succeeded" : "running";
     const errorMessage = completed && failedCount > 0
-        ? succeededCount > 0 ? `部分图片生成失败（成功 ${succeededCount}/${totalCount}）` : "全部图片生成失败"
+        ? succeededCount > 0 ? translate("canvas.someImagesFailedSuccessful", { value0: succeededCount, value1: totalCount }) : translate("canvas.allImagesFailed")
         : "";
 
     return nodes.map((node) => node.id === rootId

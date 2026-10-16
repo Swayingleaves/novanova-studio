@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { listHomepageShowcases, type HomepageShowcase } from "@/services/api/server";
 
 export const homepageFallbackEditorialShowcaseId = -1;
@@ -90,7 +92,7 @@ export async function fetchHomepageShowcases() {
     const result = await listHomepageShowcases(24);
     const items = result.items || [];
     if (items.some((item) => !isValidHomepageShowcase(item))) {
-        throw new Error("首页精选内容包含无效媒体或入口配置");
+        throw new Error(translate("homepage.invalidShowcaseMediaOrEntryConfiguration"));
     }
     return items;
 }

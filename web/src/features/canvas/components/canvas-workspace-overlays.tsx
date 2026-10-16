@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import type { ChangeEvent, RefObject } from "react";
 import { Empty, Modal } from "antd";
@@ -52,6 +54,7 @@ type CanvasWorkspaceOverlaysProps = {
 };
 
 export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
+    const translate = useTranslation();
     const cropSource = readImageSource(props.cropNode);
     const splitSource = readImageSource(props.splitNode);
     const previewSource = readMediaSource(props.previewNode);
@@ -105,7 +108,7 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
             <CanvasNodeAudioTrimDialog node={audioTrimNode} open={Boolean(audioTrimNode)} onClose={props.onCloseAudioTrim} onConfirm={(startMs, endMs) => audioTrimNode && props.onAudioTrim(audioTrimNode, startMs, endMs)} />
 
             <Modal
-                title={props.previewNode?.title || (previewIsVideo ? "视频播放" : "图片详情")}
+                title={props.previewNode?.title || (previewIsVideo ? translate("canvas.videoPlayback") : translate("canvas.imageDetails"))}
                 open={Boolean(previewSource)}
                 centered
                 footer={null}
@@ -114,34 +117,34 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
                 onCancel={props.onClosePreview}
             >
                 {previewSource && previewIsVideo ? <video src={previewSource} className="block max-h-[80vh] w-full max-w-full object-contain" autoPlay controls playsInline /> : null}
-                {previewSource && !previewIsVideo ? <img src={previewSource} alt={props.previewNode?.title || "图片"} className="max-h-[80vh] max-w-full object-contain" /> : null}
+                {previewSource && !previewIsVideo ? <img src={previewSource} alt={props.previewNode?.title || translate("canvas.image")} className="max-h-[80vh] max-w-full object-contain" /> : null}
             </Modal>
 
             <Modal
-                title="清空当前画布？"
+                title={translate("canvas.clearThisCanvas")}
                 open={props.clearConfirmOpen}
                 centered
-                okText="清空"
-                cancelText="取消"
+                okText={translate("canvas.clear")}
+                cancelText={translate("canvas.cancel")}
                 okButtonProps={{ danger: true }}
                 onOk={props.onClearCanvas}
                 onCancel={props.onCloseClearConfirm}
             >
-                <p className="text-sm opacity-70">所有节点和连线都会被移除，此操作仍可通过撤销恢复。</p>
+                <p className="text-sm opacity-70">{translate("canvas.allNodesAndConnectionsWillBeRemovedYouCan")}</p>
             </Modal>
 
             <AssetPickerModal open={props.assetPickerOpen} onInsert={props.onInsertAsset} onClose={props.onCloseAssetPicker} />
-            <Modal title="选择画布资产图片" open={props.canvasAssetPickerOpen} onCancel={props.onCloseCanvasAssetPicker} footer={null} width={760} centered destroyOnHidden>
+            <Modal title={translate("canvas.selectCanvasAssetImage")} open={props.canvasAssetPickerOpen} onCancel={props.onCloseCanvasAssetPicker} footer={null} width={760} centered destroyOnHidden>
                 {props.canvasAssets.length ? (
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                         {props.canvasAssets.map((item) => (
                             <button key={item.id} type="button" className="overflow-hidden rounded-xl border text-left transition hover:-translate-y-0.5 hover:border-[var(--studio-primary)]" onClick={() => props.onSelectCanvasAsset(item)}>
-                                {item.asset.image?.source ? <img src={item.asset.image.source} alt={item.asset.name || "画布资产"} className="aspect-[4/3] w-full object-contain" /> : null}
-                                <div className="p-2"><div className="truncate text-sm font-medium">{item.asset.name || "未命名资产"}</div><div className="mt-1 truncate text-xs opacity-60">{item.storyboardNodeTitle}</div></div>
+                                {item.asset.image?.source ? <img src={item.asset.image.source} alt={item.asset.name || translate("canvas.canvasAsset")} className="aspect-[4/3] w-full object-contain" /> : null}
+                                <div className="p-2"><div className="truncate text-sm font-medium">{item.asset.name || translate("canvas.untitledAsset")}</div><div className="mt-1 truncate text-xs opacity-60">{item.storyboardNodeTitle}</div></div>
                             </button>
                         ))}
                     </div>
-                ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前画布暂无可用的图片资产" className="py-12" />}
+                ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("canvas.noImageAssetsOnThisCanvas")} className="py-12" />}
             </Modal>
         </>
     );

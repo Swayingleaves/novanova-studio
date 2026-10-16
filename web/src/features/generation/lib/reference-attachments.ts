@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { AgentAttachment } from "@/features/canvas/api/agent";
 
 type ReferenceMedia = {
@@ -21,11 +23,11 @@ export function referenceMediaType(reference: ReferenceMedia, fallbackType: stri
 }
 
 export function imageReferenceAttachments(references: readonly ReferenceMedia[]): AgentAttachment[] {
-    return references.flatMap((reference) => toAgentAttachment(reference, "image/*", "参考图"));
+    return references.flatMap((reference) => toAgentAttachment(reference, "image/*", translate("generation.referenceImage_e8a1ec")));
 }
 
 export function videoReferenceAttachments(references: readonly ReferenceMedia[]): AgentAttachment[] {
-    return references.flatMap((reference) => toAgentAttachment(reference, "video/*", "参考视频"));
+    return references.flatMap((reference) => toAgentAttachment(reference, "video/*", translate("generation.referenceVideo_6ae00d")));
 }
 
 function toAgentAttachment(reference: ReferenceMedia, fallbackType: string, fallbackName: string): AgentAttachment[] {

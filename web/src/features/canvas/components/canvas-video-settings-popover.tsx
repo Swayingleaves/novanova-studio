@@ -1,4 +1,6 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+
 
 import { Cog } from "lucide-react";
 
@@ -44,5 +46,5 @@ export function CanvasVideoSettingsPopover({
 }
 
 function buildVideoSettingsSummary(config: AiConfig) {
-    return `${videoResolutionLabel(config.vquality)} · ${videoSizeLabel(config.size)} · ${videoSecondsLabel(config.videoSeconds, config)} · ${normalizeVideoGenerationCount(config.canvasVideoCount)}个`;
+    return translate("canvas.items", { value0: videoResolutionLabel(config.vquality), value1: videoSizeLabel(config.size), value2: videoSecondsLabel(config.videoSeconds, config), value3: normalizeVideoGenerationCount(config.canvasVideoCount) });
 }

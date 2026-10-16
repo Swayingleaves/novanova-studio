@@ -1,5 +1,7 @@
 package com.novanovastudio.storage;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
@@ -63,12 +65,12 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
      */
     @Override
     public void validate(PersistenceDtos.ObjectStorageConfig config) {
-        ObjectStorageUrlBuilder.requireText(config.accessKey(), "腾讯云COS SecretId");
-        ObjectStorageUrlBuilder.requireText(config.secretKey(), "腾讯云COS SecretKey");
-        ObjectStorageUrlBuilder.requireText(config.bucket(), "腾讯云COS Bucket");
-        ObjectStorageUrlBuilder.requireText(config.region(), "腾讯云COS Region");
+        ObjectStorageUrlBuilder.requireText(config.accessKey(), SystemMessage.of("business.tencentCloudCOSSecretId"));
+        ObjectStorageUrlBuilder.requireText(config.secretKey(), SystemMessage.of("business.tencentCloudCOSSecretKey"));
+        ObjectStorageUrlBuilder.requireText(config.bucket(), SystemMessage.of("business.tencentCloudCOSBucket"));
+        ObjectStorageUrlBuilder.requireText(config.region(), SystemMessage.of("business.tencentCloudCOSRegion"));
         if (StringUtils.hasText(config.publicBaseUrl())) {
-            ObjectStorageUrlBuilder.requireHttpUrl(config.publicBaseUrl(), "腾讯云COS公开访问地址");
+            ObjectStorageUrlBuilder.requireHttpUrl(config.publicBaseUrl(), SystemMessage.of("business.tencentCloudCOSPublicURL"));
         }
     }
 
@@ -100,7 +102,7 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
             return ObjectStorageUrlBuilder.buildPublicUrl(baseUrl, key);
         } catch (CosClientException exception) {
             log.error("上传腾讯云COS失败: bucket={}, region={}, key={}", config.bucket(), config.region(), key, exception);
-            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "上传腾讯云COS失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.tencentCloudCOSUploadFailed", exception.getMessage()));
         } finally {
             client.shutdown();
         }

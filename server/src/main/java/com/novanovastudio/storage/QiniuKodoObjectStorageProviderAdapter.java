@@ -1,5 +1,7 @@
 package com.novanovastudio.storage;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.PersistenceDtos;
@@ -47,14 +49,14 @@ public class QiniuKodoObjectStorageProviderAdapter implements ObjectStorageProvi
      */
     @Override
     public void validate(PersistenceDtos.ObjectStorageConfig config) {
-        ObjectStorageUrlBuilder.requireText(config.accessKey(), "七牛云Kodo AccessKey");
-        ObjectStorageUrlBuilder.requireText(config.secretKey(), "七牛云Kodo SecretKey");
-        ObjectStorageUrlBuilder.requireText(config.bucket(), "七牛云Kodo Bucket");
-        ObjectStorageUrlBuilder.requireText(config.region(), "七牛云Kodo区域ID");
+        ObjectStorageUrlBuilder.requireText(config.accessKey(), SystemMessage.of("business.qiniuKodoAccessKey"));
+        ObjectStorageUrlBuilder.requireText(config.secretKey(), SystemMessage.of("business.qiniuKodoSecretKey"));
+        ObjectStorageUrlBuilder.requireText(config.bucket(), SystemMessage.of("business.qiniuKodoBucket"));
+        ObjectStorageUrlBuilder.requireText(config.region(), SystemMessage.of("business.qiniuKodoRegionID"));
         if (!SUPPORTED_REGION_IDS.contains(config.region().trim())) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "七牛云Kodo区域ID不受支持");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedQiniuKodoRegion"));
         }
-        ObjectStorageUrlBuilder.requireHttpUrl(config.publicBaseUrl(), "七牛云Kodo公开访问地址");
+        ObjectStorageUrlBuilder.requireHttpUrl(config.publicBaseUrl(), SystemMessage.of("business.qiniuKodoPublicURL"));
     }
 
     /**
@@ -78,7 +80,7 @@ public class QiniuKodoObjectStorageProviderAdapter implements ObjectStorageProvi
             return ObjectStorageUrlBuilder.buildPublicUrl(config.publicBaseUrl(), key);
         } catch (QiniuException exception) {
             log.error("上传七牛云Kodo失败: bucket={}, region={}, key={}", config.bucket(), config.region(), key, exception);
-            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "上传七牛云Kodo失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.qiniuKodoUploadFailed", exception.getMessage()));
         }
     }
 }

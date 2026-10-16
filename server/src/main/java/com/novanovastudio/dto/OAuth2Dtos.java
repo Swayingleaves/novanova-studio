@@ -42,8 +42,8 @@ public final class OAuth2Dtos {
      * @param providerId 渠道唯一标识
      * @param invitationCode 可选邀请码
      */
-    public record PrepareAuthorizationRequest(@NotBlank(message = "第三方登录渠道不能为空") String providerId,
-                                              @Size(max = 16, message = "邀请码不能超过16个字符") String invitationCode) {
+    public record PrepareAuthorizationRequest(@NotBlank(message = "business.signInProviderIsRequired") String providerId,
+                                              @Size(max = 16, message = "business.invitationCodeMustNotExceed16Characters") String invitationCode) {
     }
 
     /**
@@ -59,6 +59,6 @@ public final class OAuth2Dtos {
      *
      * @param loginCode 一次性登录码
      */
-    public record ExchangeLoginCodeRequest(@NotBlank(message = "一次性登录码不能为空") String loginCode) {
+    public record ExchangeLoginCodeRequest(@NotBlank(message = "business.oneTimeSignInCodeIsRequired") String loginCode) {
     }
 }

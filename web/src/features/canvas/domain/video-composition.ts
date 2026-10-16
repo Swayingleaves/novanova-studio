@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { CanvasConnection, CanvasNode, CanvasVideoCompositionNode, CanvasVideoNode } from "../types";
 import { isVideoCompositionNode, isVideoNode } from "./canvas-node";
 
@@ -21,15 +23,15 @@ export function readVideoCompositionConnectionError(
 ): string | null {
     const source = nodes.find((node) => node.id === sourceNodeId);
     const target = nodes.find((node) => node.id === targetNodeId);
-    if (!source || !target || source.id === target.id) return "连接节点不存在或不能连接自身";
+    if (!source || !target || source.id === target.id) return translate("canvas.connectionNodeIsMissingOrSelfLinked");
     if (!isVideoCompositionNode(source) && !isVideoCompositionNode(target)) return null;
-    if (!isVideoCompositionNode(target)) return "合成视频节点只能接收视频节点输入";
-    if (!isVideoNode(source)) return "合成视频节点仅支持直接连接视频节点";
+    if (!isVideoCompositionNode(target)) return translate("canvas.compositionNodesAcceptOnlyVideoInputs");
+    if (!isVideoNode(source)) return translate("canvas.compositionNodesOnlyConnectDirectlyToVideoNodes");
     if (connections.some((connection) => connection.source.nodeId === source.id && connection.target.nodeId === target.id)) {
-        return "该视频已经连接到合成视频节点";
+        return translate("canvas.videoIsAlreadyLinkedToACompositionNode");
     }
     const connectedInputCount = connections.filter((connection) => connection.target.nodeId === target.id && connection.source.nodeId !== source.id).length;
-    if (connectedInputCount >= MAXIMUM_VIDEO_COMPOSITION_INPUT_COUNT) return "单个合成视频节点最多连接20段视频";
+    if (connectedInputCount >= MAXIMUM_VIDEO_COMPOSITION_INPUT_COUNT) return translate("canvas.atMost20VideosPerCompositionNode");
     return null;
 }
 

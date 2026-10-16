@@ -2,6 +2,8 @@ package com.novanovastudio.security;
 
 import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.common.ApiResponse;
+import com.novanovastudio.common.SystemMessage;
+import com.novanovastudio.common.WebsiteLanguage;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import java.lang.reflect.Method;
@@ -98,7 +100,8 @@ public class RoleAuthFilter implements WebFilter {
     private Mono<Void> writeErrorResponse(ServerWebExchange exchange, String message) {
         exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
         exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
-        byte[] body = JSON.toJSONBytes(ApiResponse.fail(ErrorCode.PERMISSION_DENIED, message));
+        byte[] body = JSON.toJSONBytes(ApiResponse.fail(ErrorCode.PERMISSION_DENIED,
+                SystemMessage.of("business.permissionDenied").render(WebsiteLanguage.resolve(exchange))));
         return exchange.getResponse().writeWith(Mono.just(exchange.getResponse().bufferFactory().wrap(body)));
     }
 

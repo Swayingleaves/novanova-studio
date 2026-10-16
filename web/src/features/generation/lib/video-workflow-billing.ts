@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { AiConfig, VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 import { requestCreditCost } from "@/features/generation/constants/credit-calculation";
 
@@ -66,12 +68,12 @@ export function registerVideoWorkflowQuoteDefinition(definition: VideoWorkflowQu
  * 工作流阶段由注册表定义，模式按定义顺序选择第一个可用报价。
  */
 export function quoteVideoWorkflow(input: VideoWorkflowQuoteInput): VideoWorkflowQuote {
-    if (!input.workflowType) return { available: false, reason: "未选择视频工作流" };
+    if (!input.workflowType) return { available: false, reason: translate("generation.noVideoWorkflowSelected") };
     const definition = workflowDefinitions.get(input.workflowType);
-    if (!definition) return { available: false, reason: `未注册视频工作流：${input.workflowType}` };
+    if (!definition) return { available: false, reason: translate("generation.unregisteredVideoWorkflow", { value0: input.workflowType }) };
 
     const imageModel = input.config.imageModel?.trim();
-    if (definition.imageStages.length && !imageModel) return { available: false, reason: "该视频工作流需要选择图片生成模型" };
+    if (definition.imageStages.length && !imageModel) return { available: false, reason: translate("generation.thisWorkflowRequiresAnImageModel") };
     const imageStageCredits = requestCreditCost({
         modelCosts: input.config.modelCosts,
         model: imageModel || "",
@@ -79,7 +81,7 @@ export function quoteVideoWorkflow(input: VideoWorkflowQuoteInput): VideoWorkflo
         count: 1,
     });
     if (definition.imageStages.length && !input.config.modelCosts.some((item) => item.model === imageModel && item.taskType === "image")) {
-        return { available: false, reason: "当前图片模型未配置图片生成计费价格" };
+        return { available: false, reason: translate("generation.imageGenerationPricingIsNotConfigured") };
     }
     const imageCredits = imageStageCredits * definition.imageStages.length;
     let videoQuote: ReturnType<typeof quoteVideoGeneration> | null = null;
@@ -103,11 +105,11 @@ export function quoteVideoWorkflow(input: VideoWorkflowQuoteInput): VideoWorkflo
         modeReasons.push(`${mode}: ${candidate.reason}`);
     }
     if (!videoQuote || !selectedMode) {
-        return { available: false, reason: modeReasons.join("；") || "该视频工作流没有可用的视频生成模式" };
+        return { available: false, reason: modeReasons.join("；") || translate("generation.noAvailableVideoModeForThisWorkflow") };
     }
 
     const credits = imageCredits + videoQuote.credits;
-    if (!Number.isSafeInteger(credits)) return { available: false, reason: "本次工作流积分计算超出范围" };
+    if (!Number.isSafeInteger(credits)) return { available: false, reason: translate("generation.workflowCreditCalculationExceedsRange") };
     return {
         available: true,
         workflowType: input.workflowType,

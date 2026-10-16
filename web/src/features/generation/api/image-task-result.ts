@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import type { GenerationStyleSnapshot } from "@/services/api/server";
 
@@ -16,7 +18,7 @@ export type GeneratedImageResult = {
 export function normalizeImageTaskResult(resultData: unknown, createId: () => string): GeneratedImageResult[] {
     const candidates = readCandidates(resultData);
     const images = candidates.filter(isImageResult).map((item) => toGeneratedImageResult(item, createId));
-    if (images.length === 0) throw new Error("图片任务已完成，但没有返回图片");
+    if (images.length === 0) throw new Error(translate("generation.imageTaskCompletedWithoutImages"));
     return images;
 }
 

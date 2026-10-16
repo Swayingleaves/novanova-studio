@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useState } from "react";
 import { Bell, Cog } from "lucide-react";
@@ -6,6 +8,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Popover, Tooltip } from "antd";
 
+import { LanguageMenu } from "@/features/locale/components/language-menu";
 import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
 import { navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -15,6 +18,7 @@ import { useNotificationStore } from "@/features/notification/stores/use-notific
 import { NotificationDetailModal } from "@/features/notification/components/notification-detail-modal";
 
 export function AppSidebar() {
+    const translate = useTranslation();
     const pathname = usePathname();
     const user = useUserStore((state) => state.user);
     const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
@@ -40,15 +44,15 @@ export function AppSidebar() {
                 <span className="sidebar-rail-icon">
                     <Icon className="size-5" />
                 </span>
-                <span className="sidebar-rail-label">{tool.label}</span>
-                {tool.pro ? <span className="pro-badge right-0.5 top-0.5" title="企业版功能">PRO</span> : null}
+                <span className="sidebar-rail-label">{translate(tool.labelKey)}</span>
+                {tool.pro ? <span className="pro-badge right-0.5 top-0.5" title={translate("common.enterpriseFeature")}>PRO</span> : null}
             </Link>
         );
     };
 
     const notificationContent = (
         <div className="w-72">
-            <div className="border-b border-[var(--studio-line)] px-3 py-2 text-sm font-semibold text-[var(--studio-ink)]">系统公告</div>
+            <div className="border-b border-[var(--studio-line)] px-3 py-2 text-sm font-semibold text-[var(--studio-ink)]">{translate("appShell.announcements")}</div>
             <div className="max-h-72 overflow-y-auto">
                 {notifications.length ? (
                     notifications.map((notification) => (
@@ -68,7 +72,7 @@ export function AppSidebar() {
                         </button>
                     ))
                 ) : (
-                    <div className="px-3 py-8 text-center text-xs text-[var(--studio-faint)]">暂无公告</div>
+                    <div className="px-3 py-8 text-center text-xs text-[var(--studio-faint)]">{translate("appShell.noAnnouncements")}</div>
                 )}
             </div>
         </div>
@@ -77,10 +81,10 @@ export function AppSidebar() {
     return (
         <>
             <NotificationDetailModal notification={detailNotification} onClose={() => setDetailNotification(null)} />
-            <aside className="studio-sidebar-rail flex h-dvh w-[88px] shrink-0 flex-col">
-                <div className="flex h-[72px] items-center justify-center border-b border-[var(--studio-line)]">
+            <aside className={cn("studio-sidebar-rail flex h-dvh shrink-0 flex-col", translate.locale === "en" ? "w-28" : "w-[88px]")}>
+                <div className="flex h-[72px] shrink-0 items-center justify-center border-b border-[var(--studio-line)]">
                     <Tooltip title="Novanova Studio" placement="right">
-                        <Link href="/" className="sidebar-brand-mark" aria-label="Novanova Studio 首页">
+                        <Link href="/" className="sidebar-brand-mark" aria-label={translate("appShell.novanovaStudioHome")}>
                             <img src="/logo/novanovastudio.svg" alt="" aria-hidden="true" className="size-10 object-contain" />
                         </Link>
                     </Tooltip>
@@ -88,8 +92,8 @@ export function AppSidebar() {
 
                 <nav className="hide-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto px-2 pb-3">{visibleTools.map(renderNavItem)}</nav>
 
-                <div className="flex flex-col items-center gap-2 border-t border-[var(--studio-line)] px-2 py-2">
-                    <Tooltip title="系统公告" placement="right">
+                <div className="flex shrink-0 flex-col items-center gap-2 border-t border-[var(--studio-line)] px-2 py-2">
+                    <Tooltip title={translate("appShell.announcements")} placement="right">
                         {user ? (
                             <Popover
                                 placement="rightBottom"
@@ -100,24 +104,25 @@ export function AppSidebar() {
                                     if (open) void loadNotifications();
                                 }}
                             >
-                                <button type="button" className="sidebar-rail-action sidebar-rail-action-emphasis relative" aria-label="公告">
+                                <button type="button" className="sidebar-rail-action sidebar-rail-action-emphasis relative" aria-label={translate("appShell.announcements_069c0e")}>
                                     <Bell className="size-4.5" />
                                     {unreadCount ? <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-[var(--studio-primary)]" /> : null}
                                 </button>
                             </Popover>
                         ) : (
-                            <button type="button" className="sidebar-rail-action sidebar-rail-action-emphasis relative" onClick={() => useUserStore.getState().openAuthModal()} aria-label="公告">
+                            <button type="button" className="sidebar-rail-action sidebar-rail-action-emphasis relative" onClick={() => useUserStore.getState().openAuthModal()} aria-label={translate("appShell.announcements_069c0e")}>
                                 <Bell className="size-4.5" />
                             </button>
                         )}
                     </Tooltip>
                     {user?.role === "admin" ? (
-                        <Tooltip title="配置" placement="right">
-                            <button type="button" className="sidebar-rail-action sidebar-rail-action-emphasis" onClick={() => openConfigDialog(false)} aria-label="配置">
+                        <Tooltip title={translate("appShell.configure")} placement="right">
+                            <button type="button" className="sidebar-rail-action sidebar-rail-action-emphasis" onClick={() => openConfigDialog(false)} aria-label={translate("appShell.configure")}>
                                 <Cog className="size-4.5" />
                             </button>
                         </Tooltip>
                     ) : null}
+                    <LanguageMenu />
                     <ThemePreferenceMenu />
                 </div>
             </aside>

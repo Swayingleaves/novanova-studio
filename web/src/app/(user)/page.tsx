@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { ArrowUp, ArrowUpRight, Bot, BookOpenText, Clapperboard, ImageIcon, Images, Paperclip, Pause, Play, Search, SendToBack, SlidersHorizontal, Sparkles } from "lucide-react";
@@ -12,11 +15,11 @@ import { FANTASTIC_SHOWCASE_LIMIT, FANTASTIC_SHOW_CATEGORIES, creatorMonogram, f
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import type { HomepageShowcase } from "@/services/api/server";
 
-const primaryEntries = [
-    { href: "/image", label: "图片创作", description: "构图、风格、材质与批量方案探索", icon: ImageIcon },
-    { href: "/video", label: "视频创作", description: "镜头语言、运动控制与概念成片", icon: Clapperboard },
-    { href: "/canvas", label: "无限画布", description: "组合、比较并沉淀完整创作过程", icon: SendToBack },
-] as const;
+const createPrimaryEntries = (translator: typeof translate = translate) => ([
+    { href: "/image", get label() { return translator("page.imageCreation"); }, get description() { return translator("page.exploreCompositionStyleMaterialsAndBatches"); }, icon: ImageIcon },
+    { href: "/video", get label() { return translator("page.videoCreation"); }, get description() { return translator("page.cameraLanguageMotionControlAndConceptFilms"); }, icon: Clapperboard },
+    { href: "/canvas", get label() { return translator("page.infiniteCanvas"); }, get description() { return translator("page.composeCompareAndKeepTheCreativeProcess"); }, icon: SendToBack },
+] as const);
 
 const promptSuggestions = ["一组具有工业未来感的黑银产品海报，冷白硬光，精密材质细节", "为独立音乐人设计一支低饱和电影感概念短片，克制构图与缓慢镜头", "建立一套前卫时装品牌视觉语言，并在无限画布中排列灵感、构图和成片"];
 const studioInterfaceFont = { fontFamily: "var(--studio-interface-font)" } as const;
@@ -27,6 +30,7 @@ const showcaseCardPositions = ["col-span-2 aspect-[4/3] lg:col-[1/8] lg:row-[1/1
 const icpRecordNumber = process.env.NEXT_PUBLIC_ICP_RECORD_NUMBER?.trim();
 
 export default function IndexPage() {
+    const translate = useTranslation();
     const [prompt, setPrompt] = useState("");
     const user = useUserStore((state) => state.user);
     const openAuthModal = useUserStore((state) => state.openAuthModal);
@@ -56,8 +60,7 @@ export default function IndexPage() {
                         </div>
                         <BrandMark />
                         <p className="mt-7 max-w-[520px] text-base leading-7 text-[var(--studio-text)] md:text-lg">
-                            <strong className="font-semibold text-[var(--studio-ink)]">一句话，调度完整视觉工作流。</strong> 从构思、生成、比较到无限画布编排，让 Agent 把创意推进到成片。
-                        </p>
+                            <strong className="font-semibold text-[var(--studio-ink)]">{translate("page.oneSentenceOrchestratesYourVisualWorkflow")}</strong> {translate("page.fromIdeasAndGenerationToComparisonAndCanvasComposition")}</p>
 
                         <div className="mt-8 overflow-hidden rounded-[8px] border border-[var(--studio-line-strong)] bg-[var(--studio-surface)] shadow-[var(--studio-shadow)] transition duration-300 focus-within:-translate-y-0.5 focus-within:border-[var(--studio-action)] motion-reduce:transform-none">
                             <div className="flex items-center justify-between gap-4 border-b border-[var(--studio-line)] px-3.5 py-3 text-[11px] text-[var(--studio-muted)]">
@@ -71,8 +74,8 @@ export default function IndexPage() {
                                 value={prompt}
                                 maxLength={2000}
                                 rows={4}
-                                aria-label="描述你想要的图片视觉结果"
-                                placeholder="描述你想要的视觉结果，例如：为未来城市展览设计一组冷感电影海报……"
+                                aria-label={translate("page.describeYourDesiredImage")}
+                                placeholder={translate("page.describeYourVisualGoalEGASeriesOf")}
                                 onChange={(event) => setPrompt(event.target.value)}
                                 onKeyDown={(event) => {
                                     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -87,32 +90,32 @@ export default function IndexPage() {
                                     <Link
                                         href="/assets"
                                         className="inline-flex h-9 items-center gap-2 rounded-[6px] px-2 text-xs text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]"
-                                        title="添加参考素材"
+                                        title={translate("page.addReference")}
                                     >
                                         <Paperclip className="size-4" strokeWidth={1.6} aria-hidden="true" />
-                                        <span className="hidden sm:inline">参考素材</span>
+                                        <span className="hidden sm:inline">{translate("page.referenceAssets")}</span>
                                     </Link>
                                     <Link
                                         href="/assets"
                                         className="inline-flex h-9 items-center gap-2 rounded-[6px] px-2 text-xs text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]"
-                                        title="从资产库选择"
+                                        title={translate("page.selectFromAssetLibrary")}
                                     >
                                         <Images className="size-4" strokeWidth={1.6} aria-hidden="true" />
-                                        <span className="hidden sm:inline">资产库</span>
+                                        <span className="hidden sm:inline">{translate("page.assetLibrary")}</span>
                                     </Link>
                                     <Link
                                         href="/prompts"
                                         className="inline-flex h-9 items-center gap-2 rounded-[6px] px-2 text-xs text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]"
-                                        title="打开提示词库"
+                                        title={translate("page.openPromptLibrary")}
                                     >
                                         <BookOpenText className="size-4" strokeWidth={1.6} aria-hidden="true" />
-                                        <span className="hidden md:inline">提示词库</span>
+                                        <span className="hidden md:inline">{translate("page.promptLibrary")}</span>
                                     </Link>
                                     <Link
                                         href="/image"
                                         className="inline-flex size-9 items-center justify-center rounded-[6px] text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]"
-                                        title="图片设置"
-                                        aria-label="图片设置"
+                                        title={translate("page.imageSettings")}
+                                        aria-label={translate("page.imageSettings")}
                                     >
                                         <SlidersHorizontal className="size-4" strokeWidth={1.6} aria-hidden="true" />
                                     </Link>
@@ -121,8 +124,8 @@ export default function IndexPage() {
                                     <button
                                         type="button"
                                         className="inline-flex size-9 items-center justify-center rounded-[6px] text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-action)] disabled:cursor-not-allowed disabled:opacity-40"
-                                        aria-label="AI 优化提示词"
-                                        title="AI 优化提示词"
+                                        aria-label={translate("page.optimizePromptWithAI")}
+                                        title={translate("page.optimizePromptWithAI")}
                                         disabled={!prompt.trim() || isPromptOptimizing}
                                         onClick={() => void optimizePrompt({ operationId: "homepage-image", generationType: "image", prompt, onSuccess: setPrompt })}
                                     >
@@ -131,8 +134,8 @@ export default function IndexPage() {
                                     <button
                                         type="button"
                                         className="creation-composer-submit-trigger inline-flex size-10 items-center justify-center transition active:scale-95 disabled:cursor-not-allowed motion-reduce:transform-none"
-                                        aria-label="开始图片创作"
-                                        title="开始图片创作"
+                                        aria-label={translate("page.startImageCreation")}
+                                        title={translate("page.startImageCreation")}
                                         disabled={!prompt.trim()}
                                         onClick={submitAgent}
                                     >
@@ -159,11 +162,11 @@ export default function IndexPage() {
 
                 <section className="border-t border-[var(--studio-line)] pt-8">
                     <div className="mb-5 flex flex-col gap-2 md:flex-row md:items-end md:justify-between md:gap-6">
-                        <h2 className="text-2xl font-medium text-[var(--studio-ink)]">选择创作方式</h2>
-                        <p className="max-w-[420px] text-sm leading-6 text-[var(--studio-muted)] md:text-right">延续图片、视频和无限画布三条主工作流，Agent 负责在它们之间传递创作上下文。</p>
+                        <h2 className="text-2xl font-medium text-[var(--studio-ink)]">{translate("page.chooseCreationMode")}</h2>
+                        <p className="max-w-[420px] text-sm leading-6 text-[var(--studio-muted)] md:text-right">{translate("page.imageVideoAndCanvasWorkflowsShareCreativeContextThrough")}</p>
                     </div>
                     <div className="grid border-t border-[var(--studio-line)] md:grid-cols-3">
-                        {primaryEntries.map((entry, index) => (
+                        {createPrimaryEntries(translate).map((entry, index) => (
                             <Link
                                 key={entry.href}
                                 href={entry.href}
@@ -225,10 +228,11 @@ function BrandMark() {
 }
 
 function ShowcaseWall({ items, loading, error, reload }: ReturnType<typeof useHomepageShowcases>) {
-    const visibleItems = useMemo(() => items.slice(0, 3), [items]);
+    const translate = useTranslation();
+    const visibleItems = useMemo(() => items.slice(0, 3), [items, translate.locale]);
     if (loading) {
         return (
-            <div className="grid min-h-[510px] grid-cols-2 gap-3 lg:grid-cols-12 lg:grid-rows-12" aria-label="正在加载精选作品">
+            <div className="grid min-h-[510px] grid-cols-2 gap-3 lg:grid-cols-12 lg:grid-rows-12" aria-label={translate("page.loadingFeaturedArtwork")}>
                 <div className="studio-skeleton col-span-2 lg:col-[1/8] lg:row-[1/10]" />
                 <div className="studio-skeleton lg:col-[8/13] lg:row-[2/7]" />
                 <div className="studio-skeleton lg:col-[8/13] lg:row-[7/13]" />
@@ -238,10 +242,9 @@ function ShowcaseWall({ items, loading, error, reload }: ReturnType<typeof useHo
     if (error) {
         return (
             <div className="flex min-h-[420px] flex-col items-center justify-center border border-[var(--studio-line)] bg-[var(--studio-surface)] p-8 text-center">
-                <p className="text-sm text-[var(--studio-muted)]">精选作品暂时无法加载</p>
+                <p className="text-sm text-[var(--studio-muted)]">{translate("page.featuredArtworkTemporarilyUnavailable")}</p>
                 <button type="button" className="mt-4 rounded-[6px] border border-[var(--studio-line-strong)] px-3 py-2 text-sm text-[var(--studio-ink)] transition hover:border-[var(--studio-action)]" onClick={() => void reload()}>
-                    重试
-                </button>
+                    {translate("page.retry")}</button>
             </div>
         );
     }
@@ -261,7 +264,7 @@ function ShowcaseWall({ items, loading, error, reload }: ReturnType<typeof useHo
                         <br />
                         into form.
                     </strong>
-                    <span className="max-w-56 text-right text-[11px] leading-5 text-[var(--studio-muted)]">Agent 自动串联提示词、参考素材与历史资产，持续保留创作上下文。</span>
+                    <span className="max-w-56 text-right text-[11px] leading-5 text-[var(--studio-muted)]">{translate("page.agentConnectsPromptsReferencesAndHistoricalAssetsWhilePreserving")}</span>
                 </div>
             </div>
             <span className="absolute -right-4 top-12 hidden size-10 place-items-center rounded-full border border-[var(--studio-line-strong)] bg-[var(--studio-page)] text-[10px] text-[var(--studio-action)] lg:grid">A1</span>
@@ -281,6 +284,7 @@ function ShowcaseCard({ item, index }: { item: HomepageShowcase; index: number }
 }
 
 function ShowcaseMediaCard({ item, index, href, position }: { item: HomepageShowcase; index: number; href: string; position: string }) {
+    const translate = useTranslation();
     const videoElementReference = useRef<HTMLVideoElement>(null);
     const [isVideoPlaying, setIsVideoPlaying] = useState(false);
     const toggleVideoPlayback = (event: MouseEvent<HTMLButtonElement>) => {
@@ -296,7 +300,7 @@ function ShowcaseMediaCard({ item, index, href, position }: { item: HomepageShow
     };
     return (
         <figure className={`group relative m-0 overflow-hidden rounded-[8px] border border-[var(--studio-line)] bg-[var(--studio-media)] ${position}`}>
-            <Link href={href} className="absolute inset-0 block" aria-label={`打开作品：${item.title}`}>
+            <Link href={href} className="absolute inset-0 block" aria-label={translate("page.openArtwork", { value0: item.title })}>
                 {item.mediaType === "video" ? (
                     <video
                         ref={videoElementReference}
@@ -333,6 +337,7 @@ function ShowcaseMediaCard({ item, index, href, position }: { item: HomepageShow
 }
 
 function EditorialVideoCarousel({ item, href, position }: { item: HomepageShowcase; href: string; position: string }) {
+    const translate = useTranslation();
     const videoElementReferences = useRef<Array<HTMLVideoElement | null>>([]);
     const [activeVideoIndex, setActiveVideoIndex] = useState(0);
     const [isVideoPlaying, setIsVideoPlaying] = useState(false);
@@ -365,7 +370,7 @@ function EditorialVideoCarousel({ item, href, position }: { item: HomepageShowca
     };
 
     return (
-        <figure className={`group relative m-0 overflow-hidden rounded-[8px] ${position}`} aria-roledescription="轮播图" aria-label={item.title}>
+        <figure className={`group relative m-0 overflow-hidden rounded-[8px] ${position}`} aria-roledescription={translate("page.carousel")} aria-label={item.title}>
             <div className="absolute inset-0">
                 {homepageFallbackEditorialVideoUrls.map((videoUrl, videoIndex) => {
                     const isActive = videoIndex === activeVideoIndex;
@@ -401,8 +406,8 @@ function EditorialVideoCarousel({ item, href, position }: { item: HomepageShowca
                     );
                 })}
             </div>
-            <button type="button" className="absolute inset-y-0 right-0 z-20 m-0 w-[16%] cursor-pointer border-0 bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label="切换到下一段视频" title="切换到下一段视频" onClick={promotePreviewVideo} />
-            <Link href={href} className="absolute inset-0 z-10 block" aria-label={`打开作品：${item.title}`} />
+            <button type="button" className="absolute inset-y-0 right-0 z-20 m-0 w-[16%] cursor-pointer border-0 bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label={translate("page.switchToNextClip")} title={translate("page.switchToNextClip")} onClick={promotePreviewVideo} />
+            <Link href={href} className="absolute inset-0 z-10 block" aria-label={translate("page.openArtwork", { value0: item.title })} />
             <VideoPlaybackButton isVideoPlaying={isVideoPlaying} onClick={toggleVideoPlayback} />
             <figcaption className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex min-h-10 items-center border-t border-white/15 bg-black/70 px-3 py-2 text-[11px] text-white">
                 <span className="truncate">{item.title}</span>
@@ -412,12 +417,13 @@ function EditorialVideoCarousel({ item, href, position }: { item: HomepageShowca
 }
 
 function VideoPlaybackButton({ isVideoPlaying, onClick }: { isVideoPlaying: boolean; onClick: (event: MouseEvent<HTMLButtonElement>) => void }) {
+    const translate = useTranslation();
     return (
         <button
             type="button"
             className="pointer-events-none absolute left-1/2 top-1/2 z-30 inline-flex size-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/35 bg-black/55 text-white opacity-0 transition duration-200 hover:bg-black/75 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--studio-action)] group-hover:pointer-events-auto group-hover:opacity-100 motion-reduce:transition-none"
-            aria-label={isVideoPlaying ? "暂停视频" : "播放视频"}
-            title={isVideoPlaying ? "暂停视频" : "播放视频"}
+            aria-label={isVideoPlaying ? translate("page.pauseVideo") : translate("page.playVideo")}
+            title={isVideoPlaying ? translate("page.pauseVideo") : translate("page.playVideo")}
             onClick={onClick}
         >
             {isVideoPlaying ? <Pause className="size-4" fill="currentColor" aria-hidden="true" /> : <Play className="size-4" fill="currentColor" aria-hidden="true" />}
@@ -426,10 +432,13 @@ function VideoPlaybackButton({ isVideoPlaying, onClick }: { isVideoPlaying: bool
 }
 
 function FantasticShow({ items, loading, error, reload }: ReturnType<typeof useHomepageShowcases>) {
+    const categoryMessageKeys: Record<string, string> = {"全部":"page.all","视觉海报":"page.visualPoster","概念短片":"page.conceptFilm","商业广告":"page.commercial","游戏美术":"page.gameArt","时尚影像":"page.fashionFilm","产品视觉":"page.productVisuals","生活方式":"page.lifestyle"};
+    const translateCategory = (category: string) => translate(categoryMessageKeys[category]);
+    const translate = useTranslation();
     const [category, setCategory] = useState<FantasticShowCategory>("全部");
     const [keyword, setKeyword] = useState("");
-    const showcases = useMemo(() => getFantasticShowcases(items), [items]);
-    const filteredShowcases = useMemo(() => filterFantasticShowcases(showcases, category, keyword), [category, keyword, showcases]);
+    const showcases = useMemo(() => getFantasticShowcases(items), [items, translate.locale]);
+    const filteredShowcases = useMemo(() => filterFantasticShowcases(showcases, category, keyword), [category, keyword, showcases, translate.locale]);
 
     return (
         <section className="mt-12 border-t border-[var(--studio-line)] pt-8" aria-labelledby="fantastic-show-heading">
@@ -438,7 +447,7 @@ function FantasticShow({ items, loading, error, reload }: ReturnType<typeof useH
                     <h2 id="fantastic-show-heading" style={studioInterfaceFont} className="text-2xl font-medium text-[var(--studio-ink)]">
                         Fantastic Show
                     </h2>
-                    <p className="mt-2 text-sm text-[var(--studio-muted)]">从作品中继续发现下一轮创作的方向。</p>
+                    <p className="mt-2 text-sm text-[var(--studio-muted)]">{translate("page.discoverYourNextCreativeDirectionThroughArtwork")}</p>
                 </div>
                 <label className="flex h-10 w-full items-center gap-2 border border-[var(--studio-line-strong)] bg-[var(--studio-surface)] px-3 text-[var(--studio-muted)] lg:w-80">
                     <Search className="size-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />
@@ -446,15 +455,15 @@ function FantasticShow({ items, loading, error, reload }: ReturnType<typeof useH
                         type="search"
                         value={keyword}
                         onChange={(event) => setKeyword(event.target.value)}
-                        placeholder="搜索作品或创作者"
-                        aria-label="搜索精彩创作"
+                        placeholder={translate("page.searchArtworkOrCreator")}
+                        aria-label={translate("page.searchShowcases")}
                         className="min-w-0 flex-1 bg-transparent text-sm text-[var(--studio-ink)] outline-none placeholder:text-[var(--studio-faint)]"
                     />
                 </label>
             </div>
 
             <div className="mt-6 overflow-x-auto pb-1">
-                <div className="flex min-w-max gap-2" role="tablist" aria-label="精彩创作分类">
+                <div className="flex min-w-max gap-2" role="tablist" aria-label={translate("page.showcaseCategory")}>
                     {FANTASTIC_SHOW_CATEGORIES.map((item) => {
                         const selected = item === category;
                         return (
@@ -466,7 +475,7 @@ function FantasticShow({ items, loading, error, reload }: ReturnType<typeof useH
                                 className={`h-9 rounded-[6px] border px-3 text-sm transition ${selected ? "border-[var(--studio-action)] bg-[var(--studio-surface-raised)] text-[var(--studio-action)]" : "border-[var(--studio-line)] bg-transparent text-[var(--studio-muted)] hover:border-[var(--studio-line-strong)] hover:bg-[var(--studio-surface)] hover:text-[var(--studio-ink)]"}`}
                                 onClick={() => setCategory(item)}
                             >
-                                {item}
+                                {translateCategory(item)}
                             </button>
                         );
                     })}
@@ -474,7 +483,7 @@ function FantasticShow({ items, loading, error, reload }: ReturnType<typeof useH
             </div>
 
             {loading ? (
-                <div className="mt-6 grid gap-x-4 gap-y-7 md:grid-cols-2 xl:grid-cols-4" aria-label="正在加载精彩创作">
+                <div className="mt-6 grid gap-x-4 gap-y-7 md:grid-cols-2 xl:grid-cols-4" aria-label={translate("page.loadingShowcases")}>
                     {Array.from({ length: FANTASTIC_SHOWCASE_LIMIT }, (_, index) => (
                         <div key={index} className="space-y-3">
                             <div className="studio-skeleton aspect-[4/3]" />
@@ -485,10 +494,9 @@ function FantasticShow({ items, loading, error, reload }: ReturnType<typeof useH
                 </div>
             ) : error ? (
                 <div className="mt-6 flex min-h-56 flex-col items-center justify-center border border-[var(--studio-line)] bg-[var(--studio-surface)] px-6 text-center">
-                    <p className="text-sm text-[var(--studio-muted)]">精彩创作暂时无法加载</p>
+                    <p className="text-sm text-[var(--studio-muted)]">{translate("page.showcasesTemporarilyUnavailable")}</p>
                     <button type="button" className="mt-4 h-9 border border-[var(--studio-line-strong)] px-3 text-sm text-[var(--studio-ink)] transition hover:border-[var(--studio-action)] hover:text-[var(--studio-action)]" onClick={() => void reload()}>
-                        重试
-                    </button>
+                        {translate("page.retry")}</button>
                 </div>
             ) : filteredShowcases.length ? (
                 <div className="mt-6 grid gap-x-4 gap-y-7 md:grid-cols-2 xl:grid-cols-4">
@@ -498,8 +506,7 @@ function FantasticShow({ items, loading, error, reload }: ReturnType<typeof useH
                 </div>
             ) : (
                 <div className="mt-6 flex min-h-56 items-center justify-center border border-dashed border-[var(--studio-line-strong)] px-6 text-center text-sm text-[var(--studio-muted)]">
-                    没有符合条件的精彩创作
-                </div>
+                    {translate("page.noMatchingShowcases")}</div>
             )}
         </section>
     );

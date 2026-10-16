@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/features/generation/lib/seedance-video";
 import type { CanvasConnection, CanvasNode } from "../types";
@@ -58,7 +60,7 @@ export function buildNodeGenerationReferences(node: CanvasNode): CanvasResourceR
 
         const kind = forcedKind || objectStorage?.mimeType.startsWith("video/") || /^(?:video:|.*\.(mp4|webm|mov|m4v)(?:[?#]|$))/i.test(reference) ? "video" : "image";
         countByKind[kind] += 1;
-        const label = kind === "image" ? `参考图${countByKind.image}` : `参考视频${countByKind.video}`;
+        const label = kind === "image" ? translate("canvas.reference", { value0: countByKind.image }) : translate("canvas.referenceVideo_8d15ff", { value0: countByKind.video });
         return [
             {
                 id: `${node.id}-generation-reference-${index}`,
@@ -71,7 +73,7 @@ export function buildNodeGenerationReferences(node: CanvasNode): CanvasResourceR
             },
         ];
     });
-    return [...mediaReferences, ...(isVideoNode(node) ? (node.generation.audioReferences || []).map((audio, index) => ({ id: audio.id, nodeId: `${node.id}-audio-reference-${index}`, kind: "audio" as const, label: `音频${index + 1}`, title: audio.name, previewUrl: audio.url, storageKey: audio.storageKey, objectStorage: audio.objectStorage, trimStartMs: audio.trimStartMs, trimEndMs: audio.trimEndMs, durationMs: audio.durationMs, active: true })) : [])];
+    return [...mediaReferences, ...(isVideoNode(node) ? (node.generation.audioReferences || []).map((audio, index) => ({ id: audio.id, nodeId: `${node.id}-audio-reference-${index}`, kind: "audio" as const, label: translate("canvas.audio_770332", { value0: index + 1 }), title: audio.name, previewUrl: audio.url, storageKey: audio.storageKey, objectStorage: audio.objectStorage, trimStartMs: audio.trimStartMs, trimEndMs: audio.trimEndMs, durationMs: audio.durationMs, active: true })) : [])];
 }
 
 function findObjectStorage(files: Array<{ url: string; key: string; mimeType: string }>, reference: string) {
@@ -88,10 +90,10 @@ export function getGenerationResourceNodes(nodeId: string, nodes: CanvasNode[], 
 }
 
 export function labelForKind(kind: CanvasResourceKind, index: number) {
-    if (kind === "audio") return `音频${index + 1}`;
+    if (kind === "audio") return translate("canvas.audio_770332", { value0: index + 1 });
     if (kind === "image") return imageReferenceLabel(index);
     if (kind === "video") return seedanceReferenceLabel("video", index);
-    return `文本${index + 1}`;
+    return translate("canvas.text_923647", { value0: index + 1 });
 }
 
 function resolveContextResourceNodes(nodeId: string, graph: GraphIndex, includeSelf: boolean): CanvasNode[] {

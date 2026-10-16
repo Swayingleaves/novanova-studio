@@ -1,5 +1,7 @@
 package com.novanovastudio.agent;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
 import com.novanovastudio.ai.AiTaskTypes;
@@ -78,12 +80,12 @@ public class AgentScopeModelFactory {
      */
     public Mono<TextModelSelection> resolveTextModel(String selectedModel) {
         if (!StringUtils.hasText(selectedModel)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "当前AI操作必须选择文本模型"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.selectATextModelForCurrentOperation")));
         }
         String normalizedModel = selectedModel.trim();
         int separatorIndex = normalizedModel.indexOf("::");
         if (separatorIndex <= 0 || separatorIndex >= normalizedModel.length() - 2) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "所选文本模型格式不合法"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidSelectedTextModel")));
         }
         String channelId = normalizedModel.substring(0, separatorIndex);
         String modelName = normalizedModel.substring(separatorIndex + 2);
@@ -96,7 +98,7 @@ public class AgentScopeModelFactory {
                             .findFirst()
                             .orElse(null);
                     if (modelConfig == null) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "所选文本模型不可用，请联系管理员检查模型配置"));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.textModelUnavailableAskTheAdministratorToCheckItsConfiguration")));
                     }
                     AiTaskDtos.AiChannelConfig channel = tuple.getT1().stream()
                             .filter(item -> channelId.equals(item.id())
@@ -108,11 +110,11 @@ public class AgentScopeModelFactory {
                             .findFirst()
                             .orElse(null);
                     if (channel == null) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "所选文本模型渠道不可用，请联系管理员检查渠道配置"));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.textModelChannelUnavailableAskTheAdministratorToCheckIt")));
                     }
                     Integer creditCost = modelConfig.creditCost();
                     if (creditCost == null || creditCost < 0) {
-                        return Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR, "所选文本模型积分配置不合法"));
+                        return Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.invalidTextModelCreditConfiguration")));
                     }
                     AiTaskDtos.AiChannelConfig scopedChannel = new AiTaskDtos.AiChannelConfig(
                             channel.id(), channel.name(), channel.baseUrl(), channel.apiKey(), channel.apiFormat(), List.of(modelName));

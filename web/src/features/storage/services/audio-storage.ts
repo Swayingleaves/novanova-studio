@@ -1,4 +1,6 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+
 
 import { uploadMediaFile } from "./file-storage";
 import { extractWaveformPeaks } from "../utils/audio-waveform";
@@ -10,8 +12,8 @@ export function isAudioFile(file: File): boolean {
 
 /** 解码上传文件，保存真实时长与固定长度波形，不保留解码缓冲区。 */
 export async function uploadAudioFile(file: File) {
-    if (!isAudioFile(file)) throw new Error("音频仅支持 MP3、WAV 格式");
-    if (!file.size || file.size > 15 * 1024 * 1024) throw new Error("音频不能为空，且单文件不能超过 15 MB");
+    if (!isAudioFile(file)) throw new Error(translate("storage.onlyMP3AndWAVAudioSupported"));
+    if (!file.size || file.size > 15 * 1024 * 1024) throw new Error(translate("storage.audioIsRequiredAndMustNotExceed15MB"));
     const { durationMs, waveformPeaks } = await readAudioMetadata(file);
     const mimeType = /\.wav$/i.test(file.name) || file.type.includes("wav") ? "audio/wav" : "audio/mpeg";
     const uploaded = await uploadMediaFile(file, "audio", { mimeType, durationMs });
@@ -20,18 +22,18 @@ export async function uploadAudioFile(file: File) {
 
 /** 使用浏览器解码器读取上传和归档恢复的音频元数据。 */
 export async function readAudioMetadata(file: Blob) {
-    if (!file.size || file.size > 15 * 1024 * 1024) throw new Error("音频不能为空，且单文件不能超过 15 MB");
+    if (!file.size || file.size > 15 * 1024 * 1024) throw new Error(translate("storage.audioIsRequiredAndMustNotExceed15MB"));
     let context: AudioContext | null = null;
     let durationMs: number;
     let waveformPeaks: number[];
     try {
         context = new AudioContext();
         const buffer = await context.decodeAudioData(await file.arrayBuffer());
-        if (!Number.isFinite(buffer.duration) || buffer.duration <= 0) throw new Error("音频时长无效");
+        if (!Number.isFinite(buffer.duration) || buffer.duration <= 0) throw new Error(translate("storage.invalidAudioDuration"));
         durationMs = Math.round(buffer.duration * 1000);
         waveformPeaks = extractWaveformPeaks(Array.from({ length: buffer.numberOfChannels }, (_, index) => buffer.getChannelData(index)));
     } catch {
-        throw new Error("音频解析失败，请选择有效的 MP3 或 WAV 文件");
+        throw new Error(translate("storage.failedToParseAudioChooseAValidMP3Or"));
     } finally {
         if (context) await context.close().catch(() => undefined);
     }

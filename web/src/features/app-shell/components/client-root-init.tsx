@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import type { ReactNode } from "react";
 import { useEffect } from "react";
@@ -14,6 +16,7 @@ import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { getCurrentUserInfo, subscribeCreditBalanceEvents } from "@/services/api/server";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const pathname = usePathname();
     const sessionHydrated = useUserStore((state) => state.hydrated);
@@ -60,7 +63,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         if (!sessionHydrated || !user) return;
         startTaskSubscribe();
         void Promise.all([hydrateConfig(), hydrateDocuments(), hydrateAssets(), hydrateRunningTasks()]).catch((error) => {
-            message.error(error instanceof Error ? error.message : "加载后端数据失败");
+            message.error(error instanceof Error ? error.message : translate("appShell.failedToLoadServerData"));
         });
         return stopTaskSubscribe;
     }, [hydrateAssets, hydrateConfig, hydrateDocuments, hydrateRunningTasks, message, sessionHydrated, startTaskSubscribe, stopTaskSubscribe, user]);

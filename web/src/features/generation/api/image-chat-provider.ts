@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
 
 import { chatCompletionStreamResult, consumeChatCompletionStreamText, createChatCompletionStreamState, parseChatCompletionPayload, toChatCompletionMessages, toChatCompletionToolChoice, type ChatCompletionPayload } from "./chat-completions";
@@ -13,7 +15,7 @@ export async function requestChatCompletionConversation(config: AiConfig, messag
         body: JSON.stringify({ model: config.model, messages: toChatCompletionMessages(preparedMessages), ...(tools.length ? { tools, tool_choice: toChatCompletionToolChoice(toolChoice) } : {}), stream: true }),
         signal: options?.signal,
     });
-    if (!response.ok) throw new Error(await readFailedResponse(response, "请求失败"));
+    if (!response.ok) throw new Error(await readFailedResponse(response, translate("generation.requestFailed")));
     if (!response.body) return parseChatCompletionPayload(await response.json() as ChatCompletionPayload);
 
     const state = createChatCompletionStreamState();

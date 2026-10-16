@@ -17,3 +17,11 @@ test("普通输入或当前已选择附件时不继承上一轮附件", () => {
     assert.deepEqual(selectGenerationAttachments("继续优化人物表情", [], previous), []);
     assert.deepEqual(selectGenerationAttachments("重试", current, previous), current);
 });
+
+test("英文重试按钮继续复用参考素材，普通英文消息保持原有规则", () => {
+    const previous = [{ url: "https://storage.example.com/reference.png", type: "image/png", name: "reference.png" }];
+    assert.equal(isGenerationRetryMessage("Retry!"), true);
+    assert.equal(isGenerationRetryMessage("Generate again."), true);
+    assert.deepEqual(selectGenerationAttachments("Regenerate", [], previous), previous);
+    assert.deepEqual(selectGenerationAttachments("Add a cat", [], previous), []);
+});

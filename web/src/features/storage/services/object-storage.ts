@@ -1,4 +1,6 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+
 
 import { registerRemoteMedia, testObjectStorage, uploadRemoteMediaToObjectStorage, uploadServerMedia } from "@/services/api/server";
 import type { ObjectStorageConfig, ObjectStorageFile } from "@/shared/types/object-storage";
@@ -26,14 +28,14 @@ export async function uploadObjectToStorage(input: UploadObjectInput): Promise<O
         },
         input.fileName || (input.kind === "image" ? "image.png" : input.kind === "audio" ? "audio.mp3" : "video.mp4"),
     );
-    if (!media.objectStorage) throw new Error("后端没有返回对象存储文件信息");
+    if (!media.objectStorage) throw new Error(translate("storage.serverReturnedNoObjectStorageFile"));
     return media.objectStorage;
 }
 
 export async function uploadRemoteObjectToStorage(input: { storageKey?: string; sourceUrl: string; kind: ObjectStorageUploadKind; mimeType?: string }): Promise<ObjectStorageFile> {
     const storageKey = input.storageKey?.trim() ? input.storageKey.trim() : (await registerRemoteMedia({ kind: input.kind, sourceUrl: input.sourceUrl, mimeType: input.mimeType })).storageKey;
     const media = await uploadRemoteMediaToObjectStorage(storageKey);
-    if (!media.objectStorage) throw new Error("后端没有返回对象存储文件信息");
+    if (!media.objectStorage) throw new Error(translate("storage.serverReturnedNoObjectStorageFile"));
     return media.objectStorage;
 }
 
@@ -54,15 +56,15 @@ export function buildObjectStoragePublicUrl(config: ObjectStorageConfig, key: st
         const endpoint = new URL(config.endpoint.trim());
         return `${endpoint.protocol}//${config.bucket.trim()}.${endpoint.host}/${path}`;
     }
-    throw new Error("七牛云Kodo必须填写公开访问地址");
+    throw new Error(translate("storage.qiniuKodoRequiresAPublicURL"));
 }
 
 export function objectStorageReadyMessage(config?: ObjectStorageConfig) {
-    if (!config) return "对象存储不存在";
+    if (!config) return translate("storage.objectStorageNotFound");
     if (!config.accessKey.trim() || !config.secretKey.trim() || !config.bucket.trim() || !config.region.trim()) {
-        return "请完整填写访问密钥、密钥、Bucket 和 Region";
+        return translate("storage.enterAccessKeySecretKeyBucketAndRegion");
     }
-    if (config.provider === "aliyunOss" && !config.endpoint.trim()) return "请填写阿里云OSS Endpoint";
-    if (config.provider === "qiniuKodo" && !config.publicBaseUrl.trim()) return "请填写七牛云Kodo公开访问地址";
-    return "对象存储配置不完整";
+    if (config.provider === "aliyunOss" && !config.endpoint.trim()) return translate("storage.enterAlibabaCloudOSSEndpoint");
+    if (config.provider === "qiniuKodo" && !config.publicBaseUrl.trim()) return translate("storage.enterQiniuKodoPublicURL");
+    return translate("storage.incompleteObjectStorageConfiguration");
 }

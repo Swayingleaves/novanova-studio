@@ -1,0 +1,10 @@
+{
+    "failedToMarkAnnouncementReadTryLater": "Failed to mark announcement read; try later",
+    "failedToMarkAllAnnouncementsRead": "Failed to mark all announcements read",
+    "announcementDetails": "Announcement details",
+    "iHaveRead": "I have read",
+    "markAllRead": "Mark all read",
+    "noContent": "No content",
+    "published": "Published: {value0}",
+    "created": "Created: {value0}"
+}

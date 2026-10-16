@@ -1,5 +1,7 @@
 package com.novanovastudio.storage;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.aliyun.oss.ClientBuilderConfiguration;
 import com.aliyun.oss.OSS;
 import com.aliyun.oss.OSSClientBuilder;
@@ -46,13 +48,13 @@ public class AliyunOssObjectStorageProviderAdapter implements ObjectStorageProvi
      */
     @Override
     public void validate(PersistenceDtos.ObjectStorageConfig config) {
-        ObjectStorageUrlBuilder.requireText(config.accessKey(), "阿里云OSS AccessKey ID");
-        ObjectStorageUrlBuilder.requireText(config.secretKey(), "阿里云OSS AccessKey Secret");
-        ObjectStorageUrlBuilder.requireText(config.bucket(), "阿里云OSS Bucket");
-        ObjectStorageUrlBuilder.requireText(config.region(), "阿里云OSS地域ID");
-        ObjectStorageUrlBuilder.requireHttpUrl(config.endpoint(), "阿里云OSS Endpoint");
+        ObjectStorageUrlBuilder.requireText(config.accessKey(), SystemMessage.of("business.alibabaCloudOSSAccessKeyID"));
+        ObjectStorageUrlBuilder.requireText(config.secretKey(), SystemMessage.of("business.alibabaCloudOSSAccessKeySecret"));
+        ObjectStorageUrlBuilder.requireText(config.bucket(), SystemMessage.of("business.alibabaCloudOSSBucket"));
+        ObjectStorageUrlBuilder.requireText(config.region(), SystemMessage.of("business.alibabaCloudOSSRegionID"));
+        ObjectStorageUrlBuilder.requireHttpUrl(config.endpoint(), SystemMessage.of("business.alibabaCloudOSSEndpoint"));
         if (StringUtils.hasText(config.publicBaseUrl())) {
-            ObjectStorageUrlBuilder.requireHttpUrl(config.publicBaseUrl(), "阿里云OSS公开访问地址");
+            ObjectStorageUrlBuilder.requireHttpUrl(config.publicBaseUrl(), SystemMessage.of("business.alibabaCloudOSSPublicURL"));
         }
     }
 
@@ -88,7 +90,7 @@ public class AliyunOssObjectStorageProviderAdapter implements ObjectStorageProvi
             return ObjectStorageUrlBuilder.buildPublicUrl(StringUtils.hasText(config.publicBaseUrl()) ? config.publicBaseUrl() : defaultPublicBaseUrl(config), key);
         } catch (RuntimeException exception) {
             log.error("上传阿里云OSS失败: bucket={}, region={}, key={}", config.bucket(), config.region(), key, exception);
-            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "上传阿里云OSS失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.alibabaCloudOSSUploadFailed", exception.getMessage()));
         } finally {
             client.shutdown();
         }

@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { modelOptionName, resolveModelRequestConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceVideo } from "@/features/generation/types/media";
@@ -19,15 +21,18 @@ export const seedanceResolutionOptions = [
     { value: "1080p", label: "1080p" },
 ] as const;
 
-export const seedanceRatioOptions = [
-    { value: "16:9", label: "横屏" },
-    { value: "9:16", label: "竖屏" },
-    { value: "1:1", label: "方形" },
-    { value: "4:3", label: "标准横屏" },
-    { value: "3:4", label: "标准竖屏" },
-    { value: "21:9", label: "宽银幕" },
-    { value: "adaptive", label: "自适应" },
-] as const;
+/** 按调用方语言生成显示文案，业务值保持不变。 */
+export const createSeedanceRatioOptions = (translator: typeof translate = translate) => ([
+    { value: "16:9", get label() { return translator("generation.landscape"); } },
+    { value: "9:16", get label() { return translator("generation.portrait"); } },
+    { value: "1:1", get label() { return translator("generation.square"); } },
+    { value: "4:3", get label() { return translator("generation.standardLandscape"); } },
+    { value: "3:4", get label() { return translator("generation.standardPortrait"); } },
+    { value: "21:9", get label() { return translator("generation.widescreen"); } },
+    { value: "adaptive", get label() { return translator("generation.fit"); } },
+] as const);
+
+export const seedanceRatioOptions = createSeedanceRatioOptions();
 
 export const seedanceDurationOptions = [-1, 4, 5, 6, 8, 10, 12, 15] as const;
 
@@ -122,7 +127,7 @@ export function normalizeSeedanceRatio(value: string) {
 
 export function seedancePixelLabel(resolution: string, ratio: string) {
     const normalizedRatio = normalizeSeedanceRatio(ratio);
-    if (normalizedRatio === "adaptive") return "自动匹配";
+    if (normalizedRatio === "adaptive") return translate("generation.autoMatch");
     const normalizedResolution = normalizeSeedanceResolution(resolution) as SeedanceResolution;
     return seedancePixelMap[normalizedResolution][normalizedRatio as SeedanceRatio] || "";
 }
@@ -135,7 +140,7 @@ export function boolConfig(value: string | undefined, fallback: boolean) {
 }
 
 export function seedanceReferenceLabel(kind: ReferenceKind, index: number) {
-    const prefix: Record<ReferenceKind, string> = { image: "图片", video: "视频" };
+    const prefix: Record<ReferenceKind, string> = { image: translate("generation.image_d24c10"), video: translate("generation.video") };
     return `${prefix[kind]}${index + 1}`;
 }
 
@@ -150,7 +155,7 @@ export function buildSeedancePromptText(prompt: string, images: ReferenceImage[]
 }
 
 export function seedanceVideoReferenceError(videos: ReferenceVideo[]) {
-    if (videos.length > SEEDANCE_REFERENCE_LIMITS.videos) return `Seedance 参考视频最多 ${SEEDANCE_REFERENCE_LIMITS.videos} 个`;
+    if (videos.length > SEEDANCE_REFERENCE_LIMITS.videos) return translate("generation.atMostSeedanceReferenceVideos", { value0: SEEDANCE_REFERENCE_LIMITS.videos });
     let totalDurationMs = 0;
     for (const [index, video] of videos.entries()) {
         const label = seedanceReferenceLabel("video", index);
@@ -162,14 +167,14 @@ export function seedanceVideoReferenceError(videos: ReferenceVideo[]) {
         const sizeError = videoGeometryError(label, video.width, video.height);
         if (sizeError) return sizeError;
     }
-    if (totalDurationMs > 15_000) return "Seedance 参考视频总时长不能超过 15 秒";
+    if (totalDurationMs > 15_000) return translate("generation.totalSeedanceReferenceVideoDurationMustNotExceed15");
     return "";
 }
 
 export const seedanceVideoReferenceHint = "参考视频需为 mp4/mov，H.264/H.265，FPS 24-60；含真人人脸素材请使用火山授权 asset:// 素材。";
 
 function labelsForKind(kind: ReferenceKind, count: number) {
-    return Array.from({ length: count }, (_, index) => seedanceReferenceLabel(kind, index));
+    return Array.from({ length: count }, (_, index) => `${kind === "image" ? "图片" : "视频"}${index + 1}`);
 }
 
 function nearestRatio(value: number) {
@@ -177,21 +182,21 @@ function nearestRatio(value: number) {
 }
 
 function referenceFileError(label: string, bytes: number | undefined, maxBytes: number, readableSize: string) {
-    return bytes && bytes > maxBytes ? `${label} 超过 ${readableSize}，请压缩后再上传` : "";
+    return bytes && bytes > maxBytes ? translate("generation.exceedsCompressBeforeUploading", { value0: label, value1: readableSize }) : "";
 }
 
 function referenceDurationError(label: string, durationMs: number | undefined) {
     if (!durationMs) return "";
-    return durationMs < 2_000 || durationMs > 15_000 ? `${label} 时长需要在 2-15 秒之间` : "";
+    return durationMs < 2_000 || durationMs > 15_000 ? translate("generation.durationMustBe215Seconds", { value0: label }) : "";
 }
 
 function videoGeometryError(label: string, width: number | undefined, height: number | undefined) {
     if (!width || !height) return "";
-    if (width < 300 || width > 6000 || height < 300 || height > 6000) return `${label} 宽高需要在 300-6000px 之间`;
+    if (width < 300 || width > 6000 || height < 300 || height > 6000) return translate("generation.dimensionsMustBe3006000Px", { value0: label });
     const ratio = width / height;
-    if (ratio < 0.4 || ratio > 2.5) return `${label} 宽高比需要在 0.4-2.5 之间`;
+    if (ratio < 0.4 || ratio > 2.5) return translate("generation.aspectRatioMustBeBetween04And2", { value0: label });
     const pixels = width * height;
-    if (pixels < 640 * 640 || pixels > 2206 * 946) return `${label} 像素总量不符合 Seedance 要求，请转成 480p/720p/1080p 后再上传`;
+    if (pixels < 640 * 640 || pixels > 2206 * 946) return translate("generation.pixelCountDoesNotMeetSeedanceRequirementsConvertTo", { value0: label });
     return "";
 }
 

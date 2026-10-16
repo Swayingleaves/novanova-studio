@@ -53,3 +53,14 @@ test("画布 Agent 单类型风格兼容普通风格消息格式", () => {
     const parsed = parseGenerationStyleMessage(copied, [style]);
     assert.equal(parsed?.styles[0].id, 7);
 });
+
+test("英文显示的风格消息保留原始风格名称并能重新粘贴解析", () => {
+    const styles = [
+        { id: 7, name: "电影感", generationType: "image" as const },
+        { id: 8, name: "胶片", generationType: "video" as const },
+    ];
+    assert.equal(parseGenerationStyleMessage("Style: 电影感\n原始提示词", styles)?.prompt, "原始提示词");
+    const grouped = parseGroupedGenerationStyleMessage("Image style: 电影感\nVideo style: 胶片\n原始提示词", styles);
+    assert.deepEqual(grouped?.styles.map((style) => style.id), [7, 8]);
+    assert.equal(grouped?.prompt, "原始提示词");
+});

@@ -1,4 +1,9 @@
 "use client";
+import { currentLanguageTag } from "@/features/locale/translate";
+
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { Alert, App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Switch, Tabs } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
@@ -9,7 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { MODEL_ICON_OPTIONS } from "@/features/settings/components/model-icon";
-import {
+import { createModelCapabilityOptions,
     configFromModelConfigs,
     createModelChannel,
     createObjectStorageConfig,
@@ -27,7 +32,7 @@ import {
     type VideoGenerationMode,
     type VideoResolution,
 } from "@/features/settings/stores/use-config-store";
-import { VIDEO_GENERATION_CAPABILITY_OPTIONS, VIDEO_GENERATION_MODE_OPTIONS, VIDEO_RESOLUTION_OPTIONS, createVideoBillingConfiguration } from "@/features/generation/lib/video-billing";
+import { createVideoGenerationCapabilityOptions, VIDEO_RESOLUTION_OPTIONS, createVideoBillingConfiguration } from "@/features/generation/lib/video-billing";
 import { isObjectStorageReady, objectStorageReadyMessage, testObjectStorageUpload } from "@/features/storage/services/object-storage";
 import { isOpenAiTextModel, isReasoningEffortDisabled, reasoningEffortOptions } from "@/features/settings/lib/model-thinking-configuration";
 import {
@@ -62,17 +67,17 @@ type ModelGroup = {
     optionsLabel: string;
 };
 
-const modelGroups: ModelGroup[] = [
-    { capability: "image", modelKey: "imageModel", modelsKey: "imageModels", defaultLabel: "默认生图模型", optionsLabel: "生图模型可选项" },
-    { capability: "video", modelKey: "videoModel", modelsKey: "videoModels", defaultLabel: "默认视频模型", optionsLabel: "视频模型可选项" },
-    { capability: "text", modelKey: "textModel", modelsKey: "textModels", defaultLabel: "默认文本模型", optionsLabel: "文本模型可选项" },
-];
+const createModelGroups = (translator: typeof translate = translate): ModelGroup[] => ([
+    { capability: "image", modelKey: "imageModel", modelsKey: "imageModels", get defaultLabel() { return translator("appShell.defaultImageModel"); }, get optionsLabel() { return translator("appShell.availableImageModels"); } },
+    { capability: "video", modelKey: "videoModel", modelsKey: "videoModels", get defaultLabel() { return translator("appShell.defaultVideoModel"); }, get optionsLabel() { return translator("appShell.availableVideoModels"); } },
+    { capability: "text", modelKey: "textModel", modelsKey: "textModels", get defaultLabel() { return translator("appShell.defaultTextModel"); }, get optionsLabel() { return translator("appShell.availableTextModels"); } },
+]);
 
-const capabilityGroups: Array<{ capability: ModelCapability; modelsKey: "textModels" | "imageModels" | "videoModels"; label: string }> = [
-    { capability: "text", modelsKey: "textModels", label: "文本模型" },
-    { capability: "image", modelsKey: "imageModels", label: "图像模型" },
-    { capability: "video", modelsKey: "videoModels", label: "视频模型" },
-];
+const createCapabilityGroups = (translator: typeof translate = translate): Array<{ capability: ModelCapability; modelsKey: "textModels" | "imageModels" | "videoModels"; label: string }> => ([
+    { capability: "text", modelsKey: "textModels", get label() { return translator("appShell.textModel"); } },
+    { capability: "image", modelsKey: "imageModels", get label() { return translator("appShell.imageModel"); } },
+    { capability: "video", modelsKey: "videoModels", get label() { return translator("appShell.videoModel"); } },
+]);
 
 const modelIconSelectOptions = MODEL_ICON_OPTIONS.map((option) => ({
     value: option.value,
@@ -84,7 +89,7 @@ const modelIconSelectOptions = MODEL_ICON_OPTIONS.map((option) => ({
     ),
 }));
 
-const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
+const createApiFormatOptions = (translator: typeof translate = translate): Array<{ label: string; value: ApiCallFormat }> => ([
     { label: "OpenAI", value: "openai" },
     { label: "New API", value: "newapi" },
     { label: "Evolink", value: "evolink" },
@@ -93,52 +98,53 @@ const apiFormatOptions: Array<{ label: string; value: ApiCallFormat }> = [
     { label: "Anthropic", value: "anthropic" },
     { label: "Seedance", value: "seedance" },
     { label: "MiniMax", value: "minimax" },
-    { label: "自定义", value: "custom" },
-];
+    { get label() { return translator("appShell.custom"); }, value: "custom" },
+]);
 
-const objectStorageProviderOptions: Array<{ label: string; value: ObjectStorageProvider }> = [
-    { label: "腾讯云COS", value: "tencentCos" },
-    { label: "阿里云OSS", value: "aliyunOss" },
-    { label: "七牛云Kodo", value: "qiniuKodo" },
-];
+const createObjectStorageProviderOptions = (translator: typeof translate = translate): Array<{ label: string; value: ObjectStorageProvider }> => ([
+    { get label() { return translator("appShell.tencentCloudCOS"); }, value: "tencentCos" },
+    { get label() { return translator("appShell.alibabaCloudOSS"); }, value: "aliyunOss" },
+    { get label() { return translator("appShell.qiniuCloudKodo"); }, value: "qiniuKodo" },
+]);
 
-const qiniuRegionOptions = [
-    { label: "华东-浙江（z0）", value: "z0" },
-    { label: "华东-浙江2（cn-east-2）", value: "cn-east-2" },
-    { label: "华北-河北（z1）", value: "z1" },
-    { label: "华南-广东（z2）", value: "z2" },
-    { label: "北美-洛杉矶（na0）", value: "na0" },
-    { label: "亚太-新加坡（as0）", value: "as0" },
-];
+const createQiniuRegionOptions = (translator: typeof translate = translate) => ([
+    { get label() { return translator("appShell.eastChinaZhejiangZ0"); }, value: "z0" },
+    { get label() { return translator("appShell.eastChinaZhejiang2CnEast2"); }, value: "cn-east-2" },
+    { get label() { return translator("appShell.northChinaHebeiZ1"); }, value: "z1" },
+    { get label() { return translator("appShell.southChinaGuangdongZ2"); }, value: "z2" },
+    { get label() { return translator("appShell.northAmericaLosAngelesNa0"); }, value: "na0" },
+    { get label() { return translator("appShell.asiaPacificSingaporeAs0"); }, value: "as0" },
+]);
 
-const objectStorageProviderFields: Record<ObjectStorageProvider, { accessKeyLabel: string; secretKeyLabel: string; bucketPlaceholder: string; regionLabel: string; regionPlaceholder: string; publicBaseUrlExtra: string }> = {
+const createObjectStorageProviderFields = (translator: typeof translate = translate): Record<ObjectStorageProvider, { accessKeyLabel: string; secretKeyLabel: string; bucketPlaceholder: string; regionLabel: string; regionPlaceholder: string; publicBaseUrlExtra: string }> => ({
     tencentCos: {
         accessKeyLabel: "SecretId",
         secretKeyLabel: "SecretKey",
         bucketPlaceholder: "example-1250000000",
         regionLabel: "Region",
         regionPlaceholder: "ap-guangzhou",
-        publicBaseUrlExtra: "留空时自动使用 https://{bucket}.cos.{region}.myqcloud.com/{key}",
+        get publicBaseUrlExtra() { return translator("appShell.defaultsToHttpsCosMyqcloudCom"); },
     },
     aliyunOss: {
         accessKeyLabel: "AccessKey ID",
         secretKeyLabel: "AccessKey Secret",
         bucketPlaceholder: "example-bucket",
-        regionLabel: "地域ID",
+        get regionLabel() { return translator("appShell.regionID"); },
         regionPlaceholder: "cn-hangzhou",
-        publicBaseUrlExtra: "留空时按 Bucket 和公开 Endpoint 自动生成访问地址。",
+        get publicBaseUrlExtra() { return translator("appShell.leaveBlankToGenerateTheURLFromBucketAnd"); },
     },
     qiniuKodo: {
         accessKeyLabel: "AccessKey",
         secretKeyLabel: "SecretKey",
         bucketPlaceholder: "example-bucket",
-        regionLabel: "区域",
-        regionPlaceholder: "请选择区域",
-        publicBaseUrlExtra: "必须填写已绑定当前 Bucket 的 CDN 或自定义域名。",
+        get regionLabel() { return translator("appShell.region"); },
+        get regionPlaceholder() { return translator("appShell.selectARegion"); },
+        get publicBaseUrlExtra() { return translator("appShell.enterACDNOrCustomDomainBoundToThis"); },
     },
-};
+});
 
 export function AppConfigModal() {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const user = useUserStore((state) => state.user);
     const config = useConfigStore((state) => state.config);
@@ -191,7 +197,7 @@ export function AppConfigModal() {
         const configs = cloneModelConfigs(useConfigStore.getState().modelConfigs);
         setModelConfigBaseline(configs);
         setDraftModelConfigs(cloneModelConfigs(configs));
-        setCollapsedModelCapabilityTypes(capabilityGroups.map((group) => group.capability));
+        setCollapsedModelCapabilityTypes(createCapabilityGroups(translate).map((group) => group.capability));
     }, []);
 
     const resetObjectStorageDraft = useCallback(() => {
@@ -237,7 +243,7 @@ export function AppConfigModal() {
             })
             .catch(() => {
                 if (!active) return;
-                message.error("加载配置失败");
+                message.error(translate("appShell.failedToLoadConfiguration"));
                 setDraftsReady(true);
             });
         return () => {
@@ -252,11 +258,11 @@ export function AppConfigModal() {
     const draftConfig = useMemo(() => {
         const nextConfig = configFromModelConfigs(draftChannels, draftModelConfigs, config);
         // 管理界面保留失效配置，允许用户看见并移除；业务模型目录仍只展示可用模型。
-        for (const group of modelGroups) nextConfig[group.modelsKey] = draftModelConfigs.filter((item) => item.modelType === group.capability).map(modelConfigValue);
+        for (const group of createModelGroups(translate)) nextConfig[group.modelsKey] = draftModelConfigs.filter((item) => item.modelType === group.capability).map(modelConfigValue);
         return nextConfig;
-    }, [config, draftChannels, draftModelConfigs]);
-    const dependencyIssues = useMemo(() => modelConfigDependencyIssues(channelBaseline, draftModelConfigs), [channelBaseline, draftModelConfigs]);
-    const modelOptions = useMemo(() => uniqueModels([...draftConfig.models, ...draftModelConfigs.map(modelConfigValue)]).map((model) => ({ label: modelOptionLabelWithRealName(draftConfig, model), value: model })), [draftConfig, draftModelConfigs]);
+    }, [config, draftChannels, draftModelConfigs, translate.locale]);
+    const dependencyIssues = useMemo(() => modelConfigDependencyIssues(channelBaseline, draftModelConfigs), [channelBaseline, draftModelConfigs, translate.locale]);
+    const modelOptions = useMemo(() => uniqueModels([...draftConfig.models, ...draftModelConfigs.map(modelConfigValue)]).map((model) => ({ label: modelOptionLabelWithRealName(draftConfig, model), value: model })), [draftConfig, draftModelConfigs, translate.locale]);
     const channelsDirty = !sameValue(draftChannels, channelBaseline);
     const modelConfigsDirty = !sameValue(draftModelConfigs, modelConfigBaseline);
     const objectStoragesDirty = !sameValue(draftObjectStorages, objectStorageBaseline);
@@ -276,18 +282,18 @@ export function AppConfigModal() {
     };
 
     const addChannel = () => {
-        const channel = createModelChannel({ name: `渠道 ${draftChannels.length + 1}` });
+        const channel = createModelChannel({ name: translate("appShell.channel", { value0: draftChannels.length + 1 }) });
         setDraftChannels((channels) => [channel, ...channels]);
         setCollapsedChannelIds((ids) => ids.filter((id) => id !== channel.id));
     };
 
     const removeChannel = (id: string) => {
         modal.confirm({
-            title: "确认删除",
-            content: "该渠道会在点击保存后从服务端删除。",
-            okText: "删除",
+            title: translate("appShell.confirmDeletion"),
+            content: translate("appShell.thisChannelWillBeDeletedFromTheServerWhen"),
+            okText: translate("appShell.delete"),
             okType: "danger",
-            cancelText: "取消",
+            cancelText: translate("appShell.cancel"),
             onOk: () => {
                 setDraftChannels((channels) => channels.filter((channel) => channel.id !== id));
                 setCollapsedChannelIds((ids) => ids.filter((item) => item !== id));
@@ -301,16 +307,16 @@ export function AppConfigModal() {
 
     const refreshChannelModels = async (channel: ModelChannel) => {
         if (!channel.baseUrl.trim() || !channel.apiKey.trim()) {
-            message.error("请先填写该渠道的 Base URL 和 API Key");
+            message.error(translate("appShell.enterThisChannelSBaseURLAndAPIKey"));
             return;
         }
         setLoadingChannelId(channel.id);
         try {
             const result = await refreshServerChannelModels(channel);
             updateDraftChannel(channel.id, { models: result.models });
-            message.success(`${channel.name} 模型列表已更新，请点击保存`);
+            message.success(translate("appShell.modelsUpdatedSaveYourChanges", { value0: channel.name }));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "读取模型失败");
+            message.error(error instanceof Error ? error.message : translate("appShell.failedToLoadModels"));
         } finally {
             setLoadingChannelId("");
         }
@@ -321,7 +327,7 @@ export function AppConfigModal() {
         const draftIds = new Set(draftChannels.map((channel) => channel.id));
         const deletedChannels = channelBaseline.filter((channel) => !draftIds.has(channel.id));
         if (deletedChannels.some((channel) => modelConfigBaseline.some((model) => model.channelId === channel.id))) {
-            message.error("请先在“我的模型”中删除关联模型并保存，再删除渠道");
+            message.error(translate("appShell.deleteLinkedModelsInMyModelsAndSaveBefore"));
             return;
         }
         setSavingTab("channels");
@@ -347,11 +353,11 @@ export function AppConfigModal() {
                     }),
                 );
             }
-            message.success("渠道配置已保存");
+            message.success(translate("appShell.channelConfigurationSaved"));
         } catch (error) {
             await refreshChannels().catch(() => undefined);
             setChannelBaseline(cloneChannels(useConfigStore.getState().config.channels));
-            message.error(error instanceof Error ? error.message : "保存渠道配置失败");
+            message.error(error instanceof Error ? error.message : translate("appShell.failedToSaveChannelConfiguration"));
         } finally {
             setSavingTab("");
         }
@@ -360,7 +366,7 @@ export function AppConfigModal() {
     const updateCapabilityModels = (group: ModelGroup, models: string[]) => {
         const values = uniqueModels(models.map((model) => normalizeModelOptionValue(model, draftChannels)).filter(Boolean));
         if (values.some((value) => !value.includes("::"))) {
-            message.warning("请先在“我的渠道”中添加模型，再配置可选模型");
+            message.warning(translate("appShell.addModelsInMyChannelsBeforeConfiguringOptions"));
             return;
         }
         setDraftModelConfigs((configs) => updateModelConfigSelection(configs, modelConfigBaseline, group.capability, values, createDraftModelConfig));
@@ -385,10 +391,10 @@ export function AppConfigModal() {
         let customBodyParameters: Record<string, unknown>;
         try {
             const parsed = JSON.parse(editingCustomBodyParameters.trim() || "{}");
-            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("模型自定义JSON必须是对象");
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(translate("appShell.customModelJSONMustBeAnObject"));
             customBodyParameters = parsed as Record<string, unknown>;
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "模型自定义JSON格式不正确");
+            message.error(error instanceof Error ? error.message : translate("appShell.invalidCustomModelJSON"));
             return;
         }
         const nextConfig = {
@@ -403,10 +409,10 @@ export function AppConfigModal() {
     const formatEditingCustomBodyParameters = () => {
         try {
             const parsed = JSON.parse(editingCustomBodyParameters.trim() || "{}");
-            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("模型自定义JSON必须是对象");
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(translate("appShell.customModelJSONMustBeAnObject"));
             setEditingCustomBodyParameters(JSON.stringify(parsed, null, 2));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "模型自定义JSON格式不正确");
+            message.error(error instanceof Error ? error.message : translate("appShell.invalidCustomModelJSON"));
         }
     };
 
@@ -423,7 +429,7 @@ export function AppConfigModal() {
         // 未修改的旧失效配置不阻塞其他模型，新增、修改或设置默认时仍必须校验依赖。
         const blockingIssues = blockingModelConfigDependencyIssues(channelBaseline, draftModelConfigs, modelConfigBaseline, sameModelConfigForUpdate);
         if (blockingIssues.length) {
-            message.error(`无法保存：${blockingIssues.map(({ configuration, channelName, reason }) => `${channelName} / ${configuration.modelName}（${reason}）`).join("；")}。请先保存对应渠道或移除该模型配置`);
+            message.error(translate("appShell.cannotSaveSaveItsChannelOrRemoveTheModel", { value0: blockingIssues.map(({ configuration, channelName, reason }) => `${channelName} / ${configuration.modelName}（${reason}）`).join("；") }));
             return;
         }
         const draftIds = new Set(draftModelConfigs.map((configItem) => configItem.id));
@@ -480,7 +486,7 @@ export function AppConfigModal() {
                     baselineById.set(saved.id, saved);
                 }
             }
-            for (const group of modelGroups) {
+            for (const group of createModelGroups(translate)) {
                 const nextDefault = nextDrafts.find((configItem) => configItem.modelType === group.capability && configItem.defaultModel);
                 const currentDefault = modelConfigBaseline.find((configItem) => configItem.modelType === group.capability && configItem.defaultModel);
                 if (nextDefault && nextDefault.id !== currentDefault?.id) await setDefaultModel(nextDefault.id, group.capability);
@@ -493,7 +499,7 @@ export function AppConfigModal() {
             }
             await refreshModelConfiguration();
             resetModelConfigDraft();
-            message.success("模型配置已保存");
+            message.success(translate("appShell.modelConfigurationSaved"));
         } catch (error) {
             let refreshMessage = "";
             try {
@@ -507,7 +513,7 @@ export function AppConfigModal() {
                 refreshMessage = "；重新读取配置失败，已保留草稿和已成功保存的模型";
             }
             setDraftModelConfigs(nextDrafts);
-            message.error(`${error instanceof Error ? error.message : "保存模型配置失败"}${refreshMessage}`);
+            message.error(`${error instanceof Error ? error.message : translate("appShell.failedToSaveModelConfiguration")}${refreshMessage}`);
         } finally {
             setSavingTab("");
         }
@@ -519,9 +525,9 @@ export function AppConfigModal() {
             const settings = await updateCreditSettings(draftInitialCredits);
             setCreditBaseline(settings.initialCredits);
             setDraftInitialCredits(settings.initialCredits);
-            message.success("积分设置已保存");
+            message.success(translate("appShell.creditSettingsSaved"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "保存积分设置失败");
+            message.error(error instanceof Error ? error.message : translate("appShell.failedToSaveCreditSettings"));
         } finally {
             setSavingTab("");
         }
@@ -533,9 +539,9 @@ export function AppConfigModal() {
             const settings = await updateInvitationRewardSettings(draftInvitationRewardCredits);
             setInvitationRewardBaseline(settings.invitationRewardCredits);
             setDraftInvitationRewardCredits(settings.invitationRewardCredits);
-            message.success("邀请奖励设置已保存");
+            message.success(translate("appShell.referralSettingsSaved"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "保存邀请奖励设置失败");
+            message.error(error instanceof Error ? error.message : translate("appShell.failedToSaveReferralSettings"));
         } finally {
             setSavingTab("");
         }
@@ -547,9 +553,9 @@ export function AppConfigModal() {
             const settings = await updateCheckInRewardSettings({ checkInCredits: draftCheckInCredits });
             setCheckInBaseline(settings.checkInCredits);
             setDraftCheckInCredits(settings.checkInCredits);
-            message.success("签到积分设置已保存");
+            message.success(translate("appShell.checkInSettingsSaved"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "保存签到积分设置失败");
+            message.error(error instanceof Error ? error.message : translate("appShell.failedToSaveCheckInSettings"));
         } finally {
             setSavingTab("");
         }
@@ -562,7 +568,7 @@ export function AppConfigModal() {
     const addObjectStorage = () => {
         const storage = createObjectStorageConfig({
             id: `draft-${nanoid()}`,
-            name: `对象存储 ${draftObjectStorages.length + 1}`,
+            name: translate("appShell.objectStorage", { value0: draftObjectStorages.length + 1 }),
             defaultStorage: draftObjectStorages.length === 0 || isDefaultObjectStoragePlaceholder(draftObjectStorages[0]),
         });
         setDraftObjectStorages((storages) => (isDefaultObjectStoragePlaceholder(storages[0]) ? [storage] : [storage, ...storages]));
@@ -581,19 +587,19 @@ export function AppConfigModal() {
         const storage = draftObjectStorages.find((item) => item.id === id);
         if (!storage) return;
         if (draftObjectStorages.length <= 1) {
-            message.warning("至少保留一个对象存储");
+            message.warning(translate("appShell.keepAtLeastOneObjectStorage"));
             return;
         }
         if (storage.defaultStorage) {
-            message.warning("默认对象存储不能删除，请先设置其他默认项");
+            message.warning(translate("appShell.chooseAnotherDefaultBeforeDeletingThisStorage"));
             return;
         }
         modal.confirm({
-            title: "确认删除",
-            content: "该对象存储会在点击保存后从服务端删除。",
-            okText: "删除",
+            title: translate("appShell.confirmDeletion"),
+            content: translate("appShell.thisObjectStorageConfigurationWillBeDeletedFromThe"),
+            okText: translate("appShell.delete"),
             okType: "danger",
-            cancelText: "取消",
+            cancelText: translate("appShell.cancel"),
             onOk: () => {
                 setDraftObjectStorages((storages) => storages.filter((item) => item.id !== id));
                 setCollapsedObjectStorageIds((ids) => ids.filter((item) => item !== id));
@@ -606,9 +612,9 @@ export function AppConfigModal() {
         try {
             await refreshObjectStorages();
             resetObjectStorageDraft();
-            message.success("对象存储配置已刷新");
+            message.success(translate("appShell.objectStorageRefreshed"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "刷新对象存储失败");
+            message.error(error instanceof Error ? error.message : translate("appShell.failedToRefreshObjectStorage"));
         } finally {
             setRefreshingObjectStorages(false);
         }
@@ -620,11 +626,11 @@ export function AppConfigModal() {
             return;
         }
         modal.confirm({
-            title: "放弃未保存修改？",
-            content: "刷新会丢弃对象存储 Tab 中的未保存修改。",
-            okText: "放弃并刷新",
+            title: translate("appShell.discardUnsavedChanges"),
+            content: translate("appShell.refreshingWillDiscardUnsavedChangesInTheObjectStorage"),
+            okText: translate("appShell.discardAndRefresh"),
             okType: "danger",
-            cancelText: "取消",
+            cancelText: translate("appShell.cancel"),
             onOk: refreshObjectStorageDrafts,
         });
     };
@@ -635,7 +641,7 @@ export function AppConfigModal() {
         const draftIds = new Set(draftObjectStorages.map((storage) => storage.id));
         const selectedDefault = draftObjectStorages.find((storage) => storage.defaultStorage);
         if (!selectedDefault) {
-            message.error("请设置默认对象存储");
+            message.error(translate("appShell.setDefaultObjectStorage"));
             return;
         }
         const incompleteStorage = draftObjectStorages.find((storage) => !isObjectStorageReady(storage));
@@ -668,12 +674,12 @@ export function AppConfigModal() {
             }
             await refreshObjectStorages();
             resetObjectStorageDraft();
-            message.success("对象存储配置已保存");
+            message.success(translate("appShell.objectStorageSaved"));
         } catch (error) {
             await refreshObjectStorages().catch(() => undefined);
             setObjectStorageBaseline(cloneObjectStorages(useConfigStore.getState().objectStorages));
             setDraftObjectStorages(nextDrafts);
-            message.error(error instanceof Error ? error.message : "保存对象存储失败");
+            message.error(error instanceof Error ? error.message : translate("appShell.failedToSaveObjectStorage"));
         } finally {
             setSavingTab("");
         }
@@ -681,7 +687,7 @@ export function AppConfigModal() {
 
     const testObjectStorage = async (storageId: string) => {
         if (objectStoragesDirty) {
-            message.warning("请先保存对象存储配置，再执行测试上传");
+            message.warning(translate("appShell.saveStorageConfigurationBeforeTesting"));
             return;
         }
         const storage = draftObjectStorages.find((item) => item.id === storageId);
@@ -697,9 +703,9 @@ export function AppConfigModal() {
             updateDraftObjectStorage(storageId, { lastTestedAt: result.uploadedAt });
             setTestedObjectStorageId(storageId);
             setObjectStorageTestUrl(result.url);
-            message.success("对象存储测试上传成功，请点击保存记录测试时间");
+            message.success(translate("appShell.storageTestSucceededSaveToRecordTestTime"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "对象存储测试上传失败");
+            message.error(error instanceof Error ? error.message : translate("appShell.objectStorageTestFailed"));
         } finally {
             setTestingObjectStorageId("");
         }
@@ -717,11 +723,11 @@ export function AppConfigModal() {
             return;
         }
         modal.confirm({
-            title: "放弃未保存修改？",
-            content: "关闭后会丢弃所有 Tab 中未保存的修改。",
-            okText: "放弃修改",
+            title: translate("appShell.discardUnsavedChanges"),
+            content: translate("appShell.closingWillDiscardUnsavedChangesInAllTabs"),
+            okText: translate("appShell.discardChanges"),
             okType: "danger",
-            cancelText: "继续编辑",
+            cancelText: translate("appShell.continueEditing"),
             onOk: () => setConfigDialogOpen(false),
         });
     };
@@ -729,9 +735,9 @@ export function AppConfigModal() {
     if (user?.role !== "admin") return null;
 
     return (
-        <Modal title={<div className="text-lg font-semibold">配置与用户偏好</div>} open={isConfigOpen} width={980} centered onCancel={closeConfigDialog} footer={null} styles={{ body: { height: "72vh", overflowY: "auto", paddingRight: 12 } }}>
+        <Modal title={<div className="text-lg font-semibold">{translate("appShell.configurationPreferences")}</div>} open={isConfigOpen} width={980} centered onCancel={closeConfigDialog} footer={null} styles={{ body: { height: "72vh", overflowY: "auto", paddingRight: 12 } }}>
             {!draftsReady ? (
-                <div className="flex h-40 items-center justify-center text-sm text-[var(--studio-muted)]">正在加载配置...</div>
+                <div className="flex h-40 items-center justify-center text-sm text-[var(--studio-muted)]">{translate("appShell.loadingConfiguration")}</div>
             ) : (
                 <Tabs
                     activeKey={activeTab}
@@ -741,20 +747,18 @@ export function AppConfigModal() {
                     items={[
                         {
                             key: "channels",
-                            label: "我的渠道",
+                            label: translate("appShell.myChannels"),
                             children: (
                                 <Form layout="vertical" requiredMark={false}>
                                     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
                                         <div className="min-w-0 flex-1">
-                                            <span>在这里配置生成任务使用的渠道 API。</span>
+                                            <span>{translate("appShell.configureChannelAPIsUsedForGenerationHere")}</span>
                                         </div>
                                         <div className="flex shrink-0 gap-2">
                                             <Button type="primary" disabled={!channelsDirty || isSaving} loading={savingTab === "channels"} onClick={() => void saveChannels()}>
-                                                保存
-                                            </Button>
+                                                {translate("appShell.save")}</Button>
                                             <Button icon={<Plus className="size-4" />} disabled={isSaving} onClick={addChannel}>
-                                                新增渠道
-                                            </Button>
+                                                {translate("appShell.addChannel")}</Button>
                                         </div>
                                     </div>
                                     <div className="space-y-3">
@@ -764,34 +768,32 @@ export function AppConfigModal() {
                                                 <section key={channel.id} className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
                                                     <div className={collapsed ? "flex items-center justify-between gap-3" : "mb-3 flex items-center justify-between gap-3"}>
                                                         <div className="min-w-0">
-                                                            <div className="truncate text-sm font-semibold">{channel.name || "未命名渠道"}</div>
+                                                            <div className="truncate text-sm font-semibold">{channel.name || translate("appShell.unnamedChannel")}</div>
                                                             <div className="mt-1 text-xs text-[var(--studio-muted)]">
-                                                                {apiFormatLabel(channel.apiFormat)} · 已配置 {channel.models.length} 个模型
-                                                            </div>
+                                                                {apiFormatLabel(channel.apiFormat)} {translate("appShell.configured")}{channel.models.length} {translate("appShell.models")}</div>
                                                         </div>
                                                         <div className="flex shrink-0 gap-2">
                                                             <Button size="small" icon={collapsed ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />} onClick={() => toggleChannelCollapsed(channel.id)}>
-                                                                {collapsed ? "展开" : "收起"}
+                                                                {collapsed ? translate("appShell.expand") : translate("appShell.collapse")}
                                                             </Button>
                                                             <Button
                                                                 size="small"
                                                                 disabled={isSaving || channel.apiFormat === "minimax" || channel.apiFormat === "custom"}
                                                                 loading={loadingChannelId === channel.id}
-                                                                title={channel.apiFormat === "minimax" ? "MiniMax 请手动配置 MiniMax-H3" : channel.apiFormat === "custom" ? "自定义格式请手动配置模型列表" : undefined}
+                                                                title={channel.apiFormat === "minimax" ? translate("appShell.configureMiniMaxH3ManuallyForMiniMax") : channel.apiFormat === "custom" ? translate("appShell.configureModelListManuallyForCustomFormats") : undefined}
                                                                 onClick={() => void refreshChannelModels(channel)}
                                                             >
-                                                                拉取模型
-                                                            </Button>
+                                                                {translate("appShell.fetchModels")}</Button>
                                                             <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={isSaving} onClick={() => removeChannel(channel.id)} />
                                                         </div>
                                                     </div>
                                                     {collapsed ? null : (
                                                         <div className="grid gap-4 md:grid-cols-2">
-                                                            <Form.Item label="渠道名称" className="mb-0">
+                                                            <Form.Item label={translate("appShell.channelName")} className="mb-0">
                                                                 <Input value={channel.name} disabled={isSaving} onChange={(event) => updateDraftChannel(channel.id, { name: event.target.value })} />
                                                             </Form.Item>
-                                                            <Form.Item label="调用格式" className="mb-0">
-                                                                <Select value={channel.apiFormat} disabled={isSaving} options={apiFormatOptions} onChange={(value: ApiCallFormat) => updateChannelApiFormat(channel, value)} />
+                                                            <Form.Item label={translate("appShell.aPIFormat")} className="mb-0">
+                                                                <Select value={channel.apiFormat} disabled={isSaving} options={createApiFormatOptions(translate)} onChange={(value: ApiCallFormat) => updateChannelApiFormat(channel, value)} />
                                                             </Form.Item>
                                                             <Form.Item label="Base URL" className="mb-0">
                                                                 <Input value={channel.baseUrl} disabled={isSaving} onChange={(event) => updateDraftChannel(channel.id, { baseUrl: event.target.value })} />
@@ -799,13 +801,13 @@ export function AppConfigModal() {
                                                             <Form.Item label="API Key" className="mb-0">
                                                                 <Input.Password value={channel.apiKey} disabled={isSaving} onChange={(event) => updateDraftChannel(channel.id, { apiKey: event.target.value })} />
                                                             </Form.Item>
-                                                            <Form.Item label="模型列表" className="mb-0 md:col-span-2">
+                                                            <Form.Item label={translate("appShell.models_ea4bf0")} className="mb-0 md:col-span-2">
                                                                 <Select
                                                                     mode="tags"
                                                                     showSearch
                                                                     allowClear
                                                                     maxTagCount="responsive"
-                                                                    placeholder={channel.apiFormat === "minimax" ? "请输入 MiniMax-H3" : channel.apiFormat === "custom" ? "请输入模型名（自定义格式不支持自动拉取）" : "输入模型名，或点击拉取模型"}
+                                                                    placeholder={channel.apiFormat === "minimax" ? translate("appShell.enterMiniMaxH3") : channel.apiFormat === "custom" ? translate("appShell.enterModelNameCustomFormatsCannotFetchModels") : translate("appShell.enterModelNameOrFetchModels")}
                                                                     value={channel.models}
                                                                     disabled={isSaving}
                                                                     onChange={(models) => updateDraftChannel(channel.id, { models })}
@@ -822,7 +824,7 @@ export function AppConfigModal() {
                         },
                         {
                             key: "models",
-                            label: "我的模型",
+                            label: translate("appShell.myModels"),
                             children: (
                                 <Form layout="vertical" requiredMark={false}>
                                     {dependencyIssues.length ? (
@@ -830,14 +832,14 @@ export function AppConfigModal() {
                                             className="mb-4"
                                             type="warning"
                                             showIcon
-                                            title="部分模型与已保存的渠道列表不一致"
+                                            title={translate("appShell.someModelsDifferFromSavedChannelLists")}
                                             description={(
                                                 <div className="space-y-2">
-                                                    <div>已有且未修改的失效配置不会阻塞其他模型保存。请保存对应渠道，或移除失效配置后点击保存。</div>
+                                                    <div>{translate("appShell.unchangedInvalidSettingsDoNotBlockOtherModelsSave")}</div>
                                                     {dependencyIssues.map(({ configuration, channelName, reason }) => (
                                                         <div key={configuration.id} className="flex flex-wrap items-center justify-between gap-2">
                                                             <span className="break-all">{channelName} / {configuration.modelName}（{reason}）</span>
-                                                            <Button size="small" danger disabled={isSaving} aria-label={`移除${channelName}的${configuration.modelName}配置`} onClick={() => setDraftModelConfigs((configurations) => configurations.filter((item) => item.id !== configuration.id))}>移除</Button>
+                                                            <Button size="small" danger disabled={isSaving} aria-label={translate("appShell.removeConfiguration", { value0: channelName, value1: configuration.modelName })} onClick={() => setDraftModelConfigs((configurations) => configurations.filter((item) => item.id !== configuration.id))}>{translate("appShell.remove")}</Button>
                                                         </div>
                                                     ))}
                                                 </div>
@@ -846,22 +848,21 @@ export function AppConfigModal() {
                                     ) : null}
                                     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
                                         <div>
-                                            <div className="text-sm font-semibold">默认模型和可选项</div>
-                                            <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">可选项决定各处下拉框展示哪些模型；同名模型会以括号里的展示名或渠道名区分。</div>
+                                            <div className="text-sm font-semibold">{translate("appShell.defaultModelsOptions")}</div>
+                                            <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.optionsControlModelDropdownsDisplayOrChannelNamesDistinguish")}</div>
                                         </div>
                                         <Button type="primary" disabled={!modelConfigsDirty || isSaving} loading={savingTab === "models"} onClick={() => void saveModelConfigs()}>
-                                            保存
-                                        </Button>
+                                            {translate("appShell.save")}</Button>
                                     </div>
                                     <div className="grid gap-4 md:grid-cols-2">
-                                        {modelGroups.map((group) => (
+                                        {createModelGroups(translate).map((group) => (
                                             <Form.Item key={group.modelsKey} label={group.optionsLabel} className="mb-0">
                                                 <Select
                                                     mode="tags"
                                                     showSearch
                                                     allowClear
                                                     maxTagCount="responsive"
-                                                    placeholder={draftConfig.models.length ? `请选择或输入${group.optionsLabel}` : "先到渠道里填写或拉取模型"}
+                                                    placeholder={draftConfig.models.length ? translate("appShell.selectOrEnter", { value0: group.optionsLabel }) : translate("appShell.enterOrFetchChannelModelsFirst")}
                                                     value={draftConfig[group.modelsKey]}
                                                     options={modelOptions}
                                                     disabled={isSaving}
@@ -871,7 +872,7 @@ export function AppConfigModal() {
                                         ))}
                                     </div>
                                     <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                                        {modelGroups.map((group) => (
+                                        {createModelGroups(translate).map((group) => (
                                             <Form.Item key={group.modelKey} label={group.defaultLabel} className="mb-0">
                                                 <div className={isSaving ? "pointer-events-none opacity-60" : ""}>
                                                     <ModelPicker config={draftConfig} value={draftConfig[group.modelKey]} onChange={(model) => setDefaultDraftModel(group.capability, model)} capability={group.capability} fullWidth showRealName />
@@ -880,10 +881,10 @@ export function AppConfigModal() {
                                         ))}
                                     </div>
                                     <div className="mt-6 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
-                                        <div className="text-sm font-semibold">模型能力配置</div>
-                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">点击模型后的编辑按钮配置展示名称、积分、能力与自定义 JSON 参数。</div>
+                                        <div className="text-sm font-semibold">{translate("appShell.modelCapabilities")}</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.editAModelToConfigureItsDisplayNameCredits")}</div>
                                         <div className="mt-3 space-y-4">
-                                            {capabilityGroups.map((group) => {
+                                            {createCapabilityGroups(translate).map((group) => {
                                                 const models = draftConfig[group.modelsKey];
                                                 if (!models.length) return null;
                                                 const collapsed = collapsedModelCapabilityTypes.includes(group.capability);
@@ -892,7 +893,7 @@ export function AppConfigModal() {
                                                         <div className="mb-2 flex items-center justify-between gap-3">
                                                             <div className="text-xs font-medium text-[var(--studio-muted)]">{group.label}</div>
                                                             <Button size="small" icon={collapsed ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />} onClick={() => toggleModelCapabilityCollapsed(group.capability)}>
-                                                                {collapsed ? "展开" : "收起"}
+                                                                {collapsed ? translate("appShell.expand") : translate("appShell.collapse")}
                                                             </Button>
                                                         </div>
                                                         {collapsed ? null : (
@@ -904,10 +905,9 @@ export function AppConfigModal() {
                                                                         <div key={model} className="flex items-center justify-between gap-3 rounded border border-[var(--studio-line)] bg-[var(--studio-panel)] px-3 py-2">
                                                                             <span className="min-w-0 truncate text-sm">{modelOptionLabelWithRealName(draftConfig, model)}</span>
                                                                             <div className="flex shrink-0 items-center gap-2">
-                                                                                {modelConfig.defaultModel ? <span className="text-xs text-[var(--studio-muted)]">默认</span> : null}
+                                                                                {modelConfig.defaultModel ? <span className="text-xs text-[var(--studio-muted)]">{translate("appShell.default")}</span> : null}
                                                                                 <Button size="small" icon={<Pencil className="size-3.5" />} disabled={isSaving} onClick={() => openModelConfigEditor(modelConfig)}>
-                                                                                    编辑
-                                                                                </Button>
+                                                                                    {translate("appShell.edit")}</Button>
                                                                             </div>
                                                                         </div>
                                                                     );
@@ -924,19 +924,18 @@ export function AppConfigModal() {
                         },
                         {
                             key: "credits",
-                            label: "积分设置",
+                            label: translate("appShell.creditSettings"),
                             children: (
                                 <Form layout="vertical" requiredMark={false} className="max-w-xl">
                                     <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
-                                        <div className="text-sm font-semibold">新用户初始积分</div>
-                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">仅影响之后注册、后台创建或首次第三方登录的新用户，已有用户积分不会自动变更。</div>
+                                        <div className="text-sm font-semibold">{translate("appShell.initialCreditsForNewUsers")}</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.appliesOnlyToNewRegisteredAdminCreatedOrFirst")}</div>
                                         <div className="mt-5 flex flex-wrap items-end gap-3">
-                                            <Form.Item label="初始积分" className="mb-0">
+                                            <Form.Item label={translate("appShell.initialCredits")} className="mb-0">
                                                 <InputNumber min={0} precision={0} value={draftInitialCredits} disabled={isSaving} className="w-40" onChange={(value) => setDraftInitialCredits(Math.max(0, Number(value) || 0))} />
                                             </Form.Item>
                                             <Button type="primary" disabled={!creditsDirty || isSaving} loading={savingTab === "credits"} onClick={() => void saveCreditSettings()}>
-                                                保存
-                                            </Button>
+                                                {translate("appShell.save")}</Button>
                                         </div>
                                     </div>
                                 </Form>
@@ -944,16 +943,15 @@ export function AppConfigModal() {
                         },
                         {
                             key: "invitationReward",
-                            label: "邀请奖励",
+                            label: translate("appShell.referralReward"),
                             children: (
                                 <Form layout="vertical" requiredMark={false} className="max-w-xl">
                                     <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
-                                        <div className="text-sm font-semibold">邀请注册奖励积分</div>
+                                        <div className="text-sm font-semibold">{translate("appShell.referralRegistrationCredits")}</div>
                                         <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">
-                                            新用户通过有效邀请链接完成邮箱注册或首次第三方登录后，奖励发放给邀请人。设置为 0 表示暂停发放；只影响之后注册的用户，不追溯历史邀请。
-                                        </div>
+                                            {translate("appShell.referralRewardsGoToTheInviterAfterEmailRegistration")}</div>
                                         <div className="mt-5 flex flex-wrap items-end gap-3">
-                                            <Form.Item label="每名新用户奖励积分" className="mb-0">
+                                            <Form.Item label={translate("appShell.creditsPerNewUser")} className="mb-0">
                                                 <InputNumber
                                                     min={0}
                                                     precision={0}
@@ -969,8 +967,7 @@ export function AppConfigModal() {
                                                 loading={savingTab === "invitationReward"}
                                                 onClick={() => void saveInvitationRewardSettings()}
                                             >
-                                                保存
-                                            </Button>
+                                                {translate("appShell.save")}</Button>
                                         </div>
                                     </div>
                                 </Form>
@@ -978,16 +975,15 @@ export function AppConfigModal() {
                         },
                         {
                             key: "checkIn",
-                            label: "签到积分",
+                            label: translate("appShell.checkInCredits"),
                             children: (
                                 <Form layout="vertical" requiredMark={false} className="max-w-xl">
                                     <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
-                                        <div className="text-sm font-semibold">每日签到积分</div>
+                                        <div className="text-sm font-semibold">{translate("appShell.dailyCheckInCredits")}</div>
                                         <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">
-                                            用户每天签到一次即可获得该积分；签到积分自签到起 24 小时内有效，到期未使用的部分自动作废。设置为 0 表示仍可签到但不发放积分。
-                                        </div>
+                                            {translate("appShell.dailyCheckInGrantsTheseCreditsValidFor24")}</div>
                                         <div className="mt-5 flex flex-wrap items-end gap-3">
-                                            <Form.Item label="每日签到积分" className="mb-0">
+                                            <Form.Item label={translate("appShell.dailyCheckInCredits")} className="mb-0">
                                                 <InputNumber
                                                     min={0}
                                                     precision={0}
@@ -1003,8 +999,7 @@ export function AppConfigModal() {
                                                 loading={savingTab === "checkIn"}
                                                 onClick={() => void saveCheckInRewardSettings()}
                                             >
-                                                保存
-                                            </Button>
+                                                {translate("appShell.save")}</Button>
                                         </div>
                                     </div>
                                 </Form>
@@ -1012,62 +1007,57 @@ export function AppConfigModal() {
                         },
                         {
                             key: "objectStorage",
-                            label: "对象存储",
+                            label: translate("appShell.objectStorage_2caed1"),
                             children: (
                                 <Form layout="vertical" requiredMark={false}>
                                     <div className="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
                                         <div className="min-w-0 flex-1">
                                             <div className="flex items-center gap-2 text-sm font-semibold">
                                                 <CloudUpload className="size-4" />
-                                                云储存
-                                            </div>
-                                            <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">密钥会加密保存到服务端，默认对象存储用于后端上传生成结果和素材文件。</div>
+                                                {translate("appShell.cloudStorage")}</div>
+                                            <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.keysAreEncryptedOnTheServerDefaultStorageIs")}</div>
                                         </div>
                                         <div className="flex shrink-0 gap-2">
                                             <Button icon={<RefreshCw className="size-4" />} disabled={isSaving} loading={refreshingObjectStorages} onClick={handleRefreshObjectStorages}>
-                                                刷新
-                                            </Button>
+                                                {translate("appShell.refresh")}</Button>
                                             <Button type="primary" disabled={!objectStoragesDirty || isSaving} loading={savingTab === "objectStorage"} onClick={() => void saveObjectStorages()}>
-                                                保存
-                                            </Button>
+                                                {translate("appShell.save")}</Button>
                                             <Button icon={<Plus className="size-4" />} disabled={isSaving} onClick={addObjectStorage}>
-                                                新增
-                                            </Button>
+                                                {translate("appShell.add")}</Button>
                                         </div>
                                     </div>
                                     <div className="space-y-3">
                                         {draftObjectStorages.map((storage) => {
                                             const collapsed = collapsedObjectStorageIds.includes(storage.id);
-                                            const providerFields = objectStorageProviderFields[storage.provider];
+                                            const providerFields = createObjectStorageProviderFields(translate)[storage.provider];
                                             return (
                                                 <section key={storage.id} className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
                                                     <div className={collapsed ? "flex items-center justify-between gap-3" : "mb-3 flex items-center justify-between gap-3"}>
                                                         <div className="min-w-0">
-                                                            <div className="truncate text-sm font-semibold">{storage.name || "未命名对象存储"}</div>
+                                                            <div className="truncate text-sm font-semibold">{storage.name || translate("appShell.unnamedObjectStorage")}</div>
                                                             <div className="mt-1 text-xs text-[var(--studio-muted)]">
-                                                                {storage.defaultStorage ? "默认 · " : ""}
-                                                                {storage.lastTestedAt ? `上次测试 ${formatTimestamp(storage.lastTestedAt)}` : "尚未测试"}
+                                                                {storage.defaultStorage ? translate("appShell.default_bdefaa") : ""}
+                                                                {storage.lastTestedAt ? translate("appShell.lastTested", { value0: formatTimestamp(storage.lastTestedAt) }) : translate("appShell.notTested")}
                                                             </div>
                                                         </div>
                                                         <div className="flex shrink-0 gap-2">
                                                             <Button size="small" icon={collapsed ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />} onClick={() => toggleObjectStorageCollapsed(storage.id)}>
-                                                                {collapsed ? "展开" : "收起"}
+                                                                {collapsed ? translate("appShell.expand") : translate("appShell.collapse")}
                                                             </Button>
                                                             <Button size="small" disabled={storage.defaultStorage || isSaving} onClick={() => setDraftDefaultObjectStorage(storage.id)}>
-                                                                设为默认
-                                                            </Button>
+                                                                {translate("appShell.setAsDefault")}</Button>
                                                             <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={isSaving} onClick={() => removeObjectStorage(storage.id)} />
                                                         </div>
                                                     </div>
                                                     {collapsed ? null : (
                                                         <div className="grid gap-4 md:grid-cols-2">
-                                                            <Form.Item label="配置名称" className="mb-0">
+                                                            <Form.Item label={translate("appShell.configurationName")} className="mb-0">
                                                                 <Input value={storage.name} disabled={isSaving} onChange={(event) => updateDraftObjectStorage(storage.id, { name: event.target.value })} />
                                                             </Form.Item>
-                                                            <Form.Item label="服务商" className="mb-0">
+                                                            <Form.Item label={translate("appShell.provider")} className="mb-0">
                                                                 <Select
                                                                     value={storage.provider}
-                                                                    options={objectStorageProviderOptions}
+                                                                    options={createObjectStorageProviderOptions(translate)}
                                                                     disabled={isSaving}
                                                                     onChange={(provider) =>
                                                                         updateDraftObjectStorage(storage.id, {
@@ -1083,7 +1073,7 @@ export function AppConfigModal() {
                                                                     }
                                                                 />
                                                             </Form.Item>
-                                                            <Form.Item label="存储目录" extra="上传 Key 规则：目录/images 或 videos/日期/文件名。" className="mb-0">
+                                                            <Form.Item label={translate("appShell.storageDirectory")} extra={translate("appShell.uploadKeyDirectoryImagesOrVideosDateFilename")} className="mb-0">
                                                                 <Input value={storage.directory} placeholder="novanova-studio" disabled={isSaving} onChange={(event) => updateDraftObjectStorage(storage.id, { directory: event.target.value })} />
                                                             </Form.Item>
                                                             <Form.Item label={providerFields.accessKeyLabel} className="mb-0">
@@ -1099,7 +1089,7 @@ export function AppConfigModal() {
                                                                 {storage.provider === "qiniuKodo" ? (
                                                                     <Select
                                                                         value={storage.region || undefined}
-                                                                        options={qiniuRegionOptions}
+                                                                        options={createQiniuRegionOptions(translate)}
                                                                         placeholder={providerFields.regionPlaceholder}
                                                                         disabled={isSaving}
                                                                         onChange={(region) => updateDraftObjectStorage(storage.id, { region })}
@@ -1114,7 +1104,7 @@ export function AppConfigModal() {
                                                                 )}
                                                             </Form.Item>
                                                             {storage.provider === "aliyunOss" ? (
-                                                                <Form.Item label="Endpoint" extra="必须填写包含 http:// 或 https:// 的 OSS Endpoint。" className="mb-0 md:col-span-2">
+                                                                <Form.Item label="Endpoint" extra={translate("appShell.enterAnOSSEndpointIncludingHttpOrHttps")} className="mb-0 md:col-span-2">
                                                                     <Input
                                                                         value={storage.endpoint}
                                                                         placeholder="https://oss-cn-hangzhou.aliyuncs.com"
@@ -1123,7 +1113,7 @@ export function AppConfigModal() {
                                                                     />
                                                                 </Form.Item>
                                                             ) : null}
-                                                            <Form.Item label="公开访问地址" required={storage.provider === "qiniuKodo"} extra={providerFields.publicBaseUrlExtra} className="mb-0 md:col-span-2">
+                                                            <Form.Item label={translate("appShell.publicURL")} required={storage.provider === "qiniuKodo"} extra={providerFields.publicBaseUrlExtra} className="mb-0 md:col-span-2">
                                                                 <Input
                                                                     value={storage.publicBaseUrl}
                                                                     placeholder="https://cdn.example.com"
@@ -1135,12 +1125,10 @@ export function AppConfigModal() {
                                                     )}
                                                     <div className="mt-4 flex flex-wrap items-center gap-2">
                                                         <Button icon={<Wifi className="size-4" />} disabled={!isObjectStorageReady(storage) || isSaving} loading={testingObjectStorageId === storage.id} onClick={() => void testObjectStorage(storage.id)}>
-                                                            测试上传
-                                                        </Button>
+                                                            {translate("appShell.testUpload")}</Button>
                                                         {objectStorageTestUrl && testedObjectStorageId === storage.id ? (
                                                             <Button type="link" className="h-auto p-0 text-xs" href={objectStorageTestUrl} target="_blank" rel="noreferrer">
-                                                                打开测试文件
-                                                            </Button>
+                                                                {translate("appShell.openTestFile")}</Button>
                                                         ) : null}
                                                     </div>
                                                 </section>
@@ -1163,20 +1151,20 @@ export function AppConfigModal() {
                                 </span>
                             ) : null}
                             <div>
-                                <div className="text-lg font-semibold">{modelOptionLabelWithRealName(draftConfig, modelConfigValue(editingModelConfig))} 配置</div>
-                                {editingModelConfig.modelType === "video" ? <div className="mt-0.5 text-xs font-normal text-[var(--studio-muted)]">配置模型的计费方式、分辨率价格及功能支持</div> : null}
+                                <div className="text-lg font-semibold">{modelOptionLabelWithRealName(draftConfig, modelConfigValue(editingModelConfig))} {translate("appShell.configure")}</div>
+                                {editingModelConfig.modelType === "video" ? <div className="mt-0.5 text-xs font-normal text-[var(--studio-muted)]">{translate("appShell.configureBillingResolutionPricesAndCapabilities")}</div> : null}
                             </div>
                         </div>
                     ) : (
-                        "模型配置"
+                        translate("appShell.modelSettings")
                     )
                 }
                 open={Boolean(editingModelConfig)}
                 centered
                 width={editingModelConfig?.modelType === "video" ? 980 : 760}
                 destroyOnHidden
-                okText="确认"
-                cancelText="取消"
+                okText={translate("appShell.confirm")}
+                cancelText={translate("appShell.cancel")}
                 onCancel={() => setEditingModelConfig(null)}
                 onOk={saveModelConfigEditor}
             >
@@ -1186,9 +1174,9 @@ export function AppConfigModal() {
                             <div className="flex items-center justify-between gap-3">
                                 <div>
                                     <div className="flex items-center gap-1.5 text-sm font-semibold">
-                                        自定义模型 <Info className="size-4 text-[var(--studio-muted)]" />
+                                        {translate("appShell.customModel")}<Info className="size-4 text-[var(--studio-muted)]" />
                                     </div>
-                                    <p className="mt-1 text-xs text-[var(--studio-muted)]">启用后按下方各模式配置的请求/响应示例调用任意 API，替换默认渠道调用。</p>
+                                    <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.useRequestAndResponseExamplesForEachModeTo")}</p>
                                 </div>
                                 <Switch checked={Boolean(editingModelConfig.isCustomModel)} onChange={(checked) => updateEditingModelConfig({ isCustomModel: checked })} />
                             </div>
@@ -1196,7 +1184,7 @@ export function AppConfigModal() {
 
                         <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
                             <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                展示名称 <Info className="size-4 text-[var(--studio-muted)]" />
+                                {translate("appShell.displayName")}<Info className="size-4 text-[var(--studio-muted)]" />
                             </div>
                             <Input
                                 maxLength={255}
@@ -1204,12 +1192,12 @@ export function AppConfigModal() {
                                 value={editingModelConfig.displayName || editingModelConfig.modelName}
                                 onChange={(event) => updateEditingModelConfig({ displayName: event.target.value.trim() || null })}
                             />
-                            <p className="mt-2 text-xs text-[var(--studio-muted)]">展示给用户看的名称，默认与真实模型名一致，仅影响展示不影响调用。</p>
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("appShell.userFacingNameDefaultsToModelNameAndDoes")}</p>
                         </section>
 
                         <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
                             <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                展示图标 <Info className="size-4 text-[var(--studio-muted)]" />
+                                {translate("appShell.displayIcon")}<Info className="size-4 text-[var(--studio-muted)]" />
                             </div>
                             <Select
                                 value={editingModelConfig.modelIcon || ""}
@@ -1217,19 +1205,19 @@ export function AppConfigModal() {
                                 className="w-full"
                                 onChange={(modelIcon: string) => updateEditingModelConfig({ modelIcon: modelIcon || null })}
                             />
-                            <p className="mt-2 text-xs text-[var(--studio-muted)]">展示给用户看的图标；选择「自动匹配」时按模型名或渠道自动识别。</p>
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("appShell.displayIconAutoMatchDetectsItFromModelOr")}</p>
                         </section>
 
                         <section className="grid gap-4 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4 md:grid-cols-2">
                             <div>
                                 <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                    计费方式 <Info className="size-4 text-[var(--studio-muted)]" />
+                                    {translate("appShell.billingMethod")}<Info className="size-4 text-[var(--studio-muted)]" />
                                 </div>
                                 <Select
                                     value={editingModelConfig.videoBillingConfiguration?.billingUnit || "generation"}
                                     options={[
-                                        { value: "generation", label: "按次" },
-                                        { value: "second", label: "按秒" },
+                                        { value: "generation", label: translate("appShell.perRun") },
+                                        { value: "second", label: translate("appShell.perSecond") },
                                     ]}
                                     className="w-full"
                                     onChange={(billingUnit: ServerModelConfig["creditUnit"]) =>
@@ -1245,7 +1233,7 @@ export function AppConfigModal() {
                             </div>
                             <div>
                                 <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                    {editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? "每延生成时长（秒）" : "最短生成时长（秒）"} <Info className="size-4 text-[var(--studio-muted)]" />
+                                    {editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.extensionDurationS") : translate("appShell.minimumDurationS")} <Info className="size-4 text-[var(--studio-muted)]" />
                                 </div>
                                 <Space.Compact className="w-full">
                                     <InputNumber
@@ -1262,7 +1250,7 @@ export function AppConfigModal() {
                                             })
                                         }
                                     />
-                                    <Button disabled className="pointer-events-none">秒</Button>
+                                    <Button disabled className="pointer-events-none">{translate("appShell.s")}</Button>
                                 </Space.Compact>
                             </div>
                         </section>
@@ -1271,27 +1259,27 @@ export function AppConfigModal() {
                             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                                 <div>
                                     <div className="flex items-center gap-1.5 text-base font-semibold">
-                                        功能类型与分辨率价格 <Info className="size-4 text-[var(--studio-muted)]" />
+                                        {translate("appShell.capabilitiesAndResolutionPricing")}<Info className="size-4 text-[var(--studio-muted)]" />
                                     </div>
-                                    <p className="mt-1 text-xs text-[var(--studio-muted)]">设置模型支持的功能类型及各分辨率的积分消耗价格</p>
+                                    <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.configureCapabilitiesAndCreditPricesByResolution")}</p>
                                 </div>
                                 <span className="rounded-md border border-[var(--studio-line)] px-2.5 py-1 text-xs text-[var(--studio-muted)]">
-                                    价格说明：{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? "积分/秒" : "积分/次"}
+                                    {translate("appShell.pricing")}{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.creditsS") : translate("appShell.creditsRun")}
                                 </span>
                             </div>
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] p-4">
-                                    <div><div className="font-medium">支持音频输入</div><p className="text-xs text-[var(--studio-muted)]">开启后允许该视频模型接收音频参考素材，需同时启用全能参考模式</p></div>
-                                    <Switch aria-label="支持音频输入" checked={editingModelConfig.capabilities.includes("audio-input")} disabled={isSaving || !editingModelConfig.capabilities.includes("audio-input") && !editingModelConfig.capabilities.includes("reference-to-video")} onChange={(checked) => setEditingModelConfig({ ...editingModelConfig, capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, "audio-input"]) : editingModelConfig.capabilities.filter((value) => value !== "audio-input") })} />
+                                    <div><div className="font-medium">{translate("appShell.audioInputSupported")}</div><p className="text-xs text-[var(--studio-muted)]">{translate("appShell.allowAudioReferencesForThisVideoModelUniversalReference")}</p></div>
+                                    <Switch aria-label={translate("appShell.audioInputSupported")} checked={editingModelConfig.capabilities.includes("audio-input")} disabled={isSaving || !editingModelConfig.capabilities.includes("audio-input") && !editingModelConfig.capabilities.includes("reference-to-video")} onChange={(checked) => setEditingModelConfig({ ...editingModelConfig, capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, "audio-input"]) : editingModelConfig.capabilities.filter((value) => value !== "audio-input") })} />
                                 </div>
-                                {VIDEO_GENERATION_CAPABILITY_OPTIONS.map((mode, index) => {
+                                {createVideoGenerationCapabilityOptions(translate).map((mode, index) => {
                                     const prices = editingModelConfig.videoBillingConfiguration?.modePrices?.[mode.value] || {};
                                     const modeEnabled = editingModelConfig.capabilities.includes(mode.value);
                                     const modeCollapsed = collapsedEditingCapabilities.includes(`video:${mode.value}`);
                                     const modeIcon = index === 0 ? <TextCursorInput className="size-5" /> : index === 1 ? <Image className="size-5" /> : <Sparkles className="size-5" />;
                                     const modeColor = index === 0 ? "border-violet-500/50 bg-violet-500/5" : index === 1 ? "border-blue-500/50 bg-blue-500/5" : "border-emerald-500/50 bg-emerald-500/5";
                                     const iconColor = index === 0 ? "bg-violet-500/15 text-violet-500" : index === 1 ? "bg-blue-500/15 text-blue-500" : "bg-emerald-500/15 text-emerald-500";
-                                    const description = index === 0 ? "根据文本描述生成视频" : index === 1 ? "根据图片生成视频" : "支持文本、图片及多模态参考生成视频";
+                                    const description = index === 0 ? translate("appShell.generateVideoFromText") : index === 1 ? translate("appShell.generateVideoFromImage") : translate("appShell.generateVideoFromTextImagesAndMultimodalReferences");
                                     return (
                                         <div key={mode.value} className={`rounded-lg border p-4 transition-colors ${modeEnabled ? modeColor : "border-[var(--studio-line)] opacity-70"}`}>
                                             <div className={modeCollapsed ? "flex items-start justify-between gap-4" : "flex items-start justify-between gap-4 border-b border-[var(--studio-line)] pb-3"}>
@@ -1301,9 +1289,9 @@ export function AppConfigModal() {
                                                         <div className="flex flex-wrap items-center gap-2">
                                                             <span className="font-semibold">{mode.label}</span>
                                                             {modeEnabled ? (
-                                                                <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">已启用</span>
+                                                                <span className="rounded bg-emerald-500/15 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">{translate("appShell.enabled")}</span>
                                                             ) : (
-                                                                <span className="rounded bg-[var(--studio-panel)] px-2 py-0.5 text-xs text-[var(--studio-muted)]">未启用</span>
+                                                                <span className="rounded bg-[var(--studio-panel)] px-2 py-0.5 text-xs text-[var(--studio-muted)]">{translate("appShell.disabled")}</span>
                                                             )}
                                                         </div>
                                                         <p className="mt-1 text-xs text-[var(--studio-muted)]">{description}</p>
@@ -1313,9 +1301,9 @@ export function AppConfigModal() {
                                                     <Button
                                                         type="text"
                                                         size="small"
-                                                        aria-label={`${mode.label}${modeCollapsed ? "展开" : "收起"}`}
+                                                        aria-label={`${mode.label}${modeCollapsed ? translate("appShell.expand") : translate("appShell.collapse")}`}
                                                         aria-expanded={!modeCollapsed}
-                                                        title={`${modeCollapsed ? "展开" : "收起"}${mode.label}配置`}
+                                                        title={translate("appShell.configuration", { value0: modeCollapsed ? translate("appShell.expand") : translate("appShell.collapse"), value1: mode.label })}
                                                         icon={modeCollapsed ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
                                                         onClick={() => toggleEditingCapabilityCollapsed(`video:${mode.value}`)}
                                                     />
@@ -1331,7 +1319,7 @@ export function AppConfigModal() {
                                                 </div>
                                             </div>
                                             {modeCollapsed ? null : <div className="pt-3">
-                                                <div className="mb-2 text-xs font-medium text-[var(--studio-muted)]">分辨率价格（{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? "积分/秒" : "积分/次"}）</div>
+                                                <div className="mb-2 text-xs font-medium text-[var(--studio-muted)]">{translate("appShell.resolutionPricing")}{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.creditsS") : translate("appShell.creditsRun")}）</div>
                                                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
                                                     {VIDEO_RESOLUTION_OPTIONS.filter((resolution) => resolution.value !== "auto").map((resolution) => (
                                                         <label key={resolution.value} className="flex min-w-0 items-center gap-2 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2.5 py-2">
@@ -1345,7 +1333,7 @@ export function AppConfigModal() {
                                                                 <InputNumber
                                                                     min={0}
                                                                     precision={0}
-                                                                    placeholder="未配置"
+                                                                    placeholder={translate("appShell.notConfigured")}
                                                                     value={prices[resolution.value]}
                                                                     className="mt-0.5 w-full"
                                                                     disabled={!modeEnabled}
@@ -1382,23 +1370,23 @@ export function AppConfigModal() {
                         <div className="grid gap-5 md:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
                             <section>
                                 <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                    同时并发数 <Info className="size-4 text-[var(--studio-muted)]" />
+                                    {translate("appShell.concurrency")}<Info className="size-4 text-[var(--studio-muted)]" />
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <InputNumber min={1} precision={0} value={editingModelConfig.requestConcurrency} className="w-52" onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })} />
-                                    <span className="text-sm text-[var(--studio-muted)]">个任务</span>
+                                    <span className="text-sm text-[var(--studio-muted)]">{translate("appShell.tasks")}</span>
                                 </div>
                             </section>
                             <section>
-                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">模型能力</div>
+                                <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">{translate("appShell.capabilities")}</div>
                                 <div className="flex flex-wrap gap-2">
-                                    {MODEL_CAPABILITY_OPTIONS.video.filter((option) => editingModelConfig.capabilities.includes(option.value)).map((option) => (
+                                    {createModelCapabilityOptions(translate).video.filter((option) => editingModelConfig.capabilities.includes(option.value)).map((option) => (
                                         <span key={option.value} className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
                                             <CheckCircle2 className="size-3.5" />
                                             {option.label}
                                         </span>
                                     ))}
-                                    {!editingModelConfig.capabilities.length ? <span className="text-xs text-[var(--studio-muted)]">尚未启用视频生成能力</span> : null}
+                                    {!editingModelConfig.capabilities.length ? <span className="text-xs text-[var(--studio-muted)]">{translate("appShell.videoGenerationIsDisabled")}</span> : null}
                                 </div>
                             </section>
                         </div>
@@ -1406,24 +1394,23 @@ export function AppConfigModal() {
                         <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
                             <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                                 <div className="flex items-center gap-1.5 text-sm font-semibold">
-                                    自定义 JSON（可选） <Info className="size-4 text-[var(--studio-muted)]" />
+                                    {translate("appShell.customJSONOptional")}<Info className="size-4 text-[var(--studio-muted)]" />
                                 </div>
                                 <Button size="small" icon={<Braces className="size-3.5" />} onClick={formatEditingCustomBodyParameters}>
-                                    格式化
-                                </Button>
+                                    {translate("appShell.format")}</Button>
                             </div>
                             <Input.TextArea value={editingCustomBodyParameters} autoSize={{ minRows: 5, maxRows: 12 }} spellCheck={false} className="font-mono text-xs" onChange={(event) => setEditingCustomBodyParameters(event.target.value)} />
-                            <p className="mt-2 text-xs text-[var(--studio-muted)]">仅在 JSON 格式的 POST 请求中合并；同名字段覆盖系统参数。</p>
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("appShell.mergedOnlyIntoJSONPOSTBodiesDuplicateFieldsOverride")}</p>
                         </section>
                     </div>
                 ) : editingModelConfig ? (
                     <Form layout="vertical" requiredMark={false}>
                         {editingModelConfig.modelType !== "text" ? (
-                            <Form.Item label="自定义模型" extra="启用后按下方各能力配置的请求/响应示例调用任意 API，替换默认渠道调用。">
+                            <Form.Item label={translate("appShell.customModel")} extra={translate("appShell.useRequestAndResponseExamplesForEachCapabilityTo")}>
                                 <Switch checked={Boolean(editingModelConfig.isCustomModel)} onChange={(checked) => updateEditingModelConfig({ isCustomModel: checked })} />
                             </Form.Item>
                         ) : null}
-                        <Form.Item label="展示名称" extra="展示给用户看的名称，默认与真实模型名一致，仅影响展示不影响调用。">
+                        <Form.Item label={translate("appShell.displayName")} extra={translate("appShell.userFacingNameDefaultsToModelNameAndDoes")}>
                             <Input
                                 maxLength={255}
                                 placeholder={editingModelConfig.modelName}
@@ -1431,7 +1418,7 @@ export function AppConfigModal() {
                                 onChange={(event) => updateEditingModelConfig({ displayName: event.target.value.trim() || null })}
                             />
                         </Form.Item>
-                        <Form.Item label="展示图标" extra="展示给用户看的图标；选择「自动匹配」时按模型名或渠道自动识别。">
+                        <Form.Item label={translate("appShell.displayIcon")} extra={translate("appShell.displayIconAutoMatchDetectsItFromModelOr")}>
                             <Select
                                 value={editingModelConfig.modelIcon || ""}
                                 options={modelIconSelectOptions}
@@ -1440,19 +1427,19 @@ export function AppConfigModal() {
                             />
                         </Form.Item>
                         {editingModelConfig.modelType !== "video" ? (
-                            <Form.Item label="每次积分">
+                            <Form.Item label={translate("appShell.creditsPerRun")}>
                                 <InputNumber min={0} precision={0} value={editingModelConfig.creditCost} className="w-full" onChange={(value) => updateEditingModelConfig({ creditCost: Math.max(0, Number(value) || 0) })} />
                             </Form.Item>
                         ) : null}
                         {editingModelConfig.modelType === "image" ? (
-                            <Form.Item label="同时并发数">
+                            <Form.Item label={translate("appShell.concurrency")}>
                                 <InputNumber min={1} precision={0} value={editingModelConfig.requestConcurrency} className="w-full" onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })} />
                             </Form.Item>
                         ) : null}
-                        <Form.Item label="模型能力">
+                        <Form.Item label={translate("appShell.capabilities")}>
                             {editingModelConfig.modelType === "image" && editingModelConfig.isCustomModel ? (
                                 <div className="space-y-3">
-                                    {MODEL_CAPABILITY_OPTIONS.image.map((option) => (
+                                    {createModelCapabilityOptions(translate).image.map((option) => (
                                         <div key={option.value} className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
                                             <div className="flex items-center justify-between gap-3">
                                                 <Checkbox
@@ -1468,9 +1455,9 @@ export function AppConfigModal() {
                                                 <Button
                                                     type="text"
                                                     size="small"
-                                                    aria-label={`${option.label}${collapsedEditingCapabilities.includes(`image:${option.value}`) ? "展开" : "收起"}`}
+                                                    aria-label={`${option.label}${collapsedEditingCapabilities.includes(`image:${option.value}`) ? translate("appShell.expand") : translate("appShell.collapse")}`}
                                                     aria-expanded={!collapsedEditingCapabilities.includes(`image:${option.value}`)}
-                                                    title={`${collapsedEditingCapabilities.includes(`image:${option.value}`) ? "展开" : "收起"}${option.label}配置`}
+                                                    title={translate("appShell.configuration", { value0: collapsedEditingCapabilities.includes(`image:${option.value}`) ? translate("appShell.expand") : translate("appShell.collapse"), value1: option.label })}
                                                     icon={collapsedEditingCapabilities.includes(`image:${option.value}`) ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
                                                     onClick={() => toggleEditingCapabilityCollapsed(`image:${option.value}`)}
                                                 />
@@ -1492,7 +1479,7 @@ export function AppConfigModal() {
                                 </div>
                             ) : (
                                 <div className="flex flex-wrap gap-x-4 gap-y-2">
-                                    {MODEL_CAPABILITY_OPTIONS[editingModelConfig.modelType].map((option) => (
+                                    {createModelCapabilityOptions(translate)[editingModelConfig.modelType].map((option) => (
                                         <Checkbox
                                             key={option.value}
                                             checked={editingModelConfig.capabilities.includes(option.value)}
@@ -1510,10 +1497,10 @@ export function AppConfigModal() {
                         </Form.Item>
                         {editingModelConfig.modelType === "text" && isOpenAiTextModel(editingModelConfig, draftChannels) ? (
                             <>
-                                <Form.Item label="开启思考模式">
+                                <Form.Item label={translate("appShell.enableThinking")}>
                                     <Switch checked={editingModelConfig.thinkingEnabled} onChange={(thinkingEnabled) => updateEditingModelConfig({ thinkingEnabled })} />
                                 </Form.Item>
-                                <Form.Item label="思考强度">
+                                <Form.Item label={translate("appShell.thinkingIntensity")}>
                                     <Select
                                         value={editingModelConfig.reasoningEffort}
                                         disabled={isReasoningEffortDisabled(false, editingModelConfig.thinkingEnabled)}
@@ -1523,7 +1510,7 @@ export function AppConfigModal() {
                                 </Form.Item>
                             </>
                         ) : null}
-                        <Form.Item label="自定义 JSON" extra="仅在 JSON 格式的 POST 请求中合并；同名字段覆盖系统参数。">
+                        <Form.Item label={translate("appShell.customJSON")} extra={translate("appShell.mergedOnlyIntoJSONPOSTBodiesDuplicateFieldsOverride")}>
                             <Input.TextArea value={editingCustomBodyParameters} autoSize={{ minRows: 5, maxRows: 12 }} spellCheck={false} onChange={(event) => setEditingCustomBodyParameters(event.target.value)} />
                         </Form.Item>
                     </Form>
@@ -1710,6 +1697,7 @@ function CustomModelGroupEditor({
     isVideo: boolean;
     onChange: (group: CustomModelGroupConfig) => void;
 }) {
+    const translate = useTranslation();
     const requestTemplateRef = useRef<TextAreaRef | null>(null);
     const queryRequestTemplateRef = useRef<TextAreaRef | null>(null);
     const current = { ...emptyCustomModelGroup(), ...(group || {}) };
@@ -1730,50 +1718,50 @@ function CustomModelGroupEditor({
     };
     return (
         <div className="mt-3 space-y-3 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
-            <div className="text-xs font-semibold text-[var(--studio-muted)]">自定义调用配置（{label}）</div>
+            <div className="text-xs font-semibold text-[var(--studio-muted)]">{translate("appShell.customAPIConfiguration")}{label}）</div>
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_112px]">
                 <div>
-                    <div className="mb-1 text-xs text-[var(--studio-muted)]">请求路径</div>
-                    <Input value={current.requestPath} placeholder="/api/v1/... 必填，与 Base URL 拼接" onChange={(event) => update({ requestPath: event.target.value })} />
+                    <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.requestPath")}</div>
+                    <Input value={current.requestPath} placeholder={translate("appShell.apiV1RequiredAppendedToBaseURL")} onChange={(event) => update({ requestPath: event.target.value })} />
                 </div>
                 <div>
-                    <div className="mb-1 text-xs text-[var(--studio-muted)]">请求方法</div>
+                    <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.requestMethod")}</div>
                     <Select value={current.requestMethod} options={customRequestMethodOptions} className="w-full" onChange={(value: "GET" | "POST") => update({ requestMethod: value })} />
                 </div>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
                 <div>
-                    <div className="mb-1 text-xs text-[var(--studio-muted)]">请求模型名称</div>
-                    <Input value={current.requestModelName} placeholder="填入请求体{{model}}占位符使用的模型名" onChange={(event) => update({ requestModelName: event.target.value })} />
+                    <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.modelRequestName")}</div>
+                    <Input value={current.requestModelName} placeholder={translate("appShell.modelNameUsedByTheRequestBodyPlaceholder")} onChange={(event) => update({ requestModelName: event.target.value })} />
                 </div>
                 <div>
-                    <div className="mb-1 text-xs text-[var(--studio-muted)]">结果路径</div>
-                    <Input value={current.resultPath} placeholder="如 data.image.url" onChange={(event) => update({ resultPath: event.target.value })} />
+                    <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.resultPath")}</div>
+                    <Input value={current.resultPath} placeholder={translate("appShell.eGDataImageUrl")} onChange={(event) => update({ resultPath: event.target.value })} />
                 </div>
             </div>
             {requestIsPost ? (
                 <div className="space-y-2">
                     <div className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-2.5">
-                        <div className="mb-1 text-xs text-[var(--studio-muted)]">AI 构造提示词（可选，配置后由 AI 生成请求体）</div>
+                        <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.aIRequestPromptOptionalGeneratesRequestBody")}</div>
                         <Input.TextArea
                             value={current.aiRequestPrompt}
                             autoSize={{ minRows: 2, maxRows: 5 }}
-                            placeholder="如：根据提示词、分辨率和时长构造 comfyui workflow 请求体，包含 prompt、duration、resolution 字段"
+                            placeholder={translate("appShell.eGBuildAComfyUIWorkflowBodyWithPrompt")}
                             onChange={(event) => update({ aiRequestPrompt: event.target.value })}
                         />
-                        <p className="mt-1 text-xs text-[var(--studio-muted)]">填写后每次请求由 AI 按提示词和本次实际参数生成请求体（替代模板拼接）；留空则使用下方模板。</p>
+                        <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.aIGeneratesRequestBodiesFromThePromptAndActual")}</p>
                     </div>
                     <div>
-                        <div className="mb-1 text-xs text-[var(--studio-muted)]">请求示例（JSON 模板，未填 AI 构造提示词时必填）</div>
+                        <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.requestExampleJSONTemplateRequiredWithoutAIPrompt")}</div>
                         <div className="mb-1 flex flex-wrap items-center gap-1">
-                            <span className="text-xs text-[var(--studio-muted)]">插入占位符：</span>
+                            <span className="text-xs text-[var(--studio-muted)]">{translate("appShell.insertPlaceholder")}</span>
                             {customTemplatePlaceholderOptions.map((option) => (
                                 <Button key={option.value} size="small" className="!px-1.5 font-mono text-[11px]" onClick={() => insertPlaceholder(option.value, requestTemplateRef, "requestTemplate")}>
                                     {option.label}
                                 </Button>
                             ))}
                         </div>
-                        <p className="mb-1 text-xs text-[var(--studio-muted)]">请用占位符引用实际参数（如{"{{prompt}}"}），未引用占位符的字段将原样发送，可能导致接口报错。</p>
+                        <p className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.referenceActualParametersWithPlaceholdersEG")}{"{{prompt}}"}{translate("appShell.fieldsWithoutPlaceholdersAreSentAsEnteredAndMay")}</p>
                         <Input.TextArea
                             ref={requestTemplateRef}
                             value={current.requestTemplate}
@@ -1787,7 +1775,7 @@ function CustomModelGroupEditor({
                 </div>
             ) : null}
             <div>
-                <div className="mb-1 text-xs text-[var(--studio-muted)]">响应示例（JSON，展示接口返回结构）</div>
+                <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.responseExampleJSONStructure")}</div>
                 <Input.TextArea
                     value={current.responseExample}
                     autoSize={{ minRows: 2, maxRows: 6 }}
@@ -1801,37 +1789,37 @@ function CustomModelGroupEditor({
                 <>
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_112px]">
                         <div>
-                            <div className="mb-1 text-xs text-[var(--studio-muted)]">查询路径（异步轮询，支持{"{{taskId}}"}占位符）</div>
+                            <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.queryPathAsyncPollingSupports")}{"{{taskId}}"}{translate("appShell.placeholders")}</div>
                             <Input value={current.queryPath} placeholder="/api/v1/.../result/{{taskId}}" onChange={(event) => update({ queryPath: event.target.value })} />
                         </div>
                         <div>
-                            <div className="mb-1 text-xs text-[var(--studio-muted)]">查询方法</div>
+                            <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.queryMethod")}</div>
                             <Select value={current.queryMethod} options={customRequestMethodOptions} className="w-full" onChange={(value: "GET" | "POST") => update({ queryMethod: value })} />
                         </div>
                     </div>
                     {queryIsPost ? (
                         <div className="space-y-2">
                             <div className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-2.5">
-                                <div className="mb-1 text-xs text-[var(--studio-muted)]">AI 构造提示词（可选，配置后由 AI 生成查询请求体）</div>
+                                <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.aIQueryPromptOptionalGeneratesQueryBody")}</div>
                                 <Input.TextArea
                                     value={current.aiQueryPrompt}
                                     autoSize={{ minRows: 2, maxRows: 4 }}
-                                    placeholder="如：根据任务 ID 构造查询请求体，包含 task_id 字段"
+                                    placeholder={translate("appShell.eGBuildQueryBodyFromTaskIDIncluding")}
                                     onChange={(event) => update({ aiQueryPrompt: event.target.value })}
                                 />
-                                <p className="mt-1 text-xs text-[var(--studio-muted)]">填写后由 AI 按提示词和本次任务 ID 生成查询请求体；留空则使用下方模板。</p>
+                                <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.aIGeneratesQueryBodyUsingThisPromptAndTask")}</p>
                             </div>
                             <div>
-                                <div className="mb-1 text-xs text-[var(--studio-muted)]">查询请求示例（JSON 模板，未填 AI 构造提示词时必填）</div>
+                                <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.queryExampleJSONTemplateRequiredWithoutAIPrompt")}</div>
                                 <div className="mb-1 flex flex-wrap items-center gap-1">
-                                    <span className="text-xs text-[var(--studio-muted)]">插入占位符：</span>
+                                    <span className="text-xs text-[var(--studio-muted)]">{translate("appShell.insertPlaceholder")}</span>
                                     {customTemplatePlaceholderOptions.map((option) => (
                                         <Button key={option.value} size="small" className="!px-1.5 font-mono text-[11px]" onClick={() => insertPlaceholder(option.value, queryRequestTemplateRef, "queryRequestTemplate")}>
                                             {option.label}
                                         </Button>
                                     ))}
                                 </div>
-                                <p className="mb-1 text-xs text-[var(--studio-muted)]">用{"{{taskId}}"}引用轮询任务 ID，未引用占位符的字段将原样发送。</p>
+                                <p className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.use")}{"{{taskId}}"}{translate("appShell.referenceThePollingTaskIDFieldsWithoutPlaceholdersAre")}</p>
                                 <Input.TextArea
                                     ref={queryRequestTemplateRef}
                                     value={current.queryRequestTemplate}
@@ -1845,7 +1833,7 @@ function CustomModelGroupEditor({
                         </div>
                     ) : null}
                     <div>
-                        <div className="mb-1 text-xs text-[var(--studio-muted)]">查询响应示例（JSON）</div>
+                        <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.queryResponseExampleJSON")}</div>
                         <Input.TextArea
                             value={current.queryResponseExample}
                             autoSize={{ minRows: 2, maxRows: 6 }}
@@ -1855,8 +1843,8 @@ function CustomModelGroupEditor({
                         />
                     </div>
                     <div>
-                        <div className="mb-1 text-xs text-[var(--studio-muted)]">查询结果路径（配置查询路径后必填）</div>
-                        <Input value={current.queryResultPath} placeholder="如 data.video.url" onChange={(event) => update({ queryResultPath: event.target.value })} />
+                        <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.queryResultPathRequiredWithQueryPath")}</div>
+                        <Input value={current.queryResultPath} placeholder={translate("appShell.eGDataVideoUrl")} onChange={(event) => update({ queryResultPath: event.target.value })} />
                     </div>
                 </>
             ) : null}
@@ -1872,12 +1860,12 @@ function apiFormatLabel(apiFormat: ApiCallFormat) {
     if (apiFormat === "anthropic") return "Anthropic";
     if (apiFormat === "seedance") return "Seedance";
     if (apiFormat === "minimax") return "MiniMax";
-    if (apiFormat === "custom") return "自定义";
+    if (apiFormat === "custom") return translate("appShell.custom");
     return "OpenAI";
 }
 
 function formatTimestamp(value: string) {
-    return new Date(value).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    return new Date(value).toLocaleString(currentLanguageTag(), { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 function isDefaultObjectStoragePlaceholder(storage: ObjectStorageConfig | undefined) {

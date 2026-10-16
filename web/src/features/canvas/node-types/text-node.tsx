@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { memo, useState, useRef, useEffect, useCallback, type MouseEvent as ReactMouseEvent } from "react";
 import { NodeResizer, type NodeProps, type Node } from "@xyflow/react";
@@ -8,6 +10,7 @@ import { CanvasConnectionHandles, CanvasNodeTitle, NodeError, NodeHoverSurface, 
 import { useCanvasTheme } from "../components/canvas-theme-provider";
 
 export const TextNode = memo(function TextNode({ data, selected }: NodeProps<Node<CanvasTextNode>>) {
+    const translate = useTranslation();
     const actions = useNodeActions();
     const theme = useCanvasTheme();
     const [editing, setEditing] = useState(false);
@@ -94,7 +97,7 @@ export const TextNode = memo(function TextNode({ data, selected }: NodeProps<Nod
                     boxShadow: selected ? `0 0 0 1px ${theme.node.activeStroke}55` : undefined,
                 }}
             >
-                <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle="文本" onTitleChange={actions.onTitleChange} />
+                <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.text_dd8186")} onTitleChange={actions.onTitleChange} />
                 {editing ? (
                     <textarea
                         ref={textareaRef}
@@ -129,7 +132,7 @@ export const TextNode = memo(function TextNode({ data, selected }: NodeProps<Nod
                             <NodeError node={data} />
                         ) : (
                             <div className="h-full w-full cursor-text overflow-y-auto whitespace-pre-wrap break-words p-4" style={textStyle}>
-                                {localContent || <span style={{ color: theme.node.placeholder }}>点击编辑文字</span>}
+                                {localContent || <span style={{ color: theme.node.placeholder }}>{translate("canvas.clickToEditText")}</span>}
                             </div>
                         )}
                     </div>

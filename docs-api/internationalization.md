@@ -1,0 +1,65 @@
+# 网站中英文切换
+
+网站支持 `zh-cn`（简体中文）和 `en`（英文），使用 `next-intl` 管理界面文案，服务端使用 Spring `MessageSource`。
+
+## 语言选择
+
+- 工作台网址保持不变，文档保留 `/docs/zh-cn/...` 和 `/docs/en/...`。
+- 显式文档路径优先；工作台先读 `novanova_language` Cookie，再按 `Accept-Language` 权重匹配。没有匹配语言时使用简体中文。
+- 手动切换后 Cookie 保存一年。偏好仅保存在当前浏览器，不新增账号字段。
+- 桌面侧栏、移动导航、画布工具栏、独立认证页面和文档头部提供语言入口。
+- 切换不重新挂载工作台，不清空输入、画布、登录或正在执行的任务。
+
+## 文案维护
+
+固定界面文案放在 `web/src/features/locale/messages/zh-cn/` 和 `en/` 的对应业务模块中。两种语言必须具有相同的稳定语义键和参数；英文计数需要考虑单复数。
+
+组件使用 `useTranslation()`，普通客户端动作使用 `translateMessage()`。依赖翻译结果的 `useMemo` 同时依赖 `translate.locale`。不要在模块初始化或业务持久化时缓存翻译后的菜单文案；共用显示选项通过工厂接收组件翻译函数，确保服务端首屏和客户端使用相同语言。
+
+内部状态、接口枚举、筛选值、DOM定位属性与显示标签分开。用户输入、公告正文、资产/提示词内容、模型输出和第三方原始诊断保持原文。注释与日志继续使用中文。
+
+## 接口与任务
+
+普通请求携带 `Accept-Language`。原生 `EventSource` 使用可选查询参数 `locale=zh-cn|en`，适用于 `/api/v1/ai/task/subscribe` 与 `/api/v1/ai/agent/events`。
+
+接口保持 `{ code, data, msg }`。任务与Agent事件额外携带 `systemMessage: { key, arguments }`；Redis转发时保留中立消息，各订阅分别格式化。任务查询按当前请求语言返回 `errorMessage`，底层原始诊断保留在持久化错误字段或供应商结果详情中。
+
+业务错误响应通过 `X-System-Message-Key` 返回稳定标识，前端统一请求层将其保存为 `ServerApiError.messageKey`，同时保留 HTTP 状态 `status` 和业务错误码 `code`。`ServerRequestError` 是同一错误类型的导出别名，语言适配与企业版原有并发冲突判断共用该类型。需要区分错误类型时使用消息键或错误码，不比较翻译后的 `msg`。
+
+`V55__Add_Localized_Task_Messages.sql` 为AI生成任务、主Agent请求和视频合成任务增加消息键和JSON参数。使用新增迁移，不修改既有Flyway版本，不迁移旧提示文本。
+
+## 验证步骤
+
+已添加前端语言优先级、完整双语资源、插值、英文复数和原始模板占位符测试。运行：
+
+```powershell
+cd web
+pnpm test:node src/features/locale/locale.test.ts src/features/locale/messages.test.mjs
+```
+
+服务端补充资源完整性、请求权重、并发语言隔离、错误响应、事件按订阅翻译及消息持久化恢复测试。运行：
+
+```powershell
+cd server
+$env:JAVA_HOME="$env:USERPROFILE\.jabba\jdk\openjdk@21.0.2"
+$env:PATH="$env:JAVA_HOME\bin;$env:PATH"
+mvn '-Dtest=WebsiteLanguageTest,SystemMessageTest,WebsiteLanguageHttpTest' test
+```
+
+手动验收：
+
+1. 清除语言Cookie，分别使用中英文浏览器语言首次访问；手动选择后刷新应保留选择。
+2. 验证登录、密码重置、后台表单错误、权限不足和普通业务失败的双语提示。
+3. 在输入框、弹窗和未保存画布中往返切换语言，确认内容和选择保持完整。
+4. 图片/视频/Agent正在生成时切换语言，确认生成继续，事件能够恢复，终态不重复、前端工具不重复执行。
+5. 对同一失败或取消任务，以两种语言查询；刷新后再次查询，提示应随请求语言变化。
+6. 验证工作台与文档互跳、文档同一文章切换语言、锚点和页面HTML语言。
+7. 检查深浅主题、桌面及移动视口中的英文导航、长按钮、表格和无障碍标签。
+
+## 企业版合入验证
+
+功能来源为开源项目提交 `df6fcce3`。企业版保留剧本创作、漫剧创作导航和后台定价页签，新增共享导航文案；既有数据库迁移保持不变，本次消息字段使用 `V55__Add_Localized_Task_Messages.sql`，随后端启动由 Flyway 执行。浏览器本地视频导出仍复用媒体上传接口，不引入服务端逐帧导出。
+
+2026-10-16 已完成生产构建、服务端编译和 115 项相关服务端测试。前端全量 402 项测试通过 400 项；“缩放结束时一次性保存节点位置和尺寸”和“缺少坐标的生成节点放在当前画布视口中心”已对照合入前 `HEAD`，属于既有失败。独立 TypeScript 检查的诊断数量、文件和错误码与合入前一致，没有新增类型错误。
+
+已完成合并差异和固定文案审查，保留已有主题与 Tailwind v4 适配。页面切换仅影响显示文案，新建画布名称使用当前语言，已有标题、输入内容、资源、业务枚举和生成结果不随切换改写。未自动运行浏览器测试，也未手动执行数据库迁移。

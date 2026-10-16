@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
+import { languageFromAcceptLanguage } from "@/features/locale/locale";
 
 export const locales = ["zh-cn", "en"] as const;
 export type Locale = (typeof locales)[number];
@@ -36,14 +37,7 @@ export function isLocale(value: string): value is Locale {
 }
 
 export function localeFromAcceptLanguage(header: string | null | undefined): Locale {
-    const languages = (header || "").toLowerCase().split(",").map((part) => ({ tag: part.split(";")[0].trim(), weight: Number(part.match(/q=([0-9.]+)/)?.[1] || 1) })).filter((item) => item.tag);
-    languages.sort((left, right) => right.weight - left.weight);
-    for (const language of languages) {
-        if (language.weight <= 0) continue;
-        if (language.tag === "zh" || language.tag.startsWith("zh-")) return "zh-cn";
-        if (language.tag === "en" || language.tag.startsWith("en-")) return "en";
-    }
-    return "zh-cn";
+    return languageFromAcceptLanguage(header);
 }
 
 export function getAllDocPages(locale: Locale): DocPage[] {

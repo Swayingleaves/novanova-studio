@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { App, Button, Image, Modal } from "antd";
 import { Copy, Download, Link2, PanelRightClose, PanelRightOpen } from "lucide-react";
@@ -35,6 +37,7 @@ export type ResultDetail = {
 
 /** 生成结果详情弹窗：左侧媒体本体，右侧提示词与引用 */
 export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail | null; onClose: () => void }) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const activeDownloads = useRef(new Set<string>());
     const [downloadingMedia, setDownloadingMedia] = useState(new Set<string>());
@@ -67,19 +70,19 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
         try {
             await detail.onDownload();
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "下载失败");
+            message.error(error instanceof Error ? error.message : translate("generation.downloadFailed"));
         } finally {
             activeDownloads.current.delete(downloadKey);
             setDownloadingMedia(new Set(activeDownloads.current));
         }
     };
 
-    const copyText = async (text: string, successText = "已复制") => {
+    const copyText = async (text: string, successText = translate("generation.copied")) => {
         try {
             await navigator.clipboard.writeText(text);
             message.success(successText);
         } catch {
-            message.error("复制失败");
+            message.error(translate("generation.copyFailed"));
         }
     };
 
@@ -87,10 +90,10 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
         <Modal
             title={
                 <div className="flex flex-wrap items-center justify-between gap-2 pr-8">
-                    <span>结果详情</span>
+                    <span>{translate("generation.resultDetails")}</span>
                     {hasRightContent ? (
                         <Button type="text" size="small" icon={detailsCollapsed ? <PanelRightOpen className="size-4" /> : <PanelRightClose className="size-4" />} aria-expanded={showDetails} aria-controls={detailsId} onClick={() => setDetailsCollapsed((current) => !current)}>
-                            {detailsCollapsed ? "展开信息" : "收起信息"}
+                            {detailsCollapsed ? translate("generation.expandDetails") : translate("generation.collapseDetails")}
                         </Button>
                     ) : null}
                 </div>
@@ -109,11 +112,11 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
                         <Image
                             key={media.url}
                             src={media.url}
-                            alt="生成图片，点击查看大图"
+                            alt={translate("generation.imageGeneratedClickToEnlarge")}
                             styles={{ root: { width: "100%", height: mediaHeight }, image: { width: "100%", height: "100%", objectFit: "contain" } }}
                             classNames={{ root: "overflow-hidden rounded-lg bg-[var(--studio-media)]" }}
                             preview={{
-                                cover: "查看大图",
+                                cover: translate("generation.viewFullSize"),
                                 onOpenChange: () => setOriginalSize(false),
                                 imageRender: (node) => {
                                     // 保留组件的缩放、拖动与事件，只切换图片的显示尺寸约束。
@@ -129,14 +132,14 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
                                             actions.onReset();
                                             setOriginalSize((current) => !current);
                                         }}>
-                                            {originalSize ? "适应窗口" : "原始尺寸（100%）"}
+                                            {originalSize ? translate("generation.fitToWindow") : translate("generation.originalSize100")}
                                         </Button>
                                     </div>
                                 ),
                             }}
                         />
                     ) : mediaFallback.missing ? (
-                        <img src={mediaFallback.displaySrc} alt="生成视频无法加载" className="w-full rounded-lg bg-[var(--studio-media)] object-contain" style={{ height: mediaHeight }} />
+                        <img src={mediaFallback.displaySrc} alt={translate("generation.generatedVideoCannotBeLoaded")} className="w-full rounded-lg bg-[var(--studio-media)] object-contain" style={{ height: mediaHeight }} />
                     ) : (
                         <video src={media.url} controls autoPlay className="w-full rounded-lg bg-[var(--studio-media)] object-contain" style={{ height: mediaHeight }} onError={mediaFallback.onError} />
                     )}
@@ -152,12 +155,11 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
                             {media.mimeType ? <span>{media.mimeType}</span> : null}
                         </div>
                         <div className="flex items-center gap-1.5">
-                            <Button size="small" icon={<Link2 className="size-3.5" />} onClick={() => void copyText(media.ossUrl || media.url, "链接已复制")}>
-                                拷贝链接
-                            </Button>
+                            <Button size="small" icon={<Link2 className="size-3.5" />} onClick={() => void copyText(media.ossUrl || media.url, translate("generation.linkCopied"))}>
+                                {translate("generation.copyLink")}</Button>
                             {detail.onDownload ? (
                                 <Button size="small" icon={<Download className="size-3.5" />} loading={isDownloading} disabled={isDownloading} aria-busy={isDownloading} onClick={() => void downloadResult()}>
-                                    {isDownloading ? "下载中…" : `下载${media.kind === "video" ? "视频" : "图片"}`}
+                                    {isDownloading ? translate("generation.downloading") : translate("generation.download", { value0: media.kind === "video" ? translate("generation.video") : translate("generation.image_d24c10") })}
                                 </Button>
                             ) : null}
                         </div>
@@ -167,10 +169,9 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
                     {detail.prompt?.trim() ? (
                         <section className="space-y-2">
                             <div className="flex items-center justify-between">
-                                <h4 className="text-sm font-semibold text-[var(--studio-ink)]">提示词</h4>
+                                <h4 className="text-sm font-semibold text-[var(--studio-ink)]">{translate("generation.prompt")}</h4>
                                 <Button size="small" icon={<Copy className="size-3.5" />} onClick={() => void copyText(detail.prompt!)}>
-                                    复制
-                                </Button>
+                                    {translate("generation.copy")}</Button>
                             </div>
                             <p className="studio-panel-solid max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded-lg p-3 text-sm leading-6">{detail.prompt}</p>
                         </section>
@@ -178,28 +179,27 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
                     {showGenerationPrompt ? (
                         <section className="space-y-2">
                             <div className="flex items-center justify-between">
-                                <h4 className="text-sm font-semibold text-[var(--studio-ink)]">实际生成提示词</h4>
+                                <h4 className="text-sm font-semibold text-[var(--studio-ink)]">{translate("generation.actualGenerationPrompt")}</h4>
                                 <Button size="small" icon={<Copy className="size-3.5" />} onClick={() => void copyText(detail.generationPrompt!)}>
-                                    复制
-                                </Button>
+                                    {translate("generation.copy")}</Button>
                             </div>
                             <p className="studio-panel-solid max-h-56 overflow-y-auto whitespace-pre-wrap break-words rounded-lg p-3 text-sm leading-6">{detail.generationPrompt}</p>
                         </section>
                     ) : null}
                     {visibleReferences.length ? (
                         <section className="space-y-2">
-                            <h4 className="text-sm font-semibold text-[var(--studio-ink)]">引用图片</h4>
+                            <h4 className="text-sm font-semibold text-[var(--studio-ink)]">{translate("generation.referenceImage")}</h4>
                             <div className="flex flex-wrap gap-2">
                                 {visibleReferences.map((reference, index) => (
                                     <Image
                                         key={reference.id}
                                         src={reference.dataUrl}
-                                        alt={reference.name || `引用图片 ${index + 1}`}
+                                        alt={reference.name || translate("generation.referenceImage_5fe380", { value0: index + 1 })}
                                         width={80}
                                         height={80}
                                         style={{ objectFit: "cover" }}
                                         className="rounded-xl"
-                                        preview={{ mask: "查看大图" }}
+                                        preview={{ mask: translate("generation.viewFullSize") }}
                                     />
                                 ))}
                             </div>
@@ -207,10 +207,10 @@ export function ResultDetailDialog({ detail, onClose }: { detail: ResultDetail |
                     ) : null}
                     {visibleVideoReferences.length ? (
                         <section className="space-y-2">
-                            <h4 className="text-sm font-semibold text-[var(--studio-ink)]">引用视频</h4>
+                            <h4 className="text-sm font-semibold text-[var(--studio-ink)]">{translate("generation.referenceVideo")}</h4>
                             <div className="space-y-2">
                                 {visibleVideoReferences.map((reference, index) => (
-                                    <video key={reference.id} src={reference.url} controls className="max-h-40 w-full rounded-lg bg-black" title={reference.name || `引用视频 ${index + 1}`} />
+                                    <video key={reference.id} src={reference.url} controls className="max-h-40 w-full rounded-lg bg-black" title={reference.name || translate("generation.referenceVideo_773960", { value0: index + 1 })} />
                                 ))}
                             </div>
                         </section>

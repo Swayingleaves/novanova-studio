@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { cancelAiTask, createPromptOptimizationTask, waitAiTask, type PromptOptimizationType } from "@/services/api/server";
 
 /**
@@ -18,7 +20,7 @@ export async function optimizeGenerationPrompt(generationType: PromptOptimizatio
     }
     const completed = await waitAiTask(task.id, { signal: requestSignal });
     const content = readOptimizedPrompt(completed.resultData);
-    if (!content) throw new Error("AI 没有返回有效的优化提示词");
+    if (!content) throw new Error(translate("generation.aIReturnedNoValidOptimizedPrompt"));
     return content;
 }
 

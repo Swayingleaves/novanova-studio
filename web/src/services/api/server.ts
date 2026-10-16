@@ -1,5 +1,9 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
 
+
+import { currentWebsiteLocale, currentLanguageTag } from "@/features/locale/translate";
+import { useLanguageStore } from "@/features/locale/language-store";
 import type { ObjectStorageConfig, ObjectStorageFile } from "@/shared/types/object-storage";
 import { getAuthToken, useUserStore, type ServerUserProfile } from "@/features/auth/stores/use-user-store";
 import type { ApiCallFormat, CustomModelGroupConfig, ModelCreditUnit, VideoBillingConfiguration } from "@/features/settings/stores/use-config-store";
@@ -13,15 +17,19 @@ type ApiResponse<T> = {
 /** 服务端业务错误，保留HTTP状态和业务错误码供并发冲突等场景判断。 */
 export class ServerApiError extends Error {
     readonly status: number;
+    readonly messageKey: string | null;
     readonly code: number;
 
-    constructor(message: string, status: number, code: number) {
+    constructor(message: string, status: number, code: number, messageKey: string | null = null) {
         super(message);
         this.name = "ServerApiError";
         this.status = status;
+        this.messageKey = messageKey;
         this.code = code;
     }
 }
+
+export { ServerApiError as ServerRequestError };
 
 export type ServerMediaInput = {
     kind: string;
@@ -54,6 +62,12 @@ export type ServerRuntimeConfig = {
     aiTaskPollingIntervalSeconds: number;
 };
 
+/** 服务端系统消息描述，插值参数可以包含嵌套系统消息或原始业务值。 */
+export type ServerSystemMessage = {
+    key: string;
+    arguments: unknown[];
+};
+
 export type ServerAiTaskMediaReference = {
     id?: string;
     name?: string;
@@ -75,6 +89,7 @@ export type ServerAiTask = {
     requestData: unknown;
     resultData?: unknown;
     errorMessage?: string;
+    systemMessage?: ServerSystemMessage | null;
     startedAt?: string;
     completedAt?: string;
     createdAt: string;
@@ -931,7 +946,7 @@ export async function downloadServerMedia(storageKey: string) {
     }
     if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as ApiResponse<never> | null;
-        throw new Error(payload?.msg || `下载请求失败：${response.status}`);
+        throw new Error(payload?.msg || translate("common.downloadFailed", { value0: response.status }));
     }
     return response.blob();
 }
@@ -1018,7 +1033,7 @@ export function getRuntimeConfig(): Promise<ServerRuntimeConfig> {
 export async function getAiTaskPollingIntervalMilliseconds(): Promise<number> {
     const seconds = (await getRuntimeConfig()).aiTaskPollingIntervalSeconds;
     if (!Number.isInteger(seconds) || seconds <= 0) {
-        throw new Error("服务端返回的AI任务轮询间隔无效");
+        throw new Error(translate("common.invalidAITaskPollingInterval"));
     }
     return seconds * 1000;
 }
@@ -1259,13 +1274,13 @@ export async function waitAiTask(taskId: string, options: { signal?: AbortSignal
 export function readAiTaskError(error: unknown): AiTaskErrorDetails {
     if (error instanceof AiTaskFailureError) return error.details;
     if (error instanceof DOMException && error.name === "AbortError") {
-        return { source: "canvas", category: "canceled", stage: "frontend_tool", message: "已停止生成", requestAccepted: true, safeToRetry: false };
+        return { source: "canvas", category: "canceled", stage: "frontend_tool", message: translate("common.generationStopped"), requestAccepted: true, safeToRetry: false };
     }
     return {
         source: "canvas",
         category: "unknown",
         stage: "frontend_tool",
-        message: error instanceof Error ? error.message : "生成失败",
+        message: error instanceof Error ? error.message : translate("common.generationFailed"),
         requestAccepted: true,
         safeToRetry: false,
     };
@@ -1275,7 +1290,7 @@ function completedAiTask(task: ServerAiTask): ServerAiTask {
     if (task.status === "success") return task;
     const rawResult = task.resultData && typeof task.resultData === "object" ? (task.resultData as Record<string, unknown>) : undefined;
     const rawError = rawResult?.error && typeof rawResult.error === "object" ? (rawResult.error as Record<string, unknown>) : undefined;
-    const message = readOptionalText(rawError?.message) || task.errorMessage || (task.status === "canceled" ? "任务已取消" : "生成失败");
+    const message = task.errorMessage || readOptionalText(rawError?.message) || (task.status === "canceled" ? translate("common.taskCanceled") : translate("common.generationFailed"));
     throw new AiTaskFailureError(message, {
         source: readOptionalText(rawError?.source) || "task",
         category: readOptionalText(rawError?.category) || (task.status === "canceled" ? "canceled" : "unknown"),
@@ -1320,16 +1335,17 @@ async function serverFetch<T>(path: string, init: RequestInit, options: { auth?:
     // 允许空响应体的查询接口（例如“项目最近一次任务”没有任务时）返回 undefined，而不是抛错。
     if (!payload && options.allowEmpty && response.ok) return undefined as T;
     if (!response.ok || !payload) {
-        throw new ServerApiError(payload?.msg || `服务端请求失败：${response.status}`, response.status, payload?.code ?? -1);
+        throw new ServerApiError(payload?.msg || translate("common.serverRequestFailed", { value0: response.status }), response.status, payload?.code ?? -1, response.headers.get("X-System-Message-Key"));
     }
     if (payload.code !== 0) {
-        throw new ServerApiError(payload.msg || "服务端请求失败", response.status, payload.code);
+        throw new ServerApiError(payload.msg || translate("common.serverRequestFailed_5ed90b"), response.status, payload.code, response.headers.get("X-System-Message-Key"));
     }
     return payload.data;
 }
 
 async function requestServer(path: string, init: RequestInit, options: { auth?: boolean } = {}) {
     const headers = new Headers(init.headers);
+    headers.set("Accept-Language", currentLanguageTag());
     if (options.auth !== false) {
         const token = getAuthToken();
         if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -1396,7 +1412,7 @@ function ensureAiTaskEventSource() {
     if (aiTaskEventSource || typeof window === "undefined") return;
     const token = getAuthToken();
     if (!token) return;
-    const source = new EventSource(`${serverBaseUrl()}/ai/task/subscribe?token=${encodeURIComponent(token)}`);
+    const source = new EventSource(`${serverBaseUrl()}/ai/task/subscribe?token=${encodeURIComponent(token)}&locale=${currentWebsiteLocale()}`);
     aiTaskEventSource = source;
     source.addEventListener("task", (event) => {
         const payload = parseAiTaskEventData((event as MessageEvent).data);
@@ -1465,3 +1481,10 @@ function promptQuery(params: ServerPromptListParams) {
     if (params.pageSize) query.set("pageSize", String(params.pageSize));
     return query.size ? `?${query}` : "";
 }
+
+// 语言变化仅重建订阅，运行中的任务继续由现有轮询对账。
+useLanguageStore.subscribe((state, previous) => {
+    if (state.locale === previous.locale) return;
+    closeAiTaskEventSource();
+    if (hasAiTaskEventListeners()) ensureAiTaskEventSource();
+});

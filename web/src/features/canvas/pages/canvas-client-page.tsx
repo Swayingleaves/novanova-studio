@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
@@ -230,6 +233,7 @@ export default function CanvasPage() {
 }
 
 function CanvasWorkspacePage() {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const copyText = useCopyText();
     const { optimizingOperationId: promptGeneratingNodeId, optimizePrompt } = usePromptOptimization();
@@ -351,8 +355,8 @@ function CanvasWorkspacePage() {
                 openConfigDialog(true);
                 return;
             }
-            const label = mode === "image" ? "生图" : mode === "video" ? "生视频" : "文本";
-            message.error(`请联系管理员配置默认${label}模型`);
+            const label = mode === "image" ? translate("canvas.generateImage") : mode === "video" ? translate("canvas.generateVideo") : translate("canvas.text_dd8186");
+            message.error(translate("canvas.askTheAdministratorToConfigureADefaultModel", { value0: label }));
         },
         [message, openConfigDialog, userRole],
     );
@@ -479,7 +483,7 @@ function CanvasWorkspacePage() {
                 .then((task) => applyVideoCompositionTask(compositionNodeId, resultVideoNodeId, task))
                 .catch((error) => {
                     if (isVideoCompositionPollingCanceled(error)) return;
-                    setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, compositionNodeId, resultVideoNodeId, error instanceof Error ? error.message : "查询视频合成任务失败", taskId));
+                    setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, compositionNodeId, resultVideoNodeId, error instanceof Error ? error.message : translate("canvas.failedToQueryVideoComposition"), taskId));
                 })
                 .finally(() => {
                     if (compositionPollControllersRef.current.get(taskId) === controller) compositionPollControllersRef.current.delete(taskId);
@@ -528,10 +532,10 @@ function CanvasWorkspacePage() {
     const confirmStopGeneration = useCallback(
         (nodeId: string) => {
             modal.confirm({
-                title: "停止生成？",
-                content: "当前生成请求会被中断，已经生成完成的内容会保留。",
-                okText: "停止",
-                cancelText: "继续生成",
+                title: translate("canvas.stopGeneration_9f2951"),
+                content: translate("canvas.theCurrentGenerationRequestWillStopCompletedContentWill"),
+                okText: translate("canvas.stop"),
+                cancelText: translate("canvas.continueGenerating"),
                 okButtonProps: { danger: true },
                 onOk: () => stopGenerationByRunningId(nodeId),
             });
@@ -543,10 +547,10 @@ function CanvasWorkspacePage() {
         (count: number) =>
             new Promise<boolean>((resolve) => {
                 modal.confirm({
-                    title: "上传参考图到云储存？",
-                    content: `检测到 ${count} 张参考图未上传到云储存，生成视频需要公开可访问地址，是否现在上传？`,
-                    okText: "上传并生成",
-                    cancelText: "取消",
+                    title: translate("canvas.uploadReferenceToCloudStorage"),
+                    content: translate("canvas.referenceImagesHaveNotBeenUploadedToCloudStorage", { value0: count }),
+                    okText: translate("canvas.uploadAndGenerate"),
+                    cancelText: translate("canvas.cancel"),
                     onOk: () => resolve(true),
                     onCancel: () => resolve(false),
                 });
@@ -563,7 +567,7 @@ function CanvasWorkspacePage() {
             message.open({
                 key: REFERENCE_IMAGE_UPLOAD_MESSAGE_KEY,
                 type: "loading",
-                content: `正在将 ${missing.length} 张参考图上传到云储存，请稍候...`,
+                content: translate("canvas.uploadingReferenceImagesToCloudStoragePleaseWait", { value0: missing.length }),
                 duration: 0,
             });
             try {
@@ -575,12 +579,12 @@ function CanvasWorkspacePage() {
                         return objectStorageFile?.url ? applyCanvasNodeAttributes(node, { objectStorage: objectStorageFile }) : node;
                     }),
                 );
-                message.success({ key: REFERENCE_IMAGE_UPLOAD_MESSAGE_KEY, content: "参考图已上传到云储存", duration: 3 });
+                message.success({ key: REFERENCE_IMAGE_UPLOAD_MESSAGE_KEY, content: translate("canvas.referenceImagesUploadedToCloudStorage"), duration: 3 });
                 return nextReferenceImages;
             } catch (error) {
                 message.error({
                     key: REFERENCE_IMAGE_UPLOAD_MESSAGE_KEY,
-                    content: error instanceof Error ? error.message : "参考图上传到云储存失败",
+                    content: error instanceof Error ? error.message : translate("canvas.failedToUploadReferenceToCloud"),
                     duration: 4,
                 });
                 return null;
@@ -595,17 +599,17 @@ function CanvasWorkspacePage() {
             if (!missing.length) return referenceAudios;
             const confirmed = await new Promise<boolean>((resolve) => {
                 modal.confirm({
-                    title: "上传参考音频到云储存？",
-                    content: `检测到 ${missing.length} 段参考音频未上传到云储存，生成视频需要公开可访问地址，是否现在上传？`,
-                    okText: "上传并生成",
-                    cancelText: "取消",
+                    title: translate("canvas.uploadReferenceAudioToCloudStorage"),
+                    content: translate("canvas.referenceAudioClipsHaveNotBeenUploadedToCloud", { value0: missing.length }),
+                    okText: translate("canvas.uploadAndGenerate"),
+                    cancelText: translate("canvas.cancel"),
                     onOk: () => resolve(true),
                     onCancel: () => resolve(false),
                 });
             });
             if (!confirmed) return null;
             const messageKey = "canvas-reference-audio-upload";
-            message.open({ key: messageKey, type: "loading", content: `正在将 ${missing.length} 段参考音频上传到云储存，请稍候...`, duration: 0 });
+            message.open({ key: messageKey, type: "loading", content: translate("canvas.uploadingReferenceAudioClipsToCloudStoragePleaseWait", { value0: missing.length }), duration: 0 });
             try {
                 const nextReferenceAudios = await uploadMissingReferenceAudiosToObjectStorage(referenceAudios);
                 const objectStorageById = new Map(nextReferenceAudios.map((audio) => [audio.id, audio.objectStorage]));
@@ -615,10 +619,10 @@ function CanvasWorkspacePage() {
                         return objectStorageFile?.url ? applyCanvasNodeAttributes(node, { objectStorage: objectStorageFile }) : node;
                     }),
                 );
-                message.success({ key: messageKey, content: "参考音频已上传到云储存", duration: 3 });
+                message.success({ key: messageKey, content: translate("canvas.referenceAudioUploadedToCloudStorage"), duration: 3 });
                 return nextReferenceAudios;
             } catch (error) {
-                message.error({ key: messageKey, content: error instanceof Error ? error.message : "参考音频上传到云储存失败", duration: 4 });
+                message.error({ key: messageKey, content: error instanceof Error ? error.message : translate("canvas.failedToUploadReferenceAudio"), duration: 4 });
                 return null;
             }
         },
@@ -684,7 +688,7 @@ function CanvasWorkspacePage() {
                 const resultVideoNodeId = node.composition.resultVideoNodeId;
                 if (!resultVideoNodeId || !restoredNodes.some((item) => item.id === resultVideoNodeId && isVideoNode(item))) {
                     void cancelCompositionTask(taskId).catch(() => undefined);
-                    setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, node.id, resultVideoNodeId, "合成结果视频节点不存在，任务已取消", taskId));
+                    setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, node.id, resultVideoNodeId, translate("canvas.compositionResultNodeMissingTaskCanceled"), taskId));
                     return;
                 }
                 monitorVideoCompositionTask(node.id, resultVideoNodeId, taskId);
@@ -703,7 +707,7 @@ function CanvasWorkspacePage() {
                 // 列表只包含运行中的任务，没命中时再按任务号查一次，区分“已完成 / 已失败 / 任务不存在”。
                 const task = runningTasks.find((item) => item.id === taskId) ?? (await getAiTaskInfo(taskId).catch(() => null));
                 if (!task) {
-                    setNodes((prev) => markTaskNodeFailed(prev, node.id, "页面刷新后生成已中断，请重新生成。"));
+                    setNodes((prev) => markTaskNodeFailed(prev, node.id, translate("canvas.generationInterruptedByRefreshGenerateAgain")));
                     continue;
                 }
                 if (task.status === "success") {
@@ -711,7 +715,7 @@ function CanvasWorkspacePage() {
                     continue;
                 }
                 if (task.status !== "pending" && task.status !== "running") {
-                    setNodes((prev) => markTaskNodeFailed(prev, node.id, task.errorMessage || "生成失败"));
+                    setNodes((prev) => markTaskNodeFailed(prev, node.id, task.errorMessage || translate("canvas.generationFailed")));
                     continue;
                 }
                 // 任务仍在运行，重新订阅进度。
@@ -723,7 +727,7 @@ function CanvasWorkspacePage() {
                         setNodes((prev) => updateNodeWithTaskResult(prev, node.id, completed));
                     })
                     .catch((error) => {
-                        setNodes((prev) => markTaskNodeFailed(prev, node.id, error instanceof Error ? error.message : "生成恢复失败"));
+                        setNodes((prev) => markTaskNodeFailed(prev, node.id, error instanceof Error ? error.message : translate("canvas.failedToRecoverGeneration")));
                     });
             }
         });
@@ -835,7 +839,7 @@ function CanvasWorkspacePage() {
             const containerBounds = container?.getBoundingClientRect();
             const canvasWidth = containerBounds?.width || size.width;
             const canvasHeight = containerBounds?.height || size.height;
-            const navigation = container?.querySelector<HTMLElement>('[aria-label="画布导航"]');
+            const navigation = container?.querySelector<HTMLElement>('[data-canvas-navigation="true"]');
             const navigationBounds = navigation?.getBoundingClientRect();
             const navigationRight = navigationBounds && containerBounds ? Math.max(0, Math.min(canvasWidth, navigationBounds.right - containerBounds.left)) : 0;
             const topToolbar = container?.querySelector<HTMLElement>(":scope > header");
@@ -916,7 +920,7 @@ function CanvasWorkspacePage() {
 
             const connection = normalizeCanvasConnection(current.nodeId, targetNodeId, nodesRef.current);
             if (!connection) {
-                message.warning("配置节点之间不能连接");
+                message.warning(translate("canvas.configurationNodesCannotConnect"));
                 return;
             }
             const errorMessage = readVideoCompositionConnectionError(connection.source.nodeId, connection.target.nodeId, nodesRef.current, connectionsRef.current);
@@ -942,12 +946,12 @@ function CanvasWorkspacePage() {
             const sourceNode = nodesRef.current.find((node) => node.id === sourceNodeId);
             const targetNode = nodesRef.current.find((node) => node.id === targetNodeId);
             if (!sourceNode || !targetNode || isBackgroundNode(sourceNode) || isBackgroundNode(targetNode)) {
-                message.warning("该画布资产无法作为节点引用");
+                message.warning(translate("canvas.thisAssetCannotBeANodeReference"));
                 return false;
             }
             const normalizedConnection = normalizeCanvasConnection(sourceNodeId, targetNodeId, nodesRef.current);
             if (!normalizedConnection) {
-                message.warning("配置节点之间不能连接");
+                message.warning(translate("canvas.configurationNodesCannotConnect"));
                 return false;
             }
             // @引用始终从源资产右侧输出点连接到当前节点左侧输入点，避免 React Flow 在缺少端口时默认落到左侧。
@@ -976,11 +980,11 @@ function CanvasWorkspacePage() {
         (type: PendingConnectionCreateNodeType, pending: PendingConnectionCreate, settingGraphSkill?: SkillOption) => {
             const sourceNode = nodesRef.current.find((node) => node.id === pending.connection.nodeId);
             if (type === "storyboard" && (!sourceNode || !isTextNode(sourceNode))) {
-                message.warning("分镜脚本只能引用文本剧本节点创建");
+                message.warning(translate("canvas.createStoryboardFromAScriptTextNode"));
                 return;
             }
             if (type === "videoComposition" && (!sourceNode || !isVideoNode(sourceNode))) {
-                message.warning("合成视频仅支持引用视频节点创建");
+                message.warning(translate("canvas.compositionNodesRequireVideoNodeReferences"));
                 return;
             }
             const defaultStoryboardModel = type === "storyboard" ? normalizeModelOptionValue(effectiveConfig.textModel, effectiveConfig.channels) : "";
@@ -999,7 +1003,7 @@ function CanvasWorkspacePage() {
                     ...(settingGraph ? { settingGraph } : {}),
                     ...(settingGraph ? { count: 1 } : {}),
                 }),
-                ...(settingGraphSkill ? { title: `设定图·${settingGraphSkill.name}` } : {}),
+                ...(settingGraphSkill ? { title: translate("canvas.referenceSheet_39d23c", { value0: settingGraphSkill.name }) } : {}),
             };
             // 连接菜单的释放点通常紧贴源节点手柄，不能直接作为新节点位置；统一按源节点边缘外侧间距布局。
             const preferredPosition = sourceNode
@@ -1013,7 +1017,7 @@ function CanvasWorkspacePage() {
             });
             const connection = normalizeCanvasConnection(pending.connection.nodeId, newNode.id, [...nodesRef.current, newNode]);
             if (!connection) {
-                message.warning("配置节点之间不能连接");
+                message.warning(translate("canvas.configurationNodesCannotConnect"));
                 return;
             }
             const errorMessage = readVideoCompositionConnectionError(connection.source.nodeId, connection.target.nodeId, [...nodesRef.current, newNode], connectionsRef.current);
@@ -1060,9 +1064,9 @@ function CanvasWorkspacePage() {
             (node) =>
                 !isHiddenBatchChild(node, nodes, collapsingBatchIds) && node.frame.position.x + node.frame.width > viewLeft && node.frame.position.x < viewRight && node.frame.position.y + node.frame.height > viewTop && node.frame.position.y < viewBottom,
         );
-    }, [collapsingBatchIds, nodes, size.height, size.width, viewport.k, viewport.x, viewport.y]);
+    }, [collapsingBatchIds, nodes, size.height, size.width, viewport.k, viewport.x, viewport.y, translate.locale]);
 
-    const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
+    const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes, translate.locale]);
     const storyboardWorkspaceNode = storyboardWorkspaceNodeId ? nodeById.get(storyboardWorkspaceNodeId) : null;
     const openedStoryboardNode = storyboardWorkspaceNode && isStoryboardNode(storyboardWorkspaceNode) ? storyboardWorkspaceNode : null;
     const directorDeskWorkspaceNode = directorDeskWorkspaceNodeId ? nodeById.get(directorDeskWorkspaceNodeId) : null;
@@ -1078,7 +1082,7 @@ function CanvasWorkspacePage() {
     useEffect(() => {
         if (storyboardVideoGenerationNodeId && !openedStoryboardVideoGenerationNode) setStoryboardVideoGenerationNodeId(null);
     }, [openedStoryboardVideoGenerationNode, storyboardVideoGenerationNodeId]);
-    const storyboardReferenceVideos = useMemo(() => (openedStoryboardVideoGenerationNode ? readStoryboardVideoReferences(openedStoryboardVideoGenerationNode.id, nodes, connections) : []), [connections, nodes, openedStoryboardVideoGenerationNode]);
+    const storyboardReferenceVideos = useMemo(() => (openedStoryboardVideoGenerationNode ? readStoryboardVideoReferences(openedStoryboardVideoGenerationNode.id, nodes, connections) : []), [connections, nodes, openedStoryboardVideoGenerationNode, translate.locale]);
 
     const batchCardStacks = useMemo(() => {
         const imagePreviewsByRootId = new Map<string, BatchImagePreview[]>();
@@ -1105,7 +1109,7 @@ function CanvasWorkspacePage() {
         });
 
         return { imagePreviewsByRootId, transformsByNodeId };
-    }, [nodes]);
+    }, [nodes, translate.locale]);
     const toolbarNode = toolbarNodeId ? nodeById.get(toolbarNodeId) || null : null;
     const infoNode = infoNodeId ? nodeById.get(infoNodeId) || null : null;
     const cropNode = cropNodeId ? nodeById.get(cropNodeId) || null : null;
@@ -1116,7 +1120,7 @@ function CanvasWorkspacePage() {
     const promptPanelCanGenerateWithoutPrompt = useMemo(() => {
         if (!promptPanelNode || !isImageNode(promptPanelNode) || !promptPanelNode.generation.settingGraph) return false;
         return hasNodeGenerationInputs(promptPanelNode.id, nodes, connections);
-    }, [connections, nodes, promptPanelNode]);
+    }, [connections, nodes, promptPanelNode, translate.locale]);
     const floatingPanelStyle = useMemo(() => {
         if (!promptPanelNode) return null;
         const canvasRect = containerRef.current?.getBoundingClientRect();
@@ -1126,7 +1130,7 @@ function CanvasWorkspacePage() {
             left: Math.max(PROMPT_PANEL_GAP, Math.min((canvasRect?.width || size.width) - PROMPT_PANEL_WIDTH - PROMPT_PANEL_GAP, left)),
             top: Math.max(PROMPT_PANEL_GAP, Math.min((canvasRect?.height || size.height) - PROMPT_PANEL_HEIGHT - PROMPT_PANEL_GAP, top)),
         };
-    }, [promptPanelNode, size.height, size.width, viewport.k, viewport.x, viewport.y]);
+    }, [promptPanelNode, size.height, size.width, viewport.k, viewport.x, viewport.y, translate.locale]);
     const hasMultipleSelectedNodes = selectedNodeIds.size > 1;
     const activeNodeId = hasMultipleSelectedNodes ? null : hoveredNodeId || (selectedNodeIds.size === 1 ? Array.from(selectedNodeIds)[0] : null);
     const batchChildCountById = useMemo(() => {
@@ -1135,7 +1139,7 @@ function CanvasWorkspacePage() {
             if (isImageNode(node) && node.grouping.isRoot) map.set(node.id, node.grouping.childIds.length);
         });
         return map;
-    }, [nodes]);
+    }, [nodes, translate.locale]);
     const batchMotionById = useMemo(() => {
         const map = new Map<string, { x: number; y: number; index: number }>();
         nodes.forEach((node) => {
@@ -1148,7 +1152,7 @@ function CanvasWorkspacePage() {
             map.set(node.id, { x: stackX - node.frame.position.x, y: stackY - node.frame.position.y, index: Math.max(index, 0) });
         });
         return map;
-    }, [nodeById, nodes]);
+    }, [nodeById, nodes, translate.locale]);
     const relatedHighlight = useMemo(() => {
         const nodeIds = new Set<string>();
         const connectionIds = new Set<string>();
@@ -1164,16 +1168,16 @@ function CanvasWorkspacePage() {
         });
 
         return { nodeIds, connectionIds };
-    }, [activeNodeId, connections]);
+    }, [activeNodeId, connections, translate.locale]);
 
     const resourceContextNodeId = dialogNodeId || activeNodeId;
-    const canvasResourceReferences = useMemo(() => buildCanvasResourceReferences(nodes, connections, resourceContextNodeId), [connections, nodes, resourceContextNodeId]);
-    const resourceReferenceByNodeId = useMemo(() => new Map(canvasResourceReferences.map((reference) => [reference.nodeId, reference])), [canvasResourceReferences]);
+    const canvasResourceReferences = useMemo(() => buildCanvasResourceReferences(nodes, connections, resourceContextNodeId), [connections, nodes, resourceContextNodeId, translate.locale]);
+    const resourceReferenceByNodeId = useMemo(() => new Map(canvasResourceReferences.map((reference) => [reference.nodeId, reference])), [canvasResourceReferences, translate.locale]);
     const mentionReferencesByNodeId = useMemo(() => {
         const map = new Map<string, ReturnType<typeof buildNodeMentionReferences>>();
         nodes.forEach((node) => map.set(node.id, buildNodeMentionReferences(node, nodes, connections)));
         return map;
-    }, [connections, nodes]);
+    }, [connections, nodes, translate.locale]);
     const cancelVideoCompositionTasksForDeletedNodes = useCallback(
         (nodeIds: Set<string>) => {
             const runningTasks = nodesRef.current
@@ -1184,11 +1188,11 @@ function CanvasWorkspacePage() {
                 .map((node) => ({ compositionNodeId: node.id, resultVideoNodeId: node.composition.resultVideoNodeId, taskId: node.execution.taskId as string }));
             runningTasks.forEach(({ compositionNodeId, resultVideoNodeId, taskId }) => {
                 compositionPollControllersRef.current.get(taskId)?.abort();
-                setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, compositionNodeId, resultVideoNodeId, "任务已取消", taskId));
+                setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, compositionNodeId, resultVideoNodeId, translate("canvas.taskCanceled"), taskId));
                 void cancelCompositionTask(taskId)
                     .then((task) => applyVideoCompositionTask(compositionNodeId, resultVideoNodeId, task))
                     .catch((error) => {
-                        setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, compositionNodeId, resultVideoNodeId, error instanceof Error ? error.message : "取消视频合成任务失败", taskId));
+                        setNodes((currentNodes) => markVideoCompositionTaskFailed(currentNodes, compositionNodeId, resultVideoNodeId, error instanceof Error ? error.message : translate("canvas.failedToCancelVideoComposition"), taskId));
                     });
             });
             return runningTasks;
@@ -1196,8 +1200,8 @@ function CanvasWorkspacePage() {
         [applyVideoCompositionTask],
     );
     const agentSnapshot = useMemo<CanvasAgentSnapshot>(
-        () => ({ projectId, title: currentDocument?.identity.title || "未命名画布", nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }),
-        [connections, currentDocument?.identity.title, nodes, projectId, selectedNodeIds, viewport],
+        () => ({ projectId, title: currentDocument?.identity.title || translate("canvas.untitledCanvas"), nodes, connections, selectedNodeIds: Array.from(selectedNodeIds), viewport }),
+        [connections, currentDocument?.identity.title, nodes, projectId, selectedNodeIds, viewport, translate.locale],
     );
 
     const commitAgentSnapshot = useCallback(
@@ -1205,7 +1209,7 @@ function CanvasWorkspacePage() {
             const nextNodeIds = new Set(snapshot.nodes.map((node) => node.id));
             const deletedNodeIds = new Set(nodesRef.current.filter((node) => !nextNodeIds.has(node.id)).map((node) => node.id));
             const canceledTasks = deletedNodeIds.size ? cancelVideoCompositionTasksForDeletedNodes(deletedNodeIds) : [];
-            const nextNodes = canceledTasks.reduce((currentNodes, task) => markVideoCompositionTaskFailed(currentNodes, task.compositionNodeId, task.resultVideoNodeId, "任务已取消"), snapshot.nodes);
+            const nextNodes = canceledTasks.reduce((currentNodes, task) => markVideoCompositionTaskFailed(currentNodes, task.compositionNodeId, task.resultVideoNodeId, translate("canvas.taskCanceled")), snapshot.nodes);
             nodesRef.current = nextNodes;
             connectionsRef.current = snapshot.connections;
             selectedNodeIdsRef.current = new Set(snapshot.selectedNodeIds);
@@ -1223,7 +1227,7 @@ function CanvasWorkspacePage() {
     const applyAgentOps = useCallback(
         async (ops: CanvasAgentOp[] | undefined, signal: AbortSignal) => {
             const safeOps = positionCanvasAgentAddNodeOps(Array.isArray(ops) ? ops.filter((op) => op?.type) : [], getCanvasCenter());
-            const before = { projectId, title: currentDocument?.identity.title || "未命名画布", nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current };
+            const before = { projectId, title: currentDocument?.identity.title || translate("canvas.untitledCanvas"), nodes: nodesRef.current, connections: connectionsRef.current, selectedNodeIds: Array.from(selectedNodeIdsRef.current), viewport: viewportRef.current };
             const generationOps: CanvasAgentOp[] = [];
             const stateOps: CanvasAgentOp[] = [];
             safeOps.forEach((operation) => (operation.type === "run_generation" ? generationOps : stateOps).push(operation));
@@ -1231,29 +1235,29 @@ function CanvasWorkspacePage() {
             setAgentUndoSnapshot(before);
             commitAgentSnapshot(next);
             for (const operation of generationOps) {
-                if (!operation.nodeId) throw new Error("生成节点ID不能为空");
+                if (!operation.nodeId) throw new Error(translate("canvas.generationNodeIDIsRequired"));
                 const target = next.nodes.find((node) => node.id === operation.nodeId);
-                if (!target) throw new Error(`生成节点不存在: ${operation.nodeId}`);
+                if (!target) throw new Error(translate("canvas.generationNodeNotFound", { value0: operation.nodeId }));
                 const mode = readCanvasGenerationMode(operation.mode ?? target.kind);
-                if (!mode) throw new Error("分镜脚本节点不能使用通用生成操作，请在分镜脚本节点中生成");
+                if (!mode) throw new Error(translate("canvas.useTheStoryboardGenerationActionInsteadOfGenericGeneration"));
                 const generationConfig = buildGenerationConfig(effectiveConfig, target, mode);
                 if (isAiConfigReady(generationConfig, generationConfig.model)) continue;
                 showMissingAiConfig(mode);
-                throw new Error(`${mode === "image" ? "图片" : mode === "video" ? "视频" : "文本"}生成节点已创建，但模型配置不完整，生成尚未开始`);
+                throw new Error(translate("canvas.generationNodeCreatedButModelConfigurationIsIncomplete", { value0: mode === "image" ? translate("canvas.image") : mode === "video" ? translate("canvas.video") : translate("canvas.text_dd8186") }));
             }
             if (!generationOps.length) {
-                return { snapshot: { ...next, projectId, title: currentDocument?.identity.title || "未命名画布" } };
+                return { snapshot: { ...next, projectId, title: currentDocument?.identity.title || translate("canvas.untitledCanvas") } };
             }
             const outcomes = await Promise.all(
                 generationOps.map(async (operation) => {
-                    if (!operation.nodeId) throw new Error("生成节点ID不能为空");
+                    if (!operation.nodeId) throw new Error(translate("canvas.generationNodeIDIsRequired"));
                     const target = nodesRef.current.find((node) => node.id === operation.nodeId);
-                    if (!target) throw new Error(`生成节点不存在: ${operation.nodeId}`);
+                    if (!target) throw new Error(translate("canvas.generationNodeNotFound", { value0: operation.nodeId }));
                     const prompt = operation.prompt?.trim() || readCanvasNodePrompt(target);
                     const execute = generateNodeRef.current;
-                    if (!execute) throw new Error("画布生成执行器尚未就绪");
+                    if (!execute) throw new Error(translate("canvas.canvasGenerationExecutorIsNotReady"));
                     const mode = readCanvasGenerationMode(operation.mode ?? target.kind);
-                    if (!mode) throw new Error("分镜脚本节点不能使用通用生成操作，请在分镜脚本节点中生成");
+                    if (!mode) throw new Error(translate("canvas.useTheStoryboardGenerationActionInsteadOfGenericGeneration"));
                     const generationType = mode === "image" || mode === "video" ? mode : null;
                     const snapshots = generationType ? operation.generationStyleSnapshots?.filter((snapshot) => snapshot.generationType === generationType) : [];
                     return execute(operation.nodeId, mode, prompt, operation.recovery === true, signal, { snapshots });
@@ -1268,7 +1272,7 @@ function CanvasWorkspacePage() {
                     selectedNodeIds: Array.from(selectedNodeIdsRef.current),
                     viewport: viewportRef.current,
                     projectId,
-                    title: currentDocument?.identity.title || "未命名画布",
+                    title: currentDocument?.identity.title || translate("canvas.untitledCanvas"),
                 },
                 result,
             };
@@ -1279,7 +1283,7 @@ function CanvasWorkspacePage() {
         if (!agentUndoSnapshot) return null;
         commitAgentSnapshot(agentUndoSnapshot);
         setAgentUndoSnapshot(null);
-        return { ...agentUndoSnapshot, projectId, title: currentDocument?.identity.title || "未命名画布" };
+        return { ...agentUndoSnapshot, projectId, title: currentDocument?.identity.title || translate("canvas.untitledCanvas") };
     }, [agentUndoSnapshot, commitAgentSnapshot, currentDocument?.identity.title, projectId]);
     const createNode = useCallback(
         (type: CanvasNodeKind, position?: CanvasPoint) => {
@@ -1397,12 +1401,12 @@ function CanvasWorkspacePage() {
             if (!ids.size) return;
             const selectedNodes = nodesRef.current.filter((node) => ids.has(node.id));
             const hasBackgroundBoard = selectedNodes.some(isBackgroundNode);
-            const message = hasBackgroundBoard ? "删除背景板会同时删除其中的全部成员节点及相关连线，此操作可通过撤销恢复。" : "删除选中的节点及相关连线？此操作可通过撤销恢复。";
+            const message = hasBackgroundBoard ? translate("canvas.deletingTheBackgroundAlsoRemovesItsMemberNodesAnd") : translate("canvas.deleteSelectedNodesAndConnectionsYouCanUndoThis");
             modal.confirm({
-                title: selectedNodes.length > 1 ? `删除选中节点（${selectedNodes.length}）？` : "删除节点？",
+                title: selectedNodes.length > 1 ? translate("canvas.deleteSelectedNodes_0960b3", { value0: selectedNodes.length }) : translate("canvas.deleteNode_ac609d"),
                 content: message,
-                okText: "删除",
-                cancelText: "取消",
+                okText: translate("canvas.delete"),
+                cancelText: translate("canvas.cancel"),
                 okButtonProps: { danger: true },
                 onOk: () => performDeleteNodes(ids),
             });
@@ -1444,10 +1448,10 @@ function CanvasWorkspacePage() {
             const target = nodesRef.current.find((node) => node.id === nodeId);
             if (!target || !isBackgroundNode(target)) return;
             modal.confirm({
-                title: "仅删除背景板？",
-                content: "背景板内的节点会保留在画布上，相关连线也会保留。",
-                okText: "删除背景板",
-                cancelText: "取消",
+                title: translate("canvas.deleteBackgroundOnly_4c8438"),
+                content: translate("canvas.nodesInsideTheBackgroundAndTheirConnectionsWillRemain"),
+                okText: translate("canvas.deleteBackground"),
+                cancelText: translate("canvas.cancel"),
                 okButtonProps: { danger: true },
                 onOk: () => performDeleteBackgroundOnly(nodeId),
             });
@@ -1466,10 +1470,10 @@ function CanvasWorkspacePage() {
         (connectionId: string) => {
             if (!connectionsRef.current.some((connection) => connection.id === connectionId)) return;
             modal.confirm({
-                title: "删除连线？",
-                content: "删除后可通过撤销恢复。",
-                okText: "删除",
-                cancelText: "取消",
+                title: translate("canvas.deleteConnection_bc1c01"),
+                content: translate("canvas.youCanUndoThisDeletion"),
+                okText: translate("canvas.delete"),
+                cancelText: translate("canvas.cancel"),
                 okButtonProps: { danger: true },
                 onOk: () => deleteConnection(connectionId),
             });
@@ -1531,8 +1535,8 @@ function CanvasWorkspacePage() {
                     const copied = structuredClone(node);
                     const mappedId = idMap.get(node.id) as string;
                     const frame = { ...node.frame, position: { x: node.frame.position.x + 36, y: node.frame.position.y + 36 } };
-                    if (isBackgroundNode(copied)) return { ...copied, id: mappedId, title: `${node.title} 副本`, frame, memberNodeIds: copied.memberNodeIds.flatMap((memberId) => (idMap.has(memberId) ? [idMap.get(memberId) as string] : [])) };
-                    return { ...copied, id: mappedId, title: `${node.title} 副本`, frame };
+                    if (isBackgroundNode(copied)) return { ...copied, id: mappedId, title: translate("canvas.copy_6a5e2a", { value0: node.title }), frame, memberNodeIds: copied.memberNodeIds.flatMap((memberId) => (idMap.has(memberId) ? [idMap.get(memberId) as string] : [])) };
+                    return { ...copied, id: mappedId, title: translate("canvas.copy_6a5e2a", { value0: node.title }), frame };
                 });
                 const nextConnections = connectionsRef.current
                     .filter((connection) => groupIds.has(connection.source.nodeId) && groupIds.has(connection.target.nodeId))
@@ -1557,7 +1561,7 @@ function CanvasWorkspacePage() {
                 ? {
                       ...copied,
                       id,
-                      title: `${source.title} 副本`,
+                      title: translate("canvas.copy_6a5e2a", { value0: source.title }),
                       execution: { phase: "idle" },
                       composition: { inputVideoNodeIds: [] },
                       frame: {
@@ -1568,7 +1572,7 @@ function CanvasWorkspacePage() {
                 : {
                       ...copied,
                       id,
-                      title: `${source.title} 副本`,
+                      title: translate("canvas.copy_6a5e2a", { value0: source.title }),
                       frame: {
                           ...source.frame,
                           position: { x: source.frame.position.x + 36, y: source.frame.position.y + 36 },
@@ -1636,7 +1640,7 @@ function CanvasWorkspacePage() {
                 return {
                     ...copied,
                     id: idMap.get(node.id) as string,
-                    title: node.title.endsWith(" 副本") ? node.title : `${node.title} 副本`,
+                    title: node.title.endsWith(" 副本") ? node.title : translate("canvas.copy_6a5e2a", { value0: node.title }),
                     frame,
                     execution: { phase: "idle" as const },
                     composition: {
@@ -1651,7 +1655,7 @@ function CanvasWorkspacePage() {
                 return {
                     ...copied,
                     id: idMap.get(node.id) as string,
-                    title: node.title.endsWith("副本") ? node.title : `${node.title} 副本`,
+                    title: node.title.endsWith("副本") ? node.title : translate("canvas.copy_6a5e2a", { value0: node.title }),
                     frame,
                     memberNodeIds: copied.memberNodeIds.flatMap((memberNodeId) => (idMap.has(memberNodeId) ? [idMap.get(memberNodeId) as string] : [])),
                 };
@@ -1659,7 +1663,7 @@ function CanvasWorkspacePage() {
             return {
                 ...copied,
                 id: idMap.get(node.id) as string,
-                title: node.title.endsWith(" 副本") ? node.title : `${node.title} 副本`,
+                title: node.title.endsWith(" 副本") ? node.title : translate("canvas.copy_6a5e2a", { value0: node.title }),
                 frame,
             };
         });
@@ -1731,10 +1735,10 @@ function CanvasWorkspacePage() {
 
     const confirmBackToProjects = useCallback(() => {
         modal.confirm({
-            title: "返回画布列表？",
-            content: "当前画布会自动保存，是否返回到画布列表？",
-            okText: "返回列表",
-            cancelText: "取消",
+            title: translate("canvas.backToCanvases_faf1e4"),
+            content: translate("canvas.theCurrentCanvasIsSavedAutomaticallyReturnToThe"),
+            okText: translate("canvas.backToList"),
+            cancelText: translate("canvas.cancel"),
             onOk: () => router.push("/canvas"),
         });
     }, [modal, router]);
@@ -2000,7 +2004,7 @@ function CanvasWorkspacePage() {
                 setSelectedConnectionId(null);
                 setDialogNodeId(id);
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "上传图片失败");
+                message.error(error instanceof Error ? error.message : translate("canvas.failedToUploadImage"));
             }
         },
         [message, requestFocusNodes],
@@ -2042,7 +2046,7 @@ function CanvasWorkspacePage() {
                 setSelectedConnectionId(null);
             } catch (error) {
                 if (audioUploadScope.current.get(targetId) !== scope) return;
-                const errorMessage = error instanceof Error ? error.message : "上传音频失败";
+                const errorMessage = error instanceof Error ? error.message : translate("canvas.failedToUploadAudio");
                 if (!nodeId) setNodes((previous) => previous.map((node) => (node.id === targetId ? updateCanvasNodeExecution(node, { phase: "failed", errorMessage }) : node)));
                 message.error(errorMessage);
             } finally {
@@ -2068,7 +2072,7 @@ function CanvasWorkspacePage() {
                 setSelectedConnectionId(null);
                 setDialogNodeId(id);
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "上传视频失败");
+                message.error(error instanceof Error ? error.message : translate("canvas.failedToUploadVideo"));
             }
         },
         [message, requestFocusNodes],
@@ -2080,7 +2084,7 @@ function CanvasWorkspacePage() {
             if (!isAudioNode(node) || !node.content.source) return;
             const range = normalizeAudioTrimRange(node.content.durationMilliseconds, startMs, endMs);
             if (range.durationMs < 100) {
-                message.error("音频片段不能小于0.1秒");
+                message.error(translate("canvas.audioClipMustBeAtLeast01Seconds"));
                 return;
             }
             const childId = nanoid();
@@ -2089,7 +2093,7 @@ function CanvasWorkspacePage() {
                 {
                     ...createCanvasNode("audio", position),
                     id: childId,
-                    title: `${node.title || "音频"}片段`,
+                    title: translate("canvas.clip", { value0: node.title || translate("canvas.audio") }),
                     content: {
                         ...node.content,
                         trimStartMilliseconds: range.startMs,
@@ -2115,7 +2119,7 @@ function CanvasWorkspacePage() {
 
             const node = {
                 ...createCanvasNode("text", getCanvasCenter(), { content: trimmed, status: NODE_STATUS_SUCCESS }),
-                title: trimmed.slice(0, 32) || "剪切板文本",
+                title: trimmed.slice(0, 32) || translate("canvas.clipboardText"),
             };
 
             setNodes((prev) => [...prev, node]);
@@ -2134,10 +2138,10 @@ function CanvasWorkspacePage() {
         const clipboardContent = await readCanvasSystemClipboard(navigator.clipboard);
         if (clipboardContent.kind === "image") {
             void createImageFileNode(clipboardContent.file, getCanvasCenter());
-            message.success("已从剪切板添加图片");
+            message.success(translate("canvas.imagePastedFromClipboard"));
             return;
         }
-        if (createTextNodeFromClipboard(clipboardContent.text)) message.success("已从剪切板添加文本");
+        if (createTextNodeFromClipboard(clipboardContent.text)) message.success(translate("canvas.textPastedFromClipboard"));
     }, [createImageFileNode, createTextNodeFromClipboard, getCanvasCenter, message]);
 
     const keyboardHandlers = useMemo(
@@ -2167,7 +2171,7 @@ function CanvasWorkspacePage() {
                 setPendingConnectionCreate(null);
             },
         }),
-        [copySelectedNodes, confirmDeleteConnection, confirmDeleteNodes, deselectCanvas, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, selectedConnectionId, setConnecting, undoCanvas],
+        [copySelectedNodes, confirmDeleteConnection, confirmDeleteNodes, deselectCanvas, pasteCopiedNodes, pasteSystemClipboard, redoCanvas, selectedConnectionId, setConnecting, undoCanvas, translate.locale],
     );
     useCanvasKeyboardShortcuts(keyboardHandlers);
 
@@ -2377,18 +2381,18 @@ function CanvasWorkspacePage() {
             }
             const instruction = node.content.instruction.trim();
             if (!instruction) {
-                message.error("请先填写分镜描述");
+                message.error(translate("canvas.enterShotDescriptionFirst"));
                 return null;
             }
             const visualStyle = (node.content.visualStyle || "").trim();
             if (!visualStyle) {
-                message.error("请先填写视觉风格");
+                message.error(translate("canvas.enterVisualStyleFirst"));
                 return null;
             }
             const modelValue = selectedModel === undefined ? node.content.model || effectiveConfig.textModel : selectedModel;
             const model = normalizeModelOptionValue(modelValue, effectiveConfig.channels);
             if (!model || !effectiveConfig.textModels.includes(model) || !isAiConfigReady(effectiveConfig, model)) {
-                message.error("请选择可用的文本模型后再生成分镜");
+                message.error(translate("canvas.selectATextModelBeforeGeneratingStoryboard"));
                 return null;
             }
             return {
@@ -2447,7 +2451,7 @@ function CanvasWorkspacePage() {
         const id = `image-${nanoid()}`;
         const size = fitNodeSize(image.width || 1280, image.height || 720, IMAGE_GENERATION_NODE_WIDTH, IMAGE_GENERATION_NODE_HEIGHT);
         const position = { x: sourceNode.frame.position.x + sourceNode.frame.width + CONNECTED_NODE_GAP, y: sourceNode.frame.position.y };
-        const node = updateCanvasNodeFrame(applyCanvasNodeAttributes({ ...createCanvasNode("image", position, imageAttributes(image)), id, title: `${sourceNode.title || "3D导演台"} 参考图片` }, { directorDeskSource: source }), { position, ...size });
+        const node = updateCanvasNodeFrame(applyCanvasNodeAttributes({ ...createCanvasNode("image", position, imageAttributes(image)), id, title: translate("canvas.referenceImage_7e22df", { value0: sourceNode.title || translate("canvas.3DDirectorDesk_7e75db") }) }, { directorDeskSource: source }), { position, ...size });
         setNodes((current) => (current.some((item) => isImageNode(item) && item.content.storageKey === image.storageKey && item.content.directorDeskSource?.sourceDirectorNodeId === sourceNodeId) ? current : [...current, node]));
         setConnections((current) => (current.some((connection) => connection.source.nodeId === sourceNodeId && connection.target.nodeId === id) ? current : [...current, createRightToLeftConnection(sourceNodeId, id)]));
         requestFocusNodes([id]);
@@ -2461,7 +2465,7 @@ function CanvasWorkspacePage() {
         const id = "video-director-" + nanoid();
         const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
         const position = { x: sourceNode.frame.position.x + sourceNode.frame.width + CONNECTED_NODE_GAP, y: sourceNode.frame.position.y + sourceNode.frame.height + 32 };
-        const node = updateCanvasNodeFrame(applyCanvasNodeAttributes({ ...createCanvasNode("video", position, videoAttributes(video)), id, title: `${sourceNode.title || "3D导演台"} 参考视频` }, { directorDeskSource: source }), { position, ...size });
+        const node = updateCanvasNodeFrame(applyCanvasNodeAttributes({ ...createCanvasNode("video", position, videoAttributes(video)), id, title: translate("canvas.referenceVideo", { value0: sourceNode.title || translate("canvas.3DDirectorDesk_7e75db") }) }, { directorDeskSource: source }), { position, ...size });
         setNodes((current) => (current.some((item) => isVideoNode(item) && item.content.storageKey === video.storageKey) ? current : [...current, node]));
         setConnections((current) => (current.some((connection) => connection.source.nodeId === sourceNodeId && connection.target.nodeId === id) ? current : [...current, createRightToLeftConnection(sourceNodeId, id)]));
         requestFocusNodes([id]);
@@ -2482,33 +2486,33 @@ function CanvasWorkspacePage() {
             if (!currentNode || currentNode.execution.phase === "running") return;
             const visualStyle = (currentNode.content.visualStyle || "").trim();
             if (!visualStyle) {
-                message.error("请先在分镜脚本节点填写视觉风格");
+                message.error(translate("canvas.enterVisualStyleInTheStoryboardFirst"));
                 return;
             }
             const selectedIds = Array.from(new Set(assetIds));
             const selectedAssets = currentNode.storyboard.assets.filter((asset) => selectedIds.includes(asset.id));
             if (!selectedAssets.length) {
-                message.error("请至少勾选一项资产");
+                message.error(translate("canvas.selectAtLeastOneAsset"));
                 return;
             }
             if (selectedAssets.length !== selectedIds.length) {
-                message.error("所选资产已发生变化，请重新选择");
+                message.error(translate("canvas.assetsChangedSelectAgain"));
                 return;
             }
             const normalizedModel = normalizeModelOptionValue(settings.model, effectiveConfig.channels);
             if (!normalizedModel || !effectiveConfig.imageModels.includes(normalizedModel) || !isAiConfigReady(effectiveConfig, normalizedModel)) {
-                message.error("请选择可用的图片模型后再生成资产图片");
+                message.error(translate("canvas.selectAnImageModelBeforeGeneratingAssets"));
                 return;
             }
             const unnamedAsset = selectedAssets.find((asset) => !asset.name.trim());
             if (unnamedAsset) {
-                message.error("请填写已勾选资产的名称后再生成图片");
+                message.error(translate("canvas.nameSelectedAssetsBeforeGeneratingImages"));
                 return;
             }
             const normalizedSettings: CanvasStoryboardAssetGenerationSettings = { ...settings, model: normalizedModel };
             const totalCredits = readStoryboardAssetImageCost(effectiveConfig.modelCosts, normalizedModel, selectedAssets.length);
             if (typeof creditBalance === "number" && totalCredits > creditBalance) {
-                message.error(`积分不足，生成 ${selectedAssets.length} 项资产需要 ${totalCredits} 积分，当前可用 ${creditBalance} 积分`);
+                message.error(translate("canvas.insufficientCreditsAssetsNeedAvailable", { value0: selectedAssets.length, value1: totalCredits, value2: creditBalance }));
                 return;
             }
 
@@ -2555,7 +2559,7 @@ function CanvasWorkspacePage() {
                     );
                     return true;
                 } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : "资产图片生成失败";
+                    const errorMessage = error instanceof Error ? error.message : translate("canvas.assetImageGenerationFailed");
                     updateStoryboardAssetGeneration(nodeId, (state) => {
                         const statuses = { ...state.statuses, [asset.id]: "failed" as const };
                         return { ...state, statuses, progress: readStoryboardAssetGenerationProgress({ ...state, statuses }), errors: { ...state.errors, [asset.id]: errorMessage } };
@@ -2576,7 +2580,7 @@ function CanvasWorkspacePage() {
                         phase: hasFailed ? "failed" : "succeeded",
                         progress: 100,
                         completedAt,
-                        errorMessage: hasFailed ? `部分资产图片生成失败（成功 ${results.filter(Boolean).length}/${results.length}）` : "",
+                        errorMessage: hasFailed ? translate("canvas.someAssetImagesFailedSuccessful", { value0: results.filter(Boolean).length, value1: results.length }) : "",
                     };
                     return updateCanvasNodeExecution(updateStoryboardNodeData(node, { assetGeneration: finishedState }), {
                         phase: hasFailed ? "failed" : "succeeded",
@@ -2586,8 +2590,8 @@ function CanvasWorkspacePage() {
                     });
                 }),
             );
-            if (results.every(Boolean)) message.success(`已生成 ${results.length} 项资产图片`);
-            else message.warning(`资产图片生成完成，成功 ${results.filter(Boolean).length}/${results.length} 项，失败任务已退款`);
+            if (results.every(Boolean)) message.success(translate("canvas.generatedAssetImages", { value0: results.length }));
+            else message.warning(translate("canvas.assetImagesCompleteSuccessfulFailedTasksRefunded", { value0: results.filter(Boolean).length, value1: results.length }));
         },
         [creditBalance, effectiveConfig, isAiConfigReady, message, updateStoryboardAssetGeneration],
     );
@@ -2597,18 +2601,18 @@ function CanvasWorkspacePage() {
             if (generatingStoryboardVideoNodeId) return;
             const currentNode = nodesRef.current.find((item): item is CanvasStoryboardNode => item.id === nodeId && isStoryboardNode(item));
             if (!currentNode || currentNode.execution.phase === "running") {
-                message.error("分镜脚本正在处理，请稍后再生成视频");
+                message.error(translate("canvas.storyboardIsProcessingGenerateVideoLater"));
                 return;
             }
             const selectedShotIds = Array.from(new Set(shotIds));
             if (!selectedShotIds.length || selectedShotIds.length !== shotIds.length) {
-                message.error("请选择至少一个有效镜头");
+                message.error(translate("canvas.selectAtLeastOneValidShot"));
                 return;
             }
             const selectedShotIdSet = new Set(selectedShotIds);
             const selectedShots = currentNode.storyboard.shots.filter((shot) => selectedShotIdSet.has(shot.id));
             if (selectedShots.length !== selectedShotIds.length) {
-                message.error("所选镜头已发生变化，请重新选择");
+                message.error(translate("canvas.shotsChangedSelectAgain"));
                 return;
             }
             const normalizedModel = normalizeModelOptionValue(selectedModel, effectiveConfig.channels);
@@ -2621,14 +2625,14 @@ function CanvasWorkspacePage() {
                 canvasVideoCount: "1",
             };
             if (!normalizedModel || !effectiveConfig.videoModels.includes(normalizedModel) || !isAiConfigReady(generationConfig, normalizedModel)) {
-                message.error("请选择可用的视频模型后再生成");
+                message.error(translate("canvas.selectAnAvailableVideoModelFirst"));
                 return;
             }
             const storyboardReferenceVideos = readStoryboardVideoReferences(nodeId, nodesRef.current, connectionsRef.current);
             const invalidShot = selectedShots.find((shot) => readStoryboardVideoShotIssue(shot, generationConfig) || readStoryboardVideoReferenceIssue(shot, currentNode.storyboard.assets, generationConfig));
             if (invalidShot) {
                 const issue = readStoryboardVideoShotIssue(invalidShot, generationConfig) || readStoryboardVideoReferenceIssue(invalidShot, currentNode.storyboard.assets, generationConfig);
-                message.error(`镜号 ${invalidShot.shotNumber} 无法生成视频：${issue}`);
+                message.error(translate("canvas.cannotGenerateShot", { value0: invalidShot.shotNumber, value1: issue }));
                 return;
             }
             const videoQuote = readStoryboardVideoCost(effectiveConfig, normalizedModel, generationConfig, selectedShots, currentNode.storyboard.assets, storyboardReferenceVideos);
@@ -2637,7 +2641,7 @@ function CanvasWorkspacePage() {
                 return;
             }
             if (typeof creditBalance === "number" && videoQuote.credits > creditBalance) {
-                message.error(`积分不足，生成 ${selectedShots.length} 个视频需要 ${videoQuote.credits} 积分，当前可用 ${creditBalance} 积分`);
+                message.error(translate("canvas.insufficientCreditsVideosNeedAvailable", { value0: selectedShots.length, value1: videoQuote.credits, value2: creditBalance }));
                 return;
             }
 
@@ -2696,7 +2700,7 @@ function CanvasWorkspacePage() {
                             },
                         ),
                         id,
-                        title: `镜头 ${String(shot.shotNumber).padStart(2, "0")} 视频`,
+                        title: translate("canvas.shotVideo", { value0: String(shot.shotNumber).padStart(2, "0") }),
                     },
                     {
                         position: {
@@ -2769,8 +2773,8 @@ function CanvasWorkspacePage() {
                         }
                     }),
                 );
-                if (results.every(Boolean)) message.success(`已创建 ${results.length} 个分镜视频任务`);
-                else message.warning(`分镜视频生成完成，成功 ${results.filter(Boolean).length}/${results.length} 个，失败任务已退款`);
+                if (results.every(Boolean)) message.success(translate("canvas.createdStoryboardVideoTasks", { value0: results.length }));
+                else message.warning(translate("canvas.storyboardVideosCompleteSuccessfulFailedTasksRefunded", { value0: results.filter(Boolean).length, value1: results.length }));
             } finally {
                 setGeneratingStoryboardVideoNodeId(null);
             }
@@ -2785,7 +2789,7 @@ function CanvasWorkspacePage() {
             const request = resolveStoryboardRequest(currentNode);
             if (!request) return;
             if (typeof creditBalance === "number" && request.modelCost > creditBalance) {
-                message.error(`积分不足，首次生成需要 ${request.modelCost} 积分，当前可用 ${creditBalance} 积分`);
+                message.error(translate("canvas.insufficientCreditsInitialGenerationNeedsAvailable", { value0: request.modelCost, value1: creditBalance }));
                 return;
             }
 
@@ -2806,9 +2810,9 @@ function CanvasWorkspacePage() {
                 );
                 applyStoryboardCreditCharge(result.chargedCredits, setCreditBalance);
                 setStoryboardWorkspaceNodeId(currentNode.id);
-                message.success(`分镜脚本已生成，消耗 ${result.chargedCredits} 积分`);
+                message.success(translate("canvas.storyboardGeneratedCreditsUsed", { value0: result.chargedCredits }));
             } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : "分镜脚本生成失败";
+                const errorMessage = error instanceof Error ? error.message : translate("canvas.storyboardGenerationFailed");
                 setNodes((prev) => prev.map((item) => (item.id === currentNode.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage, completedAt: new Date().toISOString() }) : item)));
                 message.error(errorMessage);
             }
@@ -2823,12 +2827,12 @@ function CanvasWorkspacePage() {
             if (!currentNode || currentNode.execution.phase === "running") return;
             const selectedShotIds = new Set(shotIds);
             if (!selectedShotIds.size || selectedShotIds.size !== shotIds.length) {
-                message.error("请选择至少一个有效镜头");
+                message.error(translate("canvas.selectAtLeastOneValidShot"));
                 return;
             }
             const selectedShots = currentNode.storyboard.shots.filter((shot) => selectedShotIds.has(shot.id));
             if (selectedShots.length !== selectedShotIds.size) {
-                message.error("部分选择的镜头不存在或已被删除");
+                message.error(translate("canvas.someSelectedShotsAreMissingOrDeleted"));
                 return;
             }
             const request = resolveStoryboardRequest(currentNode, selectedModel);
@@ -2841,7 +2845,7 @@ function CanvasWorkspacePage() {
             }
             const totalCredits = request.modelCost * selectedShots.length;
             if (typeof creditBalance === "number" && totalCredits > creditBalance) {
-                message.error(`积分不足，合成 ${selectedShots.length} 个镜头需要 ${totalCredits} 积分，当前可用 ${creditBalance} 积分`);
+                message.error(translate("canvas.insufficientCreditsShotsNeedAvailable", { value0: selectedShots.length, value1: totalCredits, value2: creditBalance }));
                 return;
             }
 
@@ -2872,9 +2876,9 @@ function CanvasWorkspacePage() {
                     ),
                 );
                 applyStoryboardCreditCharge(result.chargedCredits, setCreditBalance);
-                message.success(`已生成 ${selectedShots.length} 个镜头的最终提示词，消耗 ${result.chargedCredits} 积分`);
+                message.success(translate("canvas.finalPromptsGeneratedForShotsCreditsUsed", { value0: selectedShots.length, value1: result.chargedCredits }));
             } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : "提示词合成失败";
+                const errorMessage = error instanceof Error ? error.message : translate("canvas.failedToComposePrompt");
                 setNodes((prev) => prev.map((item) => (item.id === currentNode.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage, completedAt: new Date().toISOString() }) : item)));
                 message.error(errorMessage);
             } finally {
@@ -2891,7 +2895,7 @@ function CanvasWorkspacePage() {
             if (!currentNode || currentNode.execution.phase === "running") return;
             const shot = currentNode.storyboard.shots.find((item) => item.id === shotId);
             if (!shot) {
-                message.error("镜头不存在或已被删除");
+                message.error(translate("canvas.shotNotFoundOrDeleted"));
                 return;
             }
             const request = resolveStoryboardRequest(currentNode);
@@ -2903,7 +2907,7 @@ function CanvasWorkspacePage() {
                 return;
             }
             if (typeof creditBalance === "number" && request.modelCost > creditBalance) {
-                message.error(`积分不足，合成镜号 ${shot.shotNumber} 需要 ${request.modelCost} 积分，当前可用 ${creditBalance} 积分`);
+                message.error(translate("canvas.insufficientCreditsShotNeedsAvailable", { value0: shot.shotNumber, value1: request.modelCost, value2: creditBalance }));
                 return;
             }
 
@@ -2918,7 +2922,7 @@ function CanvasWorkspacePage() {
                     assets: compositionAssets.map(({ id, kind, name, description }) => ({ id, kind, name, description })),
                 });
                 const finalPrompt = result.prompts.find((item) => item.shotId === shotId)?.finalPrompt;
-                if (!finalPrompt) throw new Error("提示词合成完成，但未返回当前镜头结果");
+                if (!finalPrompt) throw new Error(translate("canvas.promptComposedWithoutAResultForThisShot"));
                 setNodes((prev) =>
                     prev.map((item) =>
                         item.id === nodeId && isStoryboardNode(item)
@@ -2929,9 +2933,9 @@ function CanvasWorkspacePage() {
                     ),
                 );
                 applyStoryboardCreditCharge(result.chargedCredits, setCreditBalance);
-                message.success(`镜号 ${shot.shotNumber} 的最终提示词已生成，消耗 ${result.chargedCredits} 积分`);
+                message.success(translate("canvas.finalPromptForShotGeneratedCreditsUsed", { value0: shot.shotNumber, value1: result.chargedCredits }));
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "当前镜头提示词生成失败");
+                message.error(error instanceof Error ? error.message : translate("canvas.failedToGenerateShotPrompt"));
             } finally {
                 setComposingStoryboardShot((current) => (current?.nodeId === nodeId && current.shotId === shotId ? null : current));
             }
@@ -2943,7 +2947,7 @@ function CanvasWorkspacePage() {
         (node: CanvasDomainNode) => {
             if (isAudioNode(node) && node.content.source) {
                 void downloadMedia({ storageKey: node.content.storageKey, url: node.content.source }, `${node.title.replace(/\.(mp3|wav)$/i, "")}.${node.content.mimeType?.includes("wav") ? "wav" : "mp3"}`).catch((error) =>
-                    message.error(error instanceof Error ? error.message : "下载音频失败"),
+                    message.error(error instanceof Error ? error.message : translate("canvas.failedToDownloadAudio")),
                 );
                 return;
             }
@@ -2957,15 +2961,15 @@ function CanvasWorkspacePage() {
         async (node: CanvasDomainNode) => {
             if (!isImageNode(node) && !isVideoNode(node)) return;
             if (!node.content.source) {
-                message.error(isImageNode(node) ? "没有可上传的图片" : "没有可上传的视频");
+                message.error(isImageNode(node) ? translate("canvas.noImageToUpload") : translate("canvas.noVideoToUpload"));
                 return;
             }
             if (node.content.objectStorage?.url) {
                 try {
                     await navigator.clipboard.writeText(node.content.objectStorage.url);
-                    message.success("云储存地址已复制");
+                    message.success(translate("canvas.cloudStorageURLCopied"));
                 } catch {
-                    message.error("云储存地址复制失败");
+                    message.error(translate("canvas.failedToCopyCloudStorageURL"));
                 }
                 return;
             }
@@ -2974,9 +2978,9 @@ function CanvasWorkspacePage() {
             try {
                 const objectStorageFile = await uploadNodeMediaToObjectStorage(node);
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? applyCanvasNodeAttributes(item, { objectStorage: objectStorageFile }) : item)));
-                message.success("已上传到云储存，地址已保存到节点");
+                message.success(translate("canvas.uploadedToCloudNodeURLSaved"));
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "上传到云储存失败");
+                message.error(error instanceof Error ? error.message : translate("canvas.failedToUploadToCloudStorage"));
             } finally {
                 finishNodeUpload(node.id);
             }
@@ -2988,16 +2992,16 @@ function CanvasWorkspacePage() {
         async (node: CanvasDomainNode) => {
             if (isTextNode(node)) {
                 const content = node.content.text.trim();
-                if (!content) return message.error("没有可保存的文本");
-                addAsset({ kind: "text", title: content.slice(0, 24) || "画布文本", coverUrl: "", tags: [], source: "Canvas", data: { content }, metadata: { source: "canvas", nodeId: node.id } });
-                message.success("已加入我的资产");
+                if (!content) return message.error(translate("canvas.noTextToSave"));
+                addAsset({ kind: "text", title: content.slice(0, 24) || translate("canvas.canvasText"), coverUrl: "", tags: [], source: "Canvas", data: { content }, metadata: { source: "canvas", nodeId: node.id } });
+                message.success(translate("canvas.addedToMyAssets"));
                 return;
             }
             if (isVideoNode(node)) {
-                if (!node.content.source) return message.error("没有可保存的视频");
+                if (!node.content.source) return message.error(translate("canvas.noVideoToSave"));
                 addAsset({
                     kind: "video",
-                    title: node.generation.prompt.slice(0, 24) || "画布视频",
+                    title: node.generation.prompt.slice(0, 24) || translate("canvas.canvasVideo"),
                     coverUrl: "",
                     tags: [],
                     source: "Canvas",
@@ -3012,15 +3016,15 @@ function CanvasWorkspacePage() {
                     },
                     metadata: { source: "canvas", nodeId: node.id, prompt: node.generation.prompt },
                 });
-                message.success("已加入我的资产");
+                message.success(translate("canvas.addedToMyAssets"));
                 return;
             }
             if (!isImageNode(node)) return;
-            if (!node.content.source) return message.error("没有可保存的图片");
+            if (!node.content.source) return message.error(translate("canvas.noImageToSave"));
             const dataUrl = node.content.storageKey ? "" : node.content.source;
             addAsset({
                 kind: "image",
-                title: node.generation.prompt.slice(0, 24) || "画布图片",
+                title: node.generation.prompt.slice(0, 24) || translate("canvas.canvasImage"),
                 coverUrl: node.content.source,
                 tags: [],
                 source: "Canvas",
@@ -3035,7 +3039,7 @@ function CanvasWorkspacePage() {
                 },
                 metadata: { source: "canvas", nodeId: node.id, prompt: node.generation.prompt },
             });
-            message.success("已加入我的资产");
+            message.success(translate("canvas.addedToMyAssets"));
         },
         [addAsset, message],
     );
@@ -3051,7 +3055,7 @@ function CanvasWorkspacePage() {
                 const childId = nanoid();
                 const height = width * (image.height / image.width);
                 const position = findNonOverlappingCanvasNodePosition(nodesRef.current, { x: node.frame.position.x + node.frame.width + 96, y: node.frame.position.y }, width, height);
-                const child = updateCanvasNodeFrame({ ...createCanvasNode("image", node.frame.position, { ...imageAttributes(image), prompt: node.generation.prompt }), id: childId, title: "裁剪图片" }, { position, width, height });
+                const child = updateCanvasNodeFrame({ ...createCanvasNode("image", node.frame.position, { ...imageAttributes(image), prompt: node.generation.prompt }), id: childId, title: translate("canvas.cropImage") }, { position, width, height });
                 setNodes((prev) => [...prev, child]);
                 requestFocusNodes([childId]);
                 setConnections((prev) => [...prev, createRightToLeftConnection(node.id, childId)]);
@@ -3059,7 +3063,7 @@ function CanvasWorkspacePage() {
                 setDialogNodeId(childId);
                 setCropNodeId(null);
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "裁剪图片失败");
+                message.error(error instanceof Error ? error.message : translate("canvas.failedToCropImage"));
             } finally {
                 setCroppingNodeId((current) => (current === node.id ? null : current));
             }
@@ -3083,7 +3087,7 @@ function CanvasWorkspacePage() {
                         const image = await uploadImage(piece.dataUrl);
                         const id = nanoid();
                         return updateCanvasNodeFrame(
-                            { ...createCanvasNode("image", { x: 0, y: 0 }, { ...imageAttributes(image), prompt: node.generation.prompt }), id, title: `${node.title || "图片"} ${piece.row + 1}-${piece.column + 1}` },
+                            { ...createCanvasNode("image", { x: 0, y: 0 }, { ...imageAttributes(image), prompt: node.generation.prompt }), id, title: `${node.title || translate("canvas.image")} ${piece.row + 1}-${piece.column + 1}` },
                             { position: { x: startX + piece.column * (cellWidth + gap), y: startY + piece.row * (cellHeight + gap) }, width: cellWidth, height: cellHeight },
                         );
                     }),
@@ -3100,9 +3104,9 @@ function CanvasWorkspacePage() {
                 setSelectedConnectionId(null);
                 setDialogNodeId(null);
                 setSplitNodeId(null);
-                message.success(`已切分为 ${placedChildNodes.length} 个子节点`);
+                message.success(translate("canvas.splitIntoChildNodes", { value0: placedChildNodes.length }));
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "切分图片失败");
+                message.error(error instanceof Error ? error.message : translate("canvas.failedToSplitImage"));
             } finally {
                 setSplittingNodeId((current) => (current === node.id ? null : current));
             }
@@ -3130,12 +3134,12 @@ function CanvasWorkspacePage() {
             event.target.value = "";
             const targetNode = target?.nodeId ? nodesRef.current.find((node) => node.id === target.nodeId) : undefined;
             if (file && targetNode && isAudioNode(targetNode) && !isAudioFile(file)) {
-                message.error("音频节点仅支持 MP3、WAV 文件");
+                message.error(translate("canvas.audioNodesSupportMP3AndWAVOnly"));
                 return;
             }
             if (file && isAudioFile(file)) {
                 if (targetNode && !isAudioNode(targetNode)) {
-                    message.error("图片或视频节点不能替换为音频，请先创建音频节点");
+                    message.error(translate("canvas.imageAndVideoNodesCannotBecomeAudioCreateAn"));
                     return;
                 }
                 void createAudioFileNode(file, target?.position || getCanvasCenter(), targetNode && isAudioNode(targetNode) ? targetNode.id : undefined);
@@ -3177,7 +3181,7 @@ function CanvasWorkspacePage() {
                     setSelectedConnectionId(null);
                     setDialogNodeId(target.nodeId);
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "上传媒体失败");
+                    message.error(error instanceof Error ? error.message : translate("canvas.failedToUploadMedia"));
                 } finally {
                     finishNodeUpload(target.nodeId);
                 }
@@ -3207,7 +3211,7 @@ function CanvasWorkspacePage() {
         (file: File) => {
             const position = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
             void createImageFileNode(file, position);
-            message.success("已从剪切板添加图片");
+            message.success(translate("canvas.imagePastedFromClipboard"));
         },
         [createImageFileNode, message, screenToCanvas, size.height, size.width],
     );
@@ -3225,7 +3229,7 @@ function CanvasWorkspacePage() {
         (sessionId: string, assistantMessage: CanvasAssistantMessage) => {
             updateAssistantSession(sessionId, (session) => ({
                 ...session,
-                title: session.messages.length ? session.title : assistantMessage.text.slice(0, 18) || "新对话",
+                title: session.messages.length ? session.title : assistantMessage.text.slice(0, 18) || translate("canvas.newConversation"),
                 messages: [...session.messages, assistantMessage],
                 updatedAt: new Date().toISOString(),
             }));
@@ -3239,7 +3243,7 @@ function CanvasWorkspacePage() {
                 const exists = session.messages.some((item) => item.id === messageId);
                 return {
                     ...session,
-                    title: session.messages.length ? session.title : text.slice(0, 18) || "新对话",
+                    title: session.messages.length ? session.title : text.slice(0, 18) || translate("canvas.newConversation"),
                     messages: exists ? session.messages.map((item) => (item.id === messageId ? { ...item, role: "assistant" as const, text } : item)) : [...session.messages, { id: messageId, role: "assistant" as const, text }],
                     updatedAt: new Date().toISOString(),
                 };
@@ -3325,9 +3329,9 @@ function CanvasWorkspacePage() {
             appendAssistantMessage(sessionId, {
                 id: `plan-${planId}`,
                 role: "system",
-                title: "创作计划",
+                title: translate("canvas.creativePlan"),
                 text: summary,
-                meta: `${taskCount} 个任务`,
+                meta: translate("canvas.tasks", { value0: taskCount }),
             });
         },
         onPlanTaskStatus: (planId, _taskId, status, statusMessage) => {
@@ -3338,8 +3342,8 @@ function CanvasWorkspacePage() {
                 messages: session.messages.map((item) => {
                     if (item.id !== `plan-${planId}`) return item;
                     // 已标记失败的计划不被后到的诊断/调整/重试等中间状态覆盖，避免失败显示回退为执行中。
-                    if (item.meta?.startsWith("失败：") && status !== "failed") return item;
-                    return { ...item, meta: status === "failed" ? `失败：${statusMessage}` : statusMessage };
+                    if (item.executionStatus === "failed" && status !== "failed") return item;
+                    return { ...item, executionStatus: status, meta: status === "failed" ? translate("canvas.failed_ae7e3c", { value0: statusMessage }) : statusMessage };
                 }),
                 updatedAt: new Date().toISOString(),
             }));
@@ -3349,7 +3353,7 @@ function CanvasWorkspacePage() {
             if (!sessionId) return;
             updateAssistantSession(sessionId, (session) => ({
                 ...session,
-                messages: session.messages.map((item) => (item.id === `plan-${planId}` ? { ...item, meta: strategy === "OPTIMIZE" ? "提示词已优化" : "保留原始提示词" } : item)),
+                messages: session.messages.map((item) => (item.id === `plan-${planId}` ? { ...item, meta: strategy === "OPTIMIZE" ? translate("canvas.promptOptimized") : translate("canvas.keepOriginalPrompt") } : item)),
                 updatedAt: new Date().toISOString(),
             }));
         },
@@ -3361,7 +3365,7 @@ function CanvasWorkspacePage() {
             if (sessionId && messageId) removeAssistantMessage(sessionId, messageId);
             activeAgentAssistantMessageIdRef.current = null;
             if (sessionId) {
-                appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: `错误: ${errorMessage}` });
+                appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: translate("canvas.operationFailed"), text: translate("canvas.error", { value0: errorMessage }) });
             }
             setAgentRunning(false);
             setAgentQueued(false);
@@ -3391,7 +3395,7 @@ function CanvasWorkspacePage() {
                 activeToolCallIds: readActiveToolCallIds(),
             }).catch(() => 0);
             if (notify || replayed > 0) {
-                message.info(replayed > 0 ? "已接续上一次未完成的画布任务" : "已接入仍在运行的上一次画布任务");
+                message.info(replayed > 0 ? translate("canvas.resumedThePreviousCanvasTask") : translate("canvas.reconnectedToThePreviousCanvasTask"));
             }
         },
         [attachAgentRequest, detachAgentRequest, message, projectId, readActiveToolCallIds, readAttachedRequestId],
@@ -3428,7 +3432,7 @@ function CanvasWorkspacePage() {
         const sessionId = nanoid();
         const newSession: CanvasAssistantSession = {
             id: sessionId,
-            title: "新对话",
+            title: translate("canvas.newConversation"),
             messages: [],
             createdAt: now,
             updatedAt: now,
@@ -3439,17 +3443,17 @@ function CanvasWorkspacePage() {
         handleAssistantSessionsChange([...chatSessions, newSession], sessionId);
     }, [activeChatId, agentQueued, agentRunning, chatSessions, handleAssistantSessionsChange, resetAgentSession, resetThinkings]);
 
-    const activeSessionMessages = useMemo(() => chatSessions.find((s) => s.id === activeChatId)?.messages || [], [chatSessions, activeChatId]);
+    const activeSessionMessages = useMemo(() => chatSessions.find((s) => s.id === activeChatId)?.messages || [], [chatSessions, activeChatId, translate.locale]);
 
     const handleSettingGraphGenerate = useCallback(
         async (nodeId: string, prompt: string, skill: CanvasSettingGraphSkillSnapshot) => {
             if (agentRunning || agentQueued) {
-                message.warning("画布Agent正在处理，请等待当前任务完成");
+                message.warning(translate("canvas.canvasAgentIsBusyWaitForCompletion"));
                 return;
             }
             const effectivePrompt = resolveNodeGenerationPrompt(nodeId, nodesRef.current, connectionsRef.current, prompt, true);
             if (!effectivePrompt) {
-                message.warning("请输入生成描述或连接有内容的上游节点");
+                message.warning(translate("canvas.enterAGenerationDescriptionOrConnectAnUpstreamNode"));
                 return;
             }
             const sessionId = activeChatId || nanoid();
@@ -3463,7 +3467,7 @@ function CanvasWorkspacePage() {
             const userMessage: CanvasAssistantMessage = { id: nanoid(), role: "user", text: effectivePrompt };
             if (!activeChatId) {
                 const now = new Date().toISOString();
-                handleAssistantSessionsChange([{ id: sessionId, title: `设定图：${skill.name}`, messages: [userMessage], createdAt: now, updatedAt: now }], sessionId);
+                handleAssistantSessionsChange([{ id: sessionId, title: translate("canvas.referenceSheet_2f7eb9", { value0: skill.name }), messages: [userMessage], createdAt: now, updatedAt: now }], sessionId);
             } else {
                 appendAssistantMessage(sessionId, userMessage);
             }
@@ -3488,10 +3492,10 @@ function CanvasWorkspacePage() {
                 if (!submitted) {
                     setAgentQueued(false);
                     setAgentRunning(false);
-                    message.warning("上一次画布Agent任务仍在运行，请等它结束后再试");
+                    message.warning(translate("canvas.previousCanvasAgentTaskIsStillRunningWaitFor"));
                 }
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "设定图生成失败");
+                message.error(error instanceof Error ? error.message : translate("canvas.referenceSheetGenerationFailed"));
                 setAgentQueued(false);
                 setAgentRunning(false);
             }
@@ -3517,7 +3521,7 @@ function CanvasWorkspacePage() {
     );
 
     const startTitleEditing = useCallback(() => {
-        setTitleDraft(currentDocument?.identity.title || "未命名画布");
+        setTitleDraft(currentDocument?.identity.title || translate("canvas.untitledCanvas"));
         setTitleEditing(true);
     }, [currentDocument?.identity.title]);
 
@@ -3537,23 +3541,23 @@ function CanvasWorkspacePage() {
         async (nodeId: string, mode: CanvasNodeGenerationMode, prompt: string, recovery = false, externalSignal?: AbortSignal, styleContext?: { ids?: number[]; snapshots?: GenerationStyleSnapshot[] }): Promise<CanvasAgentToolResult> => {
             if (recovery) {
                 const retryNode = nodesRef.current.find((node) => node.id === nodeId);
-                if (!retryNode) return failedCanvasGenerationResult(nodeId, canvasError("invalid_parameter", `生成节点不存在: ${nodeId}`, "nodeId"));
+                if (!retryNode) return failedCanvasGenerationResult(nodeId, canvasError("invalid_parameter", translate("canvas.generationNodeNotFound", { value0: nodeId }), "nodeId"));
                 const retry = retryNodeRef.current;
-                if (!retry) return failedCanvasGenerationResult(nodeId, canvasError("configuration", "画布重试执行器尚未就绪"));
+                if (!retry) return failedCanvasGenerationResult(nodeId, canvasError("configuration", translate("canvas.canvasRetryExecutorIsNotReady")));
                 return retry(retryNode, externalSignal);
             }
             if (isGenerationRunning(nodeId)) {
-                return failedCanvasGenerationResult(nodeId, canvasError("configuration", "当前节点正在生成，请等待任务完成"));
+                return failedCanvasGenerationResult(nodeId, canvasError("configuration", translate("canvas.nodeIsGeneratingWaitForCompletion")));
             }
             const sourceNode = nodesRef.current.find((node) => node.id === nodeId);
             // 刷新恢复出来的节点仍在等待服务端任务结果，避免接续工具调用时重复发起一次生成。
             if (sourceNode?.execution.phase === "running" && sourceNode.execution.taskId) {
-                return failedCanvasGenerationResult(nodeId, canvasError("configuration", "当前节点正在生成，请等待任务完成"));
+                return failedCanvasGenerationResult(nodeId, canvasError("configuration", translate("canvas.nodeIsGeneratingWaitForCompletion")));
             }
             const generationConfig = buildGenerationConfig(effectiveConfig, sourceNode, mode);
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 showMissingAiConfig(mode);
-                return failedCanvasGenerationResult(nodeId, canvasError("configuration", "模型配置不完整"));
+                return failedCanvasGenerationResult(nodeId, canvasError("configuration", translate("canvas.incompleteModelConfiguration")));
             }
 
             const sourceTextContent = sourceNode && isTextNode(sourceNode) ? sourceNode.content.text.trim() : "";
@@ -3570,15 +3574,15 @@ function CanvasWorkspacePage() {
             }
             if (externalSignal?.aborted) return canceledCanvasGenerationResult();
             if (mode !== "video" && generationContext.referenceAudios.length) {
-                message.error("音频输入仅支持视频节点");
-                return failedCanvasGenerationResult(nodeId, canvasError("configuration", "音频输入仅支持视频节点"));
+                message.error(translate("canvas.audioInputRequiresAVideoNode"));
+                return failedCanvasGenerationResult(nodeId, canvasError("configuration", translate("canvas.audioInputRequiresAVideoNode")));
             }
             // 合并视频节点上手动上传/上次生成持久化的参考素材（与连线引用按地址去重）
             if (mode === "video" && sourceNode && isVideoNode(sourceNode)) {
                 const savedReferences = await resolveVideoGenerationReferences(sourceNode.generation);
                 if (savedReferences?.incomplete) {
-                    message.error("参考素材恢复失败，请重新上传");
-                    return failedCanvasGenerationResult(nodeId, canvasError("configuration", "参考素材恢复失败，请重新上传"));
+                    message.error(translate("canvas.failedToRestoreReferenceUploadAgain"));
+                    return failedCanvasGenerationResult(nodeId, canvasError("configuration", translate("canvas.failedToRestoreReferenceUploadAgain")));
                 }
                 if (savedReferences) {
                     generationContext = {
@@ -3628,7 +3632,7 @@ function CanvasWorkspacePage() {
                 finishGenerationRequest(nodeId, runController);
                 setRunningNodeId(null);
                 detachExternalAbort();
-                return failedCanvasGenerationResult(nodeId, canvasError("invalid_parameter", "生成提示词不能为空", "prompt"));
+                return failedCanvasGenerationResult(nodeId, canvasError("invalid_parameter", translate("canvas.generationPromptIsRequired"), "prompt"));
             }
             let pendingChildIds: string[] = [];
 
@@ -3695,7 +3699,7 @@ function CanvasWorkspacePage() {
                                 },
                             ),
                             id: rootId,
-                            title: isSettingGraphNode && sourceNode ? sourceNode.title : count > 1 ? "图片生成" : effectivePrompt.slice(0, 32) || "生成图片",
+                            title: isSettingGraphNode && sourceNode ? sourceNode.title : count > 1 ? translate("canvas.imageGeneration") : effectivePrompt.slice(0, 32) || translate("canvas.generateImage_71c9cf"),
                         },
                         { position: rootPosition, ...rootSize },
                     );
@@ -3734,7 +3738,7 @@ function CanvasWorkspacePage() {
                                     ? rootNode
                                     : sourceIsImage
                                       ? updateCanvasNodeExecution(node, { phase: "succeeded", errorMessage: "" })
-                                      : replaceCanvasNodeWithText(node, prompt, prompt.slice(0, 32) || "提示词", "succeeded")
+                                      : replaceCanvasNodeWithText(node, prompt, prompt.slice(0, 32) || translate("canvas.prompt"), "succeeded")
                                 : node,
                         ),
                         ...(reuseImageNode ? [] : [rootNode]),
@@ -3816,7 +3820,7 @@ function CanvasWorkspacePage() {
                     }
                     const successfulNodeIds = outcomes.filter((outcome) => !outcome.error && !outcome.canceled).map((outcome) => outcome.nodeId);
                     const failures = outcomes.filter((outcome): outcome is CanvasNodeGenerationFailure => Boolean(outcome.error));
-                    if (failures.length) message.error(successfulNodeIds.length ? "部分图片生成失败" : "全部图片生成失败");
+                    if (failures.length) message.error(successfulNodeIds.length ? translate("canvas.someImagesFailed") : translate("canvas.allImagesFailed"));
                     return canvasGenerationResult(successfulNodeIds, failures, actualToolArguments);
                 }
 
@@ -3875,7 +3879,7 @@ function CanvasWorkspacePage() {
                                     },
                                 ),
                                 id: videoId,
-                                title: count > 1 ? `${index + 1}/${count}` : effectivePrompt.slice(0, 32) || "生成视频",
+                                title: count > 1 ? `${index + 1}/${count}` : effectivePrompt.slice(0, 32) || translate("canvas.generateVideo_56e566"),
                             },
                             { position: videoPosition, width: videoSize.width, height: videoSize.height },
                         );
@@ -3946,7 +3950,7 @@ function CanvasWorkspacePage() {
                     if (runController.signal.aborted) return canceledCanvasGenerationResult();
                     const successfulNodeIds = outcomes.filter((outcome) => !outcome.error && !outcome.canceled).map((outcome) => outcome.nodeId);
                     const failures = outcomes.filter((outcome): outcome is CanvasNodeGenerationFailure => Boolean(outcome.error));
-                    if (failures.length) message.error(successfulNodeIds.length ? "部分视频生成失败" : "全部视频生成失败");
+                    if (failures.length) message.error(successfulNodeIds.length ? translate("canvas.someVideosFailed") : translate("canvas.allVideosFailed"));
                     return canvasGenerationResult(successfulNodeIds, failures, actualToolArguments);
                 }
 
@@ -3959,7 +3963,7 @@ function CanvasWorkspacePage() {
                 if (editingTextNode) {
                     const childNodes: CanvasDomainNode[] = childIds.map((id, index) =>
                         updateCanvasNodeFrame(
-                            { ...createCanvasNode("text", { x: 0, y: 0 }, { content: "", status: NODE_STATUS_LOADING, fontSize: 14 }), id, title: effectivePrompt.slice(0, 32) || "生成文本" },
+                            { ...createCanvasNode("text", { x: 0, y: 0 }, { content: "", status: NODE_STATUS_LOADING, fontSize: 14 }), id, title: effectivePrompt.slice(0, 32) || translate("canvas.generateText") },
                             {
                                 position: findNonOverlappingCanvasNodePosition(
                                     nodesRef.current,
@@ -4027,7 +4031,7 @@ function CanvasWorkspacePage() {
                         childIds.includes(node.id)
                             ? replaceCanvasNodeWithText(node, answerByNodeId.get(node.id) || streamed, node.title, "succeeded")
                             : node.id === nodeId && !editingTextNode
-                              ? replaceCanvasNodeWithText(node, answerByNodeId.get(node.id) || streamed, prompt.slice(0, 32) || "生成文本", "succeeded")
+                              ? replaceCanvasNodeWithText(node, answerByNodeId.get(node.id) || streamed, prompt.slice(0, 32) || translate("canvas.generateText"), "succeeded")
                               : node,
                     ),
                 );
@@ -4072,10 +4076,10 @@ function CanvasWorkspacePage() {
     const handleRetryNode = useCallback(
         async (node: CanvasDomainNode, externalSignal?: AbortSignal): Promise<CanvasAgentToolResult> => {
             if (isStoryboardNode(node)) {
-                return failedCanvasGenerationResult(node.id, canvasError("configuration", "请在分镜脚本节点中重新生成"));
+                return failedCanvasGenerationResult(node.id, canvasError("configuration", translate("canvas.regenerateInTheStoryboardNode")));
             }
             if (isGenerationRunning(node.id)) {
-                return failedCanvasGenerationResult(node.id, canvasError("configuration", "当前节点正在生成，请等待任务完成"));
+                return failedCanvasGenerationResult(node.id, canvasError("configuration", translate("canvas.nodeIsGeneratingWaitForCompletion")));
             }
             const sourceNode = node;
             const batchRoot = isImageNode(node) && node.grouping.rootId ? nodesRef.current.find((item) => item.id === node.grouping.rootId) : null;
@@ -4094,7 +4098,7 @@ function CanvasWorkspacePage() {
                   : [];
             const hasSavedImageGeneration = Boolean(savedImageGeneration && (savedImageGeneration.prompt || savedImageGeneration.model || savedImageGeneration.references.length));
             const retryMode = readCanvasGenerationMode(node.kind);
-            if (!retryMode) return failedCanvasGenerationResult(node.id, canvasError("configuration", "分镜脚本节点请使用专属生成入口"));
+            if (!retryMode) return failedCanvasGenerationResult(node.id, canvasError("configuration", translate("canvas.useTheStoryboardSGenerationAction")));
             const settingGraphRatio = isImageNode(node) && node.generation.settingGraph ? node.generation.settingGraph.aspectRatio || "16:9" : undefined;
             const generationConfig =
                 hasSavedImageGeneration && savedImageGeneration
@@ -4109,19 +4113,19 @@ function CanvasWorkspacePage() {
                     : { ...buildGenerationConfig(effectiveConfig, sourceNode, retryMode), ...(settingGraphRatio ? { size: settingGraphRatio } : {}), count: "1" };
             if (!isAiConfigReady(generationConfig, generationConfig.model)) {
                 showMissingAiConfig(retryMode);
-                return failedCanvasGenerationResult(node.id, canvasError("configuration", "模型配置不完整"));
+                return failedCanvasGenerationResult(node.id, canvasError("configuration", translate("canvas.incompleteModelConfiguration")));
             }
 
             const retryContext = buildNodeGenerationContext(sourceNode.id, nodesRef.current, connectionsRef.current, readCanvasNodePrompt(sourceNode));
             if (retryMode !== "video" && retryContext.referenceAudios.length) {
-                message.error("音频输入仅支持视频节点");
-                return failedCanvasGenerationResult(node.id, canvasError("configuration", "音频输入仅支持视频节点"));
+                message.error(translate("canvas.audioInputRequiresAVideoNode"));
+                return failedCanvasGenerationResult(node.id, canvasError("configuration", translate("canvas.audioInputRequiresAVideoNode")));
             }
             const context = hasSavedImageGeneration ? null : await hydrateNodeGenerationContext(retryContext, retryMode);
             const prompt = (savedImageGeneration?.prompt || savedVideoGeneration?.prompt || context?.prompt || "").trim();
             if (!prompt) {
-                message.warning("找不到提示词，无法重试");
-                return failedCanvasGenerationResult(node.id, canvasError("invalid_parameter", "找不到提示词，无法重试", "prompt"));
+                message.warning(translate("canvas.promptNotFoundCannotRetry"));
+                return failedCanvasGenerationResult(node.id, canvasError("invalid_parameter", translate("canvas.promptNotFoundCannotRetry"), "prompt"));
             }
             const generationType = savedImageGeneration?.operation;
             const useReferenceImages = generationType ? generationType === "edit" : Boolean(context?.referenceImages.length);
@@ -4134,9 +4138,9 @@ function CanvasWorkspacePage() {
                           : sourceNodeReferenceImages(batchRoot || sourceNode)
                       : [];
             if (useReferenceImages && !retryReferenceImages) {
-                message.error("参考图片已丢失，无法继续重试");
-                setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage: "参考图片已丢失，无法继续重试" }) : item)));
-                return failedCanvasGenerationResult(node.id, canvasError("configuration", "参考图片已丢失，无法继续重试"));
+                message.error(translate("canvas.referenceImageLostCannotRetry"));
+                setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage: translate("canvas.referenceImageLostCannotRetry") }) : item)));
+                return failedCanvasGenerationResult(node.id, canvasError("configuration", translate("canvas.referenceImageLostCannotRetry")));
             }
             const retryImages = retryReferenceImages || [];
             let retryVideoImages = retryImages;
@@ -4145,8 +4149,8 @@ function CanvasWorkspacePage() {
             if (isVideoNode(node)) {
                 const savedVideoReferences = await resolveVideoGenerationReferences(savedVideoGeneration);
                 if (savedVideoReferences?.incomplete) {
-                    message.error("已保存的参考素材无法恢复，请重新连接参考节点后再试");
-                    return failedCanvasGenerationResult(node.id, canvasError("configuration", "已保存的参考素材无法恢复，请重新连接参考节点后再试"));
+                    message.error(translate("canvas.savedReferencesCannotBeRestoredReconnectTheReferenceNodes"));
+                    return failedCanvasGenerationResult(node.id, canvasError("configuration", translate("canvas.savedReferencesCannotBeRestoredReconnectTheReferenceNodes")));
                 }
                 if (savedVideoReferences) {
                     // 重试同样遵循直接连线优先，防止裁剪节点替换后恢复旧的完整音频引用。
@@ -4182,7 +4186,7 @@ function CanvasWorkspacePage() {
 
             try {
                 if (isTextNode(node)) {
-                    if (!context) return failedCanvasGenerationResult(node.id, canvasError("unknown", "文本节点缺少生成上下文"));
+                    if (!context) return failedCanvasGenerationResult(node.id, canvasError("unknown", translate("canvas.textNodeHasNoGenerationContext")));
                     let streamed = "";
                     const answer = await requestImageQuestion(
                         generationConfig,
@@ -4330,7 +4334,7 @@ function CanvasWorkspacePage() {
             const center = screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
             const id = `image-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
             const position = findNonOverlappingCanvasNodePosition(nodesRef.current, { x: center.x - config.width / 2, y: center.y - config.height / 2 }, config.width, config.height);
-            const node = updateCanvasNodeFrame({ ...createCanvasNode("image", center, { ...imageAttributes(storedImage), prompt: image.prompt }), id, title: image.prompt.slice(0, 32) || "生成图片" }, { position, ...config });
+            const node = updateCanvasNodeFrame({ ...createCanvasNode("image", center, { ...imageAttributes(storedImage), prompt: image.prompt }), id, title: image.prompt.slice(0, 32) || translate("canvas.generateImage_71c9cf") }, { position, ...config });
 
             setNodes((prev) => [...prev, node]);
             requestFocusNodes([node.id]);
@@ -4413,7 +4417,7 @@ function CanvasWorkspacePage() {
             setDialogNodeId(targetNodeId);
             setCanvasAssetReplaceNodeId(null);
             setCanvasAssetPickerOpen(false);
-            message.success("已使用画布资产替换当前图片");
+            message.success(translate("canvas.currentImageReplacedWithCanvasAsset"));
             const image = new window.Image();
             image.onload = () => {
                 if (!image.naturalWidth || !image.naturalHeight) return;
@@ -4460,7 +4464,7 @@ function CanvasWorkspacePage() {
             const videoById = new Map(nodesRef.current.filter((item): item is CanvasVideoNode => isVideoNode(item)).map((item) => [item.id, item]));
             const currentNode = nodesRef.current.find((item): item is CanvasVideoCompositionNode => item.id === node.id && isVideoCompositionNode(item));
             if (!currentNode || !canComposeVideo(currentNode, videoById)) {
-                message.warning("至少需要2段已完成且已保存的视频才能合成");
+                message.warning(translate("canvas.atLeast2CompletedAndSavedVideosAreRequired"));
                 return;
             }
             compositionSubmittingNodeIdsRef.current.add(node.id);
@@ -4490,7 +4494,7 @@ function CanvasWorkspacePage() {
                 const resultNode = {
                     ...createCanvasNode("video", resultCenter, { status: NODE_STATUS_LOADING, taskId: task.id, progress: task.progress }),
                     id: resultId,
-                    title: "合成视频",
+                    title: translate("canvas.composeVideo"),
                 };
                 setNodes((currentNodes) => [
                     ...currentNodes.map((item) =>
@@ -4510,7 +4514,7 @@ function CanvasWorkspacePage() {
                 requestFocusNodes([latestNode.id, resultId]);
                 monitorVideoCompositionTask(latestNode.id, resultId, task.id);
             } catch (error) {
-                const errorMessage = error instanceof Error ? error.message : "创建视频合成任务失败";
+                const errorMessage = error instanceof Error ? error.message : translate("canvas.failedToCreateVideoComposition");
                 message.error(errorMessage);
                 setNodes((currentNodes) => currentNodes.map((item) => (item.id === node.id && isVideoCompositionNode(item) ? { ...item, execution: { phase: "failed", errorMessage } } : item)));
             } finally {
@@ -4526,14 +4530,14 @@ function CanvasWorkspacePage() {
     const openNavigationPanel = () => setNavigationPanelState("expanded");
 
     // Phase 2-3: 转换为 React Flow 格式
-    const hiddenBatchNodeIds = useMemo(() => new Set(nodes.filter((node) => isHiddenBatchChild(node, nodes, collapsingBatchIds)).map((node) => node.id)), [collapsingBatchIds, nodes]);
-    const navigationNodes = useMemo(() => nodes.filter((node) => !hiddenBatchNodeIds.has(node.id)), [hiddenBatchNodeIds, nodes]);
+    const hiddenBatchNodeIds = useMemo(() => new Set(nodes.filter((node) => isHiddenBatchChild(node, nodes, collapsingBatchIds)).map((node) => node.id)), [collapsingBatchIds, nodes, translate.locale]);
+    const navigationNodes = useMemo(() => nodes.filter((node) => !hiddenBatchNodeIds.has(node.id)), [hiddenBatchNodeIds, nodes, translate.locale]);
     const navigationAssets = useMemo<CanvasNavigationAsset[]>(
         () => [
             ...assets.map((asset) => ({ id: `library:${asset.id}`, source: "library" as const, asset })),
             ...nodes.flatMap((node) => (isStoryboardNode(node) ? node.storyboard.assets.map((asset) => ({ id: `storyboard:${node.id}:${asset.id}`, source: "storyboard" as const, asset, storyboardNodeTitle: node.title })) : [])),
         ],
-        [assets, nodes],
+        [assets, nodes, translate.locale],
     );
     const hiddenBatchEdgeNodeIds = useMemo(
         () =>
@@ -4546,13 +4550,13 @@ function CanvasWorkspacePage() {
                     })
                     .map((node) => node.id),
             ),
-        [collapsingBatchIds, nodes, openingBatchIds],
+        [collapsingBatchIds, nodes, openingBatchIds, translate.locale],
     );
-    const rfNodes = useMemo(() => toRFNodes(nodes, selectedNodeIds, hiddenBatchNodeIds), [hiddenBatchNodeIds, nodes, selectedNodeIds]);
-    const nodeIdSet = useMemo(() => new Set(nodes.map((node) => node.id)), [nodes]);
-    const backgroundNodeIds = useMemo(() => new Set(nodes.filter(isBackgroundNode).map((node) => node.id)), [nodes]);
-    const rfEdges = useMemo(() => toRFEdges(connections, nodeIdSet, hiddenBatchEdgeNodeIds, backgroundNodeIds), [backgroundNodeIds, connections, hiddenBatchEdgeNodeIds, nodeIdSet]);
-    const videoNodesById = useMemo(() => new Map(nodes.filter((node): node is CanvasVideoNode => isVideoNode(node)).map((node) => [node.id, node])), [nodes]);
+    const rfNodes = useMemo(() => toRFNodes(nodes, selectedNodeIds, hiddenBatchNodeIds), [hiddenBatchNodeIds, nodes, selectedNodeIds, translate.locale]);
+    const nodeIdSet = useMemo(() => new Set(nodes.map((node) => node.id)), [nodes, translate.locale]);
+    const backgroundNodeIds = useMemo(() => new Set(nodes.filter(isBackgroundNode).map((node) => node.id)), [nodes, translate.locale]);
+    const rfEdges = useMemo(() => toRFEdges(connections, nodeIdSet, hiddenBatchEdgeNodeIds, backgroundNodeIds), [backgroundNodeIds, connections, hiddenBatchEdgeNodeIds, nodeIdSet, translate.locale]);
+    const videoNodesById = useMemo(() => new Map(nodes.filter((node): node is CanvasVideoNode => isVideoNode(node)).map((node) => [node.id, node])), [nodes, translate.locale]);
     const onNodesChange = useMemo(
         () =>
             createNodesChangeHandler(setNodes, (nodeIds) => {
@@ -4583,10 +4587,10 @@ function CanvasWorkspacePage() {
                 setConnections((currentConnections) => currentConnections.filter((connection) => !allIds.has(connection.source.nodeId) && !allIds.has(connection.target.nodeId)));
                 return allIds;
             }),
-        [cancelVideoCompositionTasksForDeletedNodes],
+        [cancelVideoCompositionTasksForDeletedNodes, translate.locale],
     );
-    const onEdgesChange = useMemo(() => createEdgesChangeHandler(setConnections), []);
-    const onConnect = useMemo(() => createConnectHandler(setConnections, connectionsRef, nodesRef, (errorMessage) => message.warning(errorMessage)), [message]);
+    const onEdgesChange = useMemo(() => createEdgesChangeHandler(setConnections), [translate.locale]);
+    const onConnect = useMemo(() => createConnectHandler(setConnections, connectionsRef, nodesRef, (errorMessage) => message.warning(errorMessage)), [message, translate.locale]);
 
     const nodeActions = useMemo(
         (): NodeActions => ({
@@ -4672,7 +4676,7 @@ function CanvasWorkspacePage() {
             toggleBatchExpanded,
             uploadNodeObjectStorage,
             videoNodesById,
-        ],
+        , translate.locale],
     );
 
     useEffect(() => {
@@ -4681,7 +4685,7 @@ function CanvasWorkspacePage() {
         setEdgeDeletePopover(null);
     }, [connections, edgeDeletePopover]);
 
-    const reactFlowViewport = useMemo(() => ({ x: viewport.x, y: viewport.y, zoom: viewport.k }), [viewport.k, viewport.x, viewport.y]);
+    const reactFlowViewport = useMemo(() => ({ x: viewport.x, y: viewport.y, zoom: viewport.k }), [viewport.k, viewport.x, viewport.y, translate.locale]);
     const handleViewportChange = useCallback((next: { x: number; y: number; zoom: number }) => {
         setViewport((current) => {
             if (current.x === next.x && current.y === next.y && current.k === next.zoom) return current;
@@ -4826,7 +4830,7 @@ function CanvasWorkspacePage() {
         >
             <section ref={containerRef} className="relative min-w-0 flex-1 overflow-hidden">
                 <CanvasTopBar
-                    title={currentDocument?.identity.title || "未命名画布"}
+                    title={currentDocument?.identity.title || translate("canvas.untitledCanvas")}
                     titleDraft={titleDraft}
                     isTitleEditing={titleEditing}
                     onTitleDraftChange={setTitleDraft}
@@ -4901,8 +4905,8 @@ function CanvasWorkspacePage() {
                             type="button"
                             className="grid size-8 place-items-center rounded-md transition"
                             style={{ color: theme.node.muted }}
-                            aria-label="删除连线"
-                            title="删除连线"
+                            aria-label={translate("canvas.deleteConnection")}
+                            title={translate("canvas.deleteConnection")}
                             onMouseEnter={(event) => {
                                 event.currentTarget.style.background = theme.node.fill;
                                 event.currentTarget.style.color = theme.node.text;
@@ -5092,7 +5096,7 @@ function CanvasWorkspacePage() {
                     asset={previewLibraryAsset}
                     onClose={() => setPreviewAsset(null)}
                     onCopy={() => {
-                        if (previewLibraryAsset?.kind === "text") copyText(previewLibraryAsset.data.content, "文本已复制");
+                        if (previewLibraryAsset?.kind === "text") copyText(previewLibraryAsset.data.content, translate("canvas.textCopied"));
                     }}
                     onDownload={() => {
                         if (previewLibraryAsset) downloadAsset(previewLibraryAsset);
@@ -5134,7 +5138,7 @@ function CanvasWorkspacePage() {
                     completedThinkings={completedThinkings}
                     activeThinking={activeThinking}
                     onNewSession={handleCreateAgentSession}
-                    onStop={() => void cancelAgentMessage().catch((error) => message.error(error instanceof Error ? error.message : "停止失败"))}
+                    onStop={() => void cancelAgentMessage().catch((error) => message.error(error instanceof Error ? error.message : translate("canvas.failedToStop")))}
                     initialPrompt={initialPrompt}
                     sessionId={activeChatId}
                     onSend={async (text, references = [], generationStyleIds = [], generationStyles = []) => {
@@ -5153,7 +5157,7 @@ function CanvasWorkspacePage() {
                         if (!activeChatId) {
                             const newSession: CanvasAssistantSession = {
                                 id: sessionId,
-                                title: text.slice(0, 30) || "新对话",
+                                title: text.slice(0, 30) || translate("canvas.newConversation"),
                                 messages: [userMessage],
                                 createdAt: now,
                                 updatedAt: now,
@@ -5187,11 +5191,11 @@ function CanvasWorkspacePage() {
                             if (!submitted) {
                                 setAgentRunning(false);
                                 setAgentQueued(false);
-                                appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: "上一次画布Agent任务仍在运行，请等它结束后再试" });
+                                appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: translate("canvas.operationFailed"), text: translate("canvas.previousCanvasAgentTaskIsStillRunningWaitFor") });
                             }
                         } catch (error) {
                             resetThinkings();
-                            appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: "操作失败", text: error instanceof Error ? error.message : "操作失败" });
+                            appendAssistantMessage(sessionId, { id: nanoid(), role: "error", title: translate("canvas.operationFailed"), text: error instanceof Error ? error.message : translate("canvas.operationFailed") });
                             setAgentRunning(false);
                             setAgentQueued(false);
                         }
@@ -5213,7 +5217,7 @@ function applyVideoCompositionTaskToNodes(nodes: CanvasDomainNode[], composition
     if (compositionNode?.execution.taskId !== task.id) return nodes;
     const resultVideoNodeId = compositionNode?.composition.resultVideoNodeId || fallbackResultVideoNodeId;
     if (task.status === "succeeded" && !readCompositionResultUrl(task)) {
-        return markVideoCompositionTaskFailed(nodes, compositionNodeId, resultVideoNodeId, "视频合成完成但没有返回结果媒体", task.id);
+        return markVideoCompositionTaskFailed(nodes, compositionNodeId, resultVideoNodeId, translate("canvas.videoCompositionReturnedNoResultMedia"), task.id);
     }
     const execution = videoCompositionExecution(task);
     return nodes.map((node) => {
@@ -5277,7 +5281,7 @@ function videoCompositionExecution(task: VideoCompositionTask) {
     return {
         phase: "failed" as const,
         progress: 100,
-        errorMessage: task.errorMessage || (task.status === "canceled" ? "任务已取消" : "视频合成失败"),
+        errorMessage: task.errorMessage || (task.status === "canceled" ? translate("canvas.taskCanceled") : translate("canvas.videoCompositionFailed")),
         ...(task.startedAt ? { startedAt: task.startedAt } : {}),
         ...(task.completedAt ? { completedAt: task.completedAt } : {}),
     };
@@ -5483,7 +5487,7 @@ async function readNodeObjectStorageBlob(node: CanvasDomainNode) {
 /** 读取节点本地媒体内容；仅用于没有服务端媒体记录的节点做回退上传。 */
 async function requireNodeObjectStorageBlob(node: CanvasDomainNode) {
     const blob = await readNodeObjectStorageBlob(node);
-    if (!blob) throw new Error(isImageNode(node) ? "图片文件读取失败" : "视频文件读取失败");
+    if (!blob) throw new Error(isImageNode(node) ? translate("canvas.failedToReadImageFile") : translate("canvas.failedToReadVideoFile"));
     return blob;
 }
 
@@ -5494,7 +5498,7 @@ async function requireNodeObjectStorageBlob(node: CanvasDomainNode) {
  * 没有媒体记录的节点才回退为浏览器上传。
  */
 async function uploadNodeMediaToObjectStorage(node: CanvasDomainNode) {
-    if (!isImageNode(node) && !isVideoNode(node)) throw new Error("当前节点不支持上传到云储存");
+    if (!isImageNode(node) && !isVideoNode(node)) throw new Error(translate("canvas.thisNodeDoesNotSupportCloudUpload"));
     if (node.content.storageKey) {
         return uploadRemoteObjectToStorage({
             storageKey: node.content.storageKey,
@@ -5514,7 +5518,7 @@ async function uploadNodeMediaToObjectStorage(node: CanvasDomainNode) {
 
 async function withNodeImageObjectUrl<Result>(node: CanvasDomainNode, process: (sourceUrl: string) => Promise<Result>): Promise<Result> {
     const blob = await readNodeObjectStorageBlob(node);
-    if (!blob) throw new Error("图片文件读取失败");
+    if (!blob) throw new Error(translate("canvas.failedToReadImageFile"));
     const sourceUrl = URL.createObjectURL(blob);
     try {
         return await process(sourceUrl);
@@ -5674,13 +5678,13 @@ function updateNodeWithTaskResult(nodes: CanvasDomainNode[], nodeId: string, com
     if (isTextNode(target)) {
         const data = completed.resultData && typeof completed.resultData === "object" ? (completed.resultData as { content?: unknown }) : null;
         const content = typeof data?.content === "string" ? data.content : "";
-        if (!content) return markTaskNodeFailed(nodes, nodeId, "生成完成但没有返回内容");
+        if (!content) return markTaskNodeFailed(nodes, nodeId, translate("canvas.generationCompletedWithoutContent"));
         return nodes.map((node) => (node.id === nodeId ? replaceCanvasNodeWithText(node, content, node.title, "succeeded") : node));
     }
     const result = completed.resultData && typeof completed.resultData === "object" ? (completed.resultData as Record<string, unknown>) : null;
     const item = (result?.item as Record<string, unknown> | undefined) ?? (result?.items as Array<Record<string, unknown>> | undefined)?.[0];
     const url = item && typeof item.url === "string" ? item.url : "";
-    if (!url) return markTaskNodeFailed(nodes, nodeId, "生成完成但没有返回结果地址");
+    if (!url) return markTaskNodeFailed(nodes, nodeId, translate("canvas.generationCompletedWithoutAResultURL"));
     const type = isVideoNode(target) ? "video" : "image";
     const width = (typeof item?.width === "number" && item.width) || target.frame.width;
     const height = (typeof item?.height === "number" && item.height) || target.frame.height;
@@ -5722,7 +5726,7 @@ function canvasGenerationResult(successfulNodeIds: string[], failures: CanvasNod
     const successful = Array.from(new Set(successfulNodeIds));
     return {
         ok: failures.length === 0,
-        message: failures.length ? (successful.length ? "部分画布节点生成失败" : "画布节点生成失败") : `画布节点生成完成，共 ${successful.length} 个`,
+        message: failures.length ? (successful.length ? translate("canvas.someCanvasNodesFailed") : translate("canvas.canvasNodeGenerationFailed")) : translate("canvas.canvasGenerationCompletedNodes", { value0: successful.length }),
         data: { successfulNodeIds: successful, failures, ...(actualToolArguments ? { actualToolArguments } : {}) },
     };
 }
@@ -5732,7 +5736,7 @@ function failedCanvasGenerationResult(nodeId: string, error: AiTaskErrorDetails,
 }
 
 function canceledCanvasGenerationResult(): CanvasAgentToolResult {
-    return { ok: false, message: "已停止生成", data: { canceled: true, successfulNodeIds: [], failures: [] } };
+    return { ok: false, message: translate("canvas.generationStopped"), data: { canceled: true, successfulNodeIds: [], failures: [] } };
 }
 
 function mergeCanvasGenerationResults(results: CanvasAgentToolResult[]): CanvasAgentToolResult {
@@ -5760,7 +5764,7 @@ function withCanvasArgumentSources(result: CanvasAgentToolResult, generationOps:
     const addOperation = stateOps.find((operation) => operation.type === "add_node" && operation.id === targetNodeId);
     const agentFields = new Set(Object.keys(addOperation?.attributes || {}));
     if (agentFields.has("content")) agentFields.add("prompt");
-    const argumentSources = Object.fromEntries(Object.keys(actualToolArguments).map((name) => [name, createdNode ? (agentFields.has(name) ? "Agent生成" : "系统默认") : "用户硬约束"]));
+    const argumentSources = Object.fromEntries(Object.keys(actualToolArguments).map((name) => [name, createdNode ? (agentFields.has(name) ? translate("canvas.generateWithAgent") : translate("canvas.systemDefault")) : translate("canvas.userConstraints")]));
     return { ...result, data: { ...result.data, argumentSources } };
 }
 
@@ -5811,7 +5815,7 @@ async function resumeStoryboardAssetGeneration(node: CanvasStoryboardNode, setNo
     const taskResults = await Promise.all(
         state.selectedAssetIds.map(async (assetId) => {
             const taskId = state.taskIds[assetId];
-            if (!taskId) return { assetId, ok: false, error: "页面刷新时未找到该资产的图片任务" };
+            if (!taskId) return { assetId, ok: false, error: translate("canvas.assetImageTaskNotFoundAfterRefresh") };
             try {
                 const task = await getAiTaskInfo(taskId);
                 const completed = task.status === "success" ? task : await waitAiTask(taskId, { signal: new AbortController().signal });
@@ -5833,7 +5837,7 @@ async function resumeStoryboardAssetGeneration(node: CanvasStoryboardNode, setNo
                 );
                 return { assetId, ok: true };
             } catch (error) {
-                return { assetId, ok: false, error: error instanceof Error ? error.message : "资产图片恢复失败" };
+                return { assetId, ok: false, error: error instanceof Error ? error.message : translate("canvas.failedToRestoreAssetImage") };
             }
         }),
     );
@@ -5850,7 +5854,7 @@ async function resumeStoryboardAssetGeneration(node: CanvasStoryboardNode, setNo
                 delete errors[result.assetId];
             } else {
                 statuses[result.assetId] = "failed";
-                errors[result.assetId] = result.error || "资产图片恢复失败";
+                errors[result.assetId] = result.error || translate("canvas.failedToRestoreAssetImage");
             }
         });
         const hasFailed = currentState.selectedAssetIds.some((assetId) => statuses[assetId] === "failed");
@@ -5861,7 +5865,7 @@ async function resumeStoryboardAssetGeneration(node: CanvasStoryboardNode, setNo
             phase: hasFailed ? "failed" : "succeeded",
             progress: 100,
             completedAt: new Date().toISOString(),
-            errorMessage: hasFailed ? "页面刷新后部分资产图片生成失败，请重试失败项。" : "",
+            errorMessage: hasFailed ? translate("canvas.someAssetImagesFailedAfterRefreshRetryFailedItems") : "",
         };
         return nodes.map((current) =>
             current.id === node.id && isStoryboardNode(current)
@@ -5882,15 +5886,15 @@ type StoryboardScriptSource = { ok: true; scriptContent: string; node: CanvasTex
 function findStoryboardScriptSource(storyboardNodeId: string, nodes: CanvasDomainNode[], connections: CanvasConnection[]): StoryboardScriptSource {
     const sourceNodeIds = Array.from(new Set(connections.filter((connection) => connection.target.nodeId === storyboardNodeId).map((connection) => connection.source.nodeId)));
     if (sourceNodeIds.length !== 1) {
-        return { ok: false, error: "分镜脚本必须且只能引用一个文本剧本节点" };
+        return { ok: false, error: translate("canvas.aStoryboardMustReferenceExactlyOneScriptTextNode") };
     }
     const sourceNode = nodes.find((node) => node.id === sourceNodeIds[0]);
     if (!sourceNode || !isTextNode(sourceNode)) {
-        return { ok: false, error: "分镜脚本的来源必须是文本剧本节点" };
+        return { ok: false, error: translate("canvas.storyboardSourceMustBeAScriptTextNode") };
     }
     const scriptContent = sourceNode.content.text.trim();
     if (!scriptContent) {
-        return { ok: false, error: "剧本文本不能为空，请先在来源文本节点输入剧本" };
+        return { ok: false, error: translate("canvas.scriptIsEmptyEnterItInTheSourceText") };
     }
     return { ok: true, scriptContent, node: sourceNode };
 }
@@ -5907,16 +5911,16 @@ function collectStoryboardCompositionAssets(shots: CanvasStoryboardShot[], asset
 
 /** 校验用户编辑后的镜头与关联资产，避免在请求前产生无效扣费。 */
 function validateStoryboardComposition(shots: CanvasStoryboardShot[], assets: CanvasStoryboardAsset[]): string | null {
-    if (!shots.length) return "至少需要一个镜头才能合成提示词";
-    if (shots.length > 100) return "镜头数量不能超过100个";
+    if (!shots.length) return translate("canvas.atLeastOneShotIsRequiredToComposePrompts");
+    if (shots.length > 100) return translate("canvas.atMost100Shots");
 
-    if (assets.length > 300) return "资产数量不能超过300项";
+    if (assets.length > 300) return translate("canvas.atMost300Assets");
     const assetIds = new Set<string>();
     const assetKinds = new Set(["character", "scene", "prop"]);
     for (const asset of assets) {
-        if (!asset.id.trim() || !assetIds.add(asset.id)) return "资产标识无效或重复";
-        if (!assetKinds.has(asset.kind)) return "资产类别仅支持角色、场景或道具";
-        if (!asset.name.trim()) return "请填写关联资产的名称后再合成提示词";
+        if (!asset.id.trim() || !assetIds.add(asset.id)) return translate("canvas.invalidOrDuplicateAssetID");
+        if (!assetKinds.has(asset.kind)) return translate("canvas.assetCategoryMustBeCharacterSceneOrProp");
+        if (!asset.name.trim()) return translate("canvas.nameLinkedAssetsBeforeComposingPrompts");
     }
 
     const shotIds = new Set<string>();
@@ -5924,16 +5928,16 @@ function validateStoryboardComposition(shots: CanvasStoryboardShot[], assets: Ca
     const shotSizes = new Set(STORYBOARD_SHOT_SIZES.map((item) => item.value));
     for (const [index, shot] of shots.entries()) {
         const row = index + 1;
-        if (!shot.id.trim() || !shotIds.add(shot.id)) return `第 ${row} 个镜头的标识无效或重复`;
-        if (!Number.isInteger(shot.shotNumber) || shot.shotNumber < 1 || !shotNumbers.add(shot.shotNumber)) return `第 ${row} 个镜头的镜号必须是不重复的正整数`;
-        if (!Number.isInteger(shot.durationSeconds) || shot.durationSeconds < 1 || shot.durationSeconds > 600) return `第 ${row} 个镜头的时长必须是1至600秒的整数`;
-        if (!shot.visualDescription.trim()) return `请填写第 ${row} 个镜头的画面描述`;
-        if (!shotSizes.has(shot.shotSize)) return `第 ${row} 个镜头的景别不合法`;
-        if (!Array.isArray(shot.assetIds)) return `第 ${row} 个镜头的关联资产数据不合法`;
+        if (!shot.id.trim() || !shotIds.add(shot.id)) return translate("canvas.invalidOrDuplicateIDForShot", { value0: row });
+        if (!Number.isInteger(shot.shotNumber) || shot.shotNumber < 1 || !shotNumbers.add(shot.shotNumber)) return translate("canvas.shotNumberMustBeAUniquePositiveInteger", { value0: row });
+        if (!Number.isInteger(shot.durationSeconds) || shot.durationSeconds < 1 || shot.durationSeconds > 600) return translate("canvas.shotDurationMustBeAnIntegerFrom1To", { value0: row });
+        if (!shot.visualDescription.trim()) return translate("canvas.enterVisualDescriptionForShot", { value0: row });
+        if (!shotSizes.has(shot.shotSize)) return translate("canvas.invalidShotSizeForShot", { value0: row });
+        if (!Array.isArray(shot.assetIds)) return translate("canvas.invalidLinkedAssetsForShot", { value0: row });
         const shotAssetIds = new Set<string>();
         for (const assetId of shot.assetIds) {
-            if (!assetId.trim() || !shotAssetIds.add(assetId)) return `第 ${row} 个镜头的关联资产标识无效或重复`;
-            if (!assetIds.has(assetId)) return `第 ${row} 个镜头关联了不存在的资产`;
+            if (!assetId.trim() || !shotAssetIds.add(assetId)) return translate("canvas.invalidOrDuplicateLinkedAssetIDForShot", { value0: row });
+            if (!assetIds.has(assetId)) return translate("canvas.shotReferencesAMissingAsset", { value0: row });
         }
     }
     return null;

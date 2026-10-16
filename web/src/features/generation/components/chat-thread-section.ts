@@ -1,4 +1,6 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+
 
 import React from "react";
 import { Image } from "antd";
@@ -94,7 +96,7 @@ export function buildChatThreadSection(
                 currentResultByCallId.set(msg.id, renderPendingToolCall?.(call)
                     ?? React.createElement(LoaderCircle, { key: `loading-${msg.id}`, className: "size-5 animate-spin text-[var(--studio-muted)]" }));
             } else if (call?.status === "failed") {
-                currentStatusText = `❌ ${call.resultMessage || "生成失败"}`;
+                currentStatusText = `❌ ${call.resultMessage || translate("generation.generationFailed")}`;
             } else if (call?.status === "canceled") {
                 currentStatusText = "已停止生成";
             } else if (call?.status === "success" && call.resultData) {
@@ -103,7 +105,7 @@ export function buildChatThreadSection(
                     currentStatusText = "✅ 生成完成";
                     currentResultByCallId.set(msg.id, mediaNodes);
                 } else {
-                    currentStatusText = `✅ ${call.resultMessage || "完成"}`;
+                    currentStatusText = `✅ ${call.resultMessage || translate("generation.done")}`;
                 }
             }
         } else if (msg.role === "error") {
@@ -115,7 +117,7 @@ export function buildChatThreadSection(
     }
 
     if (streamingText) {
-        rounds.push({ id: "loading", userText: "", statusText: "AI 正在输入...", assistantText: streamingText.text, resultContent: null } as CreationThreadRound);
+        rounds.push({ id: "loading", userText: "", statusText: translate("generation.aIIsTyping"), assistantText: streamingText.text, resultContent: null } as CreationThreadRound);
     }
 
     const latestConversationRound = rounds.findLast((round) => Boolean(round.userText || round.userAttachments));
@@ -124,7 +126,7 @@ export function buildChatThreadSection(
         latestConversationRound.activeThinkingId = activeThinking?.id;
     }
 
-    return { id: "chat", label: "当前对话", rounds };
+    return { id: "chat", label: translate("generation.currentConversation"), rounds };
 }
 
 /** 将助手文本以 Markdown 渲染后与结果内容合并为单条 round */
@@ -172,7 +174,7 @@ function renderUserAttachments(attachments?: ChatAttachment[], styles?: ChatGene
             {
                 key: `chat-skill-${skill.id}`,
                 className: "inline-flex max-w-52 items-center gap-1.5 rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-1 text-xs font-medium text-[var(--studio-ink)]",
-                title: `技能：${skill.name}`,
+                title: translate("generation.skill", { value0: skill.name }),
             },
             React.createElement(BookOpenText, { className: "size-3.5 shrink-0 text-[var(--studio-action)]" }),
             React.createElement("span", { className: "truncate" }, skill.name),

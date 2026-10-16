@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Button, Modal } from "antd";
@@ -21,8 +23,9 @@ type TrimDragTarget = "start" | "end" | "range";
 
 /** 音频节点裁剪对话框，裁剪结果以新节点保存。 */
 export function CanvasNodeAudioTrimDialog({ node, open, onClose, onConfirm }: CanvasNodeAudioTrimDialogProps) {
+    const translate = useTranslation();
     const theme = useCanvasTheme();
-    const range = useMemo(() => (node ? audioNodeTrimRange(node.content) : { startMs: 0, endMs: 0, durationMs: 0, originalDurationMs: 0 }), [node]);
+    const range = useMemo(() => (node ? audioNodeTrimRange(node.content) : { startMs: 0, endMs: 0, durationMs: 0, originalDurationMs: 0 }), [node, translate.locale]);
     const [startMs, setStartMs] = useState(0);
     const [endMs, setEndMs] = useState(0);
     const [previewTimeMs, setPreviewTimeMs] = useState(0);
@@ -143,8 +146,7 @@ export function CanvasNodeAudioTrimDialog({ node, open, onClose, onConfirm }: Ca
             title={
                 <span className="flex items-center gap-2">
                     <Scissors className="size-4" />
-                    裁剪为新音频节点
-                </span>
+                    {translate("canvas.trimIntoNewAudioNode")}</span>
             }
             open={open && Boolean(node)}
             centered
@@ -152,14 +154,11 @@ export function CanvasNodeAudioTrimDialog({ node, open, onClose, onConfirm }: Ca
             onCancel={onClose}
             footer={[
                 <Button key="reset" onClick={reset}>
-                    重置范围
-                </Button>,
+                    {translate("canvas.resetRange")}</Button>,
                 <Button key="cancel" onClick={onClose}>
-                    取消
-                </Button>,
+                    {translate("canvas.cancel")}</Button>,
                 <Button key="confirm" type="primary" disabled={!node?.content.source || selectedDuration < MINIMUM_CLIP_MILLISECONDS} onClick={() => onConfirm(startMs, endMs)}>
-                    创建音频节点
-                </Button>,
+                    {translate("canvas.createAudioNode")}</Button>,
             ]}
             width={680}
         >
@@ -172,7 +171,7 @@ export function CanvasNodeAudioTrimDialog({ node, open, onClose, onConfirm }: Ca
                         ref={audioRef}
                         src={node.content.source}
                         preload="metadata"
-                        aria-label="裁剪范围音频预览"
+                        aria-label={translate("canvas.trimmedAudioPreview")}
                         onLoadedMetadata={(event) => {
                             event.currentTarget.currentTime = startMs / 1000;
                             setPreviewTimeMs(startMs);
@@ -215,7 +214,7 @@ export function CanvasNodeAudioTrimDialog({ node, open, onClose, onConfirm }: Ca
                             <button
                                 type="button"
                                 role="slider"
-                                aria-label="调整裁剪开始时间"
+                                aria-label={translate("canvas.adjustTrimStart")}
                                 aria-valuemin={0}
                                 aria-valuemax={duration}
                                 aria-valuenow={Math.round(startMs)}
@@ -228,7 +227,7 @@ export function CanvasNodeAudioTrimDialog({ node, open, onClose, onConfirm }: Ca
                             <button
                                 type="button"
                                 role="slider"
-                                aria-label="调整裁剪结束时间"
+                                aria-label={translate("canvas.adjustTrimEnd")}
                                 aria-valuemin={0}
                                 aria-valuemax={duration}
                                 aria-valuenow={Math.round(endMs)}
@@ -238,15 +237,15 @@ export function CanvasNodeAudioTrimDialog({ node, open, onClose, onConfirm }: Ca
                                 onPointerDown={(event) => beginDrag("end", event)}
                                 onKeyDown={(event) => adjustByKeyboard("end", event)}
                             />
-                            <input type="range" min={0} max={duration || 1} step={10} value={startMs} aria-label="裁剪开始时间键盘输入" className="sr-only" onChange={(event) => updateStart(Number(event.target.value))} />
-                            <input type="range" min={0} max={duration || 1} step={10} value={endMs} aria-label="裁剪结束时间键盘输入" className="sr-only" onChange={(event) => updateEnd(Number(event.target.value))} />
+                            <input type="range" min={0} max={duration || 1} step={10} value={startMs} aria-label={translate("canvas.trimStartKeyboardInput")} className="sr-only" onChange={(event) => updateStart(Number(event.target.value))} />
+                            <input type="range" min={0} max={duration || 1} step={10} value={endMs} aria-label={translate("canvas.trimEndKeyboardInput")} className="sr-only" onChange={(event) => updateEnd(Number(event.target.value))} />
                         </div>
                     </div>
                     <div className="flex items-center justify-center gap-3 text-xs tabular-nums" style={{ color: theme.node.muted }}>
                         <button
                             type="button"
-                            aria-label={previewPlaying ? "暂停裁剪预览" : "播放裁剪预览"}
-                            title={previewPlaying ? "暂停预览" : "播放预览"}
+                            aria-label={previewPlaying ? translate("canvas.pauseTrimPreview") : translate("canvas.playTrimPreview")}
+                            title={previewPlaying ? translate("canvas.pausePreview") : translate("canvas.playPreview")}
                             disabled={!node.content.source || selectedDuration < MINIMUM_CLIP_MILLISECONDS}
                             className="grid size-11 shrink-0 place-items-center rounded-full border transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
                             style={{ borderColor: theme.node.activeStroke, color: theme.node.activeStroke }}
@@ -260,21 +259,20 @@ export function CanvasNodeAudioTrimDialog({ node, open, onClose, onConfirm }: Ca
                     </div>
                     <div className="grid grid-cols-3 gap-3 text-center text-xs tabular-nums" style={{ color: theme.node.muted }}>
                         <div>
-                            <div className="mb-1 opacity-60">开始</div>
+                            <div className="mb-1 opacity-60">{translate("canvas.start")}</div>
                             <strong style={{ color: theme.node.text }}>{formatAudioTime(startMs / 1000)}</strong>
                         </div>
                         <div>
-                            <div className="mb-1 opacity-60">片段时长</div>
+                            <div className="mb-1 opacity-60">{translate("canvas.clipDuration")}</div>
                             <strong style={{ color: theme.node.activeStroke }}>{formatAudioTime(selectedDuration / 1000)}</strong>
                         </div>
                         <div>
-                            <div className="mb-1 opacity-60">结束</div>
+                            <div className="mb-1 opacity-60">{translate("canvas.end")}</div>
                             <strong style={{ color: theme.node.text }}>{formatAudioTime(endMs / 1000)}</strong>
                         </div>
                     </div>
                     <p className="text-xs" style={{ color: theme.node.muted }}>
-                        原节点保持完整音频，新节点将引用当前选中的片段。
-                    </p>
+                        {translate("canvas.originalNodeKeepsFullAudioNewNodeReferencesThis")}</p>
                 </div>
             ) : null}
         </Modal>

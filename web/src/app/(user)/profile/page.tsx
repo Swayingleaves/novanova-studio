@@ -1,4 +1,9 @@
 "use client";
+import { currentLanguageTag } from "@/features/locale/translate";
+
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, App, Avatar, Button, Descriptions, Form, Input, Modal, Skeleton } from "antd";
@@ -16,6 +21,7 @@ type PasswordFormValues = { currentPassword: string; newPassword: string; confir
 const MAX_AVATAR_FILE_SIZE = 2 * 1024 * 1024;
 
 export default function ProfilePage() {
+    const translate = useTranslation();
     const hydrated = useUserStore((state) => state.hydrated);
     const user = useUserStore((state) => state.user);
     const setUser = useUserStore((state) => state.setUser);
@@ -44,7 +50,7 @@ export default function ProfilePage() {
                 setUser(nextProfile);
             })
             .catch((error) => {
-                if (!cancelled) setLoadError(error instanceof Error ? error.message : "个人信息加载失败");
+                if (!cancelled) setLoadError(error instanceof Error ? error.message : translate("profile.failedToLoadProfile"));
             })
             .finally(() => {
                 if (!cancelled) setLoading(false);
@@ -58,30 +64,28 @@ export default function ProfilePage() {
         <main className="studio-page h-full overflow-y-auto px-4 py-6 sm:px-6">
             <div className="mx-auto flex max-w-4xl flex-col gap-6">
                 <header className="border-b border-[var(--studio-line)] pb-5">
-                    <h1 className="studio-title text-2xl font-semibold">个人信息</h1>
-                    <p className="studio-subtitle mt-2 text-sm">管理账号展示资料与头像。</p>
+                    <h1 className="studio-title text-2xl font-semibold">{translate("profile.profile")}</h1>
+                    <p className="studio-subtitle mt-2 text-sm">{translate("profile.manageYourProfileAndAvatar")}</p>
                 </header>
 
                 {!hydrated || loading ? <ProfileSkeleton /> : null}
                 {hydrated && !user ? (
                     <section className="flex min-h-72 flex-col items-center justify-center text-center">
-                        <h2 className="studio-title text-lg font-medium">登录后管理个人信息</h2>
-                        <p className="studio-subtitle mt-2 text-sm">头像、昵称和用户名会显示在创作工作台中。</p>
+                        <h2 className="studio-title text-lg font-medium">{translate("profile.signInToManageYourProfile")}</h2>
+                        <p className="studio-subtitle mt-2 text-sm">{translate("profile.avatarAndNamesAppearInTheCreativeWorkspace")}</p>
                         <Button type="primary" className="mt-5" icon={<LogIn className="size-4" />} onClick={() => openAuthModal("/profile")}>
-                            登录
-                        </Button>
+                            {translate("profile.signIn")}</Button>
                     </section>
                 ) : null}
                 {loadError ? (
                     <Alert
                         type="error"
                         showIcon
-                        title="个人信息加载失败"
+                        title={translate("profile.failedToLoadProfile")}
                         description={loadError}
                         action={
                             <Button size="small" onClick={() => setReloadVersion((value) => value + 1)}>
-                                重新加载
-                            </Button>
+                                {translate("profile.reload")}</Button>
                         }
                     />
                 ) : null}
@@ -92,6 +96,7 @@ export default function ProfilePage() {
 }
 
 function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfile; onProfileUpdated: (profile: ServerUserProfile) => void }) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const [form] = Form.useForm<ProfileFormValues>();
     const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -121,11 +126,11 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
     const selectAvatar = (file?: File) => {
         if (!file) return;
         if (!file.type.startsWith("image/")) {
-            message.error("请选择图片文件");
+            message.error(translate("profile.selectAnImageFile"));
             return;
         }
         if (file.size > MAX_AVATAR_FILE_SIZE) {
-            message.error("头像图片不能超过 2MB");
+            message.error(translate("profile.avatarMustNotExceed2MB"));
             if (avatarInputRef.current) avatarInputRef.current.value = "";
             return;
         }
@@ -157,9 +162,9 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
             });
             onProfileUpdated(nextProfile);
             setUser(nextProfile);
-            message.success("个人信息已保存");
+            message.success(translate("profile.profileSaved"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "个人信息保存失败");
+            message.error(error instanceof Error ? error.message : translate("profile.failedToSaveProfile"));
         } finally {
             setUploadingAvatar(false);
             setSubmitting(false);
@@ -177,8 +182,7 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
                         <div className="truncate text-base font-medium text-[var(--studio-ink)]">{profile.nickname || profile.username}</div>
                         <div className="mt-1 truncate text-sm text-[var(--studio-muted)]">{profile.email}</div>
                         <Button className="mt-3" icon={<Camera className="size-4" />} loading={uploadingAvatar} disabled={submitting} onClick={() => avatarInputRef.current?.click()}>
-                            更换头像
-                        </Button>
+                            {translate("profile.changeAvatar")}</Button>
                     </div>
                 </div>
 
@@ -188,30 +192,28 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
                     </Form.Item>
                     <Form.Item
                         name="username"
-                        label="用户名"
+                        label={translate("profile.username")}
                         rules={[
-                            { required: true, whitespace: true, message: "请输入用户名" },
-                            { max: 50, message: "用户名不能超过 50 个字符" },
+                            { required: true, whitespace: true, message: translate("profile.enterUsername") },
+                            { max: 50, message: translate("profile.usernameMustNotExceed50Characters") },
                         ]}
                     >
-                        <Input autoComplete="username" maxLength={50} placeholder="请输入用户名" />
+                        <Input autoComplete="username" maxLength={50} placeholder={translate("profile.enterUsername")} />
                     </Form.Item>
-                    <Form.Item name="nickname" label="昵称" rules={[{ max: 50, message: "昵称不能超过 50 个字符" }]}>
-                        <Input autoComplete="nickname" maxLength={50} placeholder="请输入昵称" />
+                    <Form.Item name="nickname" label={translate("profile.displayName")} rules={[{ max: 50, message: translate("profile.displayNameMustNotExceed50Characters") }]}>
+                        <Input autoComplete="nickname" maxLength={50} placeholder={translate("profile.enterADisplayName")} />
                     </Form.Item>
                     <Button type="primary" htmlType="submit" icon={<Save className="size-4" />} loading={submitting} disabled={uploadingAvatar}>
-                        保存更改
-                    </Button>
+                        {translate("profile.saveChanges")}</Button>
                 </Form>
             </section>
 
             <section className="border-t border-[var(--studio-line)] pt-5 lg:border-l lg:border-t-0 lg:pl-8 lg:pt-0">
-                <h2 className="studio-title text-base font-medium">账号信息</h2>
+                <h2 className="studio-title text-base font-medium">{translate("profile.accountDetails")}</h2>
                 <Descriptions className="mt-4" column={1} size="small" items={accountInformation(profile)} />
                 <div className="mt-5 border-t border-[var(--studio-line)] pt-5">
                     <Button icon={<LockKeyhole className="size-4" />} onClick={() => setPasswordModalOpen(true)}>
-                        修改密码
-                    </Button>
+                        {translate("profile.changePassword")}</Button>
                 </div>
                 <InvitationLinkPanel />
             </section>
@@ -236,6 +238,7 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
  * @return 邀请链接面板
  */
 function InvitationLinkPanel() {
+    const translate = useTranslation();
     const copyText = useCopyText();
     const invitationQuery = useQuery({ queryKey: ["invitation-info"], queryFn: getInvitationInfo });
     const invitationLink = invitationQuery.data && typeof window !== "undefined"
@@ -244,22 +247,22 @@ function InvitationLinkPanel() {
 
     return (
         <div className="mt-5 border-t border-[var(--studio-line)] pt-5">
-            <h2 className="studio-title text-base font-medium">专属邀请链接</h2>
-            <p className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">好友通过此链接完成注册后，你可获得系统当前配置的邀请奖励。</p>
+            <h2 className="studio-title text-base font-medium">{translate("profile.yourInvitationLink")}</h2>
+            <p className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("profile.earnTheConfiguredReferralRewardWhenAFriendRegisters")}</p>
             {invitationQuery.isLoading ? <Skeleton.Input active block className="mt-3" /> : null}
             {invitationQuery.isError ? (
                 <Alert
                     className="mt-3"
                     type="error"
                     showIcon
-                    title="邀请链接加载失败"
-                    action={<Button size="small" onClick={() => void invitationQuery.refetch()}>重试</Button>}
+                    title={translate("profile.failedToLoadInvitationLink")}
+                    action={<Button size="small" onClick={() => void invitationQuery.refetch()}>{translate("profile.retry")}</Button>}
                 />
             ) : null}
             {invitationLink ? (
                 <div className="mt-3 space-y-2">
-                    <Input readOnly value={invitationLink} aria-label="专属邀请链接" />
-                    <Button block icon={<Copy className="size-4" aria-hidden="true" />} onClick={() => copyText(invitationLink, "邀请链接已复制")}>复制邀请链接</Button>
+                    <Input readOnly value={invitationLink} aria-label={translate("profile.yourInvitationLink")} />
+                    <Button block icon={<Copy className="size-4" aria-hidden="true" />} onClick={() => copyText(invitationLink, translate("profile.invitationLinkCopied"))}>{translate("profile.copyInvitationLink")}</Button>
                 </div>
             ) : null}
         </div>
@@ -267,6 +270,7 @@ function InvitationLinkPanel() {
 }
 
 function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const [form] = Form.useForm<PasswordFormValues>();
     const [submitting, setSubmitting] = useState(false);
@@ -281,11 +285,11 @@ function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => 
         setSubmitting(true);
         try {
             await changeCurrentUserPassword({ currentPassword: values.currentPassword, newPassword: values.newPassword });
-            message.success("密码已修改");
+            message.success(translate("profile.passwordChanged"));
             form.resetFields();
             onClose();
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "密码修改失败");
+            message.error(error instanceof Error ? error.message : translate("profile.failedToChangePassword"));
         } finally {
             setSubmitting(false);
         }
@@ -293,45 +297,45 @@ function ChangePasswordModal({ open, onClose }: { open: boolean; onClose: () => 
 
     return (
         <Modal
-            title="修改密码"
+            title={translate("profile.changePassword")}
             open={open}
             onCancel={closeModal}
             onOk={() => form.submit()}
-            okText="确认修改"
-            cancelText="取消"
+            okText={translate("profile.confirmChanges")}
+            cancelText={translate("profile.cancel")}
             confirmLoading={submitting}
             cancelButtonProps={{ disabled: submitting }}
             destroyOnHidden
             width={480}
         >
             <Form form={form} layout="vertical" requiredMark={false} preserve={false} className="mt-5" onFinish={submitPassword}>
-                <Form.Item name="currentPassword" label="原密码" rules={[{ required: true, message: "请输入原密码" }]}>
-                    <Input.Password autoComplete="current-password" placeholder="请输入原密码" />
+                <Form.Item name="currentPassword" label={translate("profile.currentPassword")} rules={[{ required: true, message: translate("profile.enterCurrentPassword") }]}>
+                    <Input.Password autoComplete="current-password" placeholder={translate("profile.enterCurrentPassword")} />
                 </Form.Item>
                 <Form.Item
                     name="newPassword"
-                    label="新密码"
+                    label={translate("profile.newPassword")}
                     rules={[
-                        { required: true, message: "请输入新密码" },
-                        { min: 8, message: "新密码至少需要 8 位" },
+                        { required: true, message: translate("profile.enterANewPassword") },
+                        { min: 8, message: translate("profile.newPasswordNeedsAtLeast8Characters") },
                     ]}
                 >
-                    <Input.Password autoComplete="new-password" placeholder="至少 8 位" />
+                    <Input.Password autoComplete="new-password" placeholder={translate("profile.atLeast8Characters")} />
                 </Form.Item>
                 <Form.Item
                     name="confirmPassword"
-                    label="确认新密码"
+                    label={translate("profile.confirmNewPassword")}
                     dependencies={["newPassword"]}
                     rules={[
-                        { required: true, message: "请再次输入新密码" },
+                        { required: true, message: translate("profile.reEnterNewPassword") },
                         ({ getFieldValue }) => ({
                             validator(_, value) {
-                                return !value || getFieldValue("newPassword") === value ? Promise.resolve() : Promise.reject(new Error("两次输入的新密码不一致"));
+                                return !value || getFieldValue("newPassword") === value ? Promise.resolve() : Promise.reject(new Error(translate("profile.newPasswordsDoNotMatch")));
                             },
                         }),
                     ]}
                 >
-                    <Input.Password autoComplete="new-password" placeholder="请再次输入新密码" />
+                    <Input.Password autoComplete="new-password" placeholder={translate("profile.reEnterNewPassword")} />
                 </Form.Item>
             </Form>
         </Modal>
@@ -357,16 +361,16 @@ function ProfileSkeleton() {
 
 function accountInformation(profile: ServerUserProfile) {
     return [
-        { key: "email", label: "邮箱", children: profile.email },
-        { key: "id", label: "用户 ID", children: String(profile.id) },
-        { key: "role", label: "角色", children: profile.role === "admin" ? "管理员" : "普通用户" },
-        { key: "credit", label: "可用积分", children: Number(profile.creditBalance || 0).toLocaleString("zh-CN") },
-        { key: "created", label: "注册时间", children: formatProfileTime(profile.createdAt) },
-        { key: "lastLogin", label: "最后登录", children: formatProfileTime(profile.lastLoginAt) },
+        { key: "email", label: translate("profile.email"), children: profile.email },
+        { key: "id", label: translate("profile.userID"), children: String(profile.id) },
+        { key: "role", label: translate("profile.character"), children: profile.role === "admin" ? translate("profile.administrator") : translate("profile.user") },
+        { key: "credit", label: translate("profile.availableCredits"), children: Number(profile.creditBalance || 0).toLocaleString(currentLanguageTag()) },
+        { key: "created", label: translate("profile.registeredAt"), children: formatProfileTime(profile.createdAt) },
+        { key: "lastLogin", label: translate("profile.lastSignIn"), children: formatProfileTime(profile.lastLoginAt) },
     ];
 }
 
 function formatProfileTime(value: string) {
     const time = Date.parse(value);
-    return Number.isNaN(time) ? "暂无记录" : new Date(time).toLocaleString("zh-CN", { hour12: false });
+    return Number.isNaN(time) ? translate("profile.noRecords") : new Date(time).toLocaleString(currentLanguageTag(), { hour12: false });
 }

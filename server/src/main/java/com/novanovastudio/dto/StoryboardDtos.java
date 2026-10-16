@@ -32,10 +32,10 @@ public final class StoryboardDtos {
      * @param model String 选择的channelId::model文本模型
      */
     public record GenerateStoryboardRequest(
-            @NotBlank(message = "剧本文本不能为空") @Size(max = 40000, message = "剧本文本不能超过40000字") String scriptContent,
-            @NotBlank(message = "分镜描述不能为空") @Size(max = 8000, message = "分镜描述不能超过8000字") String instruction,
-            @NotBlank(message = "视觉风格不能为空") @Size(max = 8000, message = "视觉风格不能超过8000字") String visualStyle,
-            @NotBlank(message = "文本模型不能为空") @Size(max = 256, message = "文本模型长度不合法") String model) {
+            @NotBlank(message = "business.scriptIsRequired") @Size(max = 40000, message = "business.scriptMustNotExceed40000Characters") String scriptContent,
+            @NotBlank(message = "business.storyboardDescriptionIsRequired") @Size(max = 8000, message = "business.storyboardDescriptionMustNotExceed8000Characters") String instruction,
+            @NotBlank(message = "business.visualStyleIsRequired") @Size(max = 8000, message = "business.visualStyleMustNotExceed8000Characters") String visualStyle,
+            @NotBlank(message = "business.textModelIsRequired") @Size(max = 256, message = "business.invalidTextModelLength") String model) {
     }
 
     /**
@@ -49,12 +49,12 @@ public final class StoryboardDtos {
      * @param assets List<StoryboardAsset> 当前可编辑资产
      */
     public record ComposePromptsRequest(
-            @NotBlank(message = "剧本文本不能为空") @Size(max = 40000, message = "剧本文本不能超过40000字") String scriptContent,
-            @NotBlank(message = "分镜描述不能为空") @Size(max = 8000, message = "分镜描述不能超过8000字") String instruction,
-            @NotBlank(message = "视觉风格不能为空") @Size(max = 8000, message = "视觉风格不能超过8000字") String visualStyle,
-            @NotBlank(message = "文本模型不能为空") @Size(max = 256, message = "文本模型长度不合法") String model,
-            @NotEmpty(message = "至少需要一个镜头") @Size(max = MAX_SHOT_COUNT, message = "镜头数量不能超过100") List<@Valid StoryboardShot> shots,
-            @Size(max = 300, message = "资产数量不能超过300") List<@Valid StoryboardAsset> assets) {
+            @NotBlank(message = "business.scriptIsRequired") @Size(max = 40000, message = "business.scriptMustNotExceed40000Characters") String scriptContent,
+            @NotBlank(message = "business.storyboardDescriptionIsRequired") @Size(max = 8000, message = "business.storyboardDescriptionMustNotExceed8000Characters") String instruction,
+            @NotBlank(message = "business.visualStyleIsRequired") @Size(max = 8000, message = "business.visualStyleMustNotExceed8000Characters") String visualStyle,
+            @NotBlank(message = "business.textModelIsRequired") @Size(max = 256, message = "business.invalidTextModelLength") String model,
+            @NotEmpty(message = "business.atLeastOneShotIsRequired") @Size(max = MAX_SHOT_COUNT, message = "business.atMost100Shots") List<@Valid StoryboardShot> shots,
+            @Size(max = 300, message = "business.atMost300Assets") List<@Valid StoryboardAsset> assets) {
     }
 
     /**
@@ -68,11 +68,11 @@ public final class StoryboardDtos {
      * @param settings AssetImageSettings 图片生成参数
      */
     public record CreateAssetImageTaskRequest(
-            @NotBlank(message = "分镜节点标识不能为空") @Size(max = 128, message = "分镜节点标识长度不合法") String nodeId,
-            @NotNull(message = "资产不能为空") @Valid StoryboardAsset asset,
-            @NotBlank(message = "视觉风格不能为空") @Size(max = 8000, message = "视觉风格不能超过8000字") String visualStyle,
-            @NotBlank(message = "图片模型不能为空") @Size(max = 256, message = "图片模型长度不合法") String model,
-            @NotNull(message = "图片生成参数不能为空") @Valid AssetImageSettings settings) {
+            @NotBlank(message = "business.storyboardNodeIDIsRequired") @Size(max = 128, message = "business.invalidStoryboardNodeIDLength") String nodeId,
+            @NotNull(message = "business.assetIsRequired_09d52f") @Valid StoryboardAsset asset,
+            @NotBlank(message = "business.visualStyleIsRequired") @Size(max = 8000, message = "business.visualStyleMustNotExceed8000Characters") String visualStyle,
+            @NotBlank(message = "business.imageModelIsRequired") @Size(max = 256, message = "business.invalidImageModelLength") String model,
+            @NotNull(message = "business.imageGenerationParametersAreRequired") @Valid AssetImageSettings settings) {
     }
 
     /**
@@ -101,18 +101,18 @@ public final class StoryboardDtos {
      * @param assetIds List<String> 关联的画布资产标识
      */
     public record StoryboardShot(
-            @NotBlank(message = "镜头标识不能为空") @Size(max = 128, message = "镜头标识长度不合法") String id,
-            @NotNull(message = "镜号不能为空") @Positive(message = "镜号必须为正整数") Integer shotNumber,
-            @NotNull(message = "时长不能为空") @Positive(message = "时长必须为正整数") Integer durationSeconds,
-            @NotBlank(message = "画面描述不能为空") @Size(max = 4000, message = "画面描述不能超过4000字") String visualDescription,
-            @NotBlank(message = "景别不能为空") @Size(max = 32, message = "景别长度不合法") String shotSize,
-            @Size(max = 2000, message = "光影氛围不能超过2000字") String lightingAtmosphere,
-            @Size(max = 2000, message = "对白旁白不能超过2000字") String dialogueVoiceover,
-            @Size(max = 2000, message = "音效不能超过2000字") String soundEffect,
-            @Size(max = 2000, message = "运镜不能超过2000字") String cameraMovement,
-            @Size(max = 8000, message = "最终提示词不能超过8000字") String finalPrompt,
-            @NotNull(message = "关联资产不能为空") @Size(max = 300, message = "关联资产数量不能超过300")
-            List<@NotBlank(message = "关联资产标识不能为空") @Size(max = 128, message = "关联资产标识长度不合法") String> assetIds) {
+            @NotBlank(message = "business.shotIDIsRequired") @Size(max = 128, message = "business.invalidShotIDLength") String id,
+            @NotNull(message = "business.shotNumberIsRequired") @Positive(message = "business.shotNumberMustBePositive") Integer shotNumber,
+            @NotNull(message = "business.durationIsRequired") @Positive(message = "business.durationMustBePositive") Integer durationSeconds,
+            @NotBlank(message = "business.visualDescriptionIsRequired") @Size(max = 4000, message = "business.visualDescriptionMustNotExceed4000Characters") String visualDescription,
+            @NotBlank(message = "business.shotSizeIsRequired") @Size(max = 32, message = "business.invalidShotSizeLength") String shotSize,
+            @Size(max = 2000, message = "business.lightingMustNotExceed2000Characters") String lightingAtmosphere,
+            @Size(max = 2000, message = "business.dialogueMustNotExceed2000Characters") String dialogueVoiceover,
+            @Size(max = 2000, message = "business.soundEffectsMustNotExceed2000Characters") String soundEffect,
+            @Size(max = 2000, message = "business.cameraMovementMustNotExceed2000Characters") String cameraMovement,
+            @Size(max = 8000, message = "business.finalPromptMustNotExceed8000Characters") String finalPrompt,
+            @NotNull(message = "business.linkedAssetsAreRequired") @Size(max = 300, message = "business.atMost300LinkedAssets")
+            List<@NotBlank(message = "business.linkedAssetIDIsRequired") @Size(max = 128, message = "business.invalidLinkedAssetIDLength") String> assetIds) {
     }
 
     /**
@@ -124,10 +124,10 @@ public final class StoryboardDtos {
      * @param description String 资产描述
      */
     public record StoryboardAsset(
-            @NotBlank(message = "资产标识不能为空") @Size(max = 128, message = "资产标识长度不合法") String id,
-            @NotBlank(message = "资产类别不能为空") @Size(max = 32, message = "资产类别长度不合法") String kind,
-            @NotBlank(message = "资产名称不能为空") @Size(max = 200, message = "资产名称不能超过200字") String name,
-            @Size(max = 4000, message = "资产描述不能超过4000字") String description) {
+            @NotBlank(message = "business.assetIDIsRequired") @Size(max = 128, message = "business.invalidAssetIDLength") String id,
+            @NotBlank(message = "business.assetCategoryIsRequired") @Size(max = 32, message = "business.invalidAssetCategoryLength") String kind,
+            @NotBlank(message = "business.assetNameIsRequired") @Size(max = 200, message = "business.assetNameMustNotExceed200Characters") String name,
+            @Size(max = 4000, message = "business.assetDescriptionMustNotExceed4000Characters") String description) {
     }
 
     /**

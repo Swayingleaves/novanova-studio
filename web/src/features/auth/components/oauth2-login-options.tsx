@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -27,6 +29,7 @@ const PROVIDER_DISPLAY_ORDER: Record<string, number> = {
 };
 
 export function OAuth2LoginOptions({ redirectPath, invitationCode }: OAuth2LoginOptionsProps) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const [preparingProviderId, setPreparingProviderId] = useState("");
     const providerQuery = useQuery({
@@ -40,7 +43,7 @@ export function OAuth2LoginOptions({ redirectPath, invitationCode }: OAuth2Login
 
     const startLogin = async (provider: OAuth2ProviderInfo) => {
         if (!storeOAuth2Redirect(redirectPath)) {
-            message.error("浏览器会话存储不可用，无法发起第三方登录");
+            message.error(translate("auth.sessionStorageUnavailableCannotStartSignIn"));
             return;
         }
         setPreparingProviderId(provider.providerId);
@@ -48,7 +51,7 @@ export function OAuth2LoginOptions({ redirectPath, invitationCode }: OAuth2Login
             const preparation = await prepareOAuth2Authorization(provider.providerId, invitationCode);
             window.location.assign(preparation.authorizationPath);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "第三方授权准备失败");
+            message.error(error instanceof Error ? error.message : translate("auth.failedToPrepareAuthorization"));
             setPreparingProviderId("");
         }
     };
@@ -56,7 +59,7 @@ export function OAuth2LoginOptions({ redirectPath, invitationCode }: OAuth2Login
     if (providerQuery.isPending) {
         return (
             <OAuth2LoginSection>
-                <div className="grid grid-cols-2 gap-2" aria-label="正在加载第三方登录方式">
+                <div className="grid grid-cols-2 gap-2" aria-label={translate("auth.loadingSignInOptions")}>
                     <Skeleton.Button active block size="large" />
                     <Skeleton.Button active block size="large" />
                 </div>
@@ -87,13 +90,14 @@ export function OAuth2LoginOptions({ redirectPath, invitationCode }: OAuth2Login
         );
     }
 
-    return providerQuery.isError ? <OAuth2LoginSection><div className="text-center text-sm text-[var(--studio-muted)]">第三方登录暂不可用</div></OAuth2LoginSection> : null;
+    return providerQuery.isError ? <OAuth2LoginSection><div className="text-center text-sm text-[var(--studio-muted)]">{translate("auth.thirdPartySignInUnavailable")}</div></OAuth2LoginSection> : null;
 }
 
 function OAuth2LoginSection({ children }: { children: ReactNode }) {
+    const translate = useTranslation();
     return (
         <div className="mt-5">
-            <Divider plain className="!my-4 !text-xs !text-[var(--studio-muted)]">或使用第三方账号继续</Divider>
+            <Divider plain className="!my-4 !text-xs !text-[var(--studio-muted)]">{translate("auth.orContinueWith")}</Divider>
             {children}
         </div>
     );

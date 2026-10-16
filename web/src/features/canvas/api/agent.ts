@@ -1,5 +1,9 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
+import { currentLanguageTag, currentWebsiteLocale } from "@/features/locale/translate";
 import { getAuthToken } from "@/features/auth/stores/use-user-store";
 import { serverBaseUrl } from "@/services/api/server";
+import type { ServerSystemMessage } from "@/services/api/server";
 import type { VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 
 export type AgentAttachment = {
@@ -50,6 +54,7 @@ export type GenerationStyleSnapshot = {
 export type AgentAction = {
     type: "navigate" | "choice";
     label: string;
+    labelMessage?: ServerSystemMessage | null;
     href?: string;
     initialPrompt?: string;
     /** type=choice 时的可点击选项，点击后其 value 作为用户消息发送；multiple=true 时整组支持多选（勾选多个后提交，value 用顿号拼接）；action=upload_image 时点击直接触发页面参考图上传、不发送消息 */
@@ -96,6 +101,7 @@ export interface AgentEvent {
     messageId?: string;
     text?: string;
     errorMessage?: string;
+    systemMessage?: ServerSystemMessage | null;
     thoughtId?: string;
     thoughtDelta?: string;
     thoughtDurationMs?: number;
@@ -121,14 +127,15 @@ export async function agentChat(params: AgentChatParams): Promise<{ sessionId: s
         method: "POST",
         headers: {
             "Content-Type": "application/json",
+            "Accept-Language": currentLanguageTag(),
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         cache: "no-store",
         body: JSON.stringify(params),
     });
     const payload = (await res.json().catch(() => null)) as ApiResponse<{ sessionId: string; requestId: string; status: AgentRequestStatus }> | null;
-    if (!res.ok || !payload) throw new Error(payload?.msg || `Agent Chat 请求失败: ${res.status}`);
-    if (payload.code !== 0) throw new Error(payload.msg || "Agent Chat 请求失败");
+    if (!res.ok || !payload) throw new Error(payload?.msg || translate("canvas.agentChatRequestFailed", { value0: res.status }));
+    if (payload.code !== 0) throw new Error(payload.msg || translate("canvas.agentChatRequestFailed_fe728e"));
     return payload.data;
 }
 
@@ -141,6 +148,7 @@ export async function cancelAgentChat(sessionId: string, requestId: string): Pro
         method: "POST",
         headers: {
             "Content-Type": "application/json",
+            "Accept-Language": currentLanguageTag(),
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         cache: "no-store",
@@ -148,7 +156,7 @@ export async function cancelAgentChat(sessionId: string, requestId: string): Pro
     });
     const payload = (await res.json().catch(() => null)) as ApiResponse<null> | null;
     if (!res.ok || !payload || payload.code !== 0) {
-        throw new Error(payload?.msg || `停止 Agent 对话失败: ${res.status}`);
+        throw new Error(payload?.msg || translate("canvas.failedToStopAgentChat", { value0: res.status }));
     }
 }
 
@@ -158,12 +166,12 @@ export async function cancelAgentChat(sessionId: string, requestId: string): Pro
 export async function agentRequestStatus(requestId: string): Promise<{ status: AgentRequestStatus; message: string }> {
     const token = getAuthToken();
     const res = await fetch(`${serverBaseUrl()}/ai/agent/requestStatus?requestId=${encodeURIComponent(requestId)}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { "Accept-Language": currentLanguageTag(), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         cache: "no-store",
     });
     const payload = (await res.json().catch(() => null)) as ApiResponse<{ status: AgentRequestStatus; message: string }> | null;
-    if (!res.ok || !payload) throw new Error(payload?.msg || `Agent 请求状态查询失败: ${res.status}`);
-    if (payload.code !== 0) throw new Error(payload.msg || "Agent 请求状态查询失败");
+    if (!res.ok || !payload) throw new Error(payload?.msg || translate("canvas.failedToQueryAgentStatus", { value0: res.status }));
+    if (payload.code !== 0) throw new Error(payload.msg || translate("canvas.failedToQueryAgentRequestStatus"));
     return payload.data;
 }
 
@@ -173,12 +181,12 @@ export async function agentRequestStatus(requestId: string): Promise<{ status: A
 export async function agentActiveRequest(entrySource: string): Promise<{ requestId: string; sessionId: string; status: AgentRequestStatus; message: string; projectId: string } | null> {
     const token = getAuthToken();
     const res = await fetch(`${serverBaseUrl()}/ai/agent/activeRequest?entrySource=${encodeURIComponent(entrySource)}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { "Accept-Language": currentLanguageTag(), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         cache: "no-store",
     });
     const payload = (await res.json().catch(() => null)) as ApiResponse<{ requestId: string; sessionId: string; status: AgentRequestStatus; message: string; projectId: string } | null> | null;
-    if (!res.ok || !payload) throw new Error(payload?.msg || `Agent 进行中请求查询失败: ${res.status}`);
-    if (payload.code !== 0) throw new Error(payload.msg || "Agent 进行中请求查询失败");
+    if (!res.ok || !payload) throw new Error(payload?.msg || translate("canvas.failedToQueryActiveAgentRequest", { value0: res.status }));
+    if (payload.code !== 0) throw new Error(payload.msg || translate("canvas.failedToQueryActiveAgentRequest_70fa06"));
     return payload.data || null;
 }
 
@@ -191,14 +199,15 @@ export async function agentReplayPendingTools(params: { sessionId: string; reque
         method: "POST",
         headers: {
             "Content-Type": "application/json",
+            "Accept-Language": currentLanguageTag(),
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         cache: "no-store",
         body: JSON.stringify(params),
     });
     const payload = (await res.json().catch(() => null)) as ApiResponse<number> | null;
-    if (!res.ok || !payload) throw new Error(payload?.msg || `Agent 工具重放失败: ${res.status}`);
-    if (payload.code !== 0) throw new Error(payload.msg || "Agent 工具重放失败");
+    if (!res.ok || !payload) throw new Error(payload?.msg || translate("canvas.agentToolReplayFailed", { value0: res.status }));
+    if (payload.code !== 0) throw new Error(payload.msg || translate("canvas.agentToolReplayFailed_0e6d68"));
     return payload.data || 0;
 }
 
@@ -207,7 +216,7 @@ export async function agentReplayPendingTools(params: { sessionId: string; reque
  */
 export function agentSubscribeEvents(): EventSource {
     const token = getAuthToken();
-    const url = `${serverBaseUrl()}/ai/agent/events${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+    const url = `${serverBaseUrl()}/ai/agent/events?locale=${currentWebsiteLocale()}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
     return new EventSource(url);
 }
 
@@ -220,10 +229,11 @@ export async function agentSubmitToolResult(params: AgentToolResultParams): Prom
         method: "POST",
         headers: {
             "Content-Type": "application/json",
+            "Accept-Language": currentLanguageTag(),
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         cache: "no-store",
         body: JSON.stringify(params),
     });
-    if (!res.ok) throw new Error(`Tool Result 提交失败: ${res.status}`);
+    if (!res.ok) throw new Error(translate("canvas.failedToSubmitToolResult", { value0: res.status }));
 }

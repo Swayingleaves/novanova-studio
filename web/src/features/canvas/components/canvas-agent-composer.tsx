@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button, Tooltip } from "antd";
@@ -60,12 +62,13 @@ export function AgentChatComposer({
     onStyleRemove,
     onStyleLimit,
 }: AgentChatComposerProps) {
+    const translate = useTranslation();
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [styleMenuOpen, setStyleMenuOpen] = useState(false);
     const [styleCommand, setStyleCommand] = useState<{ start: number; end: number } | null>(null);
     const [styleQuery, setStyleQuery] = useState("");
     const [highlightedStyleIndex, setHighlightedStyleIndex] = useState(0);
-    const filteredStyles = useMemo(() => filterGenerationStyles(styleOptions, styleQuery), [styleOptions, styleQuery]);
+    const filteredStyles = useMemo(() => filterGenerationStyles(styleOptions, styleQuery), [styleOptions, styleQuery, translate.locale]);
 
     useEffect(() => {
         const missingNodeIds = droppedNodes.map((node) => node.id).filter((nodeId) => !containsToken(prompt, nodeId));
@@ -185,7 +188,7 @@ export function AgentChatComposer({
                                         event.target.value = "";
                                     }}
                                 />
-                                <Tooltip title="上传图片">
+                                <Tooltip title={translate("canvas.uploadImage")}>
                                     <Button type="text" shape="circle" disabled={sending} icon={<ImagePlus className="size-4" />} style={{ color: theme.node.muted }} onClick={() => fileInputRef.current?.click()} />
                                 </Tooltip>
                             </>
@@ -216,7 +219,7 @@ export function AgentChatComposer({
                         />
                         {left}
                     </div>
-                    <Button type="primary" shape="circle" disabled={!canSubmit} icon={sending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />} onClick={onSubmit} aria-label="发送" />
+                    <Button type="primary" shape="circle" disabled={!canSubmit} icon={sending ? <LoaderCircle className="size-4 animate-spin" /> : <ArrowUp className="size-4" />} onClick={onSubmit} aria-label={translate("canvas.send")} />
                 </div>
             </div>
         </div>
@@ -224,13 +227,14 @@ export function AgentChatComposer({
 }
 
 function NodeReferenceList({ nodes, theme, onRemove }: { nodes: CanvasNode[]; theme: CanvasTheme; onRemove: (nodeId: string) => void }) {
+    const translate = useTranslation();
     return (
         <div className="mb-2 flex flex-wrap gap-2">
             {nodes.map((node) => (
                 <span key={node.id} className="inline-flex max-w-full items-center gap-2 rounded-lg border px-2 py-1 text-xs" style={{ borderColor: theme.node.stroke, color: theme.node.text }}>
                     {isImageNode(node) && node.content.source ? <img src={node.content.source} alt="" className="size-6 rounded object-cover" /> : null}
                     <span className="max-w-36 truncate">{node.title || node.id}</span>
-                    <button type="button" aria-label={`移除 ${node.title || node.id}`} onClick={() => onRemove(node.id)}>
+                    <button type="button" aria-label={translate("canvas.remove", { value0: node.title || node.id })} onClick={() => onRemove(node.id)}>
                         <X className="size-3" />
                     </button>
                 </span>
@@ -240,6 +244,7 @@ function NodeReferenceList({ nodes, theme, onRemove }: { nodes: CanvasNode[]; th
 }
 
 function AttachmentList({ attachments, theme, onRemove }: { attachments: CanvasAgentChatAttachment[]; theme: CanvasTheme; onRemove?: (id: string) => void }) {
+    const translate = useTranslation();
     return (
         <div className="mb-2 flex gap-2 overflow-x-auto">
             {attachments.map((attachment) => (
@@ -251,7 +256,7 @@ function AttachmentList({ attachments, theme, onRemove }: { attachments: CanvasA
                             className="absolute right-1 top-1 grid size-5 place-items-center rounded-full opacity-0 group-hover:opacity-100"
                             style={{ background: theme.toolbar.panel }}
                             onClick={() => onRemove(attachment.id)}
-                            aria-label="移除图片"
+                            aria-label={translate("canvas.removeImage")}
                         >
                             <X className="size-3" />
                         </button>

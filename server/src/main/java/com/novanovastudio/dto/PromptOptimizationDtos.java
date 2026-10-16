@@ -25,8 +25,8 @@ public final class PromptOptimizationDtos {
      * @param generationStyleIds 用户选择的风格ID
      */
     public record OptimizePromptRequest(
-            @NotBlank(message = "生成类型不能为空") String generationType,
-            @NotBlank(message = "提示词不能为空") String prompt,
+            @NotBlank(message = "business.generationTypeIsRequired") String generationType,
+            @NotBlank(message = "business.promptIsRequired") String prompt,
             List<Long> generationStyleIds) {
 
         /**

@@ -1,0 +1,18 @@
+{
+    "onlyMP3AndWAVAudioSupported": "音频仅支持 MP3、WAV 格式",
+    "audioIsRequiredAndMustNotExceed15MB": "音频不能为空，且单文件不能超过 15 MB",
+    "invalidAudioDuration": "音频时长无效",
+    "failedToParseAudioChooseAValidMP3Or": "音频解析失败，请选择有效的 MP3 或 WAV 文件",
+    "failedToReadImage": "读取图片失败",
+    "downloadedFileIsEmpty": "下载文件为空",
+    "mediaHasNoStorageIDOrAccessibleURL": "下载媒体缺少存储标识或可访问地址",
+    "serverReturnedNoObjectStorageFile": "后端没有返回对象存储文件信息",
+    "qiniuKodoRequiresAPublicURL": "七牛云Kodo必须填写公开访问地址",
+    "objectStorageNotFound": "对象存储不存在",
+    "enterAccessKeySecretKeyBucketAndRegion": "请完整填写访问密钥、密钥、Bucket 和 Region",
+    "enterAlibabaCloudOSSEndpoint": "请填写阿里云OSS Endpoint",
+    "enterQiniuKodoPublicURL": "请填写七牛云Kodo公开访问地址",
+    "incompleteObjectStorageConfiguration": "对象存储配置不完整",
+    "failedToReadAddItAgainBeforeGenerating": "{value0}读取失败，请重新添加后再生成视频",
+    "hasNoUploadedMediaForCloudStorage": "{value0}缺少已上传媒体，无法转存到云储存"
+}

@@ -6,6 +6,8 @@
  */
 package com.novanovastudio.agent;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.agent.dto.AgentMessage;
 import com.novanovastudio.agent.dto.AgentSession;
 import com.novanovastudio.common.BusinessException;
@@ -52,7 +54,7 @@ public class AgentSessionService {
     public Mono<AgentSession> getOrCreateSession(Long userId, String sessionId, String profile) {
         if (StringUtils.hasText(sessionId)) {
             return repository.findById(userId, sessionId)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "会话不存在")));
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.conversationNotFound"))));
         }
         return createSession(userId, profile);
     }

@@ -9,6 +9,8 @@
  */
 package com.novanovastudio.agent;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSONObject;
 import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.agent.dto.AgentChatRequest;
@@ -208,7 +210,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                                         if (!AiTaskSources.isSupported(effectiveGenerationSource)
                                                 || (AiTaskTypes.IMAGE.equals(taskType()) && AiTaskSources.VIDEO_PAGE.equals(effectiveGenerationSource))
                                                 || (AiTaskTypes.VIDEO.equals(taskType()) && AiTaskSources.IMAGE_PAGE.equals(effectiveGenerationSource))) {
-                                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成任务入口来源与任务类型不匹配"));
+                                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.generationEntryDoesNotMatchTaskType")));
                                         }
                                         Map<String, Object> providerParameters = new LinkedHashMap<>(params);
                                         providerParameters.remove(INTERNAL_STYLE_SNAPSHOTS);
@@ -275,7 +277,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                 .map(url -> {
                     String mimeType = inferReferenceMimeType(url);
                     if (!StringUtils.hasText(mimeType)) {
-                        throw new BusinessException(ErrorCode.PARAM_INVALID, "无法识别历史参考素材类型，请重新上传图片、视频或MP3/WAV音频");
+                        throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unrecognizedHistoricalReferenceTypeUploadAnImageVideoOrMP3"));
                     }
                     return new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), "reference", mimeType, "", url);
                 })
@@ -302,25 +304,25 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                     if (!StringUtils.hasText(attachment.storageKey())) {
                         String referenceUrl = StringUtils.hasText(attachment.url()) ? attachment.url().trim() : "";
                         if (!referenceUrl.matches("(?i)^https?://.+")) {
-                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考素材必须提供媒体存储键或公开URL"));
+                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.aReferenceNeedsAMediaStorageKeyOrPublicURL")));
                         }
                         String mimeType = attachment.type();
                         if (!StringUtils.hasText(mimeType)
                                 || (!mimeType.startsWith("image/") && !mimeType.startsWith("video/")
                                 && !com.novanovastudio.ai.AudioInputSupport.isAudioMimeType(mimeType))) {
-                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考素材必须是图片、视频或MP3/WAV音频"));
+                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referencesMustBeImagesVideosOrMP3WAVAudio")));
                         }
                         String name = StringUtils.hasText(attachment.name()) ? attachment.name() : "reference";
                             return Mono.just(new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, "", referenceUrl, attachment.role()));
                     }
                     return persistenceService.getMediaInfoForUser(userId, attachment.storageKey())
-                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "参考素材不存在或不属于当前用户")))
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.referenceNotFoundOrOwnedByAnotherUser"))))
                             .map(media -> {
                                 String mimeType = StringUtils.hasText(media.mimeType()) ? media.mimeType() : attachment.type();
                                 if (!StringUtils.hasText(mimeType)
                                         || (!mimeType.startsWith("image/") && !mimeType.startsWith("video/")
                                         && !com.novanovastudio.ai.AudioInputSupport.isAudioMimeType(mimeType))) {
-                                    throw new BusinessException(ErrorCode.PARAM_INVALID, "参考素材必须是图片、视频或MP3/WAV音频");
+                                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referencesMustBeImagesVideosOrMP3WAVAudio"));
                                 }
                                 String name = StringUtils.hasText(attachment.name()) ? attachment.name() : "reference";
                                 return new AiTaskDtos.AiTaskMediaReference(UUID.randomUUID().toString(), name, mimeType, media.storageKey(), media.url(), attachment.role());
@@ -349,19 +351,17 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
         }
         String mode = VideoGenerationMode.defaultIfBlank(videoGenerationMode);
         if (!VideoGenerationMode.isSupported(mode)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedVideoGenerationMode")));
         }
         return aiTaskService.modelCapabilities(userId, model.isBlank() ? null : model)
                 .flatMap(capabilities -> {
                     if (!capabilities.contains(mode)) {
-                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
-                                "当前模型未配置" + videoModeLabel(mode) + "能力，请切换支持" + videoModeLabel(mode) + "的模型"));
+                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.thisModelLacksChooseAModelSupporting", videoModeLabel(mode), videoModeLabel(mode))));
                     }
                     if (!attachments.audioReferences().isEmpty()) {
                         if (!VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode)
                                 || !capabilities.contains(AudioInputSupport.CAPABILITY)) {
-                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
-                                    "当前模型或生成模式不支持音频输入，请开启音频输入和全能参考能力"));
+                            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.enableAudioInputAndUniversalReferenceForThisModelOr")));
                         }
                     }
                     return Mono.just(attachments);
@@ -374,13 +374,13 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
      * @param mode String 视频生成模式
      * @return String 中文名称
      */
-    private String videoModeLabel(String mode) {
+    private SystemMessage videoModeLabel(String mode) {
         return switch (mode) {
-            case VideoGenerationMode.TEXT_TO_VIDEO -> "文生视频";
-            case VideoGenerationMode.IMAGE_TO_VIDEO -> "图生视频";
-            case VideoGenerationMode.REFERENCE_TO_VIDEO -> "全能参考";
-            case VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO -> "首尾帧原生生成";
-            default -> "视频";
+            case VideoGenerationMode.TEXT_TO_VIDEO -> SystemMessage.of("business.textToVideo");
+            case VideoGenerationMode.IMAGE_TO_VIDEO -> SystemMessage.of("business.imageToVideo");
+            case VideoGenerationMode.REFERENCE_TO_VIDEO -> SystemMessage.of("business.universalReference");
+            case VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO -> SystemMessage.of("business.nativeFirstAndLastFrames");
+            default -> SystemMessage.of("business.video");
         };
     }
 
@@ -792,7 +792,7 @@ public abstract class AbstractTaskProfile implements AgentLoopProfile {
                     JSON.toJSONString(raw), GenerationStyleDtos.GenerationStyleSnapshot.class);
             return snapshots == null ? List.of() : List.copyOf(snapshots);
         } catch (RuntimeException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "风格快照格式不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidStyleSnapshot"));
         }
     }
 

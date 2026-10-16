@@ -1,5 +1,7 @@
 package com.novanovastudio.security;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import org.springframework.stereotype.Component;
@@ -26,7 +28,7 @@ public class CurrentUserProvider {
         // 从Reactor上下文读取认证过滤器写入的当前用户。
         return Mono.deferContextual(contextView -> {
             if (!contextView.hasKey(CURRENT_USER_CONTEXT_KEY)) {
-                return Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, "请先登录"));
+                return Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, SystemMessage.of("business.pleaseSignIn")));
             }
             return Mono.just(contextView.get(CURRENT_USER_CONTEXT_KEY));
         });

@@ -1,5 +1,7 @@
 package com.novanovastudio.repository;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.entity.CreationAgentRequest;
 import java.time.OffsetDateTime;
@@ -99,7 +101,7 @@ public class CreationAgentRequestRepository {
     public Mono<Boolean> markRunningIfQueued(String requestId) {
         return databaseClient.sql("""
                 UPDATE creation_agent_request
-                SET status = 'running', error_message = '', started_at = COALESCE(started_at, NOW()), updated_at = NOW()
+                SET status = 'running', error_message = '', error_message_key = '', error_message_arguments = '[]'::jsonb, started_at = COALESCE(started_at, NOW()), updated_at = NOW()
                 WHERE id = :requestId AND status = 'queued'
                 """)
                 .bind("requestId", requestId)
@@ -119,7 +121,7 @@ public class CreationAgentRequestRepository {
     public Mono<Boolean> cancelQueuedIfQueued(Long userId, String requestId, String message) {
         return terminalUpdate("""
                 UPDATE creation_agent_request
-                SET status = 'canceled', error_message = :message, completed_at = NOW(), updated_at = NOW()
+                SET status = 'canceled', error_message = :message, error_message_key = :messageKey, error_message_arguments = CAST(:messageArguments AS jsonb), completed_at = NOW(), updated_at = NOW()
                 WHERE id = :requestId AND user_id = :userId AND status = 'queued'
                 """, userId, requestId, message);
     }
@@ -135,7 +137,7 @@ public class CreationAgentRequestRepository {
     public Mono<Boolean> cancelRunningIfRunning(Long userId, String requestId, String message) {
         return terminalUpdate("""
                 UPDATE creation_agent_request
-                SET status = 'canceled', error_message = :message, completed_at = NOW(), updated_at = NOW()
+                SET status = 'canceled', error_message = :message, error_message_key = :messageKey, error_message_arguments = CAST(:messageArguments AS jsonb), completed_at = NOW(), updated_at = NOW()
                 WHERE id = :requestId AND user_id = :userId AND status = 'running'
                 """, userId, requestId, message);
     }
@@ -148,13 +150,16 @@ public class CreationAgentRequestRepository {
      * @return Mono<Boolean> 是否成功标记中断
      */
     public Mono<Boolean> interruptRunningIfRunning(String requestId, String message) {
+        SystemMessage systemMessage = SystemMessage.of("system.requestInterrupted");
         return databaseClient.sql("""
                 UPDATE creation_agent_request
-                SET status = 'interrupted', error_message = :message, completed_at = NOW(), updated_at = NOW()
+                SET status = 'interrupted', error_message = :message, error_message_key = :messageKey, error_message_arguments = CAST(:messageArguments AS jsonb), completed_at = NOW(), updated_at = NOW()
                 WHERE id = :requestId AND status = 'running'
                 """)
                 .bind("requestId", requestId)
                 .bind("message", text(message))
+                .bind("messageKey", systemMessage == null ? "" : systemMessage.key())
+                .bind("messageArguments", JSON.toJSONString(systemMessage == null ? new Object[0] : systemMessage.arguments()))
                 .fetch()
                 .rowsUpdated()
                 .map(rows -> rows > 0);
@@ -169,14 +174,28 @@ public class CreationAgentRequestRepository {
      * @return Mono<Boolean> 是否成功更新
      */
     public Mono<Boolean> finishRunning(String requestId, String status, String message) {
+        return finishRunning(requestId, status, message, "success".equals(status) ? null : SystemMessage.of("system.executionFailed", message));
+    }
+
+    /**
+     * 按原有终态条件保存诊断及语言中立消息。
+     * @param requestId String 请求ID
+     * @param status String 终态
+     * @param message String 原始诊断
+     * @param systemMessage SystemMessage 消息键与参数
+     * @return Mono<Boolean> 是否写入终态
+     */
+    public Mono<Boolean> finishRunning(String requestId, String status, String message, SystemMessage systemMessage) {
         return databaseClient.sql("""
                 UPDATE creation_agent_request
-                SET status = :status, error_message = :message, completed_at = NOW(), updated_at = NOW()
+                SET status = :status, error_message = :message, error_message_key = :messageKey, error_message_arguments = CAST(:messageArguments AS jsonb), completed_at = NOW(), updated_at = NOW()
                 WHERE id = :requestId AND status = 'running'
                 """)
                 .bind("requestId", requestId)
                 .bind("status", status)
                 .bind("message", text(message))
+                .bind("messageKey", systemMessage == null ? "" : systemMessage.key())
+                .bind("messageArguments", JSON.toJSONString(systemMessage == null ? new Object[0] : systemMessage.arguments()))
                 .fetch()
                 .rowsUpdated()
                 .map(rows -> rows > 0);
@@ -272,10 +291,13 @@ public class CreationAgentRequestRepository {
      * @return Mono<Boolean> 是否更新成功
      */
     private Mono<Boolean> terminalUpdate(String sql, Long userId, String requestId, String message) {
+        SystemMessage systemMessage = SystemMessage.of("system.taskCanceled");
         return databaseClient.sql(sql)
                 .bind("userId", userId)
                 .bind("requestId", requestId)
                 .bind("message", text(message))
+                .bind("messageKey", systemMessage == null ? "" : systemMessage.key())
+                .bind("messageArguments", JSON.toJSONString(systemMessage == null ? new Object[0] : systemMessage.arguments()))
                 .fetch()
                 .rowsUpdated()
                 .map(rows -> rows > 0);
@@ -289,7 +311,7 @@ public class CreationAgentRequestRepository {
     private String selectSql() {
         return """
                 SELECT id, user_id, session_id, entry_source, request_data::text AS request_data, status,
-                       COALESCE(plan_id, '') AS plan_id, task_ids::text AS task_ids, error_message,
+                       COALESCE(plan_id, '') AS plan_id, task_ids::text AS task_ids, error_message, error_message_key, error_message_arguments::text AS error_message_arguments,
                        started_at, completed_at, created_at, updated_at
                 FROM creation_agent_request
                 """;
@@ -312,6 +334,8 @@ public class CreationAgentRequestRepository {
         request.setPlanId(row.get("plan_id", String.class));
         request.setTaskIds(row.get("task_ids", String.class));
         request.setErrorMessage(row.get("error_message", String.class));
+        request.setErrorMessageKey(row.get("error_message_key", String.class));
+        request.setErrorMessageArguments(row.get("error_message_arguments", String.class));
         request.setStartedAt(row.get("started_at", OffsetDateTime.class));
         request.setCompletedAt(row.get("completed_at", OffsetDateTime.class));
         request.setCreatedAt(row.get("created_at", OffsetDateTime.class));

@@ -1,4 +1,6 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+
 
 import { Cog } from "lucide-react";
 
@@ -52,5 +54,5 @@ function buildImageSettingsSummary(config: AiConfig) {
     const resolution = config.imageResolution || "2K";
     const size = config.size || "auto";
     const count = normalizeImageGenerationCount(config.count);
-    return `${imageQualityLabel(quality)} · ${imageResolutionLabel(resolution)} · ${imageSizeLabel(size)} · ${count} 张`;
+    return translate("canvas.images", { value0: imageQualityLabel(quality), value1: imageResolutionLabel(resolution), value2: imageSizeLabel(size), value3: count });
 }

@@ -28,7 +28,7 @@ public final class CreditCardDtos {
      *
      * @param cardCode String 卡密明文
      */
-    public record RedeemCreditsRequest(@NotBlank(message = "卡密不能为空") String cardCode) {
+    public record RedeemCreditsRequest(@NotBlank(message = "business.redemptionCodeIsRequired") String cardCode) {
     }
 
     /**
@@ -74,8 +74,8 @@ public final class CreditCardDtos {
      * @param quantity Integer 生成数量，默认100，最大1000
      * @param creditsPerCard Integer 单卡兑换积分
      */
-    public record GenerateCreditCardsRequest(@Min(value = 1, message = "生成数量必须大于0") @Max(value = MAX_QUANTITY, message = "生成数量不能超过1000") Integer quantity,
-                                             @NotNull(message = "单卡积分不能为空") @Min(value = 1, message = "单卡积分必须为正整数") Integer creditsPerCard) {
+    public record GenerateCreditCardsRequest(@Min(value = 1, message = "business.quantityMustBePositive") @Max(value = MAX_QUANTITY, message = "business.quantityMustNotExceed1000") Integer quantity,
+                                             @NotNull(message = "business.creditsPerCardAreRequired") @Min(value = 1, message = "business.creditsPerCardMustBeAPositiveInteger") Integer creditsPerCard) {
     }
 
     /**

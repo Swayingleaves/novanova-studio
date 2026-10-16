@@ -6,6 +6,12 @@
  */
 package com.novanovastudio.controller;
 
+import org.springframework.web.server.ServerWebExchange;
+
+import com.novanovastudio.common.WebsiteLanguage;
+
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentEventEmitter;
@@ -69,8 +75,7 @@ public class AgentController {
     @PostMapping("/chat")
     public Mono<ApiResponse<CreationAgentChatResponse>> chat(@RequestBody AgentChatRequest request) {
         if (request == null || !CreationEntrySource.supported(request.entrySource())) {
-            return Mono.error(new com.novanovastudio.common.BusinessException(
-                    com.novanovastudio.common.ErrorCode.PARAM_INVALID, "Agent入口来源不合法"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidAgentEntry")));
         }
         log.info("Agent 对话请求: entrySource={}, sessionId={}, message={}", request.entrySource(), request.sessionId(), request.message());
         log.info("Agent 对话请求详情: {}", JSONObject.toJSONString(request));
@@ -97,27 +102,29 @@ public class AgentController {
      * 按请求ID查询当前用户的主Agent请求状态，供前端在SSE事件丢失时对账终态。
      *
      * @param requestId String 主Agent请求ID
+     * @param exchange ServerWebExchange 当前请求
      * @return Mono<ApiResponse<AgentRequestStatusResponse>> 请求状态和终态说明
      */
     @GetMapping("/requestStatus")
-    public Mono<ApiResponse<AgentRequestStatusResponse>> requestStatus(@RequestParam String requestId) {
+    public Mono<ApiResponse<AgentRequestStatusResponse>> requestStatus(@RequestParam String requestId, ServerWebExchange exchange) {
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> creationAgentRequestRepository.findByIdForUser(userId, requestId))
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.agentRequestNotFound"))))
                 .map(request -> ApiResponse.ok(new AgentRequestStatusResponse(
-                        request.getStatus(), request.getErrorMessage() == null ? "" : request.getErrorMessage())));
+                        request.getStatus(), localizedRequestMessage(request, WebsiteLanguage.resolve(exchange)))));
     }
 
     /**
      * 查询当前用户在指定入口分区内仍在执行的主Agent请求，供页面刷新后重新接入。
      *
      * @param entrySource String 入口来源
+     * @param exchange ServerWebExchange 当前请求
      * @return Mono<ApiResponse<AgentActiveRequestResponse>> 进行中请求；没有时data为null
      */
     @GetMapping("/activeRequest")
-    public Mono<ApiResponse<AgentActiveRequestResponse>> activeRequest(@RequestParam String entrySource) {
+    public Mono<ApiResponse<AgentActiveRequestResponse>> activeRequest(@RequestParam String entrySource, ServerWebExchange exchange) {
         if (!CreationEntrySource.supported(entrySource)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "Agent入口来源不合法"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidAgentEntry")));
         }
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> Flux.concat(creationAgentRequestRepository.listRunningRequests(),
@@ -126,7 +133,7 @@ public class AgentController {
                         .next()
                         .map(request -> ApiResponse.ok(new AgentActiveRequestResponse(request.getId(),
                                 request.getSessionId(), request.getStatus(),
-                                request.getErrorMessage() == null ? "" : request.getErrorMessage(),
+                                localizedRequestMessage(request, WebsiteLanguage.resolve(exchange)),
                                 readSnapshotProjectId(request.getRequestData()))))
                         .defaultIfEmpty(ApiResponse.<AgentActiveRequestResponse>ok(null)));
     }
@@ -164,10 +171,10 @@ public class AgentController {
                 request.sessionId(), request.requestId(), request.activeToolCallIds());
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> creationAgentRequestRepository.findByIdForUser(userId, request.requestId())
-                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求不存在")))
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.agentRequestNotFound"))))
                         .flatMap(current -> {
                             if (current.getSessionId() == null || !current.getSessionId().equals(request.sessionId())) {
-                                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "会话与主Agent请求不匹配"));
+                                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.conversationDoesNotMatchAgentRequest")));
                             }
                             if (!isExecutingRequestStatus(current.getStatus())) {
                                 return Mono.just(0);
@@ -192,15 +199,16 @@ public class AgentController {
     /**
      * 订阅 SSE 事件流。前端建立长连接，接收 text-delta、tool-execute、task-complete、error 事件。
      *
+     * @param exchange ServerWebExchange 当前请求
      * @return Flux<ServerSentEvent<AgentEvent>> SSE 事件流
      */
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<ServerSentEvent<AgentEvent>> subscribe() {
+    public Flux<ServerSentEvent<AgentEvent>> subscribe(ServerWebExchange exchange) {
         return currentUserProvider.currentUserId()
             .flatMapMany(eventEmitter::subscribe)
             .map(event -> ServerSentEvent.<AgentEvent>builder()
                 .event(event.type())
-                .data(event)
+                .data(event.withLocale(WebsiteLanguage.resolve(exchange)))
                 .build());
     }
 
@@ -217,5 +225,15 @@ public class AgentController {
         return currentUserProvider.currentUserId()
             .flatMap(userId -> toolResultRelay.publish(userId, request))
             .thenReturn(ApiResponse.ok(null));
+    }
+    /**
+     * 按查询语言读取请求持久化系统提示。
+     * @param request com.novanovastudio.entity.CreationAgentRequest 请求实体
+     * @param locale java.util.Locale 请求语言
+     * @return String 系统提示
+     */
+    private String localizedRequestMessage(com.novanovastudio.entity.CreationAgentRequest request, java.util.Locale locale) {
+        SystemMessage message = SystemMessage.stored(request.getErrorMessageKey(), request.getErrorMessageArguments());
+        return message == null ? "" : message.render(locale);
     }
 }

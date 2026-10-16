@@ -1,4 +1,9 @@
 "use client";
+import { currentLanguageTag } from "@/features/locale/translate";
+
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { type Key, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
@@ -71,6 +76,7 @@ type GenerationTypeFilter = "all" | "image" | "video";
 type TrendUnit = "day" | "month";
 
 export default function AdminSystemPage() {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const currentUser = useUserStore((state) => state.user);
     const isAdmin = currentUser?.role === "admin";
@@ -79,8 +85,8 @@ export default function AdminSystemPage() {
         return (
             <main className="studio-page h-full overflow-auto">
                 <div className="mx-auto flex min-h-[420px] max-w-4xl flex-col items-center justify-center px-6 text-center">
-                    <h1 className="studio-title text-2xl font-semibold">需要管理员权限</h1>
-                    <p className="studio-subtitle mt-3 text-sm">当前账号无法访问系统管理。</p>
+                    <h1 className="studio-title text-2xl font-semibold">{translate("administration.administratorAccessRequired")}</h1>
+                    <p className="studio-subtitle mt-3 text-sm">{translate("administration.thisAccountCannotAccessAdministration")}</p>
                 </div>
             </main>
         );
@@ -90,29 +96,29 @@ export default function AdminSystemPage() {
         <main className="studio-page h-full overflow-auto">
             <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6">
                 <header className="border-b border-[var(--studio-line)] pb-5">
-                    <h1 className="studio-title text-2xl font-semibold">系统管理</h1>
-                    <p className="studio-subtitle mt-2 text-sm">用户、公告和提示词库的运营控制台。</p>
+                    <h1 className="studio-title text-2xl font-semibold">{translate("administration.systemManagement")}</h1>
+                    <p className="studio-subtitle mt-2 text-sm">{translate("administration.operationsConsoleForUsersAnnouncementsAndPrompts")}</p>
                 </header>
                 <Tabs
                     defaultActiveKey="users"
                     items={[
-                        { key: "users", label: "用户管理", children: <UserManagement /> },
-                        { key: "credits", label: "积分明细", children: <CreditConsumptionManagement /> },
-                        { key: "creditCards", label: "卡密管理", children: <CreditCardManagement /> },
-                        { key: "notifications", label: "消息管理", children: <NotificationManagement /> },
-                        { key: "prompts", label: "提示词库", children: <PromptManagement /> },
-                        { key: "styles", label: "风格管理", children: <GenerationStyleManagement /> },
-                        { key: "skills", label: "技能管理", children: <SkillManagement /> },
-                        { key: "homepage", label: "首页展示", children: <HomepageShowcaseManagement /> },
+                        { key: "users", label: translate("administration.userManagement"), children: <UserManagement /> },
+                        { key: "credits", label: translate("administration.creditDetails"), children: <CreditConsumptionManagement /> },
+                        { key: "creditCards", label: translate("administration.redemptionCodes"), children: <CreditCardManagement /> },
+                        { key: "notifications", label: translate("administration.messageManagement"), children: <NotificationManagement /> },
+                        { key: "prompts", label: translate("administration.promptLibrary"), children: <PromptManagement /> },
+                        { key: "styles", label: translate("administration.styleManagement"), children: <GenerationStyleManagement /> },
+                        { key: "skills", label: translate("administration.skillManagement"), children: <SkillManagement /> },
+                        { key: "homepage", label: translate("administration.homepageShowcase"), children: <HomepageShowcaseManagement /> },
                         {
-                            key: "scriptPricing", label: "剧本创作定价", children: <Tabs
+                            key: "scriptPricing", label: translate("administration.scriptCreationPricing"), children: <Tabs
                                 items={[
-                                    { key: "storyBible", label: "知识库定价", children: <StoryBiblePricingManagement /> },
-                                    { key: "episodeBodies", label: "分集正文", children: <EpisodeBodiesPricingManagement /> },
+                                    { key: "storyBible", label: translate("administration.storyBiblePricing"), children: <StoryBiblePricingManagement /> },
+                                    { key: "episodeBodies", label: translate("administration.episodeBodies"), children: <EpisodeBodiesPricingManagement /> },
                                 ]}
                             />,
                         },
-                        { key: "apiLogs", label: "接口记录", children: <ApiLogsManagement /> },
+                        { key: "apiLogs", label: translate("administration.aPIRecords"), children: <ApiLogsManagement /> },
                     ]}
                 />
             </div>
@@ -120,9 +126,9 @@ export default function AdminSystemPage() {
     );
 }
 
-const ADMIN_CREDIT_COLUMNS: ColumnsType<ServerAdminCreditTransaction> = [
+const createAdminCreditColumns = (translator: typeof translate = translate): ColumnsType<ServerAdminCreditTransaction> => ([
     {
-        title: "用户",
+        get title() { return translator("administration.user"); },
         width: 220,
         render: (_, transaction) => (
             <div className="min-w-0">
@@ -132,7 +138,7 @@ const ADMIN_CREDIT_COLUMNS: ColumnsType<ServerAdminCreditTransaction> = [
         ),
     },
     {
-        title: "类型",
+        get title() { return translator("administration.type"); },
         dataIndex: "transactionType",
         width: 132,
         render: (transactionType: ServerAdminCreditTransaction["transactionType"], record) => {
@@ -141,32 +147,32 @@ const ADMIN_CREDIT_COLUMNS: ColumnsType<ServerAdminCreditTransaction> = [
         },
     },
     {
-        title: "详情",
+        get title() { return translator("administration.details"); },
         dataIndex: "reason",
         ellipsis: true,
         render: (_, record) => <span className="text-[var(--studio-muted)]">{creditTransactionDetail(record.transactionType, record.generationType, record.model, record.reason)}</span>,
     },
     {
-        title: "积分变动",
+        get title() { return translator("administration.creditChange"); },
         dataIndex: "changeAmount",
         width: 128,
         align: "right",
         render: (changeAmount: number) => <span className={`font-medium tabular-nums ${changeAmount > 0 ? "text-[var(--studio-primary)]" : "text-[var(--studio-ink)]"}`}>{formatCreditChange(changeAmount)}</span>,
     },
     {
-        title: "余额快照",
+        get title() { return translator("administration.balanceSnapshot"); },
         dataIndex: "balanceAfter",
         width: 128,
         align: "right",
         render: (balanceAfter: number) => <span className="tabular-nums text-[var(--studio-muted)]">{formatCredits(balanceAfter)}</span>,
     },
     {
-        title: "时间",
+        get title() { return translator("administration.time"); },
         dataIndex: "createdAt",
         width: 176,
         render: (createdAt: string) => <span className="tabular-nums text-[var(--studio-muted)]">{formatCreditTime(createdAt)}</span>,
     },
-];
+]);
 
 /**
  * 渲染管理员积分统计与明细。
@@ -174,6 +180,7 @@ const ADMIN_CREDIT_COLUMNS: ColumnsType<ServerAdminCreditTransaction> = [
  * @return 积分明细管理内容
  */
 function CreditConsumptionManagement() {
+    const translate = useTranslation();
     const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")]);
     const [generationType, setGenerationType] = useState<GenerationTypeFilter>("all");
     const [trendUnit, setTrendUnit] = useState<TrendUnit>("day");
@@ -188,7 +195,7 @@ function CreditConsumptionManagement() {
     const userOptions = useMemo(() => {
         const users = userQuery.data?.users || [];
         return selectedUser && !users.some((user) => user.id === selectedUser.id) ? [selectedUser, ...users] : users;
-    }, [selectedUser, userQuery.data?.users]);
+    }, [selectedUser, userQuery.data?.users, translate.locale]);
     const filters = useMemo(
         () => ({
             userId: selectedUser?.id,
@@ -196,7 +203,7 @@ function CreditConsumptionManagement() {
             endDate: dateRange[1].format("YYYY-MM-DD"),
             generationType: generationType === "all" ? undefined : generationType,
         }),
-        [dateRange, generationType, selectedUser?.id],
+        [dateRange, generationType, selectedUser?.id, translate.locale],
     );
     const filterKey = adminCreditFilterKey(filters);
     const overviewQuery = useQuery({
@@ -210,9 +217,9 @@ function CreditConsumptionManagement() {
 
     const overview = overviewQuery.data;
     const transactions = transactionsQuery.data;
-    const generationDistribution = useMemo(() => normalizeGenerationDistribution(overview?.generationTypeDistribution || []), [overview?.generationTypeDistribution]);
-    const modelDistribution = useMemo(() => normalizeModelDistribution(overview?.modelDistribution || []), [overview?.modelDistribution]);
-    const trend = useMemo(() => (overview?.trend || []).map((item) => ({ name: item.period, value: item.consumedCredits })), [overview?.trend]);
+    const generationDistribution = useMemo(() => normalizeGenerationDistribution(overview?.generationTypeDistribution || []), [overview?.generationTypeDistribution, translate.locale]);
+    const modelDistribution = useMemo(() => normalizeModelDistribution(overview?.modelDistribution || []), [overview?.modelDistribution, translate.locale]);
+    const trend = useMemo(() => (overview?.trend || []).map((item) => ({ name: item.period, value: item.consumedCredits })), [overview?.trend, translate.locale]);
     const totalConsumed = trend.reduce((total, item) => total + item.value, 0);
     const hasError = overviewQuery.isError || transactionsQuery.isError;
 
@@ -228,8 +235,8 @@ function CreditConsumptionManagement() {
                     showSearch
                     allowClear
                     filterOption={false}
-                    placeholder="全部用户（搜索昵称、用户名或邮箱）"
-                    notFoundContent={userQuery.isFetching ? <Skeleton active paragraph={false} title={{ width: "70%" }} /> : "没有匹配用户"}
+                    placeholder={translate("administration.allUsersSearchNameOrEmail")}
+                    notFoundContent={userQuery.isFetching ? <Skeleton active paragraph={false} title={{ width: "70%" }} /> : translate("administration.noMatchingUsers")}
                     onSearch={setUserKeyword}
                     onChange={(userId) => {
                         setSelectedUser(userOptions.find((user) => user.id === userId) || null);
@@ -245,10 +252,10 @@ function CreditConsumptionManagement() {
                     allowClear={false}
                     disabledDate={(date) => date.isAfter(dayjs(), "day")}
                     presets={[
-                        { label: "今日", value: [dayjs().startOf("day"), dayjs().endOf("day")] },
-                        { label: "近7天", value: [dayjs().subtract(6, "day"), dayjs()] },
-                        { label: "近30天", value: [dayjs().subtract(29, "day"), dayjs()] },
-                        { label: "本月", value: [dayjs().startOf("month"), dayjs()] },
+                        { label: translate("administration.today"), value: [dayjs().startOf("day"), dayjs().endOf("day")] },
+                        { label: translate("administration.last7Days"), value: [dayjs().subtract(6, "day"), dayjs()] },
+                        { label: translate("administration.last30Days"), value: [dayjs().subtract(29, "day"), dayjs()] },
+                        { label: translate("administration.thisMonth"), value: [dayjs().startOf("month"), dayjs()] },
                     ]}
                     onChange={(nextDateRange) => {
                         if (!nextDateRange?.[0] || !nextDateRange[1]) return;
@@ -259,9 +266,9 @@ function CreditConsumptionManagement() {
                 <Segmented
                     value={generationType}
                     options={[
-                        { label: "全部", value: "all" },
-                        { label: "生图", value: "image" },
-                        { label: "生视频", value: "video" },
+                        { label: translate("administration.all"), value: "all" },
+                        { label: translate("administration.generateImage"), value: "image" },
+                        { label: translate("administration.generateVideo"), value: "video" },
                     ]}
                     onChange={(value) => {
                         setGenerationType(value as GenerationTypeFilter);
@@ -275,7 +282,7 @@ function CreditConsumptionManagement() {
                     className="mt-5"
                     type="error"
                     showIcon
-                    title="积分数据加载失败"
+                    title={translate("administration.failedToLoadCreditData")}
                     action={
                         <Button
                             size="small"
@@ -284,8 +291,7 @@ function CreditConsumptionManagement() {
                                 void transactionsQuery.refetch();
                             }}
                         >
-                            重新加载
-                        </Button>
+                            {translate("administration.reload")}</Button>
                     }
                 />
             ) : null}
@@ -294,23 +300,21 @@ function CreditConsumptionManagement() {
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                     <div>
                         <h2 id="admin-credit-statistics-title" className="text-base font-semibold text-[var(--studio-ink)]">
-                            消耗统计
-                        </h2>
+                            {translate("administration.usageStatistics")}</h2>
                         <p className="mt-1 text-sm text-[var(--studio-muted)]">
-                            {selectedUser ? `${adminCreditUserLabel(selectedUser)}本期` : "全部用户本期"}共消耗 {formatCredits(totalConsumed)} 积分
-                        </p>
+                            {selectedUser ? translate("administration.thisPeriod", { value0: adminCreditUserLabel(selectedUser) }) : translate("administration.allUsersThisPeriod")}{translate("administration.totalUsage")}{formatCredits(totalConsumed)} {translate("administration.credits")}</p>
                     </div>
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
-                    <CreditChartPanel title="生图与生视频消耗分布" loading={overviewQuery.isLoading} empty={!generationDistribution.length}>
-                        <CreditChart type="pie" data={generationDistribution} ariaLabel="管理员生图与生视频积分消耗分布图" />
+                    <CreditChartPanel title={translate("administration.imageVsVideoUsage")} loading={overviewQuery.isLoading} empty={!generationDistribution.length}>
+                        <CreditChart type="pie" data={generationDistribution} ariaLabel={translate("administration.adminImageAndVideoUsageChart")} />
                     </CreditChartPanel>
-                    <CreditChartPanel title="模型消耗分布" loading={overviewQuery.isLoading} empty={!modelDistribution.length}>
-                        <CreditChart type="pie" data={modelDistribution} ariaLabel="管理员模型积分消耗分布图" />
+                    <CreditChartPanel title={translate("administration.usageByModel")} loading={overviewQuery.isLoading} empty={!modelDistribution.length}>
+                        <CreditChart type="pie" data={modelDistribution} ariaLabel={translate("administration.adminCreditUsageByModel")} />
                     </CreditChartPanel>
                     <CreditChartPanel
                         className="lg:col-span-2"
-                        title="积分消耗趋势"
+                        title={translate("administration.creditUsageTrend")}
                         loading={overviewQuery.isLoading}
                         empty={!trend.some((item) => item.value > 0)}
                         extra={
@@ -318,14 +322,14 @@ function CreditConsumptionManagement() {
                                 value={trendUnit}
                                 size="small"
                                 options={[
-                                    { label: "按日", value: "day" },
-                                    { label: "按月", value: "month" },
+                                    { label: translate("administration.daily"), value: "day" },
+                                    { label: translate("administration.monthly"), value: "month" },
                                 ]}
                                 onChange={(value) => setTrendUnit(value as TrendUnit)}
                             />
                         }
                     >
-                        <CreditChart type="bar" data={trend} ariaLabel="管理员积分消耗趋势柱状图" />
+                        <CreditChart type="bar" data={trend} ariaLabel={translate("administration.adminCreditUsageBarChart")} />
                     </CreditChartPanel>
                 </div>
             </section>
@@ -334,20 +338,19 @@ function CreditConsumptionManagement() {
                 <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                     <div>
                         <h2 id="admin-credit-transactions-title" className="text-base font-semibold text-[var(--studio-ink)]">
-                            积分明细
-                        </h2>
-                        <p className="mt-1 text-sm text-[var(--studio-muted)]">{selectedUser ? `${adminCreditUserLabel(selectedUser)}的积分记录` : "所有用户的积分记录"}，包含消耗、退款、充值、签到等全部积分变动</p>
+                            {translate("administration.creditDetails")}</h2>
+                        <p className="mt-1 text-sm text-[var(--studio-muted)]">{selectedUser ? translate("administration.creditRecordsFor", { value0: adminCreditUserLabel(selectedUser) }) : translate("administration.creditRecordsForAllUsers")}{translate("administration.includingUsageRefundsTopUpsAndCheckIns")}</p>
                     </div>
-                    <span className="text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} 条记录</span>
+                    <span className="text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} {translate("administration.records")}</span>
                 </div>
                 <Table<ServerAdminCreditTransaction>
                     rowKey="id"
-                    columns={ADMIN_CREDIT_COLUMNS}
+                    columns={createAdminCreditColumns(translate)}
                     dataSource={transactions?.transactions || []}
                     loading={transactionsQuery.isLoading}
                     pagination={false}
                     scroll={{ x: 1_100 }}
-                    locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="所选范围没有积分记录" /> }}
+                    locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("administration.noTransactionsInThisPeriod")} /> }}
                 />
                 {transactions && transactions.total > CREDIT_TRANSACTION_PAGE_SIZE ? (
                     <div className="mt-5 flex justify-end">
@@ -366,6 +369,7 @@ function CreditConsumptionManagement() {
  * @return 图表面板
  */
 function CreditChartPanel({ title, loading, empty, extra, className, children }: { title: string; loading: boolean; empty: boolean; extra?: ReactNode; className?: string; children: ReactNode }) {
+    const translate = useTranslation();
     return (
         <section className={`min-w-0 border border-[var(--studio-line)] bg-[var(--studio-surface)] p-4 md:p-5 ${className || ""}`}>
             <div className="flex items-center justify-between gap-3">
@@ -374,7 +378,7 @@ function CreditChartPanel({ title, loading, empty, extra, className, children }:
             </div>
             <div className="mt-2">
                 {loading ? <Skeleton active className="py-5" paragraph={{ rows: 6 }} /> : null}
-                {!loading && empty ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="所选范围暂无消耗数据" className="py-9" /> : null}
+                {!loading && empty ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("administration.noUsageDataInThisPeriod")} className="py-9" /> : null}
                 {!loading && !empty ? children : null}
             </div>
         </section>
@@ -382,6 +386,7 @@ function CreditChartPanel({ title, loading, empty, extra, className, children }:
 }
 
 function UserManagement() {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const [users, setUsers] = useState<ServerUserProfile[]>([]);
     const [total, setTotal] = useState(0);
@@ -411,7 +416,7 @@ function UserManagement() {
         async (nextPage = page) => {
             const normalizedUserId = userIdKeyword.trim();
             if (normalizedUserId && !/^[1-9]\d*$/.test(normalizedUserId)) {
-                message.warning("请输入正整数用户ID");
+                message.warning(translate("administration.enterAPositiveIntegerUserID"));
                 return;
             }
             setLoading(true);
@@ -429,7 +434,7 @@ function UserManagement() {
                 setUsers(result.users);
                 setTotal(result.total);
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "查询用户失败");
+                message.error(error instanceof Error ? error.message : translate("administration.failedToLoadUsers"));
             } finally {
                 setLoading(false);
             }
@@ -448,12 +453,12 @@ function UserManagement() {
 
     const handleCreateUser = async () => {
         if (!newUserEmail.trim() || !newUserPassword.trim()) {
-            message.warning("请填写邮箱和密码");
+            message.warning(translate("administration.enterEmailAndPassword"));
             return;
         }
         try {
             await adminCreateUser({ email: newUserEmail.trim(), password: newUserPassword, nickname: newUserNickname.trim() || undefined, role: newUserRole });
-            message.success("用户已创建");
+            message.success(translate("administration.userCreated"));
             setCreateUserOpen(false);
             setNewUserEmail("");
             setNewUserPassword("");
@@ -462,27 +467,27 @@ function UserManagement() {
             setPage(1);
             await Promise.all([loadUsers(1), statisticsQuery.refetch()]);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "创建用户失败");
+            message.error(error instanceof Error ? error.message : translate("administration.failedToCreateUser"));
         }
     };
 
     const updateStatus = async (user: ServerUserProfile, status: number) => {
         try {
             await updateServerUserStatus(user.id, status);
-            message.success("用户状态已更新");
+            message.success(translate("administration.userStatusUpdated"));
             await loadUsers(page);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "更新用户状态失败");
+            message.error(error instanceof Error ? error.message : translate("administration.failedToUpdateUserStatus"));
         }
     };
 
     const updateRole = async (user: ServerUserProfile, role: ServerUserRole) => {
         try {
             await updateServerUserRole(user.id, role);
-            message.success("用户角色已更新");
+            message.success(translate("administration.userRoleUpdated"));
             await loadUsers(page);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "更新用户角色失败");
+            message.error(error instanceof Error ? error.message : translate("administration.failedToUpdateUserRole"));
         }
     };
 
@@ -494,17 +499,17 @@ function UserManagement() {
 
     const saveCreditAdjustment = async () => {
         if (!creditUser || !creditChangeAmount || !creditReason.trim()) {
-            message.warning("请填写非零积分变动值和调整原因");
+            message.warning(translate("administration.enterANonzeroCreditChangeAndAReason"));
             return;
         }
         setCreditSaving(true);
         try {
             await adjustServerUserCredits({ userId: creditUser.id, changeAmount: creditChangeAmount, reason: creditReason.trim() });
-            message.success("用户积分已调整");
+            message.success(translate("administration.userCreditsAdjusted"));
             setCreditUser(null);
             await loadUsers(page);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "调整用户积分失败");
+            message.error(error instanceof Error ? error.message : translate("administration.failedToAdjustUserCredits"));
         } finally {
             setCreditSaving(false);
         }
@@ -512,17 +517,17 @@ function UserManagement() {
 
     const unlockPassword = (user: ServerUserProfile) => {
         modal.confirm({
-            title: "解除密码锁定",
-            content: `确认解除“${user.nickname || user.email}”的密码锁定吗？`,
-            okText: "解除锁定",
-            cancelText: "取消",
+            title: translate("administration.unlockPassword"),
+            content: translate("administration.unlockPasswordSignInFor", { value0: user.nickname || user.email }),
+            okText: translate("administration.unlock"),
+            cancelText: translate("administration.cancel"),
             onOk: async () => {
                 try {
                     await unlockServerUserPassword(user.id);
-                    message.success("密码锁定已解除");
+                    message.success(translate("administration.passwordUnlocked"));
                     await loadUsers(page);
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "解除密码锁定失败");
+                    message.error(error instanceof Error ? error.message : translate("administration.failedToUnlockPassword"));
                 }
             },
         });
@@ -536,7 +541,7 @@ function UserManagement() {
             render: (value: number) => <span className="tabular-nums">{value}</span>,
         },
         {
-            title: "用户",
+            title: translate("administration.user"),
             dataIndex: "email",
             render: (_, user) => (
                 <div>
@@ -546,15 +551,15 @@ function UserManagement() {
             ),
         },
         {
-            title: "角色",
+            title: translate("administration.character"),
             dataIndex: "role",
             width: 160,
             render: (_, user) => (
                 <Select<ServerUserRole>
                     value={user.role}
                     options={[
-                        { label: "普通用户", value: "user" },
-                        { label: "管理员", value: "admin" },
+                        { label: translate("administration.user_f6a2fa"), value: "user" },
+                        { label: translate("administration.administrator"), value: "admin" },
                     ]}
                     onChange={(role) => void updateRole(user, role)}
                     className="w-28"
@@ -562,48 +567,47 @@ function UserManagement() {
             ),
         },
         {
-            title: "状态",
+            title: translate("administration.status"),
             dataIndex: "status",
             width: 130,
-            render: (status: number) => (status === 1 ? <Tag color="green">正常</Tag> : <Tag color="red">禁用</Tag>),
+            render: (status: number) => (status === 1 ? <Tag color="green">{translate("administration.normal")}</Tag> : <Tag color="red">{translate("administration.disable")}</Tag>),
         },
         {
-            title: "可用积分",
+            title: translate("administration.availableCredits"),
             dataIndex: "creditBalance",
             width: 120,
-            render: (value: number) => <span className="font-medium tabular-nums">{value.toLocaleString()}</span>,
+            render: (value: number) => <span className="font-medium tabular-nums">{value.toLocaleString(currentLanguageTag())}</span>,
         },
         {
-            title: "密码锁定",
+            title: translate("administration.passwordLock"),
             dataIndex: "passwordLockedUntil",
             width: 200,
             render: (value: string | null) => {
                 const lockedUntil = value ? new Date(value) : null;
                 if (!lockedUntil || Number.isNaN(lockedUntil.getTime()) || lockedUntil.getTime() <= Date.now()) {
-                    return <Tag>未锁定</Tag>;
+                    return <Tag>{translate("administration.unlocked")}</Tag>;
                 }
-                return <Tag color="orange">锁定至 {lockedUntil.toLocaleString()}</Tag>;
+                return <Tag color="orange">{translate("administration.lockedUntil")}{lockedUntil.toLocaleString(currentLanguageTag())}</Tag>;
             },
         },
         {
-            title: "创建时间",
+            title: translate("administration.createdAt"),
             dataIndex: "createdAt",
             width: 180,
-            render: (value: string) => (value ? new Date(value).toLocaleString() : "-"),
+            render: (value: string) => (value ? new Date(value).toLocaleString(currentLanguageTag()) : "-"),
         },
         {
-            title: "操作",
+            title: translate("administration.actions"),
             width: 310,
             render: (_, user) => (
                 <Space size="small">
-                    <Button onClick={() => openCreditAdjustment(user)}>调整积分</Button>
-                    {user.passwordLockedUntil && new Date(user.passwordLockedUntil).getTime() > Date.now() ? <Button onClick={() => unlockPassword(user)}>解除锁定</Button> : null}
+                    <Button onClick={() => openCreditAdjustment(user)}>{translate("administration.adjustCredits")}</Button>
+                    {user.passwordLockedUntil && new Date(user.passwordLockedUntil).getTime() > Date.now() ? <Button onClick={() => unlockPassword(user)}>{translate("administration.unlock")}</Button> : null}
                     {user.status === 1 ? (
                         <Button danger onClick={() => void updateStatus(user, 0)}>
-                            禁用
-                        </Button>
+                            {translate("administration.disable")}</Button>
                     ) : (
-                        <Button onClick={() => void updateStatus(user, 1)}>启用</Button>
+                        <Button onClick={() => void updateStatus(user, 1)}>{translate("administration.enable")}</Button>
                     )}
                 </Space>
             ),
@@ -612,15 +616,15 @@ function UserManagement() {
 
     return (
         <div>
-            <section className="mb-5 grid grid-cols-1 border border-[var(--studio-line)] bg-[var(--studio-surface)] sm:grid-cols-3" aria-label="用户统计">
+            <section className="mb-5 grid grid-cols-1 border border-[var(--studio-line)] bg-[var(--studio-surface)] sm:grid-cols-3" aria-label={translate("administration.userStatistics")}>
                 {[
-                    { label: "总用户数", value: statisticsQuery.data?.totalUsers },
-                    { label: "本月用户增量", value: statisticsQuery.data?.monthlyNewUsers },
-                    { label: "今日用户增量", value: statisticsQuery.data?.dailyNewUsers },
+                    { label: translate("administration.totalUsers"), value: statisticsQuery.data?.totalUsers },
+                    { label: translate("administration.newUsersThisMonth"), value: statisticsQuery.data?.monthlyNewUsers },
+                    { label: translate("administration.newUsersToday"), value: statisticsQuery.data?.dailyNewUsers },
                 ].map((item, index) => (
                     <div key={item.label} className={`min-w-0 px-5 py-4 ${index > 0 ? "border-t border-[var(--studio-line)] sm:border-l sm:border-t-0" : ""}`}>
                         <div className="text-sm text-[var(--studio-muted)]">{item.label}</div>
-                        {statisticsQuery.isLoading ? <Skeleton.Input active size="small" className="mt-2 !h-8 !w-24" /> : <div className="mt-2 text-2xl font-semibold tabular-nums text-[var(--studio-ink)]">{item.value?.toLocaleString() ?? "--"}</div>}
+                        {statisticsQuery.isLoading ? <Skeleton.Input active size="small" className="mt-2 !h-8 !w-24" /> : <div className="mt-2 text-2xl font-semibold tabular-nums text-[var(--studio-ink)]">{item.value?.toLocaleString(currentLanguageTag()) ?? "--"}</div>}
                     </div>
                 ))}
             </section>
@@ -629,18 +633,17 @@ function UserManagement() {
                     className="mb-4"
                     type="error"
                     showIcon
-                    title="用户统计加载失败"
+                    title={translate("administration.failedToLoadUserStatistics")}
                     action={
                         <Button size="small" onClick={() => void statisticsQuery.refetch()}>
-                            重新加载
-                        </Button>
+                            {translate("administration.reload")}</Button>
                     }
                 />
             ) : null}
             <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                     <Input.Search
-                        placeholder="搜索昵称、用户名或邮箱"
+                        placeholder={translate("administration.searchDisplayNameUsernameOrEmail")}
                         value={searchKeyword}
                         onChange={(e) => setSearchKeyword(e.target.value)}
                         onSearch={handleSearch}
@@ -649,7 +652,7 @@ function UserManagement() {
                         allowClear
                     />
                     <Input.Search
-                        placeholder="用户ID"
+                        placeholder={translate("administration.userID_2b8eac")}
                         value={userIdKeyword}
                         onChange={(e) => setUserIdKeyword(e.target.value)}
                         onSearch={handleSearch}
@@ -659,7 +662,7 @@ function UserManagement() {
                         allowClear
                     />
                     <Select<string>
-                        placeholder="角色"
+                        placeholder={translate("administration.character")}
                         value={filterRole}
                         onChange={(value) => {
                             setFilterRole(value);
@@ -674,12 +677,12 @@ function UserManagement() {
                         allowClear
                         className="w-28"
                         options={[
-                            { label: "普通用户", value: "user" },
-                            { label: "管理员", value: "admin" },
+                            { label: translate("administration.user_f6a2fa"), value: "user" },
+                            { label: translate("administration.administrator"), value: "admin" },
                         ]}
                     />
                     <Select<number>
-                        placeholder="状态"
+                        placeholder={translate("administration.status")}
                         value={filterStatus}
                         onChange={(value) => {
                             setFilterStatus(value);
@@ -694,8 +697,8 @@ function UserManagement() {
                         allowClear
                         className="w-24"
                         options={[
-                            { label: "正常", value: 1 },
-                            { label: "禁用", value: 0 },
+                            { label: translate("administration.normal"), value: 1 },
+                            { label: translate("administration.disable"), value: 0 },
                         ]}
                     />
                     <DatePicker.RangePicker
@@ -709,46 +712,45 @@ function UserManagement() {
                     />
                 </div>
                 <Button type="primary" icon={<Plus className="size-4" />} onClick={() => setCreateUserOpen(true)}>
-                    新增用户
-                </Button>
+                    {translate("administration.addUser")}</Button>
             </div>
             <Table rowKey="id" columns={columns} dataSource={users} loading={loading} pagination={false} />
             <div className="mt-4 flex justify-end">
                 <Pagination current={page} pageSize={PAGE_SIZE} total={total} showSizeChanger={false} onChange={setPage} />
             </div>
 
-            <Modal title="新增用户" open={createUserOpen} onOk={handleCreateUser} onCancel={() => setCreateUserOpen(false)} okText="创建" cancelText="取消">
+            <Modal title={translate("administration.addUser")} open={createUserOpen} onOk={handleCreateUser} onCancel={() => setCreateUserOpen(false)} okText={translate("administration.create")} cancelText={translate("administration.cancel")}>
                 <div className="flex flex-col gap-4">
-                    <Input value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} placeholder="邮箱" type="email" />
-                    <Input.Password value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} placeholder="密码（至少8位）" />
-                    <Input value={newUserNickname} onChange={(e) => setNewUserNickname(e.target.value)} placeholder="昵称（可选）" />
+                    <Input value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} placeholder={translate("administration.email")} type="email" />
+                    <Input.Password value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} placeholder={translate("administration.passwordAtLeast8Characters")} />
+                    <Input value={newUserNickname} onChange={(e) => setNewUserNickname(e.target.value)} placeholder={translate("administration.displayNameOptional")} />
                     <Select<string>
                         value={newUserRole}
                         onChange={setNewUserRole}
                         options={[
-                            { label: "普通用户", value: "user" },
-                            { label: "管理员", value: "admin" },
+                            { label: translate("administration.user_f6a2fa"), value: "user" },
+                            { label: translate("administration.administrator"), value: "admin" },
                         ]}
                     />
                 </div>
             </Modal>
 
             <Modal
-                title={`调整积分${creditUser ? `：${creditUser.nickname || creditUser.email}` : ""}`}
+                title={translate("administration.adjustCredits_8df211", { value0: creditUser ? `：${creditUser.nickname || creditUser.email}` : "" })}
                 open={Boolean(creditUser)}
                 confirmLoading={creditSaving}
                 onOk={() => void saveCreditAdjustment()}
                 onCancel={() => setCreditUser(null)}
-                okText="确认调整"
-                cancelText="取消"
+                okText={translate("administration.confirmAdjustment")}
+                cancelText={translate("administration.cancel")}
             >
                 <div className="flex flex-col gap-4">
                     <div className="text-sm text-[var(--studio-muted)]">
-                        当前可用积分：<span className="font-medium tabular-nums text-[var(--studio-ink)]">{creditUser?.creditBalance.toLocaleString() ?? 0}</span>
+                        {translate("administration.availableCredits_2aa38d")}<span className="font-medium tabular-nums text-[var(--studio-ink)]">{creditUser?.creditBalance.toLocaleString(currentLanguageTag()) ?? 0}</span>
                     </div>
-                    <InputNumber value={creditChangeAmount} precision={0} className="w-full" placeholder="正数增加，负数扣减" onChange={(value) => setCreditChangeAmount(value === null ? null : Number(value))} />
+                    <InputNumber value={creditChangeAmount} precision={0} className="w-full" placeholder={translate("administration.positiveToAddNegativeToDeduct")} onChange={(value) => setCreditChangeAmount(value === null ? null : Number(value))} />
                     <div className="pb-5">
-                        <Input.TextArea value={creditReason} maxLength={200} showCount placeholder="填写调整原因" autoSize={{ minRows: 3, maxRows: 5 }} onChange={(event) => setCreditReason(event.target.value)} />
+                        <Input.TextArea value={creditReason} maxLength={200} showCount placeholder={translate("administration.reasonForAdjustment")} autoSize={{ minRows: 3, maxRows: 5 }} onChange={(event) => setCreditReason(event.target.value)} />
                     </div>
                 </div>
             </Modal>
@@ -757,6 +759,7 @@ function UserManagement() {
 }
 
 function NotificationManagement() {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const [notifications, setNotifications] = useState<SystemNotification[]>([]);
     const [loading, setLoading] = useState(false);
@@ -774,7 +777,7 @@ function NotificationManagement() {
             const result = await listAdminNotifications();
             setNotifications(result.notifications || []);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "查询公告失败");
+            message.error(error instanceof Error ? error.message : translate("administration.failedToLoadAnnouncements"));
         } finally {
             setLoading(false);
         }
@@ -786,18 +789,18 @@ function NotificationManagement() {
 
     const handleCreate = async () => {
         if (!newTitle.trim()) {
-            message.warning("请输入公告标题");
+            message.warning(translate("administration.enterAnnouncementTitle"));
             return;
         }
         try {
             await createAdminNotification({ title: newTitle.trim(), content: newContent.trim() });
-            message.success("公告已创建");
+            message.success(translate("administration.announcementCreated"));
             setCreateOpen(false);
             setNewTitle("");
             setNewContent("");
             await loadNotifications();
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "创建公告失败");
+            message.error(error instanceof Error ? error.message : translate("administration.failedToCreateAnnouncement"));
         }
     };
 
@@ -812,72 +815,70 @@ function NotificationManagement() {
         if (!editTitle.trim() || editId === null) return;
         try {
             await updateAdminNotification({ id: editId, title: editTitle.trim(), content: editContent.trim() });
-            message.success("公告已更新");
+            message.success(translate("administration.announcementUpdated"));
             setEditOpen(false);
             setEditId(null);
             await loadNotifications();
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "更新公告失败");
+            message.error(error instanceof Error ? error.message : translate("administration.failedToUpdateAnnouncement"));
         }
     };
 
     const handlePublish = (id: number) => {
         modal.confirm({
-            title: "发布确认",
-            content: "发布后所有用户将看到此公告，确定发布？",
-            okText: "发布",
-            cancelText: "取消",
+            title: translate("administration.confirmPublish"),
+            content: translate("administration.allUsersWillSeeThisAnnouncementAfterPublishingPublish"),
+            okText: translate("administration.publish"),
+            cancelText: translate("administration.cancel"),
             onOk: async () => {
                 try {
                     await publishAdminNotification(id);
-                    message.success("公告已发布");
+                    message.success(translate("administration.announcementPublished"));
                     await loadNotifications();
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "发布公告失败");
+                    message.error(error instanceof Error ? error.message : translate("administration.failedToPublishAnnouncement"));
                 }
             },
         });
     };
 
     const columns: ColumnsType<SystemNotification> = [
-        { title: "标题", dataIndex: "title", ellipsis: true },
-        { title: "内容", dataIndex: "content", ellipsis: true, render: (text: string) => text || "-" },
+        { title: translate("administration.title"), dataIndex: "title", ellipsis: true },
+        { title: translate("administration.content"), dataIndex: "content", ellipsis: true, render: (text: string) => text || "-" },
         {
-            title: "优先级",
+            title: translate("administration.priority"),
             dataIndex: "priority",
             width: 100,
-            render: (priority: string) => (priority === "high" ? <Tag color="red">高</Tag> : <Tag>普通</Tag>),
+            render: (priority: string) => (priority === "high" ? <Tag color="red">{translate("administration.high")}</Tag> : <Tag>{translate("administration.regular")}</Tag>),
         },
         {
-            title: "状态",
+            title: translate("administration.status"),
             dataIndex: "status",
             width: 100,
-            render: (status: number) => (status === 1 ? <Tag color="green">已发布</Tag> : <Tag>草稿</Tag>),
+            render: (status: number) => (status === 1 ? <Tag color="green">{translate("administration.published")}</Tag> : <Tag>{translate("administration.draft")}</Tag>),
         },
         {
-            title: "发布时间",
+            title: translate("administration.publishedAt"),
             dataIndex: "publishedAt",
             width: 180,
-            render: (value: string) => (value ? new Date(value).toLocaleString() : "-"),
+            render: (value: string) => (value ? new Date(value).toLocaleString(currentLanguageTag()) : "-"),
         },
         {
-            title: "创建时间",
+            title: translate("administration.createdAt"),
             dataIndex: "createdAt",
             width: 180,
-            render: (value: string) => (value ? new Date(value).toLocaleString() : "-"),
+            render: (value: string) => (value ? new Date(value).toLocaleString(currentLanguageTag()) : "-"),
         },
         {
-            title: "操作",
+            title: translate("administration.actions"),
             width: 180,
             render: (_, record) => (
                 <span className="inline-flex gap-1">
                     <Button size="small" onClick={() => handleEdit(record)}>
-                        编辑
-                    </Button>
+                        {translate("administration.edit")}</Button>
                     {record.status === 0 ? (
                         <Button size="small" icon={<Send className="size-3.5" />} onClick={() => handlePublish(record.id)}>
-                            发布
-                        </Button>
+                            {translate("administration.publish")}</Button>
                     ) : null}
                 </span>
             ),
@@ -888,22 +889,21 @@ function NotificationManagement() {
         <div>
             <div className="mb-4 flex justify-end">
                 <Button type="primary" icon={<Plus className="size-4" />} onClick={() => setCreateOpen(true)}>
-                    新建公告
-                </Button>
+                    {translate("administration.newAnnouncement")}</Button>
             </div>
             <Table rowKey="id" columns={columns} dataSource={notifications} loading={loading} pagination={false} />
 
-            <Modal title="新建公告" open={createOpen} onOk={handleCreate} onCancel={() => setCreateOpen(false)} okText="创建" cancelText="取消">
+            <Modal title={translate("administration.newAnnouncement")} open={createOpen} onOk={handleCreate} onCancel={() => setCreateOpen(false)} okText={translate("administration.create")} cancelText={translate("administration.cancel")}>
                 <div className="flex flex-col gap-4">
-                    <Input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="公告标题" />
-                    <Input.TextArea value={newContent} onChange={(e) => setNewContent(e.target.value)} rows={4} placeholder="公告内容（可选）" />
+                    <Input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder={translate("administration.announcementTitle")} />
+                    <Input.TextArea value={newContent} onChange={(e) => setNewContent(e.target.value)} rows={4} placeholder={translate("administration.announcementContentOptional")} />
                 </div>
             </Modal>
 
-            <Modal title="编辑公告" open={editOpen} onOk={handleEditSave} onCancel={() => setEditOpen(false)} okText="保存" cancelText="取消">
+            <Modal title={translate("administration.editAnnouncement")} open={editOpen} onOk={handleEditSave} onCancel={() => setEditOpen(false)} okText={translate("administration.save")} cancelText={translate("administration.cancel")}>
                 <div className="flex flex-col gap-4">
-                    <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder="公告标题" />
-                    <Input.TextArea value={editContent} onChange={(e) => setEditContent(e.target.value)} rows={4} placeholder="公告内容（可选）" />
+                    <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={translate("administration.announcementTitle")} />
+                    <Input.TextArea value={editContent} onChange={(e) => setEditContent(e.target.value)} rows={4} placeholder={translate("administration.announcementContentOptional")} />
                 </div>
             </Modal>
         </div>
@@ -923,6 +923,7 @@ type PromptFormValues = {
 };
 
 function PromptManagement() {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const [form] = Form.useForm<PromptFormValues>();
     const [prompts, setPrompts] = useState<ServerPrompt[]>([]);
@@ -945,7 +946,7 @@ function PromptManagement() {
     const selectCoverFile = (file: File | undefined) => {
         if (!file) return;
         if (!file.type.startsWith("image/")) {
-            message.error("请选择图片文件");
+            message.error(translate("administration.selectAnImageFile"));
             return;
         }
         if (coverPreview.startsWith("blob:")) URL.revokeObjectURL(coverPreview);
@@ -956,7 +957,7 @@ function PromptManagement() {
     const previewCoverUrl = () => {
         const url = String(form.getFieldValue("coverUrl") || "").trim();
         if (!/^https?:\/\//i.test(url)) {
-            message.error("请输入有效的图片 URL");
+            message.error(translate("administration.enterAValidImageURL"));
             return;
         }
         if (coverPreview.startsWith("blob:")) URL.revokeObjectURL(coverPreview);
@@ -986,7 +987,7 @@ function PromptManagement() {
                 setTotal(result.total);
                 setCategoryOptions(result.categories || []);
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "查询提示词失败");
+                message.error(error instanceof Error ? error.message : translate("administration.failedToLoadPrompts"));
             } finally {
                 setLoading(false);
             }
@@ -1053,16 +1054,16 @@ function PromptManagement() {
             };
             if (editingPrompt) {
                 await updateAdminPrompt({ id: editingPrompt.id, ...input });
-                message.success("提示词已更新");
+                message.success(translate("administration.promptUpdated"));
             } else {
                 await createAdminPrompt(input);
-                message.success("提示词已创建");
+                message.success(translate("administration.promptCreated"));
             }
             closeEdit();
             await loadPrompts(editingPrompt ? page : 1);
             if (!editingPrompt) setPage(1);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "保存提示词失败");
+            message.error(error instanceof Error ? error.message : translate("administration.failedToSavePrompt"));
         } finally {
             setSaving(false);
         }
@@ -1071,17 +1072,17 @@ function PromptManagement() {
     const handleStatusChange = (prompt: ServerPrompt) => {
         const nextStatus = prompt.status === 1 ? 0 : 1;
         modal.confirm({
-            title: nextStatus === 1 ? "启用提示词" : "停用提示词",
-            content: nextStatus === 1 ? "启用后用户侧提示词库将展示该提示词。" : "停用后用户侧提示词库将不再展示该提示词。",
-            okText: nextStatus === 1 ? "启用" : "停用",
-            cancelText: "取消",
+            title: nextStatus === 1 ? translate("administration.enablePrompt") : translate("administration.disablePrompt"),
+            content: nextStatus === 1 ? translate("administration.enabledPromptsAppearInThePromptLibrary") : translate("administration.disabledPromptsAreHiddenFromUsers"),
+            okText: nextStatus === 1 ? translate("administration.enable") : translate("administration.disable_4e6fd0"),
+            cancelText: translate("administration.cancel"),
             onOk: async () => {
                 try {
                     await updateAdminPromptStatus(prompt.id, nextStatus);
-                    message.success("提示词状态已更新");
+                    message.success(translate("administration.promptStatusUpdated"));
                     await loadPrompts(page);
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "更新提示词状态失败");
+                    message.error(error instanceof Error ? error.message : translate("administration.failedToUpdatePromptStatus"));
                 }
             },
         });
@@ -1089,21 +1090,21 @@ function PromptManagement() {
 
     const handleDelete = (ids: number[]) => {
         modal.confirm({
-            title: "删除提示词",
-            content: "删除后用户侧和管理端列表都不会再展示这些提示词，确定删除？",
-            okText: "删除",
+            title: translate("administration.deletePrompt"),
+            content: translate("administration.thesePromptsWillDisappearFromUserAndAdminLists"),
+            okText: translate("administration.delete"),
             okButtonProps: { danger: true },
-            cancelText: "取消",
+            cancelText: translate("administration.cancel"),
             onOk: async () => {
                 try {
                     await deleteAdminPrompts(ids);
-                    message.success("提示词已删除");
+                    message.success(translate("administration.promptDeleted"));
                     setSelectedRowKeys([]);
                     const nextPage = prompts.length <= ids.length && page > 1 ? page - 1 : page;
                     setPage(nextPage);
                     await loadPrompts(nextPage);
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "删除提示词失败");
+                    message.error(error instanceof Error ? error.message : translate("administration.failedToDeletePrompt"));
                 }
             },
         });
@@ -1123,7 +1124,7 @@ function PromptManagement() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-3">
                     <Input.Search
-                        placeholder="搜索标题、内容或分类"
+                        placeholder={translate("administration.searchTitleContentOrCategory")}
                         value={keyword}
                         onChange={(event) => setKeyword(event.target.value)}
                         onSearch={handleSearch}
@@ -1132,7 +1133,7 @@ function PromptManagement() {
                         allowClear
                     />
                     <Select<string>
-                        placeholder="分类"
+                        placeholder={translate("administration.category")}
                         value={category}
                         onChange={(value) => {
                             setCategory(value);
@@ -1150,7 +1151,7 @@ function PromptManagement() {
                         options={categoryOptions.map((item) => ({ label: item, value: item }))}
                     />
                     <Select<number>
-                        placeholder="状态"
+                        placeholder={translate("administration.status")}
                         value={status}
                         onChange={(value) => {
                             setStatus(value);
@@ -1165,21 +1166,19 @@ function PromptManagement() {
                         allowClear
                         className="w-28"
                         options={[
-                            { label: "启用", value: 1 },
-                            { label: "停用", value: 0 },
+                            { label: translate("administration.enable"), value: 1 },
+                            { label: translate("administration.disable_4e6fd0"), value: 0 },
                         ]}
                     />
                     <Button danger disabled={!selectedRowKeys.length} icon={<Trash2 className="size-4" />} onClick={() => handleDelete(selectedRowKeys.map(Number))}>
-                        批量删除
-                    </Button>
+                        {translate("administration.deleteSelected")}</Button>
                 </div>
                 <Button type="primary" icon={<Plus className="size-4" />} onClick={openCreate}>
-                    新增提示词
-                </Button>
+                    {translate("administration.addPrompt")}</Button>
             </div>
             {loading ? (
                 <div className="studio-empty flex min-h-60 items-center justify-center">
-                    <span className="text-sm">加载中...</span>
+                    <span className="text-sm">{translate("administration.loading")}</span>
                 </div>
             ) : prompts.length ? (
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -1191,14 +1190,13 @@ function PromptManagement() {
                                     {prompt.coverUrl ? (
                                         <img src={prompt.coverUrl} alt={prompt.title} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
                                     ) : (
-                                        <div className="studio-empty flex h-full w-full items-center justify-center text-xs">暂无封面</div>
+                                        <div className="studio-empty flex h-full w-full items-center justify-center text-xs">{translate("administration.noCover")}</div>
                                     )}
                                     <label className="absolute left-3 top-3 inline-flex cursor-pointer items-center rounded-md border border-[var(--studio-line)] bg-[var(--studio-glass-strong)] px-2 py-1 text-xs backdrop-blur">
                                         <input type="checkbox" className="mr-1.5" checked={selected} onChange={(event) => toggleSelectedPrompt(prompt.id, event.target.checked)} />
-                                        选择
-                                    </label>
+                                        {translate("administration.select")}</label>
                                     <Tag color={prompt.status === 1 ? "green" : "red"} className="absolute right-3 top-3 m-0">
-                                        {prompt.status === 1 ? "启用" : "停用"}
+                                        {prompt.status === 1 ? translate("administration.enable") : translate("administration.disable_4e6fd0")}
                                     </Tag>
                                 </div>
                                 <div className="flex min-h-0 flex-1 flex-col p-4">
@@ -1217,17 +1215,15 @@ function PromptManagement() {
                                         {prompt.tags.length > 3 ? <Tag className="m-0 text-[11px]">+{prompt.tags.length - 3}</Tag> : null}
                                     </div>
                                     <div className="mt-auto pt-4">
-                                        <div className="studio-caption mb-3 text-xs">更新于 {prompt.updatedAt ? new Date(prompt.updatedAt).toLocaleString() : "-"}</div>
+                                        <div className="studio-caption mb-3 text-xs">{translate("administration.updated")}{prompt.updatedAt ? new Date(prompt.updatedAt).toLocaleString(currentLanguageTag()) : "-"}</div>
                                         <div className="grid grid-cols-3 gap-2">
                                             <Button size="small" icon={<Edit className="size-3.5" />} onClick={() => openEdit(prompt)}>
-                                                编辑
-                                            </Button>
+                                                {translate("administration.edit")}</Button>
                                             <Button size="small" icon={<Power className="size-3.5" />} onClick={() => handleStatusChange(prompt)}>
-                                                {prompt.status === 1 ? "停用" : "启用"}
+                                                {prompt.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable")}
                                             </Button>
                                             <Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={() => handleDelete([prompt.id])}>
-                                                删除
-                                            </Button>
+                                                {translate("administration.delete")}</Button>
                                         </div>
                                     </div>
                                 </div>
@@ -1236,21 +1232,21 @@ function PromptManagement() {
                     })}
                 </div>
             ) : (
-                <div className="studio-empty flex min-h-60 items-center justify-center text-sm">暂无提示词</div>
+                <div className="studio-empty flex min-h-60 items-center justify-center text-sm">{translate("administration.noPrompts")}</div>
             )}
             <div className="mt-4 flex justify-end">
                 <Pagination current={page} pageSize={PAGE_SIZE} total={total} showSizeChanger={false} onChange={setPage} />
             </div>
 
-            <Modal title={editingPrompt ? "编辑提示词" : "新增提示词"} open={editOpen} onOk={savePrompt} onCancel={closeEdit} okText="保存" cancelText="取消" confirmLoading={saving} width={880}>
+            <Modal title={editingPrompt ? translate("administration.editPrompt") : translate("administration.addPrompt")} open={editOpen} onOk={savePrompt} onCancel={closeEdit} okText={translate("administration.save")} cancelText={translate("administration.cancel")} confirmLoading={saving} width={880}>
                 <Form form={form} layout="vertical" className="mt-2">
                     <div className="flex h-[560px] gap-5">
                         <div className="flex w-60 shrink-0 flex-col gap-3">
                             <div className="studio-empty flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg border border-[var(--studio-line)] bg-[var(--studio-media)]">
                                 {coverPreview ? (
-                                    <img src={coverPreview} alt="封面预览" className="h-full w-full object-contain" />
+                                    <img src={coverPreview} alt={translate("administration.coverPreview")} className="h-full w-full object-contain" />
                                 ) : (
-                                    <span className="text-xs">暂无封面</span>
+                                    <span className="text-xs">{translate("administration.noCover")}</span>
                                 )}
                             </div>
                             <Segmented
@@ -1258,8 +1254,8 @@ function PromptManagement() {
                                 value={coverMode}
                                 onChange={(value) => setCoverMode(value as "upload" | "url")}
                                 options={[
-                                    { label: "上传图片", value: "upload" },
-                                    { label: "上传 URL", value: "url" },
+                                    { label: translate("administration.uploadImage"), value: "upload" },
+                                    { label: translate("administration.uploadURL"), value: "url" },
                                 ]}
                             />
                             <input
@@ -1278,8 +1274,7 @@ function PromptManagement() {
                                         <Input />
                                     </Form.Item>
                                     <Button icon={<Upload className="size-3.5" />} onClick={() => coverInputRef.current?.click()}>
-                                        选择图片并预览
-                                    </Button>
+                                        {translate("administration.selectImageAndPreview")}</Button>
                                     {coverFile ? <div className="studio-caption truncate text-xs">{coverFile.name}</div> : null}
                                 </>
                             ) : (
@@ -1288,41 +1283,40 @@ function PromptManagement() {
                                         <Input placeholder="https://..." allowClear onPressEnter={previewCoverUrl} />
                                     </Form.Item>
                                     <Button icon={<Upload className="size-3.5" />} onClick={previewCoverUrl}>
-                                        上传并预览
-                                    </Button>
+                                        {translate("administration.uploadAndPreview")}</Button>
                                 </>
                             )}
                         </div>
                         <div className="min-w-0 flex-1 overflow-y-auto pr-1">
-                            <Form.Item name="title" label="标题" rules={[{ required: true, message: "请输入标题" }]}>
-                                <Input placeholder="请输入提示词标题" />
+                            <Form.Item name="title" label={translate("administration.title")} rules={[{ required: true, message: translate("administration.enterATitle") }]}>
+                                <Input placeholder={translate("administration.enterPromptTitle")} />
                             </Form.Item>
-                            <Form.Item name="prompt" label="提示词内容" rules={[{ required: true, message: "请输入提示词内容" }]}>
-                                <Input.TextArea rows={6} placeholder="请输入提示词内容" />
+                            <Form.Item name="prompt" label={translate("administration.promptContent")} rules={[{ required: true, message: translate("administration.enterPromptContent") }]}>
+                                <Input.TextArea rows={6} placeholder={translate("administration.enterPromptContent")} />
                             </Form.Item>
                             <div className="grid gap-4 sm:grid-cols-2">
-                                <Form.Item name="category" label="分类" rules={[{ required: true, message: "请输入分类" }]}>
-                                    <Input placeholder="例如：摄影、海报、角色" />
+                                <Form.Item name="category" label={translate("administration.category")} rules={[{ required: true, message: translate("administration.enterACategory") }]}>
+                                    <Input placeholder={translate("administration.eGPhotographyPosterCharacter")} />
                                 </Form.Item>
-                                <Form.Item name="tagsText" label="标签">
-                                    <Input placeholder="多个标签用逗号分隔" />
+                                <Form.Item name="tagsText" label={translate("administration.tags")}>
+                                    <Input placeholder={translate("administration.separateTagsWithCommas")} />
                                 </Form.Item>
                             </div>
-                            <Form.Item name="preview" label="预览内容">
-                                <Input.TextArea rows={3} placeholder="可填写 Markdown 图片预览内容" />
+                            <Form.Item name="preview" label={translate("administration.previewContent")}>
+                                <Input.TextArea rows={3} placeholder={translate("administration.markdownImagePreviewContent")} />
                             </Form.Item>
-                            <Form.Item name="githubUrl" label="来源 URL">
+                            <Form.Item name="githubUrl" label={translate("administration.sourceURL")}>
                                 <Input placeholder="https://..." />
                             </Form.Item>
                             <div className="grid gap-4 sm:grid-cols-2">
-                                <Form.Item name="sortOrder" label="排序">
+                                <Form.Item name="sortOrder" label={translate("administration.sort")}>
                                     <InputNumber className="w-full" min={0} precision={0} />
                                 </Form.Item>
-                                <Form.Item name="status" label="状态">
+                                <Form.Item name="status" label={translate("administration.status")}>
                                     <Select<number>
                                         options={[
-                                            { label: "启用", value: 1 },
-                                            { label: "停用", value: 0 },
+                                            { label: translate("administration.enable"), value: 1 },
+                                            { label: translate("administration.disable_4e6fd0"), value: 0 },
                                         ]}
                                     />
                                 </Form.Item>
@@ -1351,6 +1345,7 @@ type GenerationStyleFormValues = {
  * @return 风格管理内容
  */
 function GenerationStyleManagement() {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const [form] = Form.useForm<GenerationStyleFormValues>();
     const [styles, setStyles] = useState<ServerGenerationStyle[]>([]);
@@ -1366,7 +1361,7 @@ function GenerationStyleManagement() {
     const [coverUploading, setCoverUploading] = useState(false);
     const coverInputRef = useRef<HTMLInputElement>(null);
     const coverUrl = Form.useWatch("coverUrl", form) || "";
-    const coverName = Form.useWatch("name", form) || "风格封面";
+    const coverName = Form.useWatch("name", form) || translate("administration.styleCover");
 
     const loadStyles = useCallback(
         async (nextPage = page) => {
@@ -1383,7 +1378,7 @@ function GenerationStyleManagement() {
                 setTotal(result.total);
                 setSelectedRowKeys((current) => current.filter((id) => result.styles.some((style) => style.id === Number(id))));
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "查询风格失败");
+                message.error(error instanceof Error ? error.message : translate("administration.failedToLoadStyles"));
             } finally {
                 setLoading(false);
             }
@@ -1429,10 +1424,10 @@ function GenerationStyleManagement() {
             };
             if (editingStyle) {
                 await updateAdminGenerationStyle({ id: editingStyle.id, ...input });
-                message.success("风格已更新");
+                message.success(translate("administration.styleUpdated"));
             } else {
                 await createAdminGenerationStyle(input);
-                message.success("风格已创建");
+                message.success(translate("administration.styleCreated"));
             }
             setEditOpen(false);
             await loadStyles(editingStyle ? page : 1);
@@ -1445,17 +1440,17 @@ function GenerationStyleManagement() {
     const changeStatus = (style: ServerGenerationStyle) => {
         const nextStatus = style.status === 1 ? 0 : 1;
         modal.confirm({
-            title: nextStatus === 1 ? "启用风格" : "停用风格",
-            content: nextStatus === 1 ? "启用后用户可以在图片或视频对话框中选择该风格。" : "停用后新生成不能选择该风格，历史快照不受影响。",
-            okText: nextStatus === 1 ? "启用" : "停用",
-            cancelText: "取消",
+            title: nextStatus === 1 ? translate("administration.enableStyle") : translate("administration.disableStyle"),
+            content: nextStatus === 1 ? translate("administration.enabledStylesAreAvailableInImageAndVideoDialogs") : translate("administration.disabledStylesCannotBeSelectedHistoricalSnapshotsRemain"),
+            okText: nextStatus === 1 ? translate("administration.enable") : translate("administration.disable_4e6fd0"),
+            cancelText: translate("administration.cancel"),
             onOk: async () => {
                 try {
                     await updateAdminGenerationStyleStatus(style.id, nextStatus);
-                    message.success("风格状态已更新");
+                    message.success(translate("administration.styleStatusUpdated"));
                     await loadStyles(page);
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "更新风格状态失败");
+                    message.error(error instanceof Error ? error.message : translate("administration.failedToUpdateStyleStatus"));
                 }
             },
         });
@@ -1463,21 +1458,21 @@ function GenerationStyleManagement() {
 
     const deleteStyles = (ids: number[]) => {
         modal.confirm({
-            title: "删除风格",
-            content: "删除后新生成不会再展示这些风格，历史快照不受影响，确定删除？",
-            okText: "删除",
+            title: translate("administration.deleteStyle"),
+            content: translate("administration.theseStylesWillNoLongerBeAvailableForNew"),
+            okText: translate("administration.delete"),
             okButtonProps: { danger: true },
-            cancelText: "取消",
+            cancelText: translate("administration.cancel"),
             onOk: async () => {
                 try {
                     await deleteAdminGenerationStyles(ids);
-                    message.success("风格已删除");
+                    message.success(translate("administration.styleDeleted"));
                     setSelectedRowKeys([]);
                     const nextPage = styles.length <= ids.length && page > 1 ? page - 1 : page;
                     setPage(nextPage);
                     await loadStyles(nextPage);
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "删除风格失败");
+                    message.error(error instanceof Error ? error.message : translate("administration.failedToDeleteStyle"));
                 }
             },
         });
@@ -1486,16 +1481,16 @@ function GenerationStyleManagement() {
     const uploadCover = async (file: File | undefined) => {
         if (!file) return;
         if (!file.type.startsWith("image/")) {
-            message.error("请选择图片文件");
+            message.error(translate("administration.selectAnImageFile"));
             return;
         }
         setCoverUploading(true);
         try {
             const uploaded = await uploadImage(file);
             form.setFieldValue("coverUrl", uploaded.url);
-            message.success("封面已上传");
+            message.success(translate("administration.coverUploaded"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "封面上传失败");
+            message.error(error instanceof Error ? error.message : translate("administration.failedToUploadCover"));
         } finally {
             setCoverUploading(false);
         }
@@ -1508,7 +1503,7 @@ function GenerationStyleManagement() {
                     <Input.Search
                         value={keyword}
                         allowClear
-                        placeholder="搜索名称、分类或提示词"
+                        placeholder={translate("administration.searchNameCategoryOrPrompt")}
                         onChange={(event) => setKeyword(event.target.value)}
                         onSearch={() => {
                             setPage(1);
@@ -1518,9 +1513,9 @@ function GenerationStyleManagement() {
                     <Select
                         value={generationType}
                         options={[
-                            { label: "全部类型", value: "all" },
-                            { label: "图片", value: "image" },
-                            { label: "视频", value: "video" },
+                            { label: translate("administration.allTypes"), value: "all" },
+                            { label: translate("administration.image"), value: "image" },
+                            { label: translate("administration.video"), value: "video" },
                         ]}
                         onChange={(value) => {
                             setGenerationType(value);
@@ -1529,11 +1524,11 @@ function GenerationStyleManagement() {
                     />
                     <Select
                         allowClear
-                        placeholder="全部状态"
+                        placeholder={translate("administration.allStatuses")}
                         value={status}
                         options={[
-                            { label: "启用", value: 1 },
-                            { label: "停用", value: 0 },
+                            { label: translate("administration.enable"), value: 1 },
+                            { label: translate("administration.disable_4e6fd0"), value: 0 },
                         ]}
                         onChange={(value) => {
                             setStatus(value);
@@ -1544,12 +1539,10 @@ function GenerationStyleManagement() {
                 <Space>
                     {selectedRowKeys.length ? (
                         <Button danger icon={<Trash2 className="size-3.5" />} onClick={() => deleteStyles(selectedRowKeys.map(Number))}>
-                            批量删除
-                        </Button>
+                            {translate("administration.deleteSelected")}</Button>
                     ) : null}
                     <Button type="primary" icon={<Plus className="size-4" />} onClick={openCreate}>
-                        新增风格
-                    </Button>
+                        {translate("administration.addStyle")}</Button>
                 </Space>
             </div>
             {loading ? (
@@ -1573,16 +1566,16 @@ function GenerationStyleManagement() {
                                         <span className="absolute left-2 top-2">
                                             <Checkbox
                                                 checked={selected}
-                                                aria-label={`选择风格${style.name}`}
+                                                aria-label={translate("administration.selectStyle", { value0: style.name })}
                                                 onChange={(event) => setSelectedRowKeys((current) => (event.target.checked ? [...new Set([...current, style.id])] : current.filter((id) => id !== style.id)))}
                                             />
                                         </span>
                                         <span
                                             className={`absolute right-2 top-2 rounded-sm border px-1.5 py-0.5 text-[11px] ${style.status === 1 ? "border-[var(--studio-success)] text-[var(--studio-success)]" : "border-[var(--studio-line-strong)] text-[var(--studio-muted)]"}`}
                                         >
-                                            {style.status === 1 ? "启用" : "停用"}
+                                            {style.status === 1 ? translate("administration.enable") : translate("administration.disable_4e6fd0")}
                                         </span>
-                                        <span className="absolute bottom-2 left-2 rounded-sm bg-[var(--studio-surface)] px-1.5 py-0.5 text-[11px] text-[var(--studio-muted)]">{style.generationType === "video" ? "视频" : "图片"}</span>
+                                        <span className="absolute bottom-2 left-2 rounded-sm bg-[var(--studio-surface)] px-1.5 py-0.5 text-[11px] text-[var(--studio-muted)]">{style.generationType === "video" ? translate("administration.video") : translate("administration.image")}</span>
                                     </div>
                                     <div className="min-w-0 border-t border-[var(--studio-line)] p-2.5">
                                         <div className="flex min-w-0 items-center justify-between gap-2">
@@ -1591,13 +1584,13 @@ function GenerationStyleManagement() {
                                             </span>
                                             <span className="shrink-0 text-[11px] text-[var(--studio-muted)]">#{style.sortOrder}</span>
                                         </div>
-                                        <p className="mt-1 truncate text-xs text-[var(--studio-muted)]">{style.category || "未分类"}</p>
+                                        <p className="mt-1 truncate text-xs text-[var(--studio-muted)]">{style.category || translate("administration.uncategorized")}</p>
                                         <div className="mt-2 flex items-center justify-end gap-1">
-                                            <Tooltip title="编辑">
-                                                <Button type="text" size="small" shape="circle" icon={<Edit className="size-3.5" />} onClick={() => openEdit(style)} aria-label={`编辑风格${style.name}`} />
+                                            <Tooltip title={translate("administration.edit")}>
+                                                <Button type="text" size="small" shape="circle" icon={<Edit className="size-3.5" />} onClick={() => openEdit(style)} aria-label={translate("administration.editStyle", { value0: style.name })} />
                                             </Tooltip>
-                                            <Tooltip title={style.status === 1 ? "停用" : "启用"}>
-                                                <Button type="text" size="small" shape="circle" icon={<Power className="size-3.5" />} onClick={() => changeStatus(style)} aria-label={`${style.status === 1 ? "停用" : "启用"}风格${style.name}`} />
+                                            <Tooltip title={style.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable")}>
+                                                <Button type="text" size="small" shape="circle" icon={<Power className="size-3.5" />} onClick={() => changeStatus(style)} aria-label={translate("administration.style", { value0: style.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable"), value1: style.name })} />
                                             </Tooltip>
                                         </div>
                                     </div>
@@ -1610,17 +1603,17 @@ function GenerationStyleManagement() {
                     </div>
                 </>
             ) : (
-                <Empty description="暂无风格" className="border border-dashed border-[var(--studio-line)] py-12" />
+                <Empty description={translate("administration.noStyles")} className="border border-dashed border-[var(--studio-line)] py-12" />
             )}
-            <Modal title={editingStyle ? "编辑风格" : "新增风格"} open={editOpen} onOk={saveStyle} onCancel={() => setEditOpen(false)} okText="保存" cancelText="取消" confirmLoading={coverUploading}>
+            <Modal title={editingStyle ? translate("administration.editStyle_1fa17d") : translate("administration.addStyle")} open={editOpen} onOk={saveStyle} onCancel={() => setEditOpen(false)} okText={translate("administration.save")} cancelText={translate("administration.cancel")} confirmLoading={coverUploading}>
                 <Form form={form} layout="vertical">
-                    <Form.Item name="name" label="风格名称" rules={[{ required: true, message: "请输入风格名称" }]}>
-                        <Input placeholder="例如：电影感" />
+                    <Form.Item name="name" label={translate("administration.styleName")} rules={[{ required: true, message: translate("administration.enterStyleName") }]}>
+                        <Input placeholder={translate("administration.eGCinematic")} />
                     </Form.Item>
-                    <Form.Item name="category" label="分类" rules={[{ required: true, message: "请输入风格分类" }]}>
-                        <Input placeholder="例如：人像、国风、电影" maxLength={100} />
+                    <Form.Item name="category" label={translate("administration.category")} rules={[{ required: true, message: translate("administration.enterStyleCategory") }]}>
+                        <Input placeholder={translate("administration.eGPortraitChineseStyleCinematic")} maxLength={100} />
                     </Form.Item>
-                    <Form.Item name="coverUrl" label="封面" rules={[{ required: true, message: "请上传或填写风格封面" }]}>
+                    <Form.Item name="coverUrl" label={translate("administration.cover")} rules={[{ required: true, message: translate("administration.uploadOrEnterStyleCover") }]}>
                         <Input placeholder="https://..." />
                     </Form.Item>
                     <div className="mb-4 flex items-start gap-3">
@@ -1639,31 +1632,30 @@ function GenerationStyleManagement() {
                                 }}
                             />
                             <Button icon={<Upload className="size-3.5" />} loading={coverUploading} onClick={() => coverInputRef.current?.click()}>
-                                上传封面
-                            </Button>
-                            <p className="mt-2 text-xs text-[var(--studio-muted)]">上传后会保存对象存储公开地址。</p>
+                                {translate("administration.uploadCover")}</Button>
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("administration.thePublicStorageURLWillBeSaved")}</p>
                         </div>
                     </div>
-                    <Form.Item name="stylePrompt" label="风格提示词" rules={[{ required: true, message: "请输入风格提示词" }]}>
-                        <Input.TextArea rows={6} placeholder="描述需要注入生成提示词的风格特征" />
+                    <Form.Item name="stylePrompt" label={translate("administration.stylePrompt")} rules={[{ required: true, message: translate("administration.enterStylePrompt") }]}>
+                        <Input.TextArea rows={6} placeholder={translate("administration.describeStyleFeaturesToAddToThePrompt")} />
                     </Form.Item>
                     <div className="grid grid-cols-3 gap-3">
-                        <Form.Item name="generationType" label="类型" rules={[{ required: true, message: "请选择类型" }]}>
+                        <Form.Item name="generationType" label={translate("administration.type")} rules={[{ required: true, message: translate("administration.selectAType") }]}>
                             <Select
                                 options={[
-                                    { label: "图片", value: "image" },
-                                    { label: "视频", value: "video" },
+                                    { label: translate("administration.image"), value: "image" },
+                                    { label: translate("administration.video"), value: "video" },
                                 ]}
                             />
                         </Form.Item>
-                        <Form.Item name="sortOrder" label="排序">
+                        <Form.Item name="sortOrder" label={translate("administration.sort")}>
                             <InputNumber className="w-full" min={0} />
                         </Form.Item>
-                        <Form.Item name="status" label="状态">
+                        <Form.Item name="status" label={translate("administration.status")}>
                             <Select
                                 options={[
-                                    { label: "启用", value: 1 },
-                                    { label: "停用", value: 0 },
+                                    { label: translate("administration.enable"), value: 1 },
+                                    { label: translate("administration.disable_4e6fd0"), value: 0 },
                                 ]}
                             />
                         </Form.Item>
@@ -1694,6 +1686,7 @@ type SkillFormValues = {
 };
 
 function SkillManagement() {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const [form] = Form.useForm<SkillFormValues>();
     const [skills, setSkills] = useState<ServerSkill[]>([]);
@@ -1709,7 +1702,7 @@ function SkillManagement() {
     const [coverUploading, setCoverUploading] = useState(false);
     const coverInputRef = useRef<HTMLInputElement>(null);
     const coverUrl = Form.useWatch("coverUrl", form) || "";
-    const coverName = Form.useWatch("name", form) || "技能封面";
+    const coverName = Form.useWatch("name", form) || translate("administration.skillCover");
 
     const loadSkills = useCallback(
         async (nextPage = page) => {
@@ -1726,7 +1719,7 @@ function SkillManagement() {
                 setTotal(result.total);
                 setSelectedRowKeys((current) => current.filter((id) => result.skills.some((skill) => skill.id === Number(id))));
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "查询技能失败");
+                message.error(error instanceof Error ? error.message : translate("administration.failedToLoadSkills"));
             } finally {
                 setLoading(false);
             }
@@ -1774,10 +1767,10 @@ function SkillManagement() {
             };
             if (editingSkill) {
                 await updateAdminSkill({ id: editingSkill.id, ...input });
-                message.success("技能已更新");
+                message.success(translate("administration.skillUpdated"));
             } else {
                 await createAdminSkill(input);
-                message.success("技能已创建");
+                message.success(translate("administration.skillCreated"));
             }
             setEditOpen(false);
             await loadSkills(editingSkill ? page : 1);
@@ -1790,16 +1783,16 @@ function SkillManagement() {
     const uploadCover = async (file: File | undefined) => {
         if (!file) return;
         if (!file.type.startsWith("image/")) {
-            message.error("请选择图片文件");
+            message.error(translate("administration.selectAnImageFile"));
             return;
         }
         setCoverUploading(true);
         try {
             const uploaded = await uploadImage(file);
             form.setFieldValue("coverUrl", uploaded.url);
-            message.success("封面已上传");
+            message.success(translate("administration.coverUploaded"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "封面上传失败");
+            message.error(error instanceof Error ? error.message : translate("administration.failedToUploadCover"));
         } finally {
             setCoverUploading(false);
         }
@@ -1808,17 +1801,17 @@ function SkillManagement() {
     const changeStatus = (skill: ServerSkill) => {
         const nextStatus = skill.status === 1 ? 0 : 1;
         modal.confirm({
-            title: nextStatus === 1 ? "启用技能" : "停用技能",
-            content: nextStatus === 1 ? "启用后用户可以在图片或视频对话框中选择该技能。" : "停用后用户不能继续选择该技能。",
-            okText: nextStatus === 1 ? "启用" : "停用",
-            cancelText: "取消",
+            title: nextStatus === 1 ? translate("administration.enableSkill") : translate("administration.disableSkill"),
+            content: nextStatus === 1 ? translate("administration.enabledSkillsAreAvailableInImageAndVideoDialogs") : translate("administration.disabledSkillsAreUnavailableToUsers"),
+            okText: nextStatus === 1 ? translate("administration.enable") : translate("administration.disable_4e6fd0"),
+            cancelText: translate("administration.cancel"),
             onOk: async () => {
                 try {
                     await updateAdminSkillStatus(skill.id, nextStatus);
-                    message.success("技能状态已更新");
+                    message.success(translate("administration.skillStatusUpdated"));
                     await loadSkills(page);
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "更新技能状态失败");
+                    message.error(error instanceof Error ? error.message : translate("administration.failedToUpdateSkillStatus"));
                 }
             },
         });
@@ -1826,21 +1819,21 @@ function SkillManagement() {
 
     const deleteSkills = (ids: number[]) => {
         modal.confirm({
-            title: "删除技能",
-            content: "删除后用户不能继续选择这些技能，确定删除？",
-            okText: "删除",
+            title: translate("administration.deleteSkill"),
+            content: translate("administration.usersWillNoLongerBeAbleToSelectThese"),
+            okText: translate("administration.delete"),
             okButtonProps: { danger: true },
-            cancelText: "取消",
+            cancelText: translate("administration.cancel"),
             onOk: async () => {
                 try {
                     await deleteAdminSkills(ids);
-                    message.success("技能已删除");
+                    message.success(translate("administration.skillDeleted"));
                     setSelectedRowKeys([]);
                     const nextPage = skills.length <= ids.length && page > 1 ? page - 1 : page;
                     setPage(nextPage);
                     await loadSkills(nextPage);
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "删除技能失败");
+                    message.error(error instanceof Error ? error.message : translate("administration.failedToDeleteSkill"));
                 }
             },
         });
@@ -1848,7 +1841,7 @@ function SkillManagement() {
 
     const columns: ColumnsType<ServerSkill> = [
         {
-            title: "技能名称",
+            title: translate("administration.skillName"),
             dataIndex: "name",
             render: (name: string, skill) => (
                 <div className="flex min-w-0 items-center gap-2">
@@ -1860,51 +1853,51 @@ function SkillManagement() {
             ),
         },
         {
-            title: "类型",
+            title: translate("administration.type"),
             dataIndex: "targetType",
             width: 110,
-            render: (value: string) => <Tag>{value === "video" ? "视频" : "图片"}</Tag>,
+            render: (value: string) => <Tag>{value === "video" ? translate("administration.video") : translate("administration.image")}</Tag>,
         },
         {
-            title: "简介",
+            title: translate("administration.introduction"),
             dataIndex: "description",
             ellipsis: true,
             render: (description: string) => (description ? <span className="text-[var(--studio-muted)]">{description}</span> : <span className="text-[var(--studio-faint)]">—</span>),
         },
         {
-            title: "默认比例",
+            title: translate("administration.defaultAspectRatio"),
             dataIndex: "aspectRatio",
             width: 100,
             render: (value: string) => <span className="tabular-nums text-[var(--studio-muted)]">{value || "16:9"}</span>,
         },
         {
-            title: "状态",
+            title: translate("administration.status"),
             dataIndex: "status",
             width: 80,
             render: (value: number) =>
                 value === 1 ? (
-                    <span className="text-[var(--studio-success)]">启用</span>
+                    <span className="text-[var(--studio-success)]">{translate("administration.enable")}</span>
                 ) : (
-                    <span className="text-[var(--studio-muted)]">停用</span>
+                    <span className="text-[var(--studio-muted)]">{translate("administration.disable_4e6fd0")}</span>
                 ),
         },
         {
-            title: "排序",
+            title: translate("administration.sort"),
             dataIndex: "sortOrder",
             width: 80,
             render: (value: number) => <span className="tabular-nums text-[var(--studio-muted)]">{value}</span>,
         },
         {
-            title: "操作",
+            title: translate("administration.actions"),
             key: "actions",
             width: 110,
             render: (_, skill) => (
                 <Space size={0}>
-                    <Tooltip title="编辑">
-                        <Button type="text" size="small" shape="circle" icon={<Edit className="size-3.5" />} onClick={() => openEdit(skill)} aria-label={`编辑技能${skill.name}`} />
+                    <Tooltip title={translate("administration.edit")}>
+                        <Button type="text" size="small" shape="circle" icon={<Edit className="size-3.5" />} onClick={() => openEdit(skill)} aria-label={translate("administration.editSkill", { value0: skill.name })} />
                     </Tooltip>
-                    <Tooltip title={skill.status === 1 ? "停用" : "启用"}>
-                        <Button type="text" size="small" shape="circle" icon={<Power className="size-3.5" />} onClick={() => changeStatus(skill)} aria-label={`${skill.status === 1 ? "停用" : "启用"}技能${skill.name}`} />
+                    <Tooltip title={skill.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable")}>
+                        <Button type="text" size="small" shape="circle" icon={<Power className="size-3.5" />} onClick={() => changeStatus(skill)} aria-label={translate("administration.skill", { value0: skill.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable"), value1: skill.name })} />
                     </Tooltip>
                 </Space>
             ),
@@ -1918,7 +1911,7 @@ function SkillManagement() {
                     <Input.Search
                         value={keyword}
                         allowClear
-                        placeholder="搜索技能名称或简介"
+                        placeholder={translate("administration.searchSkillNameOrDescription")}
                         onChange={(event) => setKeyword(event.target.value)}
                         onSearch={() => {
                             setPage(1);
@@ -1928,10 +1921,10 @@ function SkillManagement() {
                     <Select
                         value={targetType}
                         options={[
-                            { label: "全部类型", value: "all" },
-                            { label: "图片", value: "image" },
-                            { label: "视频", value: "video" },
-                            { label: "画布设定图", value: "canvasSettingGraph" },
+                            { label: translate("administration.allTypes"), value: "all" },
+                            { label: translate("administration.image"), value: "image" },
+                            { label: translate("administration.video"), value: "video" },
+                            { label: translate("administration.canvasReferenceSheet"), value: "canvasSettingGraph" },
                         ]}
                         onChange={(value) => {
                             setTargetType(value);
@@ -1940,11 +1933,11 @@ function SkillManagement() {
                     />
                     <Select
                         allowClear
-                        placeholder="全部状态"
+                        placeholder={translate("administration.allStatuses")}
                         value={status}
                         options={[
-                            { label: "启用", value: 1 },
-                            { label: "停用", value: 0 },
+                            { label: translate("administration.enable"), value: 1 },
+                            { label: translate("administration.disable_4e6fd0"), value: 0 },
                         ]}
                         onChange={(value) => {
                             setStatus(value);
@@ -1955,12 +1948,10 @@ function SkillManagement() {
                 <Space>
                     {selectedRowKeys.length ? (
                         <Button danger icon={<Trash2 className="size-3.5" />} onClick={() => deleteSkills(selectedRowKeys.map(Number))}>
-                            批量删除
-                        </Button>
+                            {translate("administration.deleteSelected")}</Button>
                     ) : null}
                     <Button type="primary" icon={<Plus className="size-4" />} onClick={openCreate}>
-                        新增技能
-                    </Button>
+                        {translate("administration.addSkill")}</Button>
                 </Space>
             </div>
             <Table<ServerSkill>
@@ -1979,36 +1970,36 @@ function SkillManagement() {
                     selectedRowKeys,
                     onChange: setSelectedRowKeys,
                 }}
-                locale={{ emptyText: <Empty description="暂无技能" /> }}
+                locale={{ emptyText: <Empty description={translate("administration.noSkills")} /> }}
             />
-            <Modal title={editingSkill ? "编辑技能" : "新增技能"} open={editOpen} onOk={saveSkill} onCancel={() => setEditOpen(false)} okText="保存" cancelText="取消" width={640} confirmLoading={coverUploading}>
+            <Modal title={editingSkill ? translate("administration.editSkill_149fb4") : translate("administration.addSkill")} open={editOpen} onOk={saveSkill} onCancel={() => setEditOpen(false)} okText={translate("administration.save")} cancelText={translate("administration.cancel")} width={640} confirmLoading={coverUploading}>
                 <Form form={form} layout="vertical">
                     <div className="grid grid-cols-3 gap-3">
-                        <Form.Item name="name" label="技能名称" rules={[{ required: true, message: "请输入技能名称" }]} className="col-span-2">
-                            <Input placeholder="例如：电商商品图片制作" maxLength={100} />
+                        <Form.Item name="name" label={translate("administration.skillName")} rules={[{ required: true, message: translate("administration.enterSkillName") }]} className="col-span-2">
+                            <Input placeholder={translate("administration.eGECommerceProductImages")} maxLength={100} />
                         </Form.Item>
-                        <Form.Item name="targetType" label="适用类型" rules={[{ required: true, message: "请选择类型" }]}>
+                        <Form.Item name="targetType" label={translate("administration.targetType")} rules={[{ required: true, message: translate("administration.selectAType") }]}>
                             <Select
                                 options={[
-                                    { label: "图片", value: "image" },
-                                    { label: "视频", value: "video" },
-                                    { label: "画布设定图", value: "canvasSettingGraph" },
+                                    { label: translate("administration.image"), value: "image" },
+                                    { label: translate("administration.video"), value: "video" },
+                                    { label: translate("administration.canvasReferenceSheet"), value: "canvasSettingGraph" },
                                 ]}
                             />
                         </Form.Item>
                     </div>
-                    <Form.Item name="description" label="技能简介">
-                        <Input.TextArea rows={2} maxLength={500} placeholder="展示在用户侧技能选择面板的简介" />
+                    <Form.Item name="description" label={translate("administration.skillIntroduction")}>
+                        <Input.TextArea rows={2} maxLength={500} placeholder={translate("administration.introductionShownInTheSkillSelector")} />
                     </Form.Item>
-                    <Form.Item name="coverUrl" label="封面">
-                        <Input placeholder="https://...，可留空" />
+                    <Form.Item name="coverUrl" label={translate("administration.cover")}>
+                        <Input placeholder={translate("administration.httpsOptional")} />
                     </Form.Item>
-                    <Form.Item name="aspectRatio" label="默认比例" rules={[{ required: true, message: "请选择默认比例" }]}>
+                    <Form.Item name="aspectRatio" label={translate("administration.defaultAspectRatio")} rules={[{ required: true, message: translate("administration.selectDefaultAspectRatio") }]}>
                         <Select
                             options={[
-                                { label: "16:9（横屏）", value: "16:9" },
-                                { label: "9:16（竖屏）", value: "9:16" },
-                                { label: "1:1（方形）", value: "1:1" },
+                                { label: translate("administration.169Landscape"), value: "16:9" },
+                                { label: translate("administration.916Portrait"), value: "9:16" },
+                                { label: translate("administration.11Square"), value: "1:1" },
                                 { label: "4:3", value: "4:3" },
                                 { label: "3:4", value: "3:4" },
                             ]}
@@ -2030,26 +2021,25 @@ function SkillManagement() {
                                 }}
                             />
                             <Button icon={<Upload className="size-3.5" />} loading={coverUploading} onClick={() => coverInputRef.current?.click()}>
-                                上传封面
-                            </Button>
-                            <p className="mt-2 text-xs text-[var(--studio-muted)]">上传后会保存对象存储公开地址，展示在用户侧技能选择面板。</p>
+                                {translate("administration.uploadCover")}</Button>
+                            <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("administration.publicStorageURLIsSavedAndShownInThe")}</p>
                         </div>
                     </div>
-                    <Form.Item name="systemPrompt" label="流程提示词" rules={[{ required: true, message: "请输入流程提示词" }]}>
+                    <Form.Item name="systemPrompt" label={translate("administration.workflowPrompt")} rules={[{ required: true, message: translate("administration.enterWorkflowPrompt") }]}>
                         <Input.TextArea
                             rows={12}
-                            placeholder="技能内置的生成详情与提示词，驱动主 Agent 按步骤引导用户，例如：步骤1 索要商品信息；步骤2 通过 choices 提供风格选项；最后一步组装完整提示词并让用户确认生成…"
+                            placeholder={translate("administration.builtInGenerationInstructionsGuideAgentStepByStep")}
                         />
                     </Form.Item>
                     <div className="grid grid-cols-3 gap-3">
-                        <Form.Item name="sortOrder" label="排序">
+                        <Form.Item name="sortOrder" label={translate("administration.sort")}>
                             <InputNumber className="w-full" min={0} />
                         </Form.Item>
-                        <Form.Item name="status" label="状态">
+                        <Form.Item name="status" label={translate("administration.status")}>
                             <Select
                                 options={[
-                                    { label: "启用", value: 1 },
-                                    { label: "停用", value: 0 },
+                                    { label: translate("administration.enable"), value: 1 },
+                                    { label: translate("administration.disable_4e6fd0"), value: 0 },
                                 ]}
                             />
                         </Form.Item>
@@ -2061,6 +2051,7 @@ function SkillManagement() {
 }
 
 function HomepageShowcaseManagement() {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const [items, setItems] = useState<HomepageShowcase[]>([]);
     const [loading, setLoading] = useState(false);
@@ -2079,7 +2070,7 @@ function HomepageShowcaseManagement() {
             setItems(result.items || []);
             setSelectedRowKeys((current) => current.filter((key) => result.items.some((item) => item.id === Number(key))));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "查询首页展示失败");
+            message.error(error instanceof Error ? error.message : translate("administration.failedToLoadShowcases"));
         } finally {
             setLoading(false);
         }
@@ -2121,10 +2112,10 @@ function HomepageShowcaseManagement() {
             };
             if (editing) {
                 await updateAdminHomepageShowcase({ id: editing.id, ...input });
-                message.success("首页展示已更新");
+                message.success(translate("administration.showcaseUpdated"));
             } else {
                 await createAdminHomepageShowcase(input);
-                message.success("首页展示已创建");
+                message.success(translate("administration.showcaseCreated"));
             }
             setOpen(false);
             await load();
@@ -2136,73 +2127,71 @@ function HomepageShowcaseManagement() {
     const toggleStatus = (item: HomepageShowcase) => {
         const nextStatus = item.status === 1 ? 0 : 1;
         modal.confirm({
-            title: nextStatus === 1 ? "启用首页展示" : "停用首页展示",
-            content: nextStatus === 1 ? "启用后该内容会出现在首页精选作品墙。" : "停用后该内容不会出现在首页。",
-            okText: nextStatus === 1 ? "启用" : "停用",
-            cancelText: "取消",
+            title: nextStatus === 1 ? translate("administration.enableShowcase") : translate("administration.disableShowcase"),
+            content: nextStatus === 1 ? translate("administration.enabledContentAppearsInTheHomepageGallery") : translate("administration.disabledContentIsHiddenFromTheHomepage"),
+            okText: nextStatus === 1 ? translate("administration.enable") : translate("administration.disable_4e6fd0"),
+            cancelText: translate("administration.cancel"),
             onOk: async () => {
                 await updateAdminHomepageShowcaseStatus(item.id, nextStatus);
                 await load();
-                message.success("首页展示状态已更新");
+                message.success(translate("administration.showcaseStatusUpdated"));
             },
         });
     };
 
     const remove = (ids: number[]) => {
         modal.confirm({
-            title: "删除首页展示",
-            content: "删除后首页不会再展示这些内容，确定继续？",
-            okText: "删除",
+            title: translate("administration.deleteShowcase"),
+            content: translate("administration.theseItemsWillDisappearFromTheHomepageContinue"),
+            okText: translate("administration.delete"),
             okButtonProps: { danger: true },
-            cancelText: "取消",
+            cancelText: translate("administration.cancel"),
             onOk: async () => {
                 await deleteAdminHomepageShowcases(ids);
                 setSelectedRowKeys([]);
                 await load();
-                message.success("首页展示已删除");
+                message.success(translate("administration.showcaseDeleted"));
             },
         });
     };
 
     const columns: ColumnsType<HomepageShowcase> = [
         {
-            title: "预览",
+            title: translate("administration.preview"),
             width: 100,
             render: (_, item) =>
                 item.mediaType === "video" ? <video src={item.mediaUrl} poster={item.thumbnailUrl || undefined} muted className="h-14 w-20 object-cover" /> : <img src={item.mediaUrl} alt={item.title} className="h-14 w-20 object-cover" />,
         },
         {
-            title: "标题",
+            title: translate("administration.title"),
             dataIndex: "title",
             render: (value: string, item) => (
                 <div>
                     <div className="studio-title font-medium">{value}</div>
-                    <div className="studio-caption mt-1 text-xs">{item.description || "无描述"}</div>
+                    <div className="studio-caption mt-1 text-xs">{item.description || translate("administration.noDescription")}</div>
                 </div>
             ),
         },
-        { title: "分类", dataIndex: "category", width: 110, render: (value: string) => <Tag>{value}</Tag> },
-        { title: "创作者", dataIndex: "creatorName", width: 140, ellipsis: true },
-        { title: "媒体", dataIndex: "mediaType", width: 100, render: (value: HomepageShowcase["mediaType"]) => <Tag icon={value === "video" ? <Video className="size-3" /> : <ImageIcon className="size-3" />}>{value === "video" ? "视频" : "图片"}</Tag> },
-        { title: "入口", dataIndex: "targetType", width: 100, render: (value: string) => (value === "canvas" ? "画布" : value === "asset" ? "资产" : value === "video" ? "视频" : "图片") },
-        { title: "排序", dataIndex: "sortOrder", width: 80 },
-        { title: "状态", dataIndex: "status", width: 90, render: (value: number) => <Tag color={value === 1 ? "green" : "default"}>{value === 1 ? "启用" : "停用"}</Tag> },
-        { title: "更新时间", dataIndex: "updatedAt", width: 180, render: (value: string) => (value ? new Date(value).toLocaleString("zh-CN") : "-") },
+        { title: translate("administration.category"), dataIndex: "category", width: 110, render: (value: string) => <Tag>{value}</Tag> },
+        { title: translate("administration.creator"), dataIndex: "creatorName", width: 140, ellipsis: true },
+        { title: translate("administration.media"), dataIndex: "mediaType", width: 100, render: (value: HomepageShowcase["mediaType"]) => <Tag icon={value === "video" ? <Video className="size-3" /> : <ImageIcon className="size-3" />}>{value === "video" ? translate("administration.video") : translate("administration.image")}</Tag> },
+        { title: translate("administration.entry"), dataIndex: "targetType", width: 100, render: (value: string) => (value === "canvas" ? translate("administration.canvas") : value === "asset" ? translate("administration.assets") : value === "video" ? translate("administration.video") : translate("administration.image")) },
+        { title: translate("administration.sort"), dataIndex: "sortOrder", width: 80 },
+        { title: translate("administration.status"), dataIndex: "status", width: 90, render: (value: number) => <Tag color={value === 1 ? "green" : "default"}>{value === 1 ? translate("administration.enable") : translate("administration.disable_4e6fd0")}</Tag> },
+        { title: translate("administration.updatedAt"), dataIndex: "updatedAt", width: 180, render: (value: string) => (value ? new Date(value).toLocaleString(currentLanguageTag()) : "-") },
         {
-            title: "操作",
+            title: translate("administration.actions"),
             key: "actions",
             width: 190,
             render: (_, item) => (
                 <Space>
                     <Button size="small" icon={<Edit className="size-3.5" />} onClick={() => openEdit(item)}>
-                        编辑
-                    </Button>
+                        {translate("administration.edit")}</Button>
                     <Button size="small" icon={<Power className="size-3.5" />} onClick={() => toggleStatus(item)}>
-                        {item.status === 1 ? "停用" : "启用"}
+                        {item.status === 1 ? translate("administration.disable_4e6fd0") : translate("administration.enable")}
                     </Button>
                     <Button size="small" danger icon={<Trash2 className="size-3.5" />} onClick={() => remove([item.id])}>
-                        删除
-                    </Button>
+                        {translate("administration.delete")}</Button>
                 </Space>
             ),
         },
@@ -2211,86 +2200,84 @@ function HomepageShowcaseManagement() {
     return (
         <div>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <span className="studio-subtitle text-sm">管理首页精选作品，空列表时首页使用内置示例。</span>
+                <span className="studio-subtitle text-sm">{translate("administration.manageHomepageArtworkBuiltInSamplesAppearWhenEmpty")}</span>
                 <Space>
                     <Button danger disabled={!selectedRowKeys.length} icon={<Trash2 className="size-4" />} onClick={() => remove(selectedRowKeys.map(Number))}>
-                        批量删除
-                    </Button>
+                        {translate("administration.deleteSelected")}</Button>
                     <Button type="primary" icon={<Plus className="size-4" />} onClick={openCreate}>
-                        新增展示
-                    </Button>
+                        {translate("administration.addShowcase")}</Button>
                 </Space>
             </div>
-            <Table rowKey="id" rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }} loading={loading} columns={columns} dataSource={items} pagination={false} locale={{ emptyText: "暂无首页展示内容" }} />
-            <Modal title={editing ? "编辑首页展示" : "新增首页展示"} open={open} onOk={() => void save()} onCancel={() => setOpen(false)} okText="保存" cancelText="取消" width={720} destroyOnHidden>
+            <Table rowKey="id" rowSelection={{ selectedRowKeys, onChange: setSelectedRowKeys }} loading={loading} columns={columns} dataSource={items} pagination={false} locale={{ emptyText: translate("administration.noShowcases") }} />
+            <Modal title={editing ? translate("administration.editHomepageShowcase") : translate("administration.addHomepageShowcase")} open={open} onOk={() => void save()} onCancel={() => setOpen(false)} okText={translate("administration.save")} cancelText={translate("administration.cancel")} width={720} destroyOnHidden>
                 <Form form={form} layout="vertical" className="mt-3">
                     <div className="grid gap-4 sm:grid-cols-2">
-                        <Form.Item name="title" label="标题" rules={[{ required: true, message: "请输入标题" }]}>
-                            <Input placeholder="例如：夜色中的建筑构成" />
+                        <Form.Item name="title" label={translate("administration.title")} rules={[{ required: true, message: translate("administration.enterATitle") }]}>
+                            <Input placeholder={translate("administration.eGArchitecturalCompositionAtNight")} />
                         </Form.Item>
-                        <Form.Item name="description" label="描述">
-                            <Input placeholder="首页作品墙中的简短描述" />
-                        </Form.Item>
-                    </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                        <Form.Item name="category" label="分类" rules={[{ required: true, message: "请输入作品分类" }]}>
-                            <Input placeholder="例如：视觉海报" maxLength={50} />
-                        </Form.Item>
-                        <Form.Item name="creatorName" label="创作者" rules={[{ required: true, message: "请输入创作者名称" }]}>
-                            <Input placeholder="例如：Novanova Studio" maxLength={100} />
+                        <Form.Item name="description" label={translate("administration.description")}>
+                            <Input placeholder={translate("administration.shortDescriptionForHomepageGallery")} />
                         </Form.Item>
                     </div>
                     <div className="grid gap-4 sm:grid-cols-2">
-                        <Form.Item name="mediaType" label="媒体类型" rules={[{ required: true }]}>
+                        <Form.Item name="category" label={translate("administration.category")} rules={[{ required: true, message: translate("administration.enterArtworkCategory") }]}>
+                            <Input placeholder={translate("administration.eGVisualPoster")} maxLength={50} />
+                        </Form.Item>
+                        <Form.Item name="creatorName" label={translate("administration.creator")} rules={[{ required: true, message: translate("administration.enterCreatorName") }]}>
+                            <Input placeholder={translate("administration.eGNovanovaStudio")} maxLength={100} />
+                        </Form.Item>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                        <Form.Item name="mediaType" label={translate("administration.mediaType")} rules={[{ required: true }]}>
                             <Select
                                 options={[
-                                    { label: "图片", value: "image" },
-                                    { label: "视频", value: "video" },
+                                    { label: translate("administration.image"), value: "image" },
+                                    { label: translate("administration.video"), value: "video" },
                                 ]}
                             />
                         </Form.Item>
-                        <Form.Item name="targetType" label="目标入口" rules={[{ required: true }]}>
+                        <Form.Item name="targetType" label={translate("administration.targetEntry")} rules={[{ required: true }]}>
                             <Select
                                 options={[
-                                    { label: "图片工作区", value: "image" },
-                                    { label: "视频工作区", value: "video" },
-                                    { label: "无限画布", value: "canvas" },
-                                    { label: "资产库", value: "asset" },
+                                    { label: translate("administration.imageWorkspace"), value: "image" },
+                                    { label: translate("administration.videoWorkspace"), value: "video" },
+                                    { label: translate("administration.infiniteCanvas"), value: "canvas" },
+                                    { label: translate("administration.assetLibrary"), value: "asset" },
                                 ]}
                             />
                         </Form.Item>
                     </div>
-                    <Form.Item name="mediaUrl" label="媒体 URL" rules={[{ required: true, type: "url", message: "请输入有效的媒体 URL" }]}>
+                    <Form.Item name="mediaUrl" label={translate("administration.mediaURL")} rules={[{ required: true, type: "url", message: translate("administration.enterAValidMediaURL") }]}>
                         <Input placeholder="https://..." />
                     </Form.Item>
-                    <Form.Item name="thumbnailUrl" label="视频缩略图 URL" rules={[{ type: "url", message: "请输入有效 URL" }]}>
-                        <Input placeholder="视频可选，图片无需填写" />
+                    <Form.Item name="thumbnailUrl" label={translate("administration.videoThumbnailURL")} rules={[{ type: "url", message: translate("administration.enterAValidURL") }]}>
+                        <Input placeholder={translate("administration.optionalForVideoLeaveEmptyForImages")} />
                     </Form.Item>
                     {previewMediaUrl ? (
                         <div className="mb-4 overflow-hidden rounded-[8px] border border-[var(--studio-line)] bg-[var(--studio-media)]">
                             {previewMediaType === "video" ? (
                                 <video src={previewMediaUrl} poster={previewThumbnailUrl || undefined} muted controls className="mx-auto max-h-64 w-full object-contain" />
                             ) : (
-                                <img src={previewMediaUrl} alt="首页展示预览" className="mx-auto max-h-64 w-full object-contain" />
+                                <img src={previewMediaUrl} alt={translate("administration.showcasePreview")} className="mx-auto max-h-64 w-full object-contain" />
                             )}
                         </div>
                     ) : null}
                     <div className="grid gap-4 sm:grid-cols-2">
-                        <Form.Item name="targetPath" label="目标路径">
-                            <Input placeholder="默认按目标入口生成，例如 /image" />
+                        <Form.Item name="targetPath" label={translate("administration.targetPath")}>
+                            <Input placeholder={translate("administration.generatedFromTargetEntryEGImage")} />
                         </Form.Item>
-                        <Form.Item name="sortOrder" label="排序">
+                        <Form.Item name="sortOrder" label={translate("administration.sort")}>
                             <InputNumber className="w-full" min={0} precision={0} />
                         </Form.Item>
                     </div>
-                    <Form.Item name="promptContent" label="关联提示词">
-                        <Input.TextArea rows={3} placeholder="点击作品后可带入工作区的提示词" />
+                    <Form.Item name="promptContent" label={translate("administration.linkPrompt")}>
+                        <Input.TextArea rows={3} placeholder={translate("administration.promptUsedWhenOpeningTheArtwork")} />
                     </Form.Item>
-                    <Form.Item name="status" label="状态">
+                    <Form.Item name="status" label={translate("administration.status")}>
                         <Select
                             options={[
-                                { label: "启用", value: 1 },
-                                { label: "停用", value: 0 },
+                                { label: translate("administration.enable"), value: 1 },
+                                { label: translate("administration.disable_4e6fd0"), value: 0 },
                             ]}
                         />
                     </Form.Item>

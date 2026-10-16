@@ -1,5 +1,7 @@
 package com.novanovastudio.agent;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.entity.CreationAgentRequest;
@@ -327,10 +329,10 @@ public class CreationAgentRequestDispatcher {
                                                 requestId, request.getPlanId(), planException);
                                         return Mono.empty();
                                     });
-                    return requestRepository.finishRunning(requestId, "failed", message)
+                    return requestRepository.finishRunning(requestId, "failed", message, SystemMessage.fromThrowable(exception))
                             .flatMap(finished -> Boolean.TRUE.equals(finished)
                                     ? failPlan.then(Mono.fromRunnable(() -> eventEmitter.emit(request.getUserId(),
-                                            AgentEvent.error(request.getSessionId(), message).withRequestId(requestId))))
+                                            AgentEvent.error(request.getSessionId(), message).withSystemMessage(SystemMessage.fromThrowable(exception)).withRequestId(requestId))))
                                     : Mono.<Void>empty());
                 })
                 .onErrorResume(finishException -> {
@@ -521,7 +523,7 @@ public class CreationAgentRequestDispatcher {
                         }))
                 .then(failPlan)
                 .doOnSuccess(ignored -> eventEmitter.emit(request.getUserId(), AgentEvent.error(request.getSessionId(),
-                        message).withRequestId(request.getId())));
+                        message).withSystemMessage(SystemMessage.of("system.requestInterrupted")).withRequestId(request.getId())));
     }
 
     /**

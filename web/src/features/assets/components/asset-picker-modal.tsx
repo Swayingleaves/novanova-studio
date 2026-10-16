@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useMemo, useState } from "react";
 import { Empty, Input, Modal, Pagination, Segmented, Tag } from "antd";
@@ -21,20 +24,21 @@ type AssetPickerModalProps = {
 };
 
 const PAGE_SIZE = 8;
-const KIND_OPTIONS: Array<{ label: string; value: AssetKind | "all" }> = [
-    { label: "全部", value: "all" },
-    { label: "文本", value: "text" },
-    { label: "图片", value: "image" },
-    { label: "视频", value: "video" },
-];
+const createKindOptions = (translator: typeof translate = translate): Array<{ label: string; value: AssetKind | "all" }> => ([
+    { get label() { return translator("assets.all"); }, value: "all" },
+    { get label() { return translator("assets.text"); }, value: "text" },
+    { get label() { return translator("assets.image"); }, value: "image" },
+    { get label() { return translator("assets.video"); }, value: "video" },
+]);
 
 export function AssetPickerModal({ open, onInsert, onClose, defaultTab }: AssetPickerModalProps) {
+    const translate = useTranslation();
     const assets = useAssetStore((state) => state.assets);
     const [keyword, setKeyword] = useState("");
     const [kind, setKind] = useState<AssetKind | "all">(readInitialKind(defaultTab));
     const [page, setPage] = useState(1);
-    const filteredAssets = useMemo(() => queryAssets(assets, { keyword, kind }), [assets, keyword, kind]);
-    const result = useMemo(() => paginateAssets(filteredAssets, page, PAGE_SIZE), [filteredAssets, page]);
+    const filteredAssets = useMemo(() => queryAssets(assets, { keyword, kind }), [assets, keyword, kind, translate.locale]);
+    const result = useMemo(() => paginateAssets(filteredAssets, page, PAGE_SIZE), [filteredAssets, page, translate.locale]);
     const changeQuery = (next: { keyword?: string; kind?: AssetKind | "all" }) => {
         if (next.keyword !== undefined) setKeyword(next.keyword);
         if (next.kind !== undefined) setKind(next.kind);
@@ -42,18 +46,18 @@ export function AssetPickerModal({ open, onInsert, onClose, defaultTab }: AssetP
     };
 
     return (
-        <Modal title="插入我的资产" open={open} onCancel={onClose} footer={null} width={900} centered destroyOnHidden>
+        <Modal title={translate("assets.insertMyAssets")} open={open} onCancel={onClose} footer={null} width={900} centered destroyOnHidden>
             <div className="grid gap-4" data-canvas-no-zoom onWheelCapture={(event) => event.stopPropagation()}>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <Input allowClear prefix={<Search className="size-4 text-[var(--studio-faint)]" />} value={keyword} placeholder="搜索标题、标签或内容" className="sm:max-w-sm" onChange={(event) => changeQuery({ keyword: event.target.value })} />
-                    <Segmented options={KIND_OPTIONS} value={kind} onChange={(value) => changeQuery({ kind: value as AssetKind | "all" })} />
+                    <Input allowClear prefix={<Search className="size-4 text-[var(--studio-faint)]" />} value={keyword} placeholder={translate("assets.searchTitleTagsOrContent")} className="sm:max-w-sm" onChange={(event) => changeQuery({ keyword: event.target.value })} />
+                    <Segmented options={createKindOptions(translate)} value={kind} onChange={(value) => changeQuery({ kind: value as AssetKind | "all" })} />
                 </div>
 
                 {result.items.length ? (
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                         {result.items.map((asset) => <AssetChoiceCard key={asset.id} asset={asset} onChoose={() => onInsert(createInsertPayload(asset))} />)}
                     </div>
-                ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有匹配的资产" className="py-14" />}
+                ) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("assets.noMatchingAssets")} className="py-14" />}
 
                 {result.totalPages > 1 ? <Pagination className="justify-self-center" size="small" current={result.page} pageSize={result.pageSize} total={result.total} showSizeChanger={false} onChange={setPage} /> : null}
             </div>
@@ -90,5 +94,5 @@ function readInitialKind(value?: string): AssetKind | "all" {
 }
 
 function assetKindLabel(kind: AssetKind): string {
-    return kind === "image" ? "图片" : kind === "video" ? "视频" : "文本";
+    return kind === "image" ? translate("assets.image") : kind === "video" ? translate("assets.video") : translate("assets.text");
 }

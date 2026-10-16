@@ -1,5 +1,7 @@
 package com.novanovastudio.ai.provider;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -81,7 +83,7 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
             case AiTaskTypes.IMAGE -> executeImageTask(context);
             case AiTaskTypes.VIDEO -> executeVideoTask(context);
             default ->
-                    Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "Agnes 调用格式暂不支持" + context.task().getTaskType() + "任务"));
+                    Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.agnesFormatDoesNotSupportTasks", context.task().getTaskType())));
         };
     }
 
@@ -115,7 +117,7 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                                 String data = tuple.getT2();
                                 return context.isCancelRequested().flatMap(cancelRequested -> {
                                     if (Boolean.TRUE.equals(cancelRequested)) {
-                                        return Mono.<String>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "任务已取消"));
+                                        return Mono.<String>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCanceled")));
                                     }
                                     return Mono.fromCallable(() -> parseAgnesChatDelta(data));
                                 }).flatMap(delta -> {
@@ -215,7 +217,7 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                 .flatMap(response -> {
                     JSONArray data = AiJsonUtils.responseArrayPayload(response, "data");
                     if (data == null || data.isEmpty()) {
-                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "Agnes 图片接口没有返回图片"));
+                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.agnesImageAPIReturnedNoImage")));
                     }
                     return Flux.fromIterable(data)
                             .concatMap(itemObject -> {
@@ -286,7 +288,7 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                             payload.getString("task_id"));
                     String providerTaskId = AiTaskParameterReader.firstNonEmpty(payload.getString("task_id"), payload.getString("id"), videoId);
                     if (!StringUtils.hasText(videoId)) {
-                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "Agnes 接口没有返回 video_id"));
+                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.agnesAPIReturnedNoVideoId")));
                     }
                     return context.updateRunningProgress(20)
                             .then(pollAgnesVideoTask(context, videoId))
@@ -298,7 +300,7 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                                         finished.getString("remixed_from_video_id")
                                 );
                                 if (!StringUtils.hasText(resultUrl)) {
-                                    return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "Agnes 任务成功但没有返回视频 URL"));
+                                    return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.agnesTaskSucceededWithoutVideoURL")));
                                 }
                                 // 由服务端将 AI 渠道返回的地址登记为受信任媒体，避免浏览器读取内网结果地址。
                                 return mediaSupport.registerGeneratedMediaUrl(context.task().getUserId(), AiTaskTypes.VIDEO, resultUrl,
@@ -316,8 +318,7 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                                                       AiTaskDtos.AiTaskMediaReference reference,
                                                       String mediaType) {
         return mediaSupport.resolveReferenceUrl(context.task().getUserId(), reference)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
-                        "参考" + mediaType + "地址解析为空")));
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.referenceURLIsEmpty", mediaType))));
     }
 
     /**
@@ -434,7 +435,7 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
                         .then(context.isCancelRequested())
                         .flatMap(cancelRequested -> {
                             if (Boolean.TRUE.equals(cancelRequested)) {
-                                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "任务已取消"));
+                                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCanceled")));
                             }
                             String requestUrl = agnesQueryUrl(context.channel().baseUrl(), videoId, context.model());
                             log.debug("Agnes视频轮询第{}次: videoId={}, url={}", attempt + 1, videoId, requestUrl);
@@ -473,13 +474,13 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
     private String resolveAgnesRequestSize(AiTaskExecutionContext context) {
         String size = AiTaskParameterReader.stringParameter(context.request().parameters(), "size", "");
         if (!StringUtils.hasText(size) || "auto".equalsIgnoreCase(size)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "Agnes 图片接口要求 size 必填，请选择比例或像素尺寸");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.agnesRequiresSizeSelectAspectRatioOrPixelDimensions"));
         }
         if (size.matches("^\\d+x\\d+$")) {
             return size;
         }
         if (!size.contains(":")) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "Agnes 图片尺寸格式不支持，请使用9:16或1024x1024");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedAgnesSizeUse916Or1024x1024"));
         }
         return resolveImageSize(AiTaskParameterReader.stringParameter(context.request().parameters(), "resolution", "2K"), size);
     }
@@ -496,14 +497,14 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
             case "1k" -> 1024;
             case "2k" -> 2048;
             case "4k" -> 4096;
-            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "图片清晰度只支持1K、2K、4K");
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageResolutionMustBe1K2KOr4K"));
         };
         String[] parts = ratio.split(":");
         if (parts.length != 2) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "图像比例必须是正数，例如 9:16");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.aspectRatioMustBePositiveEG916"));
         }
-        double widthRatio = parsePositiveDouble(parts[0], "图像比例必须是正数，例如 9:16");
-        double heightRatio = parsePositiveDouble(parts[1], "图像比例必须是正数，例如 9:16");
+        double widthRatio = parsePositiveDouble(parts[0], SystemMessage.of("business.aspectRatioMustBePositiveEG916"));
+        double heightRatio = parsePositiveDouble(parts[1], SystemMessage.of("business.aspectRatioMustBePositiveEG916"));
         boolean landscape = widthRatio >= heightRatio;
         double longRatio = landscape ? widthRatio / heightRatio : heightRatio / widthRatio;
         int shortSide = Math.max(16, (int) (Math.round(longSide / longRatio / 16) * 16));
@@ -637,7 +638,7 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
             case "480p" -> 961;
             default -> 409;
         };
-        int seconds = Math.max(1, Math.min((int) Math.floor((double) maxFrames), (int) Math.floor(parsePositiveDouble(StringUtils.hasText(value) ? value : "5", "Agnes 视频秒数必须是正数"))));
+        int seconds = Math.max(1, Math.min((int) Math.floor((double) maxFrames), (int) Math.floor(parsePositiveDouble(StringUtils.hasText(value) ? value : "5", SystemMessage.of("business.agnesVideoDurationMustBePositive")))));
         List<AgnesVideoTiming> presets = List.of(
                 new AgnesVideoTiming(3, 81, 24),
                 new AgnesVideoTiming(5, 121, 24),
@@ -651,10 +652,10 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
      * 解析正数参数
      *
      * @param value   String 原始值
-     * @param message String 错误提示
+     * @param message SystemMessage 错误提示
      * @return double 正数值
      */
-    private static double parsePositiveDouble(String value, String message) {
+    private static double parsePositiveDouble(String value, SystemMessage message) {
         try {
             double parsed = Double.parseDouble(value);
             if (parsed > 0) {

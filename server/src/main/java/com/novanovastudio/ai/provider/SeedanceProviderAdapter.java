@@ -1,5 +1,7 @@
 package com.novanovastudio.ai.provider;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.ai.AiErrorSupport;
@@ -107,7 +109,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
     @Override
     public Mono<JSONObject> execute(AiTaskExecutionContext context) {
         if (!supports(context.task().getTaskType())) {
-            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "Seedance 调用格式仅支持视频任务"));
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.seedanceSupportsVideoTasksOnly")));
         }
         List<AiTaskDtos.AiTaskMediaReference> imageReferences =
                 AiTaskParameterReader.safeReferences(context.request().references());
@@ -159,7 +161,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
                     String providerTaskId = AiTaskParameterReader.firstNonEmpty(created.getString("id"));
                     if (!StringUtils.hasText(providerTaskId)) {
                         return Mono.error(new BusinessException(
-                                ErrorCode.THIRD_PARTY_CALL_ERROR, "Seedance 接口没有返回任务ID"));
+                                ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.seedanceReturnedNoTaskID")));
                     }
                     return context.updateRunningProgress(20)
                             .then(pollSeedanceVideoTask(context, providerTaskId))
@@ -218,7 +220,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
                                     response, seedanceFailureMessage(response, status)));
                         }
                         return Mono.error(new BusinessException(
-                                ErrorCode.THIRD_PARTY_CALL_ERROR, "Seedance 返回了未知任务状态: " + status));
+                                ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.unknownSeedanceTaskStatus", status)));
                     }));
                 });
     }
@@ -239,7 +241,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
                 .doOnError(exception -> log.error(
                         "取消Seedance视频任务失败: taskId={}, providerTaskId={}",
                         context.task().getId(), providerTaskId, exception))
-                .then(Mono.<JSONObject>error(new BusinessException(ErrorCode.BUSINESS_ERROR, "任务已取消")));
+                .then(Mono.<JSONObject>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCanceled"))));
     }
 
     /**
@@ -267,7 +269,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
             return Mono.empty();
         }
         return Mono.error(new BusinessException(
-                ErrorCode.THIRD_PARTY_CALL_ERROR, "Seedance 返回了未知任务状态: " + status));
+                ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.unknownSeedanceTaskStatus", status)));
     }
 
     /**
@@ -284,7 +286,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
         String videoUrl = content == null ? "" : AiTaskParameterReader.firstNonEmpty(content.getString("video_url"));
         if (!StringUtils.hasText(videoUrl)) {
             return Mono.error(new BusinessException(
-                    ErrorCode.THIRD_PARTY_CALL_ERROR, "Seedance 任务成功但没有返回视频URL"));
+                    ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.seedanceTaskSucceededWithoutVideoURL")));
         }
         Integer duration = finished.getInteger("duration");
         Integer durationMilliseconds = duration == null ? null : duration * 1000;
@@ -339,7 +341,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
             List<String> imageUrls, List<String> videoUrls, String videoGenerationMode) {
         String mode = VideoGenerationMode.defaultIfBlank(videoGenerationMode);
         if (!VideoGenerationMode.isSupported(mode)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedVideoGenerationMode"));
         }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", model);
@@ -362,7 +364,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
             List<String> imageRoles) {
         String mode = VideoGenerationMode.defaultIfBlank(videoGenerationMode);
         if (!VideoGenerationMode.isSupported(mode)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "视频生成模式不受支持");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedVideoGenerationMode"));
         }
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", model);
@@ -447,12 +449,10 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
      */
     private static void validateReferenceCounts(int imageCount, int videoCount) {
         if (imageCount > MAXIMUM_REFERENCE_IMAGE_COUNT) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID,
-                    "Seedance 参考图片最多" + MAXIMUM_REFERENCE_IMAGE_COUNT + "个");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.atMostSeedanceReferenceImages", MAXIMUM_REFERENCE_IMAGE_COUNT));
         }
         if (videoCount > MAXIMUM_REFERENCE_VIDEO_COUNT) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID,
-                    "Seedance 参考视频最多" + MAXIMUM_REFERENCE_VIDEO_COUNT + "个");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.atMostSeedanceReferenceVideos", MAXIMUM_REFERENCE_VIDEO_COUNT));
         }
     }
 
@@ -471,13 +471,13 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
             return normalized;
         }
         if (!normalized.matches("^\\d+x\\d+$")) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "Seedance 视频比例不支持: " + value);
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedSeedanceAspectRatio", value));
         }
         String[] dimensions = normalized.split("x");
         double width = Double.parseDouble(dimensions[0]);
         double height = Double.parseDouble(dimensions[1]);
         if (width <= 0 || height <= 0) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "Seedance 视频尺寸必须为正数");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.seedanceDimensionsMustBePositive"));
         }
         double ratio = width / height;
         return SUPPORTED_RATIOS.entrySet().stream()
@@ -500,7 +500,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
             default -> normalized.matches("^\\d+$") ? normalized + "p" : normalized;
         };
         if (!Set.of("480p", "720p", "1080p", "4k").contains(normalized)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "Seedance 视频分辨率不支持: " + value);
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedSeedanceResolution", value));
         }
         return normalized;
     }
@@ -520,7 +520,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
         } catch (NumberFormatException ignored) {
             // 统一在方法末尾抛出参数异常。
         }
-        throw new BusinessException(ErrorCode.PARAM_INVALID, "Seedance 视频时长必须是正整数或-1");
+        throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.seedanceDurationMustBeAPositiveIntegerOr1"));
     }
 
     /**
@@ -544,7 +544,7 @@ public class SeedanceProviderAdapter implements AiProviderAdapter {
         if ("false".equalsIgnoreCase(String.valueOf(value))) {
             return false;
         }
-        throw new BusinessException(ErrorCode.PARAM_INVALID, "Seedance " + key + "参数必须是布尔值");
+        throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.seedanceMustBeBoolean", key));
     }
 
     /**

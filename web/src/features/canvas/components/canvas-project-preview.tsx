@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { memo, useMemo } from "react";
 
@@ -33,9 +36,10 @@ type PreviewLayout = {
 };
 
 export const CanvasProjectPreview = memo(function CanvasProjectPreview({ document }: { document: CanvasDocument }) {
+    const translate = useTranslation();
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
     const theme = canvasThemes[resolvedTheme];
-    const layout = useMemo(() => buildCanvasProjectPreviewLayout(document.scene), [document.scene]);
+    const layout = useMemo(() => buildCanvasProjectPreviewLayout(document.scene), [document.scene, translate.locale]);
 
     if (!document.scene.nodes.length) {
         return (
@@ -43,14 +47,13 @@ export const CanvasProjectPreview = memo(function CanvasProjectPreview({ documen
                 className="block aspect-video w-full overflow-hidden rounded-[8px] border"
                 viewBox={`0 0 ${previewWidth} ${previewHeight}`}
                 role="img"
-                aria-label={`${document.identity.title} 空画布预览`}
+                aria-label={translate("canvas.emptyCanvasPreview", { value0: document.identity.title })}
                 style={{ background: theme.canvas.background, borderColor: theme.node.stroke }}
             >
                 <PreviewDots color={theme.canvas.dot} />
                 <rect x="132" y="80" width="56" height="20" rx="5" fill={theme.toolbar.panel} stroke={theme.toolbar.border} />
                 <text x="160" y="93" textAnchor="middle" fontSize="10" fill={theme.node.faint}>
-                    空画布
-                </text>
+                    {translate("canvas.emptyCanvas")}</text>
             </svg>
         );
     }
@@ -60,7 +63,7 @@ export const CanvasProjectPreview = memo(function CanvasProjectPreview({ documen
             className="block aspect-video w-full overflow-hidden rounded-[8px] border"
             viewBox={`0 0 ${previewWidth} ${previewHeight}`}
             role="img"
-            aria-label={`${document.identity.title} 画布预览`}
+            aria-label={translate("canvas.canvasPreview", { value0: document.identity.title })}
             style={{ background: theme.canvas.background, borderColor: theme.node.stroke }}
         >
             <PreviewDots color={theme.canvas.dot} />
@@ -78,8 +81,7 @@ export const CanvasProjectPreview = memo(function CanvasProjectPreview({ documen
                 <g>
                     <rect x={previewWidth - 72} y={previewHeight - 27} width="58" height="17" rx="5" fill={theme.toolbar.panel} stroke={theme.toolbar.border} />
                     <text x={previewWidth - 43} y={previewHeight - 15} textAnchor="middle" fontSize="9" fill={theme.node.muted}>
-                        +{layout.hiddenNodeCount} 节点
-                    </text>
+                        +{layout.hiddenNodeCount} {translate("canvas.node")}</text>
                 </g>
             ) : null}
         </svg>
@@ -129,6 +131,7 @@ function PreviewDots({ color }: { color: string }) {
 }
 
 function PreviewNodeShape({ node, theme }: { node: PreviewNode; theme: CanvasTheme }) {
+    const translate = useTranslation();
     const label = nodeLabel(node);
 
     if (node.kind === "audio") return <rect x={node.previewX} y={node.previewY} width={node.previewWidth} height={node.previewHeight} rx="6" fill={theme.node.panel} stroke={theme.node.stroke} />;
@@ -136,13 +139,13 @@ function PreviewNodeShape({ node, theme }: { node: PreviewNode; theme: CanvasThe
     const content = isTextNode(node)
         ? node.content.text
         : isStoryboardNode(node)
-            ? node.storyboard.shots.length ? `已生成 ${node.storyboard.shots.length} 个镜头` : node.content.instruction
+            ? node.storyboard.shots.length ? translate("canvas.generatedShots", { value0: node.storyboard.shots.length }) : node.content.instruction
         : isVideoCompositionNode(node)
-                ? `${node.composition.inputVideoNodeIds.length} 段视频`
+                ? translate("canvas.videoClips", { value0: node.composition.inputVideoNodeIds.length })
                 : isBackgroundNode(node)
-                    ? `${node.memberNodeIds.length} 个节点`
+                    ? translate("canvas.nodes_4f04bf", { value0: node.memberNodeIds.length })
                     : isDirectorDeskNode(node)
-                        ? `${node.director.project.objects.length} 个对象`
+                        ? translate("canvas.objects", { value0: node.director.project.objects.length })
                         : node.content.source || node.generation.prompt;
     const showText = node.previewWidth >= 42 && node.previewHeight >= 24;
 
@@ -273,13 +276,13 @@ function round(value: number) {
 
 function nodeLabel(node: CanvasNode) {
     if (node.title) return node.title;
-    if (isImageNode(node)) return "图片";
-    if (isTextNode(node)) return "文本";
-    if (isStoryboardNode(node)) return "分镜脚本";
-    if (isVideoCompositionNode(node)) return "合成视频";
-    if (isDirectorDeskNode(node)) return "3D 导演台";
-    if (isBackgroundNode(node)) return "背景板";
-    return "视频";
+    if (isImageNode(node)) return translate("canvas.image");
+    if (isTextNode(node)) return translate("canvas.text_dd8186");
+    if (isStoryboardNode(node)) return translate("canvas.storyboardScript");
+    if (isVideoCompositionNode(node)) return translate("canvas.composeVideo");
+    if (isDirectorDeskNode(node)) return translate("canvas.3DDirectorDesk");
+    if (isBackgroundNode(node)) return translate("canvas.background");
+    return translate("canvas.video");
 }
 
 function shortenText(value: string) {

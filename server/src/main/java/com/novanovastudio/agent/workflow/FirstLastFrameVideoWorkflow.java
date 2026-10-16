@@ -1,5 +1,7 @@
 package com.novanovastudio.agent.workflow;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.agent.CreationEntrySource;
 import com.novanovastudio.agent.dto.CreationPlan;
 import com.novanovastudio.agent.dto.CreationTask;
@@ -198,7 +200,7 @@ public class FirstLastFrameVideoWorkflow implements VideoWorkflowDefinition {
         if (supported.contains("first-last-frame-to-video")) modes.add("first-last-frame-to-video");
         if (supported.contains("reference-to-video")) modes.add("reference-to-video");
         if (!modes.isEmpty()) return List.copyOf(modes);
-        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前视频模型未配置首尾帧原生或参考图生成能力");
+        throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.thisVideoModelSupportsNeitherNativeFirstLastFramesNor"));
     }
 
     /** {@inheritDoc} */
@@ -237,7 +239,7 @@ public class FirstLastFrameVideoWorkflow implements VideoWorkflowDefinition {
     @Override
     public Optional<VideoWorkflowQuotePlan> buildQuotePlan(AiTaskDtos.VideoWorkflowQuoteRequest request) {
         if (request == null || !StringUtils.hasText(request.resolution()) || !StringUtils.hasText(request.seconds())) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "工作流报价缺少视频分辨率或时长设置");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.workflowQuoteNeedsVideoResolutionAndDuration"));
         }
         Map<String, Object> videoParameters = new LinkedHashMap<>();
         videoParameters.put("resolution", request.resolution());
@@ -258,6 +260,6 @@ public class FirstLastFrameVideoWorkflow implements VideoWorkflowDefinition {
      * @return BusinessException 业务异常
      */
     private BusinessException invalid() {
-        return new BusinessException(ErrorCode.PARAM_INVALID, "首尾帧视频工作流计划不符合服务端定义");
+        return new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.firstLastFramePlanDoesNotMatchTheServerWorkflow"));
     }
 }

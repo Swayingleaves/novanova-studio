@@ -18,13 +18,13 @@ test("模型配置创建和更新请求都携带同时并发数", () => {
 
 test("模型配置通过编辑弹窗维护自定义 JSON 参数", () => {
     assert.match(source, /openModelConfigEditor/);
-    assert.match(source, /自定义 JSON/);
+    assert.match(source, /translate\("appShell\.customJSON"\)/);
     assert.match(source, /JSON\.parse\(editingCustomBodyParameters/);
     assert.equal((source.match(/customBodyParameters: normalizedConfig\.customBodyParameters/g) || []).length, 2);
 });
 
 test("视频模型音频输入能力由管理员配置且仅受全能参考约束", () => {
-    assert.match(source, /支持音频输入/);
+    assert.match(source, /translate\("appShell\.audioInputSupported"\)/);
     assert.match(source, /capabilities\.includes\("audio-input"\)/);
     assert.match(source, /capabilities\.includes\("reference-to-video"\)/);
     assert.doesNotMatch(source, /\["minimax", "evolink"\]\.includes/);

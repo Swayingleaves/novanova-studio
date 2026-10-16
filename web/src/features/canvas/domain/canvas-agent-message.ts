@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 export type CanvasAgentChatAttachment = {
     id: string;
     name: string;
@@ -35,5 +37,5 @@ export function groupCanvasAgentMessages(messages: readonly CanvasAgentChatMessa
 export function buildCanvasAgentAttachmentSummary(message: CanvasAgentChatMessage): string {
     const attachments = message.attachments ?? [];
     if (attachments.length === 0) return "";
-    return `${attachments.length} 个附件：${attachments.map((attachment) => attachment.name).join("、")}`;
+    return translate("canvas.attachments", { value0: attachments.length, value1: attachments.map((attachment) => attachment.name).join("、") });
 }

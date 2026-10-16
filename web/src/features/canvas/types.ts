@@ -47,6 +47,8 @@ export interface CanvasAssistantImage {
 }
 
 export interface CanvasAssistantMessage {
+    /** 系统计划执行状态，避免依赖已翻译的显示文案判断终态。 */
+    executionStatus?: string;
     id: string;
     role: "user" | "assistant" | "system" | "tool" | "error";
     title?: string;

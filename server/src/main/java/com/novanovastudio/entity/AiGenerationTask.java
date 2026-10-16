@@ -45,6 +45,12 @@ public class AiGenerationTask {
     /** 错误信息 */
     private String errorMessage;
 
+    /** 系统消息键，与语言无关。 */
+    private String errorMessageKey;
+
+    /** 系统消息插值参数JSON。 */
+    private String errorMessageArguments;
+
     /** 开始时间 */
     private OffsetDateTime startedAt;
 

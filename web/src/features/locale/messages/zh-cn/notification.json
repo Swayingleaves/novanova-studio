@@ -1,0 +1,10 @@
+{
+    "failedToMarkAnnouncementReadTryLater": "标记公告已读失败，请稍后重试",
+    "failedToMarkAllAnnouncementsRead": "标记全部公告已读失败，请稍后重试",
+    "announcementDetails": "公告详情",
+    "iHaveRead": "我已阅读",
+    "markAllRead": "全部已读",
+    "noContent": "暂无内容",
+    "published": "发布时间：{value0}",
+    "created": "创建时间：{value0}"
+}

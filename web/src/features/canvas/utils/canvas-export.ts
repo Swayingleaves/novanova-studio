@@ -1,4 +1,5 @@
 import { saveAs } from "file-saver";
+import { translateMessage as translate } from "@/features/locale/translate";
 
 import { createZip } from "@/shared/lib/zip";
 import { getMediaBlob } from "@/features/storage/services/file-storage";
@@ -7,7 +8,6 @@ import { CANVAS_EXPORT_APP_ID, CANVAS_EXPORT_MANIFEST_NAME, CANVAS_EXPORT_VERSIO
 import type { CanvasDocument } from "../types";
 
 const IMAGE_STORAGE_PREFIX = "image:";
-const FALLBACK_FILE_NAME = "无限画布";
 
 /**
  * 把画布项目导出为 ZIP 并触发下载。
@@ -18,7 +18,7 @@ const FALLBACK_FILE_NAME = "无限画布";
  * @param projects 待导出项目
  * @param fileName 输出文件名，默认"无限画布"
  */
-export async function exportCanvasDocuments(documents: CanvasDocument[], fileName = FALLBACK_FILE_NAME): Promise<void> {
+export async function exportCanvasDocuments(documents: CanvasDocument[], fileName = translate("canvas.infiniteCanvas")): Promise<void> {
     const archivedDocuments = await Promise.all(documents.map(exportDocumentBundle));
     const zipFiles = archivedDocuments
         .flatMap((item) => item.binaryFiles)

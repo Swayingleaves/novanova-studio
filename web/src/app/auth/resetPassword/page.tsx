@@ -1,11 +1,14 @@
 "use client";
+import { LanguageMenu } from "@/features/locale/components/language-menu";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { Suspense, useState } from "react";
 import { App, Alert, Button, Form, Input } from "antd";
 import { ArrowRight } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 
-import { resetPassword } from "@/services/api/server";
+import { resetPassword, ServerRequestError } from "@/services/api/server";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 
 type ResetPasswordForm = {
@@ -14,14 +17,17 @@ type ResetPasswordForm = {
 };
 
 export default function ResetPasswordPage() {
+    const translate = useTranslation();
     return (
-        <Suspense fallback={<main className="studio-shell-bg flex min-h-dvh items-center justify-center text-sm text-[var(--studio-muted)]">正在打开重置页面...</main>}>
+        <Suspense fallback={<main className="studio-shell-bg flex min-h-dvh items-center justify-center text-sm text-[var(--studio-muted)]">
+            <div className="fixed right-4 top-4 z-50"><LanguageMenu /></div>{translate("auth.openingResetPage")}</main>}>
             <ResetPasswordContent />
         </Suspense>
     );
 }
 
 function ResetPasswordContent() {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const searchParams = useSearchParams();
     const clearSession = useUserStore((state) => state.clearSession);
@@ -39,8 +45,8 @@ function ResetPasswordContent() {
             clearSession();
             setCompleted(true);
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : "重置密码失败";
-            setResetLinkInvalid(errorMessage.includes("重置链接已失效") || errorMessage.includes("重置链接无效"));
+            const errorMessage = error instanceof Error ? error.message : translate("auth.passwordResetFailed");
+            setResetLinkInvalid(error instanceof ServerRequestError && error.messageKey === "business.resetLinkExpiredOrAlreadyUsed");
             form.setFields([{ name: "newPassword", errors: [errorMessage] }]);
             message.error(errorMessage);
         } finally {
@@ -50,47 +56,45 @@ function ResetPasswordContent() {
 
     return (
         <main className="studio-shell-bg flex min-h-dvh items-center justify-center px-4">
+            <div className="fixed right-4 top-4 z-50"><LanguageMenu /></div>
             <section className="studio-glass w-full max-w-[380px] rounded-xl p-8" aria-labelledby="reset-password-title">
                 {!token ? (
                     <>
-                        <h1 id="reset-password-title" className="studio-title mb-4 text-2xl font-semibold">重置链接无效</h1>
-                        <Alert type="error" showIcon title="缺少重置链接" description="请重新发送密码重置邮件，并使用邮件中的最新链接。" />
+                        <h1 id="reset-password-title" className="studio-title mb-4 text-2xl font-semibold">{translate("auth.invalidResetLink")}</h1>
+                        <Alert type="error" showIcon title={translate("auth.missingResetLink")} description={translate("auth.resendTheResetEmailAndUseTheLatestLink")} />
                         <Button type="primary" size="large" block className="mt-6" href="/auth/forgotPassword">
-                            重新发送重置邮件
-                        </Button>
+                            {translate("auth.resendResetEmail")}</Button>
                     </>
                 ) : completed ? (
                     <div className="space-y-6" role="status" aria-live="polite">
                         <div>
-                            <h1 id="reset-password-title" className="studio-title text-2xl font-semibold">密码重置成功</h1>
-                            <p className="studio-subtitle mt-2 text-sm">为保护账号安全，所有设备上的旧登录状态已失效，请使用新密码重新登录。</p>
+                            <h1 id="reset-password-title" className="studio-title text-2xl font-semibold">{translate("auth.passwordReset")}</h1>
+                            <p className="studio-subtitle mt-2 text-sm">{translate("auth.oldSessionsOnAllDevicesWereInvalidatedSignIn")}</p>
                         </div>
                         <Button type="primary" size="large" block href="/auth" icon={<ArrowRight className="size-4" />} iconPlacement="end">
-                            去登录
-                        </Button>
+                            {translate("auth.signIn")}</Button>
                     </div>
                 ) : (
                     <>
                         <div className="mb-6">
-                            <h1 id="reset-password-title" className="studio-title text-2xl font-semibold">设置新密码</h1>
-                            <p className="studio-subtitle mt-2 text-sm">新密码至少 8 位。提交后，其他设备上的登录状态将失效。</p>
+                            <h1 id="reset-password-title" className="studio-title text-2xl font-semibold">{translate("auth.setNewPassword")}</h1>
+                            <p className="studio-subtitle mt-2 text-sm">{translate("auth.newPasswordNeeds8CharactersOtherDevicesWillBe")}</p>
                         </div>
                         {resetLinkInvalid ? (
                             <div className="mb-4 space-y-3">
-                                <Alert type="error" showIcon title="重置链接已失效" description="请重新发送邮件，并使用最新链接设置密码。" />
-                                <Button type="link" href="/auth/forgotPassword" className="h-auto px-0">重新发送重置邮件</Button>
+                                <Alert type="error" showIcon title={translate("auth.resetLinkExpired")} description={translate("auth.resendEmailAndUseTheLatestResetLink")} />
+                                <Button type="link" href="/auth/forgotPassword" className="h-auto px-0">{translate("auth.resendResetEmail")}</Button>
                             </div>
                         ) : null}
                         <Form form={form} layout="vertical" requiredMark={false} onFinish={submit}>
-                            <Form.Item name="newPassword" label="新密码" rules={[{ required: true, message: "请输入新密码" }, { min: 8, message: "密码至少 8 位" }]}>
-                                <Input.Password size="large" autoComplete="new-password" placeholder="至少 8 位" />
+                            <Form.Item name="newPassword" label={translate("auth.newPassword")} rules={[{ required: true, message: translate("auth.enterANewPassword") }, { min: 8, message: translate("auth.atLeast8Characters") }]}>
+                                <Input.Password size="large" autoComplete="new-password" placeholder={translate("auth.atLeast8Characters_d482f2")} />
                             </Form.Item>
-                            <Form.Item name="confirmPassword" label="确认新密码" dependencies={["newPassword"]} rules={[{ required: true, message: "请再次输入新密码" }, ({ getFieldValue }) => ({ validator: (_, value) => !value || getFieldValue("newPassword") === value ? Promise.resolve() : Promise.reject(new Error("两次输入的密码不一致")) })]}>
-                                <Input.Password size="large" autoComplete="new-password" placeholder="再次输入新密码" />
+                            <Form.Item name="confirmPassword" label={translate("auth.confirmNewPassword")} dependencies={["newPassword"]} rules={[{ required: true, message: translate("auth.reEnterNewPassword") }, ({ getFieldValue }) => ({ validator: (_, value) => !value || getFieldValue("newPassword") === value ? Promise.resolve() : Promise.reject(new Error(translate("auth.passwordsDoNotMatch"))) })]}>
+                                <Input.Password size="large" autoComplete="new-password" placeholder={translate("auth.reEnterNewPassword_b3c58f")} />
                             </Form.Item>
                             <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<ArrowRight className="size-4" />} iconPlacement="end">
-                                确认重置密码
-                            </Button>
+                                {translate("auth.resetPassword")}</Button>
                         </Form>
                     </>
                 )}

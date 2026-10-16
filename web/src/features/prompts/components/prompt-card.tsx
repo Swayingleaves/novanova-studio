@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import type { ReactNode } from "react";
 import { Button, Tag } from "antd";
@@ -17,7 +20,8 @@ type PromptCardProps = {
     extraAction?: ReactNode;
 };
 
-export function PromptCard({ item, onOpen, onCopy, actionLabel = "复制", actionIcon = <Copy className="size-3.5" />, actionType = "text", extraAction }: PromptCardProps) {
+export function PromptCard({ item, onOpen, onCopy, actionLabel = translate("prompts.copy"), actionIcon = <Copy className="size-3.5" />, actionType = "text", extraAction }: PromptCardProps) {
+    const translate = useTranslation();
     return (
         <article className="studio-panel-solid flex flex-col overflow-hidden">
             <button type="button" className="block text-left" onClick={onOpen}>

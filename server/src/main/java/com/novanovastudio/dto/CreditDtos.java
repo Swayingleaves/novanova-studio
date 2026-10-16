@@ -33,7 +33,7 @@ public final class CreditDtos {
      *
      * @param initialCredits Integer 新用户初始积分
      */
-    public record UpdateCreditSettingsRequest(@NotNull(message = "初始积分不能为空") @Min(value = 0, message = "初始积分不能小于0") Integer initialCredits) {
+    public record UpdateCreditSettingsRequest(@NotNull(message = "business.initialCreditsAreRequired") @Min(value = 0, message = "business.initialCreditsMustNotBeNegative") Integer initialCredits) {
     }
 
     /**
@@ -43,9 +43,9 @@ public final class CreditDtos {
      * @param changeAmount Integer 积分变动值，正数增加、负数扣减
      * @param reason String 调整原因
      */
-    public record AdjustUserCreditsRequest(@NotNull(message = "用户ID不能为空") Long userId,
-                                           @NotNull(message = "积分变动值不能为空") Integer changeAmount,
-                                           @NotBlank(message = "调整原因不能为空") @Size(max = 200, message = "调整原因不能超过200个字符") String reason) {
+    public record AdjustUserCreditsRequest(@NotNull(message = "business.userIDIsRequired") Long userId,
+                                           @NotNull(message = "business.creditChangeIsRequired") Integer changeAmount,
+                                           @NotBlank(message = "business.adjustmentReasonIsRequired") @Size(max = 200, message = "business.reasonMustNotExceed200Characters") String reason) {
     }
 
     /**

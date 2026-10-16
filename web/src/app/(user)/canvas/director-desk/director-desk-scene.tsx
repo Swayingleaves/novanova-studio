@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { Plus } from "lucide-react";
@@ -106,6 +109,7 @@ const JOINT_CONNECTIONS: Array<[CanvasDirectorDeskJoint, CanvasDirectorDeskJoint
 
 /** 三维视口复用场景对象，播放只更新变换和骨骼；辅助控件与导出隔离。 */
 export const DirectorDeskScene = forwardRef<DirectorDeskSceneHandle, SceneProps>(function DirectorDeskScene(props, ref) {
+    const translate = useTranslation();
     const theme = useCanvasTheme();
     const viewportRef = useRef<HTMLDivElement>(null);
     const runtimeRef = useRef<SceneRuntime | null>(null);
@@ -124,28 +128,28 @@ export const DirectorDeskScene = forwardRef<DirectorDeskSceneHandle, SceneProps>
         captureVideo: (project, width, height, onProgress) => withExportViewport(width, height, (runtime) => encodeDirectorDeskVideo({
             canvas: runtime.renderer.domElement, durationMilliseconds: project.timeline.durationMilliseconds, onProgress,
             renderFrame: async (time) => {
-                if (runtime.disposed) throw new Error("导演台视口已关闭，视频导出已停止");
+                if (runtime.disposed) throw new Error(translate("directorDesk.directorViewportClosedVideoExportStopped"));
                 const frame = evaluateDirectorDeskProject(project, time);
                 const complete = await synchronize(runtime, { ...latest.current, objects: frame.objects, camera: frame.camera, cameras: frame.cameras }, colorsRef.current, false);
-                if (!complete || runtime.disposed) throw new Error("导演台帧渲染已中断，视频导出已停止");
+                if (!complete || runtime.disposed) throw new Error(translate("directorDesk.directorRenderingInterruptedExportStopped"));
             },
         })),
     }));
 
     /** 导出使用拍摄机位，结束后恢复导演视角及编辑辅助物体。 */
     async function capture(objects: CanvasDirectorDeskObject[], camera: CanvasDirectorDeskCamera | undefined, width: number, height: number): Promise<Blob> {
-        if (!camera) throw new Error("导演台拍摄机位不存在");
+        if (!camera) throw new Error(translate("directorDesk.directorCameraNotFound"));
         return withExportViewport(width, height, async (runtime) => {
             const complete = await synchronize(runtime, { ...latest.current, objects, camera }, colorsRef.current, false);
-            if (!complete || runtime.disposed) throw new Error("导演台截图已中断");
-            return new Promise<Blob>((resolve, reject) => runtime.renderer.domElement.toBlob((blob) => blob ? resolve(blob) : reject(new Error("导演台 PNG 导出失败")), "image/png"));
+            if (!complete || runtime.disposed) throw new Error(translate("directorDesk.directorCaptureInterrupted"));
+            return new Promise<Blob>((resolve, reject) => runtime.renderer.domElement.toBlob((blob) => blob ? resolve(blob) : reject(new Error(translate("directorDesk.directorPNGExportFailed"))), "image/png"));
         });
     }
 
     /** 整次视频导出只切换一次渲染尺寸和机位，结束后统一恢复预览。 */
     async function withExportViewport<Result>(width: number, height: number, operation: (runtime: SceneRuntime) => Promise<Result>): Promise<Result> {
         const runtime = runtimeRef.current;
-        if (!runtime || runtime.disposed || runtime.exporting) throw new Error("导演台视口尚未就绪或正在导出");
+        if (!runtime || runtime.disposed || runtime.exporting) throw new Error(translate("directorDesk.directorViewportIsNotReadyOrExporting"));
         runtime.exporting = true;
         const previous = { width: runtime.width, height: runtime.height, ratio: runtime.renderer.getPixelRatio() };
         try {
@@ -171,7 +175,7 @@ export const DirectorDeskScene = forwardRef<DirectorDeskSceneHandle, SceneProps>
         const canvas = viewport.ownerDocument.createElement("canvas");
         canvas.tabIndex = 0;
         canvas.className = "block size-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--studio-action)]";
-        canvas.setAttribute("aria-label", "导演台三维预览与轨迹编辑");
+        canvas.setAttribute("aria-label", translate("directorDesk.director3DPreviewAndPathEditing"));
         viewport.appendChild(canvas);
         let runtime: SceneRuntime | null = null;
         let initializedRenderer: Three.WebGLRenderer | null = null;
@@ -266,7 +270,7 @@ export const DirectorDeskScene = forwardRef<DirectorDeskSceneHandle, SceneProps>
         /** 加载失败显示可重试错误，不用几何体人偶替代缺失人体。 */
         function report(error: unknown): void {
             if (stopped) return;
-            const message = error instanceof Error ? error.message : "导演台三维场景加载失败";
+            const message = error instanceof Error ? error.message : translate("directorDesk.failedToLoadDirector3DScene");
             console.error("导演台场景加载失败", error);
             setErrorMessage(message);
             setStatus("error");
@@ -287,7 +291,7 @@ export const DirectorDeskScene = forwardRef<DirectorDeskSceneHandle, SceneProps>
         if (!runtime || runtime.exporting) return;
         void synchronize(runtime, props, colorsRef.current, true).then((complete) => { if (complete && !runtime.disposed) { setStatus("ready"); props.onReadyChange(true); } }).catch((error) => {
             if (runtime.disposed) return;
-            const message = error instanceof Error ? error.message : "导演台场景更新失败";
+            const message = error instanceof Error ? error.message : translate("directorDesk.failedToUpdateDirectorScene");
             setStatus("error"); setErrorMessage(message); props.onReadyChange(false);
         });
     }, [props.objects, props.camera, props.cameras, props.assets, props.backgroundAssetId, props.selectedObjectId, props.selectedCameraId, props.transformMode, props.viewMode, props.pathSettings, props.poseEditing, props.selectedJoint, props.disabled, theme, retry]);
@@ -296,7 +300,7 @@ export const DirectorDeskScene = forwardRef<DirectorDeskSceneHandle, SceneProps>
         <div ref={viewportRef} className="absolute inset-0" />
         {status === "ready" ? <Plus aria-hidden="true" strokeWidth={1} className="pointer-events-none absolute left-1/2 top-1/2 size-6 -translate-x-1/2 -translate-y-1/2 opacity-70" style={{ color: theme.node.text }} /> : null}
         {status !== "ready" ? <div className="absolute inset-0 grid place-items-center p-6 text-center text-xs" style={{ background: theme.node.panel, color: theme.node.text }}>
-            <div><p>{status === "loading" ? "正在加载人体与三维场景…" : errorMessage}</p>{status === "error" ? <button className="mt-3 rounded border px-4 py-2" style={{ borderColor: theme.node.stroke }} onClick={() => setRetry((value) => value + 1)}>重新加载</button> : null}</div>
+            <div><p>{status === "loading" ? translate("directorDesk.loadingMannequinAnd3DScene") : errorMessage}</p>{status === "error" ? <button className="mt-3 rounded border px-4 py-2" style={{ borderColor: theme.node.stroke }} onClick={() => setRetry((value) => value + 1)}>{translate("directorDesk.reload")}</button> : null}</div>
         </div> : null}
     </div>;
 });
@@ -377,7 +381,7 @@ async function loadTemplate(runtime: SceneRuntime, key: string, asset?: CanvasDi
         let temporaryUrl: string | undefined;
         if (asset) {
             const blob = await getMediaBlob(asset.storageKey);
-            if (!blob) throw new Error("无法读取导演台 GLB 资源：" + asset.name);
+            if (!blob) throw new Error(translate("directorDesk.cannotReadDirectorGLBResource") + asset.name);
             temporaryUrl = URL.createObjectURL(blob); url = temporaryUrl;
         }
         try {
@@ -392,7 +396,7 @@ async function loadTemplate(runtime: SceneRuntime, key: string, asset?: CanvasDi
                 });
                 materials.forEach(disposeMaterial);
             }
-            if (runtime.disposed) { disposeTree(loaded.scene); throw new Error("导演台场景已关闭"); }
+            if (runtime.disposed) { disposeTree(loaded.scene); throw new Error(translate("directorDesk.directorSceneClosed")); }
             return loaded.scene;
         } finally { if (temporaryUrl) URL.revokeObjectURL(temporaryUrl); }
     })();
@@ -405,14 +409,14 @@ async function createSceneObject(runtime: SceneRuntime, object: CanvasDirectorDe
     let root: Three.Object3D;
     if (object.kind === "character" || object.kind === "glb") {
         const asset = object.kind === "glb" ? runtime.assets.find((item) => item.id === object.assetId && item.kind === "glb") : undefined;
-        if (object.kind === "glb" && !asset) throw new Error("导演台道具缺少 GLB 资源");
+        if (object.kind === "glb" && !asset) throw new Error(translate("directorDesk.directorPropHasNoGLBResource"));
         const template = await loadTemplate(runtime, asset?.storageKey || "builtin-character", asset);
         const model = cloneSkeleton(template) as Three.Group;
         root = new Three.Group(); root.add(model); root.userData.sharedModel = true;
         if (object.kind === "character") {
             const bounds = new Three.Box3().setFromObject(model);
             const height = bounds.max.y - bounds.min.y;
-            if (height <= 0) { disposeInstance(root); throw new Error("本地人体模型尺寸无效"); }
+            if (height <= 0) { disposeInstance(root); throw new Error(translate("directorDesk.invalidMannequinDimensions")); }
             model.scale.multiplyScalar(1.8 / height);
             bounds.setFromObject(model); model.position.y -= bounds.min.y;
             const bones: CharacterRig["bones"] = {};
@@ -420,7 +424,7 @@ async function createSceneObject(runtime: SceneRuntime, object: CanvasDirectorDe
             model.traverse((child) => { if (child instanceof Three.Bone) rest.set(child, child.quaternion.clone()); });
             for (const [joint, name] of Object.entries(CHARACTER_BONES)) {
                 const bone = model.getObjectByName(name);
-                if (!(bone instanceof Three.Bone)) { disposeInstance(root); throw new Error("人体模型缺少关节：" + name); }
+                if (!(bone instanceof Three.Bone)) { disposeInstance(root); throw new Error(translate("directorDesk.missingMannequinJoint") + name); }
                 bones[joint as CanvasDirectorDeskJoint] = bone;
             }
             root.userData.rig = { model, bones, rest, basePosition: model.position.clone() };
@@ -618,9 +622,9 @@ async function synchronizeBackground(runtime: SceneRuntime, assetId: string | un
     }
     const loading = (async () => {
         const asset = runtime.assets.find((item) => item.id === assetId);
-        if (!asset) throw new Error("导演台背景图片资源不存在");
+        if (!asset) throw new Error(translate("directorDesk.directorBackgroundImageNotFound"));
         const blob = await getImageBlob(asset.storageKey);
-        if (!blob) throw new Error("无法读取导演台背景图片");
+        if (!blob) throw new Error(translate("directorDesk.cannotReadDirectorBackgroundImage"));
         const url = URL.createObjectURL(blob);
         try {
             const texture = await new Three.TextureLoader().loadAsync(url);

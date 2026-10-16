@@ -1,0 +1,8 @@
+{
+    "openCanvas": "Open canvas",
+    "chooseAnOption": "Choose an option",
+    "generateVideoWithTheseImages": "Generate video with these images",
+    "adjustPrompt": "Adjust prompt",
+    "editPromptAndRegenerate": "Edit prompt and regenerate",
+    "confirmGeneration": "Confirm generation"
+}

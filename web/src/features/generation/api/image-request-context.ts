@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { buildApiUrl, type AiConfig } from "@/features/settings/stores/use-config-store";
 
 import type { ResponseInputMessage } from "./image-contracts";
@@ -36,14 +38,14 @@ export async function readFailedResponse(response: Response, fallback: string): 
             return text.slice(0, 300);
         }
     }
-    if (response.status === 401 || response.status === 403) return "鉴权失败，请检查 API Key 和模型权限";
-    if (response.status === 429) return "请求被限流或额度不足，请稍后重试";
+    if (response.status === 401 || response.status === 403) return translate("generation.authenticationFailedCheckAPIKeyAndModelPermissions");
+    if (response.status === 429) return translate("generation.rateLimitOrInsufficientQuotaTryLater");
     return `${fallback}：${response.status}`;
 }
 
 export function normalizeRequestError(error: unknown, fallback: string): Error {
-    if (error instanceof DOMException && error.name === "AbortError") return new Error("请求已取消");
-    if (error instanceof Error && error.name === "AbortError") return new Error("请求已取消");
+    if (error instanceof DOMException && error.name === "AbortError") return new Error(translate("generation.requestCanceled"));
+    if (error instanceof Error && error.name === "AbortError") return new Error(translate("generation.requestCanceled"));
     return new Error(error instanceof Error ? error.message : fallback);
 }
 

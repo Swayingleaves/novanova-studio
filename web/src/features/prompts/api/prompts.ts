@@ -1,3 +1,4 @@
+import { currentLanguageTag } from "@/features/locale/translate";
 import { listServerPrompts, type ServerPrompt } from "@/services/api/server";
 
 export type Prompt = {
@@ -54,5 +55,5 @@ function toPrompt(item: ServerPrompt): Prompt {
 
 export function formatPromptDate(value: string) {
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+    return Number.isNaN(date.getTime()) ? "" : new Intl.DateTimeFormat(currentLanguageTag(), { year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
 }

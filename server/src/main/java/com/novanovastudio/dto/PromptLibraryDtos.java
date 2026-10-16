@@ -81,9 +81,9 @@ public final class PromptLibraryDtos {
      * @param status Integer 状态
      * @param sortOrder Integer 排序值
      */
-    public record CreatePromptRequest(@NotBlank(message = "标题不能为空") String title,
-                                      @NotBlank(message = "提示词内容不能为空") String prompt,
-                                      @NotBlank(message = "分类不能为空") String category,
+    public record CreatePromptRequest(@NotBlank(message = "business.titleIsRequired") String title,
+                                      @NotBlank(message = "business.promptContentIsRequired") String prompt,
+                                      @NotBlank(message = "business.categoryIsRequired") String category,
                                       List<String> tags,
                                       String coverUrl,
                                       String preview,
@@ -107,9 +107,9 @@ public final class PromptLibraryDtos {
      * @param sortOrder Integer 排序值
      */
     public record UpdatePromptRequest(Long id,
-                                      @NotBlank(message = "标题不能为空") String title,
-                                      @NotBlank(message = "提示词内容不能为空") String prompt,
-                                      @NotBlank(message = "分类不能为空") String category,
+                                      @NotBlank(message = "business.titleIsRequired") String title,
+                                      @NotBlank(message = "business.promptContentIsRequired") String prompt,
+                                      @NotBlank(message = "business.categoryIsRequired") String category,
                                       List<String> tags,
                                       String coverUrl,
                                       String preview,

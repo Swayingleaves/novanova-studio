@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App } from "antd";
@@ -20,6 +23,7 @@ type OptimizePromptOptions = {
  * @returns 当前优化标识与优化方法
  */
 export function usePromptOptimization() {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const [optimizingOperationId, setOptimizingOperationId] = useState<string | null>(null);
     const optimizingOperationIdRef = useRef<string | null>(null);
@@ -40,10 +44,10 @@ export function usePromptOptimization() {
             try {
                 const optimizedPrompt = await optimizeGenerationPrompt(generationType, normalizedPrompt, generationStyleIds, controller.signal);
                 onSuccess(optimizedPrompt);
-                message.success("提示词已优化");
+                message.success(translate("generation.promptOptimized"));
             } catch (error) {
                 if (error instanceof DOMException && error.name === "AbortError") return;
-                message.error(error instanceof Error ? error.message : "提示词优化失败");
+                message.error(error instanceof Error ? error.message : translate("generation.failedToOptimizePrompt"));
             } finally {
                 if (controllerRef.current === controller) controllerRef.current = null;
                 if (optimizingOperationIdRef.current === operationId) optimizingOperationIdRef.current = null;

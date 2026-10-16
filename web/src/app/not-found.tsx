@@ -1,3 +1,7 @@
+
+"use client";
+
+import { useTranslation } from "@/features/locale/use-translation";
 import { Home } from "lucide-react";
 import Link from "next/link";
 
@@ -7,6 +11,7 @@ import Link from "next/link";
  * 背景使用细微圆点纹理。
  */
 export default function NotFound() {
+    const translate = useTranslation();
     return (
         <div className="flex h-dvh flex-col overflow-hidden bg-background text-[var(--studio-ink)]">
             <main
@@ -17,18 +22,16 @@ export default function NotFound() {
                     <div className="mx-auto mb-6 flex size-16 items-center justify-center rounded-lg border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] text-2xl font-semibold shadow-[var(--studio-shadow)]">
                         404
                     </div>
-                    <h1 className="text-3xl font-semibold tracking-normal">页面不存在</h1>
+                    <h1 className="text-3xl font-semibold tracking-normal">{translate("common.pageNotFound")}</h1>
                     <p className="mt-3 text-sm leading-6 text-[var(--studio-muted)]">
-                        这个地址没有对应的页面，可能已经移动或被合并到其他入口。
-                    </p>
+                        {translate("common.thisPageMayHaveMovedOrMergedIntoAnother")}</p>
                     <div className="mt-8 flex flex-wrap justify-center gap-3">
                         <Link
                             href="/"
                             className="inline-flex h-10 items-center gap-2 rounded-lg bg-[var(--studio-primary)] px-4 text-sm font-medium text-white transition hover:bg-[var(--studio-primary-hover)]"
                         >
                             <Home className="size-4" />
-                            返回首页
-                        </Link>
+                            {translate("common.backToHome")}</Link>
                     </div>
                 </section>
             </main>

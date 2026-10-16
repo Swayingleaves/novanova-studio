@@ -106,13 +106,13 @@ class PromptOptimizationServiceTest {
         when(aiTaskService.createTaskForUser(eq(1L), any(), any())).thenReturn(Mono.just(taskResponse()));
         when(aiTaskService.getTaskForUser(1L, "task-1")).thenReturn(Mono.just(new AiTaskDtos.AiGenerationTaskResponse(
                 "task-1", AiTaskTypes.TEXT, "chat-model", "默认渠道", "failed", 100,
-                null, null, "优化服务失败", "", "", "", "")));
+                null, null, "优化服务失败", null, "", "", "", "")));
         PromptOptimizationService service = new PromptOptimizationService(aiTaskService, promptTemplateService(), null, new NovanovaProperties());
 
         StepVerifier.create(service.optimizeAndWait(1L, AiTaskTypes.IMAGE, "一只猫"))
                 .expectErrorSatisfies(error -> {
                     Assertions.assertInstanceOf(BusinessException.class, error);
-                    Assertions.assertEquals("优化服务失败", error.getMessage());
+                    Assertions.assertTrue(error.getMessage().contains("优化服务失败"));
                 })
                 .verify();
     }
@@ -136,7 +136,7 @@ class PromptOptimizationServiceTest {
     private AiTaskDtos.AiGenerationTaskResponse taskResponse() {
         return new AiTaskDtos.AiGenerationTaskResponse(
                 "task-1", AiTaskTypes.TEXT, "chat-model", "默认渠道", "pending", 0,
-                null, null, "", "", "", "", "");
+                null, null, "", null, "", "", "", "");
     }
 
     /**

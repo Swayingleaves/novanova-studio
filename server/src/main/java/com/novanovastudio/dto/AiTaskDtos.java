@@ -1,5 +1,7 @@
 package com.novanovastudio.dto;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSONObject;
 import jakarta.validation.constraints.NotBlank;
 import java.util.List;
@@ -66,8 +68,8 @@ public final class AiTaskDtos {
      * @param generationSource String 生成来源
      * @param videoGenerationMode String 视频生成模式
      */
-    public record CreateAiTaskRequest(@NotBlank(message = "任务类型不能为空") String taskType,
-                                      @NotBlank(message = "提示词不能为空") String prompt,
+    public record CreateAiTaskRequest(@NotBlank(message = "business.taskTypeIsRequired") String taskType,
+                                      @NotBlank(message = "business.promptIsRequired") String prompt,
                                       String model,
                                       Map<String, Object> parameters,
                                       List<AiTaskMediaReference> references,
@@ -123,7 +125,7 @@ public final class AiTaskDtos {
      *
      * @param taskId String 任务ID
      */
-    public record AiTaskIdRequest(@NotBlank(message = "任务ID不能为空") String taskId) {
+    public record AiTaskIdRequest(@NotBlank(message = "business.taskIDIsRequired") String taskId) {
     }
 
     /**
@@ -138,6 +140,7 @@ public final class AiTaskDtos {
      * @param requestData JSONObject 请求摘要
      * @param resultData JSONObject 结果数据
      * @param errorMessage String 错误信息
+     * @param systemMessage SystemMessage 与语言无关的错误说明
      * @param startedAt String 开始时间
      * @param completedAt String 完成时间
      * @param createdAt String 创建时间
@@ -152,10 +155,19 @@ public final class AiTaskDtos {
                                            JSONObject requestData,
                                            JSONObject resultData,
                                            String errorMessage,
+                                           SystemMessage systemMessage,
                                            String startedAt,
                                            String completedAt,
                                            String createdAt,
                                            String updatedAt) {
+        /**
+         * 按当前请求语言显示系统错误，原始结果内容保持原样。
+         * @param locale java.util.Locale 当前请求语言
+         * @return AiGenerationTaskResponse 当前语言任务快照
+         */
+        public AiGenerationTaskResponse withLocale(java.util.Locale locale) {
+            return new AiGenerationTaskResponse(id, taskType, model, provider, status, progress, requestData, resultData, systemMessage == null ? errorMessage : systemMessage.render(locale), systemMessage, startedAt, completedAt, createdAt, updatedAt);
+        }
     }
 
     /**

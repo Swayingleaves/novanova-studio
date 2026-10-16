@@ -39,6 +39,12 @@ public class CreationAgentRequest {
     /** 错误、取消或中断说明 */
     private String errorMessage;
 
+    /** 系统消息键，与语言无关。 */
+    private String errorMessageKey;
+
+    /** 系统消息插值参数JSON。 */
+    private String errorMessageArguments;
+
     /** 开始执行时间 */
     private OffsetDateTime startedAt;
 

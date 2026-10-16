@@ -1,5 +1,7 @@
 package com.novanovastudio.ai;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -69,7 +71,7 @@ public class AiMediaSupport {
             }
             return aiHttpClient.downloadRemoteBinary(url, "image/png");
         }
-        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "图片接口未返回b64_json或url"));
+        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.imageAPIReturnedNeitherB64JsonNorUrl")));
     }
 
     /**
@@ -105,21 +107,21 @@ public class AiMediaSupport {
      */
     public Mono<String> resolveReferenceUrl(Long userId, AiTaskDtos.AiTaskMediaReference reference) {
         if (reference == null) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考媒体不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceMediaIsRequired")));
         }
         if (StringUtils.hasText(reference.storageKey())) {
             return persistenceService.getMediaInfoForUser(userId, reference.storageKey().trim())
-                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "参考媒体不存在或不属于当前用户")))
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.referenceMediaNotFoundOrOwnedByAnotherUser"))))
                     .flatMap(media -> audioClipService.resolveReferenceUrl(userId, reference, media))
                     .flatMap(this::validateReferenceUrl);
         }
         if (StringUtils.hasText(reference.url())) {
             if (reference.trimStartMs() != null || reference.trimEndMs() != null) {
-                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "带裁剪区间的参考音频必须提供storageKey"));
+                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.trimmedAudioReferencesRequireStorageKey")));
             }
             return validateReferenceUrl(reference.url().trim());
         }
-        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考媒体必须提供storageKey或url"));
+        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceMediaNeedsStorageKeyOrUrl")));
     }
 
     /**
@@ -139,7 +141,7 @@ public class AiMediaSupport {
             if (isHttpUrl(url)) {
                 return aiHttpClient.downloadRemoteBinary(url, mimeType);
             }
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考媒体URL必须是http、https或data URL"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceURLMustUseHTTPHTTPSOrData")));
         });
     }
 
@@ -154,7 +156,7 @@ public class AiMediaSupport {
         if (isHttpUrl(normalized) || isDataUrl(normalized)) {
             return Mono.just(normalized);
         }
-        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考媒体URL必须是http、https或data URL"));
+        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceURLMustUseHTTPHTTPSOrData")));
     }
 
     /**
@@ -187,7 +189,7 @@ public class AiMediaSupport {
      */
     public Mono<PersistenceDtos.UploadedMediaResponse> registerGeneratedMediaUrl(Long userId, String kind, String sourceUrl, String mimeType, Integer width, Integer height, Integer durationMs) {
         if (!isHttpUrl(sourceUrl)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成媒体URL必须是http或https地址"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.generatedMediaURLMustUseHTTPOrHTTPS")));
         }
         String trimmedUrl = sourceUrl.trim();
         return aiHttpClient.readRemoteMediaHeaders(trimmedUrl)
@@ -207,7 +209,7 @@ public class AiMediaSupport {
     public GeneratedBinary dataUrlBinary(String url, String defaultMimeType) {
         int commaIndex = url.indexOf(',');
         if (commaIndex < 0 || !url.substring(0, commaIndex).contains(";base64")) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "data URL必须是base64格式");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.dataURLMustBeBase64Encoded"));
         }
         String header = url.substring(5, commaIndex);
         String mimeType = AiTaskParameterReader.firstNonEmpty(header.split(";")[0], defaultMimeType);

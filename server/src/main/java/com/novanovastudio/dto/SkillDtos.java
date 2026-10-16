@@ -90,10 +90,10 @@ public final class SkillDtos {
      * @param status 状态
      * @param sortOrder 排序值
      */
-    public record CreateSkillRequest(@NotBlank(message = "技能名称不能为空") String name,
+    public record CreateSkillRequest(@NotBlank(message = "business.skillNameIsRequired") String name,
                                      String description,
-                                     @NotBlank(message = "技能类型不能为空") String targetType,
-                                     @NotBlank(message = "技能系统提示词不能为空") String systemPrompt,
+                                     @NotBlank(message = "business.skillTypeIsRequired") String targetType,
+                                     @NotBlank(message = "business.skillSystemPromptIsRequired") String systemPrompt,
                                      String aspectRatio, String coverUrl,
                                      Integer status, Integer sortOrder) {
     }
@@ -112,10 +112,10 @@ public final class SkillDtos {
      * @param sortOrder 排序值
      */
     public record UpdateSkillRequest(Long id,
-                                     @NotBlank(message = "技能名称不能为空") String name,
+                                     @NotBlank(message = "business.skillNameIsRequired") String name,
                                      String description,
-                                     @NotBlank(message = "技能类型不能为空") String targetType,
-                                     @NotBlank(message = "技能系统提示词不能为空") String systemPrompt,
+                                     @NotBlank(message = "business.skillTypeIsRequired") String targetType,
+                                     @NotBlank(message = "business.skillSystemPromptIsRequired") String systemPrompt,
                                      String aspectRatio, String coverUrl,
                                      Integer status, Integer sortOrder) {
     }

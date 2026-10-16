@@ -2,10 +2,19 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useLayoutEffect } from "react";
-import { ProConfigProvider } from "@ant-design/pro-components";
+import { usePathname } from "next/navigation";
+import { ProConfigProvider, enUSIntl, zhCNIntl } from "@ant-design/pro-components";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
+import enUS from "antd/locale/en_US";
+import { NextIntlClientProvider } from "next-intl";
+import dayjs from "dayjs";
+import "dayjs/locale/zh-cn";
+import "dayjs/locale/en";
+import { websiteMessages } from "@/features/locale/messages";
+import { useLanguageStore } from "@/features/locale/language-store";
+import { isWebsiteLocale, languageTag, type WebsiteLocale } from "@/features/locale/locale";
 
 import { ClientRootInit } from "@/features/app-shell/components/client-root-init";
 import { getAntThemeConfig } from "@/shared/lib/app-theme";
@@ -24,13 +33,36 @@ const queryClient = new QueryClient({
 
 export function AppProviders({
     children,
+    initialLocale,
     initialThemePreference,
     initialResolvedTheme,
 }: {
     children: ReactNode;
+    initialLocale: WebsiteLocale;
     initialThemePreference: ThemePreference;
     initialResolvedTheme: ResolvedTheme;
 }) {
+    const selectedLocale = useLanguageStore((state) => state.locale);
+    const pathname = usePathname();
+    const documentLocale = pathname.match(/^\/docs\/(zh-cn|en)(?:\/|$)/)?.[1];
+    const locale = isWebsiteLocale(documentLocale) ? documentLocale : selectedLocale ?? initialLocale;
+    useLayoutEffect(() => {
+        document.documentElement.lang = languageTag(locale);
+        document.documentElement.dataset.language = locale;
+        dayjs.locale(locale);
+        const description = document.querySelector('meta[name="description"]');
+        if (!pathname.startsWith("/docs")) {
+            description?.setAttribute("content", pathname === "/editions"
+                ? websiteMessages[locale].editions.compareEnterpriseFeaturesAcrossNovanovaStudioEditions
+                : websiteMessages[locale].website.description);
+            document.title = pathname === "/editions" ? websiteMessages[locale].editions.compareEditionsNovanovaStudio : "Novanova Studio";
+        }
+    }, [locale, pathname]);
+
+    useEffect(() => {
+        // 根布局会被客户端导航复用，显式文档路径始终同步到当前浏览器偏好。
+        if (isWebsiteLocale(documentLocale)) useLanguageStore.getState().setLocale(documentLocale);
+    }, [documentLocale]);
     const hydrated = useThemeStore((state) => state.hydrated);
     const preference = useThemeStore((state) => state.preference);
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
@@ -58,14 +90,16 @@ export function AppProviders({
     }, [preference, syncSystemTheme]);
 
     return (
-        <ConfigProvider locale={zhCN} theme={getAntThemeConfig(effectiveResolvedTheme)}>
-            <ProConfigProvider dark={isDarkResolvedTheme(effectiveResolvedTheme)}>
-                <App>
-                    <QueryClientProvider client={queryClient}>
-                        <ClientRootInit>{children}</ClientRootInit>
-                    </QueryClientProvider>
-                </App>
-            </ProConfigProvider>
-        </ConfigProvider>
+        <NextIntlClientProvider locale={locale} messages={websiteMessages[locale]}>
+            <ConfigProvider locale={locale === "en" ? enUS : zhCN} theme={getAntThemeConfig(effectiveResolvedTheme)}>
+                <ProConfigProvider intl={locale === "en" ? enUSIntl : zhCNIntl} dark={isDarkResolvedTheme(effectiveResolvedTheme)}>
+                    <App>
+                        <QueryClientProvider client={queryClient}>
+                            <ClientRootInit>{children}</ClientRootInit>
+                        </QueryClientProvider>
+                    </App>
+                </ProConfigProvider>
+            </ConfigProvider>
+        </NextIntlClientProvider>
     );
 }

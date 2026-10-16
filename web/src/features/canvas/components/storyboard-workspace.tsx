@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { App, Button, Checkbox, Empty, Input, InputNumber, Modal, Progress, Select, Table, Tabs, Tag, Tooltip } from "antd";
@@ -14,7 +17,7 @@ import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { uploadImage } from "@/features/storage/services/image-storage";
 import { useCanvasTheme } from "./canvas-theme-provider";
 import type { CanvasStoryboardAsset, CanvasStoryboardAssetGenerationItemStatus, CanvasStoryboardAssetGenerationSettings, CanvasStoryboardAssetKind, CanvasStoryboardNode, CanvasStoryboardShot } from "../types";
-import { readStoryboardAssetImageCost, readStoryboardModelCost, removeStoryboardAssetAndAssociations, STORYBOARD_ASSET_KIND_LABELS, STORYBOARD_SHOT_SIZES } from "../domain/storyboard";
+import { createStoryboardAssetKindLabels, readStoryboardAssetImageCost, readStoryboardModelCost, removeStoryboardAssetAndAssociations, STORYBOARD_ASSET_KIND_LABELS, STORYBOARD_SHOT_SIZES } from "../domain/storyboard";
 
 type StoryboardWorkspaceProps = {
     open: boolean;
@@ -35,6 +38,7 @@ const SHOT_TABLE_SCROLL_WIDTH = 2120;
 
 /** 分镜脚本全屏工作区，集中编辑镜头、资产和最终提示词。 */
 export function StoryboardWorkspace({ open, node, composing, composingShotId, onClose, onChangeStoryboard, onComposePrompts, onComposeShotPrompt, onGenerateAssets, onMissingImageModelConfig, onMissingTextModelConfig }: StoryboardWorkspaceProps) {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const theme = useCanvasTheme();
     const effectiveConfig = useEffectiveConfig();
@@ -61,7 +65,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
     const assets = useAssetStore((state) => state.assets);
     const imageAssets = useMemo(
         () => assets.filter((asset): asset is ImageAsset => asset.kind === "image" && Boolean(readImageAssetSource(asset))).filter((asset) => `${asset.title} ${asset.tags.join(" ")}`.toLowerCase().includes(imageKeyword.trim().toLowerCase())),
-        [assets, imageKeyword],
+        [assets, imageKeyword, translate.locale],
     );
 
     useEffect(() => {
@@ -120,10 +124,10 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
         if (!node || editingLocked) return;
         const shot = node.storyboard.shots.find((item) => item.id === shotId);
         modal.confirm({
-            title: "删除镜头",
-            content: shot ? `确定删除镜号 ${shot.shotNumber} 的镜头吗？删除后无法恢复。` : "确定删除这个镜头吗？删除后无法恢复。",
-            okText: "删除",
-            cancelText: "取消",
+            title: translate("canvas.deleteShot"),
+            content: shot ? translate("canvas.deleteShotThisCannotBeUndone", { value0: shot.shotNumber }) : translate("canvas.deleteThisShotThisCannotBeUndone"),
+            okText: translate("canvas.delete"),
+            cancelText: translate("canvas.cancel"),
             okButtonProps: { danger: true },
             onOk: () => deleteShot(shotId),
         });
@@ -141,10 +145,10 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
         if (!node || editingLocked) return;
         const asset = node.storyboard.assets.find((item) => item.id === assetId);
         modal.confirm({
-            title: "删除资产",
-            content: asset?.name ? `确定删除资产“${asset.name}”吗？删除后无法恢复。` : "确定删除这个资产吗？删除后无法恢复。",
-            okText: "删除",
-            cancelText: "取消",
+            title: translate("canvas.deleteAsset"),
+            content: asset?.name ? translate("canvas.deleteAssetThisCannotBeUndone", { value0: asset.name }) : translate("canvas.deleteThisAssetThisCannotBeUndone"),
+            okText: translate("canvas.delete"),
+            cancelText: translate("canvas.cancel"),
             okButtonProps: { danger: true },
             onOk: () => onChangeStoryboard(node.id, (storyboard) => removeStoryboardAssetAndAssociations(storyboard, assetId)),
         });
@@ -154,10 +158,10 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
         if (!node || editingLocked) return;
         const asset = node.storyboard.assets.find((item) => item.id === assetId);
         modal.confirm({
-            title: "移除图片关联",
-            content: asset?.name ? `确定移除资产“${asset.name}”的图片关联吗？` : "确定移除这个资产的图片关联吗？",
-            okText: "移除",
-            cancelText: "取消",
+            title: translate("canvas.unlinkImage"),
+            content: asset?.name ? translate("canvas.unlinkImageFromAsset", { value0: asset.name }) : translate("canvas.removeThisAssetSImageLink"),
+            okText: translate("canvas.remove_6135d4"),
+            cancelText: translate("canvas.cancel"),
             okButtonProps: { danger: true },
             onOk: () => updateAsset(assetId, { image: undefined }),
         });
@@ -185,9 +189,9 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                     objectStorage: image.objectStorage,
                 },
             });
-            message.success("资产图片已关联");
+            message.success(translate("canvas.assetImageLinked"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "资产图片上传失败");
+            message.error(error instanceof Error ? error.message : translate("canvas.failedToUploadAssetImage"));
         } finally {
             setUploadingAssetId(null);
         }
@@ -204,7 +208,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
             },
         });
         setImagePickerAssetId(null);
-        message.success("已关联资产库图片");
+        message.success(translate("canvas.assetLibraryImageLinked"));
     };
 
     const shots = node?.storyboard.shots || [];
@@ -219,7 +223,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
             onDelete: confirmDeleteShot,
             onComposePrompt: (shotId) => node && onComposeShotPrompt(node.id, shotId),
         }),
-        [composingShotId, editingLocked, node?.id, storyboardAssets],
+        [composingShotId, editingLocked, node?.id, storyboardAssets, translate.locale],
     );
     const assetGeneration = node?.storyboard.assetGeneration;
     const assetGenerating = assetGeneration?.phase === "running";
@@ -251,23 +255,23 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
     const confirmComposePrompts = () => {
         if (!node || editingLocked) return;
         if (!selectedPromptShots.length) {
-            message.warning("请至少选择一个镜头");
+            message.warning(translate("canvas.selectAtLeastOneShot"));
             return;
         }
         if (!promptModelReady) {
             onMissingTextModelConfig?.();
-            message.error("请选择可用的文本模型后再生成最终提示词");
+            message.error(translate("canvas.selectATextModelBeforeGeneratingFinalPrompts"));
             return;
         }
         if (promptBalanceInsufficient) {
-            message.error(`积分不足，合成 ${selectedPromptShots.length} 个镜头需要 ${promptTotalCredits} 积分，当前可用 ${creditBalance} 积分`);
+            message.error(translate("canvas.insufficientCreditsShotsNeedAvailable", { value0: selectedPromptShots.length, value1: promptTotalCredits, value2: creditBalance }));
             return;
         }
         modal.confirm({
-            title: "生成最终提示词",
-            content: `将为已选择的 ${selectedPromptShots.length} 个镜头生成最终提示词，预计消耗 ${promptTotalCredits} 积分。对应的现有提示词会被覆盖，是否继续？`,
-            okText: "确认生成",
-            cancelText: "取消",
+            title: translate("canvas.generateFinalPrompt"),
+            content: translate("canvas.generateFinalPromptsForSelectedShotsAtAnEstimated", { value0: selectedPromptShots.length, value1: promptTotalCredits }),
+            okText: translate("canvas.confirmGeneration"),
+            cancelText: translate("canvas.cancel"),
             onOk: () => {
                 setPromptGenerationOpen(false);
                 onComposePrompts(node.id, selectedPromptShots.map((shot) => shot.id), promptModel);
@@ -276,7 +280,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
     };
     const assetAssociationCounts = useMemo(
         () => Object.fromEntries(storyboardAssets.map((asset) => [asset.id, shots.filter((shot) => shot.assetIds.includes(asset.id)).length])),
-        [shots, storyboardAssets],
+        [shots, storyboardAssets, translate.locale],
     );
     const toggleAllAssets = () => setSelectedAssetIds(allAssetsSelected ? [] : storyboardAssets.map((asset) => asset.id));
     const openAssetGeneration = (assetIds?: string[]) => {
@@ -289,20 +293,20 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
     const startAssetGeneration = () => {
         if (!node || editingLocked || assetGenerating) return;
         if (!selectedAssets.length) {
-            message.warning("请至少勾选一项资产");
+            message.warning(translate("canvas.selectAtLeastOneAsset"));
             return;
         }
         if (selectedAssetNameError) {
-            message.error("请填写已勾选资产的名称后再生成图片");
+            message.error(translate("canvas.nameSelectedAssetsBeforeGeneratingImages"));
             return;
         }
         if (!assetModelReady) {
             onMissingImageModelConfig?.();
-            message.error("请选择可用的图片模型后再生成资产图片");
+            message.error(translate("canvas.selectAnImageModelBeforeGeneratingAssets"));
             return;
         }
         if (assetBalanceInsufficient) {
-            message.error(`积分不足，生成 ${selectedAssets.length} 项资产需要 ${assetTotalCredits} 积分，当前可用 ${creditBalance} 积分`);
+            message.error(translate("canvas.insufficientCreditsAssetsNeedAvailable", { value0: selectedAssets.length, value1: assetTotalCredits, value2: creditBalance }));
             return;
         }
         onGenerateAssets(
@@ -313,7 +317,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
     };
     const assetPanelConfig = useMemo(
         () => ({ ...effectiveConfig, model: assetImageSettings.model, imageModel: assetImageSettings.model, quality: assetImageSettings.quality, imageResolution: assetImageSettings.imageResolution, size: assetImageSettings.size, count: "1" }),
-        [assetImageSettings, effectiveConfig],
+        [assetImageSettings, effectiveConfig, translate.locale],
     );
     const assetGenerationCompletedCount =
         assetGeneration?.selectedAssetIds.filter((assetId) => {
@@ -333,7 +337,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
     return (
         <>
             <Modal
-                title="分镜头脚本"
+                title={translate("canvas.storyboardScript_b8ccbe")}
                 open={open && Boolean(node)}
                 onCancel={onClose}
                 footer={null}
@@ -345,82 +349,76 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                 <div className="flex h-full min-h-0 flex-col">
                     <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-6 py-3" style={{ borderColor: "var(--studio-line)" }}>
                         <div className="flex min-w-0 items-baseline gap-3">
-                            <span className="text-base font-semibold">镜头列表</span>
-                            <span className="text-sm text-[var(--studio-muted)]">共 {shots.length} 个镜头</span>
+                            <span className="text-base font-semibold">{translate("canvas.shots")}</span>
+                            <span className="text-sm text-[var(--studio-muted)]">{translate("canvas.total")}{shots.length} {translate("canvas.shots_2764fa")}</span>
                         </div>
                         <Button icon={<FolderOpen className="size-4" />} onClick={openAssetModal}>
-                            资产（{storyboardAssets.length}）
+                            {translate("canvas.assets_a940ce")}{storyboardAssets.length}）
                         </Button>
                     </div>
 
                     <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-4">
                         <div className="flex min-h-full min-w-0 flex-col gap-4">
                             <div className="min-w-0">
-                                <Table<CanvasStoryboardShot> rowKey="id" dataSource={shots} columns={columns} pagination={false} size="small" tableLayout="fixed" scroll={{ x: SHOT_TABLE_SCROLL_WIDTH }} locale={{ emptyText: "暂无镜头" }} />
+                                <Table<CanvasStoryboardShot> rowKey="id" dataSource={shots} columns={columns} pagination={false} size="small" tableLayout="fixed" scroll={{ x: SHOT_TABLE_SCROLL_WIDTH }} locale={{ emptyText: translate("canvas.noShots") }} />
                             </div>
                             <Button className="w-fit" icon={<Plus className="size-4" />} disabled={editingLocked} onClick={addShot}>
-                                添加镜头
-                            </Button>
+                                {translate("canvas.addShot")}</Button>
                         </div>
                     </div>
 
                     <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t px-6 py-3" style={{ borderColor: "var(--studio-line)" }}>
                         <Button icon={<ImagePlus className="size-4" />} disabled={editingLocked || !storyboardAssets.length} onClick={() => openAssetGeneration()}>
-                            一键生成全部资产（{storyboardAssets.length} 项）
-                        </Button>
+                            {translate("canvas.generateAllAssets")}{storyboardAssets.length} {translate("canvas.items_1f41b3")}</Button>
                         <Button type="primary" icon={<Sparkles className="size-4" />} loading={composing} disabled={editingLocked || !shots.length} onClick={openPromptGeneration}>
-                            一键生成最终提示词（{shots.length} 镜头）
-                        </Button>
+                            {translate("canvas.generateAllFinalPrompts")}{shots.length} {translate("canvas.shots_434648")}</Button>
                     </div>
                 </div>
             </Modal>
 
             <Modal
-                title="选择要生成的最终提示词"
+                title={translate("canvas.selectFinalPromptsToGenerate")}
                 open={promptGenerationOpen && open && Boolean(node)}
                 onCancel={() => setPromptGenerationOpen(false)}
                 width={960}
                 destroyOnHidden={false}
                 footer={[
                     <Button key="cancel" onClick={() => setPromptGenerationOpen(false)}>
-                        取消
-                    </Button>,
+                        {translate("canvas.cancel")}</Button>,
                     <Button
                         key="generate"
                         type="primary"
                         disabled={editingLocked || !selectedPromptShots.length || !promptModelReady || Boolean(promptBalanceInsufficient)}
                         onClick={confirmComposePrompts}
                     >
-                        生成已选镜头（{selectedPromptShots.length} 个，{promptTotalCredits} 积分）
-                    </Button>,
+                        {translate("canvas.generateSelectedShots")}{selectedPromptShots.length} {translate("canvas.items_d98006")}{promptTotalCredits} {translate("canvas.credits_0aeb2f")}</Button>,
                 ]}
             >
                 <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
                     <section className="min-w-0 space-y-4">
                         <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3" style={{ borderColor: "var(--studio-line)" }}>
                             <Checkbox checked={allPromptShotsSelected} indeterminate={somePromptShotsSelected} disabled={editingLocked} onChange={toggleAllPromptShots}>
-                                全选当前镜头（{shots.length} 个）
-                            </Checkbox>
-                            <span className="text-xs text-[var(--studio-muted)]">已选择 {selectedPromptShots.length} 个</span>
+                                {translate("canvas.selectAllCurrentShots")}{shots.length} {translate("canvas.items_22ba27")}</Checkbox>
+                            <span className="text-xs text-[var(--studio-muted)]">{translate("canvas.selected")}{selectedPromptShots.length} {translate("canvas.items_3a1168")}</span>
                         </div>
                         <div className="max-h-[58vh] space-y-2 overflow-y-auto pr-1">
                             {shots.map((shot) => (
                                 <div key={shot.id} className="flex min-w-0 items-start gap-3 rounded-md border px-3 py-2.5" style={{ borderColor: "var(--studio-line)", background: "var(--studio-surface-raised)" }}>
                                     <Checkbox
                                         className="mt-0.5"
-                                        aria-label={`选择镜号 ${shot.shotNumber}`}
+                                        aria-label={translate("canvas.selectShot", { value0: shot.shotNumber })}
                                         checked={selectedPromptShotIds.includes(shot.id)}
                                         disabled={editingLocked}
                                         onChange={(event) => setSelectedPromptShotIds((current) => (event.target.checked ? [...new Set([...current, shot.id])] : current.filter((id) => id !== shot.id)))}
                                     />
                                     <div className="min-w-0 flex-1">
                                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                                            <span className="font-semibold">镜号 {shot.shotNumber}</span>
-                                            <span className="text-[var(--studio-muted)]">{shot.durationSeconds} 秒</span>
+                                            <span className="font-semibold">{translate("canvas.shotNo")}{shot.shotNumber}</span>
+                                            <span className="text-[var(--studio-muted)]">{shot.durationSeconds} {translate("canvas.s")}</span>
                                             <Tag className="m-0">{shot.shotSize}</Tag>
-                                            {shot.finalPrompt ? <span className="text-amber-600">会覆盖现有提示词</span> : null}
+                                            {shot.finalPrompt ? <span className="text-amber-600">{translate("canvas.replacesTheExistingPrompt")}</span> : null}
                                         </div>
-                                        <p className="mt-1 line-clamp-2 text-sm text-[var(--studio-muted)]">{shot.visualDescription || "未填写画面描述"}</p>
+                                        <p className="mt-1 line-clamp-2 text-sm text-[var(--studio-muted)]">{shot.visualDescription || translate("canvas.noVisualDescription")}</p>
                                     </div>
                                 </div>
                             ))}
@@ -428,11 +426,11 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                     </section>
                     <aside className="space-y-5 rounded-md border p-4" style={{ borderColor: "var(--studio-line)", background: "var(--studio-surface-raised)" }}>
                         <div>
-                            <h3 className="text-sm font-semibold">合成设置</h3>
-                            <p className="mt-1 text-xs text-[var(--studio-muted)]">每个镜头按所选文本模型单价计费</p>
+                            <h3 className="text-sm font-semibold">{translate("canvas.compositionSettings")}</h3>
+                            <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("canvas.eachShotIsBilledAtTheTextModelS")}</p>
                         </div>
                         <div className="space-y-2">
-                            <label className="text-xs font-semibold text-[var(--studio-muted)]">文本模型</label>
+                            <label className="text-xs font-semibold text-[var(--studio-muted)]">{translate("canvas.textModel")}</label>
                             <ModelPicker
                                 config={effectiveConfig}
                                 value={promptModel}
@@ -444,16 +442,16 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                         </div>
                         <div className="space-y-2 border-t pt-4 text-sm" style={{ borderColor: "var(--studio-line)" }}>
                             <div className="flex items-center justify-between gap-3">
-                                <span className="text-[var(--studio-muted)]">单镜头积分</span>
+                                <span className="text-[var(--studio-muted)]">{translate("canvas.creditsPerShot")}</span>
                                 <span>{promptModelCost}</span>
                             </div>
                             <div className="flex items-center justify-between gap-3 font-semibold">
-                                <span>预计消耗</span>
-                                <span>{promptTotalCredits} 积分</span>
+                                <span>{translate("canvas.estimatedCost")}</span>
+                                <span>{promptTotalCredits} {translate("canvas.credits_10939f")}</span>
                             </div>
                         </div>
-                        {!promptModelReady ? <p className="text-xs text-red-500">请选择可用的文本模型</p> : null}
-                        {promptBalanceInsufficient ? <p className="text-xs text-red-500">积分不足，当前可用 {creditBalance ?? 0} 积分</p> : null}
+                        {!promptModelReady ? <p className="text-xs text-red-500">{translate("canvas.selectAnAvailableTextModel")}</p> : null}
+                        {promptBalanceInsufficient ? <p className="text-xs text-red-500">{translate("canvas.insufficientCreditsAvailable")}{creditBalance ?? 0} {translate("canvas.credits_10939f")}</p> : null}
                     </aside>
                 </div>
             </Modal>
@@ -472,19 +470,18 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                     <div className="flex shrink-0 flex-wrap items-end justify-between gap-4 border-b pb-5" style={{ borderColor: "var(--studio-line)" }}>
                         <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
-                                <h2 className="text-lg font-semibold">分镜资产</h2>
-                                <Tag className="m-0">{storyboardAssets.length} 项</Tag>
+                                <h2 className="text-lg font-semibold">{translate("canvas.storyboardAssets")}</h2>
+                                <Tag className="m-0">{storyboardAssets.length} {translate("canvas.items_49ccde")}</Tag>
                             </div>
-                            <p className="mt-1 text-sm text-[var(--studio-muted)]">统一管理角色、场景和道具。点击图片可查看完整原图。</p>
+                            <p className="mt-1 text-sm text-[var(--studio-muted)]">{translate("canvas.manageCharactersScenesAndPropsClickImagesToView")}</p>
                         </div>
                         <Button icon={<ImagePlus className="size-4" />} disabled={editingLocked || !storyboardAssets.length} onClick={() => openAssetGeneration()}>
-                            批量生成图片
-                        </Button>
+                            {translate("canvas.generateImagesInBatch")}</Button>
                     </div>
                     <div className="grid shrink-0 gap-3 sm:grid-cols-3">
-                        <StoryboardAssetSummary label="已生成图片" value={`${generatedAssetCount}/${storyboardAssets.length}`} hint="资产完成度" />
-                        <StoryboardAssetSummary label="已关联镜头" value={String(Object.values(assetAssociationCounts).reduce((total, count) => total + count, 0))} hint="资产与镜头的关联数" />
-                        <StoryboardAssetSummary label="待处理" value={String(Math.max(0, storyboardAssets.length - generatedAssetCount))} hint="还未生成图片" />
+                        <StoryboardAssetSummary label={translate("canvas.generatedImages")} value={`${generatedAssetCount}/${storyboardAssets.length}`} hint={translate("canvas.assetCompleteness")} />
+                        <StoryboardAssetSummary label={translate("canvas.linkedShots")} value={String(Object.values(assetAssociationCounts).reduce((total, count) => total + count, 0))} hint={translate("canvas.assetShotLinks")} />
+                        <StoryboardAssetSummary label={translate("canvas.pending")} value={String(Math.max(0, storyboardAssets.length - generatedAssetCount))} hint={translate("canvas.noGeneratedImages")} />
                     </div>
                     <Tabs
                         activeKey={activeAssetKind}
@@ -497,7 +494,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                                 key: kind,
                                 label: (
                                     <span className="inline-flex items-center gap-1.5">
-                                        {STORYBOARD_ASSET_KIND_LABELS[kind]}
+                                        {createStoryboardAssetKindLabels(translate)[kind]}
                                         <span className="text-xs opacity-60">{kindAssets.length}</span>
                                     </span>
                                 ),
@@ -527,7 +524,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
             </Modal>
 
             <Modal
-                title={previewAsset?.name || "资产图片"}
+                title={previewAsset?.name || translate("canvas.assetImage")}
                 open={Boolean(previewAsset?.image?.source)}
                 onCancel={() => setPreviewAssetId(null)}
                 footer={null}
@@ -541,32 +538,32 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                         <div className="flex min-h-[52dvh] items-center justify-center bg-[var(--studio-surface-raised)] p-3 sm:p-6 lg:min-h-[min(76dvh,800px)]">
                             <img
                                 src={previewAsset.image.source}
-                                alt={previewAsset.name || "资产图片"}
+                                alt={previewAsset.name || translate("canvas.assetImage")}
                                 className="block max-h-[min(76dvh,800px)] max-w-full object-contain"
                                 decoding="async"
                             />
                         </div>
                         <aside className="space-y-5 border-t p-5 lg:border-l lg:border-t-0" style={{ borderColor: "var(--studio-line)" }}>
                             <div>
-                                <p className="text-xs font-medium text-[var(--studio-muted)]">资产类型</p>
-                                <p className="mt-1 text-sm font-semibold">{STORYBOARD_ASSET_KIND_LABELS[previewAsset.kind]}</p>
+                                <p className="text-xs font-medium text-[var(--studio-muted)]">{translate("canvas.assetType")}</p>
+                                <p className="mt-1 text-sm font-semibold">{createStoryboardAssetKindLabels(translate)[previewAsset.kind]}</p>
                             </div>
                             <div>
-                                <p className="text-xs font-medium text-[var(--studio-muted)]">关联镜头</p>
-                                <p className="mt-1 flex items-center gap-2 text-sm font-semibold"><Link2 className="size-4" aria-hidden="true" />{assetAssociationCounts[previewAsset.id] || 0} 个镜头</p>
+                                <p className="text-xs font-medium text-[var(--studio-muted)]">{translate("canvas.linkShot")}</p>
+                                <p className="mt-1 flex items-center gap-2 text-sm font-semibold"><Link2 className="size-4" aria-hidden="true" />{assetAssociationCounts[previewAsset.id] || 0} {translate("canvas.shots_2764fa")}</p>
                             </div>
                             <div>
-                                <p className="text-xs font-medium text-[var(--studio-muted)]">资产描述</p>
-                                <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--studio-muted)]">{previewAsset.description || "暂无资产描述"}</p>
+                                <p className="text-xs font-medium text-[var(--studio-muted)]">{translate("canvas.assetDescription")}</p>
+                                <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--studio-muted)]">{previewAsset.description || translate("canvas.noAssetDescription")}</p>
                             </div>
-                            <Button block icon={<Maximize2 className="size-4" />} onClick={() => window.open(previewAsset.image?.source, "_blank", "noopener,noreferrer")}>在新窗口打开原图</Button>
+                            <Button block icon={<Maximize2 className="size-4" />} onClick={() => window.open(previewAsset.image?.source, "_blank", "noopener,noreferrer")}>{translate("canvas.openOriginalInNewWindow")}</Button>
                         </aside>
                     </div>
                 ) : null}
             </Modal>
 
             <Modal
-                title="批量生成资产图片"
+                title={translate("canvas.generateAssetImagesInBatch")}
                 open={assetGenerationOpen && Boolean(node)}
                 onCancel={() => {
                     pendingAssetSelectionRef.current = null;
@@ -582,8 +579,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                             setAssetGenerationOpen(false);
                         }}
                     >
-                        关闭
-                    </Button>,
+                        {translate("canvas.close")}</Button>,
                     <Button
                         key="generate"
                         type="primary"
@@ -591,17 +587,15 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                         disabled={editingLocked || !selectedAssets.length || Boolean(selectedAssetNameError) || !assetModelReady || Boolean(assetBalanceInsufficient)}
                         onClick={startAssetGeneration}
                     >
-                        生成选中资产（{selectedAssets.length} 项，{assetTotalCredits} 积分）
-                    </Button>,
+                        {translate("canvas.generateSelectedAssets")}{selectedAssets.length} {translate("canvas.items_637210")}{assetTotalCredits} {translate("canvas.credits_0aeb2f")}</Button>,
                 ]}
             >
                 <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
                     <section className="min-w-0 space-y-4">
                         <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3" style={{ borderColor: "var(--studio-line)" }}>
                             <Checkbox checked={allAssetsSelected} indeterminate={someAssetsSelected} disabled={assetGenerating} onChange={toggleAllAssets}>
-                                全选当前资产（{storyboardAssets.length} 项）
-                            </Checkbox>
-                            <span className="text-xs text-[var(--studio-muted)]">已勾选 {selectedAssets.length} 项</span>
+                                {translate("canvas.selectAllCurrentAssets")}{storyboardAssets.length} {translate("canvas.items_1f41b3")}</Checkbox>
+                            <span className="text-xs text-[var(--studio-muted)]">{translate("canvas.selected_6f2971")}{selectedAssets.length} {translate("canvas.items_49ccde")}</span>
                         </div>
                         <div className="max-h-[58vh] space-y-5 overflow-y-auto pr-1">
                             {ASSET_KINDS.map((kind) => {
@@ -609,7 +603,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                                 if (!kindAssets.length) return null;
                                 return (
                                     <div key={kind} className="space-y-2">
-                                        <h3 className="text-sm font-semibold">{STORYBOARD_ASSET_KIND_LABELS[kind]}</h3>
+                                        <h3 className="text-sm font-semibold">{createStoryboardAssetKindLabels(translate)[kind]}</h3>
                                         {kindAssets.map((asset) => {
                                             const status = assetGeneration?.statuses[asset.id];
                                             return (
@@ -631,11 +625,11 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                     </section>
                     <aside className="space-y-5 rounded-md border p-4" style={{ borderColor: "var(--studio-line)", background: "var(--studio-surface-raised)" }}>
                         <div>
-                            <h3 className="text-sm font-semibold">图片设置</h3>
-                            <p className="mt-1 text-xs text-[var(--studio-muted)]">每项资产固定生成 1 张图片</p>
+                            <h3 className="text-sm font-semibold">{translate("canvas.imageSettings")}</h3>
+                            <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("canvas.eachAssetGeneratesOneImage")}</p>
                         </div>
                         <div className="space-y-2">
-                            <label className="text-xs font-semibold text-[var(--studio-muted)]">模型</label>
+                            <label className="text-xs font-semibold text-[var(--studio-muted)]">{translate("canvas.model")}</label>
                             <ModelPicker
                                 config={effectiveConfig}
                                 value={assetImageSettings.model}
@@ -655,17 +649,17 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                         />
                         <div className="border-t pt-4 text-sm" style={{ borderColor: "var(--studio-line)" }}>
                             <div className="flex items-center justify-between gap-3">
-                                <span className="text-[var(--studio-muted)]">单项积分</span>
+                                <span className="text-[var(--studio-muted)]">{translate("canvas.creditsPerItem")}</span>
                                 <strong>{assetUnitCost}</strong>
                             </div>
                             <div className="mt-2 flex items-center justify-between gap-3">
-                                <span className="text-[var(--studio-muted)]">预计消耗</span>
-                                <strong>{assetTotalCredits} 积分</strong>
+                                <span className="text-[var(--studio-muted)]">{translate("canvas.estimatedCost")}</span>
+                                <strong>{assetTotalCredits} {translate("canvas.credits_10939f")}</strong>
                             </div>
                             {typeof creditBalance === "number" ? (
                                 <div className="mt-2 flex items-center justify-between gap-3 text-xs text-[var(--studio-muted)]">
-                                    <span>当前余额</span>
-                                    <span>{creditBalance} 积分</span>
+                                    <span>{translate("canvas.currentBalance")}</span>
+                                    <span>{creditBalance} {translate("canvas.credits_10939f")}</span>
                                 </div>
                             ) : null}
                         </div>
@@ -673,22 +667,21 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                             <div className="space-y-2">
                                 <Progress percent={assetGeneration?.progress || 0} size="small" />
                                 <p className="text-xs text-[var(--studio-muted)]">
-                                    已处理 {assetGenerationCompletedCount}/{assetGeneration?.selectedAssetIds.length || selectedAssets.length} 项
-                                </p>
+                                    {translate("canvas.processed")}{assetGenerationCompletedCount}/{assetGeneration?.selectedAssetIds.length || selectedAssets.length} {translate("canvas.items_49ccde")}</p>
                             </div>
                         ) : null}
-                        {!selectedAssets.length ? <p className="text-xs text-[var(--studio-danger)]">请至少勾选一项资产后再开始生成</p> : null}
-                        {selectedAssetNameError ? <p className="text-xs text-[var(--studio-danger)]">请先填写“{selectedAssetNameError.name || "未命名资产"}”的名称</p> : null}
-                        {!assetModelReady ? <p className="text-xs text-[var(--studio-danger)]">请选择已启用且已配置价格的图片模型</p> : null}
-                        {assetBalanceInsufficient ? <p className="text-xs text-[var(--studio-danger)]">当前积分不足以生成已勾选资产</p> : null}
+                        {!selectedAssets.length ? <p className="text-xs text-[var(--studio-danger)]">{translate("canvas.selectAtLeastOneAssetToGenerate")}</p> : null}
+                        {selectedAssetNameError ? <p className="text-xs text-[var(--studio-danger)]">{translate("canvas.pleaseFillIn")}{selectedAssetNameError.name || translate("canvas.untitledAsset")}{translate("canvas.name")}</p> : null}
+                        {!assetModelReady ? <p className="text-xs text-[var(--studio-danger)]">{translate("canvas.selectAnEnabledImageModelWithPricing")}</p> : null}
+                        {assetBalanceInsufficient ? <p className="text-xs text-[var(--studio-danger)]">{translate("canvas.insufficientCreditsForSelectedAssets")}</p> : null}
                     </aside>
                 </div>
             </Modal>
 
             <input ref={uploadInputRef} type="file" accept="image/*" hidden onChange={(event) => void handleImageUpload(event)} />
-            <Modal title="关联资产库图片" open={Boolean(imagePickerAssetId)} onCancel={() => setImagePickerAssetId(null)} footer={null} width={900} destroyOnHidden>
+            <Modal title={translate("canvas.linkAssetLibraryImage")} open={Boolean(imagePickerAssetId)} onCancel={() => setImagePickerAssetId(null)} footer={null} width={900} destroyOnHidden>
                 <div className="space-y-4">
-                    <Input allowClear value={imageKeyword} placeholder="搜索图片资产" onChange={(event) => setImageKeyword(event.target.value)} />
+                    <Input allowClear value={imageKeyword} placeholder={translate("canvas.searchImageAssets")} onChange={(event) => setImageKeyword(event.target.value)} />
                     {imageAssets.length ? (
                         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                             {imageAssets.map((asset) => (
@@ -699,7 +692,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                             ))}
                         </div>
                     ) : (
-                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有可关联的图片资产" className="py-10" />
+                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("canvas.noImagesAvailableToLink")} className="py-10" />
                     )}
                 </div>
             </Modal>
@@ -738,6 +731,7 @@ function StoryboardAssetSummary({ label, value, hint }: { label: string; value: 
 
 /** 单类资产的可编辑列表。 */
 function StoryboardAssetGroup({ kind, assets, assetAssociationCounts, uploadingAssetId, disabled, onAdd, onUpdate, onRemove, onRemoveImage, onChooseImage, onUploadImage, onRegenerate, onPreview }: StoryboardAssetGroupProps) {
+    const translate = useTranslation();
     const gridClassName = kind === "scene"
         ? "grid gap-4 md:grid-cols-2"
         : "grid gap-4 md:grid-cols-2 xl:grid-cols-3";
@@ -746,11 +740,11 @@ function StoryboardAssetGroup({ kind, assets, assetAssociationCounts, uploadingA
         <section className="space-y-3">
             <div className="flex items-center justify-between gap-4 border-b pb-2" style={{ borderColor: "var(--studio-line)" }}>
                 <div className="flex items-center gap-2">
-                    <h3 className="text-base font-semibold">{STORYBOARD_ASSET_KIND_LABELS[kind]}</h3>
+                    <h3 className="text-base font-semibold">{createStoryboardAssetKindLabels(translate)[kind]}</h3>
                     <span className="rounded-full bg-[var(--studio-surface-raised)] px-2 py-0.5 text-xs text-[var(--studio-muted)]">{assets.length}</span>
                 </div>
                 <Button size="small" icon={<Plus className="size-4" />} disabled={disabled} onClick={onAdd}>
-                    新增{STORYBOARD_ASSET_KIND_LABELS[kind]}
+                    {translate("canvas.add")}{createStoryboardAssetKindLabels(translate)[kind]}
                 </Button>
             </div>
             {assets.length ? (
@@ -766,43 +760,42 @@ function StoryboardAssetGroup({ kind, assets, assetAssociationCounts, uploadingA
                                     <button
                                         type="button"
                                         className="group/image relative block size-full cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--studio-action)] focus-visible:ring-inset"
-                                        aria-label={`查看${asset.name || "未命名资产"}完整图片`}
+                                        aria-label={translate("canvas.viewFullImageOf", { value0: asset.name || translate("canvas.untitledAsset") })}
                                         onClick={() => onPreview(asset.id)}
                                     >
                                         <img src={asset.image.source} alt="" className="block size-full object-contain" loading="lazy" decoding="async" />
                                         <span className="absolute inset-x-3 bottom-3 flex items-center justify-center gap-1.5 rounded-md bg-black/65 px-3 py-2 text-xs font-medium text-white opacity-100 transition-opacity sm:opacity-0 sm:group-hover/image:opacity-100 sm:group-focus-visible/image:opacity-100 motion-reduce:transition-none">
-                                            <Eye className="size-3.5" aria-hidden="true" />查看全图
-                                        </span>
+                                            <Eye className="size-3.5" aria-hidden="true" />{translate("canvas.viewFullImage")}</span>
                                     </button>
                                 ) : (
-                                    <div className="grid size-full place-items-center text-xs text-[var(--studio-muted)]">未关联图片</div>
+                                    <div className="grid size-full place-items-center text-xs text-[var(--studio-muted)]">{translate("canvas.noImageLinked_ed1975")}</div>
                                 )}
-                                {uploadingAssetId === asset.id ? <div className="absolute inset-0 grid place-items-center bg-black/45 text-xs text-white">上传中</div> : null}
+                                {uploadingAssetId === asset.id ? <div className="absolute inset-0 grid place-items-center bg-black/45 text-xs text-white">{translate("canvas.uploading")}</div> : null}
                             </div>
                             <div className="min-w-0 space-y-2.5 p-3">
                                 <div className="flex items-center justify-between gap-2">
-                                    <span className="text-xs font-medium text-[var(--studio-muted)]">资产信息</span>
-                                    <span className="shrink-0 text-[11px] text-[var(--studio-muted)]">关联 {assetAssociationCounts[asset.id] || 0} 镜头</span>
+                                    <span className="text-xs font-medium text-[var(--studio-muted)]">{translate("canvas.assetDetails")}</span>
+                                    <span className="shrink-0 text-[11px] text-[var(--studio-muted)]">{translate("canvas.link")}{assetAssociationCounts[asset.id] || 0} {translate("canvas.shot")}</span>
                                 </div>
-                                <Input className="!font-medium" value={asset.name} disabled={disabled} placeholder="资产名称" onChange={(event) => onUpdate(asset.id, { name: event.target.value })} />
-                                <Input.TextArea value={asset.description} disabled={disabled} placeholder="资产描述" autoSize={{ minRows: 2, maxRows: 4 }} onChange={(event) => onUpdate(asset.id, { description: event.target.value })} />
+                                <Input className="!font-medium" value={asset.name} disabled={disabled} placeholder={translate("canvas.assetName")} onChange={(event) => onUpdate(asset.id, { name: event.target.value })} />
+                                <Input.TextArea value={asset.description} disabled={disabled} placeholder={translate("canvas.assetDescription")} autoSize={{ minRows: 2, maxRows: 4 }} onChange={(event) => onUpdate(asset.id, { description: event.target.value })} />
                                 <div className="flex flex-wrap items-center justify-end gap-1 border-t pt-2" style={{ borderColor: "var(--studio-line)" }}>
-                                    <Tooltip title="AI重新生成">
-                                        <Button type="text" size="small" disabled={disabled} aria-label="AI重新生成" icon={<RefreshCw className="size-4" />} onClick={() => onRegenerate(asset.id)} />
+                                    <Tooltip title={translate("canvas.regenerateWithAI")}>
+                                        <Button type="text" size="small" disabled={disabled} aria-label={translate("canvas.regenerateWithAI")} icon={<RefreshCw className="size-4" />} onClick={() => onRegenerate(asset.id)} />
                                     </Tooltip>
-                                    <Tooltip title="关联资产库图片">
-                                        <Button type="text" size="small" disabled={disabled} aria-label="关联资产库图片" icon={<ImagePlus className="size-4" />} onClick={() => onChooseImage(asset.id)} />
+                                    <Tooltip title={translate("canvas.linkAssetLibraryImage")}>
+                                        <Button type="text" size="small" disabled={disabled} aria-label={translate("canvas.linkAssetLibraryImage")} icon={<ImagePlus className="size-4" />} onClick={() => onChooseImage(asset.id)} />
                                     </Tooltip>
-                                    <Tooltip title="上传图片">
-                                        <Button type="text" size="small" disabled={disabled} aria-label="上传图片" icon={<Upload className="size-4" />} onClick={() => onUploadImage(asset.id)} />
+                                    <Tooltip title={translate("canvas.uploadImage")}>
+                                        <Button type="text" size="small" disabled={disabled} aria-label={translate("canvas.uploadImage")} icon={<Upload className="size-4" />} onClick={() => onUploadImage(asset.id)} />
                                     </Tooltip>
                                     {asset.image ? (
-                                        <Tooltip title="移除关联图片">
-                                            <Button type="text" size="small" disabled={disabled} aria-label="移除关联图片" icon={<X className="size-4" />} onClick={() => onRemoveImage(asset.id)} />
+                                        <Tooltip title={translate("canvas.unlinkImage_db7433")}>
+                                            <Button type="text" size="small" disabled={disabled} aria-label={translate("canvas.unlinkImage_db7433")} icon={<X className="size-4" />} onClick={() => onRemoveImage(asset.id)} />
                                         </Tooltip>
                                     ) : null}
-                                    <Tooltip title="删除资产">
-                                        <Button type="text" danger size="small" disabled={disabled} aria-label="删除资产" icon={<Trash2 className="size-4" />} onClick={() => onRemove(asset.id)} />
+                                    <Tooltip title={translate("canvas.deleteAsset")}>
+                                        <Button type="text" danger size="small" disabled={disabled} aria-label={translate("canvas.deleteAsset")} icon={<Trash2 className="size-4" />} onClick={() => onRemove(asset.id)} />
                                     </Tooltip>
                                 </div>
                             </div>
@@ -811,7 +804,7 @@ function StoryboardAssetGroup({ kind, assets, assetAssociationCounts, uploadingA
                 </div>
             ) : (
                 <div className="border-b py-3 text-sm text-[var(--studio-muted)]" style={{ borderColor: "var(--studio-line)" }}>
-                    暂无{STORYBOARD_ASSET_KIND_LABELS[kind]}
+                    {translate("canvas.noneYet")}{createStoryboardAssetKindLabels(translate)[kind]}
                 </div>
             )}
         </section>
@@ -836,23 +829,24 @@ type StoryboardAssetGenerationRowProps = {
 
 /** 批量生成弹窗中的单项资产选择与状态行。 */
 function StoryboardAssetGenerationRow({ asset, checked, status, error, disabled, onChange }: StoryboardAssetGenerationRowProps) {
-    const statusLabel = status === "succeeded" ? "已完成" : status === "failed" ? "失败" : status === "running" ? "生成中" : status === "pending" ? "待生成" : "";
+    const translate = useTranslation();
+    const statusLabel = status === "succeeded" ? translate("canvas.completed") : status === "failed" ? translate("canvas.failed") : status === "running" ? translate("canvas.generating_969ef4") : status === "pending" ? translate("canvas.notGenerated") : "";
     return (
         <label className="flex cursor-pointer items-center gap-3 rounded-md border p-3 transition hover:bg-[var(--studio-surface-raised)]" style={{ borderColor: "var(--studio-line)" }}>
             <Checkbox checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} />
             <div className="size-16 shrink-0 overflow-hidden rounded-md" style={{ background: "var(--studio-surface-raised)" }}>
                 {asset.image?.source ? (
-                    <img src={asset.image.source} alt={asset.name || "资产图片"} className="size-full object-cover" />
+                    <img src={asset.image.source} alt={asset.name || translate("canvas.assetImage")} className="size-full object-cover" />
                 ) : (
-                    <div className="grid size-full place-items-center px-1 text-center text-[10px] text-[var(--studio-muted)]">暂无图片</div>
+                    <div className="grid size-full place-items-center px-1 text-center text-[10px] text-[var(--studio-muted)]">{translate("canvas.noImages")}</div>
                 )}
             </div>
             <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-sm font-medium">{asset.name || "未命名资产"}</span>
+                    <span className="truncate text-sm font-medium">{asset.name || translate("canvas.untitledAsset")}</span>
                     {statusLabel ? <span className="text-xs text-[var(--studio-muted)]">{statusLabel}</span> : null}
                 </div>
-                <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs leading-5 text-[var(--studio-muted)]">{asset.description || "暂无资产描述"}</p>
+                <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs leading-5 text-[var(--studio-muted)]">{asset.description || translate("canvas.noAssetDescription")}</p>
                 {error ? <p className="mt-1 line-clamp-2 text-xs text-[var(--studio-danger)]">{error}</p> : null}
             </div>
         </label>
@@ -877,7 +871,7 @@ function buildShotColumns({ editable, assets, composingShotId, onUpdate, onDelet
         label: STORYBOARD_ASSET_KIND_LABELS[kind],
         options: assets
             .filter((asset) => asset.kind === kind)
-            .map((asset) => ({ value: asset.id, label: asset.name || "未命名资产" })),
+            .map((asset) => ({ value: asset.id, label: asset.name || translate("canvas.untitledAsset") })),
     })).filter((group) => group.options.length);
     const renderText = (shot: CanvasStoryboardShot, field: StoryboardTextField, placeholder: string) => {
         const value = String(shot[field] || "");
@@ -894,7 +888,7 @@ function buildShotColumns({ editable, assets, composingShotId, onUpdate, onDelet
                     value={shot.assetIds}
                     options={assetOptions}
                     maxTagCount="responsive"
-                    placeholder="选择关联资产"
+                    placeholder={translate("canvas.selectLinkedAssets")}
                     onChange={(assetIds: string[]) => onUpdate?.(shot.id, { assetIds })}
                 />
             );
@@ -904,26 +898,26 @@ function buildShotColumns({ editable, assets, composingShotId, onUpdate, onDelet
             <div className="flex flex-wrap gap-1">
                 {associatedAssets.map((asset) => (
                     <Tag key={asset.id} className="m-0" style={{ borderColor: "var(--studio-line-strong)", background: "var(--studio-surface-raised)", color: "var(--studio-text)" }}>
-                        {STORYBOARD_ASSET_KIND_LABELS[asset.kind]}: {asset.name || "未命名资产"}
+                        {STORYBOARD_ASSET_KIND_LABELS[asset.kind]}: {asset.name || translate("canvas.untitledAsset")}
                     </Tag>
                 ))}
             </div>
         ) : (
-            <span className="text-sm text-[var(--studio-muted)]">未关联</span>
+            <span className="text-sm text-[var(--studio-muted)]">{translate("canvas.unlinked")}</span>
         );
     };
     const renderFinalPrompt = (shot: CanvasStoryboardShot) => {
         const value = shot.finalPrompt || "";
-        if (!editable) return <span className="whitespace-pre-wrap text-sm">{value || <span className="text-[var(--studio-muted)]">待生成提示词</span>}</span>;
+        if (!editable) return <span className="whitespace-pre-wrap text-sm">{value || <span className="text-[var(--studio-muted)]">{translate("canvas.promptAwaitingGeneration")}</span>}</span>;
         const generatingCurrentShot = composingShotId === shot.id;
         return (
             <div className="flex min-w-0 items-start gap-1">
-                <Input.TextArea className="min-w-0 flex-1" size="small" value={value} disabled={generatingCurrentShot} placeholder="待生成提示词" autoSize={{ minRows: 1, maxRows: 5 }} onChange={(event) => onUpdate?.(shot.id, { finalPrompt: event.target.value })} />
-                <Tooltip title="AI 生成当前镜头的最终提示词">
+                <Input.TextArea className="min-w-0 flex-1" size="small" value={value} disabled={generatingCurrentShot} placeholder={translate("canvas.promptAwaitingGeneration")} autoSize={{ minRows: 1, maxRows: 5 }} onChange={(event) => onUpdate?.(shot.id, { finalPrompt: event.target.value })} />
+                <Tooltip title={translate("canvas.generateFinalShotPromptWithAI")}>
                     <Button
                         type="text"
                         size="small"
-                        aria-label="AI生成当前镜头最终提示词"
+                        aria-label={translate("canvas.generateFinalShotPromptWithAI_089139")}
                         icon={<Sparkles className="size-4" />}
                         loading={generatingCurrentShot}
                         disabled={Boolean(composingShotId) && !generatingCurrentShot}
@@ -935,14 +929,14 @@ function buildShotColumns({ editable, assets, composingShotId, onUpdate, onDelet
     };
     return [
         {
-            title: "镜号",
+            title: translate("canvas.shotNo"),
             dataIndex: "shotNumber",
             width: 74,
             render: (value: number, shot) =>
                 editable ? <InputNumber size="small" min={1} precision={0} value={value} className="w-full" onChange={(nextValue) => typeof nextValue === "number" && onUpdate?.(shot.id, { shotNumber: nextValue })} /> : <span>{value}</span>,
         },
         {
-            title: "时长",
+            title: translate("canvas.duration"),
             dataIndex: "durationSeconds",
             width: 90,
             render: (value: number, shot) =>
@@ -952,9 +946,9 @@ function buildShotColumns({ editable, assets, composingShotId, onUpdate, onDelet
                     <span>{value}s</span>
                 ),
         },
-        { title: "画面描述", dataIndex: "visualDescription", width: 280, render: (_value, shot) => renderText(shot, "visualDescription", "描述画面") },
+        { title: translate("canvas.visualDescription"), dataIndex: "visualDescription", width: 280, render: (_value, shot) => renderText(shot, "visualDescription", translate("canvas.describeTheScene")) },
         {
-            title: "景别",
+            title: translate("canvas.shotSize"),
             dataIndex: "shotSize",
             width: 190,
             render: (value: CanvasStoryboardShot["shotSize"], shot) =>
@@ -963,29 +957,29 @@ function buildShotColumns({ editable, assets, composingShotId, onUpdate, onDelet
                         size="small"
                         value={value}
                         className="w-full"
-                        options={STORYBOARD_SHOT_SIZES.map((item) => ({ value: item.value, label: `${item.value} - ${item.englishPrompt}` }))}
+                        options={STORYBOARD_SHOT_SIZES.map((item) => ({ value: item.value, label: item.label }))}
                         onChange={(nextValue) => onUpdate?.(shot.id, { shotSize: nextValue })}
                     />
                 ) : (
                     <span>{value}</span>
                 ),
         },
-        { title: "光影氛围", dataIndex: "lightingAtmosphere", width: 210, render: (_value, shot) => renderText(shot, "lightingAtmosphere", "补充光影氛围") },
-        { title: "对白·旁白", dataIndex: "dialogueVoiceover", width: 210, render: (_value, shot) => renderText(shot, "dialogueVoiceover", "补充对白或旁白") },
-        { title: "音效", dataIndex: "soundEffect", width: 190, render: (_value, shot) => renderText(shot, "soundEffect", "补充音效") },
-        { title: "运镜", dataIndex: "cameraMovement", width: 190, render: (_value, shot) => renderText(shot, "cameraMovement", "补充运镜") },
-        { title: "关联资产", dataIndex: "assetIds", width: 240, render: (_value, shot) => renderAssociatedAssets(shot) },
-        { title: "最终提示词", dataIndex: "finalPrompt", width: 340, render: (_value, shot) => renderFinalPrompt(shot) },
+        { title: translate("canvas.lighting"), dataIndex: "lightingAtmosphere", width: 210, render: (_value, shot) => renderText(shot, "lightingAtmosphere", translate("canvas.addLightingDetails")) },
+        { title: translate("canvas.dialogueNarration"), dataIndex: "dialogueVoiceover", width: 210, render: (_value, shot) => renderText(shot, "dialogueVoiceover", translate("canvas.addDialogueOrNarration")) },
+        { title: translate("canvas.soundEffect"), dataIndex: "soundEffect", width: 190, render: (_value, shot) => renderText(shot, "soundEffect", translate("canvas.addSoundEffects")) },
+        { title: translate("canvas.cameraMovement"), dataIndex: "cameraMovement", width: 190, render: (_value, shot) => renderText(shot, "cameraMovement", translate("canvas.addCameraMovement")) },
+        { title: translate("canvas.linkAsset"), dataIndex: "assetIds", width: 240, render: (_value, shot) => renderAssociatedAssets(shot) },
+        { title: translate("canvas.finalPrompt"), dataIndex: "finalPrompt", width: 340, render: (_value, shot) => renderFinalPrompt(shot) },
         ...(editable
             ? [
                   {
-                          title: "操作",
+                          title: translate("canvas.actions"),
                       key: "operation",
                       fixed: "right" as const,
                       width: 68,
                           render: (_value: unknown, shot: CanvasStoryboardShot) => (
-                              <Tooltip title="删除镜头">
-                              <Button type="text" danger disabled={composingShotId === shot.id} aria-label="删除镜头" icon={<Trash2 className="size-4" />} onClick={() => onDelete?.(shot.id)} />
+                              <Tooltip title={translate("canvas.deleteShot")}>
+                              <Button type="text" danger disabled={composingShotId === shot.id} aria-label={translate("canvas.deleteShot")} icon={<Trash2 className="size-4" />} onClick={() => onDelete?.(shot.id)} />
                           </Tooltip>
                       ),
                   },

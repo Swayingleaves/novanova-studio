@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { type MouseEvent, type ReactNode, useMemo } from "react";
 import { ConfigProvider } from "antd";
@@ -19,11 +22,11 @@ type ImageSettingsPanelProps = {
 };
 
 /** 图片画质选项。 */
-const QUALITY_PRESETS = [
-    { value: "low", label: "低画质" },
-    { value: "medium", label: "标准画质" },
-    { value: "high", label: "高画质" },
-];
+const createQualityPresets = (translator: typeof translate = translate) => ([
+    { value: "low", get label() { return translator("generation.lowQuality_ebe981"); } },
+    { value: "medium", get label() { return translator("generation.standardQuality_3da00d"); } },
+    { value: "high", get label() { return translator("generation.highQuality_f31c44"); } },
+]);
 
 /** 图片清晰度选项。 */
 const RESOLUTION_PRESETS = ["1K", "2K", "4K"] as const;
@@ -62,8 +65,9 @@ export function ImageSettingsPanel({
     className = "w-[320px] space-y-3.5 px-1 py-0.5",
     showCount = true,
 }: ImageSettingsPanelProps) {
+    const translate = useTranslation();
     const sizeRaw = config.size || "1:1";
-    const matched = useMemo(() => matchRatio(sizeRaw), [sizeRaw]);
+    const matched = useMemo(() => matchRatio(sizeRaw), [sizeRaw, translate.locale]);
     const count = normalizeImageGenerationCount(config.count);
     const quality = config.quality || "medium";
     const imageResolution = normalizeImageResolution(config.imageResolution);
@@ -71,11 +75,11 @@ export function ImageSettingsPanel({
     return (
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={stopAndBlur}>
-                {showTitle ? <PanelHeading text="图像设置" theme={theme} /> : null}
+                {showTitle ? <PanelHeading text={translate("generation.imageSettings")} theme={theme} /> : null}
 
-                <Field label="画质" theme={theme}>
+                <Field label={translate("generation.quality")} theme={theme}>
                     <ChipRow columns={3} theme={theme}>
-                        {QUALITY_PRESETS.map((item) => (
+                        {createQualityPresets(translate).map((item) => (
                             <Chip key={item.value} active={quality === item.value} theme={theme} onMouseDown={stopDown} onClick={() => onConfigChange("quality", item.value)}>
                                 {item.label}
                             </Chip>
@@ -83,7 +87,7 @@ export function ImageSettingsPanel({
                     </ChipRow>
                 </Field>
 
-                <Field label="清晰度" theme={theme}>
+                <Field label={translate("generation.resolution")} theme={theme}>
                     <ChipRow columns={3} theme={theme}>
                         {RESOLUTION_PRESETS.map((resolution) => (
                             <Chip key={resolution} active={imageResolution === resolution} theme={theme} onMouseDown={stopDown} onClick={() => onConfigChange("imageResolution", resolution)}>
@@ -93,7 +97,7 @@ export function ImageSettingsPanel({
                     </ChipRow>
                 </Field>
 
-                <Field label="比例" theme={theme}>
+                <Field label={translate("generation.aspectRatio")} theme={theme}>
                     <div className="grid grid-cols-5 gap-2">
                         {RATIO_PRESETS.map((preset) => {
                             const active = matched.value === preset.value;
@@ -115,12 +119,11 @@ export function ImageSettingsPanel({
                 </Field>
 
                 {showCount ? (
-                    <Field label="生成数量" theme={theme}>
+                    <Field label={translate("generation.outputCount")} theme={theme}>
                         <div className="grid grid-cols-3 gap-2">
                             {IMAGE_COUNT_PRESETS.map((n) => (
                                 <Chip key={n} active={count === n} theme={theme} onMouseDown={stopDown} onClick={() => onConfigChange("count", String(n))}>
-                                    {n}张
-                                </Chip>
+                                    {n}{translate("generation.images")}</Chip>
                             ))}
                         </div>
                     </Field>
@@ -159,7 +162,7 @@ export function ImageSettingsTheme({ theme, children }: { theme: CanvasTheme; ch
 }
 
 export function imageQualityLabel(value: string): string {
-    return QUALITY_PRESETS.find((item) => item.value === value)?.label ?? value;
+    return createQualityPresets().find((item) => item.value === value)?.label ?? value;
 }
 
 export function imageResolutionLabel(value: string): string {

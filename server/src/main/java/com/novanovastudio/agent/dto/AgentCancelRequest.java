@@ -11,7 +11,7 @@ import jakarta.validation.constraints.NotBlank;
  * @date     2026-07-18 22:20
  */
 public record AgentCancelRequest(
-        @NotBlank(message = "会话ID不能为空") String sessionId,
-        @NotBlank(message = "请求ID不能为空") String requestId
+        @NotBlank(message = "business.conversationIDIsRequired") String sessionId,
+        @NotBlank(message = "business.requestIDIsRequired") String requestId
 ) {
 }

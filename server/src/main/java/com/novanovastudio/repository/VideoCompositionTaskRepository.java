@@ -1,5 +1,9 @@
 package com.novanovastudio.repository;
 
+import com.alibaba.fastjson2.JSON;
+
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.entity.VideoCompositionTask;
 import lombok.RequiredArgsConstructor;
 import org.springframework.r2dbc.core.DatabaseClient;
@@ -95,7 +99,7 @@ public class VideoCompositionTaskRepository {
     public Mono<Boolean> markTaskRunning(String taskId) {
         return databaseClient.sql("""
                 UPDATE video_composition_tasks
-                SET status = 'running', progress = 0, error_message = '', started_at = CURRENT_TIMESTAMP, completed_at = NULL, updated_at = CURRENT_TIMESTAMP
+                SET status = 'running', progress = 0, error_message = '', error_message_key = '', error_message_arguments = '[]'::jsonb, started_at = CURRENT_TIMESTAMP, completed_at = NULL, updated_at = CURRENT_TIMESTAMP
                 WHERE id = :taskId AND status = 'pending'
                 """)
                 .bind("taskId", taskId)
@@ -133,17 +137,19 @@ public class VideoCompositionTaskRepository {
      * @param errorMessage String 错误信息
      * @return Mono<Boolean> 是否成功更新任务
      */
-    public Mono<Boolean> finishRunningTask(String taskId, String status, String resultData, String errorMessage) {
+    public Mono<Boolean> finishRunningTask(String taskId, String status, String resultData, SystemMessage errorMessage) {
         return databaseClient.sql("""
                 UPDATE video_composition_tasks
-                SET status = :status, progress = 100, result_data = CAST(:resultData AS jsonb), error_message = :errorMessage,
+                SET status = :status, progress = 100, result_data = CAST(:resultData AS jsonb), error_message = :errorMessage, error_message_key = :errorMessageKey, error_message_arguments = CAST(:errorMessageArguments AS jsonb),
                     completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                 WHERE id = :taskId AND status = 'running'
                 """)
                 .bind("taskId", taskId)
                 .bind("status", status)
                 .bind("resultData", resultData == null ? "{}" : resultData)
-                .bind("errorMessage", errorMessage == null ? "" : errorMessage)
+                .bind("errorMessage", errorMessage == null ? "" : errorMessage.diagnostic())
+                .bind("errorMessageKey", errorMessage == null ? "" : errorMessage.key())
+                .bind("errorMessageArguments", JSON.toJSONString(errorMessage == null ? new Object[0] : errorMessage.arguments()))
                 .fetch()
                 .rowsUpdated()
                 .map(count -> count != null && count > 0);
@@ -159,7 +165,7 @@ public class VideoCompositionTaskRepository {
     public Mono<Boolean> cancelTask(Long userId, String taskId) {
         return databaseClient.sql("""
                 UPDATE video_composition_tasks
-                SET status = 'canceled', progress = 100, error_message = '任务已取消', completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                SET status = 'canceled', progress = 100, error_message = '任务已取消', error_message_key = 'system.taskCanceled', error_message_arguments = '[]'::jsonb, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = :userId AND id = :taskId AND status IN ('pending', 'running')
                 """)
                 .bind("userId", userId)
@@ -200,7 +206,7 @@ public class VideoCompositionTaskRepository {
     public Mono<Boolean> requeueInactiveRunningTask(String taskId) {
         return databaseClient.sql("""
                 UPDATE video_composition_tasks
-                SET status = 'pending', progress = 0, error_message = '执行实例已断开，任务已重新排队',
+                SET status = 'pending', progress = 0, error_message = '执行实例已断开，任务已重新排队', error_message_key = 'system.taskRequeued', error_message_arguments = '[]'::jsonb,
                     started_at = NULL, completed_at = NULL, updated_at = CURRENT_TIMESTAMP
                 WHERE id = :taskId AND status = 'running'
                 """)
@@ -220,7 +226,7 @@ public class VideoCompositionTaskRepository {
         return databaseClient.sql("""
                 SELECT id, user_id, status, progress, source_storage_keys::text AS source_storage_keys, task_type, project_id,
                        input_snapshot::text AS input_snapshot, result_data::text AS result_data,
-                       error_message, started_at, completed_at, created_at, updated_at
+                       error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM video_composition_tasks
                 """ + condition);
     }

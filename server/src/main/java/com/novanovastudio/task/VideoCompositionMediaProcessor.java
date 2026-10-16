@@ -1,5 +1,7 @@
 package com.novanovastudio.task;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -56,7 +58,7 @@ public class VideoCompositionMediaProcessor {
     public CompositionResult compose(List<Path> sourceFiles, Path outputFile, IntConsumer progressConsumer,
                                      BooleanSupplier cancellationRequested) {
         if (sourceFiles == null || sourceFiles.size() < 2) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "至少需要两个视频才能合成");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.atLeastTwoVideosAreRequiredForComposition"));
         }
         if (isCancellationRequested(cancellationRequested)) {
             throw new VideoCompositionCanceledException();
@@ -66,7 +68,7 @@ public class VideoCompositionMediaProcessor {
         VideoProbe first = probes.getFirst();
         runFfmpeg(sourceFiles, probes, outputFile, totalDurationMilliseconds, progressConsumer, cancellationRequested);
         if (!Files.isRegularFile(outputFile)) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "FFmpeg未生成合成视频文件");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.fFmpegProducedNoCompositionVideo"));
         }
         VideoProbe result = probe(outputFile);
         return new CompositionResult(first.width(), first.height(), result.durationMilliseconds());
@@ -82,7 +84,7 @@ public class VideoCompositionMediaProcessor {
         long totalDurationMilliseconds = probes.stream().mapToLong(VideoProbe::durationMilliseconds).sum();
         long maximumDurationMilliseconds = Math.max(1, properties.getAi().getVideoComposition().getMaximumTotalDurationSeconds()) * 1000L;
         if (totalDurationMilliseconds > maximumDurationMilliseconds) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "源视频总时长不能超过10分钟");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.totalSourceVideoDurationMustNotExceed10Minutes"));
         }
         return totalDurationMilliseconds;
     }
@@ -126,13 +128,13 @@ public class VideoCompositionMediaProcessor {
             int height = videoStream == null ? 0 : videoStream.getIntValue("height");
             long durationMilliseconds = parseDurationMilliseconds(format == null ? null : format.getString("duration"));
             if (width < 1 || height < 1 || durationMilliseconds < 1) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "视频缺少有效的画面或时长信息");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoHasNoValidPictureOrDurationMetadata"));
             }
             return new VideoProbe(evenSize(width), evenSize(height), normalizeFrameRate(videoStream.getString("avg_frame_rate")), durationMilliseconds, hasAudio);
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "解析视频媒体信息失败");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.failedToParseVideoMetadata"));
         }
     }
 
@@ -236,7 +238,7 @@ public class VideoCompositionMediaProcessor {
             Files.createDirectories(outputFile.toAbsolutePath().getParent());
             process = new ProcessBuilder(command).start();
         } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "服务端未安装FFmpeg或FFmpeg路径配置错误");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.fFmpegIsMissingOrMisconfigured"));
         }
         StringBuilder errorOutput = new StringBuilder();
         AtomicInteger maximumProgress = new AtomicInteger(0);
@@ -251,7 +253,7 @@ public class VideoCompositionMediaProcessor {
                 }
                 if (System.nanoTime() > deadline) {
                     terminateProcess(process);
-                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, "视频合成超时");
+                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoCompositionTimedOut"));
                 }
             }
             joinReader(outputReader);
@@ -260,13 +262,13 @@ public class VideoCompositionMediaProcessor {
                 throw new VideoCompositionCanceledException();
             }
             if (process.exitValue() != 0) {
-                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "视频合成失败: " + processError(errorOutput));
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoCompositionFailed", processError(errorOutput)));
             }
             progressConsumer.accept(99);
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             terminateProcess(process);
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "视频合成任务已中断");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoCompositionInterrupted"));
         } finally {
             if (process.isAlive()) {
                 terminateProcess(process);
@@ -367,24 +369,24 @@ public class VideoCompositionMediaProcessor {
         try {
             process = new ProcessBuilder(command).redirectErrorStream(true).start();
         } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "服务端未安装FFprobe或FFprobe路径配置错误");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.fFprobeIsMissingOrMisconfigured_65b9e5"));
         }
         StringBuilder output = new StringBuilder();
         Thread outputReader = Thread.ofVirtual().start(() -> readProcessError(process.getInputStream(), output));
         try {
             if (!process.waitFor(PROBE_TIMEOUT.toSeconds(), TimeUnit.SECONDS)) {
                 terminateProcess(process);
-                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "读取视频媒体信息超时");
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoMetadataReadTimedOut"));
             }
             joinReader(outputReader);
             if (process.exitValue() != 0) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "读取视频媒体信息失败: " + processError(output));
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.failedToReadVideoMetadata", processError(output)));
             }
             return output.toString();
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             terminateProcess(process);
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "读取视频媒体信息已中断");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoMetadataReadInterrupted"));
         } finally {
             if (process.isAlive()) {
                 terminateProcess(process);

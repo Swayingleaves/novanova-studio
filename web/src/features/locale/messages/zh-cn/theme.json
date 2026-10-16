@@ -1,0 +1,14 @@
+{
+    "system": "跟随系统",
+    "lightMode": "浅色模式",
+    "darkMode": "暗色模式",
+    "purpleMode": "紫色模式",
+    "light": "浅色",
+    "dark": "暗色",
+    "purple": "紫色",
+    "current": "当前：",
+    "changeTheme": "切换主题",
+    "theme": "主题模式",
+    "systemCurrently": "跟随系统 · 当前{value0}",
+    "switch": "切换"
+}

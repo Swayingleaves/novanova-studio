@@ -1,5 +1,7 @@
 package com.novanovastudio.security;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import java.time.Duration;
@@ -180,7 +182,7 @@ public class PasswordLoginLockService {
             return exception;
         }
         log.error("密码登录锁定Redis服务异常", exception);
-        return new BusinessException(ErrorCode.BUSINESS_ERROR, "认证服务暂不可用，请稍后再试");
+        return new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.authenticationServiceUnavailableTryAgainLater"));
     }
 
     /**

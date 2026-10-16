@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 type ChatMessageContent = string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }>;
 
 type ChatInputMessage =
@@ -154,7 +156,7 @@ export function chatCompletionStreamResult(state: ChatCompletionStreamState): Ch
  * @throws Error 接口返回错误时抛出异常
  */
 function validateChatCompletionPayload(payload: ChatCompletionPayload) {
-    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || "请求失败");
+    if (typeof payload.code === "number" && payload.code !== 0) throw new Error(payload.msg || translate("generation.requestFailed"));
     if (payload.error?.message) throw new Error(payload.error.message);
 }
 
@@ -236,7 +238,7 @@ function normalizeToolCalls(toolCalls: Array<ChatCompletionToolCall | ChatComple
  * @return String 错误信息
  */
 function chatCompletionErrorMessage(payload: ChatCompletionPayload) {
-    if (typeof payload.code === "number" && payload.code !== 0) return payload.msg || "请求失败";
+    if (typeof payload.code === "number" && payload.code !== 0) return payload.msg || translate("generation.requestFailed");
     return payload.error?.message || "";
 }
 

@@ -1,5 +1,7 @@
 package com.novanovastudio.storage;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.PersistenceDtos;
@@ -121,7 +123,7 @@ public class ObjectStorageService {
     private ObjectStorageProviderAdapter providerAdapter(PersistenceDtos.ObjectStorageConfig config) {
         ObjectStorageProviderAdapter adapter = config == null ? null : providerAdapters.get(config.provider());
         if (adapter == null) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "对象存储服务商不受支持");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedObjectStorageProvider"));
         }
         return adapter;
     }

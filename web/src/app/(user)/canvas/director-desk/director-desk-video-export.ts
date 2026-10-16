@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 type FrameEncodingOptions = {
     frameCount: number;
     frameRate: number;
@@ -11,7 +13,7 @@ type FrameEncodingOptions = {
  * 每隔若干帧让出主线程，以便刷新导出进度，不缓存PNG或全部原始帧。
  */
 export async function encodeDirectorDeskFrames({ frameCount, frameRate, renderFrame, encodeFrame, onProgress }: FrameEncodingOptions): Promise<void> {
-    if (!Number.isInteger(frameCount) || frameCount <= 0 || frameRate !== 30) throw new Error("导演台视频必须包含有效帧数并固定为 30 帧/秒");
+    if (!Number.isInteger(frameCount) || frameCount <= 0 || frameRate !== 30) throw new Error(translate("directorDesk.directorVideoNeedsAValidFrameCountAnd30"));
     for (let index = 0; index < frameCount; index += 1) {
         await renderFrame(Number((index * 1000 / frameRate).toFixed(6)));
         await encodeFrame(index / frameRate, 1 / frameRate);
@@ -28,12 +30,12 @@ export async function encodeDirectorDeskVideo({ canvas, durationMilliseconds, re
     onProgress: (progress: number) => void;
 }): Promise<Blob> {
     if (!globalThis.isSecureContext || typeof globalThis.VideoEncoder === "undefined") {
-        throw new Error("当前浏览器不支持本地视频编码，请使用支持 WebCodecs 的浏览器，并通过 HTTPS 或 localhost 访问");
+        throw new Error(translate("directorDesk.localVideoEncodingUnavailableUseAWebCodecsBrowserOver"));
     }
     const { BufferTarget, CanvasSource, Mp4OutputFormat, Output, Quality, canEncodeVideo } = await import("mediabunny");
     const quality = new Quality({ bitrate: 6_000_000 });
     if (!await canEncodeVideo("avc", { width: canvas.width, height: canvas.height, frameRate: 30, quality })) {
-        throw new Error("当前浏览器不支持此画幅的 H.264 编码，无法在本地生成 MP4 视频");
+        throw new Error(translate("directorDesk.thisBrowserCannotEncodeH264AtThisSize"));
     }
     const output = new Output({ format: new Mp4OutputFormat({ fastStart: "in-memory" }), target: new BufferTarget() });
     try {
@@ -46,7 +48,7 @@ export async function encodeDirectorDeskVideo({ canvas, durationMilliseconds, re
         });
         source.close();
         await output.finalize();
-        if (!output.target.buffer?.byteLength) throw new Error("浏览器视频编码结果为空");
+        if (!output.target.buffer?.byteLength) throw new Error(translate("directorDesk.browserVideoEncoderReturnedNoData"));
         return new Blob([output.target.buffer], { type: "video/mp4" });
     } catch (error) {
         if (output.state !== "finalized") {

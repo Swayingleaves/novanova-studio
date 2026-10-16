@@ -791,7 +791,7 @@ html[data-theme="purple"] {
     }
 
     .sidebar-rail-item {
-        @apply flex min-h-[58px] w-full flex-col items-center justify-center gap-1 rounded-[10px] px-1 text-center text-[11px] font-medium leading-tight transition;
+        @apply flex min-h-[58px] w-full shrink-0 flex-col items-center justify-center gap-1 rounded-[10px] px-1 py-2 text-center text-[11px] font-medium leading-tight transition;
         isolation: isolate;
         overflow: hidden;
         position: relative;
@@ -817,7 +817,7 @@ html[data-theme="purple"] {
     }
 
     .sidebar-rail-icon {
-        @apply inline-flex size-7 items-center justify-center rounded-lg transition;
+        @apply inline-flex size-7 shrink-0 items-center justify-center rounded-lg transition;
         position: relative;
         transform: translateY(0) scale(1);
         transition-duration: 0.18s;
@@ -827,7 +827,8 @@ html[data-theme="purple"] {
     }
 
     .sidebar-rail-label {
-        @apply max-w-full truncate;
+        @apply w-full min-w-0 whitespace-normal;
+        overflow-wrap: anywhere;
         position: relative;
         z-index: 1;
     }

@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.AiTaskPollingSupport;
 import com.novanovastudio.common.BusinessException;
@@ -179,11 +181,11 @@ public class PromptOptimizationService {
                 .flatMap(task -> {
                     if (!"success".equals(task.status())) {
                         return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
-                                task.errorMessage() == null || task.errorMessage().isBlank() ? "提示词优化失败" : task.errorMessage()));
+                                task.systemMessage() == null ? SystemMessage.of("system.executionFailed", task.errorMessage() == null ? "" : task.errorMessage()) : task.systemMessage()));
                     }
                     String optimizedPrompt = task.resultData() == null ? "" : task.resultData().getString("content");
                     if (optimizedPrompt == null || optimizedPrompt.isBlank()) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "提示词优化结果为空"));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.promptOptimizationReturnedNoResult")));
                     }
                     return Mono.just(optimizedPrompt.trim());
                 });
@@ -201,7 +203,7 @@ public class PromptOptimizationService {
             String generationType, List<Long> styleIds, List<GenerationStyleDtos.GenerationStyleSnapshot> snapshots) {
         if (generationStyleService == null) {
             if ((styleIds != null && !styleIds.isEmpty()) || (snapshots != null && !snapshots.isEmpty())) {
-                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "当前提示词优化服务未配置风格解析器"));
+                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.promptOptimizerHasNoStyleParser")));
             }
             return Mono.just(List.of());
         }
@@ -243,7 +245,7 @@ public class PromptOptimizationService {
         return switch (normalizedType) {
             case AiTaskTypes.IMAGE -> systemPromptTemplateService.get(PromptTemplateType.OPTIMIZATION_IMAGE);
             case AiTaskTypes.VIDEO -> systemPromptTemplateService.get(PromptTemplateType.OPTIMIZATION_VIDEO);
-            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, "仅支持优化图片或视频生成提示词");
+            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.onlyImageAndVideoPromptsCanBeOptimized"));
         };
     }
 }

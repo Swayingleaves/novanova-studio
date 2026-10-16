@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { createAssetSearchText } from "@/features/assets/lib/asset-query";
 import type { Asset } from "@/features/assets/stores/use-asset-store";
 import type { CanvasBackgroundNode, CanvasNode, CanvasStoryboardAsset, CanvasStoryboardAssetKind } from "../types";
@@ -13,43 +15,49 @@ export type CanvasNavigationNodeResult =
     | { type: "node"; node: CanvasNode }
     | { type: "background"; board: CanvasBackgroundNode; members: CanvasNode[] };
 
-export const CANVAS_NAVIGATION_NODE_CATEGORY_OPTIONS: ReadonlyArray<CanvasNavigationCategoryOption<CanvasNavigationNodeCategory>> = [
-    { value: "all", label: "全部" },
-    { value: "text", label: "文本" },
-    { value: "image", label: "图片" },
-    { value: "video", label: "视频" },
-    { value: "audio", label: "音频" },
-    { value: "storyboard", label: "分镜" },
-    { value: "videoComposition", label: "视频合成" },
-    { value: "directorDesk", label: "3D 导演台" },
-    { value: "background", label: "背景板" },
-];
+/** 按调用方语言生成显示文案，业务值保持不变。 */
+export const createCanvasNavigationNodeCategoryOptions = (translator: typeof translate = translate): ReadonlyArray<CanvasNavigationCategoryOption<CanvasNavigationNodeCategory>> => ([
+    { value: "all", get label() { return translator("canvas.all"); } },
+    { value: "text", get label() { return translator("canvas.text_dd8186"); } },
+    { value: "image", get label() { return translator("canvas.image"); } },
+    { value: "video", get label() { return translator("canvas.video"); } },
+    { value: "audio", get label() { return translator("canvas.audio"); } },
+    { value: "storyboard", get label() { return translator("canvas.storyboard"); } },
+    { value: "videoComposition", get label() { return translator("canvas.videoComposition"); } },
+    { value: "directorDesk", get label() { return translator("canvas.3DDirectorDesk"); } },
+    { value: "background", get label() { return translator("canvas.background"); } },
+]);
 
-export const CANVAS_NAVIGATION_ASSET_CATEGORY_OPTIONS: ReadonlyArray<CanvasNavigationCategoryOption<CanvasNavigationAssetCategory>> = [
-    { value: "all", label: "全部" },
-    { value: "text", label: "文本" },
-    { value: "image", label: "图片" },
-    { value: "video", label: "视频" },
-    { value: "character", label: "角色" },
-    { value: "scene", label: "场景" },
-    { value: "prop", label: "道具" },
-];
+export const CANVAS_NAVIGATION_NODE_CATEGORY_OPTIONS = createCanvasNavigationNodeCategoryOptions();
+
+/** 按调用方语言生成显示文案，业务值保持不变。 */
+export const createCanvasNavigationAssetCategoryOptions = (translator: typeof translate = translate): ReadonlyArray<CanvasNavigationCategoryOption<CanvasNavigationAssetCategory>> => ([
+    { value: "all", get label() { return translator("canvas.all"); } },
+    { value: "text", get label() { return translator("canvas.text_dd8186"); } },
+    { value: "image", get label() { return translator("canvas.image"); } },
+    { value: "video", get label() { return translator("canvas.video"); } },
+    { value: "character", get label() { return translator("canvas.character"); } },
+    { value: "scene", get label() { return translator("canvas.scene"); } },
+    { value: "prop", get label() { return translator("canvas.prop"); } },
+]);
+
+export const CANVAS_NAVIGATION_ASSET_CATEGORY_OPTIONS = createCanvasNavigationAssetCategoryOptions();
 
 const CANVAS_NODE_KIND_LABELS: Record<CanvasNode["kind"], string> = {
-    audio: "音频",
-    image: "图片",
-    text: "文本",
-    video: "视频",
-    storyboard: "分镜",
-    videoComposition: "视频合成",
-    directorDesk: "3D 导演台",
-    background: "背景板",
+    get audio() { return translate("canvas.audio"); },
+    get image() { return translate("canvas.image"); },
+    get text() { return translate("canvas.text_dd8186"); },
+    get video() { return translate("canvas.video"); },
+    get storyboard() { return translate("canvas.storyboard"); },
+    get videoComposition() { return translate("canvas.videoComposition"); },
+    get directorDesk() { return translate("canvas.3DDirectorDesk"); },
+    get background() { return translate("canvas.background"); },
 };
 
 const STORYBOARD_ASSET_KIND_LABELS: Record<CanvasStoryboardAssetKind, string> = {
-    character: "角色",
-    scene: "场景",
-    prop: "道具",
+    get character() { return translate("canvas.character"); },
+    get scene() { return translate("canvas.scene"); },
+    get prop() { return translate("canvas.prop"); },
 };
 
 /**
@@ -112,7 +120,7 @@ export function canvasNavigationNodeKindLabel(kind: CanvasNode["kind"]): string 
  * @return string 资产标题
  */
 export function canvasNavigationAssetTitle(asset: CanvasNavigationAsset): string {
-    return asset.source === "library" ? asset.asset.title || "未命名资产" : asset.asset.name || "未命名分镜资产";
+    return asset.source === "library" ? asset.asset.title || translate("canvas.untitledAsset") : asset.asset.name || translate("canvas.untitledStoryboardAsset");
 }
 
 /**
@@ -123,7 +131,7 @@ export function canvasNavigationAssetTitle(asset: CanvasNavigationAsset): string
  */
 export function canvasNavigationAssetKindLabel(asset: CanvasNavigationAsset): string {
     if (asset.source === "library") return CANVAS_NODE_KIND_LABELS[asset.asset.kind];
-    return `${STORYBOARD_ASSET_KIND_LABELS[asset.asset.kind]} · ${asset.storyboardNodeTitle || "分镜脚本"}`;
+    return `${STORYBOARD_ASSET_KIND_LABELS[asset.asset.kind]} · ${asset.storyboardNodeTitle || translate("canvas.storyboardScript")}`;
 }
 
 /**
@@ -135,7 +143,7 @@ export function canvasNavigationAssetKindLabel(asset: CanvasNavigationAsset): st
  */
 export function canvasNavigationCategoryLabel<Category extends string>(options: ReadonlyArray<CanvasNavigationCategoryOption<Category>>, category: Category): string {
     const option = options.find((item) => item.value === category);
-    if (!option) throw new Error(`未配置画布导航分类：${category}`);
+    if (!option) throw new Error(translate("canvas.canvasNavigationCategoryNotConfigured", { value0: category }));
     return option.label;
 }
 

@@ -1,0 +1,14 @@
+{
+    "system": "System",
+    "lightMode": "Light mode",
+    "darkMode": "Dark mode",
+    "purpleMode": "Purple mode",
+    "light": "Light",
+    "dark": "Dark",
+    "purple": "Purple",
+    "current": "Current:",
+    "changeTheme": "Change theme",
+    "theme": "Theme",
+    "systemCurrently": "System · Currently {value0}",
+    "switch": "Switch"
+}

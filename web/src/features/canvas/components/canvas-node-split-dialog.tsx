@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Button, InputNumber, Modal } from "antd";
@@ -91,15 +94,17 @@ export function CanvasNodeSplitDialog({ dataUrl, open, loading, onClose, onConfi
 }
 
 function SplitDialogHeading({ sliceCount }: { sliceCount: number }) {
+    const translate = useTranslation();
     return (
         <div>
-            <h2 className="text-xl font-semibold">切分图片</h2>
-            <p className="mt-1 text-sm opacity-60">生成 {sliceCount} 个图片子节点，并按原图网格排列到画布右侧</p>
+            <h2 className="text-xl font-semibold">{translate("canvas.splitImage")}</h2>
+            <p className="mt-1 text-sm opacity-60">{translate("canvas.generate")}{sliceCount} {translate("canvas.imageChildNodesArrangedInAGridToThe")}</p>
         </div>
     );
 }
 
 function SplitPreviewCard({ dataUrl, grid, sourceLabel }: { dataUrl: string; grid: CanvasImageSplitParams; sourceLabel: string }) {
+    const translate = useTranslation();
     return (
         <div className="rounded-xl border p-4">
             <div className="grid min-h-[300px] place-items-center rounded-lg bg-black/5">
@@ -109,7 +114,7 @@ function SplitPreviewCard({ dataUrl, grid, sourceLabel }: { dataUrl: string; gri
                 </div>
             </div>
             <div className="mt-3 flex items-center justify-between text-sm">
-                <span className="opacity-60">原图</span>
+                <span className="opacity-60">{translate("canvas.original")}</span>
                 <span className="font-semibold">{sourceLabel}</span>
             </div>
         </div>
@@ -133,16 +138,17 @@ function SplitControlPanel({
     loading: boolean;
     onConfirm: () => void;
 }) {
+    const translate = useTranslation();
     return (
         <div className="space-y-5 py-2">
-            <DimensionField caption="行数" value={grid.rows} disabled={loading} onValueChange={onRowsChange} />
-            <DimensionField caption="列数" value={grid.columns} disabled={loading} onValueChange={onColumnsChange} />
+            <DimensionField caption={translate("canvas.rows")} value={grid.rows} disabled={loading} onValueChange={onRowsChange} />
+            <DimensionField caption={translate("canvas.columns")} value={grid.columns} disabled={loading} onValueChange={onColumnsChange} />
             <div className="rounded-xl border px-4 py-3 text-sm">
-                <SplitMetricRow label="子节点" value={`${sliceCount} 个`} />
-                <SplitMetricRow label="单块约" value={tileLabel} className="mt-2" />
+                <SplitMetricRow label={translate("canvas.childNode")} value={translate("canvas.items_9479b5", { value0: sliceCount })} />
+                <SplitMetricRow label={translate("canvas.eachTileApprox")} value={tileLabel} className="mt-2" />
             </div>
             <Button type="primary" size="large" className="w-full" icon={<Grid2x2 className="size-4" />} loading={loading} onClick={onConfirm}>
-                {loading ? "正在处理" : "生成子节点"}
+                {loading ? translate("canvas.processing") : translate("canvas.generateChildNode")}
             </Button>
         </div>
     );
@@ -187,8 +193,8 @@ function buildSplitMetrics(shape: SourceImageShape | null, grid: CanvasImageSpli
     const estimatedTile = shape ? computeTileDimensions(shape, grid) : null;
     return {
         sliceCount,
-        sourceLabel: shape ? `${shape.width} x ${shape.height} px` : "读取中",
-        tileLabel: estimatedTile ? `${estimatedTile.width} x ${estimatedTile.height}` : "未知",
+        sourceLabel: shape ? `${shape.width} x ${shape.height} px` : translate("canvas.reading"),
+        tileLabel: estimatedTile ? `${estimatedTile.width} x ${estimatedTile.height}` : translate("canvas.unknown"),
     };
 }
 

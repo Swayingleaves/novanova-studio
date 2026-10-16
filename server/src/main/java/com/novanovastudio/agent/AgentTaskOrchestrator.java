@@ -6,6 +6,8 @@
  */
 package com.novanovastudio.agent;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -289,11 +291,11 @@ public class AgentTaskOrchestrator {
      */
     public Mono<Void> cancelChat(Long userId, String sessionId) {
         if (!sessionId.equals(activeLoops.get(userId))) {
-            return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "当前会话没有正在执行的生成任务"));
+            return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.noRunningGenerationInThisConversation")));
         }
         AgentExecutionRegistry.AgentCancellation cancellation = executionRegistry.requestCancellation(userId, sessionId);
         if (!cancellation.active()) {
-            return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "当前会话没有正在执行的生成任务"));
+            return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.noRunningGenerationInThisConversation")));
         }
 
         Mono<Boolean> cancelTasks = Flux.fromIterable(cancellation.tasks())
@@ -306,7 +308,7 @@ public class AgentTaskOrchestrator {
         return cancelTasks.flatMap(hasCanceledTask -> {
                     if (!cancellation.tasks().isEmpty() && !hasCanceledTask) {
                         executionRegistry.clearCancellation(sessionId);
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "生成任务已完成，无法停止"));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.generationCompletedAndCannotBeStopped")));
                     }
                     return cancellation.tasks().isEmpty() ? saveCanceledInitialVideoRound(userId, sessionId) : Mono.empty();
                 })
@@ -452,7 +454,7 @@ public class AgentTaskOrchestrator {
                 return Mono.empty();
             }
             log.error("Agent Loop 初始化失败: sessionId={}", session.id(), e);
-            eventEmitter.emit(userId, AgentEvent.error(session.id(), e.getMessage()));
+            eventEmitter.emit(userId, AgentEvent.error(session.id(), e.getMessage()).withSystemMessage(SystemMessage.fromThrowable(e)));
             return Mono.empty();
         });
     }
@@ -497,7 +499,7 @@ public class AgentTaskOrchestrator {
                     return Mono.empty();
                 }
                 log.error("Agent Loop 第{}步失败: sessionId={}", step, sessionId, e);
-                eventEmitter.emit(userId, AgentEvent.error(sessionId, e.getMessage()));
+                eventEmitter.emit(userId, AgentEvent.error(sessionId, e.getMessage()).withSystemMessage(SystemMessage.fromThrowable(e)));
                 return Mono.empty();
             });
     }
@@ -635,7 +637,7 @@ public class AgentTaskOrchestrator {
         }
         String roundId = generationRoundIds.get(sessionId);
         if (!StringUtils.hasText(roundId)) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "生成轮次ID不存在");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.generationRoundIDNotFound"));
         }
         List<ToolCall> toolCalls = new ArrayList<>();
         int terminalToolIndex = 0;
@@ -1019,7 +1021,8 @@ public class AgentTaskOrchestrator {
         }).timeout(frontendToolTimeout(toolName, args))
           .onErrorResume(e -> {
               String message = "前端工具执行超时";
-              eventEmitter.emit(userId, AgentEvent.toolCancel(sessionId, callId, message));
+              eventEmitter.emit(userId, AgentEvent.toolCancel(sessionId, callId, message)
+                      .withSystemMessage(SystemMessage.of("system.frontendToolTimeout")));
               AiErrorDetails error = new AiErrorDetails("canvas", "timeout", "frontend_tool", null,
                       null, null, null, message, true, false);
               return Mono.just(new ToolResult(false, message, Map.of("error", error.toMap())));
@@ -1050,7 +1053,8 @@ public class AgentTaskOrchestrator {
                 continue;
             }
             // 先取消旧页面上可能仍在执行的同一次调用，避免两个页面重复执行同一个生成。
-            eventEmitter.emit(userId, AgentEvent.toolCancel(sessionId, entry.getKey(), "页面刷新后由当前页面接续执行"));
+            eventEmitter.emit(userId, AgentEvent.toolCancel(sessionId, entry.getKey(), "页面刷新后由当前页面接续执行")
+                    .withSystemMessage(SystemMessage.of("system.frontendToolReattached")));
             eventEmitter.emit(userId, pending.event());
             replayed++;
         }
@@ -1684,7 +1688,7 @@ public class AgentTaskOrchestrator {
                         .filter(config -> capability.equals(config.modelType()) && Boolean.TRUE.equals(config.defaultModel()))
                         .findFirst()
                         .map(config -> resolveChannelByModel(config.channelId() + "::" + config.modelName()))
-                        .orElseGet(() -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员配置默认文本模型"))));
+                        .orElseGet(() -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.askTheAdministratorToConfigureADefaultTextModel")))));
     }
 
     /**
@@ -1710,7 +1714,7 @@ public class AgentTaskOrchestrator {
                                     && StringUtils.hasText(channel.apiKey())
                                     && adapterRegistry.supports(channel, AiTaskTypes.TEXT)));
                     if (!hasDefaultModel) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员配置默认文本模型"));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.askTheAdministratorToConfigureADefaultTextModel")));
                     }
                     return textModels.stream()
                             .filter(config -> modelHint.equals(config.channelId() + "::" + config.modelName()) || modelHint.equals(config.modelName()))
@@ -1724,8 +1728,8 @@ public class AgentTaskOrchestrator {
                                     .map(channel -> Mono.just(new ResolvedTextModel(
                                             new AiTaskDtos.AiChannelConfig(channel.id(), channel.name(), channel.baseUrl(), channel.apiKey(), channel.apiFormat(), List.of(config.modelName())),
                                             thinkingEnabled(config.thinkingEnabled()), reasoningEffort(config.reasoningEffort()), config.customBodyParameters())))
-                                    .orElseGet(() -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "请联系管理员完整配置文本模型渠道"))))
-                            .orElseGet(() -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "所选文本模型未在管理员启用的模型中配置")));
+                                    .orElseGet(() -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.askTheAdministratorToCompleteTheTextModelChannelConfiguration")))))
+                            .orElseGet(() -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.selectedTextModelIsNotEnabledByTheAdministrator"))));
                 });
     }
 

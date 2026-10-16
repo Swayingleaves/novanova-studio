@@ -1,4 +1,8 @@
 "use client";
+import { currentLanguageTag } from "@/features/locale/translate";
+
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useState } from "react";
 import { App, Button, Modal } from "antd";
@@ -18,6 +22,7 @@ type NotificationDetailModalProps = {
  * @return 公告详情弹窗
  */
 export function NotificationDetailModal({ notification, onClose }: NotificationDetailModalProps) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const unreadCount = useNotificationStore((state) => state.unreadCount);
     const markRead = useNotificationStore((state) => state.markRead);
@@ -38,7 +43,7 @@ export function NotificationDetailModal({ notification, onClose }: NotificationD
             onClose();
             return;
         }
-        message.error("标记公告已读失败，请稍后重试");
+        message.error(translate("notification.failedToMarkAnnouncementReadTryLater"));
     };
 
     const handleMarkAllRead = async () => {
@@ -49,12 +54,12 @@ export function NotificationDetailModal({ notification, onClose }: NotificationD
             onClose();
             return;
         }
-        message.error("标记全部公告已读失败，请稍后重试");
+        message.error(translate("notification.failedToMarkAllAnnouncementsRead"));
     };
 
     return (
         <Modal
-            title={notification.title || "公告详情"}
+            title={notification.title || translate("notification.announcementDetails")}
             open
             width={640}
             centered
@@ -63,19 +68,17 @@ export function NotificationDetailModal({ notification, onClose }: NotificationD
             footer={(
                 <div className="flex justify-end gap-2">
                     <Button type="primary" disabled={Boolean(notification.read)} loading={pendingAction === "current"} onClick={() => void handleMarkCurrentRead()}>
-                        我已阅读
-                    </Button>
+                        {translate("notification.iHaveRead")}</Button>
                     <Button disabled={unreadCount === 0} loading={pendingAction === "all"} onClick={() => void handleMarkAllRead()}>
-                        全部已读
-                    </Button>
+                        {translate("notification.markAllRead")}</Button>
                 </div>
             )}
             styles={{ body: { height: 360, overflowY: "auto", paddingRight: 12 } }}
         >
             <div className="space-y-4">
-                {notification.content ? <div className="whitespace-pre-wrap text-sm leading-7 text-[var(--studio-text)]">{notification.content}</div> : <div className="text-sm text-[var(--studio-faint)]">暂无内容</div>}
+                {notification.content ? <div className="whitespace-pre-wrap text-sm leading-7 text-[var(--studio-text)]">{notification.content}</div> : <div className="text-sm text-[var(--studio-faint)]">{translate("notification.noContent")}</div>}
                 <div className="border-t border-[var(--studio-line)] pt-3 text-xs text-[var(--studio-faint)]">
-                    {notification.publishedAt ? `发布时间：${new Date(notification.publishedAt).toLocaleString()}` : `创建时间：${new Date(notification.createdAt).toLocaleString()}`}
+                    {notification.publishedAt ? translate("notification.published", { value0: new Date(notification.publishedAt).toLocaleString(currentLanguageTag()) }) : translate("notification.created", { value0: new Date(notification.createdAt).toLocaleString(currentLanguageTag()) })}
                 </div>
             </div>
         </Modal>

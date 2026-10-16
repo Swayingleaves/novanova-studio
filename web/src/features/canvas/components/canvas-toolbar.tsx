@@ -1,3 +1,8 @@
+
+"use client";
+
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
 import type { ReactNode } from "react";
 import { Button, Tooltip } from "antd";
 import { Box, Eraser, FolderOpen, Frame, Hand, Image as ImageIcon, Redo2, Trash2, Type, Undo2, Upload, AudioLines, Video } from "lucide-react";
@@ -63,15 +68,16 @@ export function CanvasToolbar(props: CanvasToolbarProps) {
 }
 
 function BackgroundToolbarSettings({ node, onTitleChange, onColorChange }: { node: CanvasBackgroundNode; onTitleChange?: (nodeId: string, title: string) => void; onColorChange?: (nodeId: string, color: string) => void }) {
+    const translate = useTranslation();
     const theme = useCanvasTheme();
     const colors = ["var(--studio-surface-raised)", "var(--studio-surface-hover)", "var(--studio-line)", "var(--studio-info)", "var(--studio-success)", "var(--studio-warning)"];
     return (
         <div className="mr-1 flex items-center gap-1.5 border-r pr-2" style={{ borderColor: theme.toolbar.border }}>
-            <label className="sr-only" htmlFor="canvas-background-title">背景板名称</label>
-            <input id="canvas-background-title" className="h-8 w-28 rounded-md border bg-transparent px-2 text-xs outline-none focus-visible:ring-2" style={{ borderColor: theme.toolbar.border, color: theme.node.text, outlineColor: theme.node.activeStroke }} value={node.title} onChange={(event) => onTitleChange?.(node.id, event.target.value)} onBlur={(event) => onTitleChange?.(node.id, event.target.value.trim() || "背景板")} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
-            <div className="flex items-center gap-1" role="group" aria-label="背景板颜色">
+            <label className="sr-only" htmlFor="canvas-background-title">{translate("canvas.backgroundName")}</label>
+            <input id="canvas-background-title" className="h-8 w-28 rounded-md border bg-transparent px-2 text-xs outline-none focus-visible:ring-2" style={{ borderColor: theme.toolbar.border, color: theme.node.text, outlineColor: theme.node.activeStroke }} value={node.title} onChange={(event) => onTitleChange?.(node.id, event.target.value)} onBlur={(event) => onTitleChange?.(node.id, event.target.value.trim() || translate("canvas.background"))} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+            <div className="flex items-center gap-1" role="group" aria-label={translate("canvas.backgroundColor")}>
                 {colors.map((color) => {
-                    const label = `设置背景板颜色 ${color}`;
+                    const label = translate("canvas.setBackgroundColor", { value0: color });
                     return (
                         <Tooltip key={color} title={label} placement="top">
                             <button type="button" aria-label={label} className="size-5 rounded-full border transition-transform hover:scale-110 focus-visible:ring-2" style={{ background: color, borderColor: node.backgroundColor === color ? theme.node.activeStroke : theme.toolbar.border, outlineColor: theme.node.activeStroke }} onClick={() => onColorChange?.(node.id, color)} />
@@ -85,23 +91,23 @@ function BackgroundToolbarSettings({ node, onTitleChange, onColorChange }: { nod
 
 function buildToolbarActions(props: CanvasToolbarProps): ToolbarAction[] {
     const actions: ToolbarAction[] = [
-        { key: "move", label: "移动/选择", icon: <Hand className="size-4" />, active: !props.selectedCount, onClick: props.onDeselect },
-        { key: "undo", label: "撤销", icon: <Undo2 className="size-4" />, disabled: !props.canUndo, onClick: props.onUndo },
-        { key: "redo", label: "重做", icon: <Redo2 className="size-4" />, disabled: !props.canRedo, onClick: props.onRedo, dividerBefore: false },
-        { key: "text", label: "文本", icon: <Type className="size-4" />, dividerBefore: true, onClick: props.onAddText },
-        { key: "image", label: "图片", icon: <ImageIcon className="size-4" />, onClick: props.onAddImage },
-        { key: "audio", label: "音频", icon: <AudioLines className="size-4" />, onClick: props.onAddAudio },
-        { key: "video", label: "视频", icon: <Video className="size-4" />, onClick: props.onAddVideo },
-        { key: "director-desk", label: "3D 导演台", icon: <Box className="size-4" />, onClick: props.onAddDirectorDesk },
-        { key: "background", label: "背景板", icon: <Frame className="size-4" />, onClick: props.onAddBackground },
-        { key: "upload", label: "上传素材", icon: <Upload className="size-4" />, onClick: props.onUpload },
-        { key: "assets", label: "我的资产", icon: <FolderOpen className="size-4" />, dividerBefore: true, onClick: props.onOpenMyAssets },
+        { key: "move", label: translate("canvas.moveSelect"), icon: <Hand className="size-4" />, active: !props.selectedCount, onClick: props.onDeselect },
+        { key: "undo", label: translate("canvas.undo"), icon: <Undo2 className="size-4" />, disabled: !props.canUndo, onClick: props.onUndo },
+        { key: "redo", label: translate("canvas.redo"), icon: <Redo2 className="size-4" />, disabled: !props.canRedo, onClick: props.onRedo, dividerBefore: false },
+        { key: "text", label: translate("canvas.text_dd8186"), icon: <Type className="size-4" />, dividerBefore: true, onClick: props.onAddText },
+        { key: "image", label: translate("canvas.image"), icon: <ImageIcon className="size-4" />, onClick: props.onAddImage },
+        { key: "audio", label: translate("canvas.audio"), icon: <AudioLines className="size-4" />, onClick: props.onAddAudio },
+        { key: "video", label: translate("canvas.video"), icon: <Video className="size-4" />, onClick: props.onAddVideo },
+        { key: "director-desk", label: translate("canvas.3DDirectorDesk"), icon: <Box className="size-4" />, onClick: props.onAddDirectorDesk },
+        { key: "background", label: translate("canvas.background"), icon: <Frame className="size-4" />, onClick: props.onAddBackground },
+        { key: "upload", label: translate("canvas.uploadAssets"), icon: <Upload className="size-4" />, onClick: props.onUpload },
+        { key: "assets", label: translate("canvas.myAssets"), icon: <FolderOpen className="size-4" />, dividerBefore: true, onClick: props.onOpenMyAssets },
     ];
 
     if (props.selectedCount) {
         actions.push({
             key: "delete",
-            label: `删除选中 ${props.selectedCount}`,
+            label: translate("canvas.deleteSelected_53f101", { value0: props.selectedCount }),
             icon: <Trash2 className="size-4" />,
             dividerBefore: true,
             danger: true,
@@ -111,7 +117,7 @@ function buildToolbarActions(props: CanvasToolbarProps): ToolbarAction[] {
 
     actions.push({
         key: "clear",
-        label: "清空画布",
+        label: translate("canvas.clearCanvas"),
         icon: <Eraser className="size-4" />,
         dividerBefore: true,
         danger: true,

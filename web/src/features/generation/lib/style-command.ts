@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 /**
  * 读取输入框光标前正在编辑的风格命令。
  *
@@ -34,7 +36,7 @@ export function removeStyleCommand(value: string, start: number, end: number) {
  */
 export function formatGenerationStyleMessage(prompt: string, styles?: Array<{ name: string }>) {
     const names = styles?.map((style) => style.name.trim()).filter(Boolean) || [];
-    return names.length ? `风格：${names.join("、")}\n${prompt}` : prompt;
+    return names.length ? translate("generation.style_b337e2", { value0: names.join("、"), value1: prompt }) : prompt;
 }
 
 export type GenerationStyleMessageGroups<T> = {
@@ -49,8 +51,8 @@ export function formatGroupedGenerationStyleMessage<T extends { name: string; ge
     if (image.length && !video.length) return formatGenerationStyleMessage(prompt, image);
     if (video.length && !image.length) return formatGenerationStyleMessage(prompt, video);
     const lines = [
-        image.length ? `图片风格：${image.map((style) => style.name.trim()).filter(Boolean).join("、")}` : "",
-        video.length ? `视频风格：${video.map((style) => style.name.trim()).filter(Boolean).join("、")}` : "",
+        image.length ? translate("generation.imageStyle", { value0: image.map((style) => style.name.trim()).filter(Boolean).join("、") }) : "",
+        video.length ? translate("generation.videoStyle", { value0: video.map((style) => style.name.trim()).filter(Boolean).join("、") }) : "",
     ].filter(Boolean);
     return lines.length ? `${lines.join("\n")}\n${prompt}` : prompt;
 }
@@ -63,7 +65,7 @@ export function formatGroupedGenerationStyleMessage<T extends { name: string; ge
  * @returns 清理后的提示词和匹配到的风格；无法完整匹配时返回null
  */
 export function parseGenerationStyleMessage<T extends { name: string }>(value: string, availableStyles: T[]) {
-    const match = value.match(/^\s*风格\s*[:：]\s*([^\r\n]+)(?:\r?\n|$)/);
+    const match = value.match(/^\s*(?:风格|style)\s*[:：]\s*([^\r\n]+)(?:\r?\n|$)/i);
     if (!match) return null;
     const names = match[1].split(/[、,，|]/).map((name) => name.trim()).filter(Boolean);
     if (!names.length) return null;
@@ -80,10 +82,10 @@ export function parseGroupedGenerationStyleMessage<T extends { name: string; gen
     const groups: GenerationStyleMessageGroups<T> = { image: [], video: [] };
     let consumed = 0;
     for (const line of lines) {
-        const match = line.match(/^\s*(图片|视频)风格\s*[:：]\s*(.*?)\s*$/);
+        const match = line.match(/^\s*(?:(图片|视频)风格|(image|video)\s+style)\s*[:：]\s*(.*?)\s*$/i);
         if (!match) break;
-        const generationType = match[1] === "图片" ? "image" : "video";
-        const names = match[2].split(/[、,，|]/).map((name) => name.trim()).filter(Boolean);
+        const generationType = match[1] === "图片" || match[2]?.toLowerCase() === "image" ? "image" : "video";
+        const names = match[3].split(/[、,，|]/).map((name) => name.trim()).filter(Boolean);
         if (!names.length) return null;
         const styles = names.map((name) => availableStyles.find((style) => style.generationType === generationType && style.name.trim() === name));
         if (styles.some((style) => !style)) return null;

@@ -1,5 +1,7 @@
 package com.novanovastudio.security;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -28,7 +30,7 @@ public class AdminGuard {
         // 从Reactor上下文读取当前用户，并校验角色为管理员。
         return currentUserProvider.currentUser().flatMap(currentUser -> {
             if (!"admin".equals(currentUser.role())) {
-                return Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, "权限不足"));
+                return Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, SystemMessage.of("business.permissionDenied")));
             }
             return Mono.just(currentUser);
         });

@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { Modal } from "antd";
 
@@ -7,6 +9,7 @@ import { useCanvasStore } from "../stores/use-canvas-store";
 import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
 
 export function CanvasDeleteProjectsDialog() {
+    const translate = useTranslation();
     const documentIds = useCanvasUiStore((state) => state.pendingDeleteDocumentIds);
     const requestDocumentDeletion = useCanvasUiStore((state) => state.requestDocumentDeletion);
     const applyDeletedDocuments = useCanvasUiStore((state) => state.applyDeletedDocuments);
@@ -23,16 +26,16 @@ export function CanvasDeleteProjectsDialog() {
 
     return (
         <Modal
-            title={documentIds.length > 1 ? `删除 ${documentIds.length} 个画布？` : "删除画布？"}
+            title={documentIds.length > 1 ? translate("canvas.deleteCanvases", { value0: documentIds.length }) : translate("canvas.deleteCanvas")}
             open={documentIds.length > 0}
             centered
-            okText="确认删除"
-            cancelText="取消"
+            okText={translate("canvas.confirmDeletion")}
+            cancelText={translate("canvas.cancel")}
             okButtonProps={{ danger: true }}
             onOk={confirm}
             onCancel={close}
         >
-            <p className="text-sm text-[var(--studio-muted)]">画布中的节点、连线和会话记录将一起移除，此操作无法撤销。</p>
+            <p className="text-sm text-[var(--studio-muted)]">{translate("canvas.canvasNodesConnectionsAndConversationsWillBeDeletedPermanently")}</p>
         </Modal>
     );
 }

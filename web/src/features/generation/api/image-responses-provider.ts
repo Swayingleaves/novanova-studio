@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
 
 import type { ImageRequestOptions, ResponseFunctionTool, ResponseInputMessage, ToolChoice, ToolResponseResult } from "./image-contracts";
@@ -23,7 +25,7 @@ export async function requestResponsesConversation(config: AiConfig, messages: R
         body: JSON.stringify(body),
         signal: options?.signal,
     });
-    if (!response.ok) throw new Error(await readFailedResponse(response, "请求失败"));
+    if (!response.ok) throw new Error(await readFailedResponse(response, translate("generation.requestFailed")));
     if (!response.body) return normalizeResponsePayload(await response.json() as ResponsePayload);
 
     const reader = response.body.getReader();

@@ -1,5 +1,7 @@
 package com.novanovastudio.controller;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.ApiResponse;
@@ -469,7 +471,7 @@ public class PersistenceController {
         try {
             return JSON.parseObject(metadata);
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "媒体扩展元数据JSON格式不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidMediaMetadataJSON"));
         }
     }
 

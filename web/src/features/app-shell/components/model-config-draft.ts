@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { ModelCapability, ModelChannel } from "@/features/settings/stores/use-config-store";
 import type { ServerModelConfig } from "@/services/api/server";
 
@@ -39,7 +41,7 @@ export function modelConfigDependencyIssues(channels: ModelChannel[], configurat
     return configurations.flatMap((configuration) => {
         const channel = channelsById.get(configuration.channelId);
         if (channel?.models.includes(configuration.modelName)) return [];
-        return [{ configuration, channelName: channel?.name || configuration.channelId, reason: channel ? "模型已不在渠道列表中" : "所属渠道尚未保存或已不存在" }];
+        return [{ configuration, channelName: channel?.name || configuration.channelId, reason: channel ? translate("appShell.modelNoLongerInChannelList") : translate("appShell.channelIsUnsavedOrNoLongerExists") }];
     });
 }
 

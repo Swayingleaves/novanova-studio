@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
@@ -203,6 +205,7 @@ export function CanvasFlow({
   nodeTypes,
   children,
 }: CanvasFlowProps) {
+    const translate = useTranslation();
   const theme = useCanvasTheme();
   const controlStyles = getCanvasControlStyleVars(theme);
   const edgeStroke = theme.node.stroke;
@@ -418,8 +421,8 @@ export function CanvasFlow({
         <Controls style={controlStyles}>
           <ControlButton
             onClick={handleToggleMiniMap}
-            title={showMiniMap ? "隐藏小地图" : "显示小地图"}
-            aria-label={showMiniMap ? "隐藏小地图" : "显示小地图"}
+            title={showMiniMap ? translate("canvas.hideMinimap") : translate("canvas.showMinimap")}
+            aria-label={showMiniMap ? translate("canvas.hideMinimap") : translate("canvas.showMinimap")}
           >
             {showMiniMap ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
           </ControlButton>

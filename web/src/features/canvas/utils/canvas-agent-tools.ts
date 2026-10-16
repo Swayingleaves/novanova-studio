@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { nanoid } from "nanoid";
 
 import { getCanvasNodeTemplate } from "../constants";
@@ -43,7 +45,7 @@ export function resolveCanvasAgentTool(name: string, args: Record<string, unknow
             return createRunGenerationExecution(args);
         case "canvas_create_node": {
             const nodeType = readOptionalCanvasNodeType(args.nodeType);
-            if (!nodeType) return failureExecution("节点类型仅支持文本、图片、视频或音频，分镜脚本请通过剧本文本节点创建");
+            if (!nodeType) return failureExecution(translate("canvas.nodesSupportTextImageVideoOrAudioCreateStoryboards"));
             return successExecution(name, [
                 {
                     type: "add_node",
@@ -62,7 +64,7 @@ export function resolveCanvasAgentTool(name: string, args: Record<string, unknow
                 {
                     type: "add_node",
                     nodeType: "text",
-                    title: (args.title as string) || "文本",
+                    title: (args.title as string) || translate("canvas.text_dd8186"),
                     x: args.x as number,
                     y: args.y as number,
                     width: args.width as number,
@@ -77,7 +79,7 @@ export function resolveCanvasAgentTool(name: string, args: Record<string, unknow
                 {
                     type: "add_node",
                     nodeType: "text",
-                    title: "提示词",
+                    title: translate("canvas.prompt"),
                     x: args.x as number,
                     y: args.y as number,
                     width: 300,
@@ -138,9 +140,9 @@ export function positionCanvasAgentAddNodeOps(ops: CanvasAgentOp[], canvasCenter
 function createGenerationExecution(mode: "text" | "image" | "video", args: Record<string, unknown>, autoRun: boolean, createId: CreateId): CanvasAgentToolExecution {
     const prompt = readString(args.prompt);
     const generationStyleSnapshots = readStyleSnapshots(args.generationStyleSnapshots);
-    if (!prompt) return failureExecution("生成提示词不能为空");
+    if (!prompt) return failureExecution(translate("canvas.generationPromptIsRequired"));
     if (autoRun && mode === "image" && !readString(args.size)) {
-        return failureExecution("图片尺寸不能为空，请先向用户确认尺寸");
+        return failureExecution(translate("canvas.imageDimensionsAreRequiredConfirmThemWithTheUser"));
     }
     const nodeId = `${mode}-${createId()}`;
     const addNode: CanvasAgentOp = {
@@ -168,7 +170,7 @@ function createGenerationExecution(mode: "text" | "image" | "video", args: Recor
         ops,
         result: {
             ok: true,
-            message: autoRun ? `${generationLabel(mode)}节点已创建，生成任务已开始` : `${generationLabel(mode)}节点已创建`,
+            message: autoRun ? translate("canvas.nodeCreatedGenerationStarted", { value0: generationLabel(mode) }) : translate("canvas.nodeCreated", { value0: generationLabel(mode) }),
             data: { nodeId, status: autoRun ? "running" : "idle" },
         },
     };
@@ -176,7 +178,7 @@ function createGenerationExecution(mode: "text" | "image" | "video", args: Recor
 
 function createRunGenerationExecution(args: Record<string, unknown>): CanvasAgentToolExecution | null {
     const nodeId = readString(args.nodeId);
-    if (!nodeId) return failureExecution("生成节点ID不能为空");
+    if (!nodeId) return failureExecution(translate("canvas.generationNodeIDIsRequired"));
     const mode = readOptionalGenerationMode(args.mode);
     const userPrompt = readString(args.prompt);
     const settingGraphPrompt = readString(args.settingGraphPrompt);
@@ -192,7 +194,7 @@ function createRunGenerationExecution(args: Record<string, unknown>): CanvasAgen
         ],
         result: {
             ok: true,
-            message: "画布节点生成任务已开始",
+            message: translate("canvas.canvasGenerationStarted"),
             data: { nodeId, status: "running" },
         },
     };
@@ -201,7 +203,7 @@ function createRunGenerationExecution(args: Record<string, unknown>): CanvasAgen
 function createApplyOpsExecution(ops: CanvasAgentOp[]): CanvasAgentToolExecution {
     const runningNodeIds = ops.filter((op) => op.type === "run_generation" && op.nodeId).map((op) => op.nodeId as string);
     if (!runningNodeIds.length) return successExecution("canvas_apply_ops", ops);
-    return failureExecution("canvas_apply_ops不能执行生成，请使用专用生成工具");
+    return failureExecution(translate("canvas.canvasApplyOpsCannotGenerateUseADedicatedGeneration"));
 }
 
 function createRecoveryGenerationExecution(name: string, args: Record<string, unknown>, nodeIds: string[]): CanvasAgentToolExecution {
@@ -218,12 +220,12 @@ function createRecoveryGenerationExecution(name: string, args: Record<string, un
     };
     return {
         ops: nodeIds.flatMap((nodeId) => [{ type: "update_node", id: nodeId, attributes } satisfies CanvasAgentOp, { type: "run_generation", nodeId, prompt, recovery: true } satisfies CanvasAgentOp]),
-        result: { ok: true, message: "失败节点正在重新生成", data: { nodeIds, status: "running" } },
+        result: { ok: true, message: translate("canvas.regeneratingFailedNodes"), data: { nodeIds, status: "running" } },
     };
 }
 
 function successExecution(name: string, ops: CanvasAgentOp[]): CanvasAgentToolExecution {
-    return { ops, result: { ok: true, message: `工具 ${name} 执行成功` } };
+    return { ops, result: { ok: true, message: translate("canvas.toolCompleted", { value0: name }) } };
 }
 
 function failureExecution(message: string): CanvasAgentToolExecution {
@@ -302,7 +304,7 @@ function createTextNodeOps(args: Record<string, unknown>): CanvasAgentOp[] {
     return items.map((item, index) => ({
         type: "add_node",
         nodeType: "text",
-        title: readString(item.title) || `文本${index + 1}`,
+        title: readString(item.title) || translate("canvas.text_923647", { value0: index + 1 }),
         x: startX === undefined ? undefined : startX + (args.direction === "column" ? 0 : index * gap),
         y: startY === undefined ? undefined : startY + (args.direction === "column" ? index * gap : 0),
         attributes: { content: readString(item.text), status: "success" },
@@ -367,9 +369,9 @@ function readOptionalCanvasNodeType(value: unknown): CanvasGenerationMode | "aud
 }
 
 function generationLabel(mode: "text" | "image" | "video") {
-    if (mode === "text") return "文本生成";
-    if (mode === "video") return "视频生成";
-    return "图片生成";
+    if (mode === "text") return translate("canvas.textGeneration");
+    if (mode === "video") return translate("canvas.videoGeneration");
+    return translate("canvas.imageGeneration");
 }
 
 function readString(value: unknown) {

@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { memo } from "react";
 import { Button } from "antd";
@@ -12,6 +14,7 @@ import { CanvasConnectionHandles, CanvasNodeTitle, NodeHoverSurface } from "./sh
 
 /** 画布中的 3D 导演台节点，只展示轻量封面与工程摘要。 */
 export const DirectorDeskNode = memo(function DirectorDeskNode({ data: rawData, selected }: NodeProps) {
+    const translate = useTranslation();
     const data = rawData as unknown as CanvasDirectorDeskNode;
     const theme = useCanvasTheme();
     const actions = useNodeActions();
@@ -34,12 +37,12 @@ export const DirectorDeskNode = memo(function DirectorDeskNode({ data: rawData, 
                 className="relative flex select-none flex-col overflow-visible rounded-lg border"
                 style={{ width: "100%", height: "100%", background: theme.node.panel, color: theme.node.text, borderColor: selected ? theme.node.activeStroke : theme.node.stroke }}
             >
-                <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle="3D 导演台" onTitleChange={actions.onTitleChange} />
+                <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.3DDirectorDesk")} onTitleChange={actions.onTitleChange} />
                 <div className="flex items-center gap-2 border-b px-3 py-2.5" style={{ borderColor: theme.node.stroke }}>
                     <Box className="size-4" style={{ color: theme.node.activeStroke }} aria-hidden="true" />
-                    <span className="text-sm font-medium">3D 导演台</span>
+                    <span className="text-sm font-medium">{translate("canvas.3DDirectorDesk")}</span>
                     <span className="ml-auto text-[11px]" style={{ color: theme.node.muted }}>
-                        修订 {data.director.projectRevision}
+                        {translate("canvas.revision")}{data.director.projectRevision}
                     </span>
                 </div>
                 <div className="relative min-h-0 flex-1 overflow-hidden px-3 py-3">
@@ -51,12 +54,11 @@ export const DirectorDeskNode = memo(function DirectorDeskNode({ data: rawData, 
                         <Box aria-hidden="true" className="absolute left-1/2 top-1/2 size-10 -translate-x-1/2 -translate-y-1/2" style={{ color: theme.node.activeStroke }} />
                         <div className="absolute left-1/2 top-2 flex -translate-x-1/2 items-center gap-1 rounded px-2 py-1 text-[10px]" style={{ background: theme.node.panel, color: theme.node.muted }}>
                             <Camera className="size-3" aria-hidden="true" />
-                            {camera?.name || "未选择机位"}
+                            {camera?.name || translate("canvas.noCameraSelected")}
                         </div>
                         <div className="absolute bottom-2 left-2 flex items-center gap-1 text-[10px]" style={{ color: theme.node.muted }}>
                             <KeyRound className="size-3" aria-hidden="true" />
-                            {keyframeCount} 个关键帧
-                        </div>
+                            {keyframeCount} {translate("canvas.keyframes_2e317f")}</div>
                     </div>
                 </div>
                 <div className="grid grid-cols-3 gap-2 border-t px-3 py-2.5 text-[11px]" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
@@ -64,20 +66,17 @@ export const DirectorDeskNode = memo(function DirectorDeskNode({ data: rawData, 
                         <strong className="mr-1 text-sm" style={{ color: theme.node.text }}>
                             {project.objects.length}
                         </strong>
-                        对象
-                    </span>
+                        {translate("canvas.object")}</span>
                     <span>
                         <strong className="mr-1 text-sm" style={{ color: theme.node.text }}>
                             {project.cameras.length}
                         </strong>
-                        机位
-                    </span>
+                        {translate("canvas.camera")}</span>
                     <span>
                         <strong className="mr-1 text-sm" style={{ color: theme.node.text }}>
                             {(project.timeline.durationMilliseconds / 1000).toFixed(1)}s
                         </strong>
-                        时长
-                    </span>
+                        {translate("canvas.duration")}</span>
                 </div>
                 <div className="border-t px-3 py-2.5" style={{ borderColor: theme.node.stroke }}>
                     <Button
@@ -89,8 +88,7 @@ export const DirectorDeskNode = memo(function DirectorDeskNode({ data: rawData, 
                             actions.onOpenDirectorDesk?.(data);
                         }}
                     >
-                        打开导演台
-                    </Button>
+                        {translate("canvas.openDirectorDesk")}</Button>
                 </div>
                 <CanvasConnectionHandles />
             </NodeHoverSurface>

@@ -144,7 +144,7 @@ public class SecurityConfiguration {
         configuration.setAllowedOrigins(validAllowedOrigins(properties));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
-        configuration.setExposedHeaders(Arrays.asList("Content-Type", "Cache-Control", "Connection", "X-Accel-Buffering"));
+        configuration.setExposedHeaders(Arrays.asList("Content-Type", "Cache-Control", "Connection", "X-Accel-Buffering", "X-System-Message-Key"));
         configuration.setMaxAge(3600L); // 预检结果缓存1小时，减少OPTIONS请求
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         // 对所有服务端接口应用统一跨域规则。

@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import type { MenuProps } from "antd";
 import { App, Button, Checkbox, Dropdown, Input, Modal, Tooltip } from "antd";
@@ -31,6 +33,7 @@ export function CreationConversationSidebar({
     onDeleteConversation,
     compact = false,
 }: CreationConversationSidebarProps) {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
     const [renameTitle, setRenameTitle] = useState("");
@@ -69,7 +72,7 @@ export function CreationConversationSidebar({
             setRenameTitle("");
             setRenameError("");
         } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : "修改标题失败";
+            const errorMessage = error instanceof Error ? error.message : translate("generation.failedToUpdateTitle");
             setRenameError(errorMessage);
             message.error(errorMessage);
         } finally {
@@ -79,17 +82,17 @@ export function CreationConversationSidebar({
 
     const requestDelete = (item: CreationConversationItem) => {
         modal.confirm({
-            title: "删除记录",
-            content: `确定删除“${item.title}”吗？删除后无法恢复。`,
-            okText: "删除",
-            cancelText: "取消",
+            title: translate("generation.deleteRecord"),
+            content: translate("generation.deleteThisCannotBeUndone", { value0: item.title }),
+            okText: translate("generation.delete"),
+            cancelText: translate("generation.cancel"),
             okButtonProps: { danger: true },
             onOk: async () => {
                 try {
                     await onDeleteConversation(item.id);
-                    message.success("记录已删除");
+                    message.success(translate("generation.recordDeleted"));
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "删除记录失败");
+                    message.error(error instanceof Error ? error.message : translate("generation.failedToDeleteRecord"));
                     throw error;
                 }
             },
@@ -100,25 +103,23 @@ export function CreationConversationSidebar({
         <>
             <div className={`flex h-full min-h-0 flex-col ${compact ? "" : "p-4"}`}>
                 <div className="mb-4 flex items-center justify-between gap-3">
-                    <Tooltip title="新建对话">
-                        <Button type="text" size="small" className="!h-8 !w-8 !rounded-lg !p-0" icon={<Plus className="size-4" />} onClick={onCreate} aria-label="新建对话" />
+                    <Tooltip title={translate("generation.newConversation")}>
+                        <Button type="text" size="small" className="!h-8 !w-8 !rounded-lg !p-0" icon={<Plus className="size-4" />} onClick={onCreate} aria-label={translate("generation.newConversation")} />
                     </Tooltip>
                     <Button type="text" size="small" className="!h-8 !w-8 !rounded-lg !p-0" icon={managementMode ? <CheckSquare className="size-4" /> : <MoreHorizontal className="size-4" />} onClick={onToggleManagement} />
                 </div>
 
                 <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="text-xs font-medium text-[var(--studio-muted)]">最近</div>
+                    <div className="text-xs font-medium text-[var(--studio-muted)]">{translate("generation.recent")}</div>
                     {items.length ? <div className="text-xs text-[var(--studio-faint)]">{items.length}</div> : null}
                 </div>
 
                 {managementMode ? (
                     <div className="mb-3 flex flex-wrap gap-2">
                         <Button size="small" className="!rounded-[6px]" onClick={onToggleSelectAll}>
-                            全选
-                        </Button>
+                            {translate("generation.selectAll")}</Button>
                         <Button size="small" danger className="!rounded-[6px]" icon={<Trash2 className="size-3.5" />} disabled={!hasSelection} onClick={onDeleteSelected}>
-                            删除已选
-                        </Button>
+                            {translate("generation.deleteSelected")}</Button>
                     </div>
                 ) : null}
 
@@ -139,17 +140,17 @@ export function CreationConversationSidebar({
                             ))}
                         </div>
                     ) : (
-                        <div className="py-12 text-center text-sm text-[var(--studio-faint)]">暂无对话</div>
+                        <div className="py-12 text-center text-sm text-[var(--studio-faint)]">{translate("generation.noConversations")}</div>
                     )}
                 </div>
             </div>
-            <Modal title="修改标题" open={Boolean(renameTarget)} onCancel={closeRenameDialog} onOk={() => void submitRename()} okText="保存" cancelText="取消" confirmLoading={renaming} destroyOnHidden>
+            <Modal title={translate("generation.editTitle")} open={Boolean(renameTarget)} onCancel={closeRenameDialog} onOk={() => void submitRename()} okText={translate("generation.save")} cancelText={translate("generation.cancel")} confirmLoading={renaming} destroyOnHidden>
                 <div className="space-y-3 pt-2">
                     <Input
                         value={renameTitle}
                         autoFocus
                         status={renameError ? "error" : undefined}
-                        placeholder="请输入对话标题"
+                        placeholder={translate("generation.enterConversationTitle")}
                         onChange={(event) => {
                             setRenameTitle(event.target.value);
                             if (renameError) {
@@ -163,7 +164,7 @@ export function CreationConversationSidebar({
                         }}
                     />
                     <div className="flex items-center justify-between gap-3 text-xs">
-                        <span className={renameError ? "text-red-500" : "text-[var(--studio-muted)]"}>{renameError || "标题修改后会立即同步到最近对话列表。"}</span>
+                        <span className={renameError ? "text-red-500" : "text-[var(--studio-muted)]"}>{renameError || translate("generation.theTitleUpdatesImmediatelyInRecentConversations")}</span>
                         <span className="shrink-0 text-[var(--studio-faint)]">
                             {normalizeConversationTitle(renameTitle).length}/{MAX_CONVERSATION_TITLE_LENGTH}
                         </span>
@@ -191,16 +192,17 @@ function ConversationItem({
     onRequestRename: (item: CreationConversationItem) => void;
     onRequestDelete: (item: CreationConversationItem) => void;
 }) {
+    const translate = useTranslation();
     const activeClassName = item.active ? "bg-[var(--studio-primary-soft)] ring-1 ring-[var(--studio-primary-line)]" : "hover:bg-[var(--studio-surface-hover)] hover:-translate-y-0.5 hover:border-[var(--studio-primary-line)]";
     const conversationMenuItems: MenuProps["items"] = [
         {
             key: "rename",
-            label: "修改标题",
+            label: translate("generation.editTitle"),
             icon: <Pencil className="size-3.5" />,
         },
         {
             key: "delete",
-            label: item.status === "running" ? "生成中不可删除" : "删除记录",
+            label: item.status === "running" ? translate("generation.cannotDeleteWhileGenerating") : translate("generation.deleteRecord"),
             danger: true,
             disabled: item.status === "running",
             icon: <Trash2 className="size-3.5" />,
@@ -235,7 +237,7 @@ function ConversationItem({
                     <button
                         type="button"
                         className="grid size-8 shrink-0 place-items-center rounded-[6px] text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] lg:hidden"
-                        aria-label={`更多操作：${item.title}`}
+                        aria-label={translate("generation.moreActions", { value0: item.title })}
                         onClick={(event) => {
                             event.stopPropagation();
                         }}
@@ -271,14 +273,15 @@ function ConversationItem({
 }
 
 function ConversationStatus({ status }: { status: CreationConversationItem["status"] }) {
+    const translate = useTranslation();
     if (status === "running") {
-        return <LoaderCircle className="size-4 shrink-0 animate-spin text-[var(--studio-primary)]" aria-label="生成中" />;
+        return <LoaderCircle className="size-4 shrink-0 animate-spin text-[var(--studio-primary)]" aria-label={translate("generation.generating")} />;
     }
     if (status === "unreadSuccess") {
-        return <span className="size-2 shrink-0 rounded-full bg-blue-500" aria-label="生成完成" />;
+        return <span className="size-2 shrink-0 rounded-full bg-blue-500" aria-label={translate("generation.generationComplete")} />;
     }
     if (status === "unreadFailed") {
-        return <span className="size-2 shrink-0 rounded-full bg-red-500" aria-label="生成失败" />;
+        return <span className="size-2 shrink-0 rounded-full bg-red-500" aria-label={translate("generation.generationFailed")} />;
     }
     return null;
 }

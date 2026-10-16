@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.agent.AgentScopeAgentFactory;
 import com.novanovastudio.agent.AgentScopeModelFactory;
@@ -294,12 +296,12 @@ public class StoryboardAgentService {
                                     .build())
                             .timeout(Duration.ofSeconds(properties.getAi().getStoryboardAgent().getTimeoutSeconds()))
                             .map(message -> message.getStructuredData(resultType))
-                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent未返回结构化结果")))
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedNoStructuredResult"))))
                             .doFinally(signal -> agent.close());
                 })
                 .onErrorMap(exception -> exception instanceof BusinessException
                         ? exception
-                        : new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent调用失败: " + errorMessage(exception)));
+                        : new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentFailed", errorMessage(exception))));
     }
 
     /**
@@ -310,24 +312,24 @@ public class StoryboardAgentService {
      */
     private NormalizedStoryboard normalizeGeneratedStoryboard(StoryboardDtos.GeneratedStoryboardResult result) {
         if (result == null || result.shots() == null || result.shots().isEmpty()) {
-            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent未生成有效镜头");
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedNoValidShots"));
         }
         if (result.shots().size() > StoryboardDtos.MAX_SHOT_COUNT) {
-            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回的镜头数量超出限制");
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentExceededShotLimit"));
         }
         if (result.assets() != null && result.assets().size() > 300) {
-            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回的资产数量超出限制");
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentExceededAssetLimit"));
         }
         List<StoryboardDtos.StoryboardAsset> assets = new ArrayList<>();
         Map<String, String> assetIdByReferenceKey = new LinkedHashMap<>();
         for (StoryboardDtos.GeneratedStoryboardAsset asset : result.assets() == null ? List.<StoryboardDtos.GeneratedStoryboardAsset>of() : result.assets()) {
             String kind = asset == null ? "" : normalizeRequiredText(asset.kind(), "分镜Agent返回的资产类别");
             if (asset == null || !ASSET_KINDS.contains(kind)) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回了不支持的资产类别");
+                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedAnUnsupportedAssetCategory"));
             }
             String referenceKey = normalizeRequiredText(asset.referenceKey(), "分镜Agent返回的资产引用键");
             if (assetIdByReferenceKey.containsKey(referenceKey)) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回了重复的资产引用键");
+                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedDuplicateAssetKeys"));
             }
             String assetId = UUID.randomUUID().toString();
             assetIdByReferenceKey.put(referenceKey, assetId);
@@ -339,22 +341,22 @@ public class StoryboardAgentService {
         List<StoryboardDtos.StoryboardShot> shots = new ArrayList<>();
         for (StoryboardDtos.GeneratedStoryboardShot shot : result.shots()) {
             if (shot == null) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回了空镜头");
+                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedAnEmptyShot"));
             }
             validateShotFields(shot.shotNumber(), shot.durationSeconds(), shot.visualDescription(), shot.shotSize(), shotNumbers, "分镜Agent返回的镜头");
             if (shot.assetReferenceKeys() == null) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回的镜头资产引用不能为空");
+                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentShotAssetReferencesAreRequired"));
             }
             Set<String> referencedAssetKeys = new LinkedHashSet<>();
             List<String> assetIds = new ArrayList<>();
             for (String referenceKeyValue : shot.assetReferenceKeys()) {
                 String referenceKey = normalizeRequiredText(referenceKeyValue, "分镜Agent返回的镜头资产引用");
                 if (!referencedAssetKeys.add(referenceKey)) {
-                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回了重复的镜头资产引用");
+                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedDuplicateShotAssetReferences"));
                 }
                 String assetId = assetIdByReferenceKey.get(referenceKey);
                 if (assetId == null) {
-                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回了不存在的镜头资产引用");
+                    throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReferencedMissingAssets"));
                 }
                 assetIds.add(assetId);
             }
@@ -377,7 +379,7 @@ public class StoryboardAgentService {
     private List<StoryboardDtos.StoryboardPrompt> validatePromptComposition(
             List<StoryboardDtos.StoryboardShot> shots, String visualStyle, StoryboardDtos.PromptCompositionResult result) {
         if (result == null || result.prompts() == null || result.prompts().size() != shots.size()) {
-            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回的提示词数量与镜头数量不一致");
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardPromptCountDoesNotMatchShotCount"));
         }
         String normalizedVisualStyle = normalizeLineBreaks(normalizeRequiredText(visualStyle, "视觉风格"));
         Set<String> expectedShotIds = shots.stream().map(StoryboardDtos.StoryboardShot::id).collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
@@ -386,18 +388,18 @@ public class StoryboardAgentService {
             String shotId = prompt == null ? "" : normalizeRequiredText(prompt.shotId(), "分镜Agent返回的镜头标识");
             String finalPrompt = prompt == null ? "" : normalizeRequiredText(prompt.finalPrompt(), "分镜Agent返回的最终提示词");
             if (!expectedShotIds.contains(shotId) || promptByShotId.putIfAbsent(shotId, finalPrompt) != null) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回了缺失、重复或额外的镜头标识");
+                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedMissingDuplicateOrExtraShotIDs"));
             }
             if (!isChinesePrompt(finalPrompt)) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回的最终提示词必须以中文为主");
+                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardFinalPromptsMustPrimarilyUseChinese"));
             }
             StoryboardDtos.StoryboardShot shot = shots.stream().filter(item -> item.id().equals(shotId)).findFirst().orElseThrow();
             if (!isFixedPromptFormat(finalPrompt, shot, normalizedVisualStyle)) {
-                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回的最终提示词未按固定格式生成");
+                throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardFinalPromptFormatIsInvalid"));
             }
         }
         if (!promptByShotId.keySet().equals(expectedShotIds)) {
-            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "分镜Agent返回的镜头标识不完整");
+            throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedIncompleteShotIDs"));
         }
         return shots.stream().map(shot -> new StoryboardDtos.StoryboardPrompt(shot.id(), promptByShotId.get(shot.id()))).toList();
     }
@@ -446,7 +448,7 @@ public class StoryboardAgentService {
      */
     private void validateGenerateRequest(StoryboardDtos.GenerateStoryboardRequest request) {
         if (request == null) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, "分镜生成请求不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.storyboardGenerationRequestIsRequired"));
         }
         normalizeRequiredText(request.scriptContent(), "剧本文本");
         normalizeRequiredText(request.instruction(), "分镜描述");
@@ -462,26 +464,26 @@ public class StoryboardAgentService {
      */
     private void validateComposeRequest(StoryboardDtos.ComposePromptsRequest request) {
         if (request == null) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, "提示词合成请求不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.promptCompositionRequestIsRequired"));
         }
         normalizeRequiredText(request.scriptContent(), "剧本文本");
         normalizeRequiredText(request.instruction(), "分镜描述");
         normalizeRequiredText(request.visualStyle(), "视觉风格");
         normalizeRequiredText(request.model(), "文本模型");
         if (request.shots() == null || request.shots().isEmpty()) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, "至少需要一个镜头");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.atLeastOneShotIsRequired"));
         }
         if (request.shots().size() > StoryboardDtos.MAX_SHOT_COUNT) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头数量不能超过100");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.atMost100Shots"));
         }
         Set<String> assetIds = new LinkedHashSet<>();
         for (StoryboardDtos.StoryboardAsset asset : request.assets() == null ? List.<StoryboardDtos.StoryboardAsset>of() : request.assets()) {
             if (asset == null || !ASSET_KINDS.contains(normalizeRequiredText(asset.kind(), "资产类别"))) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "资产类别仅支持character、scene、prop");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.assetCategoryMustBeCharacterSceneOrProp"));
             }
             String assetId = normalizeRequiredText(asset.id(), "资产标识");
             if (!assetIds.add(assetId)) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "资产标识不能重复");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.assetIDsMustBeUnique"));
             }
             normalizeRequiredText(asset.name(), "资产名称");
         }
@@ -489,24 +491,24 @@ public class StoryboardAgentService {
         Set<String> shotIds = new LinkedHashSet<>();
         for (StoryboardDtos.StoryboardShot shot : request.shots()) {
             if (shot == null) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头不能为空");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.shotIsRequired"));
             }
             String shotId = normalizeRequiredText(shot.id(), "镜头标识");
             if (!shotIds.add(shotId)) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头标识不能重复");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.shotIDsMustBeUnique"));
             }
             validateShotFields(shot.shotNumber(), shot.durationSeconds(), shot.visualDescription(), shot.shotSize(), shotNumbers, "镜头");
             if (shot.assetIds() == null) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头关联资产不能为空");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.shotLinkedAssetsAreRequired"));
             }
             Set<String> associatedAssetIds = new LinkedHashSet<>();
             for (String assetIdValue : shot.assetIds()) {
                 String assetId = normalizeRequiredText(assetIdValue, "镜头关联资产标识");
                 if (!associatedAssetIds.add(assetId)) {
-                    throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头关联资产标识不能重复");
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.linkedAssetIDsMustBeUnique"));
                 }
                 if (!assetIds.contains(assetId)) {
-                    throw new BusinessException(ErrorCode.PARAM_INVALID, "镜头关联了不存在的资产");
+                    throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.shotReferencesAMissingAsset"));
                 }
             }
         }
@@ -520,16 +522,16 @@ public class StoryboardAgentService {
      */
     private void validateAssetImageRequest(StoryboardDtos.CreateAssetImageTaskRequest request) {
         if (request == null) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, "资产图片任务请求不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.assetImageTaskRequestIsRequired"));
         }
         normalizeRequiredText(request.nodeId(), "分镜节点标识");
         normalizeRequiredText(request.visualStyle(), "视觉风格");
         normalizeRequiredText(request.model(), "图片模型");
         if (request.asset() == null || request.settings() == null) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, "资产与图片生成参数不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.assetAndImageParametersAreRequired"));
         }
         if (!ASSET_KINDS.contains(normalizeRequiredText(request.asset().kind(), "资产类别"))) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "资产类别仅支持character、scene、prop");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.assetCategoryMustBeCharacterSceneOrProp"));
         }
         normalizeRequiredText(request.asset().id(), "资产标识");
         normalizeRequiredText(request.asset().name(), "资产名称");
@@ -572,7 +574,7 @@ public class StoryboardAgentService {
             rendered.add(text.toString());
         }
         if (rendered.isEmpty()) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "分镜资产图片提示词模板段落内容为空: " + asset.kind());
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.storyboardImagePromptSectionIsEmpty", asset.kind()));
         }
         return String.join("\n", rendered).trim();
     }
@@ -603,7 +605,7 @@ public class StoryboardAgentService {
         if (kind.equals(currentKind)) {
             return String.join("\n", lines).trim();
         }
-        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "分镜资产图片提示词模板缺少类别段落: " + kind);
+        throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.storyboardImagePromptHasNoCategorySection", kind));
     }
 
     /**
@@ -620,14 +622,14 @@ public class StoryboardAgentService {
     private void validateShotFields(Integer shotNumber, Integer durationSeconds, String visualDescription, String shotSize,
                                     Set<Integer> shotNumbers, String subject) {
         if (shotNumber == null || shotNumber < 1 || !shotNumbers.add(shotNumber)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, subject + "镜号必须为不重复的正整数");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.shotNumberMustBeAUniquePositiveInteger", subject));
         }
         if (durationSeconds == null || durationSeconds < 1 || durationSeconds > 600) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, subject + "时长必须为1至600秒的正整数");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.durationMustBeAnIntegerFrom1To600Seconds", subject));
         }
         normalizeRequiredText(visualDescription, subject + "画面描述");
         if (!SHOT_SIZES.contains(normalizeRequiredText(shotSize, subject + "景别"))) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, subject + "景别不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidShotSize", subject));
         }
     }
 
@@ -642,7 +644,7 @@ public class StoryboardAgentService {
         try {
             return Math.multiplyExact(unitCredits, shotCount);
         } catch (ArithmeticException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "分镜提示词合成积分计算超出范围");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.storyboardPromptCreditCalculationExceedsRange"));
         }
     }
 
@@ -656,7 +658,7 @@ public class StoryboardAgentService {
     private String normalizeRequiredText(String value, String fieldName) {
         String normalized = value == null ? "" : value.trim();
         if (!StringUtils.hasText(normalized)) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, fieldName + "不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.isRequired", fieldName));
         }
         return normalized;
     }

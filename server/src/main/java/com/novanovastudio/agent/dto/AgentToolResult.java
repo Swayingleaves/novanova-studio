@@ -21,10 +21,10 @@ import java.util.Map;
  * @param result    ToolResult 工具执行结果
  */
 public record AgentToolResult(
-    @NotBlank(message = "会话ID不能为空") String sessionId,
-    @NotBlank(message = "主Agent请求ID不能为空") String requestId,
-    @NotBlank(message = "工具调用ID不能为空") String callId,
-    @NotNull(message = "工具执行结果不能为空") ToolResult result
+    @NotBlank(message = "business.conversationIDIsRequired") String sessionId,
+    @NotBlank(message = "business.agentRequestIDIsRequired") String requestId,
+    @NotBlank(message = "business.toolCallIDIsRequired") String callId,
+    @NotNull(message = "business.toolResultIsRequired") ToolResult result
 ) {
 
     /**

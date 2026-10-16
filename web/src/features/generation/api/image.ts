@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
 import { createAiTask, subscribeAiTaskDeltas, waitAiTask, type ServerGenerationSource } from "@/services/api/server";
@@ -32,7 +34,7 @@ export async function requestImageQuestion(config: AiConfig, messages: AiTextMes
         });
         taskId = task.id;
         const completed = await waitAiTask(task.id, { signal: options?.signal });
-        const answer = textTaskResult(completed.resultData) || streamed || "没有返回内容";
+        const answer = textTaskResult(completed.resultData) || streamed || translate("generation.noContentReturned");
         if (!streamed) onDelta(answer);
         return answer;
     } finally {
@@ -46,7 +48,7 @@ function textTaskPrompt(messages: AiTextMessage[]) {
 
 function textMessageContent(content: AiTextMessage["content"]) {
     if (typeof content === "string") return content;
-    return content.map((item) => item.type === "text" ? item.text : `[图片：${item.image_url.url}]`).join("\n");
+    return content.map((item) => item.type === "text" ? item.text : translate("generation.image", { value0: item.image_url.url })).join("\n");
 }
 
 function textTaskResult(resultData: unknown) {

@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import type { AiTextMessage } from "@/features/generation/api/image";
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
 import { seedanceReferenceLabel } from "@/features/generation/lib/seedance-video";
@@ -52,9 +54,9 @@ export function resolveNodeGenerationPrompt(nodeId: string, nodes: CanvasNode[],
     const context = buildNodeGenerationContext(nodeId, nodes, connections, prompt);
     const resolvedPrompt = context.prompt.trim();
     const labels = [
-        ...context.referenceImages.map((_, index) => imageReferenceLabel(index)),
+        ...context.referenceImages.map((_, index) => `图片${index + 1}`),
         ...context.referenceAudios.map((_, index) => `音频${index + 1}`),
-        ...context.referenceVideos.map((_, index) => seedanceReferenceLabel("video", index)),
+        ...context.referenceVideos.map((_, index) => `视频${index + 1}`),
     ];
     if (!includeMediaReferencePrompt || !labels.length) return resolvedPrompt;
     const referencePrompt = `请根据${labels.join("、")}生成`;
@@ -164,10 +166,10 @@ function readNodeText(node: CanvasNode) {
 }
 
 function createGenerationLabel(type: NodeGenerationInput["type"], index: number) {
-    if (type === "audio") return `音频${index + 1}`;
+    if (type === "audio") return translate("canvas.audio_770332", { value0: index + 1 });
     if (type === "image") return imageReferenceLabel(index);
     if (type === "video") return seedanceReferenceLabel("video", index);
-    return `文本${index + 1}`;
+    return translate("canvas.text_923647", { value0: index + 1 });
 }
 
 function readReferenceImage(node: CanvasNode): ReferenceImage | null {

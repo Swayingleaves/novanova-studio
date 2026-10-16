@@ -1,5 +1,7 @@
 package com.novanovastudio.storage;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import java.net.URI;
@@ -37,12 +39,12 @@ public final class ObjectStorageUrlBuilder {
      * 校验HTTP或HTTPS地址。
      *
      * @param value String 待校验地址
-     * @param fieldName String 字段名称
+     * @param fieldName SystemMessage 字段名称
      * @throws BusinessException 地址为空或不符合HTTP(S)格式时抛出
      */
-    public static void requireHttpUrl(String value, String fieldName) {
+    public static void requireHttpUrl(String value, SystemMessage fieldName) {
         if (!StringUtils.hasText(value)) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, fieldName + "不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.isRequired", fieldName));
         }
         try {
             URI uri = URI.create(value.trim());
@@ -51,7 +53,7 @@ public final class ObjectStorageUrlBuilder {
                 throw new IllegalArgumentException();
             }
         } catch (IllegalArgumentException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, fieldName + "必须是HTTP或HTTPS地址");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.mustBeAnHTTPOrHTTPSURL", fieldName));
         }
     }
 
@@ -59,12 +61,12 @@ public final class ObjectStorageUrlBuilder {
      * 校验文本字段不为空。
      *
      * @param value String 待校验文本
-     * @param fieldName String 字段名称
+     * @param fieldName SystemMessage 字段名称
      * @throws BusinessException 文本为空时抛出
      */
-    public static void requireText(String value, String fieldName) {
+    public static void requireText(String value, SystemMessage fieldName) {
         if (!StringUtils.hasText(value)) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, fieldName + "不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.isRequired", fieldName));
         }
     }
 

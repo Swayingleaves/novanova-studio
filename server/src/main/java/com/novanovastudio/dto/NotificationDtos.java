@@ -22,7 +22,7 @@ public final class NotificationDtos {
      * @param content String 公告内容
      * @param priority String 优先级
      */
-    public record CreateNotificationRequest(@NotBlank(message = "公告标题不能为空") @Size(max = 200, message = "公告标题不能超过200字") String title,
+    public record CreateNotificationRequest(@NotBlank(message = "business.announcementTitleIsRequired") @Size(max = 200, message = "business.announcementTitleMustNotExceed200Characters") String title,
                                             String content,
                                             String priority) {
     }

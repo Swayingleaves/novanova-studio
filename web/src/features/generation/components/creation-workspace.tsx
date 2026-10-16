@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useState } from "react";
 import { Drawer, Grid } from "antd";
@@ -18,6 +20,7 @@ type CreationWorkspaceProps = {
 };
 
 export function CreationWorkspace({ sidebar, thread, composer, settings }: CreationWorkspaceProps) {
+    const translate = useTranslation();
     const screens = Grid.useBreakpoint();
     const isMobile = !screens.lg;
     const [threadAtBottom, setThreadAtBottom] = useState(true);
@@ -85,7 +88,7 @@ export function CreationWorkspace({ sidebar, thread, composer, settings }: Creat
                         type="button"
                         className="fixed bottom-20 left-4 z-20 grid size-10 place-items-center rounded-full border border-[var(--studio-line)] bg-[var(--studio-glass-strong)] text-[var(--studio-ink)] shadow-[var(--studio-shadow)] backdrop-blur lg:hidden"
                         onClick={sidebar.onOpenMobile}
-                        aria-label="打开会话列表"
+                        aria-label={translate("generation.openConversations")}
                     >
                         <PanelLeft className="size-4" />
                     </button>

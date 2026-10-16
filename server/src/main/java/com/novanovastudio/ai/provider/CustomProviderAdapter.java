@@ -1,5 +1,7 @@
 package com.novanovastudio.ai.provider;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -126,8 +128,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         return switch (context.task().getTaskType()) {
             case AiTaskTypes.IMAGE -> executeImageTask(context);
             case AiTaskTypes.VIDEO -> executeVideoTask(context);
-            default -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
-                    "自定义模型调用格式暂不支持" + context.task().getTaskType() + "任务"));
+            default -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.customFormatDoesNotSupportTasks", context.task().getTaskType())));
         };
     }
 
@@ -182,7 +183,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                                              String mode, String taskKind, List<String> referenceUrls, List<String> videoReferenceUrls,
                                              List<String> audioReferenceUrls) {
         if (!StringUtils.hasText(group.requestPath())) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "自定义模型未配置请求路径"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.customModelRequestPathIsMissing")));
         }
         String method = normalizeMethod(group.requestMethod());
         String url = AiHttpClient.buildAiUrl(context.channel().baseUrl(), renderUrlPath(group.requestPath(), null));
@@ -197,8 +198,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                             AiJsonUtils.formatResponseForLog(response).toJSONString());
                     String errorMessage = providerErrorMessage(response);
                     if (StringUtils.hasText(errorMessage)) {
-                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
-                                "自定义模型接口调用失败: " + errorMessage));
+                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.customModelRequestFailed", errorMessage)));
                     }
                     String extracted = extractByPath(response, group.resultPath());
                     if (isHttpUrl(extracted)) {
@@ -260,7 +260,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                         .then(context.isCancelRequested())
                         .flatMap(cancelRequested -> {
                             if (Boolean.TRUE.equals(cancelRequested)) {
-                                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "任务已取消"));
+                                return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCanceled")));
                             }
                             int progress = Math.min(95, 20 + attempt);
                             return context.updateRunningProgress(progress).then(
@@ -274,8 +274,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                                                 .flatMap(response -> {
                                                     String errorMessage = providerErrorMessage(response);
                                                     if (StringUtils.hasText(errorMessage)) {
-                                                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
-                                                                "自定义模型查询接口调用失败: " + errorMessage));
+                                                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.customModelQueryFailed", errorMessage)));
                                                     }
                                                     log.info("自定义模型查询轮询第{}次响应: taskId={}, providerTaskId={}, response={}",
                                                             attempt + 1, context.task().getId(), taskId,
@@ -356,8 +355,8 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                                 .filter(CustomProviderAdapter::isRetryableBodyError)
                                 .doAfterRetry(retrySignal -> agentOutput.set(null))))
                 .onErrorResume(exception -> Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
-                        "AI构造" + purpose + "失败: " + exception.getMessage()
-                                + (StringUtils.hasText(agentOutput.get()) ? "，AI返回内容: " + abbreviate(agentOutput.get()) : ""))));
+                        SystemMessage.of("business.aIFailedToBuild", purpose, exception.getMessage(),
+                                StringUtils.hasText(agentOutput.get()) ? "，AI返回内容: " + abbreviate(agentOutput.get()) : ""))));
     }
 
     /**
@@ -439,11 +438,9 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                 .map(CustomProviderAdapter::findFirstMediaUrl)
                 .flatMap(url -> StringUtils.hasText(url)
                         ? Mono.just(url)
-                        : Mono.<String>error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
-                        "自定义模型调用成功但无法从响应中解析出" + target + "媒体地址，请检查请求/响应示例与结果路径配置")))
+                        : Mono.<String>error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.cannotParseMediaURLCheckAPIExamplesAndResultPath", target))))
                 .onErrorResume(BusinessException.class, Mono::error)
-                .onErrorResume(exception -> Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR,
-                        "自定义模型调用成功但无法从响应中解析出" + target + "媒体地址，请检查请求/响应示例与结果路径配置")));
+                .onErrorResume(exception -> Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.cannotParseMediaURLCheckAPIExamplesAndResultPath", target))));
     }
 
     /**
@@ -485,7 +482,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         if (StringUtils.hasText(mode)) {
             if (!VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode)
                     && !AiTaskParameterReader.safeReferences(context.request().audioReferences()).isEmpty()) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "音频输入仅支持全能参考模式");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.audioInputRequiresUniversalReferenceMode"));
             }
             return mode;
         }
@@ -509,7 +506,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         Map<String, PersistenceDtos.CustomModelGroupConfig> configs = context.customModelConfig();
         PersistenceDtos.CustomModelGroupConfig group = configs == null ? null : configs.get(mode);
         if (group == null) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "自定义模型未配置该能力或模式: " + mode);
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.customModelCapabilityOrModeIsNotConfigured", mode));
         }
         return group;
     }
@@ -608,9 +605,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
             }
             return parsed;
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID,
-                    "自定义模型" + fieldName + "渲染结果不是合法JSON: " + abbreviate(StringUtils.hasText(rendered) ? rendered : "")
-                            + "（请检查占位符写法与引号，字段值需用占位符如{{prompt}}引用）");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.customModelIsNotValidJSONCheckPlaceholdersAndQuotes", fieldName, abbreviate(StringUtils.hasText(rendered) ? rendered : "")));
         }
     }
 
@@ -626,7 +621,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
      */
     private static String renderTemplate(String template, Map<String, Object> placeholders) {
         if (!StringUtils.hasText(template)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "自定义模型请求示例不能为空");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.customModelRequestExampleIsRequired"));
         }
         Matcher matcher = PLACEHOLDER_PATTERN.matcher(template);
         StringBuffer buffer = new StringBuffer();
@@ -903,7 +898,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                 }
             }
         }
-        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "AI返回内容不是合法JSON对象");
+        throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.aIResponseIsNotAValidJSONObject"));
     }
 
     /**

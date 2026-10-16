@@ -436,7 +436,7 @@ class AbstractTaskProfileTest {
      */
     private AiTaskDtos.AiGenerationTaskResponse response(String status, int progress, JSONObject resultData) {
         return new AiTaskDtos.AiGenerationTaskResponse("task-1", AiTaskTypes.IMAGE, "model-1", "图片渠道",
-                status, progress, new JSONObject(), resultData, "", "", "", "", "");
+                status, progress, new JSONObject(), resultData, "", null, "", "", "", "");
     }
 
     /**

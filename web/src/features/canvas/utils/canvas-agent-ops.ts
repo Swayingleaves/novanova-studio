@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 import { nanoid } from "nanoid";
 
 import { createAudioNode, createImageNode, createTextNode, createVideoNode } from "../constants.ts";
@@ -71,14 +73,14 @@ type AgentOpType = CanvasAgentOp["type"];
 type AgentReducer = (snapshot: CanvasAgentSnapshot, op: CanvasAgentOp, index: number) => CanvasAgentSnapshot;
 
 const OPERATION_LABELS: Record<AgentOpType, string> = {
-    add_node: "新增节点",
-    update_node: "更新节点",
-    delete_node: "删除节点",
-    delete_connections: "删除连线",
-    connect_nodes: "连接",
-    set_viewport: "调整视图",
-    select_nodes: "选择节点",
-    run_generation: "触发生成",
+    get add_node() { return translate("canvas.addNode"); },
+    get update_node() { return translate("canvas.updateNode"); },
+    get delete_node() { return translate("canvas.deleteNode"); },
+    get delete_connections() { return translate("canvas.deleteConnection"); },
+    get connect_nodes() { return translate("canvas.connect"); },
+    get set_viewport() { return translate("canvas.adjustView"); },
+    get select_nodes() { return translate("canvas.selectNode"); },
+    get run_generation() { return translate("canvas.startGeneration"); },
 };
 
 const OPERATION_REDUCERS: Record<AgentOpType, AgentReducer> = {

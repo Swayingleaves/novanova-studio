@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.AiTaskDtos;
@@ -133,11 +135,11 @@ public class CheckInService {
                         getRewardSettings())
                 .flatMap(result -> {
                     if (result.getT1().isPresent()) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "今日已签到，明天再来"));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.alreadyCheckedInComeBackTomorrow")));
                     }
                     int earnedCredits = result.getT2().checkInCredits();
                     return checkInRepository.claimCheckIn(userId, today, earnedCredits)
-                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "今日已签到，明天再来")))
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.alreadyCheckedInComeBackTomorrow"))))
                             .flatMap(recordId -> grantCredits(userId, earnedCredits, recordId))
                             .map(balance -> new CheckInDtos.CheckInResultResponse(today.toString(), earnedCredits, balance))
                             .doOnSuccess(response -> log.info("用户签到成功: userId={}, date={}, earnedCredits={}",
@@ -158,7 +160,7 @@ public class CheckInService {
     private Mono<Integer> grantCredits(Long userId, int earnedCredits, Long checkInRecordId) {
         if (earnedCredits == 0) {
             return creditRepository.getCreditBalance(userId)
-                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分账户不存在，无法签到")));
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.creditAccountNotFoundCannotCheckIn"))));
         }
         OffsetDateTime expiresAt = OffsetDateTime.now(CHECK_IN_TIME_ZONE).plusHours(CREDIT_VALID_HOURS);
         return creditGrantService.grantExpiringCredits(userId, CreditService.TRANSACTION_DAILY_CHECK_IN, String.valueOf(checkInRecordId), earnedCredits, expiresAt)
@@ -180,7 +182,7 @@ public class CheckInService {
         try {
             return YearMonth.parse(month.trim(), MONTH_FORMATTER);
         } catch (DateTimeParseException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "月份参数格式应为yyyy-MM");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.monthFormatMustBeYyyyMM"));
         }
     }
 }

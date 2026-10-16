@@ -7,6 +7,7 @@
 package com.novanovastudio.agent.dto;
 
 import java.util.Map;
+import com.novanovastudio.common.SystemMessage;
 
 /**
  * Agent SSE 事件数据结构
@@ -52,7 +53,8 @@ public record AgentEvent(
     String taskId,
     String status,
     AgentAction action,
-    String requestId
+    String requestId,
+    SystemMessage systemMessage
 ) {
 
     /**
@@ -85,7 +87,7 @@ public record AgentEvent(
                       AgentAction action) {
         this(type, sessionId, callId, name, arguments, delta, messageId, text, errorMessage, thoughtId,
                 thoughtDelta, thoughtDurationMs, resultOk, resultMessage, resultData, progress, taskId, status,
-                action, null);
+                action, null, null);
     }
 
     /**
@@ -276,7 +278,8 @@ public record AgentEvent(
      */
     public static AgentEvent promptPrepared(String sessionId, String planId, String taskId, String strategy) {
         return new AgentEvent("prompt-prepared", sessionId, taskId, null, null, null, null, "提示词已准备", null, null, null, null,
-                null, null, Map.of("planId", planId, "taskId", taskId, "strategy", strategy), null, null, "prepared", null);
+                null, null, Map.of("planId", planId, "taskId", taskId, "strategy", strategy), null, null, "prepared", null)
+                .withSystemMessage(SystemMessage.of("system.promptPrepared"));
     }
 
     /**
@@ -305,7 +308,76 @@ public record AgentEvent(
         }
         return new AgentEvent(type, sessionId, callId, name, arguments, delta, messageId, text, errorMessage,
                 thoughtId, thoughtDelta, thoughtDurationMs, resultOk, resultMessage, resultData, progress, taskId,
-                status, action, value);
+                status, action, value, systemMessage);
+    }
+
+    /**
+     * 创建带请求归属、尚未绑定系统说明的事件。
+     * @param type String 事件类型
+     * @param sessionId String 会话ID
+     * @param callId String 工具调用ID
+     * @param name String 工具名称
+     * @param arguments Map 工具参数
+     * @param delta String 文本增量
+     * @param messageId String 消息ID
+     * @param text String 文本
+     * @param errorMessage String 错误诊断
+     * @param thoughtId String 思考ID
+     * @param thoughtDelta String 思考增量
+     * @param thoughtDurationMs Integer 思考耗时
+     * @param resultOk Boolean 执行结果
+     * @param resultMessage String 结果说明
+     * @param resultData Map 结果数据
+     * @param progress Integer 进度
+     * @param taskId String 任务ID
+     * @param status String 状态
+     * @param action AgentAction 交互动作
+     * @param requestId String 请求ID
+     */
+    public AgentEvent(String type, String sessionId, String callId, String name, Map<String, Object> arguments,
+                      String delta, String messageId, String text, String errorMessage, String thoughtId,
+                      String thoughtDelta, Integer thoughtDurationMs, Boolean resultOk, String resultMessage,
+                      Map<String, Object> resultData, Integer progress, String taskId, String status,
+                      AgentAction action, String requestId) {
+        this(type, sessionId, callId, name, arguments, delta, messageId, text, errorMessage, thoughtId,
+                thoughtDelta, thoughtDurationMs, resultOk, resultMessage, resultData, progress, taskId, status, action, requestId, null);
+    }
+
+    /**
+     * 绑定语言中立系统说明，模型生成的文本和工具参数保持原样。
+     * @param message SystemMessage 系统消息
+     * @return AgentEvent 新事件
+     */
+    public AgentEvent withSystemMessage(SystemMessage message) {
+        return new AgentEvent(type, sessionId, callId, name, arguments, delta, messageId, text, errorMessage,
+                thoughtId, thoughtDelta, thoughtDurationMs, resultOk, resultMessage, resultData, progress, taskId,
+                status, action, requestId, message);
+    }
+
+    /**
+     * 在订阅边界生成用户当前语言的系统说明。
+     * @param locale java.util.Locale 当前订阅语言
+     * @return AgentEvent 当前语言事件
+     */
+    public AgentEvent withLocale(java.util.Locale locale) {
+        SystemMessage message = systemMessage;
+        if (message == null && "canceled".equals(type)) message = SystemMessage.of("system.taskCanceled");
+        if (message == null && "queue-status".equals(type)) message = SystemMessage.of("queued".equals(status) ? "system.queued" : "system.running");
+        if (message == null && "error".equals(type)) message = SystemMessage.of("system.executionFailed", errorMessage);
+        AgentAction translatedAction = action == null ? null : action.withLocale(locale);
+        if (message == null && translatedAction == null) return this;
+        String translated = message == null ? null : message.render(locale);
+        Map<String, Object> translatedData = resultData;
+        if (message != null && "plan-task-status".equals(type) && resultData != null) {
+            translatedData = new java.util.LinkedHashMap<>(resultData);
+            translatedData.put("message", translated);
+        }
+        boolean messageIsText = "canceled".equals(type) || "queue-status".equals(type) || "plan-task-status".equals(type)
+                || "task-complete".equals(type) || "prompt-prepared".equals(type) || "notice".equals(type) || "tool-cancel".equals(type);
+        return new AgentEvent(type, sessionId, callId, name, arguments, delta, messageId,
+                translated != null && messageIsText ? translated : text, translated != null && "error".equals(type) ? translated : errorMessage,
+                thoughtId, thoughtDelta, thoughtDurationMs, resultOk, translated != null && "tool-result".equals(type) ? translated : resultMessage,
+                translatedData, progress, taskId, status, translatedAction, requestId, message);
     }
 
 }

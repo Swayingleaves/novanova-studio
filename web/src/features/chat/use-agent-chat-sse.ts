@@ -1,6 +1,10 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocale } from "next-intl";
 import type { AgentAction, AgentAttachment, AgentEvent, CreationSettings } from "@/features/canvas/api/agent";
 import { agentChat, agentRequestStatus, agentSubscribeEvents, cancelAgentChat } from "@/features/canvas/api/agent";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -48,6 +52,9 @@ type AgentChatSSEReturn = {
  * 图片与视频入口下后端自行执行工具，前端透传事件给回调。
  */
 export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn {
+    const translate = useTranslation();
+  const locale = useLocale();
+  const subscribedLocale = useRef(locale);
   const { entrySource, creationSettings, skillId } = props;
 
   const sessionIdRef = useRef<string | undefined>(undefined);
@@ -114,10 +121,10 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
   const cancelSession = useCallback(async (sid: string, rid: string) => {
     try {
       await cancelAgentChat(sid, rid);
-      finishCanceledRequest(rid, "已停止生成");
+      finishCanceledRequest(rid, translate("chat.generationStopped"));
     } catch (error) {
       cancelRequestedRef.current = false;
-      callbacksRef.current.onError?.(error instanceof Error ? error.message : "停止生成失败");
+      callbacksRef.current.onError?.(error instanceof Error ? error.message : translate("chat.failedToStopGeneration"));
     } finally {
       setIsStopping(false);
       completePendingCancellation();
@@ -237,7 +244,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
       setIsQueued(false);
       setIsStopping(false);
       completePendingCancellation();
-      finishCanceledRequest(data.requestId || "", data.text || "已停止生成");
+      finishCanceledRequest(data.requestId || "", data.text || translate("chat.generationStopped"));
     });
 
     es.addEventListener("notice", (e: MessageEvent) => {
@@ -282,7 +289,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
       try {
         const data = readCurrentEvent(e);
         if (!data) return;
-        const errorMessage = data.errorMessage || "未知错误";
+        const errorMessage = data.errorMessage || translate("chat.unknownError");
         setIsStreaming(false);
         setIsQueued(false);
         activeRequestRef.current = false;
@@ -290,15 +297,15 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
         markRequestTerminal(data.requestId);
         if (CLOSED_CONNECTION_ERROR_PATTERN.test(errorMessage)) {
           if (cancelRequestedRef.current || canceledHandledRef.current) {
-            finishCanceledRequest(data.requestId || "", "已停止生成");
+            finishCanceledRequest(data.requestId || "", translate("chat.generationStopped"));
             return;
           }
-          callbacksRef.current.onError?.("生成连接已关闭，请重新生成");
+          callbacksRef.current.onError?.(translate("chat.generationConnectionClosedGenerateAgain"));
           return;
         }
         callbacksRef.current.onError?.(errorMessage);
       } catch {
-        callbacksRef.current.onError?.("未知错误");
+        callbacksRef.current.onError?.(translate("chat.unknownError"));
       }
     });
 
@@ -367,7 +374,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
         }
       } catch (err) {
         pendingEventsRef.current = [];
-        callbacksRef.current.onError?.(err instanceof Error ? err.message : "发送失败");
+        callbacksRef.current.onError?.(err instanceof Error ? err.message : translate("chat.failedToSend"));
         activeRequestRef.current = false;
         queueStatusRef.current = null;
         cancelRequestedRef.current = false;
@@ -453,6 +460,13 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
     };
   }, [token, clearReconnectTimer, connectSSE]);
 
+  // 仅替换订阅连接，保留会话、输入和现有终态对账定时器。
+  useEffect(() => {
+    if (subscribedLocale.current === locale) return;
+    subscribedLocale.current = locale;
+    if (sseEnabledRef.current) connectSSERef.current();
+  }, [locale]);
+
   // 终态对账兜底：SSE连接闪断重连会丢失task-complete等终态事件，导致前端永久loading；
   // 请求进行中间歇查询服务端请求状态，发现已终态时按终态收敛本地状态。
   useEffect(() => {
@@ -472,9 +486,9 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
         setIsQueued(false);
         setIsStopping(false);
         if (result.status === "failed") {
-          callbacksRef.current.onError?.(result.message || "生成失败");
+          callbacksRef.current.onError?.(result.message || translate("chat.generationFailed"));
         } else if (result.status === "canceled" || result.status === "interrupted") {
-          callbacksRef.current.onCanceled?.(result.message || "已停止生成");
+          callbacksRef.current.onCanceled?.(result.message || translate("chat.generationStopped"));
         } else {
           callbacksRef.current.onTaskComplete?.("", "", undefined);
         }

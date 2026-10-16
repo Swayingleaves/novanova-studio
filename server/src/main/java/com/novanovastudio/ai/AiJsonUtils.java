@@ -1,5 +1,7 @@
 package com.novanovastudio.ai;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -45,7 +47,7 @@ public final class AiJsonUtils {
         try {
             return JSON.toJSONString(value);
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "序列化JSON失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToSerializeJSON", exception.getMessage()));
         }
     }
 

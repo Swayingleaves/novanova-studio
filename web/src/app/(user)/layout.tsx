@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import type { ReactNode } from "react";
 import { useEffect } from "react";
@@ -53,8 +55,9 @@ export default function UserLayout({ children }: { children: ReactNode }) {
 }
 
 function UserLoadingFallback() {
+    const translate = useTranslation();
     return (
-        <div className="studio-shell-bg flex h-dvh items-center justify-center text-[var(--studio-muted)]" role="status" aria-label="加载中">
+        <div className="studio-shell-bg flex h-dvh items-center justify-center text-[var(--studio-muted)]" role="status" aria-label={translate("layout.loading")}>
             <LoaderCircle className="size-7 animate-spin" aria-hidden="true" />
         </div>
     );

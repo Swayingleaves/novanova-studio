@@ -1,19 +1,21 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 const OAUTH2_REDIRECT_SESSION_KEY = "novanova:oauth2:redirect:v1";
 
 const OAUTH2_ERROR_MESSAGES: Record<string, string> = {
-    accessDenied: "你已取消第三方平台授权。",
-    accountInactive: "当前第三方账号不是正常活动状态。",
-    accountDisabled: "当前本地账号已被禁用。",
-    accountAlreadyBound: "当前本地账号已经绑定其他同渠道身份。",
-    accountUnavailable: "当前账号暂时无法登录。",
-    emailUnavailable: "第三方平台未返回可用邮箱，无法完成登录。",
-    emailUnverified: "第三方账号邮箱尚未验证，无法完成登录。",
-    providerIdentityUnavailable: "无法读取第三方账号身份。",
-    providerProfileInvalid: "第三方账号资料超过系统字段限制。",
-    providerUnavailable: "当前第三方登录渠道未启用。",
-    invitationContextExpired: "邀请授权信息已过期，请从邀请链接重新发起登录。",
-    invitationContextInvalid: "邀请授权信息无效，请从邀请链接重新发起登录。",
-    authorizationFailed: "第三方平台授权失败，请重新尝试。",
+    get accessDenied() { return translate("auth.thirdPartyAuthorizationCanceled"); },
+    get accountInactive() { return translate("auth.thirdPartyAccountIsNotActive"); },
+    get accountDisabled() { return translate("auth.yourLocalAccountIsDisabled"); },
+    get accountAlreadyBound() { return translate("auth.thisAccountIsAlreadyLinkedToAnotherIdentityFrom"); },
+    get accountUnavailable() { return translate("auth.thisAccountCannotSignInRightNow"); },
+    get emailUnavailable() { return translate("auth.noUsableEmailFromProviderSignInUnavailable"); },
+    get emailUnverified() { return translate("auth.thirdPartyEmailIsUnverifiedSignInUnavailable"); },
+    get providerIdentityUnavailable() { return translate("auth.cannotReadThirdPartyIdentity"); },
+    get providerProfileInvalid() { return translate("auth.thirdPartyProfileExceedsFieldLimits"); },
+    get providerUnavailable() { return translate("auth.thisSignInProviderIsDisabled"); },
+    get invitationContextExpired() { return translate("auth.invitationAuthorizationExpiredSignInFromTheInvitationAgain"); },
+    get invitationContextInvalid() { return translate("auth.invalidInvitationAuthorizationSignInFromTheInvitationAgain"); },
+    get authorizationFailed() { return translate("auth.authorizationFailedTryAgain"); },
 };
 
 /** 校验站内重定向目标，拒绝外部地址和认证页面循环跳转。 */
@@ -49,6 +51,6 @@ export function consumeOAuth2Redirect() {
 
 /** 将服务端固定OAuth2错误码转换为中文提示。 */
 export function oauth2ErrorMessage(errorCode: string | null | undefined) {
-    if (!errorCode) return "OAuth2登录失败，请重新尝试。";
-    return OAUTH2_ERROR_MESSAGES[errorCode] || "OAuth2登录失败，请重新尝试。";
+    if (!errorCode) return translate("auth.oAuth2SignInFailedTryAgain");
+    return OAUTH2_ERROR_MESSAGES[errorCode] || translate("auth.oAuth2SignInFailedTryAgain");
 }

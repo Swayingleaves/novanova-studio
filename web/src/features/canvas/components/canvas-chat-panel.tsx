@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { App, Tooltip } from "antd";
@@ -15,7 +17,7 @@ import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import type { CanvasAssistantMessage, CanvasAssistantReference, CanvasNode } from "../types";
 import type { GenerationStyleOption } from "@/services/api/server";
 import { formatGroupedGenerationStyleMessage } from "@/features/generation/lib/style-command";
-import { GENERATION_STYLE_SELECTION_LIMIT_MESSAGE, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
+import { MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { GenerationStyleChips, useGenerationStyles } from "@/features/generation/components/generation-style-picker";
 import { isImageNode, isTextNode, isVideoNode } from "../domain/canvas-node";
 import { AgentChatComposer } from "./canvas-agent-chat-ui";
@@ -70,6 +72,7 @@ export function CanvasChatPanel({
     initialPrompt = "",
     sessionId = null,
 }: CanvasChatPanelProps) {
+    const translate = useTranslation();
     const theme = useCanvasTheme();
     const { message } = App.useApp();
     const copyText = useCopyText();
@@ -202,11 +205,11 @@ export function CanvasChatPanel({
                 onDoubleClick={() => setPanelWidth(clampPanelWidth(DEFAULT_PANEL_WIDTH))}
                 role="separator"
                 aria-orientation="vertical"
-                aria-label="调整画布Agent宽度"
+                aria-label={translate("canvas.resizeCanvasAgent")}
                 aria-valuemin={MIN_PANEL_WIDTH}
                 aria-valuemax={Math.round(getPanelMaximumWidth())}
                 aria-valuenow={Math.round(panelWidth)}
-                title="拖动调整宽度，双击恢复默认"
+                title={translate("canvas.dragToResizeDoubleClickToReset")}
             >
                 <span
                     className="absolute left-1/2 top-1/2 h-12 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-0 transition-opacity group-hover:opacity-60 group-focus-visible:opacity-80 group-active:opacity-100"
@@ -215,10 +218,10 @@ export function CanvasChatPanel({
             </button>
             {/* 标题栏 */}
             <div className="flex items-center justify-between px-4 py-3 text-sm font-medium shrink-0" style={{ borderBottom: `1px solid ${theme.toolbar.border}` }}>
-                <span>画布Agent</span>
+                <span>{translate("canvas.canvasAgent")}</span>
                 <div className="flex items-center gap-1">
                     {requestActive ? (
-                        <button type="button" className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100" onClick={onStop} title={isQueued ? "取消排队" : "停止生成"} aria-label={isQueued ? "取消排队" : "停止生成"}>
+                        <button type="button" className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100" onClick={onStop} title={isQueued ? translate("canvas.leaveQueue") : translate("canvas.stopGeneration")} aria-label={isQueued ? translate("canvas.leaveQueue") : translate("canvas.stopGeneration")}>
                             <Square className="size-3.5" />
                         </button>
                     ) : null}
@@ -227,12 +230,12 @@ export function CanvasChatPanel({
                         className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-25"
                         onClick={handleNewSession}
                         disabled={requestActive}
-                        title="新对话"
-                        aria-label="新对话"
+                        title={translate("canvas.newConversation")}
+                        aria-label={translate("canvas.newConversation")}
                     >
                         <Plus className="size-4" />
                     </button>
-                    <button type="button" className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100" onClick={onCollapse} title="收起画布Agent" aria-label="收起画布Agent">
+                    <button type="button" className="grid size-7 place-items-center rounded-lg opacity-55 transition hover:opacity-100" onClick={onCollapse} title={translate("canvas.collapseCanvasAgent")} aria-label={translate("canvas.collapseCanvasAgent")}>
                         <PanelRightClose className="size-4" />
                     </button>
                 </div>
@@ -243,12 +246,11 @@ export function CanvasChatPanel({
                 <div className="flex flex-col gap-3">
                     {messages.length === 0 ? (
                         <div className="py-12 text-center text-sm" style={{ color: theme.node.placeholder }}>
-                            发送消息开始与 AI 对话
-                        </div>
+                            {translate("canvas.sendAMessageToStartChatting")}</div>
                     ) : (
                         messages.map((msg) => (
                             <div key={msg.id} className="space-y-1.5">
-                                <ChatBubble role={msg.role as "user" | "assistant"} text={msg.text} theme={theme} onCopy={() => copyText(formatGroupedGenerationStyleMessage(msg.text, msg.generationStyles), "消息已复制")} />
+                                <ChatBubble role={msg.role as "user" | "assistant"} text={msg.text} theme={theme} onCopy={() => copyText(formatGroupedGenerationStyleMessage(msg.text, msg.generationStyles), translate("canvas.messageCopied"))} />
                                 {msg.generationStyles?.length ? <GenerationStyleChips styles={msg.generationStyles.map((style) => ({ ...style, coverUrl: "", category: "" }))} /> : null}
                                 {msg.references?.length ? <MessageReferences references={msg.references} theme={theme} /> : null}
                             </div>
@@ -271,7 +273,7 @@ export function CanvasChatPanel({
                         ))}
                     {requestActive ? (
                         <div className="text-xs" style={{ color: theme.node.muted }}>
-                            <span className="inline-block animate-pulse">● {isQueued ? "排队中..." : "生成中..."}</span>
+                            <span className="inline-block animate-pulse">● {isQueued ? translate("canvas.queued") : translate("canvas.generating")}</span>
                         </div>
                     ) : null}
                 </div>
@@ -282,7 +284,7 @@ export function CanvasChatPanel({
                 <AgentChatComposer
                     prompt={prompt}
                     sending={requestActive}
-                    placeholder="输入消息，Enter 发送..."
+                    placeholder={translate("canvas.typeAMessageEnterToSend")}
                     theme={theme}
                     onPromptChange={setPrompt}
                     onSubmit={() => handleSend(prompt)}
@@ -292,7 +294,7 @@ export function CanvasChatPanel({
                     styleError={styleCatalog.error}
                     onStyleSelect={(style) => setSelectedStyles([style])}
                     onStyleRemove={(id) => setSelectedStyles((current) => current.filter((style) => style.id !== id))}
-                    onStyleLimit={() => message.warning(GENERATION_STYLE_SELECTION_LIMIT_MESSAGE)}
+                    onStyleLimit={() => message.warning(translate("canvas.selectUpToStyles", { value0: MAX_GENERATION_STYLE_SELECTION_COUNT }))}
                     droppedNodes={droppedNodes}
                     onDroppedNodeRemove={(nodeId) => {
                         setDroppedNodeIds((prev) => {
@@ -301,7 +303,7 @@ export function CanvasChatPanel({
                             return next;
                         });
                     }}
-                    left={<ModelPicker config={config} value={model} onChange={onModelChange} capability="text" className="h-8 max-w-full" placeholder="选择文本模型" onMissingConfig={onMissingConfig} />}
+                    left={<ModelPicker config={config} value={model} onChange={onModelChange} capability="text" className="h-8 max-w-full" placeholder={translate("canvas.selectTextModel")} onMissingConfig={onMissingConfig} />}
                 />
             </div>
         </div>
@@ -327,7 +329,8 @@ function MessageReferences({ references, theme }: { references: CanvasAssistantR
 }
 
 function AssistantReferenceChip({ item, theme }: { item: CanvasAssistantReference; theme: CanvasTheme }) {
-    const text = (item.text || item.title).replace(/\s+/g, " ").trim().slice(0, 1) || "文";
+    const translate = useTranslation();
+    const text = (item.text || item.title).replace(/\s+/g, " ").trim().slice(0, 1) || translate("canvas.text");
     return (
         <div className="inline-flex h-8 max-w-[150px] shrink-0 items-center gap-1.5 rounded-lg text-sm" style={{ color: theme.node.text }}>
             {item.dataUrl ? (
@@ -355,6 +358,7 @@ function nodeToReference(node: CanvasNode): CanvasAssistantReference | null {
 }
 
 function ChatBubble({ role, text, theme, onCopy }: { role: "user" | "assistant"; text: string; theme: CanvasTheme; onCopy: () => void }) {
+    const translate = useTranslation();
     const isUser = role === "user";
     return (
         <div className={`group flex items-start gap-1 ${isUser ? "justify-end" : "justify-start"}`}>
@@ -368,13 +372,13 @@ function ChatBubble({ role, text, theme, onCopy }: { role: "user" | "assistant";
             >
                 {isUser ? <span className="whitespace-pre-wrap">{text}</span> : <AssistantMarkdownContent text={text} theme={theme} />}
             </div>
-            <Tooltip title="复制消息">
+            <Tooltip title={translate("canvas.copyMessage")}>
                 <button
                     type="button"
                     className={`${isUser ? "order-first" : "order-last"} mt-1 grid size-7 shrink-0 place-items-center rounded-lg opacity-0 pointer-events-none outline-none transition-[color,background-color,opacity] duration-150 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto focus-visible:opacity-100 focus-visible:ring-2 motion-reduce:transition-none`}
                     style={{ color: theme.node.muted, background: theme.toolbar.panel }}
                     onClick={onCopy}
-                    aria-label="复制消息"
+                    aria-label={translate("canvas.copyMessage")}
                 >
                     <Copy className="size-3.5" />
                 </button>

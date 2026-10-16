@@ -1,9 +1,9 @@
 import type { AgentAttachment } from "@/features/canvas/api/agent";
 
-const RETRY_MESSAGES = new Set(["重试", "再试一次", "重新生成", "再生成一次"]);
+const RETRY_MESSAGES = new Set(["重试", "再试一次", "重新生成", "再生成一次", "retry", "try again", "regenerate", "generate again"]);
 
 export function isGenerationRetryMessage(message: string): boolean {
-    const normalizedMessage = message.trim().replace(/[。！!？?，,、\s]+$/, "");
+    const normalizedMessage = message.trim().toLowerCase().replace(/[。！!？?，,、.\s]+$/, "");
     return RETRY_MESSAGES.has(normalizedMessage);
 }
 

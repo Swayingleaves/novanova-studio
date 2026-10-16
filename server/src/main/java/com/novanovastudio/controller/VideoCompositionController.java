@@ -1,5 +1,7 @@
 package com.novanovastudio.controller;
 
+import com.novanovastudio.common.WebsiteLanguage;
+
 import com.novanovastudio.common.ApiResponse;
 import com.novanovastudio.dto.VideoCompositionDtos;
 import com.novanovastudio.service.VideoCompositionTaskService;
@@ -41,7 +43,7 @@ public class VideoCompositionController {
         log.info("视频合成请求: url=/api/v1/ai/video/composeVideo, headers={}, request={}", httpRequest.getHeaders(), request);
         return videoCompositionTaskService.createTask(request)
                 .doOnNext(response -> log.info("视频合成任务已创建: response={}", response))
-                .map(ApiResponse::ok);
+                .flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
     }
 
     /**
@@ -57,7 +59,7 @@ public class VideoCompositionController {
         log.info("查询视频合成任务: url=/api/v1/ai/video/getCompositionTask, headers={}, request={}", httpRequest.getHeaders(), request);
         return videoCompositionTaskService.getTask(request.taskId())
                 .doOnNext(response -> log.info("视频合成任务查询响应: response={}", response))
-                .map(ApiResponse::ok);
+                .flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
     }
 
     /**
@@ -73,6 +75,6 @@ public class VideoCompositionController {
         log.info("取消视频合成任务: url=/api/v1/ai/video/cancelCompositionTask, headers={}, request={}", httpRequest.getHeaders(), request);
         return videoCompositionTaskService.cancelTask(request.taskId())
                 .doOnNext(response -> log.info("视频合成任务取消响应: response={}", response))
-                .map(ApiResponse::ok);
+                .flatMap(task -> WebsiteLanguage.current().map(locale -> ApiResponse.ok(task.withLocale(locale))));
     }
 }

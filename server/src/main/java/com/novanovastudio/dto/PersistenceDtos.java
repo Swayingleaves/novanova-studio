@@ -24,20 +24,20 @@ public final class PersistenceDtos {
     }
 
     /** 渠道标识请求。 */
-    public record ChannelIdRequest(@NotBlank(message = "渠道ID不能为空") String channelId) {
+    public record ChannelIdRequest(@NotBlank(message = "business.channelIDIsRequired") String channelId) {
     }
 
     /** 渠道创建或修改请求。 */
-    public record ChannelMutationRequest(String id, @NotNull(message = "渠道名称不能为null") String name,
+    public record ChannelMutationRequest(String id, @NotNull(message = "business.channelNameMustNotBeNull") String name,
                                          String baseUrl, String apiKey,
-                                         @NotBlank(message = "接口格式不能为空") String apiFormat,
+                                         @NotBlank(message = "business.aPIFormatIsRequired") String apiFormat,
                                          List<String> models, Integer sortOrder) {
     }
 
     /** 渠道模型拉取请求。 */
-    public record ChannelModelRefreshRequest(@NotBlank(message = "Base URL不能为空") String baseUrl,
-                                             @NotBlank(message = "API Key不能为空") String apiKey,
-                                             @NotBlank(message = "接口格式不能为空") String apiFormat) {
+    public record ChannelModelRefreshRequest(@NotBlank(message = "business.baseURLIsRequired") String baseUrl,
+                                             @NotBlank(message = "business.aPIKeyIsRequired") String apiKey,
+                                             @NotBlank(message = "business.aPIFormatIsRequired") String apiFormat) {
     }
 
     /** 渠道模型拉取响应。 */
@@ -113,15 +113,15 @@ public final class PersistenceDtos {
     }
 
     /** 创建用户模型配置请求。 */
-    public record CreateModelConfigRequest(@NotBlank(message = "渠道ID不能为空") String channelId,
-                                           @NotBlank(message = "模型名称不能为空") String modelName,
-                                           @NotBlank(message = "模型类型不能为空") String modelType,
+    public record CreateModelConfigRequest(@NotBlank(message = "business.channelIDIsRequired") String channelId,
+                                           @NotBlank(message = "business.modelNameIsRequired") String modelName,
+                                           @NotBlank(message = "business.modelTypeIsRequired") String modelType,
                                            List<String> capabilities, Integer sortOrder,
-                                           @Min(value = 0, message = "模型积分不能小于0") Integer creditCost,
+                                           @Min(value = 0, message = "business.modelCreditsMustNotBeNegative") Integer creditCost,
                                            Boolean thinkingEnabled,
-                                           @Pattern(regexp = "high|max", message = "思考强度只支持high、max") String reasoningEffort,
-                                           @Pattern(regexp = "generation|second", message = "积分计费单位只支持generation、second") String creditUnit,
-                                           @Min(value = 1, message = "模型同时并发数不能小于1") Integer requestConcurrency,
+                                           @Pattern(regexp = "high|max", message = "business.thinkingIntensityMustBeHighOrMax") String reasoningEffort,
+                                           @Pattern(regexp = "generation|second", message = "business.billingUnitMustBeGenerationOrSecond") String creditUnit,
+                                           @Min(value = 1, message = "business.modelConcurrencyMustBeAtLeast1") Integer requestConcurrency,
                                            JSONObject customBodyParameters,
                                            VideoBillingConfiguration videoBillingConfiguration,
                                            String displayName,
@@ -161,14 +161,14 @@ public final class PersistenceDtos {
     }
 
     /** 修改用户模型配置请求。 */
-    public record UpdateModelConfigRequest(@NotBlank(message = "模型配置ID不能为空") String id,
-                                           @NotBlank(message = "模型类型不能为空") String modelType,
+    public record UpdateModelConfigRequest(@NotBlank(message = "business.modelConfigurationIDIsRequired") String id,
+                                           @NotBlank(message = "business.modelTypeIsRequired") String modelType,
                                            List<String> capabilities, Integer sortOrder,
-                                           @Min(value = 0, message = "模型积分不能小于0") Integer creditCost,
+                                           @Min(value = 0, message = "business.modelCreditsMustNotBeNegative") Integer creditCost,
                                            Boolean thinkingEnabled,
-                                           @Pattern(regexp = "high|max", message = "思考强度只支持high、max") String reasoningEffort,
-                                           @Pattern(regexp = "generation|second", message = "积分计费单位只支持generation、second") String creditUnit,
-                                           @Min(value = 1, message = "模型同时并发数不能小于1") Integer requestConcurrency,
+                                           @Pattern(regexp = "high|max", message = "business.thinkingIntensityMustBeHighOrMax") String reasoningEffort,
+                                           @Pattern(regexp = "generation|second", message = "business.billingUnitMustBeGenerationOrSecond") String creditUnit,
+                                           @Min(value = 1, message = "business.modelConcurrencyMustBeAtLeast1") Integer requestConcurrency,
                                            JSONObject customBodyParameters,
                                            VideoBillingConfiguration videoBillingConfiguration,
                                            String displayName,
@@ -207,8 +207,8 @@ public final class PersistenceDtos {
     }
 
     /** 设置默认模型请求。 */
-    public record SetDefaultModelRequest(@NotBlank(message = "模型配置ID不能为空") String id,
-                                         @NotBlank(message = "模型类型不能为空") String modelType) {
+    public record SetDefaultModelRequest(@NotBlank(message = "business.modelConfigurationIDIsRequired") String id,
+                                         @NotBlank(message = "business.modelTypeIsRequired") String modelType) {
     }
 
     /**
@@ -216,7 +216,7 @@ public final class PersistenceDtos {
      *
      * @param project JSONObject 画布项目JSON
      */
-    public record SaveProjectRequest(@NotNull(message = "画布项目不能为空") JSONObject project) {
+    public record SaveProjectRequest(@NotNull(message = "business.canvasProjectIsRequired") JSONObject project) {
     }
 
     /**
@@ -240,7 +240,7 @@ public final class PersistenceDtos {
      *
      * @param id String 记录ID
      */
-    public record IdRequest(@NotBlank(message = "ID不能为空") String id) {
+    public record IdRequest(@NotBlank(message = "business.iDIsRequired_03ffcc") String id) {
     }
 
     /**
@@ -248,7 +248,7 @@ public final class PersistenceDtos {
      *
      * @param ids List<String> ID列表
      */
-    public record DeleteIdsRequest(@NotEmpty(message = "ID不能为空") List<String> ids) {
+    public record DeleteIdsRequest(@NotEmpty(message = "business.iDIsRequired_03ffcc") List<String> ids) {
     }
 
     /**
@@ -256,7 +256,7 @@ public final class PersistenceDtos {
      *
      * @param asset JSONObject 素材JSON
      */
-    public record SaveAssetRequest(@NotNull(message = "素材不能为空") JSONObject asset) {
+    public record SaveAssetRequest(@NotNull(message = "business.assetIsRequired") JSONObject asset) {
     }
 
     /**
@@ -273,8 +273,8 @@ public final class PersistenceDtos {
      * @param logType String 记录类型
      * @param log JSONObject 生成记录JSON
      */
-    public record SaveGenerationLogRequest(@NotBlank(message = "记录类型不能为空") String logType,
-                                           @NotNull(message = "生成记录不能为空") JSONObject log) {
+    public record SaveGenerationLogRequest(@NotBlank(message = "business.recordTypeIsRequired") String logType,
+                                           @NotNull(message = "business.generationRecordIsRequired") JSONObject log) {
     }
 
     /**
@@ -283,8 +283,8 @@ public final class PersistenceDtos {
      * @param id String 记录ID
      * @param title String 新标题
      */
-    public record RenameGenerationLogTitleRequest(@NotBlank(message = "记录ID不能为空") String id,
-                                                  @NotBlank(message = "标题不能为空") String title) {
+    public record RenameGenerationLogTitleRequest(@NotBlank(message = "business.recordIDIsRequired") String id,
+                                                  @NotBlank(message = "business.titleIsRequired") String title) {
     }
 
     /**
@@ -308,7 +308,7 @@ public final class PersistenceDtos {
      * @param durationMs Integer 时长毫秒
      * @param metadata JSONObject 扩展元数据
      */
-    public record RegisterRemoteMediaRequest(@NotBlank(message = "媒体类型不能为空") String kind,
+    public record RegisterRemoteMediaRequest(@NotBlank(message = "business.mediaTypeIsRequired") String kind,
                                              String sourceUrl,
                                              String storageKey,
                                              String mimeType,
@@ -324,7 +324,7 @@ public final class PersistenceDtos {
      *
      * @param storageKey String 媒体存储键
      */
-    public record MediaInfoRequest(@NotBlank(message = "媒体存储键不能为空") String storageKey) {
+    public record MediaInfoRequest(@NotBlank(message = "business.mediaStorageKeyIsRequired") String storageKey) {
     }
 
     /**
@@ -332,7 +332,7 @@ public final class PersistenceDtos {
      *
      * @param storageKey String 当前用户的媒体存储键
      */
-    public record TransferRemoteMediaRequest(@NotBlank(message = "媒体存储键不能为空") String storageKey) {
+    public record TransferRemoteMediaRequest(@NotBlank(message = "business.mediaStorageKeyIsRequired") String storageKey) {
     }
 
     /**
@@ -340,7 +340,7 @@ public final class PersistenceDtos {
      *
      * @param storageKeys List<String> 媒体存储键列表
      */
-    public record DeleteMediaRequest(@NotEmpty(message = "媒体存储键不能为空") List<String> storageKeys) {
+    public record DeleteMediaRequest(@NotEmpty(message = "business.mediaStorageKeyIsRequired") List<String> storageKeys) {
     }
 
     /**
@@ -414,7 +414,7 @@ public final class PersistenceDtos {
     }
 
     /** 对象存储标识请求。 */
-    public record ObjectStorageIdRequest(@NotBlank(message = "对象存储ID不能为空") String storageId) {
+    public record ObjectStorageIdRequest(@NotBlank(message = "business.objectStorageIDIsRequired") String storageId) {
     }
 
     /**

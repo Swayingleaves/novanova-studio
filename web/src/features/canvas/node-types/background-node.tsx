@@ -1,4 +1,6 @@
 "use client";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { memo } from "react";
 import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
@@ -11,6 +13,7 @@ import { CanvasNodeTitle } from "./shared";
 
 /** 画布背景板节点，负责呈现容器层和标题，不承载业务连线。 */
 export const BackgroundNode = memo(function BackgroundNode({ data, selected }: NodeProps<Node<any>>) {
+    const translate = useTranslation();
     const board = data as CanvasBackgroundNode;
     const theme = useCanvasTheme();
     const actions = useNodeActions();
@@ -30,14 +33,13 @@ export const BackgroundNode = memo(function BackgroundNode({ data, selected }: N
                 className="relative h-full w-full select-none overflow-visible rounded-lg border outline-none focus-visible:outline-2"
                 role="group"
                 tabIndex={0}
-                aria-label={`${board.title || "背景板"}，包含 ${board.memberNodeIds.length} 个节点`}
+                aria-label={translate("canvas.containingNodes", { value0: board.title || translate("canvas.background"), value1: board.memberNodeIds.length })}
                 style={{ borderColor, outlineColor: theme.node.activeStroke, boxShadow: selected ? `0 0 0 1px ${theme.node.activeStroke}55` : undefined }}
             >
                 <div className="pointer-events-none absolute inset-0 rounded-[inherit]" style={{ background: board.backgroundColor, opacity: 0.72 }} />
-                <CanvasNodeTitle nodeId={board.id} title={board.title} defaultTitle="背景板" onTitleChange={actions.onTitleChange} />
+                <CanvasNodeTitle nodeId={board.id} title={board.title} defaultTitle={translate("canvas.background")} onTitleChange={actions.onTitleChange} />
                 <span className="pointer-events-none absolute left-3 top-3 z-10 text-xs" style={{ color: theme.node.text }}>
-                    {board.memberNodeIds.length} 个节点
-                </span>
+                    {board.memberNodeIds.length} {translate("canvas.nodes")}</span>
             </div>
         </>
     );

@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Bot, Keyboard, PanelLeftOpen } from "lucide-react";
@@ -6,6 +9,7 @@ import { Button, Modal, Tooltip } from "antd";
 
 import { UserStatusActions } from "@/features/app-shell/components/user-status-actions";
 import { UserCreditMenu } from "@/features/app-shell/components/user-credit-menu";
+import { LanguageMenu } from "@/features/locale/components/language-menu";
 import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
@@ -24,37 +28,38 @@ type CanvasTopBarProps = {
     onToggleAgent: () => void;
 };
 
-const SHORTCUT_GROUPS = [
+const SHORTCUT_GROUPS = () => ([
     {
-        title: "视图",
+        get title() { return translate("canvas.view"); },
         items: [
-            ["拖动画布", "平移视图"],
-            ["滚轮 / 缩放滑杆", "缩放画布"],
+            [translate("canvas.panCanvas"), translate("canvas.panView")],
+            [translate("canvas.mouseWheelZoomSlider"), translate("canvas.zoomCanvas")],
         ],
     },
     {
-        title: "选择与编辑",
+        get title() { return translate("canvas.selectionEditing"); },
         items: [
-            ["Ctrl / Cmd + 拖动", "框选节点"],
-            ["Shift / Ctrl / Cmd + 点击", "追加选择"],
-            ["Ctrl / Cmd + A", "全选节点"],
-            ["Ctrl / Cmd + C / V", "复制或粘贴节点、文本、图片"],
-            ["Delete / Backspace", "删除选中内容"],
-            ["Esc", "取消选择并关闭浮层"],
+            [translate("canvas.ctrlCmdDrag"), translate("canvas.selectNodes")],
+            [translate("canvas.shiftCtrlCmdClick"), translate("canvas.extendSelection")],
+            ["Ctrl / Cmd + A", translate("canvas.selectAllNodes")],
+            ["Ctrl / Cmd + C / V", translate("canvas.copyOrPasteNodesTextAndImages")],
+            ["Delete / Backspace", translate("canvas.deleteSelectedContent")],
+            ["Esc", translate("canvas.deselectAndCloseOverlay")],
         ],
     },
     {
-        title: "历史与协作",
+        get title() { return translate("canvas.historyCollaboration"); },
         items: [
-            ["Ctrl / Cmd + Z", "撤销"],
-            ["Ctrl / Cmd + Shift + Z / Y", "重做"],
-            ["Ctrl / Cmd + Shift + 拖动节点", "发送节点到画布Agent"],
-            ["拖入图片或视频", "上传到画布"],
+            ["Ctrl / Cmd + Z", translate("canvas.undo")],
+            ["Ctrl / Cmd + Shift + Z / Y", translate("canvas.redo")],
+            [translate("canvas.ctrlCmdShiftDragNode"), translate("canvas.sendNodeToCanvasAgent")],
+            [translate("canvas.dropAnImageOrVideo"), translate("canvas.uploadToCanvas")],
         ],
     },
-] as const;
+] as const);
 
 export function CanvasTopBar(props: CanvasTopBarProps) {
+    const translate = useTranslation();
     const theme = useCanvasTheme();
     const titleAreaRef = useRef<HTMLDivElement>(null);
     const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -74,8 +79,8 @@ export function CanvasTopBar(props: CanvasTopBarProps) {
         <>
             <header className="pointer-events-none absolute inset-x-0 top-0 z-[140] flex h-14 items-center justify-between px-3">
                 <div className="pointer-events-auto flex min-w-0 items-center gap-2">
-                    <Tooltip title="返回画布列表">
-                        <Button type="text" aria-label="返回画布列表" icon={<ArrowLeft className="size-4" />} onClick={props.onBackToProjects} style={toolbarButtonStyle} />
+                    <Tooltip title={translate("canvas.backToCanvases")}>
+                        <Button type="text" aria-label={translate("canvas.backToCanvases")} icon={<ArrowLeft className="size-4" />} onClick={props.onBackToProjects} style={toolbarButtonStyle} />
                     </Tooltip>
                     <div className="h-5 w-px" style={{ background: theme.toolbar.border }} />
                     <div ref={titleAreaRef} className="min-w-0">
@@ -83,7 +88,7 @@ export function CanvasTopBar(props: CanvasTopBarProps) {
                             <input
                                 autoFocus
                                 value={props.titleDraft}
-                                aria-label="画布名称"
+                                aria-label={translate("canvas.canvasName")}
                                 className="w-[min(42vw,320px)] bg-transparent text-base font-semibold outline-none"
                                 style={{ color: theme.node.text }}
                                 onChange={(event) => props.onTitleDraftChange(event.target.value)}
@@ -94,7 +99,7 @@ export function CanvasTopBar(props: CanvasTopBarProps) {
                                 }}
                             />
                         ) : (
-                            <button type="button" className="max-w-[min(42vw,320px)] truncate text-left text-base font-semibold" onDoubleClick={props.onStartTitleEditing} title="双击修改画布名称">
+                            <button type="button" className="max-w-[min(42vw,320px)] truncate text-left text-base font-semibold" onDoubleClick={props.onStartTitleEditing} title={translate("canvas.doubleClickToRenameCanvas")}>
                                 {props.title}
                             </button>
                         )}
@@ -103,11 +108,12 @@ export function CanvasTopBar(props: CanvasTopBarProps) {
 
                 <div className="pointer-events-auto flex items-center gap-1">
                     {props.navigationPanelHidden ? (
-                        <Tooltip title="显示画布导航">
-                            <Button type="text" aria-label="显示画布导航" icon={<PanelLeftOpen className="size-4" />} onClick={props.onOpenNavigationPanel} style={toolbarButtonStyle} />
+                        <Tooltip title={translate("canvas.showCanvasNavigator")}>
+                            <Button type="text" aria-label={translate("canvas.showCanvasNavigator")} icon={<PanelLeftOpen className="size-4" />} onClick={props.onOpenNavigationPanel} style={toolbarButtonStyle} />
                         </Tooltip>
                     ) : null}
                     <UserStatusActions variant="canvas" onOpenShortcuts={() => setShortcutsOpen(true)} />
+                    <LanguageMenu />
                     <ThemePreferenceMenu variant="toolbar" />
                     <UserCreditMenu />
                     <Button
@@ -121,14 +127,13 @@ export function CanvasTopBar(props: CanvasTopBarProps) {
                             background: props.agentOpen ? theme.toolbar.activeGradient : "transparent",
                         }}
                     >
-                        画布Agent
-                    </Button>
+                        {translate("canvas.canvasAgent")}</Button>
                 </div>
             </header>
 
-            <Modal title={<span className="inline-flex items-center gap-2"><Keyboard className="size-4" />画布快捷键</span>} open={shortcutsOpen} onCancel={() => setShortcutsOpen(false)} footer={null} centered width={560}>
+            <Modal title={<span className="inline-flex items-center gap-2"><Keyboard className="size-4" />{translate("canvas.canvasShortcuts")}</span>} open={shortcutsOpen} onCancel={() => setShortcutsOpen(false)} footer={null} centered width={560}>
                 <div className="space-y-5 pt-2">
-                    {SHORTCUT_GROUPS.map((group) => (
+                    {SHORTCUT_GROUPS().map((group) => (
                         <section key={group.title} aria-label={group.title}>
                             <h3 className="mb-2 text-sm font-semibold" style={{ color: theme.node.text }}>{group.title}</h3>
                             <dl className="divide-y" style={{ borderColor: theme.node.stroke }}>

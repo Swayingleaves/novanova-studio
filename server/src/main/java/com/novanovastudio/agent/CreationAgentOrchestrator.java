@@ -1,5 +1,7 @@
 package com.novanovastudio.agent;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.dto.*;
@@ -159,7 +161,7 @@ public class CreationAgentOrchestrator {
         return sessionService.getOrCreateSession(userId, request.sessionId(), request.entrySource())
                 .flatMap(session -> {
                     if (!request.entrySource().equals(session.profile())) {
-                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "会话入口来源与当前页面不一致"));
+                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.conversationEntryDoesNotMatchThisPage")));
                     }
                     AgentChatRequest snapshot = requestWithSessionId(request, session.id());
                     CreationAgentRequest queuedRequest = new CreationAgentRequest();
@@ -375,7 +377,7 @@ public class CreationAgentOrchestrator {
      */
     public Mono<Void> cancelChat(Long userId, String requestId) {
         return requestRepository.findByIdForUser(userId, requestId)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求不存在")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.agentRequestNotFound"))))
                 .flatMap(request -> cancelRequest(userId, request));
     }
 
@@ -545,10 +547,10 @@ public class CreationAgentOrchestrator {
                                                             .contextWrite(context -> MappedDiagnosticContext.put(
                                                                     context, MappedDiagnosticContext.PLAN_ID, plan.planId())))
                                                             .flatMap(summary -> {
-                                                                active.setCompletion(summary.status(), summary.message());
+                                                                active.setCompletion(summary.status(), summary.systemMessage());
                                                                 return isWorkflowImageStagePlan(plan)
                                                                         ? completeImageStageWithConfirmation(userId, session, request, plan, summary)
-                                                                        : completeWithMessage(userId, session.id(), summary.message());
+                                                                        : completeWithMessage(userId, session.id(), summary.systemMessage(), null);
                                                             }));
                         }))));
     }
@@ -615,8 +617,7 @@ public class CreationAgentOrchestrator {
         // 用户确认使用已生成图片生成视频
         if ("用这些图片生成视频".equals(message) || "确认生成".equals(message)) {
             return videoWorkflowContextRepository.confirmGeneratedImages(context)
-                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
-                            "视频工作流图片确认状态已变化，请重新发送")))
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.workflowImageConfirmationChangedSendAgain"))))
                     // 图片确认轮用户可能调整了视频比例/清晰度/时长，用最新设置构建视频阶段计划
                     .map(confirmed -> request.creationSettings() != null
                             ? definition.buildVideoStagePlan(confirmed.withCreationSettings(request.creationSettings()))
@@ -624,8 +625,7 @@ public class CreationAgentOrchestrator {
         }
         // 用户要求修改提示词：回到澄清阶段，由对话助手重新起草
         return videoWorkflowContextRepository.reopenImages(context)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
-                        "视频工作流状态已变化，请重新发送")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoWorkflowChangedSendAgain"))))
                 .flatMap(reopened -> handleWorkflowClarifyingTurn(userId, session, request, model, reopened));
     }
 
@@ -667,12 +667,12 @@ public class CreationAgentOrchestrator {
                                                           CreationPlan plan,
                                                           CreationPlanExecutor.PlanExecutionSummary summary) {
         if (!"success".equals(summary.status())) {
-            return completeWithMessage(userId, session.id(), summary.message());
+            return completeWithMessage(userId, session.id(), summary.systemMessage(), null);
         }
         return saveImageStageResults(userId, session.id(), plan, summary)
                 .then(saveImageConfirmationRound(userId, session, request, plan))
                 .then(completeWithMessage(userId, session.id(),
-                        "首帧和尾帧图片已生成，请确认是否用这些图片生成视频，或修改提示词重新生成。",
+                        SystemMessage.of("system.imageStageConfirmation"),
                         AgentAction.choice(List.of(
                                 new AgentChoice("用这些图片生成视频", "用这些图片生成视频", null, null),
                                 new AgentChoice("修改提示词重新生成", "修改提示词重新生成", null, null)))));
@@ -791,8 +791,7 @@ public class CreationAgentOrchestrator {
                                 ? context.withCreationSettings(request.creationSettings())
                                 : context;
                         return videoWorkflowContextRepository.confirmDrafts(withSettings)
-                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
-                                        "视频工作流确认状态已变化，请重新发送")))
+                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoWorkflowConfirmationChangedSendAgain"))))
                                 .map(confirmed -> definition.supportsImageConfirmation()
                                         ? definition.buildImageStagePlan(confirmed)
                                         : definition.buildPlan(confirmed));
@@ -802,8 +801,7 @@ public class CreationAgentOrchestrator {
                                 ? context.withAnswer(request.message()).withCreationSettings(request.creationSettings())
                                 : context.withAnswer(request.message());
                         return videoWorkflowContextRepository.saveDrafts(withSettings, turn.prompts())
-                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
-                                        "视频工作流状态已变化，请重新发送")))
+                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoWorkflowChangedSendAgain"))))
                                 .map(updated -> workflowClarificationPlan(updated, definition,
                                         definition.draftDisplayMessage(turn.message(), updated.draftedPrompts()), turn.choices()));
                     }
@@ -829,8 +827,7 @@ public class CreationAgentOrchestrator {
                         ? videoWorkflowContextRepository.saveDrafts(request.creationSettings() != null
                                 ? context.withAnswer(request.message()).withCreationSettings(request.creationSettings())
                                 : context.withAnswer(request.message()), turn.prompts())
-                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR,
-                                        "视频工作流状态已变化，请重新发送")))
+                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoWorkflowChangedSendAgain"))))
                                 .map(updated -> workflowClarificationPlan(updated, definition,
                                         definition.draftDisplayMessage(turn.message(), updated.draftedPrompts()), turn.choices()))
                         : Mono.just(workflowClarificationPlan(context, definition, turn.message(), turn.choices())));
@@ -851,11 +848,11 @@ public class CreationAgentOrchestrator {
         try {
             skillId = Long.valueOf(request.skillId());
         } catch (NumberFormatException exception) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "技能ID不合法"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidSkillID")));
         }
         return skillService.findEnabledSkill(skillId).flatMap(skill -> {
             if (!"video".equals(skill.getTargetType())) {
-                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "当前技能不支持视频生成页面"));
+                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.thisSkillDoesNotSupportTheVideoPage")));
             }
             return Mono.justOrEmpty(videoWorkflowRegistry.resolveWorkflowType(skill.getSystemPrompt())
                     .map(workflowType -> {
@@ -1127,7 +1124,7 @@ public class CreationAgentOrchestrator {
         }
         Map<String, Object> snapshot = readCanvasSettingGraphSnapshot(request);
         if (snapshot.isEmpty()) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "设定图技能快照无效");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidReferenceSheetSkillSnapshot"));
         }
         CreationSettings settings = request.creationSettings();
         if (settings == null || !StringUtils.hasText(settings.size())) {
@@ -1138,7 +1135,7 @@ public class CreationAgentOrchestrator {
         }
         String userPrompt = request.message() == null ? "" : request.message().trim();
         if (!StringUtils.hasText(userPrompt)) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "设定图描述不能为空");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceSheetDescriptionIsRequired"));
         }
         // 任务提示词必须保持用户原文，避免绕过统一的来源校验；技能要求通过快照随工具参数传递。
         String prompt = userPrompt;
@@ -1349,7 +1346,7 @@ public class CreationAgentOrchestrator {
                 try {
                     skillId = Long.valueOf(request.skillId());
                 } catch (NumberFormatException exception) {
-                    return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "技能ID不合法"));
+                    return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidSkillID")));
                 }
                 return skillService.findEnabledSkill(skillId)
                         .filter(skill -> ("canvas".equals(request.entrySource()) && "canvasSettingGraph".equals(skill.getTargetType()))
@@ -1367,7 +1364,7 @@ public class CreationAgentOrchestrator {
                         .switchIfEmpty(Mono.defer(() -> {
                             Map<String, Object> snapshot = readCanvasSettingGraphSnapshot(request);
                             if (!"canvas".equals(request.entrySource()) || snapshot.isEmpty()) {
-                                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "技能类型与当前Agent入口不匹配"));
+                                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.skillTypeDoesNotMatchAgentEntry")));
                             }
                             input.put("skillId", request.skillId());
                             input.put("skill", Map.of("name", snapshot.get("name"), "targetType", snapshot.get("targetType"), "instructions", snapshot.get("systemPrompt")));
@@ -1443,11 +1440,11 @@ public class CreationAgentOrchestrator {
         Map<String, String> sources = promptSources(session, currentMessage);
         List<CreationTask> tasks = plan.tasks().stream().map(task -> {
             if (task == null || !StringUtils.hasText(task.sourcePromptId())) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "主Agent任务缺少用户原始提示词引用");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.agentTaskHasNoOriginalUserPromptReference"));
             }
             String prompt = sources.get(task.sourcePromptId());
             if (!StringUtils.hasText(prompt)) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, "主Agent任务引用的用户原始提示词不存在");
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.originalUserPromptNotFound"));
             }
             return new CreationTask(task.taskId(), task.taskType(), task.action(), prompt, task.sourcePromptId(), task.dependsOn(),
                     task.toolName(), task.toolArguments(), task.taskRole());
@@ -1567,6 +1564,21 @@ public class CreationAgentOrchestrator {
     }
 
     /**
+     * 保存固定系统说明并在订阅边界翻译，模型输出仍使用原文重载。
+     * @param userId Long 用户ID
+     * @param sessionId String 会话ID
+     * @param message SystemMessage 语言中立说明
+     * @param action AgentAction 交互动作，可为空
+     * @return Mono<Void> 完成信号
+     */
+    private Mono<Void> completeWithMessage(Long userId, String sessionId, SystemMessage message, AgentAction action) {
+        String messageId = UUID.randomUUID().toString();
+        return sessionService.appendAssistantMessage(sessionId, messageId, message.diagnostic())
+                .doOnSuccess(ignored -> eventEmitter.emit(userId, AgentEvent.taskComplete(sessionId, messageId,
+                        message.diagnostic(), action).withSystemMessage(message)));
+    }
+
+    /**
      * 将本轮修改指令合并到引用历史原文的图片或视频任务提示词。
      * <p>
      * 图片页和视频页的后续消息常是“改为男性”“换成夜景”等修改或补充指令，主Agent按规则引用历史原文，
@@ -1648,7 +1660,7 @@ public class CreationAgentOrchestrator {
                         taskPrompt = resolveCanvasHistoricalPrompt(plan, task, taskPrompt, userPrompts);
                     }
                     if (!StringUtils.hasText(taskPrompt) || !userPrompts.contains(taskPrompt)) {
-                        throw new BusinessException(ErrorCode.PARAM_INVALID, "主Agent任务提示词必须逐字来自用户消息");
+                        throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.agentTaskPromptMustMatchTheUserMessageVerbatim"));
                     }
                     return new com.novanovastudio.agent.dto.CreationTask(
                             task.taskId(), task.taskType(), task.action(), taskPrompt, task.sourcePromptId(), task.dependsOn(),
@@ -1732,14 +1744,14 @@ public class CreationAgentOrchestrator {
      */
     private void validateRequest(AgentChatRequest request) {
         if (request == null || !supports(request.entrySource())) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "Agent入口来源不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidAgentEntry"));
         }
         if (!StringUtils.hasText(request.message())) {
-            throw new BusinessException(ErrorCode.PARAM_MISSING, "用户消息不能为空");
+            throw new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.userMessageIsRequired"));
         }
         if (StringUtils.hasText(request.skillId())
                 && !"imagePage".equals(request.entrySource()) && !"videoPage".equals(request.entrySource()) && !"canvas".equals(request.entrySource())) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "技能入口来源不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidSkillEntry"));
         }
     }
 
@@ -1769,20 +1781,23 @@ public class CreationAgentOrchestrator {
         try {
             request = JSON.parseObject(queuedRequest.getRequestData(), AgentChatRequest.class);
         } catch (Exception exception) {
-            return finishClaimedRequest(queuedRequest, "failed", "主Agent请求数据无效", exception);
+            return finishClaimedRequest(queuedRequest, "failed", "主Agent请求数据无效", exception,
+                    SystemMessage.of("system.invalidAgentRequestData", exception.getMessage()));
         }
         if (request == null || !queuedRequest.getSessionId().equals(request.sessionId())
                 || !queuedRequest.getEntrySource().equals(request.entrySource())) {
-            return finishClaimedRequest(queuedRequest, "failed", "主Agent请求数据与持久化记录不一致", null);
+            return finishClaimedRequest(queuedRequest, "failed", "主Agent请求数据与持久化记录不一致", null,
+                    SystemMessage.of("system.agentRequestSnapshotMismatch"));
         }
         return sessionService.getOrCreateSession(queuedRequest.getUserId(), queuedRequest.getSessionId(), queuedRequest.getEntrySource())
                 .flatMap(session -> {
                     if (!queuedRequest.getEntrySource().equals(session.profile())) {
-                        return finishClaimedRequest(queuedRequest, "failed", "会话入口来源与请求不一致", null);
+                        return finishClaimedRequest(queuedRequest, "failed", "会话入口来源与请求不一致", null,
+                                SystemMessage.of("system.agentRequestEntryMismatch"));
                     }
                     ActiveRequestExecution active = new ActiveRequestExecution(queuedRequest.getId(), queuedRequest.getUserId(),
                             session.id(), new AtomicReference<>(), new AtomicReference<>("success"), new AtomicReference<>(""),
-                            new AtomicBoolean());
+                            new AtomicReference<>(), new AtomicBoolean());
                     executionRegistry.open(queuedRequest.getUserId(), session.id(), registration -> requestRepository
                             .appendTaskId(queuedRequest.getId(), registration.taskId())
                             .then(requestQueue.isCancelRequested(queuedRequest.getId()))
@@ -1807,8 +1822,8 @@ public class CreationAgentOrchestrator {
                                             .flatMap(effectiveRequest -> executeConversation(queuedRequest.getUserId(), session,
                                                     effectiveRequest, active))
                                             .then(isRequestCancellationRequested(active))
-                                            .then(finishClaimedRequest(queuedRequest, active.requestStatus(),
-                                                    active.completionMessage().get(), null)))
+                                            .then(Mono.defer(() -> finishClaimedRequest(queuedRequest, active.requestStatus(),
+                                                    active.completionMessage().get(), null, active.completionSystemMessage().get()))))
                             .onErrorResume(exception -> finishClaimedRequest(queuedRequest, "failed", errorMessage(exception), exception));
                 });
     }
@@ -1864,10 +1879,10 @@ public class CreationAgentOrchestrator {
                                 .then(requestDispatcher.dispatchAvailable(userId, request.getEntrySource()));
                     }
                     return requestRepository.findByIdForUser(userId, request.getId())
-                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求不存在")))
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.agentRequestNotFound"))))
                             .flatMap(current -> "running".equals(current.getStatus())
                                     ? cancelRunningRequest(userId, current)
-                                    : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "主Agent请求已结束")));
+                                    : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.agentRequestHasEnded"))));
                 });
     }
 
@@ -1933,7 +1948,7 @@ public class CreationAgentOrchestrator {
                         }))
                 .then(completePlanForTerminalRequest(request, planId, message))
                 .then(Mono.<Void>fromRunnable(() -> eventEmitter.emit(request.getUserId(),
-                        AgentEvent.error(request.getSessionId(), message).withRequestId(request.getId()))))
+                        AgentEvent.error(request.getSessionId(), message).withSystemMessage(SystemMessage.of("system.requestInterrupted")).withRequestId(request.getId()))))
                 .doFinally(signal -> {
                     if (active != null) {
                         executionRegistry.disposeWhenReady(active.sessionId());
@@ -1951,12 +1966,29 @@ public class CreationAgentOrchestrator {
      * @return Mono<Void> 收尾完成信号
      */
     private Mono<Void> finishClaimedRequest(CreationAgentRequest request, String status, String message, Throwable exception) {
+        return finishClaimedRequest(request, status, message, exception,
+                exception == null ? null : SystemMessage.fromThrowable(exception));
+    }
+
+    /**
+     * 保存请求终态的语言中立说明，保留原始异常供中文日志诊断。
+     * @param request CreationAgentRequest 请求
+     * @param status String 终态
+     * @param message String 原始诊断
+     * @param exception Throwable 原始异常，可为空
+     * @param completionMessage SystemMessage 明确的系统说明，可为空
+     * @return Mono<Void> 收尾完成信号
+     */
+    private Mono<Void> finishClaimedRequest(CreationAgentRequest request, String status, String message,
+                                           Throwable exception, SystemMessage completionMessage) {
         ActiveRequestExecution active = activeRequests.get(request.getId());
         String planId = active == null ? request.getPlanId() : active.planId().get();
         boolean cancellationRequested = active != null && executionRegistry.isCancelRequested(active.sessionId());
         String requestedStatus = cancellationRequested ? "canceled" : status;
         String requestedMessage = cancellationRequested ? "已停止生成" : message;
-        return requestRepository.finishRunning(request.getId(), requestedStatus, requestedMessage)
+        SystemMessage systemMessage = "canceled".equals(requestedStatus) ? SystemMessage.of("system.taskCanceled")
+                : completionMessage;
+        return requestRepository.finishRunning(request.getId(), requestedStatus, requestedMessage, systemMessage)
                 .flatMap(updated -> {
                     if (!Boolean.TRUE.equals(updated)) {
                         return requestRepository.findById(request.getId())
@@ -1970,7 +2002,7 @@ public class CreationAgentOrchestrator {
                                     request.getId(), request.getSessionId(), planId, exception);
                         }
                         if ("failed".equals(requestedStatus)) {
-                            eventEmitter.emit(request.getUserId(), AgentEvent.error(request.getSessionId(), requestedMessage)
+                            eventEmitter.emit(request.getUserId(), AgentEvent.error(request.getSessionId(), requestedMessage).withSystemMessage(systemMessage)
                                     .withRequestId(request.getId()));
                         } else if ("canceled".equals(requestedStatus)) {
                             eventEmitter.emit(request.getUserId(), AgentEvent.canceled(request.getSessionId(), requestedMessage)
@@ -2058,23 +2090,26 @@ public class CreationAgentOrchestrator {
      * @param planId AtomicReference<String> 当前创作计划ID
      * @param completionStatus AtomicReference<String> 请求最终状态
      * @param completionMessage AtomicReference<String> 请求最终说明
+     * @param completionSystemMessage AtomicReference<SystemMessage> 请求最终语言中立说明
      */
     private record ActiveRequestExecution(String requestId, Long userId, String sessionId,
                                           AtomicReference<String> planId,
                                           AtomicReference<String> completionStatus,
                                           AtomicReference<String> completionMessage,
+                                          AtomicReference<SystemMessage> completionSystemMessage,
                                           AtomicBoolean cancellationHandled) {
 
         /**
          * 保存计划执行汇总对应的主Agent请求终态。
          *
          * @param planStatus String 计划执行状态
-         * @param message String 计划执行说明
+         * @param message SystemMessage 计划执行说明
          */
-        private void setCompletion(String planStatus, String message) {
+        private void setCompletion(String planStatus, SystemMessage message) {
             completionStatus.set("canceled".equals(planStatus) ? "canceled"
                     : "success".equals(planStatus) ? "success" : "failed");
-            completionMessage.set("success".equals(planStatus) ? "" : (message == null ? "" : message));
+            completionMessage.set("success".equals(planStatus) ? "" : message.diagnostic());
+            completionSystemMessage.set("success".equals(planStatus) ? null : message);
         }
 
         /**

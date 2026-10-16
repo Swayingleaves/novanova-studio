@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import java.nio.charset.StandardCharsets;
@@ -65,11 +67,11 @@ public class OAuth2LoginCodeService {
      */
     public Mono<Long> consume(String loginCode) {
         if (!StringUtils.hasText(loginCode)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "一次性登录码不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.oneTimeSignInCodeIsRequired")));
         }
         return redisTemplate.opsForValue()
                 .getAndDelete(redisKey(loginCode.trim()))
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, "一次性登录码已失效或已使用")))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.oneTimeCodeExpiredOrAlreadyUsed"))))
                 .map(this::parseUserId);
     }
 
@@ -108,7 +110,7 @@ public class OAuth2LoginCodeService {
         try {
             return Long.valueOf(value);
         } catch (NumberFormatException exception) {
-            throw new BusinessException(ErrorCode.AUTH_ERROR, "一次性登录码关联用户无效");
+            throw new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.oneTimeCodeUserIsInvalid"));
         }
     }
 }

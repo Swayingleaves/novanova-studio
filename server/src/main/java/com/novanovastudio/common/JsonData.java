@@ -22,7 +22,7 @@ public class JsonData {
             // 使用Fastjson2解析JSON对象字符串。
             return JSON.parseObject(value);
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, "JSON数据格式不合法");
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidJSONData"));
         }
     }
 
@@ -37,7 +37,7 @@ public class JsonData {
             // 使用Fastjson2序列化对象。
             return JSON.toJSONString(value);
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "序列化JSON失败: " + exception.getMessage());
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToSerializeJSON", exception.getMessage()));
         }
     }
 }

@@ -1,4 +1,6 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+
 
 const OUTPUT_MIME_TYPE = "image/png";
 
@@ -105,7 +107,7 @@ function renderFrame(image: HTMLImageElement, frame: ImageFrame): string {
     canvas.height = frame.height;
     const context = canvas.getContext("2d");
     if (!context) {
-        throw new Error("图片画布上下文初始化失败");
+        throw new Error(translate("canvas.failedToInitializeCanvasImageContext"));
     }
     context.drawImage(image, frame.left, frame.top, frame.width, frame.height, 0, 0, frame.width, frame.height);
     return canvas.toDataURL(OUTPUT_MIME_TYPE);
@@ -116,7 +118,7 @@ function readSourceImage(dataUrl: string): Promise<HTMLImageElement> {
         const image = new Image();
         image.decoding = "async";
         image.onload = () => resolve(image);
-        image.onerror = () => reject(new Error("图片读取失败"));
+        image.onerror = () => reject(new Error(translate("canvas.failedToReadImage")));
         image.src = dataUrl;
     });
 }

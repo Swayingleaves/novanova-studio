@@ -1,4 +1,6 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+
 
 import { nanoid } from "nanoid";
 import { useMemo } from "react";
@@ -44,23 +46,26 @@ export type VideoModelBillingConfiguration = {
 };
 export type ModelCapabilityConfig = { model: string; capabilities: string[] };
 
-export const MODEL_CAPABILITY_OPTIONS: Record<ModelCapability, Array<{ value: string; label: string }>> = {
+/** 按调用方语言生成显示文案，业务值保持不变。 */
+export const createModelCapabilityOptions = (translator: typeof translate = translate): Record<ModelCapability, Array<{ value: string; label: string }>> => ({
     text: [
-        { value: "chat", label: "常规聊天" },
-        { value: "vision", label: "图像理解" },
+        { value: "chat", get label() { return translator("settings.chat"); } },
+        { value: "vision", get label() { return translator("settings.imageUnderstanding"); } },
     ],
     image: [
-        { value: "text-to-image", label: "文生图" },
-        { value: "image-to-image", label: "图生图" },
+        { value: "text-to-image", get label() { return translator("settings.textToImage"); } },
+        { value: "image-to-image", get label() { return translator("settings.imageToImage"); } },
     ],
     video: [
-        { value: "audio-input", label: "支持音频输入" },
-        { value: "text-to-video", label: "文生视频" },
-        { value: "image-to-video", label: "图生视频" },
-        { value: "reference-to-video", label: "全能参考" },
-        { value: "first-last-frame-to-video", label: "首尾帧原生生成" },
+        { value: "audio-input", get label() { return translator("settings.audioInputSupported"); } },
+        { value: "text-to-video", get label() { return translator("settings.textToVideo"); } },
+        { value: "image-to-video", get label() { return translator("settings.imageToVideo"); } },
+        { value: "reference-to-video", get label() { return translator("settings.universalReference"); } },
+        { value: "first-last-frame-to-video", get label() { return translator("settings.nativeFirstAndLastFrames"); } },
     ],
-};
+});
+
+export const MODEL_CAPABILITY_OPTIONS = createModelCapabilityOptions();
 
 export type ConfigDialogTabKey = "channels" | "models" | "credits" | "invitationReward" | "checkIn" | "objectStorage";
 
@@ -280,7 +285,7 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
         });
     },
     addObjectStorage: () => {
-        const storage = createObjectStorageConfig({ name: `对象存储 ${get().objectStorages.length + 1}` });
+        const storage = createObjectStorageConfig({ name: translate("settings.objectStorage", { value0: get().objectStorages.length + 1 }) });
         set((state) => {
             const objectStorages = [...state.objectStorages, storage];
             return { objectStorage: storage, objectStorages, activeObjectStorageId: storage.id };
@@ -591,7 +596,7 @@ function normalizeObjectStorages(storages: Array<Partial<ObjectStorageConfig>>):
 export function createObjectStorageConfig(input: Partial<ObjectStorageConfig> = {}): ObjectStorageConfig {
     return {
         id: input.id?.trim() || nanoid(),
-        name: input.name?.trim() || "未命名对象存储",
+        name: input.name?.trim() || translate("settings.unnamedObjectStorage"),
         provider: input.provider || "tencentCos",
         accessKey: input.accessKey || "",
         secretKey: input.secretKey || "",

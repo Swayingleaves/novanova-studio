@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.SkillDtos;
@@ -71,10 +73,10 @@ public class SkillService {
      */
     public Mono<SkillRecords.SkillRecord> findEnabledSkill(Long id) {
         if (id == null || id <= 0) {
-            return Mono.error(invalid("技能ID不合法"));
+            return Mono.error(invalid(SystemMessage.of("business.invalidSkillID")));
         }
         return repository.findEnabledById(id)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "技能不存在或已停用")));
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.skillNotFoundOrDisabled"))));
     }
 
     /**
@@ -99,13 +101,13 @@ public class SkillService {
      */
     public Mono<Void> updateSkill(SkillDtos.UpdateSkillRequest request) {
         if (request.id() == null || request.id() <= 0) {
-            return Mono.error(invalid("技能ID不能为空"));
+            return Mono.error(invalid(SystemMessage.of("business.skillIDIsRequired")));
         }
         SkillRecords.SkillRecord record = buildRecord(
                 request.name(), request.description(), request.targetType(), request.systemPrompt(), request.aspectRatio(), request.coverUrl(), request.status(), request.sortOrder());
         record.setId(request.id());
         return repository.updateSkill(record)
-                .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "技能不存在")))
+                .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.skillNotFound"))))
                 .doOnSuccess(ignored -> log.info("更新技能成功: id={}", request.id()));
     }
 
@@ -117,11 +119,11 @@ public class SkillService {
      */
     public Mono<Void> updateSkillStatus(SkillDtos.UpdateSkillStatusRequest request) {
         if (request.id() == null || request.id() <= 0) {
-            return Mono.error(invalid("技能ID不能为空"));
+            return Mono.error(invalid(SystemMessage.of("business.skillIDIsRequired")));
         }
         int status = normalizeStatus(request.status());
         return repository.updateSkillStatus(request.id(), status)
-                .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "技能不存在")))
+                .flatMap(rows -> rows > 0 ? Mono.<Void>empty() : Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.skillNotFound"))))
                 .doOnSuccess(ignored -> log.info("更新技能状态成功: id={}, status={}", request.id(), status));
     }
 
@@ -138,7 +140,7 @@ public class SkillService {
                 .distinct()
                 .toList();
         if (ids.isEmpty()) {
-            return Mono.error(invalid("请选择要删除的技能"));
+            return Mono.error(invalid(SystemMessage.of("business.selectSkillsToDelete")));
         }
         return repository.deleteSkills(ids).doOnSuccess(ignored -> log.info("删除技能成功: ids={}", ids));
     }
@@ -150,7 +152,7 @@ public class SkillService {
             case "image" -> SkillRecords.TYPE_IMAGE;
             case "video" -> SkillRecords.TYPE_VIDEO;
             case "canvassettinggraph" -> SkillRecords.TYPE_CANVAS_SETTING_GRAPH;
-            default -> throw invalid("技能类型只支持image、video或canvasSettingGraph");
+            default -> throw invalid(SystemMessage.of("business.skillTypeMustBeImageVideoOrCanvasSettingGraph"));
         };
     }
 
@@ -158,7 +160,7 @@ public class SkillService {
     private int normalizeStatus(Integer status) {
         int value = status == null ? SkillRecords.STATUS_ENABLED : status;
         if (value != SkillRecords.STATUS_ENABLED && value != SkillRecords.STATUS_DISABLED) {
-            throw invalid("技能状态只支持启用或停用");
+            throw invalid(SystemMessage.of("business.skillStatusMustBeEnabledOrDisabled"));
         }
         return value;
     }
@@ -167,15 +169,15 @@ public class SkillService {
     private SkillRecords.SkillRecord buildRecord(String name, String description, String targetType, String systemPrompt,
                                                   String aspectRatio, String coverUrl, Integer status, Integer sortOrder) {
         SkillRecords.SkillRecord record = new SkillRecords.SkillRecord();
-        record.setName(required(name, "技能名称不能为空"));
+        record.setName(required(name, SystemMessage.of("business.skillNameIsRequired")));
         record.setDescription(description == null ? "" : description.trim());
         record.setTargetType(normalizeTargetType(targetType));
-        record.setSystemPrompt(required(systemPrompt, "技能系统提示词不能为空"));
+        record.setSystemPrompt(required(systemPrompt, SystemMessage.of("business.skillSystemPromptIsRequired")));
         record.setAspectRatio(normalizeAspectRatio(aspectRatio));
         record.setCoverUrl(coverUrl == null ? "" : coverUrl.trim());
         record.setStatus(normalizeStatus(status));
         if (sortOrder != null && sortOrder < 0) {
-            throw invalid("技能排序值不能小于0");
+            throw invalid(SystemMessage.of("business.skillSortOrderMustNotBeNegative"));
         }
         record.setSortOrder(sortOrder == null ? DEFAULT_SORT_ORDER : sortOrder);
         return record;
@@ -185,15 +187,15 @@ public class SkillService {
     private String normalizeAspectRatio(String aspectRatio) {
         String value = StringUtils.hasText(aspectRatio) ? aspectRatio.trim() : "16:9";
         if (!value.matches("\\d+(?::\\d+)?")) {
-            throw invalid("默认生成比例格式不正确，例如16:9");
+            throw invalid(SystemMessage.of("business.invalidDefaultAspectRatioEG169"));
         }
         String[] parts = value.split(":");
         try {
             if (parts.length != 2 || Integer.parseInt(parts[0]) <= 0 || Integer.parseInt(parts[1]) <= 0) {
-                throw invalid("默认生成比例必须为正数宽高，例如16:9");
+                throw invalid(SystemMessage.of("business.defaultAspectRatioMustHavePositiveDimensionsEG16"));
             }
         } catch (NumberFormatException exception) {
-            throw invalid("默认生成比例必须为正数宽高，例如16:9");
+            throw invalid(SystemMessage.of("business.defaultAspectRatioMustHavePositiveDimensionsEG16"));
         }
         return value;
     }
@@ -206,7 +208,7 @@ public class SkillService {
                 || "all".equalsIgnoreCase(source.targetType()) ? "all" : normalizeTargetType(source.targetType());
         Integer status = source.status();
         if (status != null && status != 0 && status != 1) {
-            throw invalid("技能状态只支持启用或停用");
+            throw invalid(SystemMessage.of("business.skillStatusMustBeEnabledOrDisabled"));
         }
         return new SkillDtos.SkillListRequest(source.keyword() == null ? "" : source.keyword().trim(), type,
                 status, Math.max(1, source.page()), Math.min(MAX_PAGE_SIZE, Math.max(1, source.pageSize())));
@@ -228,7 +230,7 @@ public class SkillService {
     }
 
     /** 必填文本。 */
-    private String required(String value, String message) {
+    private String required(String value, SystemMessage message) {
         if (!StringUtils.hasText(value)) {
             throw invalid(message);
         }
@@ -241,7 +243,7 @@ public class SkillService {
     }
 
     /** 构建参数异常。 */
-    private BusinessException invalid(String message) {
+    private BusinessException invalid(SystemMessage message) {
         return new BusinessException(ErrorCode.PARAM_INVALID, message);
     }
 }

@@ -1,5 +1,7 @@
 package com.novanovastudio.ai;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
@@ -58,13 +60,13 @@ public class AudioClipService {
     public Mono<String> resolveReferenceUrl(Long userId, AiTaskDtos.AiTaskMediaReference reference,
                                              PersistenceDtos.UploadedMediaResponse media) {
         if (reference == null || media == null) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考音频不能为空"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceAudioIsRequired")));
         }
         if (reference.trimStartMs() == null && reference.trimEndMs() == null) {
             return requireReferenceUrl(media.url(), "原始参考音频");
         }
         if (!AudioInputSupport.isAudioMimeType(media.mimeType())) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "裁剪引用必须是MP3或WAV音频"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.trimmedReferencesMustBeMP3OrWAV")));
         }
         long originalDuration = media.durationMs() == null ? 0 : media.durationMs();
         long startMs = reference.trimStartMs() == null ? 0 : reference.trimStartMs();
@@ -72,13 +74,13 @@ public class AudioClipService {
         log.info("解析音频裁剪引用: userId={}, storageKey={}, sourceDurationMs={}, startMs={}, endMs={}, sourceUrlPresent={}",
                 userId, media.storageKey(), originalDuration, startMs, endMs, StringUtils.hasText(media.url()));
         if (originalDuration < 1 || startMs < 0 || endMs > originalDuration || endMs <= startMs) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考音频裁剪区间无效"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidReferenceAudioTrimRange")));
         }
         if (startMs == 0 && endMs == originalDuration) {
             return requireReferenceUrl(media.url(), "原始参考音频");
         }
         if (!StringUtils.hasText(media.url()) || !isHttpUrl(media.url())) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "参考音频没有可下载的地址"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.referenceAudioHasNoDownloadURL")));
         }
         String storageKey = derivedStorageKey(media.storageKey(), startMs, endMs);
         log.info("准备解析音频派生媒体: userId={}, derivedStorageKey={}, startMs={}, endMs={}",
@@ -101,7 +103,7 @@ public class AudioClipService {
                             ignored -> createAndStore(userId, media, storageKey, startMs, endMs).cache());
                     return generation.doFinally(signal -> inFlightClips.remove(requestKey, generation));
                 }))
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "音频裁剪后没有得到可访问地址")));
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.trimmedAudioHasNoAccessibleURL"))));
     }
 
     /** 创建并保存派生音频，usingWhen保证临时目录在所有终止信号下清理。 */
@@ -116,7 +118,7 @@ public class AudioClipService {
                     Path input = directory.resolve("source" + extension(media.mimeType()));
                     Path output = directory.resolve("clip" + extension(media.mimeType()));
                     return aiHttpClient.downloadRemoteMediaToFile(media.url(), media.mimeType(), input, MAXIMUM_AUDIO_BYTES)
-                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "下载参考音频没有返回文件")))
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.referenceAudioDownloadReturnedNoFile"))))
                             .flatMap(downloaded -> {
                                 log.info("参考音频下载完成: userId={}, storageKey={}, bytes={}, mimeType={}",
                                         userId, media.storageKey(), downloaded.bytes(), downloaded.mimeType());
@@ -124,11 +126,11 @@ public class AudioClipService {
                                         .subscribeOn(Schedulers.boundedElastic())
                                         .thenReturn(output);
                             })
-                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "音频裁剪没有生成输出文件")))
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.audioTrimProducedNoOutputFile"))))
                             .flatMap(outputFile -> persistenceService.storeDerivedMediaFileForUser(
                                     userId, storageKey, "audio", "audio-clip" + extension(media.mimeType()),
                                     media.mimeType(), outputFile, (int) (endMs - startMs)))
-                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "裁剪音频上传后没有返回媒体记录")))
+                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.trimmedAudioUploadReturnedNoMediaRecord"))))
                             .flatMap(stored -> requireReferenceUrl(stored.url(), "裁剪后的参考音频")
                                     .doOnSuccess(url -> log.info("音频派生媒体保存成功: userId={}, storageKey={}, bytes={}, url={}",
                                             userId, storageKey, stored.bytes(), url)));
@@ -136,7 +138,7 @@ public class AudioClipService {
                 directory -> Mono.fromRunnable(() -> deleteDirectory(directory)).subscribeOn(Schedulers.boundedElastic()),
                 (directory, exception) -> Mono.fromRunnable(() -> deleteDirectory(directory)).subscribeOn(Schedulers.boundedElastic()),
                 directory -> Mono.fromRunnable(() -> deleteDirectory(directory)).subscribeOn(Schedulers.boundedElastic())
-        ).switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "音频派生流程返回空结果")))
+        ).switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.audioDerivationReturnedNoResult"))))
                 .doOnError(exception -> log.error("创建音频派生媒体失败: userId={}, sourceStorageKey={}, derivedStorageKey={}",
                 userId, media.storageKey(), storageKey, exception));
     }
@@ -144,7 +146,7 @@ public class AudioClipService {
     /** 校验裁剪流程产出的媒体地址。 */
     private Mono<String> requireReferenceUrl(String url, String mediaDescription) {
         if (!StringUtils.hasText(url) || !isHttpUrl(url)) {
-            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, mediaDescription + "没有返回可访问的HTTP地址"));
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.returnedNoAccessibleHTTPURL", mediaDescription)));
         }
         return Mono.just(url.trim());
     }
@@ -167,26 +169,26 @@ public class AudioClipService {
             if (!completed) {
                 process.destroyForcibly();
                 process.waitFor(5, TimeUnit.SECONDS);
-                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "音频裁剪超时");
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.audioTrimTimedOut"));
             }
             reader.join(1000);
             if (process.exitValue() != 0 || !Files.exists(output) || Files.size(output) < 1) {
-                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "音频裁剪失败" + (error.isEmpty() ? "" : ": " + error));
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.audioTrimFailed", (error.isEmpty() ? "" : ": " + error)));
             }
         } catch (BusinessException exception) {
             throw exception;
         } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "服务端未安装FFmpeg或FFmpeg路径配置错误");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.fFmpegIsMissingOrMisconfigured"));
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "音频裁剪任务已中断");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.audioTrimInterrupted"));
         }
     }
 
     /** 读取音视频工具配置，配置对象缺失时返回明确业务错误。 */
     private NovanovaProperties.Ai.VideoComposition videoComposition() {
         if (properties == null || properties.getAi() == null || properties.getAi().getVideoComposition() == null) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "音频裁剪缺少FFmpeg配置");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.audioTrimRequiresFFmpegConfiguration"));
         }
         return properties.getAi().getVideoComposition();
     }
@@ -207,7 +209,7 @@ public class AudioClipService {
         try {
             return "audio-clip:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(raw.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "生成音频派生标识失败");
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.failedToCreateDerivedAudioID"));
         }
     }
 

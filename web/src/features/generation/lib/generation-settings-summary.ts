@@ -1,3 +1,5 @@
+
+import { translateMessage as translate } from "@/features/locale/translate";
 export type ImageGenerationSettingsSummaryParts = {
     quality?: string | null;
     resolution?: string | null;
@@ -27,9 +29,9 @@ export function imageQualitySummaryLabel(value?: string | null): string {
     const raw = String(value ?? "").trim();
     const normalized = raw.toLowerCase();
     if (!raw) return "";
-    if (normalized === "low" || normalized === "低" || normalized === "低画质") return "低";
-    if (normalized === "medium" || normalized === "standard" || normalized === "标准" || normalized === "标准画质") return "标准";
-    if (normalized === "high" || normalized === "高" || normalized === "高画质") return "高";
+    if (normalized === "low" || normalized === "低" || normalized === "低画质") return translate("generation.low");
+    if (normalized === "medium" || normalized === "standard" || normalized === "标准" || normalized === "标准画质") return translate("generation.standard");
+    if (normalized === "high" || normalized === "高" || normalized === "高画质") return translate("generation.high");
     return raw.endsWith("画质") ? raw.slice(0, -2) : raw;
 }
 

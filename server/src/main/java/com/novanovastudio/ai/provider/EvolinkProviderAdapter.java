@@ -1,5 +1,7 @@
 package com.novanovastudio.ai.provider;
 
+import com.novanovastudio.common.SystemMessage;
+
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiErrorSupport;
@@ -84,12 +86,12 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
     @Override
     public Mono<JSONObject> execute(AiTaskExecutionContext context) {
         if (!supports(context.task().getTaskType())) {
-            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "Evolink渠道仅支持视频任务"));
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.evolinkSupportsVideoTasksOnly")));
         }
         List<AiTaskDtos.AiTaskMediaReference> imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
         List<AiTaskDtos.AiTaskMediaReference> videoReferences = AiTaskParameterReader.safeReferences(context.request().videoReferences());
         if (imageReferences.size() > 9 || videoReferences.size() > 3) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "Evolink最多支持9张参考图和3个参考视频"));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.evolinkSupportsUpTo9ImagesAnd3Videos")));
         }
         return Mono.zip(resolveUrls(context, imageReferences), resolveUrls(context, videoReferences), resolveUrls(context, AiTaskParameterReader.safeReferences(context.request().audioReferences())))
                 .flatMap(urls -> createTask(context, urls.getT1(), urls.getT2(), urls.getT3()));
@@ -135,7 +137,7 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
                 .flatMap(created -> {
                     String providerTaskId = created.getString("id");
                     if (!StringUtils.hasText(providerTaskId)) {
-                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "Evolink接口没有返回任务ID"));
+                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.evolinkReturnedNoTaskID")));
                     }
                     return context.updateRunningProgress(10)
                             .then(pollTask(context, providerTaskId))
@@ -154,7 +156,7 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
         Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
         return Flux.range(0, MAXIMUM_POLLING_ATTEMPTS)
                 .concatMap(attempt -> Mono.delay(pollingInterval).then(context.isCancelRequested()).flatMap(cancelled -> {
-                    if (Boolean.TRUE.equals(cancelled)) return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "任务已取消"));
+                    if (Boolean.TRUE.equals(cancelled)) return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.taskCanceled")));
                     return aiHttpClient.sendJsonRequest(context.channel(), "GET", TASK_PATH_PREFIX + providerTaskId, null)
                             .map(AiJsonUtils::responsePayload)
                             .flatMap(response -> {
@@ -163,7 +165,7 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
                                     if ("completed".equals(status)) return Mono.just(response);
                                     if (PROCESSING_STATUSES.contains(status)) return Mono.empty();
                                     if ("failed".equals(status) || "cancelled".equals(status)) return Mono.error(AiErrorSupport.providerTaskFailure(response, "Evolink视频生成失败"));
-                                    return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "Evolink返回未知任务状态: " + status));
+                                    return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.unknownEvolinkTaskStatus", status)));
                                 }));
                             });
                 }))
@@ -182,7 +184,7 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
     private Mono<JSONObject> storeResult(AiTaskExecutionContext context, String providerTaskId, JSONObject response) {
         JSONArray results = response.getJSONArray("results");
         String resultUrl = results == null || results.isEmpty() ? "" : results.getString(0);
-        if (!StringUtils.hasText(resultUrl)) return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "Evolink任务完成但没有返回视频URL"));
+        if (!StringUtils.hasText(resultUrl)) return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.evolinkTaskCompletedWithoutVideoURL")));
         return aiHttpClient.downloadRemoteBinary(resultUrl, "video/mp4")
                 .flatMap(binary -> mediaSupport.storeGeneratedMedia(context.task().getUserId(), AiTaskTypes.VIDEO, "generated-evolink-video.mp4", binary, null, null, null))
                 .map(media -> AiJsonUtils.jsonObject(Map.of("item", media, "providerTaskId", providerTaskId)));
@@ -223,7 +225,7 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
         if ("low".equals(normalized)) return "480p";
         if ("auto".equals(normalized) || "medium".equals(normalized) || "high".equals(normalized) || normalized.isEmpty()) return "720p";
         if (Set.of("480p", "720p", "1080p").contains(normalized)) return normalized;
-        throw new BusinessException(ErrorCode.PARAM_INVALID, "Evolink视频清晰度仅支持480p、720p、1080p");
+        throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.evolinkResolutionMustBe480p720pOr1080p"));
     }
 
     /**
@@ -240,13 +242,13 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
             String[] dimensions = normalized.split("x");
             double width = Double.parseDouble(dimensions[0]);
             double height = Double.parseDouble(dimensions[1]);
-            if (width <= 0 || height <= 0) throw new BusinessException(ErrorCode.PARAM_INVALID, "Evolink视频尺寸必须为正数");
+            if (width <= 0 || height <= 0) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.evolinkVideoDimensionsMustBePositive"));
             double ratio = width / height;
             return Set.of("16:9", "9:16", "1:1", "4:3", "3:4", "21:9").stream()
                     .min(java.util.Comparator.comparingDouble(candidate -> Math.abs(ratio - ratioValue(candidate))))
                     .orElseThrow();
         }
-        throw new BusinessException(ErrorCode.PARAM_INVALID, "Evolink视频比例不支持: " + value);
+        throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedEvolinkAspectRatio", value));
     }
 
     /**

@@ -1,4 +1,7 @@
 "use client";
+import { translateMessage as translate } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { App, Modal, Segmented, Tooltip } from "antd";
@@ -70,6 +73,7 @@ type CanvasNodeHoverToolbarProps = {
 };
 
 export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const copyText = useCopyText();
     const theme = useCanvasTheme();
@@ -86,11 +90,11 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
     const copyImagePrompt = (targetNode: CanvasNode) => {
         const prompt = isImageNode(targetNode) || isVideoNode(targetNode) ? targetNode.generation.prompt.trim() : "";
         if (!prompt) {
-            message.warning("暂无可复制的提示词");
+            message.warning(translate("canvas.noPromptToCopy"));
             return;
         }
         const styles = isImageNode(targetNode) || isVideoNode(targetNode) ? targetNode.generation.generationStyleSnapshots : [];
-        copyText(formatGenerationStyleMessage(prompt, styles), "提示词已复制");
+        copyText(formatGenerationStyleMessage(prompt, styles), translate("canvas.promptCopied"));
     };
 
     const imageToolbarTools = buildImageToolbarTools(node, {
@@ -137,9 +141,9 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
 
     return (
         <div
-            className="absolute z-[70] flex max-w-[410px] flex-wrap gap-0.5 overflow-hidden rounded-[18px] border p-1 text-[15px] shadow-[0_8px_28px_rgba(15,23,42,.18)]"
+            className="absolute z-[70] flex w-max flex-wrap gap-0.5 overflow-hidden rounded-[18px] border p-1 text-[15px] shadow-[0_8px_28px_rgba(15,23,42,.18)]"
             data-canvas-no-zoom
-            style={{ left, top, transform: "translate(-50%, -100%)", background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
+            style={{ left, top, maxWidth: "min(410px, calc(100vw - 32px))", transform: "translate(-50%, -100%)", background: theme.node.panel, borderColor: theme.toolbar.border, color: theme.node.text }}
             onMouseEnter={() => props.onKeep(node.id)}
             onMouseLeave={props.onLeave}
             onMouseDown={(event) => event.stopPropagation()}
@@ -159,12 +163,13 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
 }
 
 export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNode | null; open: boolean; onClose: () => void }) {
+    const translate = useTranslation();
     const theme = useCanvasTheme();
     const copyText = useCopyText();
     const [view, setView] = useState<"info" | "json">("info");
     const imageBytes = node && isImageNode(node) && node.content.source ? getDataUrlByteSize(node.content.source) : 0;
     const batchCount = node && isImageNode(node) ? node.grouping.childIds.length : 0;
-    const json = useMemo(() => buildNodeInfoJson(node), [node]);
+    const json = useMemo(() => buildNodeInfoJson(node), [node, translate.locale]);
 
     useEffect(() => {
         if (open) {
@@ -177,13 +182,13 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNode 
             className="canvas-node-info-modal"
             title={
                 <div className="flex items-center justify-between gap-4 pr-12">
-                    <span>节点信息</span>
+                    <span>{translate("canvas.nodeDetails")}</span>
                     <Segmented
                         size="small"
                         value={view}
                         onChange={(value) => setView(value as "info" | "json")}
                         options={[
-                            { label: "信息", value: "info" },
+                            { label: translate("canvas.information"), value: "info" },
                             { label: "JSON", value: "json" },
                         ]}
                     />
@@ -210,22 +215,22 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNode 
                                                 event.stopPropagation();
                                                 copyText(node.id);
                                             }}
-                                            title="复制节点 ID"
+                                            title={translate("canvas.copyNodeID")}
                                         >
                                             <Copy className="size-3.5" />
                                         </button>
                                     </span>
                                 }
                             />
-                            <InfoRow label="类型" value={readNodeTypeLabel(node.kind)} />
-                            <InfoRow label="尺寸" value={`${Math.round(node.frame.width)} x ${Math.round(node.frame.height)}`} />
-                            {node.frame.naturalWidth && node.frame.naturalHeight ? <InfoRow label="原始分辨率" value={`${node.frame.naturalWidth} x ${node.frame.naturalHeight}`} /> : null}
-                            <InfoRow label="位置" value={`${Math.round(node.frame.position.x)}, ${Math.round(node.frame.position.y)}`} />
-                            <InfoRow label="状态" value={node.execution.phase} />
-                            {batchCount > 1 ? <InfoRow label="图片组" value={`${batchCount} 张`} /> : null}
+                            <InfoRow label={translate("canvas.type")} value={readNodeTypeLabel(node.kind)} />
+                            <InfoRow label={translate("canvas.dimensions")} value={`${Math.round(node.frame.width)} x ${Math.round(node.frame.height)}`} />
+                            {node.frame.naturalWidth && node.frame.naturalHeight ? <InfoRow label={translate("canvas.originalResolution")} value={`${node.frame.naturalWidth} x ${node.frame.naturalHeight}`} /> : null}
+                            <InfoRow label={translate("canvas.position")} value={`${Math.round(node.frame.position.x)}, ${Math.round(node.frame.position.y)}`} />
+                            <InfoRow label={translate("canvas.status")} value={node.execution.phase} />
+                            {batchCount > 1 ? <InfoRow label={translate("canvas.imageGroup")} value={translate("canvas.images_a4f725", { value0: batchCount })} /> : null}
                             {(isImageNode(node) || isVideoNode(node)) && node.generation.prompt ? (
                                 <InfoRow
-                                    label="提示词"
+                                    label={translate("canvas.prompt")}
                                     value={
                                         <span className="inline-flex items-start gap-2">
                                             {node.generation.prompt}
@@ -234,9 +239,9 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNode 
                                                 className="inline-flex size-5 shrink-0 items-center justify-center rounded opacity-40 transition hover:opacity-100"
                                                 onClick={(event) => {
                                                     event.stopPropagation();
-                                                    copyText(node.generation.prompt, "提示词已复制");
+                                                    copyText(node.generation.prompt, translate("canvas.promptCopied"));
                                                 }}
-                                                title="复制提示词"
+                                                title={translate("canvas.copyPrompt")}
                                             >
                                                 <Copy className="size-3.5" />
                                             </button>
@@ -244,11 +249,11 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNode 
                                     }
                                 />
                             ) : null}
-                            {isAudioNode(node) ? <><InfoRow label="音频时长" value={formatAudioTime(audioNodeTrimRange(node.content).durationMs / 1000)} /><InfoRow label="音频大小" value={formatBytes(node.content.bytes || 0)} /><InfoRow label="音频格式" value={node.content.mimeType || "尚未上传"} /></> : null}
-                            {imageBytes ? <InfoRow label="图片大小" value={formatBytes(imageBytes)} /> : null}
+                            {isAudioNode(node) ? <><InfoRow label={translate("canvas.audioDuration")} value={formatAudioTime(audioNodeTrimRange(node.content).durationMs / 1000)} /><InfoRow label={translate("canvas.audioSize")} value={formatBytes(node.content.bytes || 0)} /><InfoRow label={translate("canvas.audioFormat")} value={node.content.mimeType || translate("canvas.notUploaded")} /></> : null}
+                            {imageBytes ? <InfoRow label={translate("canvas.imageSize")} value={formatBytes(imageBytes)} /> : null}
                             {(isImageNode(node) || isVideoNode(node) || isAudioNode(node)) && node.content.objectStorage?.url ? (
                                 <InfoRow
-                                    label="云储存地址"
+                                    label={translate("canvas.cloudStorageURL")}
                                     value={
                                         <a href={node.content.objectStorage.url} target="_blank" rel="noreferrer" className="break-all text-[var(--studio-primary)]">
                                             {node.content.objectStorage.url}
@@ -275,15 +280,15 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNode 
 
 function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarAction[] {
     const actions: ToolbarAction[] = [
-        { id: "info", title: "查看节点信息", label: "信息", icon: <Info className="size-4" />, onClick: () => context.onInfo(context.node) },
-        { id: "delete", title: "移除节点", label: "删除", icon: <Trash2 className="size-4" />, onClick: () => context.onDelete(context.node), danger: true },
+        { id: "info", title: translate("canvas.viewNodeDetails"), label: translate("canvas.information"), icon: <Info className="size-4" />, onClick: () => context.onInfo(context.node) },
+        { id: "delete", title: translate("canvas.removeNode"), label: translate("canvas.delete"), icon: <Trash2 className="size-4" />, onClick: () => context.onDelete(context.node), danger: true },
     ];
 
     if (context.canRetry) {
         actions.push({
             id: "retry",
-            title: "重新生成",
-            label: "重试",
+            title: translate("canvas.regenerate"),
+            label: translate("canvas.retry"),
             icon: <RefreshCw className="size-4" />,
             onClick: () => context.onRetry(context.node),
         });
@@ -291,8 +296,8 @@ function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarA
     if (isStoryboardNode(context.node)) {
         actions.splice(1, 0, {
             id: "generateStoryboardVideos",
-            title: context.node.storyboard.shots.length ? "批量生成分镜视频" : "请先生成分镜镜头",
-            label: "批量视频",
+            title: context.node.storyboard.shots.length ? translate("canvas.generateStoryboardVideosInBatch") : translate("canvas.generateStoryboardShotsFirst"),
+            label: translate("canvas.batchVideo"),
             icon: <Clapperboard className="size-4" />,
             disabled: !context.node.storyboard.shots.length,
             onClick: () => context.onGenerateStoryboardVideos(context.node),
@@ -301,8 +306,8 @@ function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarA
     if (context.hasImage || context.hasVideo || context.isText) {
         actions.push({
             id: "saveAsset",
-            title: "加入我的资产",
-            label: "存资产",
+            title: translate("canvas.addToMyAssets"),
+            label: translate("canvas.saveAsset"),
             icon: <FolderPlus className="size-4" />,
             onClick: () => context.onSaveAsset(context.node),
         });
@@ -310,8 +315,8 @@ function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarA
     if (isImageNode(context.node)) {
         actions.push({
             id: "chooseAsset",
-            title: "从画布资产中选择图片并替换当前节点",
-            label: "画布资产",
+            title: translate("canvas.chooseCanvasAssetImageToReplaceThisNode"),
+            label: translate("canvas.canvasAsset"),
             icon: <ImagePlus className="size-4" />,
             onClick: () => context.onChooseAsset(context.node),
         });
@@ -319,8 +324,8 @@ function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarA
     if (context.hasImage || context.hasVideo) {
         actions.push({
             id: "uploadObjectStorage",
-            title: (isImageNode(context.node) || isVideoNode(context.node)) && context.node.content.objectStorage?.url ? "复制云储存地址" : "上传到云储存",
-            label: "云储存",
+            title: (isImageNode(context.node) || isVideoNode(context.node)) && context.node.content.objectStorage?.url ? translate("canvas.copyCloudStorageURL") : translate("canvas.uploadToCloudStorage"),
+            label: translate("canvas.cloudStorage"),
             icon: <CloudUpload className="size-4" />,
             onClick: () => context.onUploadObjectStorage(context.node),
         });
@@ -328,8 +333,8 @@ function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarA
     if (context.hasImage || context.hasVideo) {
         actions.push({
             id: "download",
-            title: context.hasVideo ? "下载视频" : "下载图片",
-            label: "下载",
+            title: context.hasVideo ? translate("canvas.downloadVideo") : translate("canvas.downloadImage"),
+            label: translate("canvas.download"),
             icon: <Download className="size-4" />,
             onClick: () => context.onDownload(context.node),
         });
@@ -338,15 +343,15 @@ function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarA
         actions.push(
             {
                 id: "decreaseFont",
-                title: "减小字号",
-                label: "缩小",
+                title: translate("canvas.decreaseFontSize"),
+                label: translate("canvas.zoomOut"),
                 icon: <Minus className="size-4" />,
                 onClick: () => context.onDecreaseFont(context.node),
             },
             {
                 id: "increaseFont",
-                title: "增大字号",
-                label: "放大",
+                title: translate("canvas.increaseFontSize"),
+                label: translate("canvas.zoomIn"),
                 icon: <Plus className="size-4" />,
                 onClick: () => context.onIncreaseFont(context.node),
             },
@@ -355,22 +360,22 @@ function buildBaseToolbarActions(context: ToolbarActionFactoryContext): ToolbarA
     if (isImageNode(context.node) && !context.hasImage) {
         actions.push({
             id: "uploadImage",
-            title: "上传图片",
-            label: "传图片",
+            title: translate("canvas.uploadImage"),
+            label: translate("canvas.uploadImage_a1704b"),
             icon: <Upload className="size-4" />,
             onClick: () => context.onUpload(context.node),
         });
     }
     if (isAudioNode(context.node)) {
-        actions.push({ id: "uploadAudio", title: "上传或替换音频", label: "上传音频", icon: <Upload className="size-4" />, onClick: () => context.onUpload(context.node) });
-        if (context.node.content.source) actions.push({ id: "downloadAudio", title: "下载音频", label: "下载", icon: <Download className="size-4" />, onClick: () => context.onDownload(context.node) });
-        if (context.node.content.source) actions.push({ id: "trimAudio", title: "裁剪为新音频节点", label: "裁剪", icon: <Scissors className="size-4" />, onClick: () => context.onTrim(context.node) });
+        actions.push({ id: "uploadAudio", title: translate("canvas.uploadOrReplaceAudio"), label: translate("canvas.uploadAudio"), icon: <Upload className="size-4" />, onClick: () => context.onUpload(context.node) });
+        if (context.node.content.source) actions.push({ id: "downloadAudio", title: translate("canvas.downloadAudio"), label: translate("canvas.download"), icon: <Download className="size-4" />, onClick: () => context.onDownload(context.node) });
+        if (context.node.content.source) actions.push({ id: "trimAudio", title: translate("canvas.trimIntoNewAudioNode"), label: translate("canvas.crop"), icon: <Scissors className="size-4" />, onClick: () => context.onTrim(context.node) });
     }
     if (isVideoNode(context.node)) {
         actions.push({
             id: "uploadVideo",
-            title: context.hasVideo ? "替换视频" : "上传视频",
-            label: context.hasVideo ? "替换视频" : "传视频",
+            title: context.hasVideo ? translate("canvas.replaceVideo") : translate("canvas.uploadVideo"),
+            label: context.hasVideo ? translate("canvas.replaceVideo") : translate("canvas.uploadVideo_291969"),
             icon: <Video className="size-4" />,
             onClick: () => context.onUpload(context.node),
         });
@@ -394,14 +399,14 @@ function buildNodeInfoJson(node: CanvasNode | null) {
 }
 
 function readNodeTypeLabel(type: CanvasNodeKind) {
-    if (type === "audio") return "音频";
-    if (type === "text") return "文本";
-    if (type === "image") return "图片";
-    if (type === "storyboard") return "分镜脚本";
-    if (type === "videoComposition") return "合成视频";
-    if (type === "directorDesk") return "3D 导演台";
-    if (type === "background") return "背景板";
-    return "视频";
+    if (type === "audio") return translate("canvas.audio");
+    if (type === "text") return translate("canvas.text_dd8186");
+    if (type === "image") return translate("canvas.image");
+    if (type === "storyboard") return translate("canvas.storyboardScript");
+    if (type === "videoComposition") return translate("canvas.composeVideo");
+    if (type === "directorDesk") return translate("canvas.3DDirectorDesk");
+    if (type === "background") return translate("canvas.background");
+    return translate("canvas.video");
 }
 
 function ToolbarActionButton({ title, label, icon, onClick, showLabel, active = false, danger = false, disabled = false }: ToolbarAction & { showLabel: boolean }) {
@@ -409,11 +414,11 @@ function ToolbarActionButton({ title, label, icon, onClick, showLabel, active = 
     const hasText = showLabel && Boolean(label);
     return (
         <Tooltip title={title} placement="top" mouseEnterDelay={0.2} color="#ffffff" styles={{ root: { color: "#242529", boxShadow: "0 8px 24px rgba(15,23,42,.16)", fontSize: 13, fontWeight: 500 } }}>
-            <span className="inline-flex">
+            <span className="inline-flex shrink-0">
                 <button
                     type="button"
                     disabled={disabled}
-                    className={`relative flex h-12 w-[78px] shrink-0 items-center justify-center whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-40 ${danger ? "text-[#ef4444]" : ""}`}
+                    className={`relative flex h-12 min-w-[78px] shrink-0 items-center justify-center whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-40 ${danger ? "text-[#ef4444]" : ""}`}
                     onClick={onClick}
                     aria-label={title}
                 >
