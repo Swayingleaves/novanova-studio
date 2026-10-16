@@ -1,0 +1,8 @@
+# 当前线上 Nginx 直接提供 HTTPS，并通过宿主机回环地址访问前后端。
+services:
+  nginx:
+    network_mode: host
+    ports: !reset []
+    volumes:
+      - ${NGINX_STATIC_DIRECTORY:-/usr/share/nginx/html}:/usr/share/nginx/html:ro
+      - ${NGINX_SSL_DIRECTORY:-/etc/nginx/ssl}:/etc/nginx/ssl:ro
