@@ -1,5 +1,8 @@
 "use client";
 
+import { translateMessage } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useEffect, useMemo, useState } from "react";
 import { App, Button, Card, Checkbox, Drawer, Empty, Form, Image, Input, Modal, Radio, Select, Skeleton, Space, Tabs, Tag } from "antd";
 import { Bot, Check, Copy, ExternalLink, ImagePlus, Layers, Plus, RefreshCw, Sparkles, Trash2, User, Video } from "lucide-react";
@@ -19,20 +22,20 @@ import type {
     ComicDramaMediaResult,
 } from "../types";
 
-const ASSET_TYPE_CONFIG: Record<ComicDramaAssetType, { label: string; color: string }> = {
-    character: { label: "人物", color: "blue" },
-    scene: { label: "场景", color: "green" },
-    prop: { label: "道具", color: "purple" },
-};
+const getAssetTypeConfig = (translate = translateMessage): Record<ComicDramaAssetType, { label: string; color: string }> => ({
+    character: { label: translate("comicDrama.character"), color: "blue" },
+    scene: { label: translate("comicDrama.scene"), color: "green" },
+    prop: { label: translate("comicDrama.prop"), color: "purple" },
+});
 
 /** 资产版本变体类型文案。 */
-const VARIANT_TYPE_LABELS: Record<string, string> = {
-    default: "默认基准",
-    costume: "服装变更",
-    age: "年龄时期",
-    weather: "光照/天气",
-    status: "伤损/变身状态",
-};
+const getVariantTypeLabels = (translate = translateMessage): Record<string, string> => ({
+    default: translate("comicDrama.defaultBaseline"),
+    costume: translate("comicDrama.costumeChange"),
+    age: translate("comicDrama.agePeriod"),
+    weather: translate("comicDrama.lightingWeather"),
+    status: translate("comicDrama.damageTransformation"),
+});
 
 /** 版本表单只维护可编辑字段，其余字段在提交时补齐。 */
 type AssetVersionFormValues = Pick<ComicDramaAssetVersionInput, "id" | "versionName" | "variantType" | "appearanceDescription">;
@@ -56,26 +59,27 @@ function defaultAssetGenSize(assetTypes: ComicDramaAssetType[], projectAspectRat
 }
 
 /** 资产图画面比例选项，单张与批量共用。 */
-const ASSET_GEN_SIZE_OPTIONS = [
-    { value: "1:1", label: "1:1 正方参考图" },
-    { value: "3:2", label: "3:2 横构图（多视角）" },
-    { value: "16:9", label: "16:9 场景全景" },
-    { value: "9:16", label: "9:16 全身立绘" },
-    { value: "3:4", label: "3:4 标准立绘" },
-];
+const getAssetGenSizeOptions = (translate = translateMessage) => ([
+    { value: "1:1", label: translate("comicDrama.message11SquareReference") },
+    { value: "3:2", label: translate("comicDrama.message32LandscapeMultipleViews") },
+    { value: "16:9", label: translate("comicDrama.message169PanoramicScene") },
+    { value: "9:16", label: translate("comicDrama.message916FullBodyCharacter") },
+    { value: "3:4", label: translate("comicDrama.message34StandardCharacter") },
+]);
 
 /** 资产图固定形态说明，仅在整批类型一致时给出。 */
-function assetImageShapeHint(assetTypes: ComicDramaAssetType[]): string {
+function assetImageShapeHint(assetTypes: ComicDramaAssetType[], translate = translateMessage): string {
     const [shared] = assetTypes;
     if (!shared || assetTypes.some((assetType) => assetType !== shared)) return "";
-    if (shared === "character") return "人物固定输出纯白背景的三视图设定图（正面/侧面/背面并排）。";
-    if (shared === "prop") return "道具固定输出纯白背景的多视角设定图（正面/45度斜视/侧面并排）。";
-    if (shared === "scene") return "场景固定输出空景设定图，画面中不出现人物与剧情动作。";
+    if (shared === "character") return translate("comicDrama.charactersUseAThreeViewReferenceSheetOnAWhite");
+    if (shared === "prop") return translate("comicDrama.propsUseAMultiViewReferenceSheetOnAWhite");
+    if (shared === "scene") return translate("comicDrama.scenesUseAnEmptyEnvironmentReferenceWithNoCharactersOr");
     return "";
 }
 
 /** 资产缩略图骨架屏：SkeletonNode 的 style 落在内层、styles.root 落在外层，两层都要给尺寸才能铺满父容器。 */
 function ThumbSkeleton() {
+    const translate = useTranslation();
     const fill = { width: "100%", height: "100%" };
     return <Skeleton.Image active styles={{ root: fill, content: fill }} />;
 }
@@ -99,6 +103,7 @@ function resolveAssetImageUrl(versions: ComicDramaAssetVersion[], media: ComicDr
 
 /** 视觉资产与多版本管理阶段视图。 */
 export function StageAssets() {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const config = useEffectiveConfig();
     const pendingImpactTargets = usePendingImpactTargets();
@@ -167,7 +172,7 @@ export function StageAssets() {
                 if (!cancelled) setVersionsByAsset(Object.fromEntries(entries));
             })
             .catch(() => {
-                if (!cancelled) message.error("加载资产版本失败");
+                if (!cancelled) message.error(translate("comicDrama.couldNotLoadAssetVersions"));
             })
             .finally(() => {
                 if (!cancelled) setVersionsLoaded(true);
@@ -229,7 +234,7 @@ export function StageAssets() {
                 sourceEntityId: editingAsset?.sourceEntityId ?? null,
                 voicePreference: editingAsset?.voicePreference ?? {},
             });
-            message.success(editingAsset ? "资产已更新" : "资产已创建");
+            message.success(editingAsset ? translate("comicDrama.assetUpdated") : translate("comicDrama.assetCreated"));
             setAssetDrawerOpen(false);
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
@@ -269,7 +274,7 @@ export function StageAssets() {
                 status: "active",
                 revision: 0,
             });
-            message.success(editingVersion ? "资产版本已更新" : "新版本已添加");
+            message.success(editingVersion ? translate("comicDrama.assetVersionUpdated") : translate("comicDrama.newVersionAdded"));
             setEditingVersion(null);
             versionForm.resetFields();
             resetVersionForm();
@@ -294,7 +299,7 @@ export function StageAssets() {
     const handleEstimateAssetGen = async () => {
         if (!targetVersion) return;
         if (!genModel) {
-            message.warning("请先选择生成模型");
+            message.warning(translate("comicDrama.selectAGenerationModelFirst"));
             return;
         }
         setEstimating(true);
@@ -312,7 +317,7 @@ export function StageAssets() {
                 },
             });
             setEstimatedCredits(res.estimatedCredits);
-            message.info(`预估消耗 ${res.estimatedCredits} 积分`);
+            message.info(translate("comicDrama.estimatedCostCountCredits", { value0: res.estimatedCredits }));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
         } finally {
@@ -324,7 +329,7 @@ export function StageAssets() {
     const handleGenerateAssetImage = async () => {
         if (!targetVersion) return;
         if (!genModel) {
-            message.warning("请先选择生成模型");
+            message.warning(translate("comicDrama.selectAGenerationModelFirst"));
             return;
         }
         setGenerating(true);
@@ -340,7 +345,7 @@ export function StageAssets() {
                     size: genSize,
                 },
             });
-            message.success("已创建资产图生成任务，可在右侧或媒体中心查看进度");
+            message.success(translate("comicDrama.assetImageTaskCreatedCheckProgressOnTheRightOr"));
             setGenModalOpen(false);
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
@@ -355,7 +360,7 @@ export function StageAssets() {
     const handleCardImageGen = (asset: ComicDramaAsset) => {
         const latestVersion = versionsByAsset[asset.id]?.[0];
         if (!latestVersion) {
-            message.warning("该资产还没有版本，请先保存一个版本");
+            message.warning(translate("comicDrama.thisAssetHasNoVersionsSaveOneFirst"));
             openVersions(asset);
             return;
         }
@@ -367,7 +372,7 @@ export function StageAssets() {
         setSyncing(true);
         try {
             await syncNow();
-            message.success("已同步最新生成状态");
+            message.success(translate("comicDrama.latestGenerationStatusSynced"));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
         } finally {
@@ -400,7 +405,7 @@ export function StageAssets() {
     const selectAssetsMissingImage = () => {
         const missing = filteredAssets.filter((asset) => !resolveAssetImageUrl(versionsByAsset[asset.id] || [], mediaList));
         if (missing.length === 0) {
-            message.info(filteredAssets.length === 0 ? "当前筛选结果为空" : "当前筛选结果都已生成资产图");
+            message.info(filteredAssets.length === 0 ? translate("comicDrama.noResultsMatchTheCurrentFilters") : translate("comicDrama.allFilteredAssetsAlreadyHaveImages"));
             return;
         }
         setSelectedAssetIds(missing.map((asset) => asset.id));
@@ -419,11 +424,11 @@ export function StageAssets() {
     // Estimate credits for batch asset generation
     const handleBatchEstimate = async () => {
         if (!batchModel) {
-            message.warning("请先选择生成模型");
+            message.warning(translate("comicDrama.selectAGenerationModelFirst"));
             return;
         }
         if (batchTargetVersionIds.length === 0) {
-            message.warning("所选资产都还没有版本");
+            message.warning(translate("comicDrama.noneOfTheSelectedAssetsHaveVersions"));
             return;
         }
         setBatchEstimating(true);
@@ -441,7 +446,7 @@ export function StageAssets() {
                 },
             });
             setBatchCredits(res.estimatedCredits);
-            message.info(`预估消耗 ${res.estimatedCredits} 积分`);
+            message.info(translate("comicDrama.estimatedCostCountCredits", { value0: res.estimatedCredits }));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
         } finally {
@@ -452,11 +457,11 @@ export function StageAssets() {
     // Trigger batch asset image generation
     const handleBatchGenerate = async () => {
         if (!batchModel) {
-            message.warning("请先选择生成模型");
+            message.warning(translate("comicDrama.selectAGenerationModelFirst"));
             return;
         }
         if (batchTargetVersionIds.length === 0) {
-            message.warning("所选资产都还没有版本");
+            message.warning(translate("comicDrama.noneOfTheSelectedAssetsHaveVersions"));
             return;
         }
         setBatchGenerating(true);
@@ -472,7 +477,7 @@ export function StageAssets() {
                     size: batchSize,
                 },
             });
-            message.success(`已创建 ${result.taskCount} 个资产图生成任务，可在媒体生成中心查看进度`);
+            message.success(translate("comicDrama.createdCountAssetImageTasksCheckProgressInTheMedia", { value0: result.taskCount }));
             setBatchModalOpen(false);
             setSelectedAssetIds([]);
         } catch (error) {
@@ -486,45 +491,35 @@ export function StageAssets() {
         <div className="flex flex-col gap-6">
             <header className="flex flex-col gap-2 border-b border-[var(--studio-line)] pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h2 className="text-xl font-semibold text-[var(--studio-ink)]">视觉资产库</h2>
+                    <h2 className="text-xl font-semibold text-[var(--studio-ink)]">{translate("comicDrama.visualAssetLibrary")}</h2>
                     <p className="mt-1 text-sm text-[var(--studio-muted)]">
-                        管理人物、场景与道具的视觉基准。每个资产可派生多个状态版本（如常服、战损、夜雨等），镜头精确绑定资产版本，保证全片视觉连续一致。
-                    </p>
+                        {translate("comicDrama.manageVisualBaselinesForCharactersScenesAndPropsCreateVersions")}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                     {autoRefreshing && (
                         <span className="flex items-center gap-1.5 text-xs text-[var(--studio-muted)]">
                             <RefreshCw className="size-3.5 animate-spin" />
-                            自动刷新中（{runningCount} 项进行中）
-                            {lastSyncedAt && ` · 上次 ${lastSyncedAt}`}
+                            {translate("comicDrama.autoRefreshing")}{runningCount} {translate("comicDrama.running")}{lastSyncedAt && translate("comicDrama.lastCount", { value0: lastSyncedAt })}
                         </span>
                     )}
                     <Button icon={<RefreshCw className="size-4" />} loading={syncing} onClick={handleSync}>
-                        同步状态
-                    </Button>
+                        {translate("comicDrama.syncStatus")}</Button>
                     <Button type="primary" icon={<Plus className="size-4" />} onClick={() => openCreateAsset("character")}>
-                        新建资产
-                    </Button>
+                        {translate("comicDrama.newAsset")}</Button>
                 </div>
             </header>
 
             {/* Filter & Search Bar */}
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <Radio.Group value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} buttonStyle="solid">
-                    <Radio.Button value="all">全部 ({assets.length})</Radio.Button>
-                    <Radio.Button value="character">
-                        人物 ({assets.filter((a) => a.assetType === "character").length})
-                    </Radio.Button>
-                    <Radio.Button value="scene">
-                        场景 ({assets.filter((a) => a.assetType === "scene").length})
-                    </Radio.Button>
-                    <Radio.Button value="prop">
-                        道具 ({assets.filter((a) => a.assetType === "prop").length})
-                    </Radio.Button>
+                    <Radio.Button value="all">{translate("comicDrama.allCount_e721fa", { value0: assets.length })}</Radio.Button>
+                    <Radio.Button value="character">{translate("comicDrama.charactersCount_c4808b", { value0: assets.filter((a) => a.assetType === "character").length })}</Radio.Button>
+                    <Radio.Button value="scene">{translate("comicDrama.scenesCount_b80c83", { value0: assets.filter((a) => a.assetType === "scene").length })}</Radio.Button>
+                    <Radio.Button value="prop">{translate("comicDrama.propsCount_08e0b3", { value0: assets.filter((a) => a.assetType === "prop").length })}</Radio.Button>
                 </Radio.Group>
                 <div className="w-64">
                     <Input.Search
-                        placeholder="搜索资产名称或描述..."
+                        placeholder={translate("comicDrama.searchAssetNamesOrDescriptions")}
                         allowClear
                         value={searchKeyword}
                         onChange={(e) => setSearchKeyword(e.target.value)}
@@ -539,13 +534,10 @@ export function StageAssets() {
                         indeterminate={selectedInFilteredCount > 0 && selectedInFilteredCount < filteredAssets.length}
                         checked={filteredAssets.length > 0 && selectedInFilteredCount === filteredAssets.length}
                         onChange={(e) => toggleAllFiltered(e.target.checked)}
-                    >
-                        全选当前 ({filteredAssets.length})
-                    </Checkbox>
+                    >{translate("comicDrama.selectCurrentCount_8b9873", { value0: filteredAssets.length })}</Checkbox>
                     <Button type="text" size="small" onClick={selectAssetsMissingImage}>
-                        仅选未生成图
-                    </Button>
-                    <span className="text-xs text-[var(--studio-muted)]">已选 {selectedAssetIds.length} 项</span>
+                        {translate("comicDrama.selectWithoutImages")}</Button>
+                    <span className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.countItemsSelected_380fef", { value0: selectedAssetIds.length })}</span>
                     <div className="ml-auto">
                         <Button
                             type="primary"
@@ -553,23 +545,21 @@ export function StageAssets() {
                             icon={<Sparkles className="size-4" />}
                             onClick={openBatchGen}
                         >
-                            批量生成资产图
-                        </Button>
+                            {translate("comicDrama.generateAssetImagesInBatch")}</Button>
                     </div>
                 </div>
             )}
 
             {/* Assets Grid */}
             {filteredAssets.length === 0 ? (
-                <Empty description="暂无符合条件的视觉资产">
+                <Empty description={translate("comicDrama.noMatchingVisualAssets")}>
                     <Button type="primary" icon={<Plus className="size-4" />} onClick={() => openCreateAsset("character")}>
-                        创建第一个视觉资产
-                    </Button>
+                        {translate("comicDrama.createFirstVisualAsset")}</Button>
                 </Empty>
             ) : (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {filteredAssets.map((asset) => {
-                        const typeInfo = ASSET_TYPE_CONFIG[asset.assetType] || ASSET_TYPE_CONFIG.character;
+                        const typeInfo = getAssetTypeConfig(translate)[asset.assetType] || getAssetTypeConfig(translate).character;
                         const versions = versionsByAsset[asset.id] || [];
                         const assetImageUrl = resolveAssetImageUrl(versions, mediaList);
                         // Find how many shots reference this asset's versions
@@ -609,22 +599,18 @@ export function StageAssets() {
                                             <span className="font-semibold text-[var(--studio-ink)]">{asset.name}</span>
                                             <Tag color={typeInfo.color}>{typeInfo.label}</Tag>
                                             {asset.usageStatus === "needsUpdate" || pendingImpactTargets.has(`asset:${asset.id}`) ? (
-                                                <Tag color="warning">需要更新</Tag>
+                                                <Tag color="warning">{translate("comicDrama.needsUpdate")}</Tag>
                                             ) : null}
                                         </div>
-                                        <span className="text-xs text-[var(--studio-muted)]">
-                                            引用: {shotCount} 镜头
-                                        </span>
+                                        <span className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.referencesCountShots_b98767", { value0: shotCount })}</span>
                                     </div>
 
                                     <p className="line-clamp-2 text-xs leading-5 text-[var(--studio-muted)]">
-                                        {asset.description || "暂无视觉描述"}
+                                        {asset.description || translate("comicDrama.noVisualDescriptionYet")}
                                     </p>
 
                                     {asset.sourceEntityId && (
-                                        <div className="text-xs text-[var(--studio-faint)]">
-                                            来源剧本：{asset.sourceEntityId}
-                                        </div>
+                                        <div className="text-xs text-[var(--studio-faint)]">{translate("comicDrama.scriptSourceCount_46a2f3", { value0: asset.sourceEntityId })}</div>
                                     )}
                                 </div>
 
@@ -633,9 +619,7 @@ export function StageAssets() {
                                         size="small"
                                         icon={<Layers className="size-3.5" />}
                                         onClick={() => openVersions(asset)}
-                                    >
-                                        多版本 {versions.length > 0 && `(${versions.length})`}
-                                    </Button>
+                                    >{translate("comicDrama.versionsCount_f46fd3", { value0: versions.length > 0 ? `(${versions.length})` : "" })}</Button>
                                     <div className="flex items-center gap-2">
                                         <Button
                                             size="small"
@@ -644,11 +628,9 @@ export function StageAssets() {
                                             icon={<Sparkles className="size-3.5" />}
                                             onClick={() => handleCardImageGen(asset)}
                                         >
-                                            生成资产图
-                                        </Button>
+                                            {translate("comicDrama.generateAssetImage")}</Button>
                                         <Button size="small" onClick={() => openEditAsset(asset)}>
-                                            编辑
-                                        </Button>
+                                            {translate("comicDrama.edit")}</Button>
                                     </div>
                                 </div>
                             </div>
@@ -659,14 +641,13 @@ export function StageAssets() {
 
             {/* Asset Create/Edit Drawer */}
             <Drawer
-                title={editingAsset ? "编辑视觉资产" : "新建视觉资产"}
+                title={editingAsset ? translate("comicDrama.editVisualAsset") : translate("comicDrama.newVisualAsset")}
                 open={assetDrawerOpen}
                 onClose={() => setAssetDrawerOpen(false)}
                 size="large"
                 extra={
                     <Button type="primary" onClick={handleSaveAsset}>
-                        保存
-                    </Button>
+                        {translate("comicDrama.save")}</Button>
                 }
             >
                 <Form form={assetForm} layout="vertical">
@@ -679,40 +660,40 @@ export function StageAssets() {
 
                     <Form.Item
                         name="assetType"
-                        label="资产类型"
-                        rules={[{ required: true, message: "请选择资产类型" }]}
+                        label={translate("comicDrama.assetType")}
+                        rules={[{ required: true, message: translate("comicDrama.selectAnAssetType") }]}
                     >
                         <Select
                             options={[
-                                { value: "character", label: "人物 (Character)" },
-                                { value: "scene", label: "场景 (Scene)" },
-                                { value: "prop", label: "道具 (Prop)" },
+                                { value: "character", label: translate("comicDrama.character_41f8f3") },
+                                { value: "scene", label: translate("comicDrama.scene_5b0cfe") },
+                                { value: "prop", label: translate("comicDrama.prop_2ca2eb") },
                             ]}
                         />
                     </Form.Item>
 
                     <Form.Item
                         name="name"
-                        label="资产名称"
-                        rules={[{ required: true, message: "请输入资产名称" }]}
+                        label={translate("comicDrama.assetName")}
+                        rules={[{ required: true, message: translate("comicDrama.enterAnAssetName") }]}
                     >
-                        <Input placeholder="例如：李逍遥、余杭客栈大堂、木剑" />
+                        <Input placeholder={translate("comicDrama.forExampleAWanderingSwordsmanAnInnLobbyAWooden")} />
                     </Form.Item>
 
                     <Form.Item
                         name="description"
-                        label="视觉外观与特征描述"
-                        tooltip="详细描述体貌、服装材质、光影、材质质感与辨识特征"
+                        label={translate("comicDrama.appearanceAndVisualFeatures")}
+                        tooltip={translate("comicDrama.describeAppearanceClothingLightingTexturesAndDistinctiveFeatures")}
                     >
-                        <Input.TextArea rows={4} placeholder="描述资产的视觉基准特征..." />
+                        <Input.TextArea rows={4} placeholder={translate("comicDrama.describeTheAssetSVisualBaseline")} />
                     </Form.Item>
 
-                    <Form.Item name="usageStatus" label="使用状态">
+                    <Form.Item name="usageStatus" label={translate("comicDrama.usageStatus")}>
                         <Select
                             options={[
-                                { value: "active", label: "正常使用 (Active)" },
-                                { value: "needsUpdate", label: "需要更新 (Needs Update)" },
-                                { value: "archived", label: "已归档 (Archived)" },
+                                { value: "active", label: translate("comicDrama.active") },
+                                { value: "needsUpdate", label: translate("comicDrama.needsUpdate_66840b") },
+                                { value: "archived", label: translate("comicDrama.archived") },
                             ]}
                         />
                     </Form.Item>
@@ -723,8 +704,8 @@ export function StageAssets() {
             <Drawer
                 title={
                     activeAssetForVersions
-                        ? `管理版本：${activeAssetForVersions.name}`
-                        : "视觉资产版本"
+                        ? translate("comicDrama.manageVersionsCount", { value0: activeAssetForVersions.name })
+                        : translate("comicDrama.visualAssetVersions")
                 }
                 open={versionDrawerOpen}
                 onClose={() => setVersionDrawerOpen(false)}
@@ -734,54 +715,49 @@ export function StageAssets() {
                     <div className="flex flex-col gap-6">
                         <div className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-4">
                             <h4 className="text-sm font-semibold text-[var(--studio-ink)]">
-                                添加新造型/状态版本
-                            </h4>
+                                {translate("comicDrama.addAppearanceStateVersion")}</h4>
                             <p className="mt-1 text-xs text-[var(--studio-muted)]">
-                                人物可加「常服」「战损」，场景可加「日景」「黄昏」「夜雨」，道具可加「完整」「破损」等不同外观。镜头在拆分与编排时将直接指定具体版本。
-                            </p>
+                                {translate("comicDrama.addVersionsSuchAsEverydayClothesOrBattleDamageFor")}</p>
                             <Form form={versionForm} layout="vertical" className="mt-4">
                                 <Form.Item name="id" hidden>
                                     <Input />
                                 </Form.Item>
                                 <Form.Item
                                     name="versionName"
-                                    label="版本名称"
-                                    rules={[{ required: true, message: "请输入版本名称" }]}
+                                    label={translate("comicDrama.versionName")}
+                                    rules={[{ required: true, message: translate("comicDrama.enterAVersionName") }]}
                                 >
-                                    <Input placeholder="例如：常服初登场、雨夜破损装" />
+                                    <Input placeholder={translate("comicDrama.forExampleFirstAppearanceRainDamagedOutfit")} />
                                 </Form.Item>
                                 <Form.Item
                                     name="variantType"
-                                    label="变体类型"
+                                    label={translate("comicDrama.variantType")}
                                 >
                                     <Select
-                                        options={Object.entries(VARIANT_TYPE_LABELS).map(([value, label]) => ({ value, label }))}
+                                        options={Object.entries(getVariantTypeLabels(translate)).map(([value, label]) => ({ value, label }))}
                                     />
                                 </Form.Item>
                                 <Form.Item
                                     name="appearanceDescription"
-                                    label="版本特定外观描述"
+                                    label={translate("comicDrama.versionSpecificAppearance")}
                                 >
                                     <Input.TextArea
                                         rows={3}
-                                        placeholder="详细阐述该版本有别于默认基准的外观特征..."
+                                        placeholder={translate("comicDrama.describeHowThisVersionDiffersFromTheDefaultBaseline")}
                                     />
                                 </Form.Item>
                                 <Button type="primary" onClick={handleSaveVersion}>
-                                    保存版本
-                                </Button>
+                                    {translate("comicDrama.saveVersion")}</Button>
                             </Form>
                         </div>
 
                         {/* Existing Version List */}
                         <div className="flex flex-col gap-3">
-                            <h4 className="text-sm font-semibold text-[var(--studio-ink)]">
-                                已有版本列表 ({activeVersions.length})
-                            </h4>
+                            <h4 className="text-sm font-semibold text-[var(--studio-ink)]">{translate("comicDrama.existingVersionsCount_7853c4", { value0: activeVersions.length })}</h4>
                             {activeVersions.length === 0 ? (
                                 <Empty
                                     image={Empty.PRESENTED_IMAGE_SIMPLE}
-                                    description="该资产还没有版本，先在上方保存一个版本"
+                                    description={translate("comicDrama.thisAssetHasNoVersionsSaveOneAboveFirst")}
                                 />
                             ) : (
                                 activeVersions.map((version) => {
@@ -812,11 +788,11 @@ export function StageAssets() {
                                                             {version.versionName}
                                                         </span>
                                                         <Tag>
-                                                            {VARIANT_TYPE_LABELS[version.variantType] || version.variantType}
+                                                            {getVariantTypeLabels(translate)[version.variantType] || version.variantType}
                                                         </Tag>
                                                     </div>
                                                     <p className="mt-1 line-clamp-2 text-xs text-[var(--studio-muted)]">
-                                                        {version.appearanceDescription || "暂无版本外观描述"}
+                                                        {version.appearanceDescription || translate("comicDrama.noVersionAppearanceDescription")}
                                                     </p>
                                                 </div>
                                             </div>
@@ -826,8 +802,7 @@ export function StageAssets() {
                                                 icon={<Sparkles className="size-3.5" />}
                                                 onClick={() => openAssetImageGen(activeAssetForVersions, version)}
                                             >
-                                                AI 生成资产图
-                                            </Button>
+                                                {translate("comicDrama.generateAssetImageWithAi")}</Button>
                                         </div>
                                     );
                                 })
@@ -839,7 +814,7 @@ export function StageAssets() {
 
             {/* AI Image Generation Modal */}
             <Modal
-                title="AI 资产图生成"
+                title={translate("comicDrama.aiAssetImageGeneration")}
                 open={genModalOpen}
                 onCancel={() => setGenModalOpen(false)}
                 footer={null}
@@ -848,12 +823,11 @@ export function StageAssets() {
                 {targetAsset && targetVersion && (
                     <div className="flex flex-col gap-4 py-2">
                         <div className="rounded-lg bg-[var(--studio-panel-solid)] p-3 text-xs text-[var(--studio-muted)]">
-                            资产：<span className="font-semibold text-[var(--studio-ink)]">{targetAsset.name}</span> ·
-                            版本：<span className="font-semibold text-[var(--studio-ink)]">{targetVersion.versionName}</span>
+                            {translate("comicDrama.assets")}<span className="font-semibold text-[var(--studio-ink)]">{targetAsset.name}</span> {translate("comicDrama.version")}<span className="font-semibold text-[var(--studio-ink)]">{targetVersion.versionName}</span>
                         </div>
 
                         <div>
-                            <label className="text-xs font-medium text-[var(--studio-muted)]">生成模型</label>
+                            <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.generationModel")}</label>
                             <div className="mt-1">
                                 <ModelPicker
                                     config={config}
@@ -867,20 +841,20 @@ export function StageAssets() {
 
                         <div className="grid grid-cols-3 gap-3">
                             <div>
-                                <label className="text-xs font-medium text-[var(--studio-muted)]">画质</label>
+                                <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.imageQuality")}</label>
                                 <Select
                                     className="mt-1 w-full"
                                     value={genQuality}
                                     onChange={setGenQuality}
                                     options={[
-                                        { value: "low", label: "低画质" },
-                                        { value: "medium", label: "标准画质" },
-                                        { value: "high", label: "高画质" },
+                                        { value: "low", label: translate("comicDrama.lowQuality") },
+                                        { value: "medium", label: translate("comicDrama.standardQuality") },
+                                        { value: "high", label: translate("comicDrama.highQuality") },
                                     ]}
                                 />
                             </div>
                             <div>
-                                <label className="text-xs font-medium text-[var(--studio-muted)]">清晰度</label>
+                                <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.resolution")}</label>
                                 <Select
                                     className="mt-1 w-full"
                                     value={genResolution}
@@ -893,41 +867,36 @@ export function StageAssets() {
                                 />
                             </div>
                             <div>
-                                <label className="text-xs font-medium text-[var(--studio-muted)]">画面比例</label>
+                                <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.aspectRatio")}</label>
                                 <Select
                                     className="mt-1 w-full"
                                     value={genSize}
                                     onChange={setGenSize}
-                                    options={ASSET_GEN_SIZE_OPTIONS}
+                                    options={getAssetGenSizeOptions(translate)}
                                 />
                             </div>
                         </div>
 
-                        <div className="rounded-lg bg-[var(--studio-panel-solid)] p-3 text-xs leading-5 text-[var(--studio-muted)]">
-                            提示词由服务端按资产类别模板渲染：资产名与版本名、版本外观描述、项目视觉风格（{workspace.settings.visualStyle || "未设置"}）。
-                            {assetImageShapeHint([targetAsset.assetType])}
-                        </div>
+                        <div className="rounded-lg bg-[var(--studio-panel-solid)] p-3 text-xs leading-5 text-[var(--studio-muted)]">{translate("comicDrama.theServerBuildsPromptsFromAssetAndVersionNames_bcf6cd", { value0: workspace.settings.visualStyle || translate("comicDrama.notSet_55a04b"), value1: assetImageShapeHint([targetAsset.assetType], translate) })}</div>
 
                         <div className="mt-2 flex items-center justify-between border-t border-[var(--studio-line)] pt-3">
                             <div className="text-xs text-[var(--studio-muted)]">
                                 {estimatedCredits !== null ? (
-                                    <span>预计消耗：<strong className="text-amber-500">{estimatedCredits}</strong> 积分</span>
+                                    <span>{translate("comicDrama.estimatedCost_4225d2")}<strong className="text-amber-500">{estimatedCredits}</strong> {translate("comicDrama.credits")}</span>
                                 ) : (
                                     <Button size="small" loading={estimating} onClick={handleEstimateAssetGen}>
-                                        预估积分
-                                    </Button>
+                                        {translate("comicDrama.estimatedCredits")}</Button>
                                 )}
                             </div>
                             <Space>
-                                <Button onClick={() => setGenModalOpen(false)}>取消</Button>
+                                <Button onClick={() => setGenModalOpen(false)}>{translate("comicDrama.cancel")}</Button>
                                 <Button
                                     type="primary"
                                     loading={generating}
                                     icon={<Sparkles className="size-4" />}
                                     onClick={handleGenerateAssetImage}
                                 >
-                                    确认生成
-                                </Button>
+                                    {translate("comicDrama.confirmGeneration")}</Button>
                             </Space>
                         </div>
                     </div>
@@ -936,7 +905,7 @@ export function StageAssets() {
 
             {/* Batch Asset Image Generation Modal */}
             <Modal
-                title="批量生成资产图"
+                title={translate("comicDrama.generateAssetImagesInBatch")}
                 open={batchModalOpen}
                 onCancel={() => setBatchModalOpen(false)}
                 footer={null}
@@ -944,14 +913,11 @@ export function StageAssets() {
             >
                 <div className="flex flex-col gap-4 py-2">
                     <div className="rounded-lg bg-[var(--studio-panel-solid)] p-3 text-xs leading-5 text-[var(--studio-muted)]">
-                        目标：{batchTargetVersionIds.length} 个资产（各取最新版本）
-                        {skippedAssetCount > 0 && (
-                            <span className="text-amber-500"> · 另有 {skippedAssetCount} 个资产还没有版本，将被跳过</span>
-                        )}
+                        {translate("comicDrama.batchAssetTargets", { value0: batchTargetVersionIds.length })}
+                        {skippedAssetCount > 0 ? <span className="text-amber-500">{translate("comicDrama.batchAssetsSkipped", { value0: skippedAssetCount })}</span> : null}
                     </div>
-
                     <div>
-                        <label className="text-xs font-medium text-[var(--studio-muted)]">生成模型</label>
+                        <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.generationModel")}</label>
                         <div className="mt-1">
                             <ModelPicker
                                 config={config}
@@ -965,20 +931,20 @@ export function StageAssets() {
 
                     <div className="grid grid-cols-3 gap-3">
                         <div>
-                            <label className="text-xs font-medium text-[var(--studio-muted)]">画质</label>
+                            <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.imageQuality")}</label>
                             <Select
                                 className="mt-1 w-full"
                                 value={batchQuality}
                                 onChange={setBatchQuality}
                                 options={[
-                                    { value: "low", label: "低画质" },
-                                    { value: "medium", label: "标准画质" },
-                                    { value: "high", label: "高画质" },
+                                    { value: "low", label: translate("comicDrama.lowQuality") },
+                                    { value: "medium", label: translate("comicDrama.standardQuality") },
+                                    { value: "high", label: translate("comicDrama.highQuality") },
                                 ]}
                             />
                         </div>
                         <div>
-                            <label className="text-xs font-medium text-[var(--studio-muted)]">清晰度</label>
+                            <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.resolution")}</label>
                             <Select
                                 className="mt-1 w-full"
                                 value={batchResolution}
@@ -991,42 +957,36 @@ export function StageAssets() {
                             />
                         </div>
                         <div>
-                            <label className="text-xs font-medium text-[var(--studio-muted)]">画面比例</label>
+                            <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.aspectRatio")}</label>
                             <Select
                                 className="mt-1 w-full"
                                 value={batchSize}
                                 onChange={setBatchSize}
-                                options={ASSET_GEN_SIZE_OPTIONS}
+                                options={getAssetGenSizeOptions(translate)}
                             />
                         </div>
                     </div>
 
-                    <div className="rounded-lg bg-[var(--studio-panel-solid)] p-3 text-xs leading-5 text-[var(--studio-muted)]">
-                        提示词由服务端按资产类别模板渲染：资产名与版本名、版本外观描述、项目视觉风格（{workspace.settings.visualStyle || "未设置"}）。
-                        {assetImageShapeHint(selectedAssets.map((asset) => asset.assetType))}
-                    </div>
+                    <div className="rounded-lg bg-[var(--studio-panel-solid)] p-3 text-xs leading-5 text-[var(--studio-muted)]">{translate("comicDrama.theServerBuildsPromptsFromAssetAndVersionNames_bcf6cd", { value0: workspace.settings.visualStyle || translate("comicDrama.notSet_55a04b"), value1: assetImageShapeHint(selectedAssets.map((asset) => asset.assetType), translate) })}</div>
 
                     <div className="mt-2 flex items-center justify-between border-t border-[var(--studio-line)] pt-3">
                         <div className="text-xs text-[var(--studio-muted)]">
                             {batchCredits !== null ? (
-                                <span>预计消耗：<strong className="text-amber-500">{batchCredits}</strong> 积分</span>
+                                <span>{translate("comicDrama.estimatedCost_4225d2")}<strong className="text-amber-500">{batchCredits}</strong> {translate("comicDrama.credits")}</span>
                             ) : (
                                 <Button size="small" loading={batchEstimating} onClick={handleBatchEstimate}>
-                                    预估积分
-                                </Button>
+                                    {translate("comicDrama.estimatedCredits")}</Button>
                             )}
                         </div>
                         <Space>
-                            <Button onClick={() => setBatchModalOpen(false)}>取消</Button>
+                            <Button onClick={() => setBatchModalOpen(false)}>{translate("comicDrama.cancel")}</Button>
                             <Button
                                 type="primary"
                                 loading={batchGenerating}
                                 disabled={batchTargetVersionIds.length === 0}
                                 icon={<Sparkles className="size-4" />}
                                 onClick={handleBatchGenerate}
-                            >
-                                确认生成 {batchTargetVersionIds.length} 张
-                            </Button>
+                            >{translate("comicDrama.generateCountImages_4f0a0a", { value0: batchTargetVersionIds.length })}</Button>
                         </Space>
                     </div>
                 </div>

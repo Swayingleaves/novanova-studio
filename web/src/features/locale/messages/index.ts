@@ -1,3 +1,7 @@
+import scriptChinese from "./zh-cn/script.json";
+import scriptEnglish from "./en/script.json";
+import comicDramaChinese from "./zh-cn/comicDrama.json";
+import comicDramaEnglish from "./en/comicDrama.json";
 import agentActionsChinese from "./zh-cn/agentActions.json";
 import agentActionsEnglish from "./en/agentActions.json";
 import websiteChinese from "./zh-cn/website.json";
@@ -51,6 +55,6 @@ import themeEnglish from "./en/theme.json";
 
 /** 按业务模块组织的完整双语资源。 */
 export const websiteMessages = {
-    "zh-cn": { agentActions: agentActionsChinese, website: websiteChinese, administration: administrationChinese, assets: assetsChinese, directorDesk: directorDeskChinese, canvas: canvasChinese, checkIn: checkInChinese, credits: creditsChinese, editions: editionsChinese, image: imageChinese, layout: layoutChinese, page: pageChinese, profile: profileChinese, prompts: promptsChinese, video: videoChinese, auth: authChinese, common: commonChinese, appShell: appShellChinese, chat: chatChinese, generation: generationChinese, homepage: homepageChinese, notification: notificationChinese, settings: settingsChinese, storage: storageChinese, theme: themeChinese },
-    en: { agentActions: agentActionsEnglish, website: websiteEnglish, administration: administrationEnglish, assets: assetsEnglish, directorDesk: directorDeskEnglish, canvas: canvasEnglish, checkIn: checkInEnglish, credits: creditsEnglish, editions: editionsEnglish, image: imageEnglish, layout: layoutEnglish, page: pageEnglish, profile: profileEnglish, prompts: promptsEnglish, video: videoEnglish, auth: authEnglish, common: commonEnglish, appShell: appShellEnglish, chat: chatEnglish, generation: generationEnglish, homepage: homepageEnglish, notification: notificationEnglish, settings: settingsEnglish, storage: storageEnglish, theme: themeEnglish },
+    "zh-cn": { script: scriptChinese, comicDrama: comicDramaChinese, agentActions: agentActionsChinese, website: websiteChinese, administration: administrationChinese, assets: assetsChinese, directorDesk: directorDeskChinese, canvas: canvasChinese, checkIn: checkInChinese, credits: creditsChinese, editions: editionsChinese, image: imageChinese, layout: layoutChinese, page: pageChinese, profile: profileChinese, prompts: promptsChinese, video: videoChinese, auth: authChinese, common: commonChinese, appShell: appShellChinese, chat: chatChinese, generation: generationChinese, homepage: homepageChinese, notification: notificationChinese, settings: settingsChinese, storage: storageChinese, theme: themeChinese },
+    en: { script: scriptEnglish, comicDrama: comicDramaEnglish, agentActions: agentActionsEnglish, website: websiteEnglish, administration: administrationEnglish, assets: assetsEnglish, directorDesk: directorDeskEnglish, canvas: canvasEnglish, checkIn: checkInEnglish, credits: creditsEnglish, editions: editionsEnglish, image: imageEnglish, layout: layoutEnglish, page: pageEnglish, profile: profileEnglish, prompts: promptsEnglish, video: videoEnglish, auth: authEnglish, common: commonEnglish, appShell: appShellEnglish, chat: chatEnglish, generation: generationEnglish, homepage: homepageEnglish, notification: notificationEnglish, settings: settingsEnglish, storage: storageEnglish, theme: themeEnglish },
 };

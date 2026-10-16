@@ -1,5 +1,10 @@
 "use client";
 
+import { productionParameterLabel } from "../lib/production-labels";
+
+import { translateMessage } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Checkbox, Empty, Form, Image, Input, InputNumber, Modal, Progress, Select, Space, Spin, Tag, Tooltip } from "antd";
 import {
@@ -49,53 +54,43 @@ import { useMediaAutoRefresh } from "../hooks/use-media-auto-refresh";
 import { usePendingImpactTargets } from "../hooks/use-pending-impact-targets";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaAssetVersion, ComicDramaMediaResult, ComicDramaShot, ComicDramaShotInput, ComicDramaTimelineText, ComicDramaTimelineTextInput, ComicDramaVoiceTrack, ComicDramaVoiceTrackInput, StoryboardFontFamily } from "../types";
+import { cameraMovementOptions } from "../lib/production-labels";
 import { ShotGenerationModal } from "./shot-generation-modal";
-import { STORYBOARD_FONTS, STORYBOARD_FONT_OPTIONS } from "./storyboard-fonts";
+import { getStoryboardFonts, getStoryboardFontOptions } from "./storyboard-fonts";
 import "./storyboard-fonts.css";
 import { availableTextTrackPlacement, buildShotIntervals, clampPreviewPosition, clampTimelineStart, reorderTimelineTexts, timelineTextOverlaps, visibleTimelineTexts, voiceTrackEndMs, voiceTrackSourceTimeMs } from "./storyboard-timeline";
 
-const CAMERA_MOVEMENT_OPTIONS = [
-    "固定",
-    "推近",
-    "拉远",
-    "环绕",
-    "摇镜头",
-    "移镜头",
-    "俯冲",
-    "仰视",
-];
+const getShotSizes = (translate = translateMessage) => ([
+    { value: "远景", label: translate("comicDrama.extremeLongShot") },
+    { value: "全景", label: translate("comicDrama.longShot") },
+    { value: "中景", label: translate("comicDrama.mediumShot_ff6483") },
+    { value: "近景", label: translate("comicDrama.mediumCloseUp") },
+    { value: "特写", label: translate("comicDrama.closeUp") },
+    { value: "大特写", label: translate("comicDrama.extremeCloseUp") },
+]);
 
-const SHOT_SIZES = [
-    { value: "远景", label: "远景 (Extreme Long Shot)" },
-    { value: "全景", label: "全景 (Long Shot)" },
-    { value: "中景", label: "中景 (Medium Shot)" },
-    { value: "近景", label: "近景 (Medium Close-Up)" },
-    { value: "特写", label: "特写 (Close-Up)" },
-    { value: "大特写", label: "大特写 (Extreme Close-Up)" },
-];
+const getStatusMap = (translate = translateMessage): Record<string, { label: string; color: string }> => ({
+    draft: { label: translate("comicDrama.draft"), color: "default" },
+    ready: { label: translate("comicDrama.ready_b796f2"), color: "blue" },
+    generating: { label: translate("comicDrama.generating"), color: "processing" },
+    completed: { label: translate("comicDrama.completed_e99b48"), color: "success" },
+    failed: { label: translate("comicDrama.failed_3e3c80"), color: "error" },
+    needsUpdate: { label: translate("comicDrama.needsUpdate"), color: "warning" },
+});
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-    draft: { label: "草稿", color: "default" },
-    ready: { label: "就绪", color: "blue" },
-    generating: { label: "生成中", color: "processing" },
-    completed: { label: "已完成", color: "success" },
-    failed: { label: "失败", color: "error" },
-    needsUpdate: { label: "需要更新", color: "warning" },
-};
+const getAssetTypeConfig = (translate = translateMessage): Record<string, { label: string; color: string }> => ({
+    character: { label: translate("comicDrama.character"), color: "blue" },
+    scene: { label: translate("comicDrama.scene"), color: "green" },
+    prop: { label: translate("comicDrama.prop"), color: "purple" },
+});
 
-const ASSET_TYPE_CONFIG: Record<string, { label: string; color: string }> = {
-    character: { label: "人物", color: "blue" },
-    scene: { label: "场景", color: "green" },
-    prop: { label: "道具", color: "purple" },
-};
-
-const VARIANT_TYPE_LABELS: Record<string, string> = {
-    default: "默认基准",
-    costume: "服装变更",
-    age: "年龄时期",
-    weather: "光照/天气",
-    status: "伤损/变身状态",
-};
+const getVariantTypeLabels = (translate = translateMessage): Record<string, string> => ({
+    default: translate("comicDrama.defaultBaseline"),
+    costume: translate("comicDrama.costumeChange"),
+    age: translate("comicDrama.agePeriod"),
+    weather: translate("comicDrama.lightingWeather"),
+    status: translate("comicDrama.damageTransformation"),
+});
 
 const PPS_MIN = 16;
 const PPS_MAX = 130;
@@ -217,6 +212,7 @@ function TimelineClipThumbnail({
     posterUrl?: string;
     alt: string;
 }) {
+    const translate = useTranslation();
     const [loadError, setLoadError] = useState(false);
     const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -263,6 +259,7 @@ const ACTIVE_STYLE = { background: "var(--studio-action)", color: "var(--studio-
 
 /** 分镜板组件：支持 3D 翻转卡片工作台与可左右交互擦洗的时间轴轨道。 */
 export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boolean }) {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const pendingImpactTargets = usePendingImpactTargets();
     const workspace = useComicDramaStore((state) => state.workspace);
@@ -340,7 +337,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         setExportTask(null);
         void getLatestComicDramaVideoExport(projectId)
             .then((result) => { if (!canceled) setExportTask(result.task); })
-            .catch((error) => { if (!canceled) message.error(error instanceof Error ? error.message : "读取导出任务失败"); });
+            .catch((error) => { if (!canceled) message.error(error instanceof Error ? error.message : translate("comicDrama.couldNotLoadTheExportTask")); });
         return () => { canceled = true; };
     }, [projectId, message]);
 
@@ -351,7 +348,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             signal: controller.signal,
             onProgress: setExportTask,
         }).then((task) => setExportTask(task)).catch((error) => {
-            if (!controller.signal.aborted) message.error(error instanceof Error ? error.message : "查询导出进度失败");
+            if (!controller.signal.aborted) message.error(error instanceof Error ? error.message : translate("comicDrama.couldNotCheckExportProgress"));
         });
         return () => controller.abort();
     }, [exportTask?.id, exportTask?.status, message]);
@@ -363,13 +360,13 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             const pending = useComicDramaStore.getState();
             if ((Object.keys(pending.pendingTimelineTexts).length || Object.keys(pending.pendingTimelineVoices).length)
                 && !await savePendingTimelineChanges()) {
-                throw new Error(useComicDramaStore.getState().timelineSaveError || "时间轴保存失败，无法导出");
+                throw new Error(useComicDramaStore.getState().timelineSaveError || translate("comicDrama.timelineSaveFailedCannotExport"));
             }
             const task = await exportComicDramaVideo(projectId, selectedEpisodeId === "all" ? null : selectedEpisodeId);
             setExportTask(task);
-            message.success("视频导出任务已创建");
+            message.success(translate("comicDrama.videoExportTaskCreated"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "视频导出失败");
+            message.error(error instanceof Error ? error.message : translate("comicDrama.videoExportFailed"));
         } finally {
             setExportSubmitting(false);
         }
@@ -383,13 +380,13 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             const url = URL.createObjectURL(blob);
             const anchor = document.createElement("a");
             anchor.href = url;
-            anchor.download = "分镜成片.mp4";
+            anchor.download = translate("comicDrama.storyboardMp4");
             document.body.append(anchor);
             anchor.click();
             anchor.remove();
             window.setTimeout(() => URL.revokeObjectURL(url), 60000);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "视频下载失败");
+            message.error(error instanceof Error ? error.message : translate("comicDrama.videoDownloadFailed"));
         } finally {
             setExportDownloading(false);
         }
@@ -398,7 +395,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
     const cancelVideoExport = async () => {
         if (!exportTask) return;
         try { setExportTask(await cancelCompositionTask(exportTask.id)); }
-        catch (error) { message.error(error instanceof Error ? error.message : "取消导出失败"); }
+        catch (error) { message.error(error instanceof Error ? error.message : translate("comicDrama.couldNotCancelExport")); }
     };
     const episodes = workspace?.scriptProject.episodes || [];
     const shots = workspace?.shots || [];
@@ -421,12 +418,12 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         let canceled = false;
         const families = new Set<StoryboardFontFamily>(["notoSansSc", ...(storyboardFontFamilies.split("|") as StoryboardFontFamily[])]);
         void Promise.all([...families].map(async (family) => {
-            const font = STORYBOARD_FONTS[family];
-            if (!font) throw new Error(`不支持的分镜文字字体：${family}`);
+            const font = getStoryboardFonts(translate)[family];
+            if (!font) throw new Error(translate("comicDrama.unsupportedStoryboardFontCount", { value0: family }));
             const faces = await document.fonts.load(`400 16px ${font.cssFamily.split(",")[0]}`);
-            if (!faces.length) throw new Error(`浏览器缺少分镜字体资源：${font.label}`);
+            if (!faces.length) throw new Error(translate("comicDrama.storyboardFontUnavailableInTheBrowserCount", { value0: font.label }));
         })).catch((error) => {
-            if (!canceled) message.error(error instanceof Error ? error.message : "加载分镜字体失败");
+            if (!canceled) message.error(error instanceof Error ? error.message : translate("comicDrama.couldNotLoadStoryboardFonts"));
         });
         return () => { canceled = true; };
     }, [storyboardFontFamilies, message]);
@@ -628,10 +625,10 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         Promise.all(keys.map(async (key) => {
             try {
                 const media = await getServerMediaInfo(key);
-                if (!media.url) throw new Error("音频地址不可用");
+                if (!media.url) throw new Error(translate("comicDrama.audioUrlUnavailable"));
                 return { key, url: media.url, error: "" };
             } catch (error) {
-                return { key, url: "", error: error instanceof Error ? error.message : "音频加载失败" };
+                return { key, url: "", error: error instanceof Error ? error.message : translate("comicDrama.couldNotLoadAudio") };
             }
         })).then((items) => {
             if (cancelled) return;
@@ -669,18 +666,18 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                 return;
             }
             if (Math.abs(audio.currentTime * 1000 - sourceTimeMs) > 250) audio.currentTime = sourceTimeMs / 1000;
-            if (audio.paused && !audioErrors[track.audioStorageKey!]) audio.play().catch(() => setAudioErrors((current) => current[track.audioStorageKey!] ? current : { ...current, [track.audioStorageKey!]: "浏览器未能播放音频，请检查文件或手动开始播放" }));
+            if (audio.paused && !audioErrors[track.audioStorageKey!]) audio.play().catch(() => setAudioErrors((current) => current[track.audioStorageKey!] ? current : { ...current, [track.audioStorageKey!]: translate("comicDrama.theBrowserCouldNotPlayTheAudioCheckTheFile") }));
         });
     }, [currentTime, isPlaying, isMuted, audioTrackEnabled, scheduledVoices, audioUrls, audioErrors]);
 
     const openNewText = () => {
         const startMs = Math.round(currentTime * 1000);
-        if (projectDurationMs - startMs < 100) { message.warning("播放头距离项目末尾不足 0.1 秒，无法添加文字"); return; }
+        if (projectDurationMs - startMs < 100) { message.warning(translate("comicDrama.cannotAddTextWithin01SecondsOfTheProject")); return; }
         const placement = availableTextTrackPlacement(timelineTexts, startMs, projectDurationMs);
-        if (!placement) { message.warning("三条文字轨道在当前时间均已有片段"); return; }
+        if (!placement) { message.warning(translate("comicDrama.allThreeTextTracksAlreadyContainClipsAtThisTime")); return; }
         setIsPlaying(false);
         setFlipSide("preview");
-        const item = { id: nanoid(), content: "文字", startMs, endMs: placement.endMs, trackNumber: placement.trackNumber, positionX: 0.5, positionY: 0.82 - placement.trackNumber * 0.14, fontSize: 36, fontFamily: "notoSansSc" as const, color: "#ffffff", alignment: "center" as const, backgroundColor: null, revision: 0 };
+        const item = { id: nanoid(), content: translate("comicDrama.text"), startMs, endMs: placement.endMs, trackNumber: placement.trackNumber, positionX: 0.5, positionY: 0.82 - placement.trackNumber * 0.14, fontSize: 36, fontFamily: "notoSansSc" as const, color: "#ffffff", alignment: "center" as const, backgroundColor: null, revision: 0 };
         queueTimelineText(item);
         setSelectedPreviewTextId(item.id);
         setSelectedTimelineNode({ kind: "text", id: item.id });
@@ -691,7 +688,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         if (!value.content.trim() || (!current && (value.startMs < 0 || value.endMs <= value.startMs || value.endMs > projectDurationMs
             || value.trackNumber < 0 || value.trackNumber >= textTrackCount
             || timelineTexts.some((item) => item.id !== value.id && item.trackNumber === value.trackNumber && timelineTextOverlaps(item, value))))) {
-            message.error("请填写文字内容，且同一文字轨道的片段时间不能重叠");
+            message.error(translate("comicDrama.enterTextAndEnsureClipsOnTheSameTextTrack"));
             return false;
         }
         setSavingTrack(true);
@@ -702,10 +699,10 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             const pending = useComicDramaStore.getState().pendingTimelineTexts[value.id];
             if (current && pending) queueTimelineText({ ...pending, ...editedFields, revision: saved.revision });
             else clearPendingTimelineText(value.id);
-            message.success("文字片段已保存");
+            message.success(translate("comicDrama.textClipSaved"));
             return true;
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "文字片段保存失败");
+            message.error(error instanceof Error ? error.message : translate("comicDrama.couldNotSaveTheTextClip"));
             return false;
         } finally {
             setSavingTrack(false);
@@ -719,7 +716,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
     };
 
     const saveAudio = async (draft: ComicDramaVoiceTrackInput) => {
-        if (!draft.content.trim()) { message.error("请填写声音条目内容"); return false; }
+        if (!draft.content.trim()) { message.error(translate("comicDrama.enterAudioEntryContent")); return false; }
         setSavingTrack(true);
         try {
             let value = draft;
@@ -729,18 +726,18 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                 setAudioDraft(value);
                 setAudioFile(null);
             }
-            if (!value.audioStorageKey || !value.audioDurationMs) throw new Error("请上传音频文件");
-            if (value.timelineStartMs == null || value.trimStartMs == null || value.trimEndMs == null) throw new Error("请设置音频排期和裁剪范围");
-            if (value.trimEndMs <= value.trimStartMs || value.trimEndMs > value.audioDurationMs || value.timelineStartMs + value.trimEndMs - value.trimStartMs > projectDurationMs) throw new Error("音频裁剪范围超出文件或项目时长");
-            if (Object.keys(useComicDramaStore.getState().pendingTimelineTexts).length + Object.keys(useComicDramaStore.getState().pendingTimelineVoices).length > 0 && !await savePendingTimelineChanges()) throw new Error("请先解决待保存的时间轴修改");
+            if (!value.audioStorageKey || !value.audioDurationMs) throw new Error(translate("comicDrama.uploadAnAudioFile"));
+            if (value.timelineStartMs == null || value.trimStartMs == null || value.trimEndMs == null) throw new Error(translate("comicDrama.setTheAudioPositionAndTrimRange"));
+            if (value.trimEndMs <= value.trimStartMs || value.trimEndMs > value.audioDurationMs || value.timelineStartMs + value.trimEndMs - value.trimStartMs > projectDurationMs) throw new Error(translate("comicDrama.theTrimRangeExceedsTheFileOrProjectDuration"));
+            if (Object.keys(useComicDramaStore.getState().pendingTimelineTexts).length + Object.keys(useComicDramaStore.getState().pendingTimelineVoices).length > 0 && !await savePendingTimelineChanges()) throw new Error(translate("comicDrama.resolveUnsavedTimelineChangesFirst"));
             const current = useComicDramaStore.getState().workspace?.voiceTracks.find((item) => item.id === value.id);
             await saveVoiceTrack({ ...value, revision: current?.revision ?? value.revision, content: value.content.trim() });
             clearPendingTimelineVoice(value.id);
             setAudioDraft(null);
-            message.success("音频片段已保存");
+            message.success(translate("comicDrama.audioClipSaved"));
             return true;
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "音频片段保存失败");
+            message.error(error instanceof Error ? error.message : translate("comicDrama.couldNotSaveTheAudioClip"));
             return false;
         } finally {
             setSavingTrack(false);
@@ -889,7 +886,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                 return;
             }
             if (timelineTexts.some((item) => item.id !== draggedText.id && item.trackNumber === draggedText.trackNumber && timelineTextOverlaps(item, draggedText))) {
-                message.warning("同一文字轨道的片段不能重叠");
+                message.warning(translate("comicDrama.clipsOnTheSameTextTrackCannotOverlap"));
                 setClipDraft(null);
                 setTextReorderDraft([]);
                 return;
@@ -903,20 +900,20 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
 
     const confirmDeleteText = (item: ComicDramaTimelineTextInput) => {
         modal.confirm({
-            title: "删除文字片段",
-            content: `确定删除“${item.content}”吗？`,
-            okText: "删除", cancelText: "取消", okButtonProps: { danger: true },
+            title: translate("comicDrama.deleteTextClip"),
+            content: translate("comicDrama.deleteCount", { value0: item.content }),
+            okText: translate("comicDrama.delete"), cancelText: translate("comicDrama.cancel"), okButtonProps: { danger: true },
             onOk: async () => {
                 try {
-                    if (Object.keys(useComicDramaStore.getState().pendingTimelineTexts).length + Object.keys(useComicDramaStore.getState().pendingTimelineVoices).length > 0 && !await savePendingTimelineChanges()) throw new Error("请先解决待保存的时间轴修改");
+                    if (Object.keys(useComicDramaStore.getState().pendingTimelineTexts).length + Object.keys(useComicDramaStore.getState().pendingTimelineVoices).length > 0 && !await savePendingTimelineChanges()) throw new Error(translate("comicDrama.resolveUnsavedTimelineChangesFirst"));
                     await deleteTimelineText(item.id);
                     clearPendingTimelineText(item.id);
                     if (selectedPreviewTextId === item.id) setSelectedPreviewTextId(null);
                     if (selectedTimelineNode?.kind === "text" && selectedTimelineNode.id === item.id) setSelectedTimelineNode(null);
                     setTextDraft(null);
-                    message.success("文字片段已删除");
+                    message.success(translate("comicDrama.textClipDeleted"));
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "文字片段删除失败");
+                    message.error(error instanceof Error ? error.message : translate("comicDrama.couldNotDeleteTheTextClip"));
                     throw error;
                 }
             },
@@ -926,20 +923,20 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
     const confirmDeleteTextTrack = (trackNumber: number) => {
         const clipCount = timelineTexts.filter((item) => item.trackNumber === trackNumber).length;
         modal.confirm({
-            title: `删除文字轨道${trackNumber}`,
-            content: clipCount ? `该轨道中的 ${clipCount} 个文字片段将一同删除，确定继续吗？` : "确定删除该文字轨道吗？",
-            okText: "删除轨道", cancelText: "取消", okButtonProps: { danger: true },
+            title: translate("comicDrama.deleteTextTrackCount", { value0: trackNumber }),
+            content: clipCount ? translate("comicDrama.allCountTextClipsOnThisTrackWillAlsoBe", { value0: clipCount }) : translate("comicDrama.deleteThisTextTrack"),
+            okText: translate("comicDrama.deleteTrack"), cancelText: translate("comicDrama.cancel"), okButtonProps: { danger: true },
             onOk: async () => {
                 try {
-                    if (pendingTimelineCount && !await savePendingTimelineChanges()) throw new Error("请先解决待保存的时间轴修改");
+                    if (pendingTimelineCount && !await savePendingTimelineChanges()) throw new Error(translate("comicDrama.resolveUnsavedTimelineChangesFirst"));
                     await deleteTextTrack(trackNumber);
                     // 删除后后续轨道重新编号，临时开关随原轨道一起移动。
                     setDisabledTextTracks((tracks) => tracks.filter((number) => number !== trackNumber).map((number) => number > trackNumber ? number - 1 : number));
                     setSelectedPreviewTextId(null);
                     setSelectedTimelineNode(null);
-                    message.success("文字轨道已删除");
+                    message.success(translate("comicDrama.textTrackDeleted"));
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "删除文字轨道失败");
+                    message.error(error instanceof Error ? error.message : translate("comicDrama.couldNotDeleteTheTextTrack"));
                     throw error;
                 }
             },
@@ -954,21 +951,21 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             setAudioDraft((current) => current ? { ...current, audioDurationMs: metadata.durationMs, trimStartMs: 0, trimEndMs: Math.min(metadata.durationMs, Math.max(100, projectDurationMs - (current.timelineStartMs || 0))) } : current);
         } catch (error) {
             setAudioFile(null);
-            message.error(error instanceof Error ? error.message : "音频解析失败");
+            message.error(error instanceof Error ? error.message : translate("comicDrama.couldNotParseAudio"));
         }
     };
 
     const removeAudioFromTimeline = async (item: ComicDramaVoiceTrackInput) => {
         setSavingTrack(true);
         try {
-            if (Object.keys(useComicDramaStore.getState().pendingTimelineTexts).length + Object.keys(useComicDramaStore.getState().pendingTimelineVoices).length > 0 && !await savePendingTimelineChanges()) throw new Error("请先解决待保存的时间轴修改");
+            if (Object.keys(useComicDramaStore.getState().pendingTimelineTexts).length + Object.keys(useComicDramaStore.getState().pendingTimelineVoices).length > 0 && !await savePendingTimelineChanges()) throw new Error(translate("comicDrama.resolveUnsavedTimelineChangesFirst"));
             const current = useComicDramaStore.getState().workspace?.voiceTracks.find((track) => track.id === item.id);
             await saveVoiceTrack({ ...item, revision: current?.revision ?? item.revision, timelineStartMs: null, trimStartMs: null, trimEndMs: null });
             clearPendingTimelineVoice(item.id);
             setAudioDraft(null);
-            message.success("音频已移出轨道，声音条目和文件已保留");
+            message.success(translate("comicDrama.audioRemovedFromTheTimelineTheAudioEntryAndFile"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "移出音频轨道失败");
+            message.error(error instanceof Error ? error.message : translate("comicDrama.couldNotRemoveTheAudioFromTheTimeline"));
         } finally {
             setSavingTrack(false);
         }
@@ -1221,7 +1218,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             const values = await editForm.validateFields();
             setSavingShot(true);
             await saveShot(values);
-            message.success(`镜头 #${activeShot?.shotNumber} 设定已更新`);
+            message.success(translate("comicDrama.settingsUpdatedForShotCount", { value0: activeShot?.shotNumber }));
             setEditModalOpen(false);
         } catch (err) {
             if (err instanceof Error) message.error(err.message);
@@ -1243,7 +1240,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         if (!text) return;
         navigator.clipboard.writeText(text);
         setCopiedPromptType(type);
-        message.success("提示词已复制到剪贴板");
+        message.success(translate("comicDrama.promptCopiedToClipboard"));
         setTimeout(() => setCopiedPromptType((current) => current === type ? null : current), 2000);
     };
 
@@ -1257,8 +1254,8 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
     // 上游变更只登记待确认项、不改镜头状态，因此「需要更新」由待确认项派生
     const activeShotStatusInfo = activeShot && activeShot.productionStatus !== "needsUpdate"
             && pendingImpactTargets.has(`shot:${activeShot.id}`)
-        ? { label: "需要更新", color: "warning" }
-        : STATUS_MAP[activeShot?.productionStatus || ""] || STATUS_MAP.draft;
+        ? { label: translate("comicDrama.needsUpdate"), color: "warning" }
+        : getStatusMap(translate)[activeShot?.productionStatus || ""] || getStatusMap(translate).draft;
     const activePosterUrl = activeShot
         ? readComicDramaThumbnailUrl(activeMedia?.resultData) || getShotImagePoster(activeShot.id)
         : "";
@@ -1305,14 +1302,14 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         if (typeof mediaPrompt === "string" && mediaPrompt.trim()) {
             return {
                 text: mediaPrompt.trim(),
-                label: "本次视频生成快照提示词",
+                label: translate("comicDrama.promptSnapshotForThisVideoGeneration"),
                 model: typeof (activeMedia?.inputSnapshot as Record<string, unknown> | undefined)?.model === "string"
                     ? formatModelName(String((activeMedia?.inputSnapshot as Record<string, unknown>).model))
                     : undefined,
             };
         }
         return null;
-    }, [activeMedia]);
+    }, [activeMedia, translate.locale]);
 
     // 关联视觉资产解析：根据 activeShot.assetVersionIds 解析资产名、版本名及参考图
     const associatedAssets = useMemo(() => {
@@ -1330,7 +1327,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             return {
                 versionId: vId,
                 assetId: asset?.id,
-                assetName: asset?.name || "未知资产",
+                assetName: asset?.name || translate("comicDrama.unknownAsset"),
                 assetType: asset?.assetType || "character",
                 versionName: version?.versionName || vId.split("_")[1] || vId,
                 variantType: version?.variantType || "default",
@@ -1338,7 +1335,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                 imageUrl,
             };
         });
-    }, [activeShot, assets, versionsByAsset, mediaList]);
+    }, [activeShot, assets, versionsByAsset, mediaList, translate.locale]);
 
     // 分镜图参考底图（分镜图已采用或已生成，作为图生视频参考；needsUpdate 只代表上游有变更，历史结果仍要展示）
     const storyboardReferenceImage = useMemo(() => {
@@ -1357,8 +1354,8 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
         if (!activeShot) return "";
         const ep = episodes.find((e) => e.id === activeShot.sourceEpisodeId);
         if (!ep) return "";
-        return `第${ep.episodeNumber}集：${ep.title || "无标题"}`;
-    }, [activeShot, episodes]);
+        return translate("comicDrama.episodeCountCount", { value0: ep.episodeNumber, value1: ep.title || translate("comicDrama.untitled") });
+    }, [activeShot, episodes, translate.locale]);
 
     // 所有 Hook 必须在条件返回前执行；切换分集导致镜头列表为空时，仍保持固定调用顺序。
     if (!workspace) return null;
@@ -1373,11 +1370,8 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                     </div>
                     <div>
                         <div className="text-sm font-semibold tracking-wide text-[var(--studio-ink)]">
-                            视觉分镜板 · 工作台
-                        </div>
-                        <div className="text-[11px] text-[var(--studio-muted)]">
-                            {workspace.scriptProject.overview.title || "漫剧项目"} · 共 {viewMode === "timeline" ? timelineShots.length : filteredShots.length} 个镜头
-                        </div>
+                            {translate("comicDrama.visualStoryboardWorkspace")}</div>
+                        <div className="text-[11px] text-[var(--studio-muted)]">{translate("comicDrama.countCountShots_575e68", { value0: workspace.scriptProject.overview.title || translate("comicDrama.comicDramaProject"), value1: viewMode === "timeline" ? timelineShots.length : filteredShots.length })}</div>
                     </div>
                 </div>
 
@@ -1394,18 +1388,18 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                             if (firstIndex >= 0) setCurrentTime(shotIntervals[firstIndex].startMs / 1000);
                         }}
                         options={[
-                            { value: "all", label: "全部分集" },
+                            { value: "all", label: translate("comicDrama.allEpisodes") },
                             ...episodes.map((ep) => ({
                                 value: ep.id,
-                                label: `第${ep.episodeNumber}集：${ep.title || "无标题"}`,
+                                label: translate("comicDrama.episodeCountCount", { value0: ep.episodeNumber, value1: ep.title || translate("comicDrama.untitled") }),
                             })),
                         ]}
                     />
 
-                    {timelineSaveError ? <span className="max-w-52 truncate text-xs text-rose-500" title={timelineSaveError}>保存失败：{timelineSaveError}</span> : pendingTimelineCount > 0 ? <span className="text-xs text-[var(--studio-muted)]">待保存 {pendingTimelineCount} 项</span> : null}
-                    <Button size="small" icon={<Save className="size-3.5" />} disabled={!pendingTimelineCount} loading={timelineSaving} onClick={() => void savePendingTimelineChanges().then((saved) => { if (saved) message.success("时间轴已保存"); else message.error(useComicDramaStore.getState().timelineSaveError || "仍有待保存的修改"); })}>保存</Button>
+                    {timelineSaveError ? <span className="max-w-52 truncate text-xs text-rose-500" title={timelineSaveError}>{translate("comicDrama.saveFailedCount_e86f4e", { value0: timelineSaveError })}</span> : pendingTimelineCount > 0 ? <span className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.unsavedCountItems_27a8aa", { value0: pendingTimelineCount })}</span> : null}
+                    <Button size="small" icon={<Save className="size-3.5" />} disabled={!pendingTimelineCount} loading={timelineSaving} onClick={() => void savePendingTimelineChanges().then((saved) => { if (saved) message.success(translate("comicDrama.timelineSaved")); else message.error(useComicDramaStore.getState().timelineSaveError || translate("comicDrama.thereAreStillUnsavedChanges")); })}>{translate("comicDrama.save")}</Button>
 
-                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => setExportDialogOpen(true)}>导出视频</Button>
+                    <Button size="small" icon={<Download className="size-3.5" />} onClick={() => setExportDialogOpen(true)}>{translate("comicDrama.exportVideo")}</Button>
 
                     {/* View mode toggle */}
                     <div className="flex items-center rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-0.5">
@@ -1420,7 +1414,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                             onClick={() => setViewMode("timeline")}
                         >
                             <Film className="size-3.5" />
-                            <span>时间轴</span>
+                            <span>{translate("comicDrama.timeline")}</span>
                         </button>
                         <button
                             type="button"
@@ -1433,7 +1427,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                             onClick={() => setViewMode("grid")}
                         >
                             <LayoutGrid className="size-3.5" />
-                            <span>网格板</span>
+                            <span>{translate("comicDrama.grid")}</span>
                         </button>
                     </div>
 
@@ -1444,23 +1438,22 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                         disabled={filteredShots.length === 0}
                         onClick={() => setGenerationShotIds(filteredShots.map((shot) => shot.id))}
                     >
-                        批量媒体生成
-                    </Button>
+                        {translate("comicDrama.batchMediaGeneration")}</Button>
                 </div>
             </header>
 
-            <Modal title="导出分镜视频" open={exportDialogOpen} onCancel={() => setExportDialogOpen(false)} footer={null} mask={{ closable: true }}>
+            <Modal title={translate("comicDrama.exportStoryboardVideo")} open={exportDialogOpen} onCancel={() => setExportDialogOpen(false)} footer={null} mask={{ closable: true }}>
                 <div className="space-y-4 py-2">
-                    <p className="text-sm text-[var(--studio-muted)]">当前范围：{selectedEpisodeId === "all" ? "全部分集" : episodes.find((item) => item.id === selectedEpisodeId)?.title || "当前分集"}。成片包含视频、文字和音频轨道，缺失镜头保留黑画面，最长10分钟。</p>
+                    <p className="text-sm text-[var(--studio-muted)]">{translate("comicDrama.currentRangeCountIncludesVideoTextAndAudioTracks_02d85b", { value0: selectedEpisodeId === "all" ? translate("comicDrama.allEpisodes") : episodes.find((item) => item.id === selectedEpisodeId)?.title || translate("comicDrama.currentEpisode") })}</p>
                     {exportTask && <div className="space-y-2 rounded border border-[var(--studio-line)] p-3">
-                        <div className="text-sm">最近任务：{exportTask.status === "succeeded" ? "导出完成" : exportTask.status === "failed" ? "导出失败" : exportTask.status === "canceled" ? "已取消" : "正在导出"}</div>
+                        <div className="text-sm">{translate("comicDrama.latestTaskCount_29e8be", { value0: exportTask.status === "succeeded" ? translate("comicDrama.exportComplete") : exportTask.status === "failed" ? translate("comicDrama.exportFailed") : exportTask.status === "canceled" ? translate("comicDrama.canceled") : translate("comicDrama.exporting") })}</div>
                         <Progress percent={exportTask.progress} status={exportTask.status === "failed" ? "exception" : exportTask.status === "succeeded" ? "success" : "active"} strokeColor={exportTask.status === "failed" ? undefined : "var(--studio-primary)"} />
-                        {exportTask.status === "failed" && <p className="text-sm text-red-500">{exportTask.errorMessage || "导出失败"}</p>}
+                        {exportTask.status === "failed" && <p className="text-sm text-red-500">{exportTask.errorMessage || translate("comicDrama.exportFailed")}</p>}
                     </div>}
                     <Space>
-                        <Button type="primary" loading={exportSubmitting} disabled={exportTask?.status === "pending" || exportTask?.status === "running"} onClick={() => void startVideoExport()}>{exportTask ? "重新导出" : "开始导出"}</Button>
-                        {exportTask?.status === "succeeded" && <Button icon={<Download className="size-4" />} loading={exportDownloading} onClick={() => void downloadExport()}>下载 MP4</Button>}
-                        {(exportTask?.status === "pending" || exportTask?.status === "running") && <Button danger onClick={() => void cancelVideoExport()}>取消导出</Button>}
+                        <Button type="primary" loading={exportSubmitting} disabled={exportTask?.status === "pending" || exportTask?.status === "running"} onClick={() => void startVideoExport()}>{exportTask ? translate("comicDrama.exportAgain") : translate("comicDrama.startExport")}</Button>
+                        {exportTask?.status === "succeeded" && <Button icon={<Download className="size-4" />} loading={exportDownloading} onClick={() => void downloadExport()}>{translate("comicDrama.downloadMp4")}</Button>}
+                        {(exportTask?.status === "pending" || exportTask?.status === "running") && <Button danger onClick={() => void cancelVideoExport()}>{translate("comicDrama.cancelExport")}</Button>}
                     </Space>
                 </div>
             </Modal>
@@ -1468,10 +1461,9 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             {/* 分集切换控件始终保留，空分集仅替换内容区，避免用户无法切回有分镜的分集。 */}
             {shots.length === 0 || (viewMode === "grid" && filteredShots.length === 0) ? (
                 <div className="flex flex-1 items-center justify-center p-8">
-                    <Empty description="当前分集暂无镜头画面，请先进行镜头拆分">
+                    <Empty description={translate("comicDrama.thisEpisodeHasNoShotsYetCompleteShotBreakdownFirst")}>
                         <Button type="primary" icon={<Clapperboard className="size-4" />} onClick={() => setActiveStage("shots")}>
-                            前往镜头拆分
-                        </Button>
+                            {translate("comicDrama.goToShotBreakdown")}</Button>
                     </Empty>
                 </div>
             ) : viewMode === "grid" ? (
@@ -1516,17 +1508,17 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     </div>
                                                 </div>
                                             ) : (
-                                                <img src={url} alt={`镜头 #${shot.shotNumber}`} className="h-full w-full object-cover" />
+                                                <img src={url} alt={translate("comicDrama.shotCount", { value0: shot.shotNumber })} className="h-full w-full object-cover" />
                                             )
                                         ) : media?.status === "failed" ? (
                                             <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-3 text-center text-xs text-rose-500">
                                                 <AlertCircle className="size-6" />
-                                                <span>生成失败</span>
+                                                <span>{translate("comicDrama.generationFailed")}</span>
                                             </div>
                                         ) : (
                                             <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-3 text-center text-xs text-[var(--studio-muted)]">
                                                 <Video className="size-6 text-[var(--studio-faint)]" />
-                                                <span>未生成画面</span>
+                                                <span>{translate("comicDrama.noGeneratedVisuals")}</span>
                                             </div>
                                         )}
                                         <div className="absolute left-2 top-2 flex items-center gap-1">
@@ -1540,18 +1532,18 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                     </div>
                                     <div className="flex flex-1 flex-col justify-between p-3">
                                         <p className="line-clamp-2 text-xs leading-5 text-[var(--studio-text)]">
-                                            {shot.visualDescription || "暂无画面描述"}
+                                            {shot.visualDescription || translate("comicDrama.noVisualDescription")}
                                         </p>
                                         {media?.status === "failed" && (
                                             <p
                                                 className="mt-1.5 line-clamp-3 text-[10px] leading-4 text-rose-500"
                                                 title={media?.failureReason || ""}
                                             >
-                                                {media?.failureReason || "任务未返回具体失败原因"}
+                                                {media?.failureReason || translate("comicDrama.theTaskReturnedNoSpecificFailureReason")}
                                             </p>
                                         )}
                                         <div className="mt-2.5 flex items-center justify-between border-t border-[var(--studio-line)] pt-2">
-                                            <span className="text-[11px] text-[var(--studio-muted)]">{shot.cameraMovement || "固定镜头"}</span>
+                                            <span className="text-[11px] text-[var(--studio-muted)]">{productionParameterLabel(shot.cameraMovement || "", translate) || translate("comicDrama.staticCamera")}</span>
                                             <Button
                                                 size="small"
                                                 type="text"
@@ -1561,8 +1553,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     setViewMode("timeline");
                                                 }}
                                             >
-                                                在工作台预览
-                                            </Button>
+                                                {translate("comicDrama.previewInWorkspace")}</Button>
                                         </div>
                                     </div>
                                 </div>
@@ -1587,8 +1578,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                 }`}
                                 onClick={() => setFlipSide("preview")}
                             >
-                                视频预览
-                            </button>
+                                {translate("comicDrama.videoPreview")}</button>
                             <button
                                 type="button"
                                 style={flipSide === "config" ? ACTIVE_STYLE : undefined}
@@ -1599,8 +1589,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                 }`}
                                 onClick={() => setFlipSide("config")}
                             >
-                                生成配置
-                            </button>
+                                {translate("comicDrama.generationSettings")}</button>
                         </div>
 
                         {/* 3D Flip Container */}
@@ -1653,7 +1642,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                             ) : (
                                                 <img
                                                     src={activeMediaUrl}
-                                                    alt={`镜头 #${activeShot?.shotNumber}`}
+                                                    alt={translate("comicDrama.shotCount", { value0: activeShot?.shotNumber })}
                                                     className="h-full w-full max-h-full max-w-full object-contain"
                                                     onLoad={(event) => {
                                                         const image = event.currentTarget;
@@ -1665,19 +1654,17 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                             <div className="flex h-full w-full flex-col items-center justify-center p-6 text-center">
                                                 <Spin size="large" />
                                                 <div className="mt-4 text-sm font-semibold tracking-wide text-[var(--studio-ink)]">
-                                                    本镜头正在生成视频
-                                                </div>
+                                                    {translate("comicDrama.generatingVideoForThisShot")}</div>
                                                 <div className="mt-1 text-xs text-[var(--studio-muted)]">
-                                                    生成完成后将自动更新状态并渲染最新视频
-                                                </div>
+                                                    {translate("comicDrama.theStatusAndPreviewWillUpdateAutomaticallyWhenGenerationCompletes")}</div>
                                             </div>
                                         ) : isActiveMediaFailed ? (
                                             /* 生成失败：就地展示失败原因与重试入口 */
                                             <div className="flex h-full w-full flex-col items-center justify-center gap-2 p-6 text-center">
                                                 <AlertCircle className="size-8 text-rose-500" />
-                                                <div className="text-sm font-semibold tracking-wide text-rose-500">视频生成失败</div>
+                                                <div className="text-sm font-semibold tracking-wide text-rose-500">{translate("comicDrama.videoGenerationFailed")}</div>
                                                 <div className="max-h-24 max-w-xl overflow-y-auto whitespace-pre-wrap break-words text-xs leading-5 text-[var(--studio-muted)]">
-                                                    {activeMediaFailureReason || "任务未返回具体失败原因"}
+                                                    {activeMediaFailureReason || translate("comicDrama.theTaskReturnedNoSpecificFailureReason")}
                                                 </div>
                                                 <Button
                                                     size="small"
@@ -1686,8 +1673,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     className="mt-2 !border-[var(--studio-primary-line)] !text-[var(--studio-primary)]"
                                                     onClick={() => setFlipSide("config")}
                                                 >
-                                                    前往配置重新生成
-                                                </Button>
+                                                    {translate("comicDrama.openSettingsToRegenerate")}</Button>
                                             </div>
                                         ) : (
                                             /* Aesthetic Empty Frame Placeholder */
@@ -1696,11 +1682,9 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     <Video className="size-7" />
                                                 </div>
                                                 <div className="text-sm font-semibold tracking-wide text-[var(--studio-ink)]">
-                                                    该镜头尚未生成视频
-                                                </div>
+                                                    {translate("comicDrama.thisShotHasNoGeneratedVideoYet")}</div>
                                                 <div className="mt-1 text-xs text-[var(--studio-muted)]">
-                                                    切换到「生成配置」并生成后可拖动时间轴预览
-                                                </div>
+                                                    {translate("comicDrama.openGenerationSettingsAndGenerateAVideoToPreviewIt")}</div>
                                                 <Button
                                                     size="small"
                                                     type="primary"
@@ -1708,8 +1692,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     className="mt-4 !border-[var(--studio-primary-line)] !text-[var(--studio-primary)]"
                                                     onClick={() => setFlipSide("config")}
                                                 >
-                                                    前往配置与生成
-                                                </Button>
+                                                    {translate("comicDrama.openSettingsAndGenerate")}</Button>
                                             </div>
                                         )}
 
@@ -1732,14 +1715,14 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     <button
                                                         key={item.id}
                                                         type="button"
-                                                        aria-label={`拖动文字或右下角调整字号：${item.content}`}
+                                                        aria-label={translate("comicDrama.dragTextOrResizeFromItsLowerRightCornerCount", { value0: item.content })}
                                                         aria-pressed={selected}
-                                                        title="拖动文字调整位置，拖动右下角调整大小，双击编辑"
+                                                        title={translate("comicDrama.dragToRepositionDragTheLowerRightCornerToResize")}
                                                         className={`pointer-events-auto absolute cursor-move touch-none whitespace-pre-wrap break-all rounded-sm focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${selected ? "ring-1 ring-[var(--studio-action)]" : ""}`}
                                                         style={{
                                                             left: `${position.x * 100}%`, top: `${position.y * 100}%`,
                                                             transform: "translate(-50%, -50%)", width: "max-content", maxWidth: "90%",
-                                                            fontSize, fontFamily: STORYBOARD_FONTS[item.fontFamily].cssFamily,
+                                                            fontSize, fontFamily: getStoryboardFonts(translate)[item.fontFamily].cssFamily,
                                                             fontWeight: 400, fontVariantLigatures: "none", lineHeight: 1.2,
                                                             padding: `${fontSize / 16}px ${fontSize / 8}px`,
                                                             color: item.color, backgroundColor: item.backgroundColor || "transparent", textAlign: item.alignment,
@@ -1777,9 +1760,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
 
                                         {/* Top-Right Badges */}
                                         <div className="absolute right-4 top-4 z-10 flex items-center gap-2">
-                                            <span className="rounded-full border border-[var(--studio-line)] bg-[var(--studio-panel-solid)]/85 px-3 py-1 text-xs font-semibold text-[var(--studio-ink)] backdrop-blur-md shadow-sm">
-                                                镜头 {pad2(activeShot?.shotNumber || activeIndex + 1)} · {activeShot?.shotSize || "中景"} · {Number.isInteger(shotDuration) ? `${shotDuration}s` : `${shotDuration.toFixed(1)}s`}
-                                            </span>
+                                            <span className="rounded-full border border-[var(--studio-line)] bg-[var(--studio-panel-solid)]/85 px-3 py-1 text-xs font-semibold text-[var(--studio-ink)] backdrop-blur-md shadow-sm">{translate("comicDrama.shotCountCountCount_9a1ae5", { value0: pad2(activeShot?.shotNumber || activeIndex + 1), value1: productionParameterLabel(activeShot?.shotSize || "", translate) || translate("comicDrama.mediumShot"), value2: Number.isInteger(shotDuration) ? `${shotDuration}s` : `${shotDuration.toFixed(1)}s` })}</span>
                                             <span
                                                 role="status"
                                                 aria-live="polite"
@@ -1795,12 +1776,12 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                 }`}
                                             >
                                                 {activeMedia?.status === "completed" || activeMediaUrl
-                                                    ? "已生成"
+                                                    ? translate("comicDrama.generated_79c74f")
                                                     : isActiveMediaGenerating
-                                                    ? "生成中"
+                                                    ? translate("comicDrama.generating")
                                                     : isActiveMediaFailed
-                                                    ? "生成失败"
-                                                    : "未生成"}
+                                                    ? translate("comicDrama.generationFailed")
+                                                    : translate("comicDrama.notGenerated")}
                                             </span>
                                         </div>
 
@@ -1812,7 +1793,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     type="button"
                                                     className="flex size-6 items-center justify-center rounded-md text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]"
                                                     onClick={handlePrevShot}
-                                                    title="上一个镜头"
+                                                    title={translate("comicDrama.previousShot_925e14")}
                                                 >
                                                     <SkipBack className="size-3.5" />
                                                 </button>
@@ -1821,7 +1802,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     style={ACTIVE_STYLE}
                                                     className="flex size-7 items-center justify-center rounded-md hover:bg-[var(--studio-primary-hover)] shadow-sm"
                                                     onClick={() => setIsPlaying((prev) => !prev)}
-                                                    title={isPlaying ? "暂停" : "播放"}
+                                                    title={isPlaying ? translate("comicDrama.pause") : translate("comicDrama.play")}
                                                 >
                                                     {isPlaying ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
                                                 </button>
@@ -1829,7 +1810,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     type="button"
                                                     className="flex size-6 items-center justify-center rounded-md text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]"
                                                     onClick={handleNextShot}
-                                                    title="下一个镜头"
+                                                    title={translate("comicDrama.nextShot")}
                                                 >
                                                     <SkipForward className="size-3.5" />
                                                 </button>
@@ -1850,7 +1831,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
 
                                             {/* Meta tags */}
                                             <span className="text-[11px] text-[var(--studio-muted)]">
-                                                {activeShot?.cameraMovement || "固定镜头"} · {activeShot?.shotSize || "全景"} · {Number.isInteger(shotDuration) ? `${shotDuration}s` : `${shotDuration.toFixed(1)}s`}
+                                                {productionParameterLabel(activeShot?.cameraMovement || "", translate) || translate("comicDrama.staticCamera")} · {productionParameterLabel(activeShot?.shotSize || "", translate) || translate("comicDrama.longShot_8cb9cf")} · {Number.isInteger(shotDuration) ? `${shotDuration}s` : `${shotDuration.toFixed(1)}s`}
                                             </span>
 
                                             {/* Sound Toggle */}
@@ -1858,7 +1839,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                 type="button"
                                                 className="flex size-6 items-center justify-center rounded-md text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] transition-colors ml-1"
                                                 onClick={() => setIsMuted((prev) => !prev)}
-                                                title={isMuted ? "开启声音" : "静音"}
+                                                title={isMuted ? translate("comicDrama.unmute") : translate("comicDrama.mute")}
                                             >
                                                 {isMuted ? (
                                                     <VolumeX className="size-3.5 text-rose-500" />
@@ -1882,10 +1863,10 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                         #{pad2(activeShot?.shotNumber || activeIndex + 1)}
                                                     </span>
                                                     <Tag color="cyan" className="px-2 py-0.5 text-xs font-medium">
-                                                        {activeShot?.shotSize || "未定景别"}
+                                                        {productionParameterLabel(activeShot?.shotSize || "", translate) || translate("comicDrama.shotSizeNotSet")}
                                                     </Tag>
                                                     <Tag color="geekblue" className="px-2 py-0.5 text-xs font-medium">
-                                                        {activeShot?.cameraMovement || "固定镜头"}
+                                                        {productionParameterLabel(activeShot?.cameraMovement || "", translate) || translate("comicDrama.staticCamera")}
                                                     </Tag>
                                                     <span className="text-xs font-semibold text-[var(--studio-muted)]">
                                                         {Number.isInteger(shotDuration) ? `${shotDuration}s` : `${shotDuration.toFixed(1)}s`}
@@ -1905,12 +1886,12 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                         }
                                                     >
                                                         {activeMedia?.status === "completed" || activeMediaUrl
-                                                            ? "视频已生成"
+                                                            ? translate("comicDrama.videoGenerated")
                                                             : isActiveMediaGenerating
-                                                            ? "视频生成中"
+                                                            ? translate("comicDrama.generatingVideo")
                                                             : isActiveMediaFailed
-                                                            ? "视频生成失败"
-                                                            : "视频未生成"}
+                                                            ? translate("comicDrama.videoGenerationFailed")
+                                                            : translate("comicDrama.videoNotGenerated")}
                                                     </Tag>
                                                 </div>
 
@@ -1928,15 +1909,12 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                         <div className="flex flex-wrap items-center gap-2">
                                                             <Sparkles className="size-4 text-purple-500" />
                                                             <span className="text-xs font-bold text-[var(--studio-ink)]">
-                                                                最终视频提示词
-                                                            </span>
+                                                                {translate("comicDrama.finalVideoPrompt_abd84d")}</span>
                                                             <Tag color={finalVideoPrompt ? "purple" : "default"} className="text-[10px]">
-                                                                {finalVideoPrompt ? `已采用 v${finalVideoPrompt.versionNumber}` : "未生成"}
+                                                                {finalVideoPrompt ? translate("comicDrama.adoptedVCount", { value0: finalVideoPrompt.versionNumber }) : translate("comicDrama.notGenerated")}
                                                             </Tag>
                                                             {finalVideoPrompt?.model && (
-                                                                <Tag className="text-[10px]">
-                                                                    模型: {formatModelName(finalVideoPrompt.model)}
-                                                                </Tag>
+                                                                <Tag className="text-[10px]">{translate("comicDrama.modelCount_58dfe5", { value0: formatModelName(finalVideoPrompt.model) })}</Tag>
                                                             )}
                                                         </div>
                                                         <div className="flex items-center gap-1.5">
@@ -1946,7 +1924,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                                 onClick={() => handleCopyPrompt(finalVideoPrompt?.prompt || "", "final")}
                                                                 disabled={!finalVideoPrompt?.prompt}
                                                             >
-                                                                {copiedPromptType === "final" ? "已复制" : "复制提示词"}
+                                                                {copiedPromptType === "final" ? translate("comicDrama.copied") : translate("comicDrama.copyPrompt")}
                                                             </Button>
                                                             <Button
                                                                 size="small"
@@ -1954,13 +1932,12 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                                 className="!text-[var(--studio-primary)] hover:!text-[var(--studio-primary-hover)] text-xs"
                                                                 onClick={() => setActiveStage("shots")}
                                                             >
-                                                                镜头清单
-                                                            </Button>
+                                                                {translate("comicDrama.shotList")}</Button>
                                                         </div>
                                                     </div>
-                                                    <p className="mb-2 text-xs text-[var(--studio-muted)]">下一次视频生成将使用此已采用版本。</p>
+                                                    <p className="mb-2 text-xs text-[var(--studio-muted)]">{translate("comicDrama.theNextVideoGenerationWillUseThisAdoptedVersion")}</p>
                                                     <div className="max-h-48 overflow-y-auto rounded-lg border border-[var(--studio-line)]/60 bg-[var(--studio-panel-solid)] p-3 text-xs leading-relaxed text-[var(--studio-text)] select-text whitespace-pre-wrap font-sans">
-                                                        {finalVideoPrompt?.prompt || "暂无最终视频提示词，请先在「镜头清单」中使用 AI 生成并采用。"}
+                                                        {finalVideoPrompt?.prompt || translate("comicDrama.noFinalVideoPromptYetGenerateAndAdoptOneWith")}
                                                     </div>
                                                 </div>
 
@@ -1970,16 +1947,16 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                         <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2">
                                                             <div className="flex flex-wrap items-center gap-2">
                                                                 <Clapperboard className="size-4 text-emerald-500" />
-                                                                <span className="text-xs font-bold text-[var(--studio-ink)]">上次视频生成提示词</span>
+                                                                <span className="text-xs font-bold text-[var(--studio-ink)]">{translate("comicDrama.previousVideoGenerationPrompt")}</span>
                                                                 <Tag color="green" className="text-[10px]">{previousVideoPromptInfo.label}</Tag>
-                                                                {previousVideoPromptInfo.model ? <Tag className="text-[10px]">模型: {previousVideoPromptInfo.model}</Tag> : null}
+                                                                {previousVideoPromptInfo.model ? <Tag className="text-[10px]">{translate("comicDrama.modelCount_58dfe5", { value0: previousVideoPromptInfo.model })}</Tag> : null}
                                                             </div>
                                                             <Button
                                                                 size="small"
                                                                 icon={copiedPromptType === "snapshot" ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
                                                                 onClick={() => handleCopyPrompt(previousVideoPromptInfo.text, "snapshot")}
                                                             >
-                                                                {copiedPromptType === "snapshot" ? "已复制" : "复制提示词"}
+                                                                {copiedPromptType === "snapshot" ? translate("comicDrama.copied") : translate("comicDrama.copyPrompt")}
                                                             </Button>
                                                         </div>
                                                         <div className="max-h-48 overflow-y-auto rounded-lg border border-[var(--studio-line)]/60 bg-[var(--studio-panel-solid)] p-3 text-xs leading-relaxed text-[var(--studio-text)] select-text whitespace-pre-wrap font-sans">
@@ -1994,20 +1971,20 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     <div className="flex flex-col rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-3.5 shadow-sm">
                                                         <div className="mb-2 flex items-center gap-1.5 font-semibold text-[var(--studio-ink)]">
                                                             <Film className="size-3.5 text-cyan-500" />
-                                                            <span>画面构图与内容</span>
+                                                            <span>{translate("comicDrama.compositionAndContent_06cbdb")}</span>
                                                         </div>
                                                         <p className="flex-1 leading-5 text-[var(--studio-text)]">
-                                                            {activeShot?.visualDescription || "暂无画面描述"}
+                                                            {activeShot?.visualDescription || translate("comicDrama.noVisualDescription")}
                                                         </p>
                                                         {activeShot?.actionDescription && (
                                                             <div className="mt-2.5 border-t border-[var(--studio-line)] pt-2 text-[var(--studio-muted)]">
-                                                                <span className="font-medium text-[var(--studio-ink)]">动作调度：</span>
+                                                                <span className="font-medium text-[var(--studio-ink)]">{translate("comicDrama.actionAndBlocking")}</span>
                                                                 {activeShot.actionDescription}
                                                             </div>
                                                         )}
                                                         {activeShot?.composition && (
                                                             <div className="mt-1 text-[var(--studio-faint)]">
-                                                                <span className="font-medium">构图方式：</span>
+                                                                <span className="font-medium">{translate("comicDrama.composition")}</span>
                                                                 {activeShot.composition}
                                                             </div>
                                                         )}
@@ -2017,7 +1994,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     <div className="flex flex-col rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-3.5 shadow-sm">
                                                         <div className="mb-2 flex items-center gap-1.5 font-semibold text-[var(--studio-ink)]">
                                                             <Volume2 className="size-3.5 text-blue-500" />
-                                                            <span>对白与声音</span>
+                                                            <span>{translate("comicDrama.dialogueAndSound_0a9b7c")}</span>
                                                         </div>
                                                         <div className="flex-1">
                                                             {activeShot?.dialogueVoiceover ? (
@@ -2025,19 +2002,18 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                                     “{activeShot.dialogueVoiceover}”
                                                                 </p>
                                                             ) : (
-                                                                <p className="leading-5 text-[var(--studio-muted)]">无台词 / 纯画面镜头</p>
+                                                                <p className="leading-5 text-[var(--studio-muted)]">{translate("comicDrama.noDialogueVisualOnlyShot")}</p>
                                                             )}
                                                         </div>
                                                         <div className="mt-2.5 border-t border-[var(--studio-line)] pt-2 text-[var(--studio-muted)]">
                                                             {activeShot?.soundDescription ? (
                                                                 <div>
-                                                                    <span className="font-medium text-[var(--studio-ink)]">音效：</span>
+                                                                    <span className="font-medium text-[var(--studio-ink)]">{translate("comicDrama.soundEffects")}</span>
                                                                     {activeShot.soundDescription}
                                                                 </div>
                                                             ) : (
                                                                 <div className="text-[var(--studio-faint)]">
-                                                                    暂无音效设定
-                                                                </div>
+                                                                    {translate("comicDrama.noSoundEffectsDefined")}</div>
                                                             )}
                                                         </div>
                                                     </div>
@@ -2046,22 +2022,22 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     <div className="flex flex-col rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-3.5 shadow-sm">
                                                         <div className="mb-2 flex items-center gap-1.5 font-semibold text-[var(--studio-ink)]">
                                                             <Sliders className="size-3.5 text-amber-500" />
-                                                            <span>光线氛围与运镜</span>
+                                                            <span>{translate("comicDrama.lightingAndCameraMovement")}</span>
                                                         </div>
                                                         <div className="flex-1 space-y-1.5 text-[var(--studio-text)]">
                                                             <div>
-                                                                <span className="text-[var(--studio-muted)]">光线氛围：</span>
-                                                                {activeShot?.lightingAtmosphere || "自然光影"}
+                                                                <span className="text-[var(--studio-muted)]">{translate("comicDrama.lightingAndMood_d35ac3")}</span>
+                                                                {activeShot?.lightingAtmosphere || translate("comicDrama.naturalLighting")}
                                                             </div>
                                                             <div>
-                                                                <span className="text-[var(--studio-muted)]">运镜方式：</span>
+                                                                <span className="text-[var(--studio-muted)]">{translate("comicDrama.cameraMovement_76ba18")}</span>
                                                                 <span className="font-medium text-[var(--studio-ink)]">
-                                                                    {activeShot?.cameraMovement || "固定镜头"}
+                                                                    {productionParameterLabel(activeShot?.cameraMovement || "", translate) || translate("comicDrama.staticCamera")}
                                                                 </span>
                                                             </div>
                                                             {activeShot?.styleOverride && (
                                                                 <div>
-                                                                    <span className="text-[var(--studio-muted)]">风格覆盖：</span>
+                                                                    <span className="text-[var(--studio-muted)]">{translate("comicDrama.styleOverride")}</span>
                                                                     {activeShot.styleOverride}
                                                                 </div>
                                                             )}
@@ -2075,18 +2051,14 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                         <div className="flex items-center gap-2">
                                                             <Layers className="size-4 text-purple-500" />
                                                             <span className="text-xs font-bold text-[var(--studio-ink)]">
-                                                                关联视觉资产与参考图
-                                                            </span>
-                                                            <span className="text-xs text-[var(--studio-muted)]">
-                                                                (共 {associatedAssets.length} 项关联资产)
-                                                            </span>
+                                                                {translate("comicDrama.linkedVisualAssetsAndReferences")}</span>
+                                                            <span className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.countLinkedAssets_f32210", { value0: associatedAssets.length })}</span>
                                                         </div>
                                                     </div>
 
                                                     {associatedAssets.length === 0 && !storyboardReferenceImage ? (
                                                         <div className="rounded-lg border border-dashed border-[var(--studio-line)] p-4 text-center text-xs text-[var(--studio-muted)]">
-                                                            该镜头暂未绑定任何角色、场景或道具资产，可在编辑镜头中添加关联版本
-                                                        </div>
+                                                            {translate("comicDrama.noCharactersScenesOrPropsAreLinkedToThisShot")}</div>
                                                     ) : (
                                                         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                                                             {/* Keyframe / Storyboard Image if exists */}
@@ -2095,28 +2067,26 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                                     <div className="relative size-16 shrink-0 overflow-hidden rounded bg-black/40">
                                                                         <Image
                                                                             src={storyboardReferenceImage}
-                                                                            alt="分镜参考底图"
+                                                                            alt={translate("comicDrama.storyboardReferenceImage")}
                                                                             className="h-full w-full object-cover"
-                                                                            preview={{ mask: "预览" }}
+                                                                            preview={{ mask: translate("comicDrama.preview") }}
                                                                         />
                                                                     </div>
                                                                     <div className="flex flex-1 flex-col justify-center min-w-0">
                                                                         <div className="flex items-center gap-1">
-                                                                            <Tag color="blue" className="text-[10px] m-0">参考图</Tag>
+                                                                            <Tag color="blue" className="text-[10px] m-0">{translate("comicDrama.referenceImage")}</Tag>
                                                                             <span className="truncate text-xs font-semibold text-[var(--studio-ink)]">
-                                                                                分镜参考底图
-                                                                            </span>
+                                                                                {translate("comicDrama.storyboardReferenceImage")}</span>
                                                                         </div>
                                                                         <div className="mt-1 text-[11px] text-[var(--studio-muted)]">
-                                                                            图生视频首帧关键底图
-                                                                        </div>
+                                                                            {translate("comicDrama.initialKeyframeForImageToVideo")}</div>
                                                                     </div>
                                                                 </div>
                                                             )}
 
                                                             {/* Associated Assets */}
                                                             {associatedAssets.map((assetItem) => {
-                                                                const typeCfg = ASSET_TYPE_CONFIG[assetItem.assetType] || { label: "资产", color: "default" };
+                                                                const typeCfg = getAssetTypeConfig(translate)[assetItem.assetType] || { label: translate("comicDrama.asset"), color: "default" };
                                                                 return (
                                                                     <div
                                                                         key={assetItem.versionId}
@@ -2128,7 +2098,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                                                     src={assetItem.imageUrl}
                                                                                     alt={assetItem.assetName}
                                                                                     className="h-full w-full object-cover"
-                                                                                    preview={{ mask: "预览" }}
+                                                                                    preview={{ mask: translate("comicDrama.preview") }}
                                                                                 />
                                                                             ) : (
                                                                                 <div className="flex h-full w-full items-center justify-center text-[var(--studio-muted)]">
@@ -2145,9 +2115,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                                                     {assetItem.assetName}
                                                                                 </span>
                                                                             </div>
-                                                                            <div className="mt-1 truncate text-[11px] text-[var(--studio-muted)]">
-                                                                                版本：{assetItem.versionName} · {VARIANT_TYPE_LABELS[assetItem.variantType] || assetItem.variantType}
-                                                                            </div>
+                                                                            <div className="mt-1 truncate text-[11px] text-[var(--studio-muted)]">{translate("comicDrama.versionCountCount_570a50", { value0: assetItem.versionName, value1: getVariantTypeLabels(translate)[assetItem.variantType] || assetItem.variantType })}</div>
                                                                             {assetItem.appearanceDescription && (
                                                                                 <div className="mt-0.5 line-clamp-1 text-[10px] text-[var(--studio-faint)]">
                                                                                     {assetItem.appearanceDescription}
@@ -2166,43 +2134,43 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     <div className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-surface-soft)]/60 p-3.5">
                                                         <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-[var(--studio-ink)]">
                                                             <Clapperboard className="size-3.5 text-emerald-500" />
-                                                            <span>生成任务快照参数</span>
+                                                            <span>{translate("comicDrama.generationSnapshotSettings")}</span>
                                                         </div>
                                                         <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
                                                             <div className="rounded border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-2">
-                                                                <span className="block text-[10px] text-[var(--studio-muted)]">生成模型</span>
+                                                                <span className="block text-[10px] text-[var(--studio-muted)]">{translate("comicDrama.generationModel")}</span>
                                                                 <span
                                                                     className="block truncate font-semibold text-[var(--studio-ink)]"
-                                                                    title={formatModelName(String((activeMedia.inputSnapshot as Record<string, unknown> | undefined)?.model || "")) || "未记录"}
+                                                                    title={formatModelName(String((activeMedia.inputSnapshot as Record<string, unknown> | undefined)?.model || "")) || translate("comicDrama.notRecorded")}
                                                                 >
-                                                                    {formatModelName(String((activeMedia.inputSnapshot as Record<string, unknown> | undefined)?.model || "")) || "未记录"}
+                                                                    {formatModelName(String((activeMedia.inputSnapshot as Record<string, unknown> | undefined)?.model || "")) || translate("comicDrama.notRecorded")}
                                                                 </span>
                                                             </div>
                                                             <div className="rounded border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-2">
-                                                                <span className="block text-[10px] text-[var(--studio-muted)]">画幅与分辨率</span>
+                                                                <span className="block text-[10px] text-[var(--studio-muted)]">{translate("comicDrama.aspectRatioAndResolution")}</span>
                                                                 <span className="block font-semibold text-[var(--studio-ink)]">
                                                                     {String((activeMedia.inputSnapshot as Record<string, unknown> | undefined)?.size || workspace?.settings.aspectRatio || "16:9")} · {String((activeMedia.inputSnapshot as Record<string, unknown> | undefined)?.resolution || (activeMedia.inputSnapshot as Record<string, unknown> | undefined)?.vquality || "1080P")}
                                                                 </span>
                                                             </div>
                                                             <div className="rounded border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-2">
-                                                                <span className="block text-[10px] text-[var(--studio-muted)]">生成模式</span>
+                                                                <span className="block text-[10px] text-[var(--studio-muted)]">{translate("comicDrama.generationMode")}</span>
                                                                 <span className="block font-semibold text-[var(--studio-ink)]">
-                                                                    {(activeMedia.inputSnapshot as Record<string, unknown> | undefined)?.videoGenerationMode === "image-to-video" ? "图生视频" : "文生视频"}
+                                                                    {(activeMedia.inputSnapshot as Record<string, unknown> | undefined)?.videoGenerationMode === "image-to-video" ? translate("comicDrama.imageToVideo") : translate("comicDrama.textToVideo")}
                                                                 </span>
                                                             </div>
                                                             <div className="rounded border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-2">
-                                                                <span className="block text-[10px] text-[var(--studio-muted)]">任务状态</span>
+                                                                <span className="block text-[10px] text-[var(--studio-muted)]">{translate("comicDrama.taskStatus")}</span>
                                                                 <span
                                                                     className={`block font-semibold ${
                                                                         isActiveMediaFailed ? "text-rose-500" : "text-emerald-600 dark:text-emerald-400"
                                                                     }`}
                                                                 >
                                                                     {activeMedia.status === "completed"
-                                                                        ? "完成"
+                                                                        ? translate("comicDrama.complete")
                                                                         : activeMedia.status === "processing"
-                                                                        ? "生成中"
+                                                                        ? translate("comicDrama.generating")
                                                                         : activeMedia.status === "failed"
-                                                                        ? "失败"
+                                                                        ? translate("comicDrama.failed_3e3c80")
                                                                         : activeMedia.status}
                                                                 </span>
                                                             </div>
@@ -2212,7 +2180,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                             <div className="mt-2 flex items-start gap-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 p-2 text-xs text-rose-500">
                                                                 <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
                                                                 <span className="min-w-0 whitespace-pre-wrap break-words leading-5">
-                                                                    {activeMediaFailureReason || "任务未返回具体失败原因"}
+                                                                    {activeMediaFailureReason || translate("comicDrama.theTaskReturnedNoSpecificFailureReason")}
                                                                 </span>
                                                             </div>
                                                         )}
@@ -2229,8 +2197,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                 className="!text-[var(--studio-muted)] hover:!text-[var(--studio-ink)]"
                                                 onClick={() => setFlipSide("preview")}
                                             >
-                                                返回预览
-                                            </Button>
+                                                {translate("comicDrama.backToPreview")}</Button>
 
                                             <div className="flex items-center gap-2">
                                                 <Button
@@ -2238,8 +2205,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     icon={<Edit className="size-3.5" />}
                                                     onClick={handleOpenEditModal}
                                                 >
-                                                    编辑镜头
-                                                </Button>
+                                                    {translate("comicDrama.editShot")}</Button>
                                                 <Button
                                                     size="small"
                                                     type="primary"
@@ -2249,7 +2215,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     disabled={isActiveMediaGenerating}
                                                     onClick={handleGenerateShot}
                                                 >
-                                                    {activeMedia?.status === "completed" || activeMediaUrl ? "重新生成视频" : "生成此镜头"}
+                                                    {activeMedia?.status === "completed" || activeMediaUrl ? translate("comicDrama.regenerateVideo") : translate("comicDrama.generateThisShot")}
                                                 </Button>
                                             </div>
                                         </div>
@@ -2267,23 +2233,19 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                     {/* Timeline Head Bar */}
                     <div className="flex shrink-0 items-center justify-between px-5 py-2.5">
                         <div className="text-xs font-semibold text-[var(--studio-ink)]">
-                            分镜轨道
-                            <span className="ml-2 font-normal text-[var(--studio-muted)]">
-                                共 {timelineShots.length} 个镜头 · 总时长 {totalDuration.toFixed(1)}s
-                            </span>
+                            {translate("comicDrama.storyboardTrack")}<span className="ml-2 font-normal text-[var(--studio-muted)]">{translate("comicDrama.countShotsTotalDurationCounts_f9932c", { value0: timelineShots.length, value1: totalDuration.toFixed(1) })}</span>
                         </div>
 
                         <div className="flex items-center gap-3 text-xs text-[var(--studio-muted)]">
                             <span className="hidden rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--studio-primary)] lg:inline-flex">
-                                ← 点击时间刻度或拖动竖线定位 · 按空格键播放/暂停 →
-                            </span>
+                                {translate("comicDrama.clickTheRulerOrDragThePlayheadPressSpaceTo")}</span>
 
                             <div className="flex items-center gap-1.5">
                                 <button
                                     type="button"
                                     className="flex size-6 items-center justify-center rounded border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] text-[var(--studio-muted)] hover:border-[var(--studio-line-strong)] hover:text-[var(--studio-ink)]"
                                     onClick={zoomOut}
-                                    title="缩小时间轴"
+                                    title={translate("comicDrama.zoomOutTimeline")}
                                 >
                                     <ZoomOut className="size-3.5" />
                                 </button>
@@ -2297,7 +2259,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                     type="button"
                                     className="flex size-6 items-center justify-center rounded border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] text-[var(--studio-muted)] hover:border-[var(--studio-line-strong)] hover:text-[var(--studio-ink)]"
                                     onClick={zoomIn}
-                                    title="放大时间轴"
+                                    title={translate("comicDrama.zoomInTimeline")}
                                 >
                                     <ZoomIn className="size-3.5" />
                                 </button>
@@ -2309,34 +2271,33 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                     <div className="flex min-h-0 flex-1">
                         <div className="z-10 w-36 shrink-0 border-r border-[var(--studio-line)] bg-[var(--studio-panel-solid)] text-xs text-[var(--studio-ink)]">
                             <div className="h-5 border-b border-[var(--studio-line)]" />
-                            <div className="flex h-[88px] items-center gap-2 border-b border-[var(--studio-line)] px-3 font-medium"><Video className="size-4" aria-hidden="true" />视频轨道</div>
+                            <div className="flex h-[88px] items-center gap-2 border-b border-[var(--studio-line)] px-3 font-medium"><Video className="size-4" aria-hidden="true" />{translate("comicDrama.videoTrack")}</div>
                             {Array.from({ length: textTrackCount }, (_, trackNumber) => (
                                 <div key={trackNumber} className="flex h-12 items-center justify-between border-b border-[var(--studio-line)] px-2 font-medium">
                                     <span className="flex items-center gap-1">
                                         <button type="button" className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--studio-muted)] hover:bg-[var(--studio-surface-soft)] hover:text-[var(--studio-ink)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]"
-                                            aria-label={`${disabledTextTracks.includes(trackNumber) ? "开启" : "禁用"}文字轨道${trackNumber === 0 ? "" : trackNumber}预览`} aria-pressed={!disabledTextTracks.includes(trackNumber)} title={`${disabledTextTracks.includes(trackNumber) ? "开启" : "禁用"}该文字轨道预览`}
+                                            aria-label={translate("comicDrama.countTextTrackCountPreview", { value0: disabledTextTracks.includes(trackNumber) ? translate("comicDrama.enable") : translate("comicDrama.disable"), value1: trackNumber === 0 ? "" : trackNumber })} aria-pressed={!disabledTextTracks.includes(trackNumber)} title={translate("comicDrama.countThisTextTrackPreview", { value0: disabledTextTracks.includes(trackNumber) ? translate("comicDrama.enable") : translate("comicDrama.disable") })}
                                             onClick={() => {
                                                 setDisabledTextTracks((tracks) => tracks.includes(trackNumber) ? tracks.filter((number) => number !== trackNumber) : [...tracks, trackNumber]);
                                                 if (timelineTexts.some((item) => item.id === selectedPreviewTextId && item.trackNumber === trackNumber)) setSelectedPreviewTextId(null);
                                             }}>
                                             {disabledTextTracks.includes(trackNumber) ? <EyeOff className="size-3.5" aria-hidden="true" /> : <Eye className="size-3.5" aria-hidden="true" />}
                                         </button>
-                                        {trackNumber === 0 ? "文字轨道" : `文字轨道${trackNumber}`}
+                                        {trackNumber === 0 ? translate("comicDrama.textTrack") : translate("comicDrama.textTrackCount", { value0: trackNumber })}
                                     </span>
                                     {trackNumber === 0
-                                        ? <button type="button" className="flex size-8 items-center justify-center rounded hover:bg-[var(--studio-surface-soft)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label="添加文字" title="添加文字" onClick={openNewText}><Plus className="size-3.5" /></button>
-                                        : <button type="button" className="flex size-8 items-center justify-center rounded text-[var(--studio-muted)] hover:bg-[var(--studio-surface-soft)] hover:text-rose-500 focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label={`删除文字轨道${trackNumber}`} title={`删除文字轨道${trackNumber}`} onClick={() => confirmDeleteTextTrack(trackNumber)}><Trash2 className="size-3.5" /></button>}
+                                        ? <button type="button" className="flex size-8 items-center justify-center rounded hover:bg-[var(--studio-surface-soft)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label={translate("comicDrama.addText")} title={translate("comicDrama.addText")} onClick={openNewText}><Plus className="size-3.5" /></button>
+                                        : <button type="button" className="flex size-8 items-center justify-center rounded text-[var(--studio-muted)] hover:bg-[var(--studio-surface-soft)] hover:text-rose-500 focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label={translate("comicDrama.deleteTextTrackCount", { value0: trackNumber })} title={translate("comicDrama.deleteTextTrackCount", { value0: trackNumber })} onClick={() => confirmDeleteTextTrack(trackNumber)}><Trash2 className="size-3.5" /></button>}
                                 </div>
                             ))}
                             <div className="flex h-12 items-center justify-between px-2 font-medium">
                                 <span className="flex items-center gap-1">
                                     <button type="button" className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-[var(--studio-muted)] hover:bg-[var(--studio-surface-soft)] hover:text-[var(--studio-ink)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]"
-                                        aria-label={`${audioTrackEnabled ? "禁用" : "开启"}音频轨道预览`} aria-pressed={audioTrackEnabled} title={`${audioTrackEnabled ? "禁用" : "开启"}该音频轨道预览`} onClick={() => setAudioTrackEnabled((enabled) => !enabled)}>
+                                        aria-label={translate("comicDrama.countAudioTrackPreview", { value0: audioTrackEnabled ? translate("comicDrama.disable") : translate("comicDrama.enable") })} aria-pressed={audioTrackEnabled} title={translate("comicDrama.countThisAudioTrackPreview", { value0: audioTrackEnabled ? translate("comicDrama.disable") : translate("comicDrama.enable") })} onClick={() => setAudioTrackEnabled((enabled) => !enabled)}>
                                         {audioTrackEnabled ? <Eye className="size-3.5" aria-hidden="true" /> : <EyeOff className="size-3.5" aria-hidden="true" />}
                                     </button>
-                                    音频轨道
-                                </span>
-                                <button type="button" className="flex size-8 items-center justify-center rounded hover:bg-[var(--studio-surface-soft)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label="添加音频" title="添加音频" onClick={openNewAudio}><Plus className="size-3.5" /></button>
+                                    {translate("comicDrama.audioTrack_fbe9eb")}</span>
+                                <button type="button" className="flex size-8 items-center justify-center rounded hover:bg-[var(--studio-surface-soft)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" aria-label={translate("comicDrama.addAudio")} title={translate("comicDrama.addAudio")} onClick={openNewAudio}><Plus className="size-3.5" /></button>
                             </div>
                         </div>
                     <div
@@ -2358,7 +2319,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                 className="relative h-5 shrink-0 cursor-pointer border-b border-[var(--studio-line)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]"
                                 role="slider"
                                 tabIndex={0}
-                                aria-label="时间轴播放位置"
+                                aria-label={translate("comicDrama.timelinePlayheadPosition")}
                                 aria-valuemin={0}
                                 aria-valuemax={totalDuration}
                                 aria-valuenow={currentTime}
@@ -2368,7 +2329,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                     seekTimelineTime(timeFromClientX(event.clientX));
                                 }}
                                 onKeyDown={handleRulerKeyDown}
-                                title="点击定位时间，方向键微调，Home / End 跳到起点 / 终点"
+                                title={translate("comicDrama.clickToSeekUseArrowKeysToAdjustAndHome")}
                             >
                                 {Array.from({ length: Math.ceil(totalDuration) + 2 }).map((_, sec) => {
                                     const left = sec * pps;
@@ -2428,7 +2389,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                     url={url}
                                                     hasVideo={hasVideo}
                                                     posterUrl={posterUrl}
-                                                    alt={`镜头 #${shot.shotNumber}`}
+                                                    alt={translate("comicDrama.shotCount", { value0: shot.shotNumber })}
                                                 />
 
                                                 {/* Clip Index & Duration Tag */}
@@ -2446,7 +2407,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                             : "border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] text-[var(--studio-muted)]"
                                                     }`}
                                                 >
-                                                    {hasVideo ? "已生成" : media?.status === "failed" ? "失败" : "未生成"}
+                                                    {hasVideo ? translate("comicDrama.generated_79c74f") : media?.status === "failed" ? translate("comicDrama.failed_3e3c80") : translate("comicDrama.notGenerated")}
                                                 </span>
                                             </div>
                                         </div>
@@ -2478,7 +2439,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                         willChange: "transform",
                                     }}
                                     onPointerDown={handlePointerDown}
-                                    title="拖动时间轴竖线"
+                                    title={translate("comicDrama.dragTimelinePlayhead")}
                                 >
                                     <div className="pointer-events-none absolute inset-y-0 left-[5px] w-[2px] bg-gradient-to-b from-[var(--studio-brand-start)] to-[var(--studio-brand-end)] shadow-md shadow-[var(--studio-brand-glow)]" />
                                     {/* Playhead Top Pin */}
@@ -2492,7 +2453,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                     const item = clipDraft?.kind === "text" && clipDraft.item.id === source.id
                                         ? clipDraft.item : textReorderDraft.find((draft) => draft.id === source.id) || source;
                                     return (
-                                        <button key={source.id} type="button" title={`${item.content} · 双击编辑，拖动移动，两端调整时间`} aria-pressed={selectedTimelineNode?.kind === "text" && selectedTimelineNode.id === source.id} className={`absolute top-1.5 h-9 min-w-[8px] touch-none cursor-grab overflow-hidden rounded border bg-[var(--studio-primary-soft)] text-left text-xs text-[var(--studio-ink)] active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${selectedTimelineNode?.kind === "text" && selectedTimelineNode.id === source.id ? "border-[var(--studio-primary)] shadow-lg shadow-[var(--studio-primary-soft)] ring-1 ring-[var(--studio-primary)]" : "border-[var(--studio-primary-line)] hover:border-[var(--studio-primary)]"} ${clipDragRef.current?.id === source.id ? "z-30" : ""}`} style={{ left: item.startMs / 1000 * pps, width: (item.endMs - item.startMs) / 1000 * pps }}
+                                        <button key={source.id} type="button" title={translate("comicDrama.countDoubleClickToEditDragToMoveAndDrag", { value0: item.content })} aria-pressed={selectedTimelineNode?.kind === "text" && selectedTimelineNode.id === source.id} className={`absolute top-1.5 h-9 min-w-[8px] touch-none cursor-grab overflow-hidden rounded border bg-[var(--studio-primary-soft)] text-left text-xs text-[var(--studio-ink)] active:cursor-grabbing focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${selectedTimelineNode?.kind === "text" && selectedTimelineNode.id === source.id ? "border-[var(--studio-primary)] shadow-lg shadow-[var(--studio-primary-soft)] ring-1 ring-[var(--studio-primary)]" : "border-[var(--studio-primary-line)] hover:border-[var(--studio-primary)]"} ${clipDragRef.current?.id === source.id ? "z-30" : ""}`} style={{ left: item.startMs / 1000 * pps, width: (item.endMs - item.startMs) / 1000 * pps }}
                                             onPointerDown={(event) => startClipDrag(event, { kind: "text", item })}
                                             onDragStart={(event) => event.preventDefault()}
                                             onClick={(event) => {
@@ -2522,7 +2483,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                     if (item.timelineStartMs == null || endMs == null) return null;
                                     const error = item.audioStorageKey ? audioErrors[item.audioStorageKey] : "";
                                     return (
-                                        <button key={source.id} type="button" title={error || `${item.content} · 点击编辑，拖动移动，两端裁剪音频`} aria-pressed={selectedTimelineNode?.kind === "audio" && selectedTimelineNode.id === source.id} className={`absolute top-1.5 h-9 min-w-[8px] touch-none overflow-hidden rounded border bg-[var(--studio-surface-raised)] text-left text-xs focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${clipDragRef.current?.id === source.id ? "z-30" : ""} ${selectedTimelineNode?.kind === "audio" && selectedTimelineNode.id === source.id ? "border-[var(--studio-primary)] shadow-lg shadow-[var(--studio-primary-soft)] ring-1 ring-[var(--studio-primary)]" : error ? "border-red-500" : "border-[var(--studio-line-strong)]"} ${error ? "text-red-500" : "text-[var(--studio-ink)]"}`} style={{ left: item.timelineStartMs / 1000 * pps, width: (endMs - item.timelineStartMs) / 1000 * pps }}
+                                        <button key={source.id} type="button" title={error || translate("comicDrama.countClickToEditDragToMoveAndDragEither", { value0: item.content })} aria-pressed={selectedTimelineNode?.kind === "audio" && selectedTimelineNode.id === source.id} className={`absolute top-1.5 h-9 min-w-[8px] touch-none overflow-hidden rounded border bg-[var(--studio-surface-raised)] text-left text-xs focus-visible:outline-2 focus-visible:outline-[var(--studio-action)] ${clipDragRef.current?.id === source.id ? "z-30" : ""} ${selectedTimelineNode?.kind === "audio" && selectedTimelineNode.id === source.id ? "border-[var(--studio-primary)] shadow-lg shadow-[var(--studio-primary-soft)] ring-1 ring-[var(--studio-primary)]" : error ? "border-red-500" : "border-[var(--studio-line-strong)]"} ${error ? "text-red-500" : "text-[var(--studio-ink)]"}`} style={{ left: item.timelineStartMs / 1000 * pps, width: (endMs - item.timelineStartMs) / 1000 * pps }}
                                             onPointerDown={(event) => startClipDrag(event, { kind: "audio", item })}
                                             onDragStart={(event) => event.preventDefault()}
                                             onClick={(event) => { event.stopPropagation(); if (clipWasDraggedRef.current) { clipWasDraggedRef.current = false; return; } setIsPlaying(false); setSelectedPreviewTextId(null); setSelectedTimelineNode({ kind: "audio", id: item.id }); setAudioFile(null); setAudioDraft(item); }}>
@@ -2545,75 +2506,75 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                     ref={(element) => { audioRefs.current[track.id] = element; }}
                     src={audioUrls[track.audioStorageKey]}
                     preload="auto"
-                    onError={() => setAudioErrors((current) => ({ ...current, [track.audioStorageKey!]: "音频文件加载失败，请重新上传" }))}
+                    onError={() => setAudioErrors((current) => ({ ...current, [track.audioStorageKey!]: translate("comicDrama.couldNotLoadTheAudioFileUploadItAgain") }))}
                 />
             ) : null)}
 
             <Modal
-                title={timelineTexts.some((item) => item.id === textDraft?.id) ? "编辑文字片段" : "添加文字片段"}
+                title={timelineTexts.some((item) => item.id === textDraft?.id) ? translate("comicDrama.editTextClip") : translate("comicDrama.addTextClip")}
                 open={Boolean(textDraft)}
                 onCancel={() => setTextDraft(null)}
                 onOk={() => { if (textDraft) void saveText(textDraft).then((saved) => { if (saved) setTextDraft(null); }); }}
-                okText="保存文字"
+                okText={translate("comicDrama.saveText")}
                 confirmLoading={savingTrack}
                 destroyOnHidden
                 footer={textDraft ? [
-                    timelineTexts.some((item) => item.id === textDraft.id) ? <Button key="delete" danger icon={<Trash2 className="size-4" />} onClick={() => confirmDeleteText(textDraft)}>删除</Button> : null,
-                    <Button key="cancel" onClick={() => setTextDraft(null)}>取消</Button>,
-                    <Button key="save" type="primary" loading={savingTrack} onClick={() => { void saveText(textDraft).then((saved) => { if (saved) setTextDraft(null); }); }}>保存文字</Button>,
+                    timelineTexts.some((item) => item.id === textDraft.id) ? <Button key="delete" danger icon={<Trash2 className="size-4" />} onClick={() => confirmDeleteText(textDraft)}>{translate("comicDrama.delete")}</Button> : null,
+                    <Button key="cancel" onClick={() => setTextDraft(null)}>{translate("comicDrama.cancel")}</Button>,
+                    <Button key="save" type="primary" loading={savingTrack} onClick={() => { void saveText(textDraft).then((saved) => { if (saved) setTextDraft(null); }); }}>{translate("comicDrama.saveText")}</Button>,
                 ] : undefined}
             >
                 {textDraft ? <div className="space-y-4 pt-3">
-                    <div><label className="mb-1 block text-sm font-medium">文字内容</label><Input.TextArea rows={3} maxLength={2000} value={textDraft.content} onChange={(event) => setTextDraft({ ...textDraft, content: event.target.value })} /></div>
+                    <div><label className="mb-1 block text-sm font-medium">{translate("comicDrama.textContent")}</label><Input.TextArea rows={3} maxLength={2000} value={textDraft.content} onChange={(event) => setTextDraft({ ...textDraft, content: event.target.value })} /></div>
                     <div className="grid grid-cols-2 gap-3">
-                        <div><label className="mb-1 block text-sm font-medium">字体</label><Select<StoryboardFontFamily> className="w-full" value={textDraft.fontFamily} options={STORYBOARD_FONT_OPTIONS} onChange={(fontFamily) => setTextDraft({ ...textDraft, fontFamily })} /></div>
-                        <div><label className="mb-1 block text-sm font-medium">字号</label><InputNumber className="w-full" min={12} max={120} value={textDraft.fontSize} onChange={(value) => setTextDraft({ ...textDraft, fontSize: value || 12 })} /></div>
-                        <div><label className="mb-1 block text-sm font-medium">对齐方式</label><Select className="w-full" value={textDraft.alignment} options={[{ value: "left", label: "左对齐" }, { value: "center", label: "居中" }, { value: "right", label: "右对齐" }]} onChange={(alignment) => setTextDraft({ ...textDraft, alignment })} /></div>
-                        <div><label className="mb-1 block text-sm font-medium">文字颜色</label><input type="color" className="h-9 w-full cursor-pointer rounded border border-[var(--studio-line)] bg-transparent" value={textDraft.color.slice(0, 7)} onChange={(event) => setTextDraft({ ...textDraft, color: event.target.value })} /></div>
-                        <div><label className="mb-1 block text-sm font-medium">背景颜色</label><div className="flex h-9 items-center gap-2"><Checkbox checked={Boolean(textDraft.backgroundColor)} onChange={(event) => setTextDraft({ ...textDraft, backgroundColor: event.target.checked ? "#000000" : null })}>启用</Checkbox>{textDraft.backgroundColor ? <input type="color" className="h-8 w-14 cursor-pointer rounded border border-[var(--studio-line)] bg-transparent" value={textDraft.backgroundColor.slice(0, 7)} onChange={(event) => setTextDraft({ ...textDraft, backgroundColor: event.target.value })} /> : null}</div></div>
+                        <div><label className="mb-1 block text-sm font-medium">{translate("comicDrama.font")}</label><Select<StoryboardFontFamily> className="w-full" value={textDraft.fontFamily} options={getStoryboardFontOptions(translate)} onChange={(fontFamily) => setTextDraft({ ...textDraft, fontFamily })} /></div>
+                        <div><label className="mb-1 block text-sm font-medium">{translate("comicDrama.fontSize")}</label><InputNumber className="w-full" min={12} max={120} value={textDraft.fontSize} onChange={(value) => setTextDraft({ ...textDraft, fontSize: value || 12 })} /></div>
+                        <div><label className="mb-1 block text-sm font-medium">{translate("comicDrama.alignment")}</label><Select className="w-full" value={textDraft.alignment} options={[{ value: "left", label: translate("comicDrama.left") }, { value: "center", label: translate("comicDrama.center") }, { value: "right", label: translate("comicDrama.right") }]} onChange={(alignment) => setTextDraft({ ...textDraft, alignment })} /></div>
+                        <div><label className="mb-1 block text-sm font-medium">{translate("comicDrama.textColor")}</label><input type="color" className="h-9 w-full cursor-pointer rounded border border-[var(--studio-line)] bg-transparent" value={textDraft.color.slice(0, 7)} onChange={(event) => setTextDraft({ ...textDraft, color: event.target.value })} /></div>
+                        <div><label className="mb-1 block text-sm font-medium">{translate("comicDrama.backgroundColor")}</label><div className="flex h-9 items-center gap-2"><Checkbox checked={Boolean(textDraft.backgroundColor)} onChange={(event) => setTextDraft({ ...textDraft, backgroundColor: event.target.checked ? "#000000" : null })}>{translate("comicDrama.enable_d4e9ca")}</Checkbox>{textDraft.backgroundColor ? <input type="color" className="h-8 w-14 cursor-pointer rounded border border-[var(--studio-line)] bg-transparent" value={textDraft.backgroundColor.slice(0, 7)} onChange={(event) => setTextDraft({ ...textDraft, backgroundColor: event.target.value })} /> : null}</div></div>
                     </div>
                 </div> : null}
             </Modal>
 
             <Modal
-                title="音频片段"
+                title={translate("comicDrama.audioClip")}
                 open={Boolean(audioDraft)}
                 onCancel={() => { setAudioDraft(null); setAudioFile(null); }}
                 footer={audioDraft ? [
-                    audioDraft.timelineStartMs != null && voiceTracks.some((item) => item.id === audioDraft.id) ? <Button key="remove" danger onClick={() => void removeAudioFromTimeline(audioDraft)}>移出轨道</Button> : null,
-                    <Button key="cancel" onClick={() => { setAudioDraft(null); setAudioFile(null); }}>取消</Button>,
-                    <Button key="save" type="primary" loading={savingTrack} onClick={() => void saveAudio(audioDraft)}>保存音频</Button>,
+                    audioDraft.timelineStartMs != null && voiceTracks.some((item) => item.id === audioDraft.id) ? <Button key="remove" danger onClick={() => void removeAudioFromTimeline(audioDraft)}>{translate("comicDrama.removeFromTrack")}</Button> : null,
+                    <Button key="cancel" onClick={() => { setAudioDraft(null); setAudioFile(null); }}>{translate("comicDrama.cancel")}</Button>,
+                    <Button key="save" type="primary" loading={savingTrack} onClick={() => void saveAudio(audioDraft)}>{translate("comicDrama.saveAudio")}</Button>,
                 ] : undefined}
                 destroyOnHidden
             >
                 {audioDraft ? <div className="space-y-4 pt-3">
-                    <div><label className="mb-1 block text-sm font-medium">声音条目</label><Select className="w-full" value={voiceTracks.some((item) => item.id === audioDraft.id) ? audioDraft.id : undefined} placeholder="新建声音条目" allowClear options={voiceTracks.filter((item) => voiceTrackEndMs(item) == null || item.id === audioDraft.id).map((item) => ({ value: item.id, label: `${item.trackType} · ${item.content}` }))} onChange={(id) => {
+                    <div><label className="mb-1 block text-sm font-medium">{translate("comicDrama.audioEntry")}</label><Select className="w-full" value={voiceTracks.some((item) => item.id === audioDraft.id) ? audioDraft.id : undefined} placeholder={translate("comicDrama.newAudioEntry")} allowClear options={voiceTracks.filter((item) => voiceTrackEndMs(item) == null || item.id === audioDraft.id).map((item) => ({ value: item.id, label: `${item.trackType} · ${item.content}` }))} onChange={(id) => {
                         const track = voiceTracks.find((item) => item.id === id);
                         setAudioFile(null);
                         if (track) setAudioDraft({ ...track, timelineStartMs: Math.round(currentTime * 1000), trimStartMs: track.audioStorageKey ? 0 : null, trimEndMs: track.audioDurationMs || null });
                         else openNewAudio();
                     }} /></div>
-                    <div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-sm font-medium">类型</label><Select className="w-full" value={audioDraft.trackType} options={[{ value: "dialogue", label: "对白" }, { value: "narration", label: "旁白" }, { value: "ambient", label: "环境声" }, { value: "soundEffect", label: "音效" }, { value: "music", label: "配乐" }]} onChange={(trackType) => setAudioDraft({ ...audioDraft, trackType })} /></div>
-                    <div><label className="mb-1 block text-sm font-medium">上传音频</label><input type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" className="block w-full text-xs" onChange={(event) => void selectAudioFile(event.target.files?.[0] || null)} /></div></div>
-                    <div><label className="mb-1 block text-sm font-medium">内容或声音描述</label><Input value={audioDraft.content} maxLength={12000} onChange={(event) => setAudioDraft({ ...audioDraft, content: event.target.value })} /></div>
+                    <div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-sm font-medium">{translate("comicDrama.type")}</label><Select className="w-full" value={audioDraft.trackType} options={[{ value: "dialogue", label: translate("comicDrama.dialogue") }, { value: "narration", label: translate("comicDrama.narration") }, { value: "ambient", label: translate("comicDrama.ambientSound_b2c657") }, { value: "soundEffect", label: translate("comicDrama.soundEffects_505e64") }, { value: "music", label: translate("comicDrama.music") }]} onChange={(trackType) => setAudioDraft({ ...audioDraft, trackType })} /></div>
+                    <div><label className="mb-1 block text-sm font-medium">{translate("comicDrama.uploadAudio")}</label><input type="file" accept=".mp3,.wav,audio/mpeg,audio/wav" className="block w-full text-xs" onChange={(event) => void selectAudioFile(event.target.files?.[0] || null)} /></div></div>
+                    <div><label className="mb-1 block text-sm font-medium">{translate("comicDrama.contentOrSoundDescription")}</label><Input value={audioDraft.content} maxLength={12000} onChange={(event) => setAudioDraft({ ...audioDraft, content: event.target.value })} /></div>
                     <div className="grid grid-cols-3 gap-3">
-                        <div><label className="mb-1 block text-sm font-medium">时间轴起点（秒）</label><InputNumber className="w-full" min={0} max={totalDuration} step={0.1} value={(audioDraft.timelineStartMs || 0) / 1000} onChange={(value) => setAudioDraft({ ...audioDraft, timelineStartMs: Math.round((value || 0) * 1000) })} /></div>
-                        <div><label className="mb-1 block text-sm font-medium">裁剪起点（秒）</label><InputNumber className="w-full" min={0} max={(audioDraft.audioDurationMs || 0) / 1000} step={0.1} value={audioDraft.trimStartMs == null ? null : audioDraft.trimStartMs / 1000} onChange={(value) => setAudioDraft({ ...audioDraft, trimStartMs: Math.round((value || 0) * 1000) })} /></div>
-                        <div><label className="mb-1 block text-sm font-medium">裁剪终点（秒）</label><InputNumber className="w-full" min={0} max={(audioDraft.audioDurationMs || 0) / 1000} step={0.1} value={audioDraft.trimEndMs == null ? null : audioDraft.trimEndMs / 1000} onChange={(value) => setAudioDraft({ ...audioDraft, trimEndMs: Math.round((value || 0) * 1000) })} /></div>
+                        <div><label className="mb-1 block text-sm font-medium">{translate("comicDrama.timelineStartSeconds")}</label><InputNumber className="w-full" min={0} max={totalDuration} step={0.1} value={(audioDraft.timelineStartMs || 0) / 1000} onChange={(value) => setAudioDraft({ ...audioDraft, timelineStartMs: Math.round((value || 0) * 1000) })} /></div>
+                        <div><label className="mb-1 block text-sm font-medium">{translate("comicDrama.trimStartSeconds")}</label><InputNumber className="w-full" min={0} max={(audioDraft.audioDurationMs || 0) / 1000} step={0.1} value={audioDraft.trimStartMs == null ? null : audioDraft.trimStartMs / 1000} onChange={(value) => setAudioDraft({ ...audioDraft, trimStartMs: Math.round((value || 0) * 1000) })} /></div>
+                        <div><label className="mb-1 block text-sm font-medium">{translate("comicDrama.trimEndSeconds")}</label><InputNumber className="w-full" min={0} max={(audioDraft.audioDurationMs || 0) / 1000} step={0.1} value={audioDraft.trimEndMs == null ? null : audioDraft.trimEndMs / 1000} onChange={(value) => setAudioDraft({ ...audioDraft, trimEndMs: Math.round((value || 0) * 1000) })} /></div>
                     </div>
-                    <p className="text-xs text-[var(--studio-muted)]">{audioFile ? `待上传：${audioFile.name}` : audioDraft.audioStorageKey ? `已关联音频 · ${((audioDraft.audioDurationMs || 0) / 1000).toFixed(1)} 秒` : "支持 MP3、WAV，最大 15 MB"}</p>
+                    <p className="text-xs text-[var(--studio-muted)]">{audioFile ? translate("comicDrama.readyToUploadCount", { value0: audioFile.name }) : audioDraft.audioStorageKey ? translate("comicDrama.audioLinkedCountSeconds", { value0: ((audioDraft.audioDurationMs || 0) / 1000).toFixed(1) }) : translate("comicDrama.mp3OrWavUpTo15Mb")}</p>
                 </div> : null}
             </Modal>
 
             {/* Shot Edit Modal */}
             <Modal
-                title={`编辑镜头 #${pad2(activeShot?.shotNumber || activeIndex + 1)} 设定`}
+                title={translate("comicDrama.editSettingsForShotCount", { value0: pad2(activeShot?.shotNumber || activeIndex + 1) })}
                 open={editModalOpen}
                 onCancel={() => setEditModalOpen(false)}
                 onOk={handleSaveEditModal}
                 confirmLoading={savingShot}
-                okText="保存设定"
-                cancelText="取消"
+                okText={translate("comicDrama.saveSettings_392c30")}
+                cancelText={translate("comicDrama.cancel")}
                 width={620}
                 destroyOnHidden
             >
@@ -2628,41 +2589,41 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                     <Form.Item name="assetVersionIds" hidden><Input /></Form.Item>
 
                     <div className="grid grid-cols-3 gap-3">
-                        <Form.Item label="景别" name="shotSize">
-                            <Select options={SHOT_SIZES} />
+                        <Form.Item label={translate("comicDrama.shotSize_6867f7")} name="shotSize">
+                            <Select options={getShotSizes(translate)} />
                         </Form.Item>
-                        <Form.Item label="运镜方式" name="cameraMovement">
-                            <Select options={CAMERA_MOVEMENT_OPTIONS.map((c) => ({ value: c, label: c }))} />
+                        <Form.Item label={translate("comicDrama.cameraMovement_6809ea")} name="cameraMovement">
+                            <Select options={cameraMovementOptions(translate)} />
                         </Form.Item>
-                        <Form.Item label="单镜时长 (秒)" name="durationSeconds" rules={[{ required: true, message: "请输入时长" }]}>
+                        <Form.Item label={translate("comicDrama.shotDurationSeconds")} name="durationSeconds" rules={[{ required: true, message: translate("comicDrama.enterADuration") }]}>
                             <InputNumber min={1} max={60} className="w-full" />
                         </Form.Item>
                     </div>
 
-                    <Form.Item label="画面构图与视觉描述" name="visualDescription" rules={[{ required: true, message: "请输入画面描述" }]}>
-                        <Input.TextArea rows={3} placeholder="描述画面主体形态、环境细节与视觉焦点..." />
+                    <Form.Item label={translate("comicDrama.compositionAndVisualDescription")} name="visualDescription" rules={[{ required: true, message: translate("comicDrama.enterAVisualDescription_3438b0") }]}>
+                        <Input.TextArea rows={3} placeholder={translate("comicDrama.describeTheSubjectEnvironmentAndVisualFocus")} />
                     </Form.Item>
 
-                    <Form.Item label="动作调度 (可选)" name="actionDescription">
-                        <Input placeholder="描述人物动作细节或走位调度..." />
+                    <Form.Item label={translate("comicDrama.actionAndBlockingOptional")} name="actionDescription">
+                        <Input placeholder={translate("comicDrama.describeCharacterActionsAndMovement")} />
                     </Form.Item>
 
                     <div className="grid grid-cols-2 gap-3">
-                        <Form.Item label="对白 / 旁白" name="dialogueVoiceover">
-                            <Input.TextArea rows={2} placeholder="角色对白或旁白文本..." />
+                        <Form.Item label={translate("comicDrama.dialogueNarration_76b776")} name="dialogueVoiceover">
+                            <Input.TextArea rows={2} placeholder={translate("comicDrama.characterDialogueOrNarration")} />
                         </Form.Item>
-                        <Form.Item label="声音 / 音效" name="soundDescription">
-                            <Input.TextArea rows={2} placeholder="环境音效或特殊音效..." />
+                        <Form.Item label={translate("comicDrama.soundEffects_596637")} name="soundDescription">
+                            <Input.TextArea rows={2} placeholder={translate("comicDrama.ambientSoundsOrSpecialEffects")} />
                         </Form.Item>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
-                        <Form.Item label="光线氛围" name="lightingAtmosphere">
-                            <Input placeholder="如：阳光斜射、冷色调夜景等" />
+                        <Form.Item label={translate("comicDrama.lightingAndMood_013aba")} name="lightingAtmosphere">
+                            <Input placeholder={translate("comicDrama.forExampleSlantingSunlightCoolTonedNightScene")} />
                         </Form.Item>
-                        <Form.Item label="制作状态" name="productionStatus">
+                        <Form.Item label={translate("comicDrama.productionStatus")} name="productionStatus">
                             <Select
-                                options={Object.entries(STATUS_MAP).map(([val, { label }]) => ({
+                                options={Object.entries(getStatusMap(translate)).map(([val, { label }]) => ({
                                     value: val,
                                     label,
                                 }))}

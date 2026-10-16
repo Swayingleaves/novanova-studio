@@ -1,5 +1,10 @@
 "use client";
 
+import { productionParameterLabel } from "../lib/production-labels";
+
+import { translateMessage } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useEffect, useMemo, useState } from "react";
 import {
     Alert,
@@ -43,36 +48,37 @@ import type { ComicDramaPromptVersion, ComicDramaShot, ComicDramaShotDraft, Comi
 import { ShotDeleteImpactModal } from "./shot-delete-impact-modal";
 import { ShotDraftModal } from "./shot-draft-modal";
 
-const SHOT_SIZES = [
-    { value: "远景", label: "远景 (Extreme Long Shot / 交代环境全貌)" },
-    { value: "全景", label: "全景 (Long Shot / 人物全身与空间)" },
-    { value: "中景", label: "中景 (Medium Shot / 半身至腰部)" },
-    { value: "近景", label: "近景 (Medium Close-Up / 胸部以上)" },
-    { value: "特写", label: "特写 (Close-Up / 面部微表情或关键道具)" },
-    { value: "大特写", label: "大特写 (Extreme Close-Up / 眼神与细节)" },
-];
+const getShotSizes = (translate = translateMessage) => ([
+    { value: "远景", label: translate("comicDrama.extremeLongShotOverallEnvironment") },
+    { value: "全景", label: translate("comicDrama.longShotFullBodyAndSurroundings") },
+    { value: "中景", label: translate("comicDrama.mediumShotWaistUp") },
+    { value: "近景", label: translate("comicDrama.mediumCloseUpChestUp") },
+    { value: "特写", label: translate("comicDrama.closeUpFacialDetailsOrKeyProps") },
+    { value: "大特写", label: translate("comicDrama.extremeCloseUpEyesAndFineDetails") },
+]);
 
-const CAMERA_MOVEMENTS = [
-    { value: "固定镜头", label: "固定镜头 (Static)" },
-    { value: "缓慢推进", label: "缓慢推进 (Push In / 聚焦情绪)" },
-    { value: "缓慢拉远", label: "缓慢拉远 (Pull Out / 揭示环境)" },
-    { value: "横向摇摄", label: "横向摇摄 (Pan / 环视全景)" },
-    { value: "纵向俯仰", label: "纵向俯仰 (Tilt / 展现高大或压抑)" },
-    { value: "跟随移动", label: "跟随移动 (Tracking / 动作跟拍)" },
-    { value: "环绕旋转", label: "环绕旋转 (Orbit / 动态张力)" },
-];
+const getCameraMovements = (translate = translateMessage) => ([
+    { value: "固定镜头", label: translate("comicDrama.staticCamera_f7eff2") },
+    { value: "缓慢推进", label: translate("comicDrama.slowPushInEmotionalFocus") },
+    { value: "缓慢拉远", label: translate("comicDrama.slowPullOutRevealSurroundings") },
+    { value: "横向摇摄", label: translate("comicDrama.panSurveyTheScene") },
+    { value: "纵向俯仰", label: translate("comicDrama.tiltHeightOrPressure") },
+    { value: "跟随移动", label: translate("comicDrama.trackingFollowAction") },
+    { value: "环绕旋转", label: translate("comicDrama.orbitDynamicTension") },
+]);
 
-const STATUS_MAP: Record<string, { label: string; color: string }> = {
-    draft: { label: "草稿", color: "default" },
-    ready: { label: "就绪", color: "blue" },
-    generating: { label: "生成中", color: "processing" },
-    completed: { label: "已完成", color: "success" },
-    failed: { label: "失败", color: "error" },
-    needsUpdate: { label: "需要更新", color: "warning" },
-};
+const getStatusMap = (translate = translateMessage): Record<string, { label: string; color: string }> => ({
+    draft: { label: translate("comicDrama.draft"), color: "default" },
+    ready: { label: translate("comicDrama.ready_b796f2"), color: "blue" },
+    generating: { label: translate("comicDrama.generating"), color: "processing" },
+    completed: { label: translate("comicDrama.completed_e99b48"), color: "success" },
+    failed: { label: translate("comicDrama.failed_3e3c80"), color: "error" },
+    needsUpdate: { label: translate("comicDrama.needsUpdate"), color: "warning" },
+});
 
 /** 镜头拆分与清单阶段视图。 */
 export function StageShots() {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const config = useEffectiveConfig();
     const pendingImpactTargets = usePendingImpactTargets();
@@ -210,7 +216,7 @@ export function StageShots() {
     // Trigger AI shot split
     const handleTriggerSplit = async () => {
         if (!splitModel) {
-            message.warning("请选择文本模型");
+            message.warning(translate("comicDrama.selectATextModel"));
             return;
         }
         setSplitting(true);
@@ -223,7 +229,7 @@ export function StageShots() {
                 focus: splitFocus,
                 model: splitModel,
             });
-            message.success("已生成镜头拆分草稿，请审核并微调");
+            message.success(translate("comicDrama.shotBreakdownDraftGeneratedReviewAndAdjustIt"));
             setSplitModalOpen(false);
             setDraftReviewOpen(true);
         } catch (error) {
@@ -295,7 +301,7 @@ export function StageShots() {
             const values = await shotForm.validateFields();
             setSavingShot(true);
             await saveShot(values);
-            message.success(editingShot ? "镜头已更新" : "新镜头已创建");
+            message.success(editingShot ? translate("comicDrama.shotUpdated") : translate("comicDrama.newShotCreated"));
             setShotDrawerOpen(false);
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
@@ -317,7 +323,7 @@ export function StageShots() {
         const shotIds = reordered.map((s) => s.id);
         try {
             await reorderShots(shotIds);
-            message.success("镜头顺序已调整");
+            message.success(translate("comicDrama.shotOrderUpdated"));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
         }
@@ -333,13 +339,13 @@ export function StageShots() {
     const handleGenerateFinalVideoPrompt = async (shot: ComicDramaShot) => {
         if (composingPromptShotId) return;
         if (!promptModel) {
-            message.warning("请选择提示词模型");
+            message.warning(translate("comicDrama.selectAPromptModel"));
             return;
         }
         setComposingPromptShotId(shot.id);
         try {
             const prompt = await generateFinalVideoPrompt(shot.id, promptModel);
-            message.success(`镜头 #${shot.shotNumber} 的最终视频提示词已生成并采用（v${prompt.versionNumber}）`);
+            message.success(translate("comicDrama.finalVideoPromptForShotCountGeneratedAndAdoptedV", { value0: shot.shotNumber, value1: prompt.versionNumber }));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
         } finally {
@@ -351,7 +357,7 @@ export function StageShots() {
     const handleBatchGenerateFinalVideoPrompts = async () => {
         if (composingPrompts || selectedShots.length === 0) return;
         if (!promptModel) {
-            message.warning("请选择提示词模型");
+            message.warning(translate("comicDrama.selectAPromptModel"));
             return;
         }
         let failed = 0;
@@ -365,26 +371,23 @@ export function StageShots() {
         }
         setBatchComposeProgress(null);
         const succeeded = selectedShots.length - failed;
-        if (failed > 0) message.warning(`已生成并采用 ${succeeded} 个镜头的最终提示词，${failed} 个失败`);
-        else message.success(`已生成并采用 ${succeeded} 个镜头的最终提示词`);
+        if (failed > 0) message.warning(translate("comicDrama.generatedAndAdoptedFinalPromptsForCountShotsCountFailed", { value0: succeeded, value1: failed }));
+        else message.success(translate("comicDrama.generatedAndAdoptedFinalPromptsForCountShots", { value0: succeeded }));
     };
 
     return (
         <div className="flex flex-col gap-6">
             <header className="flex flex-col gap-2 border-b border-[var(--studio-line)] pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h2 className="text-xl font-semibold text-[var(--studio-ink)]">镜头拆分与清单</h2>
+                    <h2 className="text-xl font-semibold text-[var(--studio-ink)]">{translate("comicDrama.shotBreakdownAndList")}</h2>
                     <p className="mt-1 text-sm text-[var(--studio-muted)]">
-                        将剧本场次拆分为连续、可执行的画面镜头单元。支持 AI 智能拆解并生成草稿审核，也可手动精确调整景别、构图、运镜与对白。
-                    </p>
+                        {translate("comicDrama.breakScriptScenesIntoContinuousActionableShotsGenerateAiDrafts")}</p>
                 </div>
                 <div className="flex items-center gap-2">
                     <Button icon={<Sparkles className="size-4 text-purple-500" />} onClick={openSplitModal}>
-                        AI 自动拆分镜头
-                    </Button>
+                        {translate("comicDrama.breakDownShotsWithAi")}</Button>
                     <Button type="primary" icon={<Plus className="size-4" />} onClick={openCreateShot}>
-                        添加镜头
-                    </Button>
+                        {translate("comicDrama.addShot")}</Button>
                 </div>
             </header>
 
@@ -394,22 +397,20 @@ export function StageShots() {
                     <div className="flex items-center gap-3">
                         <Sparkles className="size-5 text-purple-500" />
                         <div>
-                            <span className="font-semibold text-[var(--studio-ink)]">存在待确认的镜头拆分草稿</span>
+                            <span className="font-semibold text-[var(--studio-ink)]">{translate("comicDrama.aShotBreakdownDraftIsAwaitingApproval")}</span>
                             <p className="text-xs text-[var(--studio-muted)]">
-                                包含已拆分的候选镜头，微调确认后将正式追加至镜头清单中。
-                            </p>
+                                {translate("comicDrama.reviewAndAdjustTheProposedShotsBeforeAppendingThemTo")}</p>
                         </div>
                     </div>
                     <Button type="primary" size="small" onClick={() => setDraftReviewOpen(true)}>
-                        审核并编辑草稿
-                    </Button>
+                        {translate("comicDrama.reviewAndEditDraft")}</Button>
                 </div>
             )}
 
             {/* Episode & Scene Filter Toolbar */}
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                    <span className="text-xs font-medium text-[var(--studio-muted)]">分集筛选：</span>
+                    <span className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.episodeFilter")}</span>
                     <Select
                         className="w-36"
                         value={selectedEpisodeId}
@@ -418,26 +419,26 @@ export function StageShots() {
                             setSelectedSceneId("all");
                         }}
                         options={[
-                            { value: "all", label: "全部分集" },
+                            { value: "all", label: translate("comicDrama.allEpisodes") },
                             ...episodes.map((ep) => ({
                                 value: ep.id,
-                                label: `第${ep.episodeNumber}集：${ep.title || "无标题"}`,
+                                label: translate("comicDrama.episodeCountCount", { value0: ep.episodeNumber, value1: ep.title || translate("comicDrama.untitled") }),
                             })),
                         ]}
                     />
 
                     {selectedEpisodeId !== "all" && availableScenes.length > 0 && (
                         <>
-                            <span className="ml-2 text-xs font-medium text-[var(--studio-muted)]">场次：</span>
+                            <span className="ml-2 text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.scene_e22aac")}</span>
                             <Select
                                 className="w-36"
                                 value={selectedSceneId}
                                 onChange={setSelectedSceneId}
                                 options={[
-                                    { value: "all", label: "全部场次" },
+                                    { value: "all", label: translate("comicDrama.allScenes") },
                                     ...availableScenes.map((sc) => ({
                                         value: sc.id,
-                                        label: `第${sc.sceneNumber}场：${sc.location || "未设地点"}`,
+                                        label: translate("comicDrama.sceneCountCount", { value0: sc.sceneNumber, value1: sc.location || translate("comicDrama.locationNotSet") }),
                                     })),
                                 ]}
                             />
@@ -447,13 +448,13 @@ export function StageShots() {
 
                 <div className="flex flex-wrap items-center gap-3">
                     <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-[var(--studio-muted)]">提示词模型：</span>
+                        <span className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.promptModel")}</span>
                         <div className="w-44">
                             <ModelPicker config={config} capability="text" value={promptModel} onChange={setPromptModel} fullWidth />
                         </div>
                     </div>
                     <div className="text-xs text-[var(--studio-muted)]">
-                        共 <strong className="text-[var(--studio-ink)]">{filteredShots.length}</strong> 个镜头 · 总时长约{" "}
+                        {translate("comicDrama.total")}<strong className="text-[var(--studio-ink)]">{filteredShots.length}</strong> {translate("comicDrama.shotsTotalDurationApproximately")}{" "}
                         <strong className="text-[var(--studio-ink)]">
                             {filteredShots.reduce((acc, cur) => acc + Number(cur.durationSeconds || 0), 0).toFixed(1)}s
                         </strong>
@@ -468,18 +469,15 @@ export function StageShots() {
                         indeterminate={selectedInFilteredCount > 0 && selectedInFilteredCount < filteredShots.length}
                         checked={filteredShots.length > 0 && selectedInFilteredCount === filteredShots.length}
                         onChange={(e) => toggleAllShotsFiltered(e.target.checked)}
-                    >
-                        全选当前 ({filteredShots.length})
-                    </Checkbox>
+                    >{translate("comicDrama.selectCurrentCount_8b9873", { value0: filteredShots.length })}</Checkbox>
                     <Button
                         type="text"
                         size="small"
                         disabled={shotsMissingFinalPrompt.length === 0}
                         onClick={selectShotsMissingFinalPrompt}
                     >
-                        仅选未生成提示词
-                    </Button>
-                    <span className="text-xs text-[var(--studio-muted)]">已选 {selectedShots.length} 项</span>
+                        {translate("comicDrama.selectWithoutPrompts")}</Button>
+                    <span className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.countItemsSelected_380fef", { value0: selectedShots.length })}</span>
                     <div className="ml-auto">
                         <Button
                             icon={<Sparkles className="size-4 text-purple-500" />}
@@ -488,8 +486,8 @@ export function StageShots() {
                             onClick={() => void handleBatchGenerateFinalVideoPrompts()}
                         >
                             {batchComposeProgress
-                                ? `批量生成中 ${batchComposeProgress.done}/${batchComposeProgress.total}`
-                                : `批量生成最终提示词${selectedShots.length > 0 ? `（${selectedShots.length}）` : ""}`}
+                                ? translate("comicDrama.generatingBatchCountCount", { value0: batchComposeProgress.done, value1: batchComposeProgress.total })
+                                : translate("comicDrama.generateFinalPromptsInBatchCount", { value0: selectedShots.length > 0 ? `（${selectedShots.length}）` : "" })}
                         </Button>
                     </div>
                 </div>
@@ -497,14 +495,12 @@ export function StageShots() {
 
             {/* Shot List Table / Cards */}
             {filteredShots.length === 0 ? (
-                <Empty description="当前筛选条件下没有镜头">
+                <Empty description={translate("comicDrama.noShotsMatchTheCurrentFilters")}>
                     <Space>
                         <Button type="primary" icon={<Sparkles className="size-4" />} onClick={openSplitModal}>
-                            AI 自动拆分镜头
-                        </Button>
+                            {translate("comicDrama.breakDownShotsWithAi")}</Button>
                         <Button icon={<Plus className="size-4" />} onClick={openCreateShot}>
-                            手动添加镜头
-                        </Button>
+                            {translate("comicDrama.addShotManually")}</Button>
                     </Space>
                 </Empty>
             ) : (
@@ -513,8 +509,8 @@ export function StageShots() {
                         // 上游变更只登记影响项，不再改动镜头状态，因此「需要更新」由待确认项派生
                         const pendingUpdate = pendingImpactTargets.has(`shot:${shot.id}`);
                         const statusInfo = pendingUpdate && shot.productionStatus !== "needsUpdate"
-                            ? { label: "需要更新", color: "warning" }
-                            : STATUS_MAP[shot.productionStatus] || STATUS_MAP.draft;
+                            ? { label: translate("comicDrama.needsUpdate"), color: "warning" }
+                            : getStatusMap(translate)[shot.productionStatus] || getStatusMap(translate).draft;
                         const finalVideoPrompt = finalVideoPrompts.get(shot.id);
                         return (
                             <div
@@ -526,13 +522,13 @@ export function StageShots() {
                                         <Checkbox
                                             checked={selectedShotIds.includes(shot.id)}
                                             onChange={(e) => toggleShotSelection(shot.id, e.target.checked)}
-                                            aria-label={`选择镜头 #${shot.shotNumber}`}
+                                            aria-label={translate("comicDrama.selectShotCount", { value0: shot.shotNumber })}
                                         />
                                         <span className="rounded bg-[var(--studio-line)] px-2 py-0.5 font-mono text-sm font-semibold text-[var(--studio-ink)]">
                                             #{shot.shotNumber}
                                         </span>
-                                        <Tag color="cyan">{shot.shotSize || "未定景别"}</Tag>
-                                        <Tag color="geekblue">{shot.cameraMovement || "固定镜头"}</Tag>
+                                        <Tag color="cyan">{productionParameterLabel(shot.shotSize || "", translate) || translate("comicDrama.shotSizeNotSet")}</Tag>
+                                        <Tag color="geekblue">{productionParameterLabel(shot.cameraMovement || "", translate) || translate("comicDrama.staticCamera")}</Tag>
                                         <span className="text-xs text-[var(--studio-muted)]">{shot.durationSeconds}s</span>
                                         <Tag color={statusInfo.color}>{statusInfo.label}</Tag>
                                     </div>
@@ -544,7 +540,7 @@ export function StageShots() {
                                             disabled={idx === 0}
                                             icon={<ArrowUp className="size-3.5" />}
                                             onClick={() => handleMoveShot(idx, "up")}
-                                            title="上移"
+                                            title={translate("comicDrama.moveUp")}
                                         />
                                         <Button
                                             size="small"
@@ -552,15 +548,14 @@ export function StageShots() {
                                             disabled={idx === filteredShots.length - 1}
                                             icon={<ArrowDown className="size-3.5" />}
                                             onClick={() => handleMoveShot(idx, "down")}
-                                            title="下移"
+                                            title={translate("comicDrama.moveDown")}
                                         />
                                         <Button
                                             size="small"
                                             icon={<Edit className="size-3.5" />}
                                             onClick={() => openEditShot(shot)}
                                         >
-                                            编辑
-                                        </Button>
+                                            {translate("comicDrama.edit")}</Button>
                                         <Button
                                             size="small"
                                             danger
@@ -573,28 +568,26 @@ export function StageShots() {
 
                                 <div className="grid gap-3 text-xs sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
                                     <div>
-                                        <span className="font-medium text-[var(--studio-muted)]">画面构图与内容：</span>
+                                        <span className="font-medium text-[var(--studio-muted)]">{translate("comicDrama.compositionAndContent")}</span>
                                         <p className="mt-1 leading-5 text-[var(--studio-text)]">
-                                            {shot.visualDescription || "暂无画面描述"}
+                                            {shot.visualDescription || translate("comicDrama.noVisualDescription")}
                                         </p>
                                     </div>
 
                                     <div>
-                                        <span className="font-medium text-[var(--studio-muted)]">对白与声音：</span>
+                                        <span className="font-medium text-[var(--studio-muted)]">{translate("comicDrama.dialogueAndSound")}</span>
                                         <p className="mt-1 leading-5 text-[var(--studio-text)]">
-                                            {shot.dialogueVoiceover ? `“${shot.dialogueVoiceover}”` : "无台词/纯画面"}
+                                            {shot.dialogueVoiceover ? `“${shot.dialogueVoiceover}”` : translate("comicDrama.noDialogueVisualsOnly")}
                                         </p>
                                         {shot.soundDescription && (
-                                            <p className="mt-0.5 text-[var(--studio-faint)]">
-                                                音效：{shot.soundDescription}
-                                            </p>
+                                            <p className="mt-0.5 text-[var(--studio-faint)]">{translate("comicDrama.soundEffectsCount_36cdc2", { value0: shot.soundDescription })}</p>
                                         )}
                                     </div>
 
                                     <div>
-                                        <span className="font-medium text-[var(--studio-muted)]">光线氛围与资产：</span>
+                                        <span className="font-medium text-[var(--studio-muted)]">{translate("comicDrama.lightingAndAssets")}</span>
                                         <p className="mt-1 text-[var(--studio-text)]">
-                                            {shot.lightingAtmosphere || "自然光影"}
+                                            {shot.lightingAtmosphere || translate("comicDrama.naturalLighting")}
                                         </p>
                                         {shot.assetVersionIds && shot.assetVersionIds.length > 0 && (
                                             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -605,7 +598,7 @@ export function StageShots() {
                                                         <Image
                                                             key={versionId}
                                                             src={assetImageUrl}
-                                                            alt={`资产版本 ${versionLabel}`}
+                                                            alt={translate("comicDrama.assetVersionCount", { value0: versionLabel })}
                                                             width={52}
                                                             height={52}
                                                             className="size-[52px] rounded-md border border-[var(--studio-line)] object-cover"
@@ -615,7 +608,7 @@ export function StageShots() {
                                                     ) : (
                                                         <span
                                                             key={versionId}
-                                                            title={`资产版本 ${versionLabel} 尚未生成图片`}
+                                                            title={translate("comicDrama.assetVersionCountHasNoGeneratedImageYet", { value0: versionLabel })}
                                                             className="flex size-[52px] items-center justify-center rounded-md border border-dashed border-[var(--studio-line-strong)] text-[var(--studio-muted)]"
                                                         >
                                                             <ImageIcon className="size-4" />
@@ -628,7 +621,7 @@ export function StageShots() {
 
                                     <div className="min-w-0">
                                         <div className="flex items-center justify-between gap-2">
-                                            <span className="font-medium text-[var(--studio-muted)]">最终视频提示词：</span>
+                                            <span className="font-medium text-[var(--studio-muted)]">{translate("comicDrama.finalVideoPrompt")}</span>
                                             <Button
                                                 size="small"
                                                 type="text"
@@ -637,7 +630,7 @@ export function StageShots() {
                                                 disabled={composingPrompts || !promptModel}
                                                 onClick={() => void handleGenerateFinalVideoPrompt(shot)}
                                             >
-                                                {finalVideoPrompt ? "重新生成" : "AI 生成"}
+                                                {finalVideoPrompt ? translate("comicDrama.regenerate") : translate("comicDrama.generateWithAi")}
                                             </Button>
                                         </div>
                                         {finalVideoPrompt ? (
@@ -645,7 +638,7 @@ export function StageShots() {
                                                 type="text"
                                                 block
                                                 className="mt-1 !h-auto !p-0 text-left"
-                                                aria-label={`查看镜头 #${shot.shotNumber} 的最终视频提示词详情`}
+                                                aria-label={translate("comicDrama.viewFinalVideoPromptForShotCount", { value0: shot.shotNumber })}
                                                 onClick={() => setPromptDetail({ shotNumber: shot.shotNumber, prompt: finalVideoPrompt })}
                                             >
                                                 <span className="line-clamp-3 whitespace-normal text-left leading-5 text-[var(--studio-text)]" title={finalVideoPrompt.prompt}>
@@ -653,12 +646,10 @@ export function StageShots() {
                                                 </span>
                                             </Button>
                                         ) : (
-                                            <p className="mt-1 leading-5 text-[var(--studio-text)]">暂未生成，可使用 AI 生成后直接用于生视频。</p>
+                                            <p className="mt-1 leading-5 text-[var(--studio-text)]">{translate("comicDrama.notGeneratedYetUseAiToCreateAPromptFor")}</p>
                                         )}
                                         {finalVideoPrompt ? (
-                                            <p className="mt-1 text-[10px] text-[var(--studio-faint)]">
-                                                已采用 v{finalVideoPrompt.versionNumber}
-                                            </p>
+                                            <p className="mt-1 text-[10px] text-[var(--studio-faint)]">{translate("comicDrama.adoptedVcount_25e1ac", { value0: finalVideoPrompt.versionNumber })}</p>
                                         ) : null}
                                     </div>
                                 </div>
@@ -673,7 +664,7 @@ export function StageShots() {
                 title={
                     <div className="flex items-center gap-2">
                         <Sparkles className="size-4 text-purple-500" />
-                        <span>AI 智能拆分镜头</span>
+                        <span>{translate("comicDrama.aiShotBreakdown")}</span>
                     </div>
                 }
                 open={splitModalOpen}
@@ -683,11 +674,10 @@ export function StageShots() {
             >
                 <div className="flex flex-col gap-4 py-2">
                     <p className="text-xs text-[var(--studio-muted)]">
-                        分镜 Agent 将解析所选范围的剧本正文与人物对白，结合项目视觉风格智能拆解为连续镜头草稿。生成的草稿必须经过您的审核确认后才会生效。
-                    </p>
+                        {translate("comicDrama.theStoryboardAgentAnalyzesTheSelectedScriptAndDialogueWith")}</p>
 
                     <div>
-                        <label className="block text-xs font-medium text-[var(--studio-muted)]">拆分范围（分集）</label>
+                        <label className="block text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.breakdownScopeEpisode")}</label>
                         <Select
                             className="mt-1 w-full"
                             value={splitEpisodeId}
@@ -697,23 +687,23 @@ export function StageShots() {
                             }}
                             options={episodes.map((ep) => ({
                                 value: ep.id,
-                                label: `第${ep.episodeNumber}集：${ep.title || "无标题"}`,
+                                label: translate("comicDrama.episodeCountCount", { value0: ep.episodeNumber, value1: ep.title || translate("comicDrama.untitled") }),
                             }))}
                         />
                     </div>
 
                     {splitEpisodeId && (
                         <div>
-                            <label className="block text-xs font-medium text-[var(--studio-muted)]">指定场次（可选）</label>
+                            <label className="block text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.specificSceneOptional")}</label>
                             <Select
                                 className="mt-1 w-full"
                                 value={splitSceneId}
                                 onChange={setSplitSceneId}
                                 options={[
-                                    { value: "", label: "拆分整集剧本" },
+                                    { value: "", label: translate("comicDrama.breakDownEntireEpisode") },
                                     ...(episodes.find((e) => e.id === splitEpisodeId)?.scenes || []).map((sc) => ({
                                         value: sc.id,
-                                        label: `第${sc.sceneNumber}场：${sc.location || "未设地点"}`,
+                                        label: translate("comicDrama.sceneCountCount", { value0: sc.sceneNumber, value1: sc.location || translate("comicDrama.locationNotSet") }),
                                     })),
                                 ]}
                             />
@@ -722,46 +712,46 @@ export function StageShots() {
 
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="block text-xs font-medium text-[var(--studio-muted)]">预计镜头数量</label>
+                            <label className="block text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.estimatedShotCount")}</label>
                             {/* InputNumber 自带 90px 固定宽度且属于无层样式，普通 w-full 会被它压过，必须用 w-full! 才能撑满 */}
                             <InputNumber
                                 min={1}
                                 max={50}
                                 className="mt-1 w-full!"
-                                placeholder="留空由 AI 自行判断"
+                                placeholder={translate("comicDrama.leaveBlankForAiToDecide")}
                                 value={splitShotCount}
                                 onChange={setSplitShotCount}
                             />
                         </div>
 
                         <div>
-                            <label className="block text-xs font-medium text-[var(--studio-muted)]">叙事节奏</label>
+                            <label className="block text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.narrativePacing")}</label>
                             <Select
                                 className="mt-1 w-full"
                                 value={splitRhythm}
                                 onChange={setSplitRhythm}
                                 options={[
-                                    { value: "紧凑利落", label: "紧凑利落 (短剧快节奏)" },
-                                    { value: "高潮反转", label: "高潮反转 (悬疑与爆发)" },
-                                    { value: "舒缓写意", label: "舒缓写意 (情感烘托)" },
-                                    { value: "激烈打斗", label: "激烈打斗 (快速切换)" },
+                                    { value: "紧凑利落", label: translate("comicDrama.tightAndBriskFastPacedDrama") },
+                                    { value: "高潮反转", label: translate("comicDrama.climacticTwistsSuspenseAndRelease") },
+                                    { value: "舒缓写意", label: translate("comicDrama.relaxedAndExpressiveEmotionalAtmosphere") },
+                                    { value: "激烈打斗", label: translate("comicDrama.intenseActionRapidCuts") },
                                 ]}
                             />
                         </div>
                     </div>
 
                     <div>
-                        <label className="block text-xs font-medium text-[var(--studio-muted)]">创作重点指示</label>
+                        <label className="block text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.creativeFocus")}</label>
                         <Input
                             className="mt-1"
                             value={splitFocus}
                             onChange={(e) => setSplitFocus(e.target.value)}
-                            placeholder="突出人物冲突与关键动作"
+                            placeholder={translate("comicDrama.emphasizeCharacterConflictAndKeyActions")}
                         />
                     </div>
 
                     <div>
-                        <label className="block text-xs font-medium text-[var(--studio-muted)]">拆分模型</label>
+                        <label className="block text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.breakdownModel")}</label>
                         <div className="mt-1">
                             <ModelPicker
                                 config={config}
@@ -774,27 +764,26 @@ export function StageShots() {
                     </div>
 
                     <div className="mt-2 flex items-center justify-end gap-2 border-t border-[var(--studio-line)] pt-3">
-                        <Button onClick={() => setSplitModalOpen(false)}>取消</Button>
+                        <Button onClick={() => setSplitModalOpen(false)}>{translate("comicDrama.cancel")}</Button>
                         <Button
                             type="primary"
                             loading={splitting}
                             icon={<Sparkles className="size-4" />}
                             onClick={handleTriggerSplit}
                         >
-                            开始拆分
-                        </Button>
+                            {translate("comicDrama.startBreakdown")}</Button>
                     </div>
                 </div>
             </Modal>
 
             <Modal
-                title={`镜头 #${promptDetail?.shotNumber ?? ""} 的最终视频提示词`}
+                title={translate("comicDrama.finalVideoPromptForShotCount", { value0: promptDetail?.shotNumber ?? "" })}
                 open={Boolean(promptDetail)}
                 onCancel={() => setPromptDetail(null)}
-                footer={<Button onClick={() => setPromptDetail(null)}>关闭</Button>}
+                footer={<Button onClick={() => setPromptDetail(null)}>{translate("comicDrama.close")}</Button>}
                 width={720}
             >
-                <p className="mb-3 text-xs text-[var(--studio-muted)]">已采用 v{promptDetail?.prompt.versionNumber}</p>
+                <p className="mb-3 text-xs text-[var(--studio-muted)]">{translate("comicDrama.adoptedVcount_25e1ac", { value0: promptDetail?.prompt.versionNumber ?? "" })}</p>
                 <div className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words leading-6 text-[var(--studio-text)]">
                     {promptDetail?.prompt.prompt}
                 </div>
@@ -802,14 +791,13 @@ export function StageShots() {
 
             {/* Shot Edit / Create Drawer */}
             <Drawer
-                title={editingShot ? `编辑镜头 #${editingShot.shotNumber}` : "新建镜头"}
+                title={editingShot ? translate("comicDrama.editShotCount", { value0: editingShot.shotNumber }) : translate("comicDrama.newShot")}
                 open={shotDrawerOpen}
                 onClose={() => setShotDrawerOpen(false)}
                 size="large"
                 extra={
                     <Button type="primary" loading={savingShot} onClick={handleSaveShot}>
-                        保存
-                    </Button>
+                        {translate("comicDrama.save")}</Button>
                 }
             >
                 <Form form={shotForm} layout="vertical">
@@ -826,8 +814,8 @@ export function StageShots() {
                     <div className="grid grid-cols-2 gap-3">
                         <Form.Item
                             name="shotNumber"
-                            label="镜号"
-                            rules={[{ required: true, message: "请输入镜号" }]}
+                            label={translate("comicDrama.shotNumber")}
+                            rules={[{ required: true, message: translate("comicDrama.enterAShotNumber") }]}
                         >
                             {/* InputNumber 自带 90px 固定宽度，普通 w-full 压不过它，必须用 w-full! */}
                             <InputNumber min={1} className="w-full!" />
@@ -835,56 +823,56 @@ export function StageShots() {
 
                         <Form.Item
                             name="durationSeconds"
-                            label="预估时长 (秒)"
-                            rules={[{ required: true, message: "请输入时长" }]}
+                            label={translate("comicDrama.estimatedDurationSeconds")}
+                            rules={[{ required: true, message: translate("comicDrama.enterADuration") }]}
                         >
                             <InputNumber min={0.5} max={120} step={0.5} className="w-full!" />
                         </Form.Item>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
-                        <Form.Item name="shotSize" label="景别">
-                            <Select options={SHOT_SIZES} />
+                        <Form.Item name="shotSize" label={translate("comicDrama.shotSize_6867f7")}>
+                            <Select options={getShotSizes(translate)} />
                         </Form.Item>
 
-                        <Form.Item name="cameraMovement" label="摄影机运动">
-                            <Select options={CAMERA_MOVEMENTS} />
+                        <Form.Item name="cameraMovement" label={translate("comicDrama.cameraMovement")}>
+                            <Select options={getCameraMovements(translate)} />
                         </Form.Item>
                     </div>
 
                     <Form.Item
                         name="visualDescription"
-                        label="画面构图与视觉描述"
-                        rules={[{ required: true, message: "请填写画面描述" }]}
+                        label={translate("comicDrama.compositionAndVisualDescription")}
+                        rules={[{ required: true, message: translate("comicDrama.enterAVisualDescription") }]}
                     >
-                        <Input.TextArea rows={3} placeholder="人物在画面的位置、环境细节、动作发生..." />
+                        <Input.TextArea rows={3} placeholder={translate("comicDrama.characterPlacementEnvironmentalDetailsAndAction")} />
                     </Form.Item>
 
-                    <Form.Item name="actionDescription" label="人物与物体动作">
-                        <Input placeholder="例如：拔剑指向前方，眼神坚定" />
+                    <Form.Item name="actionDescription" label={translate("comicDrama.characterAndObjectAction")}>
+                        <Input placeholder={translate("comicDrama.forExampleDrawsASwordAndPointsForwardWithA")} />
                     </Form.Item>
 
-                    <Form.Item name="dialogueVoiceover" label="对白或旁白">
-                        <Input.TextArea rows={2} placeholder="角色在此镜头中说出的台词，或画外音旁白" />
+                    <Form.Item name="dialogueVoiceover" label={translate("comicDrama.dialogueOrNarration")}>
+                        <Input.TextArea rows={2} placeholder={translate("comicDrama.spokenDialogueOrVoiceOverInThisShot")} />
                     </Form.Item>
 
                     <div className="grid grid-cols-2 gap-3">
-                        <Form.Item name="lightingAtmosphere" label="光线、天气与氛围">
-                            <Input placeholder="例如：暖阳斜照、雷暴雨夜" />
+                        <Form.Item name="lightingAtmosphere" label={translate("comicDrama.lightingWeatherAndMood")}>
+                            <Input placeholder={translate("comicDrama.forExampleWarmSlantingSunlightAStormyNight")} />
                         </Form.Item>
 
-                        <Form.Item name="soundDescription" label="环境音与关键音效">
-                            <Input placeholder="例如：刀剑出鞘金属音、急促雨点声" />
+                        <Form.Item name="soundDescription" label={translate("comicDrama.ambientSoundAndKeyEffects")}>
+                            <Input placeholder={translate("comicDrama.forExampleMetallicSwordDrawRapidRain")} />
                         </Form.Item>
                     </div>
 
-                    <Form.Item name="productionStatus" label="制作状态">
+                    <Form.Item name="productionStatus" label={translate("comicDrama.productionStatus")}>
                         <Select
                             options={[
-                                { value: "draft", label: "草稿 (Draft)" },
-                                { value: "ready", label: "就绪 (Ready)" },
-                                { value: "completed", label: "已完成 (Completed)" },
-                                { value: "needsUpdate", label: "需要更新 (Needs Update)" },
+                                { value: "draft", label: translate("comicDrama.draft_61984e") },
+                                { value: "ready", label: translate("comicDrama.ready_760470") },
+                                { value: "completed", label: translate("comicDrama.completed_eca6cb") },
+                                { value: "needsUpdate", label: translate("comicDrama.needsUpdate_66840b") },
                             ]}
                         />
                     </Form.Item>

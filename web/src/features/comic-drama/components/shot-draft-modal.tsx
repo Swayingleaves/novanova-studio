@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useEffect, useState } from "react";
 import { App, Button, Drawer, Empty, Input, InputNumber, Modal, Select, Space, Table, Tag } from "antd";
 import { Check, Edit, Sparkles, Trash2, X } from "lucide-react";
@@ -15,6 +17,7 @@ type ShotDraftModalProps = {
 
 /** 镜头拆分草稿审核与编辑弹窗。 */
 export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const confirmShotDraft = useComicDramaStore((state) => state.confirmShotDraft);
     const updateShotDraft = useComicDramaStore((state) => state.updateShotDraft);
@@ -45,7 +48,7 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
 
     const handleDeleteDraftShot = (index: number) => {
         if (draftShots.length <= 1) {
-            message.warning("镜头草稿至少需要保留一个镜头");
+            message.warning(translate("comicDrama.keepAtLeastOneShotInTheDraft"));
             return;
         }
         setDraftShots((prev) => prev.filter((_, i) => i !== index));
@@ -59,7 +62,7 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
                 shots: draftShots,
             };
             await updateShotDraft(draft.id, updatedData);
-            message.success("镜头草稿微调已保存");
+            message.success(translate("comicDrama.shotDraftAdjustmentsSaved"));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
         } finally {
@@ -71,7 +74,7 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
         setConfirming(true);
         try {
             await confirmShotDraft(draft.id);
-            message.success("镜头草稿已确认生效，已正式追加至镜头清单");
+            message.success(translate("comicDrama.shotDraftApprovedAndAppendedToTheShotList"));
             onClose();
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
@@ -82,15 +85,15 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
 
     const handleDiscard = async () => {
         Modal.confirm({
-            title: "确定放弃此拆分草稿？",
-            content: "放弃后不会影响现有正式镜头，历史记录将存档。",
-            okText: "确认放弃",
-            cancelText: "取消",
+            title: translate("comicDrama.discardThisShotBreakdownDraft"),
+            content: translate("comicDrama.existingShotsWillRemainUnchangedTheDraftWillBeArchived"),
+            okText: translate("comicDrama.confirmDiscard"),
+            cancelText: translate("comicDrama.cancel"),
             okButtonProps: { danger: true },
             onOk: async () => {
                 try {
                     await discardShotDraft(draft.id);
-                    message.info("已放弃拆分草稿");
+                    message.info(translate("comicDrama.shotBreakdownDraftDiscarded"));
                     onClose();
                 } catch (error) {
                     if (error instanceof Error) message.error(error.message);
@@ -104,7 +107,7 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
             title={
                 <div className="flex items-center gap-2">
                     <Sparkles className="size-4 text-purple-500" />
-                    <span>审核镜头拆分草稿（共 {draftShots.length} 个镜头）</span>
+                    <span>{translate("comicDrama.reviewShotBreakdownDraftCountShots_ad2d31", { value0: draftShots.length })}</span>
                 </div>
             }
             open={open}
@@ -113,23 +116,18 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
             extra={
                 <Space>
                     <Button danger onClick={handleDiscard}>
-                        放弃草稿
-                    </Button>
+                        {translate("comicDrama.discardDraft")}</Button>
                     <Button loading={saving} onClick={handleSaveEdits}>
-                        保存微调
-                    </Button>
+                        {translate("comicDrama.saveAdjustments")}</Button>
                     <Button type="primary" loading={confirming} onClick={handleConfirm}>
-                        确认生效为正式镜头
-                    </Button>
+                        {translate("comicDrama.approveAsProductionShots")}</Button>
                 </Space>
             }
         >
             <div className="flex flex-col gap-4">
                 <div className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-3 text-xs text-[var(--studio-muted)]">
-                    <p>指令要求：{draft.instruction}</p>
-                    <p className="mt-1">
-                        模型：{draft.model} · 实际消耗：{draft.chargedCredits} 积分 · 状态：待确认
-                    </p>
+                    <p>{translate("comicDrama.instructionsCount_4ef0ac", { value0: draft.instruction })}</p>
+                    <p className="mt-1">{translate("comicDrama.modelCountActualCostCountCreditsAwaitingApproval_265d32", { value0: draft.model, value1: draft.chargedCredits })}</p>
                 </div>
 
                 <div className="flex flex-col gap-3">
@@ -140,15 +138,15 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
                         >
                             <div className="mb-3 flex items-center justify-between">
                                 <div className="flex items-center gap-2">
-                                    <Tag color="purple">草稿镜头 #{index + 1}</Tag>
+                                    <Tag color="purple">{translate("comicDrama.draftShotCount_c07f34", { value0: index + 1 })}</Tag>
                                     <Input
                                         className="w-24"
                                         size="small"
                                         value={String(shot.shotSize || "中景")}
                                         onChange={(e) => handleFieldChange(index, "shotSize", e.target.value)}
-                                        placeholder="景别"
+                                        placeholder={translate("comicDrama.shotSize_6867f7")}
                                     />
-                                    <span className="text-xs text-[var(--studio-muted)]">预计时长(s):</span>
+                                    <span className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.estimatedDurationS")}</span>
                                     <InputNumber
                                         size="small"
                                         min={0.5}
@@ -170,7 +168,7 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
 
                             <div className="grid gap-3 sm:grid-cols-2">
                                 <div>
-                                    <label className="text-xs text-[var(--studio-muted)]">画面描述</label>
+                                    <label className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.visualDescription")}</label>
                                     <Input.TextArea
                                         className="mt-1"
                                         rows={2}
@@ -179,7 +177,7 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-xs text-[var(--studio-muted)]">对白与旁白</label>
+                                    <label className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.dialogueAndNarration")}</label>
                                     <Input.TextArea
                                         className="mt-1"
                                         rows={2}
@@ -188,7 +186,7 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-xs text-[var(--studio-muted)]">运镜与调度</label>
+                                    <label className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.cameraMovementAndBlocking")}</label>
                                     <Input
                                         className="mt-1"
                                         value={String(shot.cameraMovement || "")}
@@ -196,7 +194,7 @@ export function ShotDraftModal({ draft, open, onClose }: ShotDraftModalProps) {
                                     />
                                 </div>
                                 <div>
-                                    <label className="text-xs text-[var(--studio-muted)]">光线与情绪氛围</label>
+                                    <label className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.lightingAndMood")}</label>
                                     <Input
                                         className="mt-1"
                                         value={String(shot.lightingAtmosphere || "")}

@@ -1,5 +1,7 @@
 "use client";
 
+import { translateMessage as translate } from "@/features/locale/translate";
+
 import { create } from "zustand";
 
 import {
@@ -209,7 +211,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
         } catch (requestError) {
             set({
                 loading: false,
-                error: requestError instanceof Error ? requestError.message : "加载漫剧工作区失败",
+                error: requestError instanceof Error ? requestError.message : translate("comicDrama.couldNotLoadTheComicDramaWorkspace"),
             });
         }
     },
@@ -224,7 +226,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
         } catch (requestError) {
             set({
                 refreshing: false,
-                error: requestError instanceof Error ? requestError.message : "刷新工作区失败",
+                error: requestError instanceof Error ? requestError.message : translate("comicDrama.couldNotRefreshTheWorkspace"),
             });
         }
     },
@@ -249,7 +251,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     updateSettings: async (settings) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const result = await updateComicDramaSettings(workspace.projectId, workspace.revision, settings);
         await get().reloadWorkspace();
         return result;
@@ -257,7 +259,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     saveAsset: async (asset) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const saved = await saveComicDramaAsset(workspace.projectId, workspace.revision, asset);
         await get().reloadWorkspace();
         return saved;
@@ -265,7 +267,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     saveAssetVersion: async (version) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const saved = await saveComicDramaAssetVersion(workspace.projectId, workspace.revision, version);
         await get().reloadWorkspace();
         return saved;
@@ -273,7 +275,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     generateShotDraft: async (input) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const draft = await generateComicDramaShotDraft({
             projectId: workspace.projectId,
             ...input,
@@ -285,7 +287,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     confirmShotDraft: async (draftId) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const result = await confirmComicDramaShotDraft(workspace.projectId, workspace.revision, draftId);
         await get().reloadWorkspace();
         return result;
@@ -293,7 +295,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     updateShotDraft: async (draftId, draftData) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const updated = await updateComicDramaShotDraft(workspace.projectId, workspace.revision, draftId, draftData);
         await get().reloadWorkspace();
         return updated;
@@ -301,7 +303,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     discardShotDraft: async (draftId) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const result = await discardComicDramaShotDraft(workspace.projectId, workspace.revision, draftId);
         await get().reloadWorkspace();
         return result;
@@ -309,7 +311,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     saveShot: async (shot) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const saved = await saveComicDramaShot(workspace.projectId, workspace.revision, shot);
         await get().reloadWorkspace();
         return saved;
@@ -317,14 +319,14 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     reorderShots: async (shotIds) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         await reorderComicDramaShots(workspace.projectId, workspace.revision, shotIds);
         await get().reloadWorkspace();
     },
 
     deleteShot: async (shotId, confirm) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const result = await deleteComicDramaShot(workspace.projectId, workspace.revision, shotId, confirm);
         await get().reloadWorkspace();
         return result;
@@ -332,7 +334,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     composePrompt: async (shotId, model) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const prompt = await composeComicDramaPrompt(workspace.projectId, shotId, model, true);
         await get().reloadWorkspace();
         return prompt;
@@ -340,7 +342,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     savePrompt: async (shotId, prompt, expectedPromptVersion) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const saved = await saveComicDramaPrompt(workspace.projectId, workspace.revision, shotId, prompt, expectedPromptVersion);
         await get().reloadWorkspace();
         return saved;
@@ -354,7 +356,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     createGenerationTask: async (input) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const result = await createComicDramaGenerationTask({
             projectId: workspace.projectId,
             expectedRevision: workspace.revision,
@@ -367,7 +369,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     adoptMedia: async (mediaId) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const result = await adoptComicDramaMedia(workspace.projectId, workspace.revision, mediaId);
         await get().reloadWorkspace();
         return result;
@@ -375,7 +377,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     confirmUpdate: async (scope, targetId, resolution, source) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const result = await confirmComicDramaUpdate(workspace.projectId, workspace.revision, scope, targetId, resolution, true, source);
         await get().reloadWorkspace();
         return result;
@@ -383,7 +385,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     saveVoiceTrack: async (voiceTrack) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const saved = await saveComicDramaVoiceTrack(workspace.projectId, workspace.revision, voiceTrack);
         await get().reloadWorkspace();
         return saved;
@@ -391,7 +393,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     saveTimelineText: async (timelineText) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const saved = await saveComicDramaTimelineText(workspace.projectId, workspace.revision, timelineText);
         await get().reloadWorkspace();
         return saved;
@@ -399,14 +401,14 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     deleteTimelineText: async (timelineTextId) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         await deleteComicDramaTimelineText(workspace.projectId, workspace.revision, timelineTextId);
         await get().reloadWorkspace();
     },
 
     deleteTextTrack: async (trackNumber) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         await deleteComicDramaTextTrack(workspace.projectId, workspace.revision, trackNumber);
         await get().reloadWorkspace();
     },
@@ -447,7 +449,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
             set({ timelineSaving: true, timelineSaveError: "" });
             const workspace = get().workspace;
             if (!workspace) {
-                set({ timelineSaving: false, timelineSaveError: "工作区未初始化" });
+                set({ timelineSaving: false, timelineSaveError: translate("comicDrama.workspaceNotInitialized") });
                 timelineSavePromise = null;
                 return false;
             }
@@ -515,7 +517,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
                 return Object.keys(get().pendingTimelineTexts).length === 0 && Object.keys(get().pendingTimelineVoices).length === 0;
             } catch (error) {
                 if (savedAny) await get().reloadWorkspace();
-                set({ timelineSaveError: error instanceof Error ? error.message : "时间轴保存失败" });
+                set({ timelineSaveError: error instanceof Error ? error.message : translate("comicDrama.couldNotSaveTheTimeline") });
                 return false;
             } finally {
                 set({ timelineSaving: false });
@@ -527,7 +529,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     createBatchTask: async (input) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         const result = await createComicDramaBatchTask({
             projectId: workspace.projectId,
             expectedRevision: workspace.revision,
@@ -540,7 +542,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
 
     bindCanvas: async (input) => {
         const workspace = get().workspace;
-        if (!workspace) throw new Error("工作区未初始化");
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
         await bindComicDramaCanvas({
             projectId: workspace.projectId,
             expectedRevision: workspace.revision,

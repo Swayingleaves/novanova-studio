@@ -1,5 +1,8 @@
 "use client";
 
+import { translateMessage } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Alert, Button, Empty, Input, Progress, Spin, Tag } from "antd";
 import { CheckCircle2, ChevronRight, FileText, RefreshCw, Scissors } from "lucide-react";
@@ -36,21 +39,22 @@ const MAX_PREVIEW_CHARACTERS = 20000;
 /** 定位证据时在目标前保留的上下文字符数。 */
 const FOCUS_CONTEXT_CHARACTERS = 4000;
 
-const STATUS_LABELS: Record<ScriptSourceImportStatus["status"], string> = {
-    queued: "排队中",
-    running: "解析中",
-    completed: "已完成",
-    failed: "解析失败",
-};
+const getStatusLabels = (translate = translateMessage): Record<ScriptSourceImportStatus["status"], string> => ({
+    queued: translate("script.queued"),
+    running: translate("script.parsing"),
+    completed: translate("script.completed"),
+    failed: translate("script.parsingFailed"),
+});
 
-const STAGE_LABELS: Record<string, string> = {
-    uploaded: "读取原文件",
-    sections: "写入章节与片段",
-    completed: "已完成",
-};
+const getStageLabels = (translate = translateMessage): Record<string, string> => ({
+    uploaded: translate("script.readingSourceFile"),
+    sections: translate("script.savingChaptersAndExcerpts"),
+    completed: translate("script.completed"),
+});
 
 /** 原文导入状态、章节场次树与人工校对工作区；传入 focus 时跳转并高亮对应原文。 */
 export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null }) {
+    const translate = useTranslation();
     const projectId = useScriptStore((state) => state.project?.id || "");
     const { message, modal } = App.useApp();
     const [status, setStatus] = useState<ScriptSourceImportStatus | null>(null);
@@ -81,7 +85,7 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
         } catch (error) {
             const text = error instanceof Error ? error.message : "";
             if (text.includes("没有可校对的导入原文")) stopPollingRef.current = true;
-            setLoadError(text || "原文导入状态加载失败");
+            setLoadError(text || translate("script.couldNotLoadSourceImportStatus"));
         }
     }, [projectId]);
 
@@ -107,7 +111,7 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
             setStatus((current) => current ? { ...current, revision: next.revision, confirmedRevision: next.confirmedRevision } : current);
             setLoadError("");
         } catch (error) {
-            setLoadError(error instanceof Error ? error.message : "原文目录加载失败");
+            setLoadError(error instanceof Error ? error.message : translate("script.couldNotLoadTheSourceDirectory"));
         }
     }, [projectId]);
 
@@ -143,7 +147,7 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
             setDetail(await getScriptSourceSection(projectId, selectedId));
         } catch (error) {
             setDetail(null);
-            setDetailError(error instanceof Error ? error.message : "原文正文加载失败");
+            setDetailError(error instanceof Error ? error.message : translate("script.couldNotLoadSourceText"));
         } finally {
             setLoadingDetail(false);
         }
@@ -165,9 +169,9 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
             statusRef.current = next;
             setStatus(next);
             setTree((current) => (current ? { ...current, confirmedRevision: next.confirmedRevision } : current));
-            message.success("已确认当前原文结构，可以前往故事知识库分析");
+            message.success(translate("script.sourceStructureConfirmedYouCanNowAnalyzeTheStoryBible"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "确认结构失败，请刷新后重试");
+            message.error(error instanceof Error ? error.message : translate("script.couldNotConfirmTheStructureRefreshAndTryAgain"));
         } finally {
             setMutating(false);
         }
@@ -181,7 +185,7 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
             message.success(done);
             await Promise.all([loadTree(), loadDetail()]);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "原文结构校对失败，请重试");
+            message.error(error instanceof Error ? error.message : translate("script.couldNotUpdateTheSourceStructureTryAgain"));
         } finally {
             setMutating(false);
         }
@@ -191,39 +195,39 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
         if (!tree || !selectedSection) return;
         const title = titleDraft.trim();
         if (!title) {
-            message.warning("结构段标题不能为空");
+            message.warning(translate("script.theSectionTitleCannotBeEmpty"));
             return;
         }
         if (title === selectedSection.title) return;
-        void runMutation(() => renameScriptSourceSection(projectId, selectedSection.id, tree.revision, title), "标题已更新");
+        void runMutation(() => renameScriptSourceSection(projectId, selectedSection.id, tree.revision, title), translate("script.titleUpdated"));
     };
 
     const mergeWith = (other: ScriptSourceSection) => {
         if (!tree || !selectedSection) return;
         modal.confirm({
-            title: `合并“${selectedSection.title}”与“${other.title}”？`,
-            content: "两段正文按原顺序拼接为一段，原文件不会改变。",
-            okText: "确认合并",
-            cancelText: "取消",
-            onOk: () => runMutation(() => mergeScriptSourceSections(projectId, selectedSection.id, other.id, tree.revision), "结构段已合并"),
+            title: translate("script.mergeCountWithCount", { value0: selectedSection.title, value1: other.title }),
+            content: translate("script.theSectionsWillBeJoinedInTheirOriginalOrderThe"),
+            okText: translate("script.confirmMerge"),
+            cancelText: translate("script.cancel"),
+            onOk: () => runMutation(() => mergeScriptSourceSections(projectId, selectedSection.id, other.id, tree.revision), translate("script.sectionsMerged")),
         });
     };
 
     const splitAt = (offsetInSection: number) => {
         if (!tree || !selectedSection) return;
-        const defaultTitle = `${selectedSection.title} · 续`;
+        const defaultTitle = translate("script.countContinued", { value0: selectedSection.title });
         let nextTitle = defaultTitle;
         modal.confirm({
-            title: "拆分为新结构段",
-            content: <Input defaultValue={defaultTitle} maxLength={255} placeholder="新结构段标题" onChange={(event) => { nextTitle = event.target.value; }} />,
-            okText: "确认拆分",
-            cancelText: "取消",
+            title: translate("script.splitIntoANewSection"),
+            content: <Input defaultValue={defaultTitle} maxLength={255} placeholder={translate("script.newSectionTitle")} onChange={(event) => { nextTitle = event.target.value; }} />,
+            okText: translate("script.confirmSplit"),
+            cancelText: translate("script.cancel"),
             onOk: () => {
                 if (!nextTitle.trim()) {
-                    message.warning("新结构段标题不能为空");
+                    message.warning(translate("script.theNewSectionTitleCannotBeEmpty"));
                     return Promise.reject(new Error("empty title"));
                 }
-                return runMutation(() => splitScriptSourceSection(projectId, selectedSection.id, tree.revision, selectedSection.startOffset + offsetInSection, nextTitle.trim()), "结构段已拆分");
+                return runMutation(() => splitScriptSourceSection(projectId, selectedSection.id, tree.revision, selectedSection.startOffset + offsetInSection, nextTitle.trim()), translate("script.sectionSplit"));
             },
         });
     };
@@ -235,9 +239,9 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
             const next = await retryScriptSourceImport(projectId, encoding);
             statusRef.current = next;
             setStatus(next);
-            message.success(encoding ? "已按新编码重新排队解析" : "已重新排队解析");
+            message.success(encoding ? translate("script.queuedForParsingWithTheNewEncoding") : translate("script.queuedForParsingAgain"));
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "重新解析失败，请重试");
+            message.error(error instanceof Error ? error.message : translate("script.couldNotRestartParsingTryAgain"));
         } finally {
             setMutating(false);
         }
@@ -259,8 +263,8 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
         const missing = loadError.includes("没有可校对的导入原文");
         return (
             <section className="flex min-h-0 flex-1 items-center justify-center p-6">
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={missing ? "该项目还没有导入原文" : loadError}>
-                    {missing ? <p className="max-w-sm text-xs text-[var(--studio-muted)]">回到剧本项目库，用“上传剧本 / 小说”创建带原文的项目后，可以在这里校对章节与场次。</p> : <Button onClick={() => void loadStatus()}>重试</Button>}
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={missing ? translate("script.thisProjectHasNoImportedSource") : loadError}>
+                    {missing ? <p className="max-w-sm text-xs text-[var(--studio-muted)]">{translate("script.returnToTheScriptLibraryAndUseUploadScriptNovel")}</p> : <Button onClick={() => void loadStatus()}>{translate("script.retry")}</Button>}
                 </Empty>
             </section>
         );
@@ -277,19 +281,19 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
         <section className="flex min-h-0 flex-col">
             <header className="flex flex-wrap items-center gap-3 border-b border-[var(--studio-line)] px-4 py-3 sm:px-6">
                 <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-[var(--studio-ink)]"><FileText className="size-4 text-[var(--studio-primary)]" aria-hidden="true" /><span className="truncate">{fileName || "导入原文"}</span></div>
+                    <div className="flex items-center gap-2 text-sm font-semibold text-[var(--studio-ink)]"><FileText className="size-4 text-[var(--studio-primary)]" aria-hidden="true" /><span className="truncate">{fileName || translate("script.importedSource")}</span></div>
                     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--studio-faint)]">
-                        {status ? <Tag color={status.status === "completed" ? "green" : status.status === "failed" ? "red" : "blue"}>{STATUS_LABELS[status.status]}</Tag> : null}
-                        {status ? <span>{STAGE_LABELS[status.stage] || status.stage}</span> : null}
-                        {tree ? <span>{tree.sourceType === "novel" ? "小说" : "剧本"}</span> : null}
-                        {tree ? <span>修订 {tree.revision}</span> : null}
-                        {tree ? (tree.confirmedRevision === tree.revision ? <Tag color="green">结构已确认</Tag> : <Tag color="gold">结构待确认</Tag>) : null}
-                        {status && status.totalSections ? <span>{status.processedSections} / {status.totalSections} 段</span> : null}
+                        {status ? <Tag color={status.status === "completed" ? "green" : status.status === "failed" ? "red" : "blue"}>{getStatusLabels(translate)[status.status]}</Tag> : null}
+                        {status ? <span>{getStageLabels(translate)[status.stage] || status.stage}</span> : null}
+                        {tree ? <span>{tree.sourceType === "novel" ? translate("script.novel") : translate("script.script")}</span> : null}
+                        {tree ? <span>{translate("script.revisionCount_95045f", { value0: tree.revision })}</span> : null}
+                        {tree ? (tree.confirmedRevision === tree.revision ? <Tag color="green">{translate("script.structureConfirmed")}</Tag> : <Tag color="gold">{translate("script.structureAwaitingConfirmation")}</Tag>) : null}
+                        {status && status.totalSections ? <span>{translate("script.countCountSections_86ff0a", { value0: status.processedSections, value1: status.totalSections })}</span> : null}
                     </div>
                 </div>
                 {polling ? <Progress percent={percent} showInfo={false} size="small" className="w-32" strokeColor="var(--studio-primary)" /> : null}
-                {tree && tree.confirmedRevision !== tree.revision ? <Button size="small" type="primary" icon={<CheckCircle2 className="size-3.5" />} loading={mutating} onClick={() => void confirmStructure()}>确认结构</Button> : null}
-                <Button size="small" icon={<RefreshCw className="size-3.5" />} disabled={mutating} onClick={() => void loadStatus().then(() => (statusRef.current?.status === "completed" ? loadTree() : undefined))}>刷新</Button>
+                {tree && tree.confirmedRevision !== tree.revision ? <Button size="small" type="primary" icon={<CheckCircle2 className="size-3.5" />} loading={mutating} onClick={() => void confirmStructure()}>{translate("script.confirmStructure")}</Button> : null}
+                <Button size="small" icon={<RefreshCw className="size-3.5" />} disabled={mutating} onClick={() => void loadStatus().then(() => (statusRef.current?.status === "completed" ? loadTree() : undefined))}>{translate("script.refresh")}</Button>
             </header>
 
             {status?.status === "failed" ? (
@@ -297,41 +301,41 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
                     type="error"
                     showIcon
                     className="mx-4 mt-3 sm:mx-6"
-                    title="原文解析失败"
-                    description={<div className="flex flex-col gap-2"><span>{status.errorMessage || "请检查文件内容后重试"}</span><span className="flex items-center gap-2">{textEncoding ? <Button size="small" onClick={switchEncodingAndRetry}>切换为 {nextEncoding} 并重试</Button> : null}<Button size="small" type="primary" loading={mutating} onClick={() => void retry()}>重新解析</Button></span></div>}
+                    title={translate("script.sourceParsingFailed")}
+                    description={<div className="flex flex-col gap-2"><span>{status.errorMessage || translate("script.checkTheFileContentAndTryAgain")}</span><span className="flex items-center gap-2">{textEncoding ? <Button size="small" onClick={switchEncodingAndRetry}>{translate("script.switchToCountAndRetry_3cc5e7", { value0: nextEncoding })}</Button> : null}<Button size="small" type="primary" loading={mutating} onClick={() => void retry()}>{translate("script.parseAgain")}</Button></span></div>}
                 />
             ) : null}
-            {status?.warning ? <Alert type="warning" showIcon className="mx-4 mt-3 sm:mx-6" title={status.warning} description="可在此处人工校对标题与边界。" /> : null}
-            {loadError && status ? <Alert type="warning" showIcon className="mx-4 mt-3 sm:mx-6" title={loadError} action={<Button size="small" onClick={() => void loadTree()}>重试</Button>} /> : null}
+            {status?.warning ? <Alert type="warning" showIcon className="mx-4 mt-3 sm:mx-6" title={status.warning} description={translate("script.reviewSectionTitlesAndBoundariesHere")} /> : null}
+            {loadError && status ? <Alert type="warning" showIcon className="mx-4 mt-3 sm:mx-6" title={loadError} action={<Button size="small" onClick={() => void loadTree()}>{translate("script.retry")}</Button>} /> : null}
 
-            {polling ? <div className="flex flex-1 items-center justify-center p-6 text-sm text-[var(--studio-muted)]"><Spin /> <span className="ml-3">正在解析原文结构，可稍后返回本页查看</span></div> : null}
+            {polling ? <div className="flex flex-1 items-center justify-center p-6 text-sm text-[var(--studio-muted)]"><Spin /> <span className="ml-3">{translate("script.parsingSourceStructureReturnLaterToViewTheResults")}</span></div> : null}
 
             {!polling && status.status === "completed" && !tree ? <div className="flex flex-1 items-center justify-center p-6"><Spin /></div> : null}
 
             {!polling && status.status === "completed" && tree ? (
                 <div className="grid min-h-0 flex-1 lg:grid-cols-[300px_minmax(0,1fr)]">
-                    <aside className="min-h-0 overflow-y-auto border-r border-[var(--studio-line)] p-3" aria-label="原文目录">
+                    <aside className="min-h-0 overflow-y-auto border-r border-[var(--studio-line)] p-3" aria-label={translate("script.sourceContents")}>
                         {tree.sections.length ? tree.sections.filter((section) => !section.parentId).map((section) => (
                             <SectionNode key={section.id} section={section} sections={tree.sections} selectedId={selectedId} onSelect={setSelectedId} />
-                        )) : <p className="px-2 py-3 text-xs text-[var(--studio-faint)]">没有可校对的章节或场次</p>}
+                        )) : <p className="px-2 py-3 text-xs text-[var(--studio-faint)]">{translate("script.noChaptersOrScenesAvailableForReview")}</p>}
                     </aside>
                     <div className="flex min-h-0 flex-col">
                         {selectedSection ? (
                             <>
                                 <div className="flex flex-wrap items-center gap-2 border-b border-[var(--studio-line)] px-4 py-3">
-                                    <Input value={titleDraft} maxLength={255} onChange={(event) => setTitleDraft(event.target.value)} onPressEnter={rename} className="max-w-sm" aria-label="结构段标题" />
-                                    <Button size="small" type="primary" loading={mutating} disabled={titleDraft.trim() === selectedSection.title} onClick={rename}>保存标题</Button>
-                                    <Button size="small" icon={<Scissors className="size-3.5" />} type={splitMode ? "primary" : "default"} onClick={() => setSplitMode((current) => !current)}>{splitMode ? "退出拆分" : "拆分"}</Button>
-                                    <Button size="small" disabled={siblingIndex <= 0 || mutating} onClick={() => mergeWith(siblings[siblingIndex - 1])}>与上一段合并</Button>
-                                    <Button size="small" disabled={siblingIndex < 0 || siblingIndex >= siblings.length - 1 || mutating} onClick={() => mergeWith(siblings[siblingIndex + 1])}>与下一段合并</Button>
-                                    <span className="text-xs text-[var(--studio-faint)]">{selectedSection.startOffset} – {selectedSection.endOffset}{selectedSection.needsReview ? " · 待校对" : ""}</span>
+                                    <Input value={titleDraft} maxLength={255} onChange={(event) => setTitleDraft(event.target.value)} onPressEnter={rename} className="max-w-sm" aria-label={translate("script.sectionTitle")} />
+                                    <Button size="small" type="primary" loading={mutating} disabled={titleDraft.trim() === selectedSection.title} onClick={rename}>{translate("script.saveTitle")}</Button>
+                                    <Button size="small" icon={<Scissors className="size-3.5" />} type={splitMode ? "primary" : "default"} onClick={() => setSplitMode((current) => !current)}>{splitMode ? translate("script.exitSplitMode") : translate("script.split")}</Button>
+                                    <Button size="small" disabled={siblingIndex <= 0 || mutating} onClick={() => mergeWith(siblings[siblingIndex - 1])}>{translate("script.mergeWithPreviousSection")}</Button>
+                                    <Button size="small" disabled={siblingIndex < 0 || siblingIndex >= siblings.length - 1 || mutating} onClick={() => mergeWith(siblings[siblingIndex + 1])}>{translate("script.mergeWithNextSection")}</Button>
+                                    <span className="text-xs text-[var(--studio-faint)]">{selectedSection.startOffset} – {selectedSection.endOffset}{selectedSection.needsReview ? translate("script.needsReview") : ""}</span>
                                 </div>
-                                {splitMode ? <p className="border-b border-[var(--studio-line)] bg-[var(--studio-primary-soft)] px-4 py-2 text-xs text-[var(--studio-muted)]">点击正文中任意一行开头的“在此拆分”，把该行起的正文划为新结构段。</p> : null}
+                                {splitMode ? <p className="border-b border-[var(--studio-line)] bg-[var(--studio-primary-soft)] px-4 py-2 text-xs text-[var(--studio-muted)]">{translate("script.clickSplitHereAtTheStartOfALineTo")}</p> : null}
                                 <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6">
-                                    {loadingDetail ? <div className="flex items-center gap-3 text-sm text-[var(--studio-muted)]"><Spin size="small" />正在读取正文</div> : detailError ? <Alert type="error" showIcon title={detailError} action={<Button size="small" onClick={() => void loadDetail()}>重试</Button>} /> : detail ? <SectionContent content={detail.content} splitEnabled={splitMode} onSplit={splitAt} highlight={focus && detail.section.id === selectedId ? { start: focus.start - detail.section.startOffset, end: focus.end - detail.section.startOffset, key: focus.key } : null} /> : null}
+                                    {loadingDetail ? <div className="flex items-center gap-3 text-sm text-[var(--studio-muted)]"><Spin size="small" />{translate("script.loadingText")}</div> : detailError ? <Alert type="error" showIcon title={detailError} action={<Button size="small" onClick={() => void loadDetail()}>{translate("script.retry")}</Button>} /> : detail ? <SectionContent content={detail.content} splitEnabled={splitMode} onSplit={splitAt} highlight={focus && detail.section.id === selectedId ? { start: focus.start - detail.section.startOffset, end: focus.end - detail.section.startOffset, key: focus.key } : null} /> : null}
                                 </div>
                             </>
-                        ) : <div className="flex flex-1 items-center justify-center"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择左侧章节或场次" /></div>}
+                        ) : <div className="flex flex-1 items-center justify-center"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("script.selectAChapterOrSceneOnTheLeft")} /></div>}
                     </div>
                 </div>
             ) : null}
@@ -340,6 +344,7 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
 }
 
 function SectionNode({ section, sections, selectedId, onSelect }: { section: ScriptSourceSection; sections: ScriptSourceSection[]; selectedId: string; onSelect: (id: string) => void }) {
+    const translate = useTranslation();
     const children = sections.filter((item) => item.parentId === section.id);
     const active = selectedId === section.id;
     return (
@@ -353,7 +358,7 @@ function SectionNode({ section, sections, selectedId, onSelect }: { section: Scr
                 title={section.title}
             >
                 <span className="min-w-0 flex-1 truncate text-current">{section.title}</span>
-                {section.needsReview ? <Tag color="gold" className="mr-0">待校对</Tag> : null}
+                {section.needsReview ? <Tag color="gold" className="mr-0">{translate("script.needsReview_f4b6b7")}</Tag> : null}
                 {children.length ? <span className="text-xs text-current opacity-70">{children.length}</span> : null}
             </button>
             {children.length ? (
@@ -379,6 +384,7 @@ function SectionNode({ section, sections, selectedId, onSelect }: { section: Scr
 }
 
 function SectionContent({ content, splitEnabled, onSplit, highlight }: { content: string; splitEnabled: boolean; onSplit: (offsetInSection: number) => void; highlight: { start: number; end: number; key: string } | null }) {
+    const translate = useTranslation();
     const highlightRef = useRef<HTMLParagraphElement | null>(null);
     /* 只渲染可见预览窗口内的行；定位证据时把窗口移到目标附近，超长章节也能看到证据原文。 */
     const { lines, truncated, windowStart } = useMemo(() => {
@@ -403,11 +409,11 @@ function SectionContent({ content, splitEnabled, onSplit, highlight }: { content
         highlightRef.current?.scrollIntoView({ block: "center" });
     }, [highlight?.key, windowStart]);
 
-    if (!content) return <p className="text-sm text-[var(--studio-muted)]">该结构段没有正文</p>;
+    if (!content) return <p className="text-sm text-[var(--studio-muted)]">{translate("script.thisSectionContainsNoText")}</p>;
 
     return (
         <div className="flex flex-col">
-            {truncated ? <p className="mb-3 text-xs text-[var(--studio-warning)]">{windowStart > 0 ? `正文过长，当前显示第 ${windowStart} 字符起的片段` : `正文过长，仅显示前 ${MAX_PREVIEW_LINES} 行且不超过 ${MAX_PREVIEW_CHARACTERS} 字符`}，拆分位置只能在可见范围内选择。</p> : null}
+            {truncated ? <p className="mb-3 text-xs text-[var(--studio-warning)]">{translate("script.countSplitPositionsMustBeWithinTheVisibleRange_a02200", { value0: windowStart > 0 ? translate("script.theTextIsLongShowingAnExcerptStartingAtCharacter", { value0: windowStart }) : translate("script.theTextIsLongShowingUpToCountLinesAnd", { value0: MAX_PREVIEW_LINES, value1: MAX_PREVIEW_CHARACTERS }) })}</p> : null}
             {lines.map((line, index) => {
                 const lineEnd = line.start + line.text.length;
                 const markStart = highlight ? Math.max(0, highlight.start - line.start) : 0;
@@ -418,9 +424,8 @@ function SectionContent({ content, splitEnabled, onSplit, highlight }: { content
                     <div key={`${index}-${line.start}`} className="group flex items-start gap-2">
                         <span className="w-14 shrink-0 select-none pt-0.5 text-right text-[10px] leading-6 text-[var(--studio-faint)]">{line.start}</span>
                         {splitEnabled && (index > 0 || windowStart > 0) && line.text.trim() ? (
-                            <button type="button" className="mt-1 shrink-0 rounded border border-dashed border-[var(--studio-line-strong)] px-1.5 py-0.5 text-[10px] text-[var(--studio-muted)] hover:border-[var(--studio-action)] hover:text-[var(--studio-ink)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" onClick={() => onSplit(line.start)} title="在此拆分">
-                                <Scissors className="mr-1 inline size-3" aria-hidden="true" />拆分
-                            </button>
+                            <button type="button" className="mt-1 shrink-0 rounded border border-dashed border-[var(--studio-line-strong)] px-1.5 py-0.5 text-[10px] text-[var(--studio-muted)] hover:border-[var(--studio-action)] hover:text-[var(--studio-ink)] focus-visible:outline-2 focus-visible:outline-[var(--studio-action)]" onClick={() => onSplit(line.start)} title={translate("script.splitHere")}>
+                                <Scissors className="mr-1 inline size-3" aria-hidden="true" />{translate("script.split")}</button>
                         ) : null}
                         <p ref={anchor ? highlightRef : undefined} className={line.text.trim() ? "min-w-0 flex-1 whitespace-pre-wrap break-words text-sm leading-6 text-[var(--studio-text)]" : "min-w-0 flex-1 text-sm leading-6 text-[var(--studio-faint)]"}>
                             {marked ? <>{line.text.slice(0, markStart)}<mark className="rounded-sm bg-[var(--studio-primary-soft)] px-0.5 text-[var(--studio-ink)] ring-1 ring-[var(--studio-primary)]">{line.text.slice(markStart, markEnd)}</mark>{line.text.slice(markEnd)}</> : (line.text || "\u00A0")}

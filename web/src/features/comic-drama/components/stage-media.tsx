@@ -1,5 +1,10 @@
 "use client";
 
+import { productionParameterLabel } from "../lib/production-labels";
+
+import { translateMessage } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useEffect, useMemo, useState } from "react";
 import {
     Alert,
@@ -63,22 +68,22 @@ type ImageSettingsKey = "quality" | "imageResolution" | "size" | "count";
 type VideoSettingsKey = "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark";
 
 /** 生成目标类型的中文名，与后端 comic_drama_media_results.target_type 对齐。 */
-const TARGET_TYPE_LABELS: Record<string, string> = {
-    shot: "分镜镜头",
-    assetVersion: "资产图",
-    voiceTrack: "声音轨",
-    project: "项目",
-};
+const getTargetTypeLabels = (translate = translateMessage): Record<string, string> => ({
+    shot: translate("comicDrama.storyboardShot"),
+    assetVersion: translate("comicDrama.assetImage"),
+    voiceTrack: translate("comicDrama.audioTrack"),
+    project: translate("comicDrama.project"),
+});
 
 /** 媒体生成状态的中文名。 */
-const MEDIA_STATUS_LABELS: Record<string, string> = {
-    quoted: "已报价",
-    queued: "排队中",
-    processing: "生成中",
-    completed: "完成",
-    failed: "失败",
-    needsUpdate: "需更新",
-};
+const getMediaStatusLabels = (translate = translateMessage): Record<string, string> => ({
+    quoted: translate("comicDrama.quoted"),
+    queued: translate("comicDrama.queued_4dcbbc"),
+    processing: translate("comicDrama.generating"),
+    completed: translate("comicDrama.complete"),
+    failed: translate("comicDrama.failed_3e3c80"),
+    needsUpdate: translate("comicDrama.needsUpdate_d2b913"),
+});
 
 /** 是否由用户主动停止：后端把 canceled 归一成 failed，只能靠失败原因区分。 */
 function isStoppedMedia(media: ComicDramaMediaResult): boolean {
@@ -86,20 +91,21 @@ function isStoppedMedia(media: ComicDramaMediaResult): boolean {
 }
 
 /** 生成目标的可读名称：镜头用镜号，资产图用「资产名-版本名」，其余用类型名。 */
-function mediaTargetLabel(media: ComicDramaMediaResult, shots: ComicDramaShot[], versionLabels: Record<string, string>): string {
+function mediaTargetLabel(media: ComicDramaMediaResult, shots: ComicDramaShot[], versionLabels: Record<string, string>, translate = translateMessage): string {
     if (media.targetType === "shot") {
         const shot = shots.find((item) => item.id === media.targetId);
-        return shot ? `镜头 #${shot.shotNumber}` : TARGET_TYPE_LABELS.shot;
+        return shot ? translate("comicDrama.shotCount", { value0: shot.shotNumber }) : getTargetTypeLabels(translate).shot;
     }
     if (media.targetType === "assetVersion") {
         const versionLabel = versionLabels[media.targetId];
-        return versionLabel ? `资产图 · ${versionLabel}` : TARGET_TYPE_LABELS.assetVersion;
+        return versionLabel ? translate("comicDrama.assetImageCount", { value0: versionLabel }) : getTargetTypeLabels(translate).assetVersion;
     }
-    return TARGET_TYPE_LABELS[media.targetType] || media.targetType;
+    return getTargetTypeLabels(translate)[media.targetType] || media.targetType;
 }
 
 /** 媒体生成中心阶段视图。 */
 export function StageMedia() {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const config = useEffectiveConfig();
     const workspace = useComicDramaStore((state) => state.workspace);
@@ -118,7 +124,7 @@ export function StageMedia() {
     const [genModalOpen, setGenModalOpen] = useState(false);
     const [targetType, setTargetType] = useState<string>("shot");
     const [targetShotId, setTargetShotId] = useState<string>("");
-    const [mediaType, setMediaType] = useState<string>("image");
+    const [mediaType, setMediaType] = useState<"image" | "video">("image");
     const [model, setModel] = useState<string>("");
     const [mediaSettings, setMediaSettings] = useState<MediaSettingsState>(() => ({
         size: config.size || "16:9",
@@ -232,17 +238,17 @@ export function StageMedia() {
         );
         if (adopted) {
             const url = readComicDramaMediaUrl(adopted.resultData);
-            if (url) return { name: "分镜图 (已采用)", url };
+            if (url) return { name: translate("comicDrama.storyboardImageAdopted"), url };
         }
         const completed = mediaList.find(
             (m) => m.targetId === targetShotId && m.mediaType === "image" && m.status === "completed"
         );
         if (completed) {
             const url = readComicDramaMediaUrl(completed.resultData);
-            if (url) return { name: "分镜图", url };
+            if (url) return { name: translate("comicDrama.storyboardImage_874e0f"), url };
         }
         return null;
-    }, [mediaList, targetShotId]);
+    }, [mediaList, targetShotId, translate.locale]);
 
     // 镜头关联资产版本的已完成图片
     const shotAssetImages = useMemo(() => {
@@ -255,13 +261,13 @@ export function StageMedia() {
             if (media) {
                 const url = readComicDramaMediaUrl(media.resultData);
                 if (url) {
-                    const label = versionLabels[vId] || "资产参考图";
+                    const label = versionLabels[vId] || translate("comicDrama.assetReferenceImage");
                     list.push({ id: vId, name: label, url });
                 }
             }
         }
         return list;
-    }, [currentTargetShot, mediaList, versionLabels]);
+    }, [currentTargetShot, mediaList, versionLabels, translate.locale]);
 
     // 视频模式综合参考列表：分镜图置首，后接关联资产图
     const videoReferences = useMemo(() => {
@@ -306,7 +312,7 @@ export function StageMedia() {
     // Estimate Credits
     const handleEstimate = async () => {
         if (!targetShotId || !model) {
-            message.warning("请先选择镜头和生成模型");
+            message.warning(translate("comicDrama.selectAShotAndGenerationModelFirst"));
             return;
         }
         setEstimating(true);
@@ -319,7 +325,7 @@ export function StageMedia() {
                 settings: taskSettings,
             });
             setEstimatedCredits(res.estimatedCredits);
-            message.info(`预估单任务消耗 ${res.estimatedCredits} 积分`);
+            message.info(translate("comicDrama.estimatedCostPerTaskCountCredits", { value0: res.estimatedCredits }));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
         } finally {
@@ -330,7 +336,7 @@ export function StageMedia() {
     // Create generation task
     const handleCreateTask = async () => {
         if (!targetShotId || !model) {
-            message.warning("请先选择镜头和生成模型");
+            message.warning(translate("comicDrama.selectAShotAndGenerationModelFirst"));
             return;
         }
         setGenerating(true);
@@ -341,7 +347,7 @@ export function StageMedia() {
                 model,
                 settings: taskSettings,
             });
-            message.success("已创建媒体生成任务，可在列表中查看排队与渲染进度");
+            message.success(translate("comicDrama.mediaTaskCreatedCheckQueueAndRenderProgressInThe"));
             setGenModalOpen(false);
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
@@ -354,7 +360,7 @@ export function StageMedia() {
     const handleAdopt = async (mediaId: string) => {
         try {
             await adoptMedia(mediaId);
-            message.success("已设为该镜头的正式采用版本");
+            message.success(translate("comicDrama.adoptedAsThisShotSProductionVersion"));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
         }
@@ -367,7 +373,7 @@ export function StageMedia() {
         try {
             await cancelAiTask(media.taskId);
             await syncNow();
-            message.success("已停止生成，已扣积分会自动退回");
+            message.success(translate("comicDrama.generationStoppedChargedCreditsWillBeRefundedAutomatically"));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
         } finally {
@@ -380,7 +386,7 @@ export function StageMedia() {
         setSyncing(true);
         try {
             await syncNow();
-            message.success("已同步最新媒体任务状态");
+            message.success(translate("comicDrama.latestMediaTaskStatusSynced"));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
         } finally {
@@ -392,26 +398,22 @@ export function StageMedia() {
         <div className="flex flex-col gap-6">
             <header className="flex flex-col gap-2 border-b border-[var(--studio-line)] pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h2 className="text-xl font-semibold text-[var(--studio-ink)]">媒体生成中心</h2>
+                    <h2 className="text-xl font-semibold text-[var(--studio-ink)]">{translate("comicDrama.mediaGenerationCenter")}</h2>
                     <p className="mt-1 text-sm text-[var(--studio-muted)]">
-                        根据各镜头已采用的提示词与视觉资产生成分镜图片或单镜头视频。所有生成版本完整存档，用户可自由试看、对比并明确采用最佳版本。
-                    </p>
+                        {translate("comicDrama.generateStoryboardImagesOrShotVideosFromAdoptedPromptsAnd")}</p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
                     {autoRefreshing && (
                         <span className="flex items-center gap-1.5 text-xs text-[var(--studio-muted)]">
                             <RefreshCw className="size-3.5 animate-spin" />
-                            自动刷新中（{runningMediaCount} 项进行中）
-                            {lastSyncedAt && ` · 上次 ${lastSyncedAt}`}
+                            {translate("comicDrama.autoRefreshing")}{runningMediaCount} {translate("comicDrama.running")}{lastSyncedAt && translate("comicDrama.lastCount", { value0: lastSyncedAt })}
                         </span>
                     )}
                     <Button icon={<RefreshCw className={`size-4 ${syncing ? "animate-spin" : ""}`} />} onClick={handleSync}>
-                        同步状态
-                    </Button>
+                        {translate("comicDrama.syncStatus")}</Button>
                     <Button type="primary" icon={<Plus className="size-4" />} onClick={() => openGenModal()}>
-                        新建生成任务
-                    </Button>
+                        {translate("comicDrama.newGenerationTask")}</Button>
                 </div>
             </header>
 
@@ -419,9 +421,9 @@ export function StageMedia() {
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <Space>
                     <Radio.Group value={mediaTypeFilter} onChange={(e) => setMediaTypeFilter(e.target.value)} buttonStyle="solid">
-                        <Radio.Button value="all">全部类型</Radio.Button>
-                        <Radio.Button value="image">图片</Radio.Button>
-                        <Radio.Button value="video">视频</Radio.Button>
+                        <Radio.Button value="all">{translate("comicDrama.allTypes")}</Radio.Button>
+                        <Radio.Button value="image">{translate("comicDrama.image")}</Radio.Button>
+                        <Radio.Button value="video">{translate("comicDrama.video")}</Radio.Button>
                     </Radio.Group>
 
                     <Select
@@ -429,26 +431,24 @@ export function StageMedia() {
                         value={statusFilter}
                         onChange={setStatusFilter}
                         options={[
-                            { value: "all", label: "全部状态" },
-                            { value: "adopted", label: "已采用版本" },
-                            { value: "completed", label: "已完成" },
-                            { value: "processing", label: "处理中" },
-                            { value: "failed", label: "失败" },
+                            { value: "all", label: translate("comicDrama.allStatuses") },
+                            { value: "adopted", label: translate("comicDrama.adoptedVersion") },
+                            { value: "completed", label: translate("comicDrama.completed_e99b48") },
+                            { value: "processing", label: translate("comicDrama.processing") },
+                            { value: "failed", label: translate("comicDrama.failed_3e3c80") },
                         ]}
                     />
                 </Space>
 
                 <div className="text-xs text-[var(--studio-muted)]">
-                    共 <strong className="text-[var(--studio-ink)]">{filteredMedia.length}</strong> 条媒体记录
-                </div>
+                    {translate("comicDrama.total")}<strong className="text-[var(--studio-ink)]">{filteredMedia.length}</strong> {translate("comicDrama.mediaRecords")}</div>
             </div>
 
             {/* Media Grid */}
             {filteredMedia.length === 0 ? (
-                <Empty description="暂无符合条件的媒体生成记录">
+                <Empty description={translate("comicDrama.noMatchingMediaRecords")}>
                     <Button type="primary" icon={<Plus className="size-4" />} onClick={() => openGenModal()}>
-                        创建第一个生成任务
-                    </Button>
+                        {translate("comicDrama.createFirstGenerationTask")}</Button>
                 </Empty>
             ) : (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -480,7 +480,7 @@ export function StageMedia() {
                                         ) : (
                                             <Image
                                                 src={mediaUrl}
-                                                alt="生成结果"
+                                                alt={translate("comicDrama.generationResult")}
                                                 className="h-full w-full object-cover"
                                                 classNames={{ root: "h-full w-full" }}
                                             />
@@ -489,13 +489,13 @@ export function StageMedia() {
                                         <div className="flex h-full w-full flex-col items-center justify-center gap-2 p-4 text-center">
                                             <RefreshCw className="size-6 animate-spin text-[var(--studio-primary)]" />
                                             <span className="text-xs text-[var(--studio-muted)]">
-                                                {media.status === "queued" ? "排队中..." : "AI 渲染中..."}
+                                                {media.status === "queued" ? translate("comicDrama.queued_a1cef3") : translate("comicDrama.aiRendering")}
                                             </span>
                                         </div>
                                     ) : (
                                         <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-4 text-center text-xs text-rose-500">
                                             <AlertCircle className="size-6" />
-                                            <span>{isStoppedMedia(media) ? "已停止生成" : "生成失败"}</span>
+                                            <span>{isStoppedMedia(media) ? translate("comicDrama.generationStopped") : translate("comicDrama.generationFailed")}</span>
                                             {media.failureReason && (
                                                 <span className="line-clamp-2 text-[10px] text-[var(--studio-muted)]">
                                                     {media.failureReason}
@@ -506,8 +506,8 @@ export function StageMedia() {
 
                                     {/* Overlay Tags */}
                                     <div className="absolute left-2 top-2 flex items-center gap-1">
-                                        <Tag color={isVideo ? "purple" : "blue"}>{isVideo ? "视频" : "图片"}</Tag>
-                                        {media.adopted && <Tag color="success">已采用</Tag>}
+                                        <Tag color={isVideo ? "purple" : "blue"}>{isVideo ? translate("comicDrama.video") : translate("comicDrama.image")}</Tag>
+                                        {media.adopted && <Tag color="success">{translate("comicDrama.adopted")}</Tag>}
                                     </div>
                                 </div>
 
@@ -515,17 +515,17 @@ export function StageMedia() {
                                 <div className="mt-3 flex flex-col gap-2">
                                     <div className="flex items-center justify-between">
                                         <span className="text-xs font-semibold text-[var(--studio-ink)]">
-                                            {mediaTargetLabel(media, shots, versionLabels)}
+                                            {mediaTargetLabel(media, shots, versionLabels, translate)}
                                         </span>
                                         <span className="text-[11px] text-[var(--studio-muted)]">
-                                            {isStoppedMedia(media) ? "已停止" : MEDIA_STATUS_LABELS[media.status] || media.status}
+                                            {isStoppedMedia(media) ? translate("comicDrama.stopped") : getMediaStatusLabels(translate)[media.status] || media.status}
                                         </span>
                                     </div>
 
                                     {/* Adopt button */}
                                     <div className="mt-1 flex items-center justify-between border-t border-[var(--studio-line)] pt-2">
                                         <span className="text-[10px] text-[var(--studio-faint)]">
-                                            {new Date(media.createdAt || "").toLocaleTimeString("zh-CN", {
+                                            {new Date(media.createdAt || "").toLocaleTimeString(translate.locale, {
                                                 hour: "2-digit",
                                                 minute: "2-digit",
                                             })}
@@ -539,16 +539,15 @@ export function StageMedia() {
                                                 icon={<Check className="size-3.5" />}
                                                 onClick={() => handleAdopt(media.id)}
                                             >
-                                                设为采用
-                                            </Button>
+                                                {translate("comicDrama.adopt")}</Button>
                                         )}
 
                                         {(media.status === "queued" || media.status === "processing") && media.taskId && (
                                             <Popconfirm
-                                                title="停止该生成任务？"
-                                                description="已扣积分会自动退回"
-                                                okText="停止"
-                                                cancelText="取消"
+                                                title={translate("comicDrama.stopThisGenerationTask")}
+                                                description={translate("comicDrama.chargedCreditsWillBeRefundedAutomatically")}
+                                                okText={translate("comicDrama.stop")}
+                                                cancelText={translate("comicDrama.cancel")}
                                                 onConfirm={() => handleCancelMedia(media)}
                                             >
                                                 <Button
@@ -557,8 +556,7 @@ export function StageMedia() {
                                                     loading={cancelingMediaId === media.id}
                                                     icon={<Square className="size-3" />}
                                                 >
-                                                    停止
-                                                </Button>
+                                                    {translate("comicDrama.stop")}</Button>
                                             </Popconfirm>
                                         )}
 
@@ -569,8 +567,7 @@ export function StageMedia() {
                                                 icon={<RotateCcw className="size-3.5" />}
                                                 onClick={() => openGenModal(targetShot.id, isVideo ? "video" : "image")}
                                             >
-                                                重试
-                                            </Button>
+                                                {translate("comicDrama.retry")}</Button>
                                         )}
                                     </div>
                                 </div>
@@ -582,7 +579,7 @@ export function StageMedia() {
 
             {/* Creation Modal */}
             <Modal
-                title="新建媒体生成任务"
+                title={translate("comicDrama.newMediaGenerationTask")}
                 open={genModalOpen}
                 onCancel={() => setGenModalOpen(false)}
                 footer={null}
@@ -590,7 +587,7 @@ export function StageMedia() {
             >
                 <div className="flex flex-col gap-4 py-2">
                     <div>
-                        <label className="text-xs font-medium text-[var(--studio-muted)]">目标镜头</label>
+                        <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.targetShot")}</label>
                         <Select
                             className="mt-1 w-full"
                             value={targetShotId}
@@ -600,13 +597,13 @@ export function StageMedia() {
                             }}
                             options={shots.map((s) => ({
                                 value: s.id,
-                                label: `镜头 #${s.shotNumber} (${s.shotSize || "未设景别"} - ${s.visualDescription.slice(0, 20)}...)`,
+                                label: translate("comicDrama.shotCountCountCount", { value0: s.shotNumber, value1: productionParameterLabel(s.shotSize || "", translate) || translate("comicDrama.shotSizeNotSet_457b65"), value2: s.visualDescription.slice(0, 20) }),
                             }))}
                         />
                     </div>
 
                     <div>
-                        <label className="text-xs font-medium text-[var(--studio-muted)]">媒体类型</label>
+                        <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.mediaType")}</label>
                         <Select
                             className="mt-1 w-full"
                             value={mediaType}
@@ -618,14 +615,14 @@ export function StageMedia() {
                                 setEstimatedCredits(null);
                             }}
                             options={[
-                                { value: "image", label: "图片 (关键帧 / 分镜图)" },
-                                { value: "video", label: "单镜头视频 (Video)" },
+                                { value: "image", label: translate("comicDrama.imageKeyframeStoryboard") },
+                                { value: "video", label: translate("comicDrama.shotVideo_03f8f3") },
                             ]}
                         />
                     </div>
 
                     <div>
-                        <label className="text-xs font-medium text-[var(--studio-muted)]">生成模型</label>
+                        <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.generationModel")}</label>
                         <div className="mt-1">
                             <ModelPicker
                                 config={config}
@@ -648,13 +645,13 @@ export function StageMedia() {
                             <div className="flex items-center justify-between">
                                 <span className="text-xs font-medium text-[var(--studio-muted)]">
                                     {mediaType === "video"
-                                        ? `关联参考图 (${videoReferences.length})`
-                                        : `关联资产图 (${shotAssetImages.length})`}
+                                        ? translate("comicDrama.linkedReferenceImagesCount", { value0: videoReferences.length })
+                                        : translate("comicDrama.linkedAssetImagesCount", { value0: shotAssetImages.length })}
                                 </span>
                                 <span className="text-[11px] text-[var(--studio-faint)]">
                                     {mediaType === "video"
-                                        ? (hasVideoReferences ? "已自动进入图生视频" : "无参考图，将使用文生视频")
-                                        : (shotAssetImages.length > 0 ? "生成时将自动作为视觉参考" : "当前无可用资产图")}
+                                        ? (hasVideoReferences ? translate("comicDrama.imageToVideoSelectedAutomatically") : translate("comicDrama.noReferenceImageUsingTextToVideo"))
+                                        : (shotAssetImages.length > 0 ? translate("comicDrama.usedAutomaticallyAsVisualReferencesDuringGeneration") : translate("comicDrama.noAssetImagesAvailable"))}
                                 </span>
                             </div>
 
@@ -666,8 +663,7 @@ export function StageMedia() {
                                                 <img src={ref.url} alt={ref.name} className="h-full w-full object-cover" />
                                                 {"isStoryboard" in ref && ref.isStoryboard && (
                                                     <span className="absolute bottom-0 inset-x-0 bg-black/60 text-center text-[9px] text-white">
-                                                        分镜
-                                                    </span>
+                                                        {translate("comicDrama.storyboard")}</span>
                                                 )}
                                             </div>
                                             <span
@@ -682,8 +678,8 @@ export function StageMedia() {
                             ) : (
                                 <p className="mt-1.5 text-xs text-[var(--studio-faint)]">
                                     {mediaType === "video"
-                                        ? "当前镜头暂无已生成的分镜图或关联资产图，将通过文生视频提示词生成。"
-                                        : "当前镜头关联的资产尚无已完成的图片版本。"}
+                                        ? translate("comicDrama.thisShotHasNoGeneratedStoryboardImagesOrLinkedAsset")
+                                        : translate("comicDrama.theAssetsLinkedToThisShotHaveNoCompletedImage")}
                                 </p>
                             )}
                         </div>
@@ -728,24 +724,22 @@ export function StageMedia() {
                     <div className="mt-2 flex items-center justify-between border-t border-[var(--studio-line)] pt-3">
                         <div className="text-xs text-[var(--studio-muted)]">
                             {estimatedCredits !== null ? (
-                                <span>预估消耗：<strong className="text-amber-500">{estimatedCredits}</strong> 积分</span>
+                                <span>{translate("comicDrama.estimatedCost_657727")}<strong className="text-amber-500">{estimatedCredits}</strong> {translate("comicDrama.credits")}</span>
                             ) : (
                                 <Button size="small" loading={estimating} onClick={handleEstimate}>
-                                    预估费用
-                                </Button>
+                                    {translate("comicDrama.estimatedCost_d79de0")}</Button>
                             )}
                         </div>
 
                         <Space>
-                            <Button onClick={() => setGenModalOpen(false)}>取消</Button>
+                            <Button onClick={() => setGenModalOpen(false)}>{translate("comicDrama.cancel")}</Button>
                             <Button
                                 type="primary"
                                 loading={generating}
                                 icon={<Sparkles className="size-4" />}
                                 onClick={handleCreateTask}
                             >
-                                确认生成
-                            </Button>
+                                {translate("comicDrama.confirmGeneration")}</Button>
                         </Space>
                     </div>
                 </div>

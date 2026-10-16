@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useEffect, useMemo, useState } from "react";
 import { Alert, App, Button, Modal, Progress, Radio, Select, Space, Tabs, Tag } from "antd";
 import { CheckCircle2, Clapperboard, Film, Layers, Play, Sparkles } from "lucide-react";
@@ -16,6 +18,7 @@ type BatchGenerationModalProps = {
 
 /** P1 批量生产计划与进度监控弹窗。 */
 export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProps) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const config = useEffectiveConfig();
     const workspace = useComicDramaStore((state) => state.workspace);
@@ -24,7 +27,7 @@ export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProp
     const [activeTab, setActiveTab] = useState<string>("create");
     const [scopeType, setScopeType] = useState<string>("uncompleted");
     const [selectedEpisodeId, setSelectedEpisodeId] = useState<string>("");
-    const [taskType, setTaskType] = useState<string>("image");
+    const [taskType, setTaskType] = useState<"image" | "video">("image");
     const [model, setModel] = useState<string>("");
     const [aspectRatio, setAspectRatio] = useState<string>(workspace?.settings.aspectRatio || "16:9");
     const [submitting, setSubmitting] = useState(false);
@@ -53,11 +56,11 @@ export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProp
 
     const handleCreateBatch = async () => {
         if (targetIds.length === 0) {
-            message.warning("所选范围内没有需要生成的镜头");
+            message.warning(translate("comicDrama.noShotsInThisRangeNeedGeneration"));
             return;
         }
         if (!model) {
-            message.warning("请选择生成模型");
+            message.warning(translate("comicDrama.selectAGenerationModel"));
             return;
         }
 
@@ -74,7 +77,7 @@ export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProp
                     size: aspectRatio,
                 },
             });
-            message.success(`已创建包含 ${targetIds.length} 个镜头的批量生成任务`);
+            message.success(translate("comicDrama.batchTaskCreatedForCountShots", { value0: targetIds.length }));
             setActiveTab("monitor");
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
@@ -88,7 +91,7 @@ export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProp
             title={
                 <div className="flex items-center gap-2">
                     <Layers className="size-5 text-[var(--studio-primary)]" />
-                    <span>批量生产管理 (Batch Production)</span>
+                    <span>{translate("comicDrama.batchProduction")}</span>
                 </div>
             }
             open={open}
@@ -102,18 +105,18 @@ export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProp
                 items={[
                     {
                         key: "create",
-                        label: "发起批量生成",
+                        label: translate("comicDrama.startBatchGeneration"),
                         children: (
                             <div className="flex flex-col gap-4 py-2">
                                 <Alert
                                     type="info"
                                     showIcon
-                                    title="批量任务将按镜头顺序自动生成素材"
-                                    description="系统将基于各个镜头已采用的提示词进行生成。已完成的镜头不会被重复处理，确保积分安全。"
+                                    title={translate("comicDrama.batchTasksGenerateMediaInShotOrder")}
+                                    description={translate("comicDrama.generationUsesEachShotSAdoptedPromptCompletedShotsAre")}
                                 />
 
                                 <div>
-                                    <label className="text-xs font-medium text-[var(--studio-muted)]">生成范围</label>
+                                    <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.generationRange")}</label>
                                     <Select
                                         className="mt-1 w-full"
                                         value={scopeType}
@@ -124,23 +127,23 @@ export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProp
                                             }
                                         }}
                                         options={[
-                                            { value: "uncompleted", label: `未完成镜头 (${shots.filter((s) => s.productionStatus !== "completed").length} 个)` },
-                                            { value: "all", label: `全剧全部镜头 (${shots.length} 个)` },
-                                            { value: "episode", label: "按指定分集批量生成" },
+                                            { value: "uncompleted", label: translate("comicDrama.unfinishedShotsCount", { value0: shots.filter((s) => s.productionStatus !== "completed").length }) },
+                                            { value: "all", label: translate("comicDrama.allShotsCount", { value0: shots.length }) },
+                                            { value: "episode", label: translate("comicDrama.generateByEpisode") },
                                         ]}
                                     />
                                 </div>
 
                                 {scopeType === "episode" && (
                                     <div>
-                                        <label className="text-xs font-medium text-[var(--studio-muted)]">选择分集</label>
+                                        <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.selectEpisode")}</label>
                                         <Select
                                             className="mt-1 w-full"
                                             value={selectedEpisodeId}
                                             onChange={setSelectedEpisodeId}
                                             options={episodes.map((ep) => ({
                                                 value: ep.id,
-                                                label: `第${ep.episodeNumber}集：${ep.title || "无标题"}`,
+                                                label: translate("comicDrama.episodeCountCount", { value0: ep.episodeNumber, value1: ep.title || translate("comicDrama.untitled") }),
                                             }))}
                                         />
                                     </div>
@@ -148,7 +151,7 @@ export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProp
 
                                 <div className="grid grid-cols-2 gap-3">
                                     <div>
-                                        <label className="text-xs font-medium text-[var(--studio-muted)]">媒体类型</label>
+                                        <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.mediaType")}</label>
                                         <Select
                                             className="mt-1 w-full"
                                             value={taskType}
@@ -157,29 +160,29 @@ export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProp
                                                 setModel(val === "video" ? config.videoModel || "" : config.imageModel || "");
                                             }}
                                             options={[
-                                                { value: "image", label: "分镜图片 (Image)" },
-                                                { value: "video", label: "镜头视频 (Video)" },
+                                                { value: "image", label: translate("comicDrama.storyboardImage") },
+                                                { value: "video", label: translate("comicDrama.shotVideo") },
                                             ]}
                                         />
                                     </div>
 
                                     <div>
-                                        <label className="text-xs font-medium text-[var(--studio-muted)]">画面比例</label>
+                                        <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.aspectRatio")}</label>
                                         <Select
                                             className="mt-1 w-full"
                                             value={aspectRatio}
                                             onChange={setAspectRatio}
                                             options={[
-                                                { value: "9:16", label: "9:16 (竖屏)" },
-                                                { value: "16:9", label: "16:9 (横屏)" },
-                                                { value: "1:1", label: "1:1 (正方)" },
+                                                { value: "9:16", label: translate("comicDrama.message916Portrait") },
+                                                { value: "16:9", label: translate("comicDrama.message169Landscape") },
+                                                { value: "1:1", label: translate("comicDrama.message11Square") },
                                             ]}
                                         />
                                     </div>
                                 </div>
 
                                 <div>
-                                    <label className="text-xs font-medium text-[var(--studio-muted)]">生成模型</label>
+                                    <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.generationModel")}</label>
                                     <div className="mt-1">
                                         <ModelPicker
                                             config={config}
@@ -193,8 +196,7 @@ export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProp
 
                                 <div className="mt-3 flex items-center justify-between border-t border-[var(--studio-line)] pt-3">
                                     <span className="text-xs text-[var(--studio-muted)]">
-                                        目标任务数：<strong className="text-[var(--studio-ink)]">{targetIds.length}</strong> 个镜头
-                                    </span>
+                                        {translate("comicDrama.targets")}<strong className="text-[var(--studio-ink)]">{targetIds.length}</strong> {translate("comicDrama.shots")}</span>
                                     <Button
                                         type="primary"
                                         loading={submitting}
@@ -202,21 +204,19 @@ export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProp
                                         icon={<Sparkles className="size-4" />}
                                         onClick={handleCreateBatch}
                                     >
-                                        开始批量生成
-                                    </Button>
+                                        {translate("comicDrama.startBatchGeneration_77cd21")}</Button>
                                 </div>
                             </div>
                         ),
                     },
                     {
                         key: "monitor",
-                        label: `进度监控 (${batchTasks.length})`,
+                        label: translate("comicDrama.progressCount", { value0: batchTasks.length }),
                         children: (
                             <div className="flex flex-col gap-3 py-2">
                                 {batchTasks.length === 0 ? (
                                     <div className="py-8 text-center text-xs text-[var(--studio-muted)]">
-                                        暂无批量生产任务
-                                    </div>
+                                        {translate("comicDrama.noBatchProductionTasksYet")}</div>
                                 ) : (
                                     batchTasks.map((task) => {
                                         const percent =
@@ -232,11 +232,9 @@ export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProp
                                                 <div className="flex items-center justify-between">
                                                     <div className="flex items-center gap-2">
                                                         <Tag color={task.batchType === "video" ? "purple" : "blue"}>
-                                                            {task.batchType === "video" ? "视频批量" : "图片批量"}
+                                                            {task.batchType === "video" ? translate("comicDrama.videoBatch") : translate("comicDrama.imageBatch")}
                                                         </Tag>
-                                                        <span className="font-semibold text-[var(--studio-ink)]">
-                                                            共 {task.totalCount} 个镜头
-                                                        </span>
+                                                        <span className="font-semibold text-[var(--studio-ink)]">{translate("comicDrama.countShots_cfb6a3", { value0: task.totalCount })}</span>
                                                     </div>
                                                     <Tag
                                                         color={
@@ -248,10 +246,10 @@ export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProp
                                                         }
                                                     >
                                                         {task.status === "completed"
-                                                            ? "已全部完成"
+                                                            ? translate("comicDrama.allCompleted")
                                                             : task.status === "failed"
-                                                              ? "执行失败"
-                                                              : "排队处理中"}
+                                                              ? translate("comicDrama.failed")
+                                                              : translate("comicDrama.queued")}
                                                     </Tag>
                                                 </div>
 
@@ -260,12 +258,8 @@ export function BatchGenerationModal({ open, onClose }: BatchGenerationModalProp
                                                 </div>
 
                                                 <div className="mt-2 flex items-center justify-between text-xs text-[var(--studio-muted)]">
-                                                    <span>
-                                                        已完成: {task.completedCount} · 排队: {task.queuedCount} · 失败: {task.failedCount}
-                                                    </span>
-                                                    <span>
-                                                        消耗预估: {task.estimatedCredits} 积分
-                                                    </span>
+                                                    <span>{translate("comicDrama.completedCountQueuedCountFailedCount_991ddb", { value0: task.completedCount, value1: task.queuedCount, value2: task.failedCount })}</span>
+                                                    <span>{translate("comicDrama.estimatedCostCountCredits_715a6a", { value0: task.estimatedCredits })}</span>
                                                 </div>
                                             </div>
                                         );

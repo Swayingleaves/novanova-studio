@@ -1,5 +1,9 @@
 "use client";
 
+import { productionParameterLabel } from "../lib/production-labels";
+
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { App, Button, Card, Empty, Form, Input, Modal, Select, Space, Table, Tag } from "antd";
@@ -10,6 +14,7 @@ import type { ComicDramaCanvasBinding } from "../types";
 
 /** 无限画布联动阶段视图。 */
 export function StageCanvas() {
+    const translate = useTranslation();
     const router = useRouter();
     const { message } = App.useApp();
     const workspace = useComicDramaStore((state) => state.workspace);
@@ -39,7 +44,7 @@ export function StageCanvas() {
             const values = await form.validateFields();
             setBinding(true);
             await bindCanvas(values);
-            message.success("画布节点绑定成功");
+            message.success(translate("comicDrama.canvasNodeLinked"));
             setBindModalOpen(false);
             form.resetFields();
         } catch (error) {
@@ -53,19 +58,16 @@ export function StageCanvas() {
         <div className="flex flex-col gap-6">
             <header className="flex flex-col gap-2 border-b border-[var(--studio-line)] pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h2 className="text-xl font-semibold text-[var(--studio-ink)]">无限画布联动 (Infinite Canvas Linkage)</h2>
+                    <h2 className="text-xl font-semibold text-[var(--studio-ink)]">{translate("comicDrama.infiniteCanvasIntegration")}</h2>
                     <p className="mt-1 text-sm text-[var(--studio-muted)]">
-                        漫剧创作负责结构化项目管理与镜头流水线；无限画布负责自由探索视觉创意、多方案横向对比与综合编排。两端数据节点双向联动互通。
-                    </p>
+                        {translate("comicDrama.comicDramaManagesStructuredProjectsAndShotProductionInfiniteCanvas")}</p>
                 </div>
 
                 <div className="flex items-center gap-2">
                     <Button icon={<Link2 className="size-4" />} onClick={() => setBindModalOpen(true)}>
-                        手动绑定节点
-                    </Button>
+                        {translate("comicDrama.linkNodeManually")}</Button>
                     <Button type="primary" icon={<ExternalLink className="size-4" />} onClick={handleOpenCanvas}>
-                        打开无限画布
-                    </Button>
+                        {translate("comicDrama.openInfiniteCanvas")}</Button>
                 </div>
             </header>
 
@@ -77,11 +79,9 @@ export function StageCanvas() {
                     </div>
                     <div className="flex flex-col gap-1">
                         <h4 className="text-base font-semibold text-[var(--studio-ink)]">
-                            同一项目，多维度创作空间
-                        </h4>
+                            {translate("comicDrama.oneProjectMultipleCreativeSpaces")}</h4>
                         <p className="text-xs leading-5 text-[var(--studio-muted)]">
-                            在无限画布中，您可以直接引用当前漫剧项目的角色设定图、镜头提示词以及分镜脚本节点进行多节点自由连线与视频合成；画布中确认采用的媒体结果可自动同步回写至当前漫剧工作区的镜头与资产版本中。
-                        </p>
+                            {translate("comicDrama.referenceCharacterSheetsShotPromptsAndStoryboardNodesOnThe")}</p>
                     </div>
                 </div>
             </div>
@@ -89,16 +89,13 @@ export function StageCanvas() {
             {/* Existing Canvas Bindings Table */}
             <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-[var(--studio-ink)]">
-                        已绑定的画布节点 ({bindings.length})
-                    </h3>
+                    <h3 className="text-sm font-semibold text-[var(--studio-ink)]">{translate("comicDrama.linkedCanvasNodesCount_fbe77a", { value0: bindings.length })}</h3>
                 </div>
 
                 {bindings.length === 0 ? (
-                    <Empty description="当前项目暂无画布节点绑定记录">
+                    <Empty description={translate("comicDrama.thisProjectHasNoLinkedCanvasNodes")}>
                         <Button type="dashed" icon={<Plus className="size-4" />} onClick={() => setBindModalOpen(true)}>
-                            建立第一个绑定
-                        </Button>
+                            {translate("comicDrama.createFirstLink")}</Button>
                     </Empty>
                 ) : (
                     <div className="grid gap-3">
@@ -109,19 +106,14 @@ export function StageCanvas() {
                             >
                                 <div className="flex items-center gap-3">
                                     <Tag color={b.entityType === "shot" ? "blue" : "purple"}>
-                                        {b.entityType === "shot" ? "镜头" : "资产"}
+                                        {b.entityType === "shot" ? translate("comicDrama.shot_c7d192") : translate("comicDrama.asset")}
                                     </Tag>
-                                    <span className="font-semibold text-[var(--studio-ink)]">
-                                        实体标识：{b.entityId}
-                                    </span>
-                                    <span className="text-[var(--studio-muted)]">
-                                        画布项目：{b.canvasProjectId} · 节点：{b.nodeId}
-                                    </span>
+                                    <span className="font-semibold text-[var(--studio-ink)]">{translate("comicDrama.entityIdCount_2e48ba", { value0: b.entityId })}</span>
+                                    <span className="text-[var(--studio-muted)]">{translate("comicDrama.canvasProjectCountNodeCount_4ccdc5", { value0: b.canvasProjectId, value1: b.nodeId })}</span>
                                 </div>
 
                                 <Button size="small" type="link" onClick={() => router.push(`/canvas/${b.canvasProjectId}`)}>
-                                    前往画布节点
-                                </Button>
+                                    {translate("comicDrama.goToCanvasNode")}</Button>
                             </div>
                         ))}
                     </div>
@@ -130,7 +122,7 @@ export function StageCanvas() {
 
             {/* Bind Node Modal */}
             <Modal
-                title="绑定无限画布节点"
+                title={translate("comicDrama.linkInfiniteCanvasNode")}
                 open={bindModalOpen}
                 onCancel={() => setBindModalOpen(false)}
                 footer={null}
@@ -139,41 +131,41 @@ export function StageCanvas() {
                 <Form form={form} layout="vertical" className="py-2">
                     <Form.Item
                         name="canvasProjectId"
-                        label="画布项目标识 (Canvas Project ID)"
-                        rules={[{ required: true, message: "请输入画布项目ID" }]}
+                        label={translate("comicDrama.canvasProjectId")}
+                        rules={[{ required: true, message: translate("comicDrama.enterACanvasProjectId") }]}
                     >
-                        <Input placeholder="输入目标画布的项目ID" />
+                        <Input placeholder={translate("comicDrama.enterTheTargetCanvasProjectId")} />
                     </Form.Item>
 
                     <Form.Item
                         name="entityType"
-                        label="绑定实体类型"
+                        label={translate("comicDrama.linkedEntityType")}
                         initialValue="shot"
-                        rules={[{ required: true, message: "请选择实体类型" }]}
+                        rules={[{ required: true, message: translate("comicDrama.selectAnEntityType") }]}
                     >
                         <Select
                             options={[
-                                { value: "shot", label: "镜头 (Shot)" },
-                                { value: "asset", label: "视觉资产 (Asset)" },
+                                { value: "shot", label: translate("comicDrama.shot_95716e") },
+                                { value: "asset", label: translate("comicDrama.visualAsset") },
                             ]}
                         />
                     </Form.Item>
 
                     <Form.Item
                         name="entityId"
-                        label="实体标识 (Entity ID)"
-                        rules={[{ required: true, message: "请选择或输入实体ID" }]}
+                        label={translate("comicDrama.entityId_d54039")}
+                        rules={[{ required: true, message: translate("comicDrama.selectOrEnterAnEntityId") }]}
                     >
                         <Select
-                            placeholder="选择要绑定的镜头或资产"
+                            placeholder={translate("comicDrama.selectTheShotOrAssetToLink")}
                             options={[
                                 ...shots.map((s) => ({
                                     value: s.id,
-                                    label: `镜头 #${s.shotNumber} (${s.shotSize || "未定景别"})`,
+                                    label: translate("comicDrama.shotCountCount", { value0: s.shotNumber, value1: productionParameterLabel(s.shotSize || "", translate) || translate("comicDrama.shotSizeNotSet") }),
                                 })),
                                 ...assets.map((a) => ({
                                     value: a.id,
-                                    label: `资产：${a.name} (${a.assetType})`,
+                                    label: translate("comicDrama.assetCountCount", { value0: a.name, value1: a.assetType }),
                                 })),
                             ]}
                         />
@@ -181,17 +173,16 @@ export function StageCanvas() {
 
                     <Form.Item
                         name="nodeId"
-                        label="画布节点标识 (Node ID)"
-                        rules={[{ required: true, message: "请输入画布节点ID" }]}
+                        label={translate("comicDrama.canvasNodeId")}
+                        rules={[{ required: true, message: translate("comicDrama.enterACanvasNodeId") }]}
                     >
-                        <Input placeholder="输入目标画布中的节点ID，例如 node_xxx" />
+                        <Input placeholder={translate("comicDrama.enterTheTargetNodeIdForExampleNodeXxx")} />
                     </Form.Item>
 
                     <div className="mt-4 flex justify-end gap-2 border-t border-[var(--studio-line)] pt-3">
-                        <Button onClick={() => setBindModalOpen(false)}>取消</Button>
+                        <Button onClick={() => setBindModalOpen(false)}>{translate("comicDrama.cancel")}</Button>
                         <Button type="primary" loading={binding} onClick={handleCreateBinding}>
-                            确认绑定
-                        </Button>
+                            {translate("comicDrama.confirmLink")}</Button>
                     </div>
                 </Form>
             </Modal>

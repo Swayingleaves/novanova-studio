@@ -1,5 +1,8 @@
 "use client";
 
+import { translateMessage } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useEffect, useState } from "react";
 import { App, Button, Card, Form, Input, InputNumber, Radio, Select, Tag } from "antd";
 import { Check, RotateCcw, Save } from "lucide-react";
@@ -7,43 +10,52 @@ import { Check, RotateCcw, Save } from "lucide-react";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaProjectType, ComicDramaSettings } from "../types";
 
-const PROJECT_TYPES: Array<{ value: ComicDramaProjectType; label: string }> = [
-    { value: "comicDrama", label: "漫剧" },
-    { value: "liveActionShort", label: "真人短剧" },
-    { value: "animation", label: "动画" },
-    { value: "advertisement", label: "广告故事" },
-    { value: "musicVideo", label: "音乐视频" },
-    { value: "storyShort", label: "故事短片" },
-];
+const getProjectTypes = (translate = translateMessage): Array<{ value: ComicDramaProjectType; label: string }> => ([
+    { value: "comicDrama", label: translate("comicDrama.comicDrama") },
+    { value: "liveActionShort", label: translate("comicDrama.liveActionShortDrama") },
+    { value: "animation", label: translate("comicDrama.animation") },
+    { value: "advertisement", label: translate("comicDrama.advertisingStory") },
+    { value: "musicVideo", label: translate("comicDrama.musicVideo") },
+    { value: "storyShort", label: translate("comicDrama.shortFilm") },
+]);
 
-const ORIENTATIONS = [
-    { value: "portrait", label: "竖屏 (9:16 移动端优先)" },
-    { value: "landscape", label: "横屏 (16:9 宽画幅优先)" },
-    { value: "square", label: "方形 (1:1 社交媒体)" },
-];
+const getOrientations = (translate = translateMessage) => ([
+    { value: "portrait", label: translate("comicDrama.portrait916MobileFirst") },
+    { value: "landscape", label: translate("comicDrama.landscape169WidescreenFirst") },
+    { value: "square", label: translate("comicDrama.square11SocialMedia") },
+]);
 
-const ASPECT_RATIOS = [
-    { value: "9:16", label: "9:16 (短视频/短剧标准)" },
-    { value: "16:9", label: "16:9 (长视频/影视标准)" },
-    { value: "1:1", label: "1:1 (正方形)" },
-    { value: "4:3", label: "4:3 (经典画幅)" },
-    { value: "2.35:1", label: "2.35:1 (电影宽银幕)" },
-];
+const getAspectRatios = (translate = translateMessage) => ([
+    { value: "9:16", label: translate("comicDrama.message916ShortVideoDrama") },
+    { value: "16:9", label: translate("comicDrama.message169LongVideoFilm") },
+    { value: "1:1", label: translate("comicDrama.message11Square_f475e5") },
+    { value: "4:3", label: translate("comicDrama.message43Classic") },
+    { value: "2.35:1", label: translate("comicDrama.message2351CinematicWidescreen") },
+]);
 
-const STYLE_PRESETS = [
-    "国漫写实 3D，高精度建模，电影级体积光与次表面散射",
-    "新中式水墨工笔，淡彩晕染，留白意境，唯美古风",
-    "日漫胶片复古，手绘赛璐珞质感，颗粒噪点，光影柔和",
-    "赛博朋克电影质感，霓虹雨夜反光，机械结构与高对比冷暖光",
-    "真人短剧电影级写实，8k超清影视质感，浅景深自然肤色",
-    "治愈系 3D 动画，黏土手作风格，柔和暖色调，微距摄影",
-    "美漫厚涂超级英雄风，硬朗阴影，强张力动态线条",
-];
+const getStylePresets = (translate = translateMessage) => ([
+    translate("comicDrama.realisticChinese3dAnimationDetailedModelingCinematicVolumetricLightAnd"),
+    translate("comicDrama.chineseInkAndFineLinePaintingSoftColorWashesNegative"),
+    translate("comicDrama.retroJapaneseAnimationHandDrawnCelShadingFilmGrainAnd"),
+    translate("comicDrama.cinematicCyberpunkNeonReflectionsOnRainyStreetsMechanicalStructuresAnd"),
+    translate("comicDrama.cinematicLiveActionShortDramaDetailed8kLookShallowDepth"),
+    translate("comicDrama.warm3dAnimationHandmadeClayStyleSoftWarmColorsAnd"),
+    translate("comicDrama.americanSuperheroComicStylePainterlyRenderingBoldShadowsAndDynamic"),
+]);
 
-const PLATFORM_PRESETS = ["抖音", "快手", "微信视频号", "B站 (Bilibili)", "小红书", "YouTube", "TikTok"];
+const getPlatformPresets = (translate = translateMessage) => ([
+    { value: "抖音", label: translate("comicDrama.douyin") },
+    { value: "快手", label: translate("comicDrama.kuaishou") },
+    { value: "微信视频号", label: translate("comicDrama.wechatChannels") },
+    { value: "B站 (Bilibili)", label: translate("comicDrama.bilibili") },
+    { value: "小红书", label: translate("comicDrama.xiaohongshu") },
+    { value: "YouTube", label: "YouTube" },
+    { value: "TikTok", label: "TikTok" },
+]);
 
 /** 项目生产设置阶段视图。 */
 export function StageSettings() {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const workspace = useComicDramaStore((state) => state.workspace);
     const updateSettings = useComicDramaStore((state) => state.updateSettings);
@@ -64,7 +76,7 @@ export function StageSettings() {
             const values = await form.validateFields();
             setSaving(true);
             await updateSettings(values);
-            message.success("生产设置已保存");
+            message.success(translate("comicDrama.productionSettingsSaved"));
         } catch (error) {
             if (error instanceof Error) {
                 message.error(error.message);
@@ -77,7 +89,7 @@ export function StageSettings() {
     const handleReset = () => {
         if (workspace.settings) {
             form.setFieldsValue(workspace.settings);
-            message.info("已重置为当前保存的设置");
+            message.info(translate("comicDrama.resetToSavedSettings"));
         }
     };
 
@@ -85,18 +97,15 @@ export function StageSettings() {
         <div className="flex flex-col gap-6">
             <header className="flex flex-col gap-2 border-b border-[var(--studio-line)] pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h2 className="text-xl font-semibold text-[var(--studio-ink)]">项目生产设置</h2>
+                    <h2 className="text-xl font-semibold text-[var(--studio-ink)]">{translate("comicDrama.projectProductionSettings")}</h2>
                     <p className="mt-1 text-sm text-[var(--studio-muted)]">
-                        设定全局画面比例、视觉风格、时长与目标平台。这里的视觉风格将作为自动拆镜头、提示词合成及生成的默认标准。
-                    </p>
+                        {translate("comicDrama.setTheGlobalAspectRatioVisualStyleDurationAndTarget")}</p>
                 </div>
                 <div className="flex items-center gap-2">
                     <Button icon={<RotateCcw className="size-4" />} onClick={handleReset}>
-                        重置
-                    </Button>
+                        {translate("comicDrama.reset")}</Button>
                     <Button type="primary" loading={saving} icon={<Save className="size-4" />} onClick={handleSave}>
-                        保存设置
-                    </Button>
+                        {translate("comicDrama.saveSettings")}</Button>
                 </div>
             </header>
 
@@ -104,19 +113,19 @@ export function StageSettings() {
                 <div className="grid gap-6 md:grid-cols-2">
                     <Form.Item
                         name="projectType"
-                        label="项目类型"
-                        rules={[{ required: true, message: "请选择项目类型" }]}
+                        label={translate("comicDrama.projectType")}
+                        rules={[{ required: true, message: translate("comicDrama.selectAProjectType") }]}
                     >
-                        <Select options={PROJECT_TYPES} />
+                        <Select options={getProjectTypes(translate)} />
                     </Form.Item>
 
                     <Form.Item
                         name="orientation"
-                        label="画面方向"
-                        rules={[{ required: true, message: "请选择画面方向" }]}
+                        label={translate("comicDrama.orientation")}
+                        rules={[{ required: true, message: translate("comicDrama.selectAnOrientation") }]}
                     >
                         <Select
-                            options={ORIENTATIONS}
+                            options={getOrientations(translate)}
                             onChange={(value) => {
                                 if (value === "portrait") form.setFieldValue("aspectRatio", "9:16");
                                 else if (value === "landscape") form.setFieldValue("aspectRatio", "16:9");
@@ -127,50 +136,50 @@ export function StageSettings() {
 
                     <Form.Item
                         name="aspectRatio"
-                        label="画面宽高比"
-                        rules={[{ required: true, message: "请选择画面宽高比" }]}
+                        label={translate("comicDrama.aspectRatio_f4a23e")}
+                        rules={[{ required: true, message: translate("comicDrama.selectAnAspectRatio") }]}
                     >
-                        <Select options={ASPECT_RATIOS} />
+                        <Select options={getAspectRatios(translate)} />
                     </Form.Item>
 
                     <Form.Item
                         name="targetEpisodeCount"
-                        label="目标总集数"
-                        rules={[{ required: true, message: "请输入目标集数" }]}
+                        label={translate("comicDrama.targetEpisodeCount")}
+                        rules={[{ required: true, message: translate("comicDrama.enterTheTargetEpisodeCount") }]}
                     >
                         <InputNumber min={1} max={1000} className="w-full" />
                     </Form.Item>
 
                     <Form.Item
                         name="episodeTargetDuration"
-                        label="单集目标时长（秒）"
-                        tooltip="0 表示不限制，短剧通常为 60~120 秒"
+                        label={translate("comicDrama.targetEpisodeDurationSeconds")}
+                        tooltip={translate("comicDrama.message0MeansUnlimitedShortDramasTypicallyUse60120Seconds")}
                     >
-                        <InputNumber min={0} className="w-full" placeholder="例如：90" />
+                        <InputNumber min={0} className="w-full" placeholder={translate("comicDrama.forExample90")} />
                     </Form.Item>
 
                     <Form.Item
                         name="overallDuration"
-                        label="预计全片总时长（秒）"
-                        tooltip="0 表示根据集数自动折算"
+                        label={translate("comicDrama.estimatedTotalDurationSeconds")}
+                        tooltip={translate("comicDrama.message0CalculatesAutomaticallyFromTheEpisodeCount")}
                     >
-                        <InputNumber min={0} className="w-full" placeholder="例如：900" />
+                        <InputNumber min={0} className="w-full" placeholder={translate("comicDrama.forExample900")} />
                     </Form.Item>
                 </div>
 
                 <div className="mt-4 flex flex-col gap-2">
                     <Form.Item
                         name="visualStyle"
-                        label="默认视觉风格与画风标准"
-                        rules={[{ required: true, message: "请填写视觉风格" }]}
-                        tooltip="将注入至镜头提示词与资产图生成的提示词合成引擎中"
+                        label={translate("comicDrama.defaultVisualStyle")}
+                        rules={[{ required: true, message: translate("comicDrama.enterAVisualStyle") }]}
+                        tooltip={translate("comicDrama.includedInShotPromptsAndAssetImagePrompts")}
                     >
-                        <Input.TextArea rows={3} placeholder="描述画风、光影、渲染器、笔触与镜头质感..." />
+                        <Input.TextArea rows={3} placeholder={translate("comicDrama.describeTheArtStyleLightingRendererBrushworkAndCameraTexture")} />
                     </Form.Item>
 
                     <div className="mb-4 flex flex-wrap items-center gap-1.5">
-                        <span className="text-xs text-[var(--studio-muted)]">快捷风格预设：</span>
-                        {STYLE_PRESETS.map((preset) => (
+                        <span className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.stylePresets")}</span>
+                        {getStylePresets(translate).map((preset) => (
                             <Tag
                                 key={preset}
                                 className="cursor-pointer transition-opacity hover:opacity-80"
@@ -184,19 +193,19 @@ export function StageSettings() {
 
                 <Form.Item
                     name="periodAtmosphere"
-                    label="时代背景与整体氛围"
-                    tooltip="例如：赛博未来、近未来废土、大唐盛世盛宴、民国初年雨夜"
+                    label={translate("comicDrama.eraAndAtmosphere")}
+                    tooltip={translate("comicDrama.forExampleCyberpunkFuturePostApocalypticNearFutureTangDynasty")}
                 >
-                    <Input placeholder="例如：赛博未来 2088 年雨夜街区，科技感与市井烟火并存" />
+                    <Input placeholder={translate("comicDrama.forExampleARainyStreetIn2088MixingFuturisticTechnology")} />
                 </Form.Item>
 
                 <div className="grid gap-6 md:grid-cols-2">
                     <div>
-                        <Form.Item name="targetPlatform" label="目标发布平台">
-                            <Input placeholder="例如：抖音、快手、微信视频号" />
+                        <Form.Item name="targetPlatform" label={translate("comicDrama.targetPlatform")}>
+                            <Input placeholder={translate("comicDrama.forExampleDouyinKuaishouWechatChannels")} />
                         </Form.Item>
                         <div className="flex flex-wrap gap-1">
-                            {PLATFORM_PRESETS.map((platform) => (
+                            {getPlatformPresets(translate).map(({ value: platform, label }) => (
                                 <Tag
                                     key={platform}
                                     className="cursor-pointer"
@@ -207,14 +216,14 @@ export function StageSettings() {
                                         }
                                     }}
                                 >
-                                    + {platform}
+                                    + {label}
                                 </Tag>
                             ))}
                         </div>
                     </div>
 
-                    <Form.Item name="useCase" label="具体使用场景">
-                        <Input placeholder="例如：商业短剧宣发、IP 故事孵化、竖屏番剧更新" />
+                    <Form.Item name="useCase" label={translate("comicDrama.useCase")}>
+                        <Input placeholder={translate("comicDrama.forExampleShortDramaPromotionStoryDevelopmentPortraitFormatEpisodic")} />
                     </Form.Item>
                 </div>
             </Form>

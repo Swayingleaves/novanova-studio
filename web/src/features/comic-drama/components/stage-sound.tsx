@@ -1,5 +1,10 @@
 "use client";
 
+import { productionParameterLabel } from "../lib/production-labels";
+
+import { translateMessage } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useMemo, useState } from "react";
 import { App, Button, Card, Drawer, Empty, Form, Input, InputNumber, Radio, Select, Space, Tag } from "antd";
 import { Mic, Music, Plus, Radio as RadioIcon, Sparkles, Volume2 } from "lucide-react";
@@ -7,16 +12,17 @@ import { Mic, Music, Plus, Radio as RadioIcon, Sparkles, Volume2 } from "lucide-
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaVoiceTrack, ComicDramaVoiceTrackInput } from "../types";
 
-const TRACK_TYPE_CONFIG: Record<string, { label: string; color: string; icon: typeof Mic }> = {
-    dialogue: { label: "角色对白", color: "blue", icon: Mic },
-    narration: { label: "旁白解说", color: "purple", icon: RadioIcon },
-    ambient: { label: "环境底噪", color: "green", icon: Volume2 },
-    soundEffect: { label: "关键音效", color: "orange", icon: Volume2 },
-    music: { label: "配乐氛围", color: "magenta", icon: Music },
-};
+const getTrackTypeConfig = (translate = translateMessage): Record<string, { label: string; color: string; icon: typeof Mic }> => ({
+    dialogue: { label: translate("comicDrama.characterDialogue"), color: "blue", icon: Mic },
+    narration: { label: translate("comicDrama.voiceOverNarration"), color: "purple", icon: RadioIcon },
+    ambient: { label: translate("comicDrama.ambientSound"), color: "green", icon: Volume2 },
+    soundEffect: { label: translate("comicDrama.soundEffect"), color: "orange", icon: Volume2 },
+    music: { label: translate("comicDrama.backgroundMusic"), color: "magenta", icon: Music },
+});
 
 /** 声音轨与对白管理阶段视图。 */
 export function StageSound() {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const workspace = useComicDramaStore((state) => state.workspace);
     const saveVoiceTrack = useComicDramaStore((state) => state.saveVoiceTrack);
@@ -51,8 +57,8 @@ export function StageSound() {
             content: "",
             voiceModel: "default_vocal",
             speechRate: 1.0,
-            tone: "自然沉稳",
-            emotion: "平静",
+            tone: translate("comicDrama.naturalAndSteady"),
+            emotion: translate("comicDrama.calm"),
             status: "draft",
             revision: 0,
         });
@@ -84,7 +90,7 @@ export function StageSound() {
             const values = await form.validateFields();
             setSaving(true);
             await saveVoiceTrack({ ...(editingTrack || {}), ...values });
-            message.success(editingTrack ? "声音条目已更新" : "声音条目已创建");
+            message.success(editingTrack ? translate("comicDrama.audioEntryUpdated") : translate("comicDrama.audioEntryCreated"));
             setDrawerOpen(false);
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
@@ -97,7 +103,7 @@ export function StageSound() {
     const handleExtractFromShots = async () => {
         const shotsWithDialogue = shots.filter((s) => Boolean(s.dialogueVoiceover?.trim()));
         if (shotsWithDialogue.length === 0) {
-            message.info("现有镜头中没有检测到对白或旁白文本");
+            message.info(translate("comicDrama.noDialogueOrNarrationFoundInTheCurrentShots"));
             return;
         }
 
@@ -114,8 +120,8 @@ export function StageSound() {
                         content: shot.dialogueVoiceover,
                         voiceModel: "default_character",
                         speechRate: 1.0,
-                        tone: "根据剧情自动调节",
-                        emotion: "自然流露",
+                        tone: translate("comicDrama.adjustAutomaticallyToTheStory"),
+                        emotion: translate("comicDrama.naturalExpression"),
                         status: "ready",
                         revision: 0,
                     });
@@ -126,9 +132,9 @@ export function StageSound() {
             }
         }
         if (addedCount > 0) {
-            message.success(`已从镜头对白中提取 ${addedCount} 条声音轨`);
+            message.success(translate("comicDrama.extractedCountAudioTracksFromShotDialogue", { value0: addedCount }));
         } else {
-            message.info("所有镜头对白均已存在对应声音条目");
+            message.info(translate("comicDrama.allShotDialogueAlreadyHasMatchingAudioEntries"));
         }
     };
 
@@ -136,50 +142,45 @@ export function StageSound() {
         <div className="flex flex-col gap-6">
             <header className="flex flex-col gap-2 border-b border-[var(--studio-line)] pb-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h2 className="text-xl font-semibold text-[var(--studio-ink)]">声音与对白编排 (Audio Tracks)</h2>
+                    <h2 className="text-xl font-semibold text-[var(--studio-ink)]">{translate("comicDrama.soundAndDialogue_d24e3a")}</h2>
                     <p className="mt-1 text-sm text-[var(--studio-muted)]">
-                        结构化管理角色对白、配音音色、旁白解说、环境音效与背景音乐建议，支持与剧本正文及镜头对白深度联动。
-                    </p>
+                        {translate("comicDrama.manageDialogueVoicesNarrationAmbientEffectsAndMusicSuggestionsLinked")}</p>
                 </div>
 
                 <div className="flex items-center gap-2">
                     <Button icon={<Sparkles className="size-4" />} onClick={handleExtractFromShots}>
-                        从镜头提取对白
-                    </Button>
+                        {translate("comicDrama.extractDialogueFromShots")}</Button>
                     <Button type="primary" icon={<Plus className="size-4" />} onClick={() => openCreateTrack("dialogue")}>
-                        添加声音轨
-                    </Button>
+                        {translate("comicDrama.addAudioTrack")}</Button>
                 </div>
             </header>
 
             {/* Filter toolbar */}
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <Radio.Group value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} buttonStyle="solid">
-                    <Radio.Button value="all">全部声音 ({voiceTracks.length})</Radio.Button>
-                    <Radio.Button value="dialogue">对白</Radio.Button>
-                    <Radio.Button value="narration">旁白</Radio.Button>
-                    <Radio.Button value="soundEffect">音效</Radio.Button>
-                    <Radio.Button value="ambient">环境</Radio.Button>
-                    <Radio.Button value="music">配乐</Radio.Button>
+                    <Radio.Button value="all">{translate("comicDrama.allAudioCount_5e31b4", { value0: voiceTracks.length })}</Radio.Button>
+                    <Radio.Button value="dialogue">{translate("comicDrama.dialogue")}</Radio.Button>
+                    <Radio.Button value="narration">{translate("comicDrama.narration")}</Radio.Button>
+                    <Radio.Button value="soundEffect">{translate("comicDrama.soundEffects_505e64")}</Radio.Button>
+                    <Radio.Button value="ambient">{translate("comicDrama.ambient")}</Radio.Button>
+                    <Radio.Button value="music">{translate("comicDrama.music")}</Radio.Button>
                 </Radio.Group>
             </div>
 
             {/* Voice Tracks List */}
             {filteredTracks.length === 0 ? (
-                <Empty description="暂无声音轨道数据">
+                <Empty description={translate("comicDrama.noAudioTracksYet")}>
                     <Space>
                         <Button type="primary" icon={<Sparkles className="size-4" />} onClick={handleExtractFromShots}>
-                            一键从镜头提取对白
-                        </Button>
+                            {translate("comicDrama.extractDialogueFromShots_27558d")}</Button>
                         <Button icon={<Plus className="size-4" />} onClick={() => openCreateTrack("dialogue")}>
-                            手动添加声音轨
-                        </Button>
+                            {translate("comicDrama.addAudioTrackManually")}</Button>
                     </Space>
                 </Empty>
             ) : (
                 <div className="grid gap-3">
                     {filteredTracks.map((track) => {
-                        const config = TRACK_TYPE_CONFIG[track.trackType] || TRACK_TYPE_CONFIG.dialogue;
+                        const config = getTrackTypeConfig(translate)[track.trackType] || getTrackTypeConfig(translate).dialogue;
                         const Icon = config.icon;
                         const relatedShot = shots.find((s) => s.id === track.shotId);
                         const relatedChar = characters.find((c) => c.id === track.characterId);
@@ -198,16 +199,12 @@ export function StageSound() {
                                         <div className="flex items-center gap-2">
                                             <Tag color={config.color}>{config.label}</Tag>
                                             {relatedShot && (
-                                                <span className="font-mono text-xs font-semibold text-[var(--studio-ink)]">
-                                                    镜头 #{relatedShot.shotNumber}
-                                                </span>
+                                                <span className="font-mono text-xs font-semibold text-[var(--studio-ink)]">{translate("comicDrama.shotCount_cb9c45", { value0: relatedShot.shotNumber })}</span>
                                             )}
                                             {relatedChar && (
-                                                <Tag color="cyan">角色：{relatedChar.name}</Tag>
+                                                <Tag color="cyan">{translate("comicDrama.characterCount_ea4eee", { value0: relatedChar.name })}</Tag>
                                             )}
-                                            <span className="text-xs text-[var(--studio-muted)]">
-                                                语速：{track.speechRate}x · 语气：{track.tone || "默认"} · 情绪：{track.emotion || "自然"}
-                                            </span>
+                                            <span className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.speechRateCountxToneCountEmotionCount_8acab8", { value0: track.speechRate, value1: track.tone || translate("comicDrama.default"), value2: track.emotion || translate("comicDrama.natural") })}</span>
                                         </div>
 
                                         <p className="text-sm font-medium text-[var(--studio-ink)]">
@@ -217,8 +214,7 @@ export function StageSound() {
                                 </div>
 
                                 <Button size="small" onClick={() => openEditTrack(track)}>
-                                    配置
-                                </Button>
+                                    {translate("comicDrama.configure")}</Button>
                             </div>
                         );
                     })}
@@ -227,14 +223,13 @@ export function StageSound() {
 
             {/* Edit Drawer */}
             <Drawer
-                title={editingTrack ? "编辑声音条目" : "添加声音条目"}
+                title={editingTrack ? translate("comicDrama.editAudioEntry") : translate("comicDrama.addAudioEntry")}
                 open={drawerOpen}
                 onClose={() => setDrawerOpen(false)}
                 size="large"
                 extra={
                     <Button type="primary" loading={saving} onClick={handleSaveTrack}>
-                        保存
-                    </Button>
+                        {translate("comicDrama.save")}</Button>
                 }
             >
                 <Form form={form} layout="vertical">
@@ -247,55 +242,55 @@ export function StageSound() {
 
                     <Form.Item
                         name="trackType"
-                        label="声音类型"
-                        rules={[{ required: true, message: "请选择声音类型" }]}
+                        label={translate("comicDrama.audioType")}
+                        rules={[{ required: true, message: translate("comicDrama.selectAnAudioType") }]}
                     >
                         <Select
                             options={[
-                                { value: "dialogue", label: "角色对白 (Dialogue)" },
-                                { value: "narration", label: "旁白解说 (Narration)" },
-                                { value: "soundEffect", label: "关键音效 (Sound Effect)" },
-                                { value: "ambient", label: "环境声 (Ambient)" },
-                                { value: "music", label: "背景音乐 (Music)" },
+                                { value: "dialogue", label: translate("comicDrama.characterDialogue_3ab5f1") },
+                                { value: "narration", label: translate("comicDrama.voiceOverNarration_8f399e") },
+                                { value: "soundEffect", label: translate("comicDrama.soundEffect_18ecdf") },
+                                { value: "ambient", label: translate("comicDrama.ambientSound_5d4c73") },
+                                { value: "music", label: translate("comicDrama.backgroundMusic_852179") },
                             ]}
                         />
                     </Form.Item>
 
-                    <Form.Item name="shotId" label="关联镜头">
+                    <Form.Item name="shotId" label={translate("comicDrama.linkedShot")}>
                         <Select
                             allowClear
                             options={shots.map((s) => ({
                                 value: s.id,
-                                label: `镜头 #${s.shotNumber} (${s.shotSize || "未定景别"})`,
+                                label: translate("comicDrama.shotCountCount", { value0: s.shotNumber, value1: productionParameterLabel(s.shotSize || "", translate) || translate("comicDrama.shotSizeNotSet") }),
                             }))}
                         />
                     </Form.Item>
 
                     <Form.Item
                         name="content"
-                        label="内容或声音描述"
-                        rules={[{ required: true, message: "请输入对白或声音描述" }]}
+                        label={translate("comicDrama.contentOrSoundDescription")}
+                        rules={[{ required: true, message: translate("comicDrama.enterDialogueOrASoundDescription") }]}
                     >
-                        <Input.TextArea rows={3} placeholder="台词正文，或声音特效具体描述..." />
+                        <Input.TextArea rows={3} placeholder={translate("comicDrama.dialogueTextOrADetailedSoundEffectDescription")} />
                     </Form.Item>
 
                     <div className="grid grid-cols-2 gap-3">
-                        <Form.Item name="tone" label="语气">
-                            <Input placeholder="例如：坚定、急促、低沉、轻佻" />
+                        <Form.Item name="tone" label={translate("comicDrama.tone")}>
+                            <Input placeholder={translate("comicDrama.forExampleFirmUrgentDeepPlayful")} />
                         </Form.Item>
 
-                        <Form.Item name="emotion" label="情绪">
-                            <Input placeholder="例如：愤怒、悲伤、欣喜、平静" />
+                        <Form.Item name="emotion" label={translate("comicDrama.emotion_6e8e0c")}>
+                            <Input placeholder={translate("comicDrama.forExampleAngrySadHappyCalm")} />
                         </Form.Item>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
-                        <Form.Item name="speechRate" label="语速倍率">
+                        <Form.Item name="speechRate" label={translate("comicDrama.speechRateMultiplier")}>
                             <InputNumber min={0.5} max={2.0} step={0.1} className="w-full" />
                         </Form.Item>
 
-                        <Form.Item name="voiceModel" label="音色/配音模型">
-                            <Input placeholder="例如：沉稳青年男音、清脆少女音" />
+                        <Form.Item name="voiceModel" label={translate("comicDrama.voiceDubbingModel")}>
+                            <Input placeholder={translate("comicDrama.forExampleASteadyYoungMaleVoiceABrightYoung")} />
                         </Form.Item>
                     </div>
                 </Form>

@@ -1,5 +1,8 @@
 "use client";
 
+import { translateMessage } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useEffect, useState } from "react";
 import { App, Alert, Button, Progress, Radio, Select, Tag } from "antd";
 import { nanoid } from "nanoid";
@@ -13,15 +16,15 @@ import type { EpisodeBodiesJob, EpisodeBodiesMode, NovelAdaptationJobStatus } fr
 /** 正文批量任务的进度查询间隔。 */
 const JOB_POLL_INTERVAL_MILLISECONDS = 3000;
 
-const JOB_STATUS_LABELS: Record<NovelAdaptationJobStatus, string> = { queued: "排队中", running: "生成中", awaiting: "等待确认", completed: "已完成", failed: "生成失败，未结算积分已退回", canceled: "已取消，已退未完成部分" };
+const getJobStatusLabels = (translate = translateMessage): Record<NovelAdaptationJobStatus, string> => ({ queued: translate("script.queued"), running: translate("script.generating"), awaiting: translate("script.awaitingConfirmation"), completed: translate("script.completed"), failed: translate("script.generationFailedUnusedCreditsHaveBeenRefunded"), canceled: translate("script.canceledCreditsForUnfinishedWorkHaveBeenRefunded") });
 const JOB_STATUS_COLORS: Record<NovelAdaptationJobStatus, string> = { queued: "blue", running: "blue", awaiting: "gold", completed: "green", failed: "red", canceled: "default" };
 
 /** 生成模式的中文名与结果去向，两处文案共用。 */
-const MODE_LABELS: Record<EpisodeBodiesMode, string> = { apply: "生成并直接写入正式剧本（推荐）", draft: "只生成待审草稿（在分集卡片里逐集确认应用）" };
-const MODE_DETAILS: Record<EpisodeBodiesMode, string> = {
-    apply: "每集生成成功后立即合并进正式剧本的场次与正文，可在分集工作台查看；发起前会保存一份修改前版本，随时可以回退。",
-    draft: "产出先作为待审草稿暂存，需要在右侧「AI 剧本助手」的「待确认草稿」里逐集预览并确认应用后才写入正式剧本；上百集逐集确认比较费时，只在需要逐集把关时选它。",
-};
+const getModeLabels = (translate = translateMessage): Record<EpisodeBodiesMode, string> => ({ apply: translate("script.generateDirectlyIntoTheScriptRecommended"), draft: translate("script.generateDraftsForReviewApproveEachEpisodeIndividually") });
+const getModeDetails = (translate = translateMessage): Record<EpisodeBodiesMode, string> => ({
+    apply: translate("script.eachCompletedEpisodeIsImmediatelySavedIntoTheScriptAs"),
+    draft: translate("script.resultsAreSavedAsDraftsPreviewAndApproveEachEpisode"),
+});
 
 /**
  * 批量生成分集正文：把已固定的分集一次排队写成场次与正文。
@@ -29,6 +32,7 @@ const MODE_DETAILS: Record<EpisodeBodiesMode, string> = {
  * @param onJobChange 任务状态变化回调，供上层流程步骤条显示第 8 步「分集正文」的进度
  */
 export function EpisodeBodiesPanel({ onJobChange }: { onJobChange?: (job: EpisodeBodiesJob | null) => void }) {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const project = useScriptStore((state) => state.project);
     const saveStatus = useScriptStore((state) => state.saveStatus);
@@ -71,7 +75,7 @@ export function EpisodeBodiesPanel({ onJobChange }: { onJobChange?: (job: Episod
         setJob(null);
         void latestEpisodeBodies(projectId)
             .then((latest) => { if (active) setJob(latest || null); })
-            .catch((error: unknown) => { if (active) message.error(error instanceof Error ? error.message : "生成进度加载失败"); });
+            .catch((error: unknown) => { if (active) message.error(error instanceof Error ? error.message : translate("script.couldNotLoadGenerationProgress")); });
         return () => { active = false; };
     }, [projectId]);
 
@@ -86,12 +90,12 @@ export function EpisodeBodiesPanel({ onJobChange }: { onJobChange?: (job: Episod
                 notified = false;
                 setJob(next);
                 if (next.status !== "completed") return;
-                message.success(`已生成 ${next.processedEpisodes} 集正文`);
+                message.success(translate("script.generatedBodyTextForCountEpisodes", { value0: next.processedEpisodes }));
                 void reloadProject();
             }).catch((error: unknown) => {
                 if (notified) return;
                 notified = true;
-                message.error(error instanceof Error ? error.message : "生成进度刷新失败");
+                message.error(error instanceof Error ? error.message : translate("script.couldNotRefreshGenerationProgress"));
             });
         }, JOB_POLL_INTERVAL_MILLISECONDS);
         return () => window.clearInterval(timer);
@@ -101,37 +105,37 @@ export function EpisodeBodiesPanel({ onJobChange }: { onJobChange?: (job: Episod
 
     /** 批量生成正文：先按所选分集报价，确认后交给后台逐集排队。 */
     const runBatch = async () => {
-        if (!model) return message.warning("请选择文本模型");
-        if (!episodeIds.length) return message.warning("请至少选择一集再生成正文");
-        if (!["saved", "idle"].includes(saveStatus)) return message.warning("请先保存当前剧本修改再发起生成");
+        if (!model) return message.warning(translate("script.selectATextModel"));
+        if (!episodeIds.length) return message.warning(translate("script.selectAtLeastOneEpisodeToGenerate"));
+        if (!["saved", "idle"].includes(saveStatus)) return message.warning(translate("script.saveYourScriptChangesBeforeGenerating"));
         setJobBusy(true);
         try {
             const clientRequestId = nanoid();
             const quote = await quoteEpisodeBodies({ projectId, expectedRevision: project.revision, model, mode, episodeIds });
             modal.confirm({
-                title: `确认为 ${quote.episodes} 集生成正文？`,
+                title: translate("script.generateBodyTextForCountEpisodes", { value0: quote.episodes }),
                 content: (
                     <div className="mt-3 space-y-1 text-sm">
-                        <p>将生成：{quote.episodes} 集</p>
-                        <p>预计调用：{quote.calls} 次</p>
-                        <p className="font-semibold">本次预扣：{quote.credits} 积分</p>
-                        <p>模式说明：{MODE_LABELS[mode]}</p>
-                        <p>结果去向：{MODE_DETAILS[mode]}</p>
-                        <p className="text-xs text-[var(--studio-muted)]">一集一次调用，只结算真正生成成功的分集；取消或失败时未完成部分的积分退回，续跑只重做未完成的分集。</p>
+                        <p>{translate("script.episodesToGenerateCount_346622", { value0: quote.episodes })}</p>
+                        <p>{translate("script.estimatedCallsCount_21cb78", { value0: quote.calls })}</p>
+                        <p className="font-semibold">{translate("script.creditsReservedCount_731bdd", { value0: quote.credits })}</p>
+                        <p>{translate("script.modeCount_ed9352", { value0: getModeLabels(translate)[mode] })}</p>
+                        <p>{translate("script.outputCount_e5df42", { value0: getModeDetails(translate)[mode] })}</p>
+                        <p className="text-xs text-[var(--studio-muted)]">{translate("script.eachEpisodeUsesOneCallOnlySuccessfulEpisodesAreCharged")}</p>
                     </div>
                 ),
-                okText: `确认并扣除 ${quote.credits} 积分`,
-                cancelText: "取消",
+                okText: translate("script.confirmAndChargeCountCredits", { value0: quote.credits }),
+                cancelText: translate("script.cancel"),
                 onOk: async () => {
                     const latest = useScriptStore.getState().project;
-                    if (!latest || latest.id !== projectId) throw new Error("当前项目已切换，请重新发起");
+                    if (!latest || latest.id !== projectId) throw new Error(translate("script.theCurrentProjectHasChangedStartAgain"));
                     setJob(await startEpisodeBodies({ projectId, expectedRevision: latest.revision, clientRequestId,
                         model, mode, episodeIds, expectedCredits: quote.credits, expectedFingerprint: quote.fingerprint }));
-                    message.success(`已提交，后台开始生成 ${quote.episodes} 集正文`);
+                    message.success(translate("script.submittedGeneratingBodyTextForCountEpisodesInTheBackground", { value0: quote.episodes }));
                 },
             });
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "发起批量生成失败");
+            message.error(error instanceof Error ? error.message : translate("script.couldNotStartBatchGeneration"));
         } finally {
             setJobBusy(false);
         }
@@ -141,22 +145,22 @@ export function EpisodeBodiesPanel({ onJobChange }: { onJobChange?: (job: Episod
     const retryJob = () => {
         if (!job) return;
         modal.confirm({
-            title: "从缺失分集继续？",
+            title: translate("script.resumeUnfinishedEpisodes"),
             content: (
                 <div className="mt-3 space-y-1 text-sm">
-                    <p>已生成的 {job.processedEpisodes} 集保留，只重做剩余的 {job.failedEpisodeIds.length} 集，不重复扣费。</p>
-                    <p className="text-xs text-[var(--studio-muted)]">修好失败原因后再点这里：例如改了提示词或模型配置后需要先重启后端。</p>
+                    <p>{translate("script.keepCountCompletedEpisodesAndRegenerateOnlyTheRemaining_137560", { value0: job.processedEpisodes, value1: job.failedEpisodeIds.length })}</p>
+                    <p className="text-xs text-[var(--studio-muted)]">{translate("script.resolveTheCauseOfTheFailureFirstForExampleRestart")}</p>
                 </div>
             ),
-            okText: "继续生成",
-            cancelText: "取消",
+            okText: translate("script.continueGenerating"),
+            cancelText: translate("script.cancel"),
             onOk: async () => {
                 setJobBusy(true);
                 try {
                     setJob(await retryEpisodeBodies(projectId, job.jobId));
-                    message.success("已提交，从缺失分集继续生成");
+                    message.success(translate("script.submittedResumingUnfinishedEpisodes"));
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "继续生成失败");
+                    message.error(error instanceof Error ? error.message : translate("script.couldNotResumeGeneration"));
                     throw error;
                 } finally { setJobBusy(false); }
             },
@@ -167,17 +171,17 @@ export function EpisodeBodiesPanel({ onJobChange }: { onJobChange?: (job: Episod
     const cancelJob = () => {
         if (!job) return;
         modal.confirm({
-            title: "取消批量生成？",
-            content: "已生成的正文保留，未完成分集的预扣积分退还。",
-            okText: "确认取消",
-            cancelText: "继续生成",
+            title: translate("script.cancelBatchGeneration"),
+            content: translate("script.completedBodyTextWillBeKeptReservedCreditsForUnfinished"),
+            okText: translate("script.confirmCancellation"),
+            cancelText: translate("script.continueGenerating"),
             onOk: async () => {
                 setJobBusy(true);
                 try {
                     setJob(await cancelEpisodeBodies(projectId, job.jobId));
-                    message.success("已取消，未完成部分的积分已退还");
+                    message.success(translate("script.canceledCreditsForUnfinishedWorkHaveBeenRefunded_f9127e"));
                 } catch (error) {
-                    message.error(error instanceof Error ? error.message : "取消失败");
+                    message.error(error instanceof Error ? error.message : translate("script.couldNotCancel"));
                 } finally { setJobBusy(false); }
             },
         });
@@ -185,50 +189,50 @@ export function EpisodeBodiesPanel({ onJobChange }: { onJobChange?: (job: Episod
 
     return <div className="mt-3 border-t border-dashed border-[var(--studio-line-strong)] pt-3">
         <div className="flex flex-wrap items-center gap-2">
-            <h3 className="font-semibold">批量生成分集正文</h3>
-            {job ? <Tag color={JOB_STATUS_COLORS[job.status]} className="mr-0">{JOB_STATUS_LABELS[job.status]}</Tag> : null}
+            <h3 className="font-semibold">{translate("script.batchEpisodeGeneration")}</h3>
+            {job ? <Tag color={JOB_STATUS_COLORS[job.status]} className="mr-0">{getJobStatusLabels(translate)[job.status]}</Tag> : null}
             <span className="flex-1" />
             {jobRunning
-                ? <Button size="small" danger loading={jobBusy} onClick={cancelJob}>取消任务</Button>
-                : <Button type="primary" size="small" loading={jobBusy} disabled={!episodes.length} onClick={() => void runBatch()}>{job ? "重新批量生成" : "批量生成正文"}</Button>}
+                ? <Button size="small" danger loading={jobBusy} onClick={cancelJob}>{translate("script.cancelTask")}</Button>
+                : <Button type="primary" size="small" loading={jobBusy} disabled={!episodes.length} onClick={() => void runBatch()}>{job ? translate("script.regenerateInBatch") : translate("script.generateEpisodeTextInBatch")}</Button>}
         </div>
-        <p className="mt-1 text-xs text-[var(--studio-muted)]">按已固定的分集逐集生成场次、动作、对白与旁白。集号与分集身份由全书改编固定，这里只决定生成哪几集；一次可以排队上百集，失败或取消后从未完成的分集继续。</p>
+        <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("script.generateScenesActionDialogueAndNarrationForTheFixedEpisode")}</p>
         {job ? <div className="mt-3 space-y-2">
             <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--studio-muted)]">
-                <span>已生成 {job.processedEpisodes} / {job.totalEpisodes} 集</span>
-                <span>本阶段预扣 {job.credits} 积分{job.refundedCredits ? ` · 已退 ${job.refundedCredits}` : ""}</span>
-                {job.retryCount ? <span>已续跑 {job.retryCount} 次</span> : null}
+                <span>{translate("script.generatedCountCountEpisodes_b69cb7", { value0: job.processedEpisodes, value1: job.totalEpisodes })}</span>
+                <span>{translate("script.creditsReservedForThisStageCountcount_3ba93d", { value0: job.credits, value1: job.refundedCredits ? translate("script.refundedCount", { value0: job.refundedCredits }) : "" })}</span>
+                {job.retryCount ? <span>{translate("script.resumedCountTimes_a627b9", { value0: job.retryCount })}</span> : null}
             </div>
             {jobRunning ? <Progress percent={job.totalEpisodes ? Math.min(99, Math.round(job.processedEpisodes / job.totalEpisodes * 100)) : 0} size="small" showInfo={false} strokeColor="var(--studio-primary)" /> : null}
-            {job.status === "completed" ? <Alert type="success" showIcon title={`已生成 ${job.processedEpisodes} 集正文`} description={job.mode === "draft" ? "剧本数据已刷新：这批量只生成了待审草稿，请在右侧「AI 剧本助手」的「待确认草稿」里逐集确认应用后才会写入正式剧本。" : "剧本数据已刷新：场次与正文已直接写入正式剧本，可在分集工作台查看。"} /> : null}
+            {job.status === "completed" ? <Alert type="success" showIcon title={translate("script.generatedBodyTextForCountEpisodes", { value0: job.processedEpisodes })} description={job.mode === "draft" ? translate("script.scriptDataRefreshedThisBatchProducedReviewDraftsApproveEach") : translate("script.scriptDataRefreshedScenesAndBodyTextHaveBeenAdded")} /> : null}
             {job.errorMessage ? <Alert type="error" showIcon title={job.errorMessage} /> : null}
             {job.status === "failed" || job.status === "canceled" ? <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm">还有 {job.failedEpisodeIds.length} 集未完成，已生成的会保留。</span>
+                <span className="text-sm">{translate("script.countEpisodesRemainUnfinishedCompletedEpisodesWillBeKept_cfd86b", { value0: job.failedEpisodeIds.length })}</span>
                 <span className="flex-1" />
-                {job.failedEpisodeIds.length ? <Button type="primary" size="small" loading={jobBusy} onClick={retryJob}>从缺失分集继续</Button> : null}
+                {job.failedEpisodeIds.length ? <Button type="primary" size="small" loading={jobBusy} onClick={retryJob}>{translate("script.resumeUnfinishedEpisodes_039066")}</Button> : null}
             </div> : null}
         </div> : null}
         <div className="mt-3 space-y-3 rounded-lg border border-dashed border-[var(--studio-line-strong)] p-3">
             <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-medium">生成范围</span>
-                <span className="text-xs text-[var(--studio-muted)]">已选 {episodeIds.length} / {episodes.length} 集</span>
+                <span className="text-sm font-medium">{translate("script.generationRange")}</span>
+                <span className="text-xs text-[var(--studio-muted)]">{translate("script.selectedCountCountEpisodes_638d82", { value0: episodeIds.length, value1: episodes.length })}</span>
                 <span className="flex-1" />
-                <Button size="small" type="link" className="px-0" disabled={!episodes.length} onClick={() => setEpisodeIds(episodes.map((episode) => episode.id))}>全部</Button>
-                <Button size="small" type="link" className="px-0" disabled={!episodeIds.length} onClick={() => setEpisodeIds([])}>全部不勾选</Button>
-                <Button size="small" type="link" className="px-0" disabled={!episodes.length} onClick={() => setEpisodeIds(episodes.filter((episode) => episode.completionStatus !== "complete").map((episode) => episode.id))}>只选未完成</Button>
+                <Button size="small" type="link" className="px-0" disabled={!episodes.length} onClick={() => setEpisodeIds(episodes.map((episode) => episode.id))}>{translate("script.all")}</Button>
+                <Button size="small" type="link" className="px-0" disabled={!episodeIds.length} onClick={() => setEpisodeIds([])}>{translate("script.deselectAll")}</Button>
+                <Button size="small" type="link" className="px-0" disabled={!episodes.length} onClick={() => setEpisodeIds(episodes.filter((episode) => episode.completionStatus !== "complete").map((episode) => episode.id))}>{translate("script.selectUnfinishedOnly")}</Button>
             </div>
             {episodes.length
-                ? <Select mode="multiple" className="w-full" value={episodeIds} maxTagCount="responsive" showSearch optionFilterProp="label" placeholder="选择要生成正文的分集" options={episodes.map((episode) => ({ value: episode.id, label: `第 ${episode.episodeNumber} 集 · ${episode.title || "未命名分集"}` }))} onChange={(value: string[]) => setEpisodeIds(value)} />
-                : <Alert type="warning" showIcon title="请先完成分集规划" description="全书改编确认后才会固定分集的标识与集号，之后才能批量生成正文。" />}
+                ? <Select mode="multiple" className="w-full" value={episodeIds} maxTagCount="responsive" showSearch optionFilterProp="label" placeholder={translate("script.selectEpisodesToGenerate")} options={episodes.map((episode) => ({ value: episode.id, label: translate("script.episodeCountCount", { value0: episode.episodeNumber, value1: episode.title || translate("script.untitledEpisode") }) }))} onChange={(value: string[]) => setEpisodeIds(value)} />
+                : <Alert type="warning" showIcon title={translate("script.completeTheEpisodePlanFirst")} description={translate("script.fullBookAdaptationFixesEpisodeIdentitiesAndNumbersBeforeBatch")} />}
             <div className="space-y-1">
-                <p className="text-sm font-medium">生成模式</p>
-                <Radio.Group value={mode} onChange={(event) => setMode(event.target.value)} options={[{ value: "apply", label: MODE_LABELS.apply }, { value: "draft", label: MODE_LABELS.draft }]} />
-                <p className="text-xs text-[var(--studio-muted)]">{MODE_DETAILS[mode]}</p>
+                <p className="text-sm font-medium">{translate("script.generationMode")}</p>
+                <Radio.Group value={mode} onChange={(event) => setMode(event.target.value)} options={[{ value: "apply", label: getModeLabels(translate).apply }, { value: "draft", label: getModeLabels(translate).draft }]} />
+                <p className="text-xs text-[var(--studio-muted)]">{getModeDetails(translate)[mode]}</p>
             </div>
-            <label className="block text-sm">文本模型<div className="mt-1"><ModelPicker config={config} value={model} onChange={setModel} capability="text" fullWidth onMissingConfig={() => openConfig(true, "models")} /></div></label>
+            <label className="block text-sm">{translate("script.textModel")}<div className="mt-1"><ModelPicker config={config} value={model} onChange={setModel} capability="text" fullWidth onMissingConfig={() => openConfig(true, "models")} /></div></label>
             <Alert type={unitPriceFailed ? "warning" : "info"} showIcon
-                title={`文本模型单价：${unitPriceFailed ? "读取失败，请刷新页面重试" : unitPrice === undefined ? "读取中…" : unitPrice === null ? "未配置，请到后台「剧本创作定价 · 分集正文」配置" : `${unitPrice} 积分 / 集`}`}
-                description="一集一次调用，按所选分集数量预扣；只结算真正生成成功的分集，取消或失败时未完成部分的积分退回。" />
+                title={translate("script.textModelPriceCount", { value0: unitPriceFailed ? translate("script.couldNotLoadRefreshThePageAndTryAgain") : unitPrice === undefined ? translate("script.loading") : unitPrice === null ? translate("script.notConfiguredSetThePriceUnderScriptPricingEpisodeText") : translate("script.countCreditsEpisode", { value0: unitPrice }) })}
+                description={translate("script.oneCallPerEpisodeCreditsAreReservedForTheSelected")} />
         </div>
     </div>;
 }

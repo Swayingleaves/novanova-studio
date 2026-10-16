@@ -1,5 +1,8 @@
 "use client";
 
+import { translateMessage } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { nanoid } from "nanoid";
@@ -9,24 +12,24 @@ import { Upload } from "lucide-react";
 import { uploadScriptSource } from "@/services/api/script";
 import type { ScriptContentType, ScriptSourceFileEncoding, ScriptSourceType } from "@/features/script/types";
 
-const CONTENT_TYPES: Array<{ value: ScriptContentType; label: string }> = [
-    { value: "comicDrama", label: "漫剧" },
-    { value: "liveActionShort", label: "真人短剧" },
-    { value: "animation", label: "动画" },
-    { value: "advertisement", label: "广告 / 宣传片" },
-    { value: "musicVideo", label: "音乐视频" },
-    { value: "storyShort", label: "故事短片" },
-];
+const getContentTypes = (translate = translateMessage): Array<{ value: ScriptContentType; label: string }> => ([
+    { value: "comicDrama", label: translate("script.comicDrama") },
+    { value: "liveActionShort", label: translate("script.liveActionShortDrama") },
+    { value: "animation", label: translate("script.animation") },
+    { value: "advertisement", label: translate("script.advertisementPromotionalVideo") },
+    { value: "musicVideo", label: translate("script.musicVideo") },
+    { value: "storyShort", label: translate("script.shortFilm") },
+]);
 
-const SOURCE_TYPES: Array<{ value: ScriptSourceType; label: string }> = [
-    { value: "novel", label: "小说" },
-    { value: "script", label: "剧本" },
-];
+const getSourceTypes = (translate = translateMessage): Array<{ value: ScriptSourceType; label: string }> => ([
+    { value: "novel", label: translate("script.novel") },
+    { value: "script", label: translate("script.script") },
+]);
 
-const ENCODINGS: Array<{ value: ScriptSourceFileEncoding; label: string }> = [
-    { value: "UTF-8", label: "UTF-8（默认）" },
-    { value: "GB18030", label: "GB18030（简体中文旧编码）" },
-];
+const getEncodings = (translate = translateMessage): Array<{ value: ScriptSourceFileEncoding; label: string }> => ([
+    { value: "UTF-8", label: translate("script.utf8Default") },
+    { value: "GB18030", label: translate("script.gb18030LegacySimplifiedChinese") },
+]);
 
 /** 沿用服务端单文件上传上限。 */
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -35,6 +38,7 @@ const SUPPORTED_EXTENSIONS = ["txt", "docx", "doc"];
 
 /** 上传剧本或小说原文弹窗，创建剧本项目并异步解析原文结构。 */
 export function ScriptSourceUploadModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+    const translate = useTranslation();
     const router = useRouter();
     const { message } = App.useApp();
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -69,11 +73,11 @@ export function ScriptSourceUploadModal({ open, onClose }: { open: boolean; onCl
         if (!next) return;
         const nextExtension = next.name.split(".").pop()?.toLowerCase() || "";
         if (!SUPPORTED_EXTENSIONS.includes(nextExtension)) {
-            message.error("仅支持 TXT、DOCX 和 DOC 文件");
+            message.error(translate("script.onlyTxtDocxAndDocFilesAreSupported"));
             return;
         }
         if (next.size > MAX_FILE_BYTES) {
-            message.error("上传文件超过 50 MB 上限");
+            message.error(translate("script.theFileExceedsThe50MbLimit"));
             return;
         }
         setFile(next);
@@ -83,11 +87,11 @@ export function ScriptSourceUploadModal({ open, onClose }: { open: boolean; onCl
 
     const submit = async () => {
         if (!file) {
-            message.warning("请选择要导入的文件");
+            message.warning(translate("script.selectAFileToImport"));
             return;
         }
         if (!title.trim()) {
-            message.warning("请输入项目名称");
+            message.warning(translate("script.enterAProjectName"));
             return;
         }
         setUploading(true);
@@ -100,38 +104,33 @@ export function ScriptSourceUploadModal({ open, onClose }: { open: boolean; onCl
                 encoding: isTextFile ? encoding : undefined,
                 clientRequestId: requestIdRef.current,
             });
-            message.success("原文已上传，正在解析结构与正文");
+            message.success(translate("script.sourceUploadedParsingStructureAndText"));
             reset();
             router.push(`/script/${result.projectId}?source=1`);
         } catch (error) {
-            message.error(error instanceof Error ? error.message : "原文上传失败，请重试");
+            message.error(error instanceof Error ? error.message : translate("script.couldNotUploadTheSourceTryAgain"));
         } finally {
             setUploading(false);
         }
     };
 
     return (
-        <Modal title="上传剧本 / 小说" open={open} onCancel={close} onOk={() => void submit()} confirmLoading={uploading} okText="上传并解析" cancelText="取消" width={560} destroyOnHidden>
+        <Modal title={translate("script.uploadScriptNovel")} open={open} onCancel={close} onOk={() => void submit()} confirmLoading={uploading} okText={translate("script.uploadAndParse")} cancelText={translate("script.cancel")} width={560} destroyOnHidden>
             <div className="flex flex-col gap-4 pt-2">
-                <p className="text-xs leading-5 text-[var(--studio-muted)]">上传后只保存原文与章节结构，不会生成人物、分集或正式剧本场次；结构可在工作台“原文”中人工校对。</p>
-                <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">导入类型
-                    <Select value={sourceType} options={SOURCE_TYPES} onChange={setSourceType} />
+                <p className="text-xs leading-5 text-[var(--studio-muted)]">{translate("script.uploadingSavesOnlySourceTextAndChapterStructureItDoes")}</p>
+                <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">{translate("script.importType")}<Select value={sourceType} options={getSourceTypes(translate)} onChange={setSourceType} />
                 </label>
-                <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">内容形式
-                    <Select value={contentType} options={CONTENT_TYPES} onChange={setContentType} />
+                <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">{translate("script.contentFormat")}<Select value={contentType} options={getContentTypes(translate)} onChange={setContentType} />
                 </label>
-                <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">原文件
-                    <span className="flex items-center gap-3">
-                        <Button icon={<Upload className="size-4" />} onClick={() => fileInputRef.current?.click()}>选择文件</Button>
-                        <span className="min-w-0 flex-1 truncate text-xs text-[var(--studio-muted)]">{file ? file.name : "支持 TXT、DOCX、DOC，单文件不超过 50 MB"}</span>
+                <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">{translate("script.sourceFile")}<span className="flex items-center gap-3">
+                        <Button icon={<Upload className="size-4" />} onClick={() => fileInputRef.current?.click()}>{translate("script.chooseFile")}</Button>
+                        <span className="min-w-0 flex-1 truncate text-xs text-[var(--studio-muted)]">{file ? file.name : translate("script.txtDocxOrDocUpTo50MbPerFile")}</span>
                     </span>
                     <input ref={fileInputRef} type="file" accept=".txt,.docx,.doc" className="hidden" onChange={(event) => selectFile(event.target.files?.[0])} />
                 </label>
-                {isTextFile ? <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">文本编码
-                    <Select value={encoding} options={ENCODINGS} onChange={setEncoding} />
+                {isTextFile ? <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">{translate("script.textEncoding")}<Select value={encoding} options={getEncodings(translate)} onChange={setEncoding} />
                 </label> : null}
-                <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">项目名称
-                    <Input value={title} maxLength={120} showCount onChange={(event) => setTitle(event.target.value)} placeholder="默认取文件名，可修改" />
+                <label className="flex flex-col gap-2 text-sm text-[var(--studio-text)]">{translate("script.projectName")}<Input value={title} maxLength={120} showCount onChange={(event) => setTitle(event.target.value)} placeholder={translate("script.defaultsToTheFileNameEditable")} />
                 </label>
             </div>
         </Modal>

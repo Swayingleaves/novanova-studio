@@ -1,5 +1,8 @@
 "use client";
 
+import { translateMessage } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useMemo, useState } from "react";
 import { Alert, App, Button, Empty, Radio, Space, Tag } from "antd";
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight } from "lucide-react";
@@ -8,24 +11,24 @@ import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaChangeImpact } from "../types";
 
 /** 上游来源类型的中文名，具体来源会再补上实体名称。 */
-const SOURCE_TYPE_LABELS: Record<string, string> = {
-    overview: "故事概览 / 大纲 / 分集顺序", versionRestore: "剧本版本回退", episode: "分集",
-    scene: "场次", character: "人物", world: "世界观 / 地点", asset: "视觉资产", assetVersion: "资产版本",
-};
+const getSourceTypeLabels = (translate = translateMessage): Record<string, string> => ({
+    overview: translate("comicDrama.storyOverviewOutlineEpisodeOrder"), versionRestore: translate("comicDrama.scriptVersionRestored"), episode: translate("comicDrama.episode"),
+    scene: translate("comicDrama.scene_061e0f"), character: translate("comicDrama.character"), world: translate("comicDrama.worldLocations"), asset: translate("comicDrama.visualAssets"), assetVersion: translate("comicDrama.assetVersion"),
+});
 
 /** 下游目标类型的中文名。 */
-const TARGET_TYPE_LABELS: Record<string, string> = {
-    shot: "镜头", asset: "视觉资产", promptVersion: "提示词版本", media: "生成结果", voiceTrack: "声音轨",
-};
+const getTargetTypeLabels = (translate = translateMessage): Record<string, string> => ({
+    shot: translate("comicDrama.shot_c7d192"), asset: translate("comicDrama.visualAssets"), promptVersion: translate("comicDrama.promptVersion"), media: translate("comicDrama.generationResult"), voiceTrack: translate("comicDrama.audioTrack"),
+});
 
-const MEDIA_TYPE_LABELS: Record<string, string> = { image: "图片", video: "视频", audio: "音频", composite: "合成" };
+const getMediaTypeLabels = (translate = translateMessage): Record<string, string> => ({ image: translate("comicDrama.image"), video: translate("comicDrama.video"), audio: translate("comicDrama.audio"), composite: translate("comicDrama.composition_0bb9bb") });
 
 /** 各类目标在确认更新后需要用户去做的下一步，按类型拼成一句可执行的说明。 */
-const TARGET_NEXT_STEPS: Record<string, string> = {
-    promptVersion: "到「提示词」阶段重新合成", media: "到「生成」阶段重新生成",
-    shot: "到「分镜」阶段调整镜头", asset: "到「资产」阶段重新生成资产图",
-    voiceTrack: "到「配音」阶段重新合成",
-};
+const getTargetNextSteps = (translate = translateMessage): Record<string, string> => ({
+    promptVersion: translate("comicDrama.regenerateInPrompts"), media: translate("comicDrama.regenerateInMedia"),
+    shot: translate("comicDrama.adjustTheShotInStoryboard"), asset: translate("comicDrama.regenerateAssetImagesInAssets"),
+    voiceTrack: translate("comicDrama.regenerateInSound"),
+});
 
 /** 按上游来源聚合的一组变更：一次变更会影响很多下游目标，逐条列出只会得到一长串标识。 */
 type ImpactGroup = {
@@ -41,6 +44,7 @@ type ImpactGroup = {
 
 /** 上游变更联动与影响确认阶段视图。 */
 export function StageUpdates() {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const workspace = useComicDramaStore((state) => state.workspace);
     const confirmUpdate = useComicDramaStore((state) => state.confirmUpdate);
@@ -78,47 +82,47 @@ export function StageUpdates() {
         const project = workspace.scriptProject;
         if (sourceType === "episode") {
             const episode = project.episodes.find((item) => item.id === sourceId);
-            return episode ? `第 ${episode.episodeNumber} 集《${episode.title || "未命名"}》` : "某个分集";
+            return episode ? translate("comicDrama.episodeCountCount_6eae1a", { value0: episode.episodeNumber, value1: episode.title || translate("comicDrama.untitled_355630") }) : translate("comicDrama.anEpisode");
         }
         if (sourceType === "character") {
             const character = project.characters.find((item) => item.id === sourceId);
-            return character ? `人物「${character.name}」` : "人物设定";
+            return character ? translate("comicDrama.characterCount", { value0: character.name }) : translate("comicDrama.characters_85ae09");
         }
         if (sourceType === "world") {
             const location = project.locations.find((item) => item.id === sourceId);
-            return location ? `地点「${location.name}」` : "世界观 / 地点";
+            return location ? translate("comicDrama.locationCount", { value0: location.name }) : translate("comicDrama.worldLocations");
         }
-        return SOURCE_TYPE_LABELS[sourceType] || sourceType;
+        return getSourceTypeLabels(translate)[sourceType] || sourceType;
     };
 
     /** 下游目标的可读名称，解析不到实体时退回类型名。 */
     const targetLabel = (impact: ComicDramaChangeImpact) => {
         if (impact.targetType === "shot") {
             const shot = workspace.shots.find((item) => item.id === impact.targetId);
-            return shot ? `分镜 #${shot.shotNumber}` : "某个镜头";
+            return shot ? translate("comicDrama.storyboardCount", { value0: shot.shotNumber }) : translate("comicDrama.aShot");
         }
         if (impact.targetType === "asset") {
             const asset = workspace.assets.find((item) => item.id === impact.targetId);
-            return asset ? `资产「${asset.name || asset.assetType}」` : "某个资产";
+            return asset ? translate("comicDrama.assetCount", { value0: asset.name || asset.assetType }) : translate("comicDrama.anAsset");
         }
         if (impact.targetType === "promptVersion") {
             const version = workspace.promptVersions.find((item) => item.id === impact.targetId);
-            return version ? `提示词 v${version.versionNumber}` : "某个提示词版本";
+            return version ? translate("comicDrama.promptVCount", { value0: version.versionNumber }) : translate("comicDrama.aPromptVersion");
         }
         if (impact.targetType === "media") {
             const media = workspace.media.find((item) => item.id === impact.targetId);
-            return media ? `${MEDIA_TYPE_LABELS[media.mediaType] || "媒体"}结果` : "某个生成结果";
+            return media ? translate("comicDrama.countResult", { value0: getMediaTypeLabels(translate)[media.mediaType] || translate("comicDrama.media") }) : translate("comicDrama.aGeneratedResult");
         }
-        return TARGET_TYPE_LABELS[impact.targetType] || impact.targetType;
+        return getTargetTypeLabels(translate)[impact.targetType] || impact.targetType;
     };
 
     /** 影响统计，例如「37 个生成结果 · 34 个提示词版本」。 */
     const impactSummary = (counts: Record<string, number>) => Object.entries(counts)
-        .map(([type, count]) => `${count} 个${TARGET_TYPE_LABELS[type] || type}`).join(" · ");
+        .map(([type, count]) => translate("comicDrama.countCount", { value0: count, value1: getTargetTypeLabels(translate)[type] || type })).join(" · ");
 
     /** 确认更新后用户实际要去做的动作，带数量。 */
     const nextStepSummary = (counts: Record<string, number>) => Object.entries(counts)
-        .map(([type, count]) => TARGET_NEXT_STEPS[type] ? `${TARGET_NEXT_STEPS[type]}（${count} 个）` : null)
+        .map(([type, count]) => getTargetNextSteps(translate)[type] ? translate("comicDrama.countCount_88af18", { value0: getTargetNextSteps(translate)[type], value1: count }) : null)
         .filter(Boolean).join("；");
 
     const handleResolve = async (group: ImpactGroup, resolution: "keepOld" | "update") => {
@@ -127,8 +131,8 @@ export function StageUpdates() {
             // 一次上游变更会为每个受影响目标各插一条影响项，这里按来源整组处理，不必逐条点击。
             await confirmUpdate("all", null, resolution, { sourceType: group.sourceType, sourceId: group.sourceId });
             message.success(resolution === "keepOld"
-                ? "已确认保留旧结果，不触发重新生成"
-                : "已标记需要更新，按下面的说明到对应阶段重新制作即可");
+                ? translate("comicDrama.previousResultsRetainedNoRegenerationTriggered")
+                : translate("comicDrama.markedForUpdateFollowTheInstructionsBelowInTheCorresponding"));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
         } finally {
@@ -139,37 +143,36 @@ export function StageUpdates() {
     return (
         <div className="flex flex-col gap-6">
             <header className="flex flex-col gap-2 border-b border-[var(--studio-line)] pb-4">
-                <h2 className="text-xl font-semibold text-[var(--studio-ink)]">上游变更联动管理</h2>
+                <h2 className="text-xl font-semibold text-[var(--studio-ink)]">{translate("comicDrama.upstreamChangeManagement")}</h2>
                 <p className="mt-1 text-sm text-[var(--studio-muted)]">
-                    当共享剧本、人物设定或场景描述修改后，系统精准追踪受影响的下游镜头与资产，并保留全部既有生成成果。未经您的明确确认，绝不自动覆盖或重复扣费。
-                </p>
+                    {translate("comicDrama.trackDownstreamShotsAndAssetsAffectedBySharedScriptCharacter")}</p>
             </header>
 
             {pendingImpacts.length > 0 ? (
                 <Alert
                     type="warning"
                     showIcon
-                    title={`检测到 ${groups.length} 次上游变更，共影响 ${pendingImpacts.length} 个下游内容`}
-                    description="“需要更新”只表示剧本来源变了，不代表历史生成结果失效。您可以整组「保留旧结果」继续用现有内容，或「确认更新」后按新剧本重新制作。"
+                    title={translate("comicDrama.detectedCountUpstreamChangesAffectingCountDownstreamItems", { value0: groups.length, value1: pendingImpacts.length })}
+                    description={translate("comicDrama.needsUpdateMeansTheSourceScriptChangedExistingResultsRemain")}
                 />
             ) : (
                 <Alert
                     type="success"
                     showIcon
-                    title="当前下游生产内容与上游剧本保持完全同步"
-                    description="所有镜头、提示词与视觉资产均为最新状态，暂无待确认的变更影响项。"
+                    title={translate("comicDrama.productionContentIsFullySyncedWithTheSourceScript")}
+                    description={translate("comicDrama.allShotsPromptsAndVisualAssetsAreCurrentNoChange")}
                 />
             )}
 
             <div className="flex items-center justify-between">
                 <Radio.Group value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} buttonStyle="solid">
-                    <Radio.Button value="pending">待处理影响 ({pendingImpacts.length})</Radio.Button>
-                    <Radio.Button value="history">已处理历史 ({impacts.length - pendingImpacts.length})</Radio.Button>
+                    <Radio.Button value="pending">{translate("comicDrama.pendingImpactsCount_43a840", { value0: pendingImpacts.length })}</Radio.Button>
+                    <Radio.Button value="history">{translate("comicDrama.historyCount_9c7085", { value0: impacts.length - pendingImpacts.length })}</Radio.Button>
                 </Radio.Group>
             </div>
 
             {groups.length === 0 ? (
-                <Empty description={statusFilter === "pending" ? "暂无待处理的上游变更" : "暂无历史处理记录"} />
+                <Empty description={statusFilter === "pending" ? translate("comicDrama.noPendingUpstreamChanges") : translate("comicDrama.noProcessedChangesYet")} />
             ) : (
                 <div className="grid gap-3">
                     {groups.map((group) => {
@@ -190,18 +193,14 @@ export function StageUpdates() {
                                         <div className="flex flex-col gap-1">
                                             <div className="flex flex-wrap items-center gap-2">
                                                 <Tag color={isPending ? "warning" : "default"}>
-                                                    {isPending ? "待处理" : group.status === "accepted" ? "已确认更新" : "已保留旧成果"}
+                                                    {isPending ? translate("comicDrama.pending") : group.status === "accepted" ? translate("comicDrama.updateConfirmed") : translate("comicDrama.previousResultsRetained")}
                                                 </Tag>
-                                                <span className="font-semibold text-[var(--studio-ink)]">{group.summary || "上游设定发生变动"}</span>
+                                                <span className="font-semibold text-[var(--studio-ink)]">{group.summary || translate("comicDrama.upstreamSettingsChanged")}</span>
                                             </div>
-                                            <p className="text-xs text-[var(--studio-muted)]">
-                                                来源：{sourceLabel(group.sourceType, group.sourceId)}
-                                            </p>
-                                            <p className="text-xs text-[var(--studio-muted)]">
-                                                影响：{impactSummary(group.counts)}
-                                            </p>
+                                            <p className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.sourceCount_e567d9", { value0: sourceLabel(group.sourceType, group.sourceId) })}</p>
+                                            <p className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.impactCount_20b1aa", { value0: impactSummary(group.counts) })}</p>
                                             {isPending && nextSteps ? (
-                                                <p className="text-xs text-[var(--studio-muted)]">确认更新后：{nextSteps}</p>
+                                                <p className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.afterConfirmingUpdateCount_343d7e", { value0: nextSteps })}</p>
                                             ) : null}
                                         </div>
                                     </div>
@@ -209,15 +208,13 @@ export function StageUpdates() {
                                     {isPending ? (
                                         <Space wrap>
                                             <Button size="small" type="link" className="px-0" onClick={() => setExpandedKey(expanded ? null : group.key)}>
-                                                {expanded ? "收起明细" : `查看明细 (${group.impacts.length})`}
+                                                {expanded ? translate("comicDrama.hideDetails") : translate("comicDrama.viewDetailsCount", { value0: group.impacts.length })}
                                             </Button>
-                                            <Button size="small" loading={isLoading} onClick={() => void handleResolve(group, "keepOld")}>保留旧结果</Button>
-                                            <Button size="small" type="primary" loading={isLoading} onClick={() => void handleResolve(group, "update")}>确认更新</Button>
+                                            <Button size="small" loading={isLoading} onClick={() => void handleResolve(group, "keepOld")}>{translate("comicDrama.keepPreviousResults")}</Button>
+                                            <Button size="small" type="primary" loading={isLoading} onClick={() => void handleResolve(group, "update")}>{translate("comicDrama.confirmUpdate")}</Button>
                                         </Space>
                                     ) : (
-                                        <span className="text-xs text-[var(--studio-faint)]">
-                                            处理时间：{new Date(group.latestAt || "").toLocaleString("zh-CN")}
-                                        </span>
+                                        <span className="text-xs text-[var(--studio-faint)]">{translate("comicDrama.processedAtCount_78d6c6", { value0: new Date(group.latestAt || "").toLocaleString(translate.locale) })}</span>
                                     )}
                                 </div>
 
@@ -229,7 +226,7 @@ export function StageUpdates() {
                                                     ? <ChevronRight className="size-3.5" />
                                                     : <ChevronDown className="size-3.5" />}
                                                 <span className="text-[var(--studio-text)]">{targetLabel(impact)}</span>
-                                                <span>· {TARGET_TYPE_LABELS[impact.targetType] || impact.targetType}</span>
+                                                <span>· {getTargetTypeLabels(translate)[impact.targetType] || impact.targetType}</span>
                                             </div>
                                         ))}
                                     </div>

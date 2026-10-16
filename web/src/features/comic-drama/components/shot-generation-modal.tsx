@@ -1,5 +1,9 @@
 "use client";
 
+import { productionParameterLabel } from "../lib/production-labels";
+
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useEffect, useMemo, useState } from "react";
 import { App, Button, Checkbox, Modal, Space, Spin } from "antd";
 import { Coins, Sparkles } from "lucide-react";
@@ -32,6 +36,7 @@ type ShotGenerationModalProps = {
  * 传入多个镜头时按同一套参数批量提交，供分镜板右上角「批量媒体生成」使用。
  */
 export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationModalProps) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const config = useEffectiveConfig();
     const workspace = useComicDramaStore((state) => state.workspace);
@@ -157,17 +162,17 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
 
     const handleCreate = async () => {
         if (!model) {
-            message.warning("请先选择生成模型");
+            message.warning(translate("comicDrama.selectAGenerationModelFirst"));
             return;
         }
         if (targetIds.length === 0) {
-            message.warning("请至少勾选一个镜头");
+            message.warning(translate("comicDrama.selectAtLeastOneShot"));
             return;
         }
         setGenerating(true);
         try {
             const res = await createGenerationTask({ targetType: "shot", targetIds, model, settings: taskSettings });
-            message.success(isBatch ? `已创建 ${res.taskCount} 个视频生成任务，分镜板将自动同步生成进度` : "已创建视频生成任务，分镜板将自动同步生成进度");
+            message.success(isBatch ? translate("comicDrama.createdCountVideoGenerationTasksStoryboardProgressWillUpdateAutomatically", { value0: res.taskCount }) : translate("comicDrama.videoGenerationTaskCreatedStoryboardProgressWillUpdateAutomatically"));
             onClose();
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
@@ -184,7 +189,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
 
     return (
         <Modal
-            title={isBatch ? `批量生成镜头视频（已选 ${targetShots.length}/${shots.length}）` : `生成镜头视频 #${String(activeShot?.shotNumber || 0).padStart(2, "0")}`}
+            title={isBatch ? translate("comicDrama.batchVideoGenerationCountCountSelected", { value0: targetShots.length, value1: shots.length }) : translate("comicDrama.generateVideoForShotCount", { value0: String(activeShot?.shotNumber || 0).padStart(2, "0") })}
             open={open}
             onCancel={onClose}
             footer={null}
@@ -201,17 +206,17 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                                 checked={allSelected}
                                 onChange={(e) => setSelectedIds(e.target.checked ? shots.map((shot) => shot.id) : [])}
                             >
-                                <span className="text-xs font-medium text-[var(--studio-ink)]">选择要生成的镜头</span>
+                                <span className="text-xs font-medium text-[var(--studio-ink)]">{translate("comicDrama.selectShotsToGenerate")}</span>
                             </Checkbox>
                         ) : (
-                            <span className="text-xs font-medium text-[var(--studio-ink)]">镜头提示词</span>
+                            <span className="text-xs font-medium text-[var(--studio-ink)]">{translate("comicDrama.shotPrompt")}</span>
                         )}
                         <span className="text-[10px] text-[var(--studio-muted)]">
                             {isBatch
-                                ? `已选 ${targetShots.length} 个 · 已采用提示词 ${shotsWithPromptCount}/${targetShots.length}`
+                                ? translate("comicDrama.countSelectedAdoptedPromptsCountCount", { value0: targetShots.length, value1: shotsWithPromptCount, value2: targetShots.length })
                                 : finalVideoPrompt
-                                    ? `已采用 v${finalVideoPrompt.versionNumber}`
-                                    : "尚未采用最终提示词"}
+                                    ? translate("comicDrama.adoptedVCount", { value0: finalVideoPrompt.versionNumber })
+                                    : translate("comicDrama.noFinalPromptAdoptedYet")}
                         </span>
                     </div>
 
@@ -248,16 +253,16 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                                                         e.target.checked ? [...current, shot.id] : current.filter((id) => id !== shot.id)
                                                     )
                                                 }
-                                                aria-label={`选择镜头 #${shot.shotNumber}`}
+                                                aria-label={translate("comicDrama.selectShotCount", { value0: shot.shotNumber })}
                                             />
                                         )}
                                         <span className="font-mono text-xs font-semibold text-[var(--studio-ink)]">#{shot.shotNumber}</span>
-                                        <span className="text-[10px] text-[var(--studio-muted)]">{shot.shotSize || "未定景别"}</span>
+                                        <span className="text-[10px] text-[var(--studio-muted)]">{productionParameterLabel(shot.shotSize || "", translate) || translate("comicDrama.shotSizeNotSet")}</span>
                                         <span className="text-[10px] text-[var(--studio-muted)]">{shot.durationSeconds}s</span>
                                         {shotPrompt ? (
-                                            <span className="ml-auto text-[10px] text-[var(--studio-muted)]">提示词 v{shotPrompt.versionNumber}</span>
+                                            <span className="ml-auto text-[10px] text-[var(--studio-muted)]">{translate("comicDrama.promptVcount_1b1160", { value0: shotPrompt.versionNumber })}</span>
                                         ) : (
-                                            <span className="ml-auto text-[10px] text-amber-500">缺最终提示词</span>
+                                            <span className="ml-auto text-[10px] text-amber-500">{translate("comicDrama.missingFinalPrompt")}</span>
                                         )}
                                     </div>
                                     {/* 正文完整展示，过长时卡片内独立滚动；阻止冒泡，避免选中复制提示词时误切换勾选 */}
@@ -265,7 +270,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                                         onClick={(e) => e.stopPropagation()}
                                         className="mt-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words pr-1 text-xs leading-5 text-[var(--studio-text)]"
                                     >
-                                        {shotPrompt?.prompt || shot.visualDescription || "暂无提示词与画面描述"}
+                                        {shotPrompt?.prompt || shot.visualDescription || translate("comicDrama.noPromptOrVisualDescription")}
                                     </div>
                                 </div>
                             );
@@ -276,7 +281,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                 {/* 右：生成配置 */}
                 <div className="flex w-[420px] shrink-0 flex-col gap-4 border-l border-[var(--studio-line)] pl-4">
                     <div>
-                        <label className="text-xs font-medium text-[var(--studio-muted)]">生成模型</label>
+                        <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.generationModel")}</label>
                         <div className="mt-1">
                             <ModelPicker
                                 config={config}
@@ -316,10 +321,10 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
 
                     <p className="text-xs text-[var(--studio-muted)]">
                         {isBatch
-                            ? `已选 ${targetShots.length} 个镜头：${shotsWithReferenceCount} 个已有参考图（按图生视频），${targetShots.length - shotsWithReferenceCount} 个暂无参考图`
+                            ? translate("comicDrama.countShotsSelectedCountWithReferenceImagesForImageTo", { value0: targetShots.length, value1: shotsWithReferenceCount, value2: targetShots.length - shotsWithReferenceCount })
                             : referenceCount > 0
-                                ? `将使用 ${referenceCount} 张已生成图片作为参考（图生视频）`
-                                : "当前镜头暂无参考图，将按提示词文生视频"}
+                                ? translate("comicDrama.useCountGeneratedImagesAsReferencesImageToVideo", { value0: referenceCount })
+                                : translate("comicDrama.noReferenceImageForThisShotItWillUseText")}
                     </p>
 
                     <div className="mt-auto flex flex-col gap-3 border-t border-[var(--studio-line)] pt-3">
@@ -327,28 +332,26 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                         <div className="flex min-h-[52px] items-center justify-between gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2">
                             <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--studio-muted)]">
                                 <Coins className="size-4 text-amber-500" />
-                                预估总价
-                            </span>
+                                {translate("comicDrama.estimatedTotal")}</span>
                             {estimating ? (
                                 <span className="flex items-center gap-2 text-xs text-[var(--studio-muted)]">
                                     <Spin size="small" />
-                                    计算中…
-                                </span>
+                                    {translate("comicDrama.calculating")}</span>
                             ) : estimatedCredits !== null ? (
                                 <span className="text-xl font-semibold leading-none text-amber-500">
                                     {estimatedCredits}
-                                    <span className="ml-1 text-xs font-normal">积分</span>
+                                    <span className="ml-1 text-xs font-normal">{translate("comicDrama.credits")}</span>
                                 </span>
                             ) : (
                                 <span className="text-xs text-[var(--studio-muted)]">
-                                    {targetIds.length === 0 ? "未选择镜头" : "估算失败"}
+                                    {targetIds.length === 0 ? translate("comicDrama.noShotsSelected") : translate("comicDrama.estimateFailed")}
                                 </span>
                             )}
                         </div>
 
                         <div className="flex items-center justify-end">
                             <Space>
-                                <Button onClick={onClose}>取消</Button>
+                                <Button onClick={onClose}>{translate("comicDrama.cancel")}</Button>
                                 <Button
                                     type="primary"
                                     loading={generating}
@@ -356,7 +359,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                                     icon={<Sparkles className="size-4" />}
                                     onClick={handleCreate}
                                 >
-                                    {isBatch ? `确认批量生成（${targetShots.length}）` : "确认生成"}
+                                    {isBatch ? translate("comicDrama.confirmBatchGenerationCount", { value0: targetShots.length }) : translate("comicDrama.confirmGeneration")}
                                 </Button>
                             </Space>
                         </div>

@@ -1,21 +1,23 @@
-const SECTION_LABELS: Record<string, string> = {
-    overview: "故事概览",
-    outlineSections: "故事大纲",
-    storyEvents: "关键事件",
-    characters: "人物设定",
-    characterRelations: "人物关系",
-    worldSetting: "世界观",
-    worldItems: "世界规则",
-    locations: "场景地点",
-    episodes: "分集规划",
-    episodeDetails: "分集正文",
-};
+import { translateMessage } from "@/features/locale/translate";
+
+const getSectionLabels = (translate = translateMessage): Record<string, string> => ({
+    overview: translate("script.storyOverview"),
+    outlineSections: translate("script.storyOutline"),
+    storyEvents: translate("script.keyEvents"),
+    characters: translate("script.characters"),
+    characterRelations: translate("script.characterRelationships"),
+    worldSetting: translate("script.world"),
+    worldItems: translate("script.worldRules"),
+    locations: translate("script.sceneLocations"),
+    episodes: translate("script.episodePlanning"),
+    episodeDetails: translate("script.episodeBodyText"),
+});
 
 /** 比较版本快照与当前项目，返回发生结构变化的业务区块。 */
 export function diffScriptVersion(snapshotData: Record<string, unknown>, currentProject: Record<string, unknown>,
-                                  currentEpisodeDetails?: unknown[]) {
+                                  currentEpisodeDetails?: unknown[], translate = translateMessage) {
     const snapshotProject = isRecord(snapshotData.project) ? snapshotData.project : {};
-    return Object.entries(SECTION_LABELS).flatMap(([key, label]) => {
+    return Object.entries(getSectionLabels(translate)).flatMap(([key, label]) => {
         const before = key === "episodeDetails" ? snapshotData.episodeDetails : snapshotProject[key];
         const after = key === "episodeDetails" ? currentEpisodeDetails : currentProject[key];
         if (key === "episodeDetails" && currentEpisodeDetails === undefined) return [];

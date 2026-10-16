@@ -1,5 +1,9 @@
 "use client";
 
+import { productionParameterLabel } from "../lib/production-labels";
+
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useEffect, useState } from "react";
 import { Alert, App, Button, Modal, Spin } from "antd";
 import { AlertTriangle, Trash2 } from "lucide-react";
@@ -16,6 +20,7 @@ type ShotDeleteImpactModalProps = {
 
 /** 镜头删除前影响预检与二次确认弹窗。 */
 export function ShotDeleteImpactModal({ shot, open, onClose }: ShotDeleteImpactModalProps) {
+    const translate = useTranslation();
     const { message } = App.useApp();
     const workspace = useComicDramaStore((state) => state.workspace);
     const deleteShot = useComicDramaStore((state) => state.deleteShot);
@@ -36,7 +41,7 @@ export function ShotDeleteImpactModal({ shot, open, onClose }: ShotDeleteImpactM
             getComicDramaShotDeleteImpact(workspace.projectId, shot.id)
                 .then(setImpact)
                 .catch((err) => {
-                    message.error(err instanceof Error ? err.message : "获取删除影响失败");
+                    message.error(err instanceof Error ? err.message : translate("comicDrama.couldNotCheckDeletionImpact"));
                 })
                 .finally(() => setLoading(false));
         }
@@ -48,7 +53,7 @@ export function ShotDeleteImpactModal({ shot, open, onClose }: ShotDeleteImpactM
         setDeleting(true);
         try {
             await deleteShot(shot.id, true);
-            message.success(`镜头 #${shot.shotNumber} 已删除`);
+            message.success(translate("comicDrama.shotCountDeleted", { value0: shot.shotNumber }));
             onClose();
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
@@ -62,47 +67,43 @@ export function ShotDeleteImpactModal({ shot, open, onClose }: ShotDeleteImpactM
             title={
                 <div className="flex items-center gap-2 text-rose-500">
                     <AlertTriangle className="size-5" />
-                    <span>确认删除镜头 #{shot.shotNumber}？</span>
+                    <span>{translate("comicDrama.deleteShotCount_b2c3d2", { value0: shot.shotNumber })}</span>
                 </div>
             }
             open={open}
             onCancel={onClose}
             footer={[
                 <Button key="cancel" onClick={onClose}>
-                    取消
-                </Button>,
+                    {translate("comicDrama.cancel")}</Button>,
                 <Button key="delete" danger type="primary" loading={deleting} onClick={handleDelete}>
-                    确认删除
-                </Button>,
+                    {translate("comicDrama.confirmDelete")}</Button>,
             ]}
         >
             <div className="flex flex-col gap-4 py-2">
                 <div className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-3 text-sm">
-                    <p className="font-medium text-[var(--studio-ink)]">
-                        镜号 #{shot.shotNumber} · 景别：{shot.shotSize || "未设"} · 时长：{shot.durationSeconds}s
-                    </p>
+                    <p className="font-medium text-[var(--studio-ink)]">{translate("comicDrama.shotCountSizeCountDurationCounts_fdbaa8", { value0: shot.shotNumber, value1: productionParameterLabel(shot.shotSize || "", translate) || translate("comicDrama.notSet"), value2: shot.durationSeconds })}</p>
                     <p className="mt-1 text-xs text-[var(--studio-muted)]">
-                        {shot.visualDescription || "暂无画面描述"}
+                        {shot.visualDescription || translate("comicDrama.noVisualDescription")}
                     </p>
                 </div>
 
                 {loading ? (
                     <div className="flex items-center justify-center py-4">
-                        <Spin description="正在预检受影响媒体..." />
+                        <Spin description={translate("comicDrama.checkingAffectedMedia")} />
                     </div>
                 ) : impact ? (
                     impact.affectedMediaCount > 0 ? (
                         <Alert
                             type="warning"
                             showIcon
-                            title={`注意：该镜头关联了 ${impact.affectedMediaCount} 个已生成的图片或视频素材`}
-                            description="删除镜头将同时级联删除对应的提示词版本、绑定关系及该镜头专属的媒体记录。操作不可逆，请谨慎确认。"
+                            title={translate("comicDrama.thisShotHasCountGeneratedImagesOrVideos", { value0: impact.affectedMediaCount })}
+                            description={translate("comicDrama.deletingTheShotAlsoDeletesItsPromptVersionsBindingsAnd")}
                         />
                     ) : (
                         <Alert
                             type="info"
                             showIcon
-                            title="该镜头尚未生成媒体素材，删除不会损失生成成果。"
+                            title={translate("comicDrama.thisShotHasNoGeneratedMediaSoNoGeneratedResults")}
                         />
                     )
                 ) : null}

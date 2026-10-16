@@ -1,5 +1,7 @@
 "use client";
 
+import { translateMessage as translate } from "@/features/locale/translate";
+
 import { nanoid } from "nanoid";
 import { create } from "zustand";
 
@@ -139,7 +141,7 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
             }
         } catch (error) {
             if (loadGeneration !== projectListLoadGeneration) return;
-            const message = error instanceof Error ? error.message : "加载剧本项目失败";
+            const message = error instanceof Error ? error.message : translate("script.couldNotLoadScriptProjects");
             set({ loading: false, error: error instanceof ServerApiError && error.status === 403 ? `403：${message}` : message });
         }
     },
@@ -153,7 +155,7 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
             if (loadGeneration === projectLoadGeneration) set({ project, loading: false });
         } catch (error) {
             if (loadGeneration === projectLoadGeneration) {
-                set({ loading: false, error: error instanceof Error ? error.message : "加载剧本失败" });
+                set({ loading: false, error: error instanceof Error ? error.message : translate("script.couldNotLoadTheScript") });
                 throw error;
             }
         }
@@ -172,13 +174,13 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
         const cached = get().episodes[episodeId];
         if (cached) return cached;
         const projectId = get().project?.id;
-        if (!projectId) throw new Error("剧本项目尚未加载");
+        if (!projectId) throw new Error(translate("script.theScriptProjectIsNotLoadedYet"));
         const loadGeneration = projectLoadGeneration;
         const requestKey = `${loadGeneration}:${episodeId}`;
         const pendingRequest = episodeLoadRequests.get(requestKey);
         if (pendingRequest) return pendingRequest;
         const request = getScriptEpisode(projectId, episodeId).then((detail) => {
-            if (projectLoadGeneration !== loadGeneration || get().project?.id !== projectId) throw new Error("剧本项目已经切换，请重新打开分集");
+            if (projectLoadGeneration !== loadGeneration || get().project?.id !== projectId) throw new Error(translate("script.theScriptProjectHasChangedReopenTheEpisode"));
             set((state) => ({ episodes: { ...state.episodes, [episodeId]: detail } }));
             return detail;
         }).finally(() => { episodeLoadRequests.delete(requestKey); });
@@ -196,8 +198,8 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
             if (get().project?.id === projectId) set({ drafts, versions, error: "" });
         } catch (error) {
             if (get().project?.id === projectId) {
-                const message = error instanceof Error ? error.message : "未知错误";
-                set({ error: `剧本辅助数据加载失败：${message}` });
+                const message = error instanceof Error ? error.message : translate("script.unknownError");
+                set({ error: translate("script.couldNotLoadSupportingScriptDataCount", { value0: message }) });
             }
             throw error;
         }
@@ -247,7 +249,7 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
         const project = get().project;
         if (!project || !characterIds.length) return;
         if (get().saveStatus !== "saved" && get().saveStatus !== "idle") {
-            throw new Error("请等待当前修改保存完成后再删除人物");
+            throw new Error(translate("script.waitUntilChangesAreSavedBeforeDeletingCharacters"));
         }
         const removing = new Set(characterIds);
         const characters = project.characters.filter((character) => !removing.has(character.id))
@@ -261,7 +263,7 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
         try {
             await get().reloadProject();
         } catch {
-            throw new Error("人物已删除，但重新加载项目失败，请刷新页面查看最新内容");
+            throw new Error(translate("script.charactersDeletedButTheProjectCouldNotBeReloadedRefresh"));
         }
     },
     updateWorld: (worldSetting, worldItems, locations) => {
@@ -280,7 +282,7 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
         const episodeNumber = project.episodes.length + 1;
         const id = nanoid();
         get().updateEpisode({
-            episode: { id, episodeNumber, title: `第 ${episodeNumber} 集`, summary: "", keyEvents: "", mainConflict: "", climax: "", endingHook: "", targetDurationSeconds: 0, completionStatus: "planning", sortOrder: project.episodes.length },
+            episode: { id, episodeNumber, title: translate("script.episodeCount", { value0: episodeNumber }), summary: "", keyEvents: "", mainConflict: "", climax: "", endingHook: "", targetDurationSeconds: 0, completionStatus: "planning", sortOrder: project.episodes.length },
             scenes: [],
         });
         return id;
@@ -335,7 +337,7 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
             // 本地新建、尚未落库：直接丢掉本地数据和待保存任务，不必等服务端。保存任务已经开跑时才回退到等待提示。
             if (!saveScheduler.cancel(`episode:${episodeId}`)) {
                 localOnlyEpisodeIds.add(episodeId);
-                throw new Error("请等待当前修改保存完成后再删除分集");
+                throw new Error(translate("script.waitUntilChangesAreSavedBeforeDeletingAnEpisode"));
             }
             const remaining = project.episodes.filter((episode) => episode.id !== episodeId);
             if (remaining.length === project.episodes.length) return;
@@ -354,14 +356,14 @@ export const useScriptStore = create<ScriptStore>()((set, get) => ({
             return;
         }
         if (get().saveStatus !== "saved" && get().saveStatus !== "idle") {
-            throw new Error("请等待当前修改保存完成后再删除分集");
+            throw new Error(translate("script.waitUntilChangesAreSavedBeforeDeletingAnEpisode"));
         }
         const result = await deleteScriptEpisode(project.id, project.revision, episodeId);
         applyMutation(project.id, result);
         try {
             await get().reloadProject();
         } catch {
-            throw new Error("分集已删除，但重新加载项目失败，请刷新页面查看最新内容");
+            throw new Error(translate("script.episodeDeletedButTheProjectCouldNotBeReloadedRefresh"));
         }
     },
     setAiTarget: (aiTarget) => set({ aiTarget }),

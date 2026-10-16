@@ -1,5 +1,8 @@
 "use client";
 
+import { translateMessage } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Alert, App, Badge, Button, Modal, Progress, Spin, Tag } from "antd";
@@ -37,32 +40,32 @@ import { StageSound } from "./stage-sound";
 import { StageStoryboard } from "./stage-storyboard";
 import { StageUpdates } from "./stage-updates";
 
-const STAGE_NAV_ITEMS: Array<{
+const getStageNavItems = (translate = translateMessage): Array<{
     key: ComicDramaStage;
     label: string;
     icon: typeof Clapperboard;
     badgeKey?: "pendingUpdateCount";
     /** 有值的项在菜单里显示步骤序号，用于指示推荐操作顺序。 */
     order?: number;
-}> = [
-    { key: "readiness", label: "生产准备", icon: CheckCircle2, order: 1 },
-    { key: "settings", label: "生产设置", icon: Settings, order: 2 },
-    { key: "shots", label: "镜头清单", icon: Clapperboard, order: 3 },
-    { key: "storyboard", label: "视觉分镜板", icon: LayoutGrid, order: 4 },
-    { key: "assets", label: "视觉资产", icon: Palette },
-    { key: "sound", label: "声音对白", icon: Volume2 },
-    { key: "canvas", label: "画布联动", icon: SendToBack },
-    { key: "updates", label: "待更新项", icon: History, badgeKey: "pendingUpdateCount" },
-];
+}> => ([
+    { key: "readiness", label: translate("comicDrama.productionReadiness"), icon: CheckCircle2, order: 1 },
+    { key: "settings", label: translate("comicDrama.productionSettings"), icon: Settings, order: 2 },
+    { key: "shots", label: translate("comicDrama.shotList"), icon: Clapperboard, order: 3 },
+    { key: "storyboard", label: translate("comicDrama.visualStoryboard"), icon: LayoutGrid, order: 4 },
+    { key: "assets", label: translate("comicDrama.visualAssets"), icon: Palette },
+    { key: "sound", label: translate("comicDrama.soundAndDialogue"), icon: Volume2 },
+    { key: "canvas", label: translate("comicDrama.canvasIntegration"), icon: SendToBack },
+    { key: "updates", label: translate("comicDrama.pendingUpdates_7c9d22"), icon: History, badgeKey: "pendingUpdateCount" },
+]);
 
-const PROJECT_TYPE_LABELS: Record<string, string> = {
-    comicDrama: "漫剧",
-    liveActionShort: "真人短剧",
-    animation: "动画",
-    advertisement: "广告故事",
-    musicVideo: "音乐视频",
-    storyShort: "故事短片",
-};
+const getProjectTypeLabels = (translate = translateMessage): Record<string, string> => ({
+    comicDrama: translate("comicDrama.comicDrama"),
+    liveActionShort: translate("comicDrama.liveActionShortDrama"),
+    animation: translate("comicDrama.animation"),
+    advertisement: translate("comicDrama.advertisingStory"),
+    musicVideo: translate("comicDrama.musicVideo"),
+    storyShort: translate("comicDrama.shortFilm"),
+});
 
 type ComicDramaWorkspaceProps = {
     projectId: string;
@@ -71,6 +74,7 @@ type ComicDramaWorkspaceProps = {
 
 /** 漫剧生产工作台主容器。 */
 export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWorkspaceProps) {
+    const translate = useTranslation();
     const router = useRouter();
     const { message } = App.useApp();
     const workspace = useComicDramaStore((state) => state.workspace);
@@ -118,7 +122,7 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
 
     const saveAndLeave = async () => {
         if (!await savePendingTimelineChanges()) {
-            message.error(useComicDramaStore.getState().timelineSaveError || "仍有待保存的时间轴修改");
+            message.error(useComicDramaStore.getState().timelineSaveError || translate("comicDrama.thereAreUnsavedTimelineChanges"));
             return;
         }
         finishLeave(false);
@@ -164,7 +168,7 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
     if (loading && !workspace) {
         return (
             <main className="studio-page flex h-full items-center justify-center">
-                <Spin size="large" description="正在加载漫剧生产工作台..." />
+                <Spin size="large" description={translate("comicDrama.loadingTheComicDramaWorkspace")} />
             </main>
         );
     }
@@ -175,12 +179,11 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
                 <Alert
                     type="error"
                     showIcon
-                    title="无法打开漫剧工作台"
+                    title={translate("comicDrama.couldNotOpenTheComicDramaWorkspace")}
                     description={error}
                     action={
                         <Button type="primary" onClick={() => void loadWorkspace(projectId)}>
-                            重试
-                        </Button>
+                            {translate("comicDrama.retry")}</Button>
                     }
                 />
             </main>
@@ -190,8 +193,8 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
     if (!workspace) return null;
 
     const progress = workspace.productionProgress;
-    const projectTitle = workspace.scriptProject?.overview?.title || "未命名项目";
-    const projectType = PROJECT_TYPE_LABELS[workspace.settings.projectType] || "漫剧";
+    const projectTitle = workspace.scriptProject?.overview?.title || translate("comicDrama.untitledProject");
+    const projectType = getProjectTypeLabels(translate)[workspace.settings.projectType] || translate("comicDrama.comicDrama");
 
     const renderStageContent = () => {
         switch (activeStage) {
@@ -220,7 +223,7 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
 
     const navigationList = (
         <nav className="flex flex-col gap-1 p-3">
-            {STAGE_NAV_ITEMS.map((item) => {
+            {getStageNavItems(translate).map((item) => {
                 const Icon = item.icon;
                 const isActive = activeStage === item.key;
                 const badgeCount = item.badgeKey ? progress[item.badgeKey] : 0;
@@ -266,7 +269,7 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
             <header className="flex flex-wrap items-center gap-3 border-b border-[var(--studio-line)] bg-[var(--studio-panel-solid)] py-2.5 pl-4 pr-[260px]">
                 <Button
                     type="text"
-                    aria-label="返回漫剧项目库"
+                    aria-label={translate("comicDrama.backToComicDramaLibrary")}
                     icon={<ArrowLeft className="size-4" />}
                         onClick={() => requestRouteLeave(() => router.push("/comic-drama"))}
                 />
@@ -278,18 +281,14 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
                     </div>
 
                     <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-[var(--studio-muted)]">
-                        <span>修订号 {workspace.revision}</span>
-                        <span>
-                            资产：{progress.readyAssetCount}/{progress.assetCount}
-                        </span>
-                        <span>
-                            镜头：{progress.completedShotCount}/{progress.shotCount}
-                        </span>
+                        <span>{translate("comicDrama.revisionCount_0b0315", { value0: workspace.revision })}</span>
+                        <span>{translate("comicDrama.assetsCountCount_735adc", { value0: progress.readyAssetCount, value1: progress.assetCount })}</span>
+                        <span>{translate("comicDrama.shotsCountCount_67c7ca", { value0: progress.completedShotCount, value1: progress.shotCount })}</span>
                         {progress.runningTaskCount > 0 && (
-                            <span className="text-[var(--studio-primary)]">运行任务：{progress.runningTaskCount}</span>
+                            <span className="text-[var(--studio-primary)]">{translate("comicDrama.runningTasksCount_7acd87", { value0: progress.runningTaskCount })}</span>
                         )}
                         {progress.pendingUpdateCount > 0 && (
-                            <span className="text-amber-500 font-medium">待更新：{progress.pendingUpdateCount} 项</span>
+                            <span className="text-amber-500 font-medium">{translate("comicDrama.pendingUpdatesCount_eafaf7", { value0: progress.pendingUpdateCount })}</span>
                         )}
                     </div>
                 </div>
@@ -307,35 +306,31 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
                     <Button
                         icon={<RefreshCw className={`size-3.5 ${refreshing ? "animate-spin" : ""}`} />}
                         onClick={() => void reloadWorkspace()}
-                        title="刷新工作区"
+                        title={translate("comicDrama.refreshWorkspace")}
                     />
 
                     <Button
                         icon={<ExternalLink className="size-3.5" />}
                         onClick={() => requestRouteLeave(() => router.push(`/script/${encodeURIComponent(workspace.scriptProjectId)}`))}
                     >
-                        剧本工作台
-                    </Button>
+                        {translate("comicDrama.scriptWorkspace")}</Button>
 
                     <Button
                         type={activeStage === "media" ? "primary" : "default"}
                         icon={<Film className="size-3.5" />}
                         onClick={() => setActiveStage("media")}
                     >
-                        媒体生成中心
-                    </Button>
+                        {translate("comicDrama.mediaGenerationCenter")}</Button>
 
                     <Button icon={<ShieldCheck className="size-3.5" />} onClick={() => setContinuityOpen(true)}>
-                        连续性检查
-                    </Button>
+                        {translate("comicDrama.continuityCheck")}</Button>
 
                     <Button
                         type="primary"
                         icon={<Layers className="size-3.5" />}
                         onClick={() => setBatchModalOpen(true)}
                     >
-                        批量生产
-                    </Button>
+                        {translate("comicDrama.batchProduction_9d2fe0")}</Button>
                 </div>
             </header>
 
@@ -363,12 +358,12 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
             {/* Global Modals & Drawers */}
             <BatchGenerationModal open={batchModalOpen} onClose={() => setBatchModalOpen(false)} />
             <ContinuityDrawer open={continuityOpen} onClose={() => setContinuityOpen(false)} />
-            <Modal title="时间轴有未保存的修改" open={leavePromptOpen} onCancel={cancelLeave} closable={!timelineSaving} mask={{ closable: false }} footer={[
-                <Button key="cancel" onClick={cancelLeave} disabled={timelineSaving}>继续编辑</Button>,
-                <Button key="discard" danger onClick={() => finishLeave(true)} disabled={timelineSaving}>不保存并离开</Button>,
-                <Button key="save" type="primary" loading={timelineSaving} onClick={() => void saveAndLeave()}>保存后离开</Button>,
+            <Modal title={translate("comicDrama.unsavedTimelineChanges")} open={leavePromptOpen} onCancel={cancelLeave} closable={!timelineSaving} mask={{ closable: false }} footer={[
+                <Button key="cancel" onClick={cancelLeave} disabled={timelineSaving}>{translate("comicDrama.continueEditing")}</Button>,
+                <Button key="discard" danger onClick={() => finishLeave(true)} disabled={timelineSaving}>{translate("comicDrama.leaveWithoutSaving")}</Button>,
+                <Button key="save" type="primary" loading={timelineSaving} onClick={() => void saveAndLeave()}>{translate("comicDrama.saveAndLeave")}</Button>,
             ]}>
-                <p>文字或音频轨道有尚未保存的移动与裁剪修改。</p>
+                <p>{translate("comicDrama.textOrAudioTracksContainUnsavedMovesOrTrims")}</p>
                 {timelineSaveError ? <Alert className="mt-3" type="error" showIcon message={timelineSaveError} /> : null}
             </Modal>
         </main>

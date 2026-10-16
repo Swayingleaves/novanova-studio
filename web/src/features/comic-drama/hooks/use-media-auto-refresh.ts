@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "@/features/locale/use-translation";
 
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaMediaResult } from "../types";
@@ -21,8 +22,9 @@ function isRunningMedia(media: ComicDramaMediaResult): boolean {
  * @returns autoRefreshing 是否处于自动刷新；runningCount 进行中数量；lastSyncedAt 上次成功同步时间；syncNow 立即同步一次（失败会抛错）
  */
 export function useMediaAutoRefresh(media: ComicDramaMediaResult[]) {
+    const translate = useTranslation();
     const syncMedia = useComicDramaStore((state) => state.syncMedia);
-    const [lastSyncedAt, setLastSyncedAt] = useState<string>("");
+    const [lastSyncedTime, setLastSyncedTime] = useState<number | null>(null);
     const syncingRef = useRef(false);
 
     const runningCount = media.filter(isRunningMedia).length;
@@ -34,7 +36,7 @@ export function useMediaAutoRefresh(media: ComicDramaMediaResult[]) {
         syncingRef.current = true;
         try {
             await syncMedia();
-            setLastSyncedAt(new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+            setLastSyncedTime(Date.now());
         } finally {
             syncingRef.current = false;
         }
@@ -50,5 +52,6 @@ export function useMediaAutoRefresh(media: ComicDramaMediaResult[]) {
         return () => window.clearInterval(timer);
     }, [autoRefreshing, syncNow]);
 
+    const lastSyncedAt = lastSyncedTime === null ? "" : new Date(lastSyncedTime).toLocaleTimeString(translate.locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     return { autoRefreshing, runningCount, lastSyncedAt, syncNow };
 }

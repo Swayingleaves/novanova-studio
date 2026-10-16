@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslation } from "@/features/locale/use-translation";
+
 import { useEffect, useRef, useState } from "react";
 import { App, Button, Empty, Input, Modal, Tag, Timeline } from "antd";
 import { FileClock, GitCompare, RotateCcw } from "lucide-react";
@@ -11,6 +13,7 @@ import type { ScriptVersionDetail } from "../types";
 
 /** 命名版本记录面板。 */
 export function ScriptVersions() {
+    const translate = useTranslation();
     const { message, modal } = App.useApp();
     const project = useScriptStore((state) => state.project);
     const versions = useScriptStore((state) => state.versions);
@@ -35,13 +38,13 @@ export function ScriptVersions() {
     if (!project) return null;
     const requireSaved = () => {
         if (["saved", "idle"].includes(useScriptStore.getState().saveStatus)) return true;
-        message.warning("请等待当前修改保存完成后再操作版本");
+        message.warning(translate("script.waitUntilTheCurrentChangesAreSavedBeforeUsingVersions"));
         return false;
     };
     const create = async () => {
         if (!requireSaved()) return;
         if (!versionName.trim()) {
-            message.warning("请输入版本名称");
+            message.warning(translate("script.enterAVersionName"));
             return;
         }
         const projectId = project.id;
@@ -54,10 +57,10 @@ export function ScriptVersions() {
             setCreateOpen(false);
             setVersionName("");
             setChangeSummary("");
-            message.success("命名版本已创建");
+            message.success(translate("script.namedVersionCreated"));
         } catch (error) {
             if (generation === createGeneration.current && useScriptStore.getState().project?.id === projectId) {
-                message.error(error instanceof Error ? error.message : "版本创建失败，请重试");
+                message.error(error instanceof Error ? error.message : translate("script.couldNotCreateTheVersionTryAgain"));
             }
         } finally {
             if (generation === createGeneration.current) setCreating(false);
@@ -72,7 +75,7 @@ export function ScriptVersions() {
             if (generation === compareGeneration.current && useScriptStore.getState().project?.id === projectId) setCompareVersion(detail);
         } catch (error) {
             if (generation === compareGeneration.current && useScriptStore.getState().project?.id === projectId) {
-                message.error(error instanceof Error ? error.message : "版本详情加载失败，请重试");
+                message.error(error instanceof Error ? error.message : translate("script.couldNotLoadVersionDetailsTryAgain"));
             }
         } finally {
             if (generation === compareGeneration.current) setComparingId("");
@@ -81,28 +84,28 @@ export function ScriptVersions() {
     const restore = (versionId: string) => {
         if (!requireSaved()) return;
         modal.confirm({
-        title: "恢复这个版本？",
-        content: "恢复不会自动保存当前内容。若需要保留当前状态，请先手动创建命名版本。",
-        okText: "确认恢复",
-        cancelText: "取消",
+        title: translate("script.restoreThisVersion"),
+        content: translate("script.restoringDoesNotSaveTheCurrentContentAutomaticallyCreateA"),
+        okText: translate("script.confirmRestore"),
+        cancelText: translate("script.cancel"),
         onOk: async () => {
             if (!requireSaved()) return;
             const latestProject = useScriptStore.getState().project;
             if (!latestProject || latestProject.id !== project.id) {
-                message.warning("当前剧本项目已经切换，请重新选择版本");
+                message.warning(translate("script.theScriptProjectHasChangedSelectTheVersionAgain"));
                 return;
             }
             try {
                 await restoreScriptVersion(project.id, latestProject.revision, versionId);
                 await reloadProject();
-                message.success("版本已恢复");
+                message.success(translate("script.versionRestored"));
             } catch (error) {
-                message.error(error instanceof Error ? error.message : "版本恢复失败，请重试");
+                message.error(error instanceof Error ? error.message : translate("script.couldNotRestoreTheVersionTryAgain"));
                 throw error;
             }
         },
     });
     };
-    const changedSections = compareVersion ? diffScriptVersion(compareVersion.snapshotData, project as unknown as Record<string, unknown>) : [];
-    return <section><header className="mb-5 flex items-start justify-between gap-4 border-b border-[var(--studio-line)] pb-4"><div><h2 className="text-xl font-semibold text-[var(--studio-ink)]">版本记录</h2><p className="mt-1 text-sm text-[var(--studio-muted)]">普通自动保存不会产生历史版本；应用AI前会自动保留修改前快照。</p></div><Button type="primary" icon={<FileClock className="size-4" />} onClick={() => setCreateOpen(true)}>创建版本</Button></header>{versions.length ? <Timeline items={versions.map((version) => ({ content: <div className="pb-2"><div className="flex flex-wrap items-center gap-2"><strong>{version.versionName}</strong><Tag color={version.changeSource === "ai" ? "purple" : "blue"}>{version.changeSource === "ai" ? "AI修改前" : "手动"}</Tag><span className="text-xs text-[var(--studio-faint)]">修订 {version.sourceRevision} · {new Date(version.createdAt).toLocaleString("zh-CN")}</span></div><p className="my-2 text-sm text-[var(--studio-muted)]">{version.changeSummary || "无修改说明"}</p><div className="flex gap-2"><Button size="small" icon={<GitCompare className="size-3.5" />} loading={comparingId === version.id} onClick={() => void compare(version.id)}>结构对比</Button><Button size="small" icon={<RotateCcw className="size-3.5" />} onClick={() => restore(version.id)}>恢复</Button></div></div> }))} /> : <Empty description="还没有版本记录" />}<Modal title="创建命名版本" open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => void create()} confirmLoading={creating} okText="创建"><div className="space-y-3 pt-2"><label className="block text-sm text-[var(--studio-text)]">版本名称<Input className="mt-2" value={versionName} maxLength={120} placeholder="例如：第一幕定稿" onChange={(event) => setVersionName(event.target.value)} /></label><label className="block text-sm text-[var(--studio-text)]">修改说明（可选）<Input.TextArea className="mt-2" value={changeSummary} rows={3} placeholder="说明本版本保留的关键修改" onChange={(event) => setChangeSummary(event.target.value)} /></label></div></Modal><Modal width={920} title="版本内容对比" open={Boolean(compareVersion)} onCancel={() => setCompareVersion(null)} footer={null}>{compareVersion ? <div><p className="text-sm text-[var(--studio-muted)]">展开变化区块可查看版本内容与当前内容。</p><div className="mt-3 flex flex-wrap gap-2">{changedSections.length ? changedSections.map((section) => <Tag key={section.key} color="orange">{section.label}</Tag>) : <Tag color="green">已加载区块未检测到变化</Tag>}</div><div className="mt-4 space-y-3">{changedSections.map((section) => <details key={section.key} className="rounded-lg border border-[var(--studio-line)] p-3"><summary className="cursor-pointer font-medium text-[var(--studio-ink)]">{section.label}</summary><div className="mt-3 grid gap-3 md:grid-cols-2"><div><p className="mb-2 text-xs font-medium text-[var(--studio-muted)]">版本内容</p><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--studio-surface-soft)] p-3 text-xs text-[var(--studio-text)]">{JSON.stringify(section.before, null, 2)}</pre></div><div><p className="mb-2 text-xs font-medium text-[var(--studio-muted)]">当前内容</p><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--studio-surface-soft)] p-3 text-xs text-[var(--studio-text)]">{JSON.stringify(section.after, null, 2)}</pre></div></div></details>)}</div><p className="mt-4 text-xs text-[var(--studio-faint)]">分集正文按需加载，本次仅比较项目详情中的结构化设定与分集摘要。</p></div> : null}</Modal></section>;
+    const changedSections = compareVersion ? diffScriptVersion(compareVersion.snapshotData, project as unknown as Record<string, unknown>, undefined, translate) : [];
+    return <section><header className="mb-5 flex items-start justify-between gap-4 border-b border-[var(--studio-line)] pb-4"><div><h2 className="text-xl font-semibold text-[var(--studio-ink)]">{translate("script.versionHistory")}</h2><p className="mt-1 text-sm text-[var(--studio-muted)]">{translate("script.normalAutosavesDoNotCreateHistoricalVersionsASnapshotIs")}</p></div><Button type="primary" icon={<FileClock className="size-4" />} onClick={() => setCreateOpen(true)}>{translate("script.createVersion")}</Button></header>{versions.length ? <Timeline items={versions.map((version) => ({ content: <div className="pb-2"><div className="flex flex-wrap items-center gap-2"><strong>{version.versionName}</strong><Tag color={version.changeSource === "ai" ? "purple" : "blue"}>{version.changeSource === "ai" ? translate("script.beforeAiChanges") : translate("script.manual")}</Tag><span className="text-xs text-[var(--studio-faint)]">{translate("script.revisionCountCount_741e27", { value0: version.sourceRevision, value1: new Date(version.createdAt).toLocaleString(translate.locale) })}</span></div><p className="my-2 text-sm text-[var(--studio-muted)]">{version.changeSummary || translate("script.noChangeNotes")}</p><div className="flex gap-2"><Button size="small" icon={<GitCompare className="size-3.5" />} loading={comparingId === version.id} onClick={() => void compare(version.id)}>{translate("script.compareStructure")}</Button><Button size="small" icon={<RotateCcw className="size-3.5" />} onClick={() => restore(version.id)}>{translate("script.restore")}</Button></div></div> }))} /> : <Empty description={translate("script.noVersionHistoryYet")} />}<Modal title={translate("script.createNamedVersion")} open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => void create()} confirmLoading={creating} okText={translate("script.create")}><div className="space-y-3 pt-2"><label className="block text-sm text-[var(--studio-text)]">{translate("script.versionName")}<Input className="mt-2" value={versionName} maxLength={120} placeholder={translate("script.exampleAct1FinalDraft")} onChange={(event) => setVersionName(event.target.value)} /></label><label className="block text-sm text-[var(--studio-text)]">{translate("script.changeNotesOptional")}<Input.TextArea className="mt-2" value={changeSummary} rows={3} placeholder={translate("script.describeTheKeyChangesSavedInThisVersion")} onChange={(event) => setChangeSummary(event.target.value)} /></label></div></Modal><Modal width={920} title={translate("script.compareVersionContent")} open={Boolean(compareVersion)} onCancel={() => setCompareVersion(null)} footer={null}>{compareVersion ? <div><p className="text-sm text-[var(--studio-muted)]">{translate("script.expandAChangedSectionToCompareThisVersionWithThe")}</p><div className="mt-3 flex flex-wrap gap-2">{changedSections.length ? changedSections.map((section) => <Tag key={section.key} color="orange">{section.label}</Tag>) : <Tag color="green">{translate("script.noChangesDetectedInLoadedSections")}</Tag>}</div><div className="mt-4 space-y-3">{changedSections.map((section) => <details key={section.key} className="rounded-lg border border-[var(--studio-line)] p-3"><summary className="cursor-pointer font-medium text-[var(--studio-ink)]">{section.label}</summary><div className="mt-3 grid gap-3 md:grid-cols-2"><div><p className="mb-2 text-xs font-medium text-[var(--studio-muted)]">{translate("script.versionContent")}</p><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--studio-surface-soft)] p-3 text-xs text-[var(--studio-text)]">{JSON.stringify(section.before, null, 2)}</pre></div><div><p className="mb-2 text-xs font-medium text-[var(--studio-muted)]">{translate("script.currentContent")}</p><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-[var(--studio-surface-soft)] p-3 text-xs text-[var(--studio-text)]">{JSON.stringify(section.after, null, 2)}</pre></div></div></details>)}</div><p className="mt-4 text-xs text-[var(--studio-faint)]">{translate("script.episodeTextIsLoadedOnDemandThisComparisonIncludesOnly")}</p></div> : null}</Modal></section>;
 }
