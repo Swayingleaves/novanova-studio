@@ -7,7 +7,8 @@
             <id>aliyun-public</id>
             <name>阿里云 Maven 公共仓库</name>
             <url>https://maven.aliyun.com/repository/public</url>
-            <mirrorOf>central</mirrorOf>
+            <!-- 统一镜像包括 Spring 在内的仓库，避免构建时直接访问国外仓库。 -->
+            <mirrorOf>*</mirrorOf>
         </mirror>
     </mirrors>
 </settings>

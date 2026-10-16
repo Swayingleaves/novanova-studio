@@ -3,5 +3,7 @@ packageImportMethod: copy
 enableGlobalVirtualStore: false
 
 allowBuilds:
+  '@parcel/watcher': true
+  '@swc/core': true
   esbuild: true
   sharp: true

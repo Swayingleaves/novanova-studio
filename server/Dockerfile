@@ -4,9 +4,9 @@ WORKDIR /app
 COPY maven-settings.xml /opt/maven/settings.xml
 COPY pom.xml .
 COPY .mvn ./.mvn
-RUN --mount=type=cache,id=novanova-studio-pro-maven,target=/app/.maven-repository mvn -q -s /opt/maven/settings.xml -DskipTests dependency:go-offline
 COPY src ./src
-RUN --mount=type=cache,id=novanova-studio-pro-maven,target=/app/.maven-repository mvn -q -s /opt/maven/settings.xml -DskipTests package
+# 直接打包并复用依赖缓存，避免预下载未使用的插件；并发构建时锁定仓库缓存。
+RUN --mount=type=cache,id=novanova-studio-pro-maven,target=/app/.maven-repository,sharing=locked mvn -B -ntp -s /opt/maven/settings.xml -DskipTests package
 
 FROM eclipse-temurin:21-jre
 
