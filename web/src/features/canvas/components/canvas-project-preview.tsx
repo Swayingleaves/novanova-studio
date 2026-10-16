@@ -6,7 +6,7 @@ import { canvasThemes } from "@/shared/lib/canvas-theme";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import type { CanvasConnection, CanvasDocument, CanvasNode } from "../types";
-import { isBackgroundNode, isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
+import { isBackgroundNode, isDirectorDeskNode, isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
 
 const previewWidth = 320;
 const previewHeight = 180;
@@ -141,11 +141,17 @@ function PreviewNodeShape({ node, theme }: { node: PreviewNode; theme: CanvasThe
                 ? `${node.composition.inputVideoNodeIds.length} 段视频`
                 : isBackgroundNode(node)
                     ? `${node.memberNodeIds.length} 个节点`
-                    : node.content.source || node.generation.prompt;
+                    : isDirectorDeskNode(node)
+                        ? `${node.director.project.objects.length} 个对象`
+                        : node.content.source || node.generation.prompt;
     const showText = node.previewWidth >= 42 && node.previewHeight >= 24;
 
     if (isBackgroundNode(node)) {
         return <g><rect x={node.previewX} y={node.previewY} width={node.previewWidth} height={node.previewHeight} rx="6" fill={node.backgroundColor} fillOpacity="0.55" stroke={theme.node.stroke} /><text x={node.previewX + 7} y={node.previewY + 13} fontSize="8.5" fontWeight="600" fill={theme.node.text}>{label}</text></g>;
+    }
+
+    if (isDirectorDeskNode(node)) {
+        return <g><rect x={node.previewX} y={node.previewY} width={node.previewWidth} height={node.previewHeight} rx="6" fill={theme.node.panel} stroke={theme.node.stroke} /><circle cx={node.previewX + node.previewWidth / 2} cy={node.previewY + node.previewHeight / 2} r={Math.max(4, Math.min(node.previewWidth, node.previewHeight) * 0.16)} fill={theme.node.activeStroke} opacity="0.9" /><text x={node.previewX + 7} y={node.previewY + 14} fontSize="8.5" fontWeight="600" fill={theme.node.text}>{label}</text>{showText ? <text x={node.previewX + 7} y={node.previewY + node.previewHeight - 8} fontSize="7.5" fill={theme.node.muted}>{shortenText(content)}</text> : null}</g>;
     }
 
     if ((isImageNode(node) || isVideoNode(node)) && node.content.source) {
@@ -271,6 +277,7 @@ function nodeLabel(node: CanvasNode) {
     if (isTextNode(node)) return "文本";
     if (isStoryboardNode(node)) return "分镜脚本";
     if (isVideoCompositionNode(node)) return "合成视频";
+    if (isDirectorDeskNode(node)) return "3D 导演台";
     if (isBackgroundNode(node)) return "背景板";
     return "视频";
 }

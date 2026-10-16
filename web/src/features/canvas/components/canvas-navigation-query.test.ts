@@ -60,6 +60,7 @@ test("节点分类与关键词取交集", () => {
         audio: ["node-audio"],
         storyboard: [],
         videoComposition: ["node-composition"],
+        directorDesk: [],
         background: [],
     };
 

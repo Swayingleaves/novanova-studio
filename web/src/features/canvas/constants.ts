@@ -1,4 +1,4 @@
-import { type CanvasAudioNode, type CanvasBackgroundNode, type CanvasExecutionState, type CanvasImageNode, type CanvasNodeFrame, type CanvasNodeKind, type CanvasPoint, type CanvasStoryboardNode, type CanvasTextNode, type CanvasVideoCompositionNode, type CanvasVideoNode } from "./types.ts";
+import { type CanvasAudioNode, type CanvasBackgroundNode, type CanvasDirectorDeskAspectRatio, type CanvasDirectorDeskCamera, type CanvasDirectorDeskNode, type CanvasDirectorDeskObject, type CanvasDirectorDeskProject, type CanvasExecutionState, type CanvasImageNode, type CanvasNodeFrame, type CanvasNodeKind, type CanvasPoint, type CanvasStoryboardNode, type CanvasTextNode, type CanvasVideoCompositionNode, type CanvasVideoNode } from "./types.ts";
 
 export interface CreateCanvasNodeInput {
     id: string;
@@ -38,6 +38,12 @@ const VIDEO_COMPOSITION_NODE_TEMPLATE: CanvasNodeTemplate = {
     height: 380,
 };
 
+const DIRECTOR_DESK_NODE_TEMPLATE: CanvasNodeTemplate = {
+    title: "3D 导演台",
+    width: 520,
+    height: 360,
+};
+
 const STORYBOARD_NODE_TEMPLATE: CanvasNodeTemplate = {
     title: "分镜脚本",
     width: 600,
@@ -57,6 +63,7 @@ const CANVAS_NODE_TEMPLATES: Record<CanvasNodeKind, CanvasNodeTemplate> = {
     video: VIDEO_NODE_TEMPLATE,
     storyboard: STORYBOARD_NODE_TEMPLATE,
     videoComposition: VIDEO_COMPOSITION_NODE_TEMPLATE,
+    directorDesk: DIRECTOR_DESK_NODE_TEMPLATE,
     background: BACKGROUND_NODE_TEMPLATE,
 };
 
@@ -173,6 +180,67 @@ export function createVideoCompositionNode(input: CreateCanvasNodeInput): Canvas
         execution: createIdleExecution(),
         composition: {
             inputVideoNodeIds: [],
+        },
+    };
+}
+
+/** 创建带默认机位和基础地面的导演台节点。 */
+export function createDirectorDeskNode(input: CreateCanvasNodeInput): CanvasDirectorDeskNode {
+    const camera: CanvasDirectorDeskCamera = {
+        id: "camera-main",
+        name: "主机位",
+        position: { x: 4, y: 3, z: 6 },
+        target: { x: 0, y: 1, z: 0 },
+        fieldOfView: 42,
+        keyframes: [],
+    };
+    const objects: CanvasDirectorDeskObject[] = [
+        {
+            id: "ground-main",
+            name: "地面",
+            kind: "ground",
+            transform: {
+                position: { x: 0, y: 0, z: 0 },
+                rotation: { x: 0, y: 0, z: 0 },
+                scale: { x: 6, y: 1, z: 6 },
+            },
+            visible: true,
+            locked: true,
+        },
+        {
+            id: "character-main",
+            name: "角色 A",
+            kind: "character",
+            transform: {
+                position: { x: 0, y: 0, z: 0 },
+                rotation: { x: 0, y: 0, z: 0 },
+                scale: { x: 1, y: 1, z: 1 },
+            },
+            visible: true,
+            locked: false,
+            track: { position: [], rotation: [], actionClips: [] },
+        },
+    ];
+    const project: CanvasDirectorDeskProject = {
+        schemaVersion: 1,
+        objects,
+        assets: [],
+        cameras: [camera],
+        selectedCameraId: camera.id,
+        timeline: { durationMilliseconds: 5000, frameRate: 30 },
+    };
+    const aspectRatio: CanvasDirectorDeskAspectRatio = "16:9";
+    return {
+        id: input.id,
+        kind: "directorDesk",
+        title: input.title?.trim() || DIRECTOR_DESK_NODE_TEMPLATE.title,
+        frame: createNodeFrame(DIRECTOR_DESK_NODE_TEMPLATE, input.position),
+        execution: createIdleExecution(),
+        director: {
+            schemaVersion: 1,
+            projectRevision: 1,
+            project,
+            exportSettings: { aspectRatio, width: 1280, height: 720, frameRate: 30 },
         },
     };
 }

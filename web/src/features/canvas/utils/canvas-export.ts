@@ -95,6 +95,8 @@ function resolveFileExtension(mimeType: string, storageKey: string): string {
         ["gif", "gif"],
         ["mp4", "mp4"],
         ["webm", "webm"],
+        ["model/gltf-binary", "glb"],
+        ["model/gltf+json", "gltf"],
     ].find(([fragment]) => mimeType.includes(fragment))?.[1];
 
     if (matchedExtension) return matchedExtension;

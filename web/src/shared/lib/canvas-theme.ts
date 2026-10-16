@@ -39,11 +39,18 @@ interface CanvasToolbarColors {
     activeGradientText: string;
 }
 
+/** 三维导演台视口色值，保证地面网格与场景背景的明度区分。 */
+interface CanvasDirectorDeskColors {
+    background: string;
+    grid: string;
+}
+
 /** 单个主题色板。 */
 interface CanvasColorPalette {
     canvas: CanvasBgColors;
     node: CanvasNodeColors;
     toolbar: CanvasToolbarColors;
+    directorDesk: CanvasDirectorDeskColors;
 }
 
 /**
@@ -82,6 +89,10 @@ export const canvasThemes = {
             activeGradient: "#526f1e",
             activeGradientText: "#ffffff",
         },
+        directorDesk: {
+            background: "#ecefe9",
+            grid: "#7d8a78",
+        },
     },
     dark: {
         canvas: {
@@ -112,6 +123,10 @@ export const canvasThemes = {
             activeGradient: "#c7f36b",
             activeGradientText: "#11170a",
         },
+        directorDesk: {
+            background: "#1b211e",
+            grid: "#66766b",
+        },
     },
     purple: {
         canvas: {
@@ -141,6 +156,10 @@ export const canvasThemes = {
             activeText: "#f5f5f5",
             activeGradient: "#b85cf6",
             activeGradientText: "#ffffff",
+        },
+        directorDesk: {
+            background: "#201c26",
+            grid: "#7d718d",
         },
     },
 } as const satisfies Record<CanvasColorTheme, CanvasColorPalette>;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createBackgroundNode, createImageNode, createStoryboardNode, createTextNode, createVideoNode, getCanvasNodeTemplate } from "./constants.ts";
+import { createBackgroundNode, createDirectorDeskNode, createImageNode, createStoryboardNode, createTextNode, createVideoNode, getCanvasNodeTemplate } from "./constants.ts";
 import { MINIMUM_CONTENT_NODE_DIMENSION, nodeSizeFromRatioWithMinimum } from "./utils/canvas-node-size.ts";
 
 test("图片节点工厂每次返回独立的嵌套对象", () => {
@@ -56,11 +56,24 @@ test("背景板节点工厂使用默认尺寸和独立成员列表", () => {
     assert.notEqual(first.memberNodeIds, second.memberNodeIds);
 });
 
+test("导演台节点工厂创建独立场景、机位和导出预设", () => {
+    const first = createDirectorDeskNode({ id: "director-1", position: { x: 0, y: 0 } });
+    const second = createDirectorDeskNode({ id: "director-2", position: { x: 0, y: 0 } });
+
+    assert.equal(first.kind, "directorDesk");
+    assert.equal(first.director.exportSettings.aspectRatio, "16:9");
+    assert.equal(first.director.project.cameras[0]?.id, first.director.project.selectedCameraId);
+    assert.notEqual(first.director.project, second.director.project);
+    assert.notEqual(first.director.project.objects, second.director.project.objects);
+    assert.notEqual(first.director.project.cameras, second.director.project.cameras);
+});
+
 test("节点模板按类型返回固定尺寸", () => {
     assert.deepEqual(getCanvasNodeTemplate("image"), { title: "图像", width: 510, height: 360 });
     assert.deepEqual(getCanvasNodeTemplate("text"), { title: "文本", width: 600, height: 600 });
     assert.deepEqual(getCanvasNodeTemplate("video"), { title: "视频", width: 630, height: 354 });
     assert.deepEqual(getCanvasNodeTemplate("storyboard"), { title: "分镜脚本", width: 600, height: 600 });
+    assert.deepEqual(getCanvasNodeTemplate("directorDesk"), { title: "3D 导演台", width: 520, height: 360 });
     assert.deepEqual(getCanvasNodeTemplate("background"), { title: "背景板", width: 960, height: 640 });
 });
 

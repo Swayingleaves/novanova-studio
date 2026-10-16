@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, type ComponentType } from "react";
-import { Copy, Frame, Image, Trash2, Type, AudioLines, Video } from "lucide-react";
+import { Box, Copy, Frame, Image, Trash2, Type, AudioLines, Video } from "lucide-react";
 
 import type { CanvasNodeKind, ContextMenuState } from "../types";
 import { useCanvasTheme } from "./canvas-theme-provider";
@@ -18,6 +18,7 @@ export function CanvasNodeContextMenu({ menu, onClose, onCreateNode, onDuplicate
               { key: "add-image", label: "添加图片节点", icon: Image, run: () => onCreateNode("image") },
               { key: "add-audio", label: "添加音频节点", icon: AudioLines, run: () => onCreateNode("audio") },
               { key: "add-video", label: "添加视频节点", icon: Video, run: () => onCreateNode("video") },
+              { key: "add-director-desk", label: "添加3D导演台节点", icon: Box, run: () => onCreateNode("directorDesk") },
               { key: "add-background", label: "添加背景板", icon: Frame, run: () => onCreateNode("background") },
           ]
         : [

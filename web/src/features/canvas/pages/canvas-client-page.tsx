@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useParams, useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { Trash2 } from "lucide-react";
 import { saveAs } from "file-saver";
 
@@ -40,6 +41,7 @@ import { CANVAS_BACKGROUND_MIN_HEIGHT, CANVAS_BACKGROUND_MIN_WIDTH, CANVAS_BACKG
 import {
     applyCanvasNodeAttributes,
     isBackgroundNode,
+    isDirectorDeskNode,
     isImageNode,
     isStoryboardNode,
     isTextNode,
@@ -49,6 +51,7 @@ import {
     updateCanvasNodeExecution,
     updateCanvasNodeFrame,
     updateCanvasNodeTitle,
+    updateDirectorDeskData,
     updateStoryboardNodeContent,
     updateStoryboardNodeData,
     type CanvasNodeAttributes,
@@ -136,6 +139,9 @@ import {
 import {
     type CanvasAssistantImage,
     type CanvasBackgroundNode,
+    type CanvasDirectorDeskNode,
+    type CanvasDirectorDeskExportSource,
+    type CanvasDirectorDeskProject,
     type CanvasAssistantMessage,
     type CanvasAssistantSession,
     type CanvasConnection,
@@ -164,6 +170,9 @@ import {
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/features/generation/types/media";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
+
+// 三维编辑器只在打开导演台时加载，避免普通画布提前加载模型运行库。
+const DirectorDeskWorkspace = dynamic(() => import("@/app/(user)/canvas/director-desk/director-desk-workspace").then((module) => module.DirectorDeskWorkspace), { ssr: false });
 
 const VIDEO_NODE_MAX_WIDTH = 630;
 const VIDEO_NODE_MAX_HEIGHT = 630;
@@ -413,6 +422,7 @@ function CanvasWorkspacePage() {
     const batchTransitionIdsRef = useRef<Set<string>>(new Set());
     const [isNodeDragging, setIsNodeDragging] = useState(false);
     const [storyboardWorkspaceNodeId, setStoryboardWorkspaceNodeId] = useState<string | null>(null);
+    const [directorDeskWorkspaceNodeId, setDirectorDeskWorkspaceNodeId] = useState<string | null>(null);
     const [storyboardVideoGenerationNodeId, setStoryboardVideoGenerationNodeId] = useState<string | null>(null);
     const [generatingStoryboardVideoNodeId, setGeneratingStoryboardVideoNodeId] = useState<string | null>(null);
     const [composingStoryboardNodeId, setComposingStoryboardNodeId] = useState<string | null>(null);
@@ -1055,11 +1065,16 @@ function CanvasWorkspacePage() {
     const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
     const storyboardWorkspaceNode = storyboardWorkspaceNodeId ? nodeById.get(storyboardWorkspaceNodeId) : null;
     const openedStoryboardNode = storyboardWorkspaceNode && isStoryboardNode(storyboardWorkspaceNode) ? storyboardWorkspaceNode : null;
+    const directorDeskWorkspaceNode = directorDeskWorkspaceNodeId ? nodeById.get(directorDeskWorkspaceNodeId) : null;
+    const openedDirectorDeskNode = directorDeskWorkspaceNode && isDirectorDeskNode(directorDeskWorkspaceNode) ? directorDeskWorkspaceNode : null;
     const storyboardVideoGenerationNode = storyboardVideoGenerationNodeId ? nodeById.get(storyboardVideoGenerationNodeId) : null;
     const openedStoryboardVideoGenerationNode = storyboardVideoGenerationNode && isStoryboardNode(storyboardVideoGenerationNode) ? storyboardVideoGenerationNode : null;
     useEffect(() => {
         if (storyboardWorkspaceNodeId && !openedStoryboardNode) setStoryboardWorkspaceNodeId(null);
     }, [openedStoryboardNode, storyboardWorkspaceNodeId]);
+    useEffect(() => {
+        if (directorDeskWorkspaceNodeId && !openedDirectorDeskNode) setDirectorDeskWorkspaceNodeId(null);
+    }, [directorDeskWorkspaceNodeId, openedDirectorDeskNode]);
     useEffect(() => {
         if (storyboardVideoGenerationNodeId && !openedStoryboardVideoGenerationNode) setStoryboardVideoGenerationNodeId(null);
     }, [openedStoryboardVideoGenerationNode, storyboardVideoGenerationNodeId]);
@@ -1097,7 +1112,7 @@ function CanvasWorkspacePage() {
     const splitNode = splitNodeId ? nodeById.get(splitNodeId) || null : null;
     const previewNode = previewNodeId ? nodeById.get(previewNodeId) || null : null;
     const dialogNode = dialogNodeId ? nodeById.get(dialogNodeId) || null : null;
-    const promptPanelNode = dialogNode && !selectionBox && !isAudioNode(dialogNode) && !isStoryboardNode(dialogNode) && !isVideoCompositionNode(dialogNode) ? dialogNode : null;
+    const promptPanelNode = dialogNode && !selectionBox && !isAudioNode(dialogNode) && !isStoryboardNode(dialogNode) && !isVideoCompositionNode(dialogNode) && !isDirectorDeskNode(dialogNode) ? dialogNode : null;
     const promptPanelCanGenerateWithoutPrompt = useMemo(() => {
         if (!promptPanelNode || !isImageNode(promptPanelNode) || !promptPanelNode.generation.settingGraph) return false;
         return hasNodeGenerationInputs(promptPanelNode.id, nodes, connections);
@@ -2407,6 +2422,51 @@ function CanvasWorkspacePage() {
         setNodes((prev) => prev.map((node) => (node.id === nodeId && isStoryboardNode(node) ? updateStoryboardNodeData(node, updater(node.storyboard)) : node)));
     }, []);
 
+    /** 更新导演台工程，所有编辑均通过画布节点保存调度持久化。 */
+    const handleDirectorDeskProjectChange = useCallback((nodeId: string, updater: (project: CanvasDirectorDeskProject) => CanvasDirectorDeskProject) => {
+        setNodes((prev) =>
+            prev.map((node) => {
+                if (node.id !== nodeId || !isDirectorDeskNode(node)) return node;
+                const nextProject = updater(node.director.project);
+                if (nextProject === node.director.project) return node;
+                return updateDirectorDeskData(node, { ...node.director, project: nextProject });
+            }),
+        );
+    }, []);
+
+    /** 更新导演台节点的导出设置并触发画布保存。 */
+    const handleDirectorDeskSettingsChange = useCallback((nodeId: string, updater: (node: CanvasDirectorDeskNode) => CanvasDirectorDeskNode) => {
+        setNodes((prev) => prev.map((node) => (node.id === nodeId && isDirectorDeskNode(node) ? updater(node) : node)));
+    }, []);
+
+    /** 将导演台 PNG 导出结果回填为普通图片节点并建立来源连线。 */
+    const handleDirectorDeskImageExported = useCallback((sourceNodeId: string, image: UploadedImage, source: CanvasDirectorDeskExportSource) => {
+        const sourceNode = nodesRef.current.find((node) => node.id === sourceNodeId);
+        if (!sourceNode || !isDirectorDeskNode(sourceNode)) return;
+        if (nodesRef.current.some((node) => isImageNode(node) && node.content.storageKey === image.storageKey && node.content.directorDeskSource?.sourceDirectorNodeId === sourceNodeId)) return;
+        const id = `image-${nanoid()}`;
+        const size = fitNodeSize(image.width || 1280, image.height || 720, IMAGE_GENERATION_NODE_WIDTH, IMAGE_GENERATION_NODE_HEIGHT);
+        const position = { x: sourceNode.frame.position.x + sourceNode.frame.width + CONNECTED_NODE_GAP, y: sourceNode.frame.position.y };
+        const node = updateCanvasNodeFrame(applyCanvasNodeAttributes({ ...createCanvasNode("image", position, imageAttributes(image)), id, title: `${sourceNode.title || "3D导演台"} 参考图片` }, { directorDeskSource: source }), { position, ...size });
+        setNodes((current) => (current.some((item) => isImageNode(item) && item.content.storageKey === image.storageKey && item.content.directorDeskSource?.sourceDirectorNodeId === sourceNodeId) ? current : [...current, node]));
+        setConnections((current) => (current.some((connection) => connection.source.nodeId === sourceNodeId && connection.target.nodeId === id) ? current : [...current, createRightToLeftConnection(sourceNodeId, id)]));
+        requestFocusNodes([id]);
+    }, [requestFocusNodes]);
+
+    /** 将导演台视频导出结果回填为普通视频节点并建立来源连线。 */
+    const handleDirectorDeskVideoExported = useCallback((sourceNodeId: string, video: UploadedFile, source: CanvasDirectorDeskExportSource) => {
+        const sourceNode = nodesRef.current.find((node) => node.id === sourceNodeId);
+        if (!sourceNode || !isDirectorDeskNode(sourceNode) || !video.storageKey || !video.url) return;
+        if (nodesRef.current.some((node) => isVideoNode(node) && node.content.storageKey === video.storageKey)) return;
+        const id = "video-director-" + nanoid();
+        const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
+        const position = { x: sourceNode.frame.position.x + sourceNode.frame.width + CONNECTED_NODE_GAP, y: sourceNode.frame.position.y + sourceNode.frame.height + 32 };
+        const node = updateCanvasNodeFrame(applyCanvasNodeAttributes({ ...createCanvasNode("video", position, videoAttributes(video)), id, title: `${sourceNode.title || "3D导演台"} 参考视频` }, { directorDeskSource: source }), { position, ...size });
+        setNodes((current) => (current.some((item) => isVideoNode(item) && item.content.storageKey === video.storageKey) ? current : [...current, node]));
+        setConnections((current) => (current.some((connection) => connection.source.nodeId === sourceNodeId && connection.target.nodeId === id) ? current : [...current, createRightToLeftConnection(sourceNodeId, id)]));
+        requestFocusNodes([id]);
+    }, [requestFocusNodes]);
+
     const updateStoryboardAssetGeneration = useCallback((nodeId: string, updater: (state: CanvasStoryboardAssetGenerationState) => CanvasStoryboardAssetGenerationState) => {
         setNodes((prev) =>
             prev.map((node) => {
@@ -3577,7 +3637,8 @@ function CanvasWorkspacePage() {
                     const sourceIsImage = Boolean(sourceNode && isImageNode(sourceNode));
                     const isEmptyImageNode = Boolean(sourceNode && isImageNode(sourceNode) && !sourceNode.content.source);
                     const isSettingGraphNode = Boolean(sourceNode && isImageNode(sourceNode) && sourceNode.generation.settingGraph);
-                    const generationSize = isSettingGraphNode ? sourceNode?.generation.settingGraph?.aspectRatio || "16:9" : generationConfig.size;
+                    const settingGraphAspectRatio = sourceNode && isImageNode(sourceNode) ? sourceNode.generation.settingGraph?.aspectRatio : undefined;
+                    const generationSize = isSettingGraphNode ? settingGraphAspectRatio || "16:9" : generationConfig.size;
                     const count = isSettingGraphNode ? 1 : normalizeImageGenerationCount(generationConfig.count);
                     const sourceReference =
                         sourceNode && isImageNode(sourceNode) && sourceNode.content.source
@@ -4555,6 +4616,7 @@ function CanvasWorkspacePage() {
             onViewVideo: (n) => setPreviewNodeId(n.id),
             onRetry: (n) => (isStoryboardNode(n) ? void handleGenerateStoryboard(n) : void handleRetryNode(n)),
             onOpenStoryboard: (node) => setStoryboardWorkspaceNodeId(node.id),
+            onOpenDirectorDesk: (node) => setDirectorDeskWorkspaceNodeId(node.id),
             onStoryboardInstructionChange: handleStoryboardInstructionChange,
             onStoryboardVisualStyleChange: handleStoryboardVisualStyleChange,
             onStoryboardModelChange: handleStoryboardModelChange,
@@ -4950,6 +5012,7 @@ function CanvasWorkspacePage() {
                     onAddImage={() => createNode("image")}
                     onAddAudio={() => createNode("audio")}
                     onAddVideo={() => createNode("video")}
+                    onAddDirectorDesk={() => createNode("directorDesk")}
                     onAddText={() => createNode("text")}
                     onAddBackground={() => createNode("background")}
                     onUndo={undoCanvas}
@@ -5050,6 +5113,9 @@ function CanvasWorkspacePage() {
                 onMissingImageModelConfig={() => showMissingAiConfig("image")}
                 onMissingTextModelConfig={() => showMissingAiConfig("text")}
             />
+            {openedDirectorDeskNode ? (
+                <DirectorDeskWorkspace projectId={projectId} open node={openedDirectorDeskNode} onClose={() => setDirectorDeskWorkspaceNodeId(null)} onChangeProject={handleDirectorDeskProjectChange} onChangeSettings={handleDirectorDeskSettingsChange} onImageExported={handleDirectorDeskImageExported} onVideoExported={handleDirectorDeskVideoExported} />
+            ) : null}
             <StoryboardVideoGenerationModal
                 open={Boolean(openedStoryboardVideoGenerationNode)}
                 node={openedStoryboardVideoGenerationNode}
@@ -5487,6 +5553,10 @@ async function hydrateCanvasImages(nodes: CanvasDomainNode[]) {
             continue;
         }
         if (isVideoCompositionNode(node)) {
+            hydratedNodes.push(node);
+            continue;
+        }
+        if (isDirectorDeskNode(node)) {
             hydratedNodes.push(node);
             continue;
         }

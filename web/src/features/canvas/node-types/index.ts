@@ -5,6 +5,7 @@ import { TextNode } from "./text-node";
 import { StoryboardNode } from "./storyboard-node";
 import { VideoCompositionNode } from "./video-composition-node";
 import { BackgroundNode } from "./background-node";
+import { DirectorDeskNode } from "./director-desk-node";
 
 export const nodeTypes = {
   audio: AudioNode,
@@ -13,5 +14,6 @@ export const nodeTypes = {
   text: TextNode,
   storyboard: StoryboardNode,
   videoComposition: VideoCompositionNode,
+  directorDesk: DirectorDeskNode,
   background: BackgroundNode,
 };

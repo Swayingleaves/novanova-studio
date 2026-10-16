@@ -21,6 +21,7 @@ export const CANVAS_NAVIGATION_NODE_CATEGORY_OPTIONS: ReadonlyArray<CanvasNaviga
     { value: "audio", label: "音频" },
     { value: "storyboard", label: "分镜" },
     { value: "videoComposition", label: "视频合成" },
+    { value: "directorDesk", label: "3D 导演台" },
     { value: "background", label: "背景板" },
 ];
 
@@ -41,6 +42,7 @@ const CANVAS_NODE_KIND_LABELS: Record<CanvasNode["kind"], string> = {
     video: "视频",
     storyboard: "分镜",
     videoComposition: "视频合成",
+    directorDesk: "3D 导演台",
     background: "背景板",
 };
 

@@ -1,6 +1,8 @@
 import type {
     CanvasAudioNode,
     CanvasBackgroundNode,
+    CanvasDirectorDeskData,
+    CanvasDirectorDeskNode,
     CanvasExecutionState,
     CanvasImageContent,
     CanvasImageGenerationSettings,
@@ -17,6 +19,7 @@ import type {
     CanvasVideoContent,
     CanvasVideoGenerationSettings,
     CanvasVideoNode,
+    CanvasDirectorDeskExportSource,
 } from "../types.ts";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import type { GenerationStyleSnapshot } from "@/services/api/server";
@@ -66,6 +69,7 @@ export type CanvasNodeAttributes = {
     waveformPeaks?: number[];
     audioReferences?: import("@/features/generation/types/media").ReferenceAudio[];
     objectStorage?: ObjectStorageFile;
+    directorDeskSource?: CanvasDirectorDeskExportSource;
     generationStyleIds?: number[];
     generationStyleSnapshots?: GenerationStyleSnapshot[];
     settingGraph?: import("../types.ts").CanvasSettingGraphSkillSnapshot;
@@ -98,6 +102,11 @@ export function isVideoCompositionNode(node: CanvasNode): node is CanvasVideoCom
 
 export function isStoryboardNode(node: CanvasNode): node is CanvasStoryboardNode {
     return node.kind === "storyboard";
+}
+
+/** 判断是否为 3D 导演台节点。 */
+export function isDirectorDeskNode(node: CanvasNode): node is CanvasDirectorDeskNode {
+    return node.kind === "directorDesk";
 }
 
 /** 判断节点是否为背景板。 */
@@ -204,6 +213,20 @@ export function updateStoryboardNodeData(node: CanvasStoryboardNode, patch: Part
     };
 }
 
+/** 更新导演台工程数据，并增加工程修订号。 */
+export function updateDirectorDeskData(node: CanvasDirectorDeskNode, director: CanvasDirectorDeskData): CanvasDirectorDeskNode {
+    if (director === node.director) return node;
+    const currentRevision = Number.isInteger(node.director.projectRevision) && node.director.projectRevision > 0 ? node.director.projectRevision : 0;
+    const requestedRevision = Number.isInteger(director.projectRevision) && director.projectRevision > 0 ? director.projectRevision : 0;
+    return {
+        ...node,
+        director: {
+            ...director,
+            projectRevision: Math.max(currentRevision + 1, requestedRevision),
+        },
+    };
+}
+
 export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasNodeAttributes): CanvasNode {
     if (!attributes) return node;
     const phase = mapExecutionPhase(attributes.status, node.execution.phase);
@@ -249,6 +272,7 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
             mimeType: attributes.mimeType,
             bytes: attributes.bytes,
             objectStorage: attributes.objectStorage,
+            directorDeskSource: attributes.directorDeskSource,
         });
         const withGeneration = updateImageNodeGeneration(withContent, {
             operation: attributes.generationType,
@@ -283,6 +307,7 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
             assets: attributes.storyboardAssets,
         });
     }
+    if (isDirectorDeskNode(framed)) return framed;
     if (isVideoCompositionNode(framed)) {
         return updateVideoCompositionNodeData(framed, {
             inputVideoNodeIds: attributes.videoCompositionInputVideoNodeIds,
@@ -297,6 +322,7 @@ export function applyCanvasNodeAttributes(node: CanvasNode, attributes?: CanvasN
         bytes: attributes.bytes,
         durationMilliseconds: attributes.durationMs,
         objectStorage: attributes.objectStorage,
+        directorDeskSource: attributes.directorDeskSource,
     });
     return updateVideoNodeGeneration(withContent, {
         prompt: attributes.prompt,

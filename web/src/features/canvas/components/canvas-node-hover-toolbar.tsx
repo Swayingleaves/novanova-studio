@@ -8,7 +8,7 @@ import { formatAudioTime } from "@/features/storage/utils/audio-waveform";
 import { formatBytes, getDataUrlByteSize } from "@/features/generation/lib/image-utils";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { CanvasNode, CanvasNodeKind, CanvasViewTransform } from "../types";
-import { isAudioNode, isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
+import { isAudioNode, isDirectorDeskNode, isImageNode, isStoryboardNode, isTextNode, isVideoCompositionNode, isVideoNode } from "../domain/canvas-node";
 import { buildImageToolbarTools } from "./canvas-image-toolbar-tools";
 import { useCanvasTheme } from "./canvas-theme-provider";
 import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
@@ -81,7 +81,7 @@ export function CanvasNodeHoverToolbar(props: CanvasNodeHoverToolbarProps) {
     const hasImage = isImageNode(node) && Boolean(node.content.source);
     const hasVideo = isVideoNode(node) && Boolean(node.content.source);
     const isText = isTextNode(node);
-    const canRetry = node.execution.phase === "failed" && !isAudioNode(node) && !isVideoCompositionNode(node);
+    const canRetry = node.execution.phase === "failed" && !isAudioNode(node) && !isVideoCompositionNode(node) && !isDirectorDeskNode(node);
 
     const copyImagePrompt = (targetNode: CanvasNode) => {
         const prompt = isImageNode(targetNode) || isVideoNode(targetNode) ? targetNode.generation.prompt.trim() : "";
@@ -399,6 +399,7 @@ function readNodeTypeLabel(type: CanvasNodeKind) {
     if (type === "image") return "图片";
     if (type === "storyboard") return "分镜脚本";
     if (type === "videoComposition") return "合成视频";
+    if (type === "directorDesk") return "3D 导演台";
     if (type === "background") return "背景板";
     return "视频";
 }

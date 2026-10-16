@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import type { MenuProps } from "antd";
 import { Button, Dropdown, Empty, Input, Modal, Tabs, Tag, Tooltip } from "antd";
-import { AudioLines, Boxes, Check, ChevronDown, ChevronsLeft, ChevronRight, Clapperboard, FileText, FolderOpen, Image as ImageIcon, ListFilter, PanelLeftClose, PanelLeftOpen, Search, UserRound, Video, X } from "lucide-react";
+import { AudioLines, Box, Boxes, Check, ChevronDown, ChevronsLeft, ChevronRight, Clapperboard, FileText, FolderOpen, Image as ImageIcon, ListFilter, PanelLeftClose, PanelLeftOpen, Search, UserRound, Video, X } from "lucide-react";
 
 import { isBackgroundNode, isImageNode, isVideoNode } from "../domain/canvas-node";
 import type { CanvasBackgroundNode, CanvasNode, CanvasStoryboardAssetKind } from "../types";
@@ -418,7 +418,7 @@ function AssetPreview({ asset }: { asset: CanvasNavigationAsset }) {
 }
 
 function NodeKindIcon({ kind, className }: { kind: CanvasNode["kind"]; className?: string }) {
-    const Icon = kind === "audio" ? AudioLines : kind === "image" ? ImageIcon : kind === "text" ? FileText : kind === "video" ? Video : kind === "storyboard" ? Clapperboard : Boxes;
+    const Icon = kind === "audio" ? AudioLines : kind === "image" ? ImageIcon : kind === "text" ? FileText : kind === "video" ? Video : kind === "storyboard" ? Clapperboard : kind === "directorDesk" ? Box : Boxes;
     return <Icon className={className} />;
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext } from "react";
-import type { CanvasBackgroundNode, CanvasNode, CanvasPoint, CanvasStoryboardNode, CanvasVideoCompositionNode, CanvasVideoNode } from "../types";
+import type { CanvasBackgroundNode, CanvasDirectorDeskNode, CanvasNode, CanvasPoint, CanvasStoryboardNode, CanvasVideoCompositionNode, CanvasVideoNode } from "../types";
 
 export type BatchImagePreview = {
     id: string;
@@ -30,6 +30,7 @@ export type NodeActions = {
     onViewVideo: (node: CanvasNode) => void;
     onRetry: (node: CanvasNode) => void;
     onOpenStoryboard: (node: CanvasStoryboardNode) => void;
+    onOpenDirectorDesk?: (node: CanvasDirectorDeskNode) => void;
     onStoryboardInstructionChange?: (nodeId: string, instruction: string) => void;
     onStoryboardVisualStyleChange?: (nodeId: string, visualStyle: string) => void;
     onStoryboardModelChange?: (nodeId: string, model: string) => void;
@@ -72,6 +73,7 @@ const NodeActionContext = createContext<NodeActions>({
     onViewVideo: noop,
     onRetry: noop,
     onOpenStoryboard: noop,
+    onOpenDirectorDesk: noop,
     onToggleFreeResize: noop,
     onDelete: noop,
 });
