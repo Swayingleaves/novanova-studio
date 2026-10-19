@@ -1,5 +1,7 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
 import com.alibaba.fastjson2.JSONObject;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
@@ -89,13 +91,13 @@ public final class ComicDramaDtos {
     /** 镜头拆分草稿。 */
     public record ShotDraft(String id, String projectId, String scopeType, String scopeId,
                             long baseProjectRevision, long baseScriptRevision, String instruction, String model,
-                            JSONObject draftData, int chargedCredits, String status,
+                            JSONObject draftData, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal chargedCredits, String status,
                             OffsetDateTime createdAt, OffsetDateTime confirmedAt) {
     }
 
     /** 镜头提示词版本。 */
     public record PromptVersion(String id, String shotId, int versionNumber, String sourceType,
-                                String prompt, JSONObject sourceSnapshot, String model, int chargedCredits,
+                                String prompt, JSONObject sourceSnapshot, String model, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal chargedCredits,
                                 String status, OffsetDateTime createdAt) {
     }
 
@@ -140,7 +142,7 @@ public final class ComicDramaDtos {
 
     /** P1批量任务。 */
     public record BatchTask(String id, String batchType, String scopeType, JSONObject scope,
-                            JSONObject modelSettings, int estimatedCredits, int totalCount, int queuedCount,
+                            JSONObject modelSettings, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal estimatedCredits, int totalCount, int queuedCount,
                             int processingCount, int completedCount, int failedCount, int needsUpdateCount,
                             String status, OffsetDateTime confirmedAt, OffsetDateTime createdAt,
                             OffsetDateTime updatedAt) {
@@ -177,7 +179,7 @@ public final class ComicDramaDtos {
     }
 
     /** 生成费用预估。 */
-    public record GenerationEstimate(String targetType, int taskCount, int estimatedCredits,
+    public record GenerationEstimate(String targetType, int taskCount, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal estimatedCredits,
                                      String model, JSONObject settings) {
     }
 

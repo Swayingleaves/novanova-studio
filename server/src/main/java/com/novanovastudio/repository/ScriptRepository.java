@@ -1,5 +1,6 @@
 package com.novanovastudio.repository;
 
+import java.math.BigDecimal;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.dto.ScriptDtos;
@@ -466,7 +467,7 @@ public class ScriptRepository {
                     FROM script_scene_characters sc JOIN script_scenes s ON s.id = sc.scene_id
                     JOIN script_episodes e ON e.id = s.episode_id
                     WHERE e.project_id = :projectId AND sc.character_id IN (
-                """ + scenePlaceholders + """ 
+                """ + scenePlaceholders + """
                     ) UNION ALL
                     SELECT e.episode_number, s.scene_number, '对白' AS reference_type
                     FROM script_blocks b JOIN script_scenes s ON s.id = b.scene_id
@@ -1215,7 +1216,7 @@ public class ScriptRepository {
                 row.get("action_type", String.class), row.get("target_type", String.class), row.get("target_id", String.class),
                 value(row, "base_revision", Long.class, 0L), row.get("instruction", String.class),
                 JSON.parseObject(row.get("source_data", String.class)), JSON.parseObject(row.get("draft_data", String.class)),
-                row.get("model", String.class), value(row, "charged_credits", Integer.class, 0),
+                row.get("model", String.class), value(row, "charged_credits", BigDecimal.class, BigDecimal.ZERO),
                 row.get("status", String.class), row.get("created_at", OffsetDateTime.class));
     }
 

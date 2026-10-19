@@ -1,5 +1,9 @@
 package com.novanovastudio.entity;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+
 import java.time.OffsetDateTime;
 import lombok.Data;
 
@@ -40,7 +44,14 @@ public class User {
     private Integer tokenVersion;
 
     /** 可用积分 */
-    private Integer creditBalance;
+    @JSONField(serializeUsing = CreditAmountWriter.class)
+    private BigDecimal creditBalance;
+
+    /** 首次创建账号的团队，平台创建或历史账号为空。 */
+    private Long createdByTeamId;
+
+    /** 首次创建账号的管理员，公开注册或历史账号为空。 */
+    private Long createdByUserId;
 
     /** 用户唯一邀请码 */
     private String invitationCode;

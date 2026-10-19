@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.CreditAmounts;
+import java.math.BigDecimal;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentScopeModelFactory;
 import com.novanovastudio.ai.AiTaskTypes;
@@ -109,7 +111,7 @@ public class StoryBibleService {
                 .switchIfEmpty(Mono.defer(() -> quote(userId, request.projectId(), request.model(), request.sectionIds())
                         .flatMap(context -> {
                             StoryBibleDtos.Quote quote = context.quote();
-                            if (quote.credits() != request.expectedCredits()
+                            if (CreditAmounts.of(quote.credits()).compareTo(CreditAmounts.of(request.expectedCredits())) != 0
                                     || quote.sourceRevision() != request.expectedSourceRevision()
                                     || quote.pricingRevision() != request.expectedPricingRevision()) {
                                 return Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT, "报价已变化，请重新报价后确认"));
@@ -158,9 +160,7 @@ public class StoryBibleService {
                             }
                             return repository.batchSettlement(job.id()).flatMap(settlement -> {
                                 // 初始批数在报价时固定，避免取消与逐批规划并发时低估尚未提交的批次。
-                                int refund = job.initialBatchCount() == 0 ? job.credits()
-                                        : (int) ((long) job.credits() * (job.initialBatchCount() - settlement.completedBatches())
-                                                / job.initialBatchCount());
+                                BigDecimal refund = job.initialBatchCount() == 0 ? job.credits() : CreditAmounts.divide(job.credits().multiply(BigDecimal.valueOf(job.initialBatchCount() - settlement.completedBatches())), job.initialBatchCount());
                                 return creditService.refundOperation(job.userId(), job.id(), OPERATION_NAME, refund);
                             });
                         })
@@ -495,7 +495,7 @@ public class StoryBibleService {
      * @return Mono&lt;Void&gt; 退款结果
      */
     public Mono<Void> refund(StoryBibleRepository.Job job) {
-        return job.credits() > 0 ? creditService.refundOperation(job.userId(), job.id(), OPERATION_NAME) : Mono.empty();
+        return CreditAmounts.of(job.credits()).compareTo(CreditAmounts.of(0)) > 0 ? creditService.refundOperation(job.userId(), job.id(), OPERATION_NAME) : Mono.empty();
     }
 
     /**
@@ -577,7 +577,7 @@ public class StoryBibleService {
                 "queued", "extract", 0, 0, 0, "", null,
                 quote.quickConfiguration(), 0, quote.estimatedBatches());
         return transactionalOperator.transactional(repository.insertJob(job)
-                        .then(creditService.chargeOperation(userId, job.id(), job.credits(), OPERATION_NAME)))
+                        .then(creditService.chargeOperation(userId, job.id(), job.credits(), OPERATION_NAME, job.modelConfigId())))
                 .onErrorMap(DataIntegrityViolationException.class,
                         error -> new BusinessException(ErrorCode.BUSINESS_ERROR, "该项目已有进行中的分析任务，请等待完成或取消后再试"))
                 .then(Mono.fromRunnable(() -> log.info("故事知识库分析已创建: jobId={}, projectId={}, chars={}, credits={}",
@@ -608,12 +608,12 @@ public class StoryBibleService {
      * @return Mono&lt;JobStatus&gt; 任务状态
      */
     private Mono<StoryBibleDtos.JobStatus> status(StoryBibleRepository.Job job, Long balanceUserId) {
-        Mono<java.util.Optional<Integer>> balance = balanceUserId == null ? Mono.just(java.util.Optional.empty())
+        Mono<java.util.Optional<BigDecimal>> balance = balanceUserId == null ? Mono.just(java.util.Optional.empty())
                 : creditRepository.getCreditBalance(balanceUserId).map(java.util.Optional::of).defaultIfEmpty(java.util.Optional.empty());
         Mono<List<StoryBibleDtos.AnalysisGap>> gaps = List.of("partial", "failed", "canceled").contains(job.status())
                 ? repository.listGaps(job.id()).collectList() : Mono.just(List.of());
-        Mono<Integer> refunded = List.of("failed", "canceled").contains(job.status())
-                ? creditService.getOperationRefundAmount(job.userId(), job.id(), OPERATION_NAME) : Mono.just(0);
+        Mono<BigDecimal> refunded = List.of("failed", "canceled").contains(job.status())
+                ? creditService.getOperationRefundAmount(job.userId(), job.id(), OPERATION_NAME) : Mono.just(BigDecimal.ZERO);
         return Mono.zip(balance, gaps, refunded).map(tuple -> new StoryBibleDtos.JobStatus(job.id(), job.status(), job.stage(), job.processedUnits(),
                 job.totalUnits(), job.modelValue(), job.billableChars(), job.credits(), job.sectionIds(), job.errorMessage(),
                 job.createdAt(), tuple.getT1().orElse(null), job.supplementCalls(), tuple.getT2(), tuple.getT3()));

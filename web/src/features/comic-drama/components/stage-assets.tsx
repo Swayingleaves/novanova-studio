@@ -1,5 +1,8 @@
 "use client";
 
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
+
+
 import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
@@ -136,7 +139,7 @@ export function StageAssets() {
     const [genSize, setGenSize] = useState<string>("1:1");
     const [estimating, setEstimating] = useState(false);
     const [generating, setGenerating] = useState(false);
-    const [estimatedCredits, setEstimatedCredits] = useState<number | null>(null);
+    const [estimatedCredits, setEstimatedCredits] = useState<CreditAmount | null>(null);
 
     // 真实资产版本与媒体状态同步
     const [versionsByAsset, setVersionsByAsset] = useState<Record<string, ComicDramaAssetVersion[]>>({});
@@ -152,7 +155,7 @@ export function StageAssets() {
     const [batchSize, setBatchSize] = useState<string>("1:1");
     const [batchEstimating, setBatchEstimating] = useState(false);
     const [batchGenerating, setBatchGenerating] = useState(false);
-    const [batchCredits, setBatchCredits] = useState<number | null>(null);
+    const [batchCredits, setBatchCredits] = useState<CreditAmount | null>(null);
 
     const assets = useMemo(() => workspace?.assets || [], [workspace]);
     const mediaList = useMemo(() => workspace?.media || [], [workspace]);

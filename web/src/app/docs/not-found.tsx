@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/shared/lib/team-navigation";
 import { ArrowLeft, BookOpen } from "lucide-react";
 import { useTranslation } from "@/features/locale/use-translation";
 

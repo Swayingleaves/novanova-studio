@@ -1,5 +1,7 @@
 package com.novanovastudio.repository;
 
+import java.math.BigDecimal;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.dto.WholeBookAdaptationDtos.*;
@@ -27,7 +29,7 @@ public class WholeBookAdaptationRepository {
     /** 不可变输入及人工确认规划。 */
     public record Workflow(String jobId, long revision, List<StoryBibleRepository.Item> facts,
                            List<JSONObject> links, JSONObject entityMapping, Strategy strategy,
-                           List<Slot> slots, List<String> episodeIds, int unitPrice) { }
+                           List<Slot> slots, List<String> episodeIds, BigDecimal unitPrice) { }
     /** 已计划或已完成的生成单元。 */
     public record Unit(String key, String phase, String stage, int sequence, JSONObject input,
                        JSONObject output, String draftId, String chargeId, OffsetDateTime completedAt) { }
@@ -104,7 +106,7 @@ public class WholeBookAdaptationRepository {
                         JSON.parseObject(RowMappers.jsonText(row, "strategy"), Strategy.class),
                         JSON.parseArray(RowMappers.jsonText(row, "episode_slots"), Slot.class),
                         JSON.parseArray(RowMappers.jsonText(row, "episode_ids"), String.class),
-                        row.get("unit_price", Integer.class))).one();
+                        row.get("unit_price", BigDecimal.class))).one();
     }
     /**
      * 持久化阶段单元，报价确认事务与预扣共用规划。
@@ -327,7 +329,7 @@ public class WholeBookAdaptationRepository {
      * @param credits int 本次积分
      * @return Mono<Boolean> 是否认领成功
      */
-    public Mono<Boolean> advance(NovelAdaptationJobRepository.Job job, String phase, int calls, int credits) {
+    public Mono<Boolean> advance(NovelAdaptationJobRepository.Job job, String phase, int calls, BigDecimal credits) {
         return databaseClient.sql("UPDATE novel_adaptation_jobs SET phase=:phase,stage=:stage,status='queued',total_units=:calls,estimated_calls=:calls,processed_units=0,settled_calls=0,credits=:credits,retry_count=retry_count+1,error_message='',lease_until=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=:job AND status=:status AND phase=:previous AND retry_count=:attempt")
                 .bind("job", job.id()).bind("phase", phase).bind("stage", "materials".equals(phase) ? "material" : "planning".equals(phase) ? "overview" : "episode")
                 .bind("calls", calls).bind("credits", credits).bind("status", job.status()).bind("previous", job.phase()).bind("attempt", job.retryCount())

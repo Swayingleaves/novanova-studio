@@ -8,8 +8,7 @@ import { type CSSProperties, useEffect, useState } from "react";
 import type { MenuProps } from "antd";
 import { Bell, Keyboard, LogOut, Cog, UserCircle, Users } from "lucide-react";
 import { App, Badge, Dropdown, Popover } from "antd";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Link from "@/shared/lib/team-navigation";
 
 import { GitHubLink } from "@/features/app-shell/components/github-link";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
@@ -18,6 +17,7 @@ import { logoutCurrentUser } from "@/services/api/server";
 import { useConfigStore } from "@/features/settings/stores/use-config-store";
 import { useNotificationStore } from "@/features/notification/stores/use-notification-store";
 import { NotificationDetailModal } from "@/features/notification/components/notification-detail-modal";
+import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 
 type UserStatusActionsProps = {
@@ -28,7 +28,6 @@ type UserStatusActionsProps = {
 
 export function UserStatusActions({ showConfig = true, variant = "default", onOpenShortcuts }: UserStatusActionsProps) {
     const translate = useTranslation();
-    const router = useRouter();
     const { message } = App.useApp();
     const user = useUserStore((state) => state.user);
     const clearSession = useUserStore((state) => state.clearSession);
@@ -55,7 +54,6 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
         }
         clearSession();
         message.success(translate("appShell.signedOut"));
-        router.replace("/auth");
     };
     const userMenuItems: MenuProps["items"] = user
         ? [
@@ -69,7 +67,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
                       </div>
                   ),
               },
-              ...(user.role === "admin"
+              ...(canManageCurrentSpace()
                   ? [
                         {
                             key: "adminSystem",
@@ -120,7 +118,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
         <>
             <NotificationDetailModal notification={detailNotification} onClose={() => setDetailNotification(null)} />
             <div className="inline-flex shrink-0 items-center gap-1">
-                {showConfig && user?.role === "admin" ? (
+                {showConfig && canManageCurrentSpace() ? (
                     <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label={translate("appShell.configure")} title={translate("appShell.configure")}>
                         <Cog className="size-4" />
                     </button>

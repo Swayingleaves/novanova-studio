@@ -1,5 +1,7 @@
 package com.novanovastudio.repository;
 
+import java.math.BigDecimal;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import io.r2dbc.spi.Row;
@@ -28,7 +30,7 @@ public class NovelAdaptationJobRepository {
     public record Job(String id, String projectId, long userId, String clientRequestId, String modelValue,
                       String modelConfigId, JSONObject settings, List<String> factIds, String phase, String stage,
                       String status, int totalUnits, int processedUnits, int estimatedCalls, int settledCalls,
-                      int credits, String errorMessage, OffsetDateTime createdAt, int retryCount) { }
+                      BigDecimal credits, String errorMessage, OffsetDateTime createdAt, int retryCount) { }
 
     /** 查询列，保持与映射顺序一致。 */
     private static final String COLUMNS = "id,project_id,user_id,client_request_id,model_value,model_config_id,"
@@ -46,7 +48,7 @@ public class NovelAdaptationJobRepository {
                         + "model_value,model_config_id,settings,fact_ids,phase,stage,status,total_units,estimated_calls,credits) "
                         + "VALUES (:id,:projectId,:userId,:clientRequestId,:modelValue,:modelConfigId,"
                         + "CAST(:settings AS jsonb),CAST(:factIds AS jsonb),:phase,:stage,'queued',:totalUnits,:estimatedCalls,:credits) "
-                        + "ON CONFLICT (user_id,client_request_id) DO NOTHING")
+                        + "ON CONFLICT (team_id,user_id,client_request_id) DO NOTHING")
                 .bind("id", job.id()).bind("projectId", job.projectId()).bind("userId", job.userId())
                 .bind("clientRequestId", job.clientRequestId()).bind("modelValue", job.modelValue())
                 .bind("modelConfigId", job.modelConfigId())
@@ -182,7 +184,7 @@ public class NovelAdaptationJobRepository {
      * @param totalCredits int 按原单价计算的完整计划积分
      * @return Mono&lt;Boolean&gt; 是否成功转为排队状态
      */
-    public Mono<Boolean> retry(Job job, int completedCalls, int remainingCalls, int totalCredits) {
+    public Mono<Boolean> retry(Job job, int completedCalls, int remainingCalls, BigDecimal totalCredits) {
         return databaseClient.sql("UPDATE novel_adaptation_jobs SET status='queued',error_message='',lease_until=NULL,"
                         + "retry_count=retry_count+1,processed_units=:completed,settled_calls=:completed,"
                         + "total_units=:total,estimated_calls=:total,credits=:credits,updated_at=CURRENT_TIMESTAMP "
@@ -302,7 +304,7 @@ public class NovelAdaptationJobRepository {
      * @param credits int 本阶段预扣积分
      * @return Mono&lt;Boolean&gt; 是否成功推进
      */
-    public Mono<Boolean> stage(String jobId, String phase, int totalUnits, int credits) {
+    public Mono<Boolean> stage(String jobId, String phase, int totalUnits, BigDecimal credits) {
         return databaseClient.sql("UPDATE novel_adaptation_jobs SET status='queued',phase=:phase,"
                         + "total_units=:totalUnits,estimated_calls=:totalUnits,processed_units=0,settled_calls=0,"
                         + "credits=:credits,retry_count=retry_count+1,updated_at=CURRENT_TIMESTAMP "
@@ -352,7 +354,7 @@ public class NovelAdaptationJobRepository {
                 row.get("phase", String.class), row.get("stage", String.class), row.get("status", String.class),
                 row.get("total_units", Integer.class), row.get("processed_units", Integer.class),
                 row.get("estimated_calls", Integer.class), row.get("settled_calls", Integer.class),
-                row.get("credits", Integer.class), row.get("error_message", String.class),
+                row.get("credits", BigDecimal.class), row.get("error_message", String.class),
                 row.get("created_at", OffsetDateTime.class), row.get("retry_count", Integer.class));
     }
 }

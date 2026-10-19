@@ -1,5 +1,7 @@
 "use client";
 
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
+
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Empty, InputNumber, Select, Space, Switch, Table, Tag, Tooltip } from "antd";
@@ -35,7 +37,7 @@ export function StoryBiblePricingManagement() {
 
     /* 修改上限时自动衔接下一档起点，保证档位首尾相接。 */
     const updateMax = (index: number, maxChars: number | null) => setTiers((list) => list.map((tier, position) => position === index ? { ...tier, maxChars } : position === index + 1 && maxChars != null ? { ...tier, minChars: maxChars + 1 } : tier));
-    const updateCredits = (index: number, credits: number) => setTiers((list) => list.map((tier, position) => position === index ? { ...tier, credits } : tier));
+    const updateCredits = (index: number, credits: CreditAmount) => setTiers((list) => list.map((tier, position) => position === index ? { ...tier, credits } : tier));
     const addTier = () => setTiers((list) => {
         const last = list[list.length - 1];
         if (!last) return [{ minChars: 1, maxChars: null, credits: 0 }];

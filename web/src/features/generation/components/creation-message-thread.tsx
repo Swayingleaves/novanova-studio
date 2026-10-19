@@ -7,7 +7,7 @@ import { Button, Input, Modal, Tooltip } from "antd";
 import { ArrowRight, Copy, PenLine } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/shared/lib/team-navigation";
 
 import { AgentActivityTimeline } from "@/features/generation/components/agent-activity-timeline";
 import type { CreationMessageThreadProps } from "@/features/generation/components/creation-workspace-types";

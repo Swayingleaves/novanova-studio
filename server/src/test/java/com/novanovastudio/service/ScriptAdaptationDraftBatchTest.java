@@ -257,7 +257,7 @@ class ScriptAdaptationDraftBatchTest {
     private ScriptDtos.AiDraft draft(String id, long baseRevision, JSONObject source, ScriptDtos.Character... proposed) {
         return new ScriptDtos.AiDraft(id, "project-a", "novelAdaptationCharacters", "characters", null, baseRevision, "",
                 source, JSON.parseObject(JSON.toJSONString(new ScriptDtos.CharacterDraft(List.of(proposed), List.of()))),
-                "text-model", 1, "pending", OffsetDateTime.now());
+                "text-model", java.math.BigDecimal.valueOf(1), "pending", OffsetDateTime.now());
     }
 
     /**
@@ -330,7 +330,7 @@ class ScriptAdaptationDraftBatchTest {
         if (status != null) episode.put("completionStatus", status);
         JSONObject data = new JSONObject().fluentPut("episodes", new com.alibaba.fastjson2.JSONArray().fluentAdd(episode));
         return new ScriptDtos.AiDraft("draft-ep", "project-a", "novelAdaptationepisodes", "episodes", null, 4, "",
-                JSON.parseObject("{\"episodes\":[]}"), data, "text-model", 1, "pending", OffsetDateTime.now());
+                JSON.parseObject("{\"episodes\":[]}"), data, "text-model", java.math.BigDecimal.valueOf(1), "pending", OffsetDateTime.now());
     }
 
     /** 省略完成状态的分集草稿。 */

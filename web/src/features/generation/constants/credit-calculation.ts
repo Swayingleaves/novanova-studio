@@ -1,10 +1,12 @@
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import type { ModelCreditUnit } from "@/features/settings/stores/use-config-store";
 
 /** 单个模型的积分消耗定义。 */
 export interface ModelCreditCost {
     model: string;
     taskType: "image" | "video" | "text";
-    credits: number;
+    credits: CreditAmount;
     unit: ModelCreditUnit;
 }
 
@@ -21,7 +23,7 @@ export interface CreditCostOptions {
 }
 
 /** 查询单个模型的积分单价，未配置时为0。 */
-function unitCost(modelCosts: ModelCreditCost[], model: string, taskType: ModelCreditCost["taskType"]): number {
+function unitCost(modelCosts: ModelCreditCost[], model: string, taskType: ModelCreditCost["taskType"]): CreditAmount {
     return modelCosts.find((item) => item.model === model && item.taskType === taskType)?.credits ?? 0;
 }
 
@@ -31,9 +33,9 @@ function unitCost(modelCosts: ModelCreditCost[], model: string, taskType: ModelC
  * @param options 计算入参
  * @return number 本次请求应消耗的积分
  */
-export function requestCreditCost(options: CreditCostOptions): number {
+export function requestCreditCost(options: CreditCostOptions): CreditAmount {
     if (options.taskType === "text") return 0;
     const count = Math.max(1, Math.floor(Math.abs(Number(options.count)) || 1));
     const credits = unitCost(options.modelCosts, options.model, options.taskType);
-    return credits * count;
+    return creditText(creditAmount(credits).times(count));
 }

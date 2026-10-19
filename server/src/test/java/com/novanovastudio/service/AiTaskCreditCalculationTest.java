@@ -35,7 +35,7 @@ class AiTaskCreditCalculationTest {
         method.setAccessible(true);
 
         List<VideoWorkflowDefinition.VideoWorkflowQuoteStage> imageStages =
-                (List<VideoWorkflowDefinition.VideoWorkflowQuoteStage>) method.invoke(new AiTaskService(null, null, null, null, null, null, null, null, null, null, null, null), plan, "image");
+                (List<VideoWorkflowDefinition.VideoWorkflowQuoteStage>) method.invoke(new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), null, null, null, null, null, null, null, null, null, null, null, null), plan, "image");
 
         Assertions.assertEquals(List.of("first_frame"), imageStages.stream().map(VideoWorkflowDefinition.VideoWorkflowQuoteStage::role).toList());
     }
@@ -43,19 +43,19 @@ class AiTaskCreditCalculationTest {
     /** 按次图片任务应按生成数量计费。 */
     @Test
     void shouldChargeGenerationUnitByImageCount() {
-        int credits = calculate(new AiTaskDtos.CreateAiTaskRequest("image", "生成图片", "channel::model",
+        java.math.BigDecimal credits = calculate(new AiTaskDtos.CreateAiTaskRequest("image", "生成图片", "channel::model",
                 Map.of("count", 3), List.of(), List.of(), "imagePage"), 7, "generation");
 
-        Assertions.assertEquals(21, credits);
+        Assertions.assertEquals(0, java.math.BigDecimal.valueOf(21).compareTo(credits));
     }
 
     /** 按秒视频任务应按单位积分和视频时长计费。 */
     @Test
     void shouldChargeSecondUnitByVideoDuration() {
-        int credits = calculate(new AiTaskDtos.CreateAiTaskRequest("video", "生成视频", "channel::model",
+        java.math.BigDecimal credits = calculate(new AiTaskDtos.CreateAiTaskRequest("video", "生成视频", "channel::model",
                 Map.of("seconds", "8", "resolution", "720p"), List.of(), List.of(), "videoPage"), 5, "second");
 
-        Assertions.assertEquals(40, credits);
+        Assertions.assertEquals(0, java.math.BigDecimal.valueOf(40).compareTo(credits));
     }
 
     /** 按秒视频任务不接受智能时长、空值和非整数。 */
@@ -71,14 +71,12 @@ class AiTaskCreditCalculationTest {
         }
     }
 
-    /** 按秒计费的整数乘法溢出时应拒绝创建任务。 */
+    /** 六位小数升级后，超过旧整数上限的合法金额仍应精确计算。 */
     @Test
-    void shouldRejectCreditOverflow() {
-        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> calculate(
-                new AiTaskDtos.CreateAiTaskRequest("video", "生成视频", "channel::model", Map.of("seconds", 2, "resolution", "720p"),
-                        List.of(), List.of(), "videoPage"), Integer.MAX_VALUE, "second"));
-
-        Assertions.assertTrue(exception.getMessage().contains("超出范围"));
+    void shouldSupportAmountsBeyondIntegerRange() {
+        var credits = calculate(new AiTaskDtos.CreateAiTaskRequest("video", "生成视频", "channel::model",
+                Map.of("seconds", 2, "resolution", "720p"), List.of(), List.of(), "videoPage"), Integer.MAX_VALUE, "second");
+        Assertions.assertEquals(0, new java.math.BigDecimal("4294967294").compareTo(credits));
     }
 
     /** 非视频模型不允许按秒计费。 */
@@ -99,28 +97,28 @@ class AiTaskCreditCalculationTest {
      * @param creditUnit String 计费单位
      * @return int 应扣积分
      */
-    private int calculate(AiTaskDtos.CreateAiTaskRequest request, int creditCost, String creditUnit) {
+    private java.math.BigDecimal calculate(AiTaskDtos.CreateAiTaskRequest request, int creditCost, String creditUnit) {
         try {
             Class<?> resolvedModelType = Class.forName("com.novanovastudio.service.AiTaskService$ResolvedModel");
             Constructor<?> constructor = resolvedModelType.getDeclaredConstructor(
-                    AiTaskDtos.AiChannelConfig.class, String.class, String.class, Integer.class, String.class,
+                    AiTaskDtos.AiChannelConfig.class, String.class, String.class, java.math.BigDecimal.class, String.class,
                     List.class, VideoBillingConfiguration.class, boolean.class, String.class, com.alibaba.fastjson2.JSONObject.class,
                     boolean.class, Map.class);
             constructor.setAccessible(true);
             boolean video = "video".equals(request.taskType());
             VideoBillingConfiguration videoBillingConfiguration = video
                     ? new VideoBillingConfiguration(creditUnit, 1,
-                    Map.of(VideoGenerationMode.TEXT_TO_VIDEO, Map.of("720p", creditCost)))
+                    Map.of(VideoGenerationMode.TEXT_TO_VIDEO, Map.of("720p", java.math.BigDecimal.valueOf(creditCost))))
                     : null;
             Object resolvedModel = constructor.newInstance(
                     new AiTaskDtos.AiChannelConfig("channel", "测试渠道", "https://example.com", "key", "openai", List.of("model")),
-                    "model", "model-config", creditCost, creditUnit,
+                    "model", "model-config", java.math.BigDecimal.valueOf(creditCost), creditUnit,
                     video ? List.of(VideoGenerationMode.TEXT_TO_VIDEO) : List.of(), videoBillingConfiguration, true, "high",
                     new com.alibaba.fastjson2.JSONObject(),
                     false, Map.of());
             Method method = AiTaskService.class.getDeclaredMethod("calculateTaskCredits", AiTaskDtos.CreateAiTaskRequest.class, resolvedModelType);
             method.setAccessible(true);
-            return (Integer) method.invoke(new AiTaskService(null, null, null, null, null, null, null, null, null, null, null, null), request, resolvedModel);
+            return (java.math.BigDecimal) method.invoke(new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), null, null, null, null, null, null, null, null, null, null, null, null), request, resolvedModel);
         } catch (InvocationTargetException exception) {
             if (exception.getCause() instanceof RuntimeException runtimeException) throw runtimeException;
             throw new IllegalStateException(exception.getCause());

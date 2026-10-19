@@ -1,5 +1,7 @@
 package com.novanovastudio.repository;
 
+import java.math.BigDecimal;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -40,7 +42,7 @@ public class StoryBibleRepository {
     /** 分析任务。 */
     public record Job(String id, String projectId, String documentId, long userId, String clientRequestId,
                       String modelValue, String modelConfigId, List<String> sectionIds, List<int[]> ranges,
-                      int billableChars, int credits, long pricingRevision, long sourceRevision, String status,
+                      int billableChars, BigDecimal credits, long pricingRevision, long sourceRevision, String status,
                       String stage, int processedUnits, int totalUnits, int attemptCount, String errorMessage,
                       String createdAt, StoryBibleDtos.QuickConfiguration quickConfiguration,
                       int supplementCalls, int initialBatchCount) { }
@@ -884,7 +886,7 @@ public class StoryBibleRepository {
         return new Job(row.get("id", String.class), row.get("project_id", String.class), row.get("document_id", String.class),
                 row.get("user_id", Long.class), row.get("client_request_id", String.class), row.get("model_value", String.class),
                 row.get("model_config_id", String.class), JSON.parseArray(row.get("section_ids", String.class), String.class), ranges,
-                row.get("billable_chars", Integer.class), row.get("credits", Integer.class), row.get("pricing_revision", Long.class),
+                row.get("billable_chars", Integer.class), row.get("credits", BigDecimal.class), row.get("pricing_revision", Long.class),
                 row.get("source_revision", Long.class), row.get("status", String.class), row.get("stage", String.class),
                 row.get("processed_units", Integer.class), row.get("total_units", Integer.class), row.get("attempt_count", Integer.class),
                 row.get("error_message", String.class), Objects.toString(createdAt, null),

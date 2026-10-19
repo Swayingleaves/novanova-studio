@@ -1,5 +1,8 @@
 "use client";
 
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
+
+
 import { productionParameterLabel } from "../lib/production-labels";
 
 import { useTranslation } from "@/features/locale/use-translation";
@@ -48,7 +51,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
     const [videoSeconds, setVideoSeconds] = useState<string>("5");
     /** 批量模式下勾选要生成的镜头，打开弹窗时默认全选 */
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
-    const [estimatedCredits, setEstimatedCredits] = useState<number | null>(null);
+    const [estimatedCredits, setEstimatedCredits] = useState<CreditAmount | null>(null);
     const [estimating, setEstimating] = useState(false);
     const [generating, setGenerating] = useState(false);
 

@@ -1,5 +1,7 @@
 package com.novanovastudio.repository;
 
+import java.math.BigDecimal;
+
 import java.time.OffsetDateTime;
 import lombok.RequiredArgsConstructor;
 import org.springframework.r2dbc.core.DatabaseClient;
@@ -28,7 +30,7 @@ public class CreditCardRepository {
      * @param createdBy Long 创建管理员ID
      * @return Mono<Long> 批次ID
      */
-    public Mono<Long> createBatch(int quantity, int creditsPerCard, Long createdBy) {
+    public Mono<Long> createBatch(int quantity, BigDecimal creditsPerCard, Long createdBy) {
         return databaseClient.sql("""
                         INSERT INTO credit_card_batches(quantity, credits_per_card, created_by)
                         VALUES (:quantity, :creditsPerCard, :createdBy)
@@ -52,7 +54,7 @@ public class CreditCardRepository {
      * @param credits int 可兑换积分
      * @return Mono<Void> 写入结果
      */
-    public Mono<Void> createCard(Long batchId, String codeHash, String codeEncrypted, String codeMasked, String codeSuffix, int credits) {
+    public Mono<Void> createCard(Long batchId, String codeHash, String codeEncrypted, String codeMasked, String codeSuffix, BigDecimal credits) {
         return databaseClient.sql("""
                         INSERT INTO credit_cards(batch_id, code_hash, code_encrypted, code_masked, code_suffix, credits)
                         VALUES (:batchId, :codeHash, :codeEncrypted, :codeMasked, :codeSuffix, :credits)
@@ -88,7 +90,7 @@ public class CreditCardRepository {
                         row.get("id", Long.class),
                         row.get("code_masked", String.class),
                         row.get("code_suffix", String.class),
-                        row.get("credits", Integer.class),
+                        row.get("credits", BigDecimal.class),
                         row.get("redeemed_at", OffsetDateTime.class)))
                 .one();
     }
@@ -136,7 +138,7 @@ public class CreditCardRepository {
                 .map((row, metadata) -> new BatchRecord(
                         row.get("id", Long.class),
                         row.get("quantity", Integer.class),
-                        row.get("credits_per_card", Integer.class),
+                        row.get("credits_per_card", BigDecimal.class),
                         row.get("redeemed_count", Long.class),
                         row.get("created_by", Long.class),
                         row.get("created_by_nickname", String.class),
@@ -200,7 +202,7 @@ public class CreditCardRepository {
                         row.get("code_encrypted", String.class),
                         row.get("code_masked", String.class),
                         row.get("code_suffix", String.class),
-                        row.get("credits", Integer.class),
+                        row.get("credits", BigDecimal.class),
                         row.get("redeemed_by_user_id", Long.class),
                         row.get("redeemed_by_username", String.class),
                         row.get("redeemed_by_nickname", String.class),
@@ -208,7 +210,7 @@ public class CreditCardRepository {
                         row.get("redeemed_at", OffsetDateTime.class),
                         row.get("created_at", OffsetDateTime.class),
                         row.get("transaction_id", Long.class),
-                        row.get("balance_after", Integer.class)))
+                        row.get("balance_after", BigDecimal.class)))
                 .all();
     }
 
@@ -261,8 +263,8 @@ public class CreditCardRepository {
                         row.get("code_encrypted", String.class),
                         row.get("code_masked", String.class),
                         row.get("code_suffix", String.class),
-                        row.get("credits", Integer.class),
-                        row.get("balance_after", Integer.class),
+                        row.get("credits", BigDecimal.class),
+                        row.get("balance_after", BigDecimal.class),
                         row.get("redeemed_at", OffsetDateTime.class)))
                 .all();
     }
@@ -360,7 +362,7 @@ public class CreditCardRepository {
      * @param credits Integer 积分
      * @param redeemedAt OffsetDateTime 兑换时间
      */
-    public record ClaimedCard(Long id, String codeMasked, String codeSuffix, Integer credits, OffsetDateTime redeemedAt) {
+    public record ClaimedCard(Long id, String codeMasked, String codeSuffix, BigDecimal credits, OffsetDateTime redeemedAt) {
     }
 
     /**
@@ -385,7 +387,7 @@ public class CreditCardRepository {
      * @param createdByEmail String 创建管理员邮箱
      * @param createdAt OffsetDateTime 创建时间
      */
-    public record BatchRecord(Long id, Integer quantity, Integer creditsPerCard, Long redeemedCount, Long createdByUserId,
+    public record BatchRecord(Long id, Integer quantity, BigDecimal creditsPerCard, Long redeemedCount, Long createdByUserId,
                               String createdByNickname, String createdByUsername, String createdByEmail, OffsetDateTime createdAt) {
     }
 
@@ -407,9 +409,9 @@ public class CreditCardRepository {
      * @param transactionId Long 积分流水ID
      * @param balanceAfter Integer 流水余额
      */
-    public record CardRecord(Long id, Long batchId, String codeEncrypted, String codeMasked, String codeSuffix, Integer credits,
+    public record CardRecord(Long id, Long batchId, String codeEncrypted, String codeMasked, String codeSuffix, BigDecimal credits,
                              Long redeemedByUserId, String redeemedByUsername, String redeemedByNickname, String redeemedByEmail,
-                             OffsetDateTime redeemedAt, OffsetDateTime createdAt, Long transactionId, Integer balanceAfter) {
+                             OffsetDateTime redeemedAt, OffsetDateTime createdAt, Long transactionId, BigDecimal balanceAfter) {
     }
 
     /**
@@ -448,7 +450,7 @@ public class CreditCardRepository {
      * @param balanceAfter Integer 流水余额
      * @param redeemedAt OffsetDateTime 兑换时间
      */
-    public record RedemptionRecord(Long id, Long transactionId, String codeEncrypted, String codeMasked, String codeSuffix, Integer credits,
-                                   Integer balanceAfter, OffsetDateTime redeemedAt) {
+    public record RedemptionRecord(Long id, Long transactionId, String codeEncrypted, String codeMasked, String codeSuffix, BigDecimal credits,
+                                   BigDecimal balanceAfter, OffsetDateTime redeemedAt) {
     }
 }

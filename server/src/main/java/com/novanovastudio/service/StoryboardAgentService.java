@@ -1,5 +1,8 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.novanovastudio.common.SystemMessage;
 
 import com.alibaba.fastjson2.JSON;
@@ -154,7 +157,7 @@ public class StoryboardAgentService {
      */
     private Mono<StoryboardDtos.GenerateStoryboardResponse> generateWithModel(
             Long userId, AgentScopeModelFactory.TextModelSelection model, StoryboardDtos.GenerateStoryboardRequest request) {
-        return executeChargedOperation(userId, model.creditCost(), "分镜首次生成", operationId -> callGenerateAgent(userId, operationId, model, request)
+        return executeChargedOperation(userId, model.ownerTeamId(), model.creditCost(), "分镜首次生成", operationId -> callGenerateAgent(userId, operationId, model, request)
                         .map(this::normalizeGeneratedStoryboard))
                 .map(result -> new StoryboardDtos.GenerateStoryboardResponse(result.shots(), result.assets(), model.creditCost()));
     }
@@ -169,8 +172,8 @@ public class StoryboardAgentService {
      */
     private Mono<StoryboardDtos.ComposePromptsResponse> composeWithModel(
             Long userId, AgentScopeModelFactory.TextModelSelection model, StoryboardDtos.ComposePromptsRequest request) {
-        int credits = multiplyCredits(model.creditCost(), request.shots().size());
-        return executeChargedOperation(userId, credits, "分镜提示词合成", operationId -> callComposeAgent(userId, operationId, model, request)
+        BigDecimal credits = multiplyCredits(model.creditCost(), request.shots().size());
+        return executeChargedOperation(userId, model.ownerTeamId(), credits, "分镜提示词合成", operationId -> callComposeAgent(userId, operationId, model, request)
                         .map(result -> validatePromptComposition(request.shots(), request.visualStyle(), result)))
                 .map(prompts -> new StoryboardDtos.ComposePromptsResponse(prompts, credits));
     }
@@ -185,13 +188,13 @@ public class StoryboardAgentService {
      * @return Mono<T> 业务结果
      * @param <T> 业务结果类型
      */
-    private <T> Mono<T> executeChargedOperation(Long userId, int credits, String operationName,
+    private <T> Mono<T> executeChargedOperation(Long userId, long ownerTeamId, BigDecimal credits, String operationName,
                                                   Function<String, Mono<T>> operation) {
         String operationId = UUID.randomUUID().toString();
         AtomicBoolean charged = new AtomicBoolean(false);
         return creditService.chargeOperation(userId, operationId, credits, operationName)
                 .then(Mono.defer(() -> {
-                    charged.set(credits > 0);
+                    charged.set(CreditAmounts.of(credits).compareTo(CreditAmounts.of(0)) > 0);
                     log.info("开始执行分镜Agent操作: operationId={}, userId={}, operationName={}, credits={}", operationId, userId, operationName, credits);
                     return operation.apply(operationId);
                 }))
@@ -204,7 +207,7 @@ public class StoryboardAgentService {
                     return creditService.refundOperation(userId, operationId, operationName)
                             .doOnSuccess(ignored -> log.info("分镜Agent操作退款完成: operationId={}, userId={}, operationName={}", operationId, userId, operationName))
                             .then(Mono.error(exception));
-                });
+                }).contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.WALLET_KEY, ownerTeamId));
     }
 
     /**
@@ -640,9 +643,9 @@ public class StoryboardAgentService {
      * @param shotCount int 镜头数量
      * @return int 总积分
      */
-    private int multiplyCredits(int unitCredits, int shotCount) {
+    private BigDecimal multiplyCredits(BigDecimal unitCredits, int shotCount) {
         try {
-            return Math.multiplyExact(unitCredits, shotCount);
+            return CreditAmounts.multiply(unitCredits, shotCount);
         } catch (ArithmeticException exception) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.storyboardPromptCreditCalculationExceedsRange"));
         }

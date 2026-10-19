@@ -57,22 +57,10 @@ class VideoCompositionTaskServiceTest {
         repository = mock(VideoCompositionTaskRepository.class);
         currentUserProvider = mock(CurrentUserProvider.class);
         persistenceService = mock(PersistenceService.class);
+        when(persistenceService.requireStorageWritable(org.mockito.ArgumentMatchers.anyLong())).thenReturn(Mono.empty());
         taskDispatcher = mock(VideoCompositionTaskDispatcher.class);
         cancellation = mock(VideoCompositionTaskCancellation.class);
-        taskService = new VideoCompositionTaskService(
-                repository,
-                currentUserProvider,
-                persistenceService,
-                mock(VideoCompositionMediaProcessor.class),
-                mock(StoryboardVideoExportProcessor.class),
-                mock(ComicDramaRepository.class),
-                mock(ScriptService.class),
-                mock(ComicDramaService.class),
-                taskDispatcher,
-                mock(VideoCompositionTaskQueue.class),
-                cancellation,
-                new NovanovaProperties()
-        );
+        taskService = new VideoCompositionTaskService(com.novanovastudio.TeamTestSupport.taskScope(), repository, currentUserProvider, persistenceService, mock(VideoCompositionMediaProcessor.class), mock(StoryboardVideoExportProcessor.class), mock(ComicDramaRepository.class), mock(ScriptService.class), mock(ComicDramaService.class), taskDispatcher, mock(VideoCompositionTaskQueue.class), cancellation, new NovanovaProperties());
     }
 
     /**

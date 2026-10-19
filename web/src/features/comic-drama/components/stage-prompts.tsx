@@ -1,5 +1,7 @@
 "use client";
 
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+
 import { productionParameterLabel } from "../lib/production-labels";
 
 import { useTranslation } from "@/features/locale/use-translation";
@@ -263,7 +265,7 @@ export function StagePrompts() {
                                                             {v.sourceType === "ai" ? translate("comicDrama.aiGenerated") : translate("comicDrama.manuallySaved")}
                                                         </span>
                                                         {v.model && <Tag>{v.model}</Tag>}
-                                                        {v.chargedCredits > 0 && (
+                                                        {creditAmount(v.chargedCredits).greaterThan(0) && (
                                                             <span className="text-[var(--studio-muted)]">{translate("comicDrama.costCountCredits_ef657d", { value0: v.chargedCredits })}</span>
                                                         )}
                                                     </div>

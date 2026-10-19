@@ -143,7 +143,7 @@ public class SecurityConfiguration {
         configuration.setAllowCredentials(true);
         configuration.setAllowedOrigins(validAllowedOrigins(properties));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
+        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With", "X-Team-Id"));
         configuration.setExposedHeaders(Arrays.asList("Content-Type", "Cache-Control", "Connection", "X-Accel-Buffering", "X-System-Message-Key"));
         configuration.setMaxAge(3600L); // 预检结果缓存1小时，减少OPTIONS请求
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

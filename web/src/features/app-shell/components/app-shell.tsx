@@ -3,8 +3,8 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { useState, type ReactNode } from "react";
-import { usePathname } from "next/navigation";
-import Link from "next/link";
+import { usePathname } from "@/shared/lib/team-navigation";
+import Link from "@/shared/lib/team-navigation";
 import { BookOpen, Layers3, Menu } from "lucide-react";
 
 import { AppSidebar } from "@/features/app-shell/components/app-sidebar";
@@ -15,10 +15,13 @@ import { WelcomeModal } from "@/features/app-shell/components/welcome-modal";
 import { AuthModal } from "@/features/auth/components/auth-modal";
 import { MobileNavDrawer } from "@/features/app-shell/components/mobile-nav-drawer";
 import { navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
+import { useTeamStore } from "@/features/team/stores/use-team-store";
 
 export function AppShell({ children }: { children: ReactNode }) {
     const translate = useTranslation();
     const pathname = usePathname();
+    const team = useTeamStore((state) => state.team);
+    const teamSpaceLabel = team ? translate("appShell.currentTeamSpace", { name: team.name }) : "";
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
     const hideSidebar = /^\/canvas\/[^/]+/.test(pathname);
@@ -47,7 +50,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
 
             {!hideSidebar ? (
-                <div className="fixed right-3 top-3 z-40 flex items-center gap-2">
+                <div className="fixed right-3 top-3 z-40 flex max-w-[calc(100vw-4.5rem)] items-center gap-2 md:max-w-[calc(100vw-7rem)]">
+                    {team ? <span role="status" title={teamSpaceLabel} className="mr-1 min-w-0 max-w-80 truncate text-xs text-[var(--studio-muted)]">{teamSpaceLabel}</span> : null}
                     <Link
                         href="/editions"
                         className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]"

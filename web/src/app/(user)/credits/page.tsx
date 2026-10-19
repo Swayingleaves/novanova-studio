@@ -1,4 +1,8 @@
 "use client";
+
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
@@ -50,14 +54,14 @@ const createCreditTransactionColumns = (translator: typeof translate = translate
         dataIndex: "changeAmount",
         width: 128,
         align: "right",
-        render: (changeAmount: number) => <span className={`font-medium tabular-nums ${changeAmount > 0 ? "text-[var(--studio-primary)]" : "text-[var(--studio-ink)]"}`}>{formatCreditChange(changeAmount)}</span>,
+        render: (changeAmount: CreditAmount) => <span className={`font-medium tabular-nums ${creditAmount(changeAmount).greaterThan(0) ? "text-[var(--studio-primary)]" : "text-[var(--studio-ink)]"}`}>{formatCreditChange(changeAmount)}</span>,
     },
     {
         get title() { return translator("credits.balanceSnapshot"); },
         dataIndex: "balanceAfter",
         width: 128,
         align: "right",
-        render: (balanceAfter: number) => <span className="tabular-nums text-[var(--studio-muted)]">{formatCredits(balanceAfter)}</span>,
+        render: (balanceAfter: CreditAmount) => <span className="tabular-nums text-[var(--studio-muted)]">{formatCredits(balanceAfter)}</span>,
     },
     {
         get title() { return translator("credits.time"); },
@@ -109,8 +113,8 @@ export default function CreditsPage() {
     const transactions = transactionsQuery.data;
     const generationDistribution = useMemo(() => normalizeGenerationDistribution(overview?.generationTypeDistribution || []), [overview?.generationTypeDistribution, translate.locale]);
     const modelDistribution = useMemo(() => normalizeModelDistribution(overview?.modelDistribution || []), [overview?.modelDistribution, translate.locale]);
-    const trend = useMemo(() => (overview?.trend || []).map((item) => ({ name: item.period, value: item.consumedCredits })), [overview?.trend, translate.locale]);
-    const totalConsumed = trend.reduce((total, item) => total + item.value, 0);
+    const trend = useMemo(() => (overview?.trend || []).map((item) => ({ name: item.period, value: Number(item.consumedCredits) })), [overview?.trend, translate.locale]);
+    const totalConsumed = trend.reduce<CreditAmount>((total, item) => creditAmount(total).plus(item.value).toFixed(), 0);
     const hasOverviewError = overviewQuery.isError || transactionsQuery.isError;
 
     return (
@@ -184,7 +188,7 @@ export default function CreditsPage() {
                         className="lg:col-span-2"
                         title={translate("credits.creditUsageTrend")}
                         loading={overviewQuery.isLoading}
-                        empty={!trend.some((item) => item.value > 0)}
+                        empty={!trend.some((item) => creditAmount(item.value).greaterThan(0))}
                         extra={<Segmented value={trendUnit} size="small" options={[{ label: translate("credits.daily"), value: "day" }, { label: translate("credits.monthly"), value: "month" }]} onChange={(value) => setTrendUnit(value as TrendUnit)} />}
                     >
                         <CreditChart type="bar" data={trend} ariaLabel={translate("credits.creditUsageBarChart")} />
@@ -250,7 +254,7 @@ export default function CreditsPage() {
                             <article key={transaction.id} className="border-b border-[var(--studio-line)] py-4">
                                 <div className="flex items-start justify-between gap-3">
                                     <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-[var(--studio-ink)]"><Icon className="size-4 shrink-0 text-[var(--studio-primary)]" />{creditTransactionTypeLabel(transaction.transactionType)}</span>
-                                    <span className={`shrink-0 text-sm font-semibold tabular-nums ${transaction.changeAmount > 0 ? "text-[var(--studio-primary)]" : "text-[var(--studio-ink)]"}`}>{formatCreditChange(transaction.changeAmount)}</span>
+                                    <span className={`shrink-0 text-sm font-semibold tabular-nums ${creditAmount(transaction.changeAmount).greaterThan(0) ? "text-[var(--studio-primary)]" : "text-[var(--studio-ink)]"}`}>{formatCreditChange(transaction.changeAmount)}</span>
                                 </div>
                                 <div className="mt-2 grid gap-1 text-xs text-[var(--studio-muted)]">
                                     <span className="truncate">{creditTransactionDetail(transaction.transactionType, transaction.generationType, transaction.model, transaction.reason)}</span>

@@ -88,9 +88,9 @@ class StoryBibleServiceTest {
         lenient().when(currentUserProvider.currentUserId()).thenReturn(Mono.just(USER_ID));
         lenient().when(queueProvider.getObject()).thenReturn(queue);
         lenient().when(queue.enqueue(anyString(), anyString())).thenReturn(Mono.empty());
-        lenient().when(creditRepository.getCreditBalance(USER_ID)).thenReturn(Mono.just(90));
+        lenient().when(creditRepository.getCreditBalance(USER_ID)).thenReturn(Mono.just(java.math.BigDecimal.valueOf(90)));
         lenient().when(repository.listGaps(anyString())).thenReturn(reactor.core.publisher.Flux.empty());
-        lenient().when(creditService.getOperationRefundAmount(anyLong(), anyString(), anyString())).thenReturn(Mono.just(0));
+        lenient().when(creditService.getOperationRefundAmount(anyLong(), anyString(), anyString())).thenReturn(Mono.just(java.math.BigDecimal.valueOf(0)));
     }
 
     /**
@@ -121,11 +121,11 @@ class StoryBibleServiceTest {
      */
     @Test
     void shouldQuoteByBillableChars() {
-        stubQuote(List.of(new StoryBibleDtos.PricingTier(1, 10, 20), new StoryBibleDtos.PricingTier(11, null, 50)));
+        stubQuote(List.of(new StoryBibleDtos.PricingTier(1, 10, java.math.BigDecimal.valueOf(20)), new StoryBibleDtos.PricingTier(11, null, java.math.BigDecimal.valueOf(50))));
         StepVerifier.create(service.quoteAnalysis(new StoryBibleDtos.QuoteRequest(PROJECT_ID, MODEL, null)))
                 .assertNext(quote -> {
                     assertEquals(10, quote.billableChars());
-                    assertEquals(20, quote.credits());
+                    assertEquals(0, java.math.BigDecimal.valueOf(20).compareTo(quote.credits()));
                     assertEquals(3, quote.sourceRevision());
                     assertEquals(4, quote.pricingRevision());
                 })
@@ -137,9 +137,9 @@ class StoryBibleServiceTest {
      */
     @Test
     void shouldRejectQuickQuoteWithoutVerifiedCapacity() {
-        stubQuote(List.of(new StoryBibleDtos.PricingTier(1, null, 20)));
+        stubQuote(List.of(new StoryBibleDtos.PricingTier(1, null, java.math.BigDecimal.valueOf(20))));
         when(pricingService.find("config-1")).thenReturn(Mono.just(new StoryBibleRepository.Pricing(
-                "config-1", List.of(new StoryBibleDtos.PricingTier(1, null, 20)), 4, null)));
+                "config-1", List.of(new StoryBibleDtos.PricingTier(1, null, java.math.BigDecimal.valueOf(20))), 4, null)));
         StepVerifier.create(service.quoteAnalysis(new StoryBibleDtos.QuoteRequest(PROJECT_ID, MODEL, null)))
                 .expectErrorMatches(error -> error.getMessage().contains("未配置经验证的分析容量"))
                 .verify();
@@ -150,7 +150,7 @@ class StoryBibleServiceTest {
      */
     @Test
     void shouldRejectQuoteWithoutCoveringTier() {
-        stubQuote(List.of(new StoryBibleDtos.PricingTier(1, 5, 20)));
+        stubQuote(List.of(new StoryBibleDtos.PricingTier(1, 5, java.math.BigDecimal.valueOf(20))));
         StepVerifier.create(service.quoteAnalysis(new StoryBibleDtos.QuoteRequest(PROJECT_ID, MODEL, null)))
                 .expectErrorMatches(error -> error.getMessage().contains("没有覆盖10字"))
                 .verify();
@@ -161,13 +161,13 @@ class StoryBibleServiceTest {
      */
     @Test
     void shouldRequireRequoteWhenQuoteChanged() {
-        stubQuote(List.of(new StoryBibleDtos.PricingTier(1, null, 20)));
+        stubQuote(List.of(new StoryBibleDtos.PricingTier(1, null, java.math.BigDecimal.valueOf(20))));
         when(repository.findJobByRequest(USER_ID, "req-1")).thenReturn(Mono.empty());
-        StepVerifier.create(service.startAnalysis(new StoryBibleDtos.StartRequest(PROJECT_ID, MODEL, null, "req-1", 20, 3, 3)))
+        StepVerifier.create(service.startAnalysis(new StoryBibleDtos.StartRequest(PROJECT_ID, MODEL, null, "req-1", java.math.BigDecimal.valueOf(20), 3, 3)))
                 .expectErrorMatches(error -> error instanceof BusinessException exception
                         && exception.getCode() == ErrorCode.DATA_CONFLICT)
                 .verify();
-        verify(creditService, never()).chargeOperation(anyLong(), anyString(), anyInt(), anyString());
+        verify(creditService, never()).chargeOperation(anyLong(), anyString(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), anyString());
     }
 
     /**
@@ -175,15 +175,15 @@ class StoryBibleServiceTest {
      */
     @Test
     void shouldCreateJobAndChargeCredits() {
-        stubQuote(List.of(new StoryBibleDtos.PricingTier(1, null, 20)));
+        stubQuote(List.of(new StoryBibleDtos.PricingTier(1, null, java.math.BigDecimal.valueOf(20))));
         when(repository.findJobByRequest(USER_ID, "req-1")).thenReturn(Mono.empty());
         when(repository.insertJob(any())).thenReturn(Mono.empty());
-        when(creditService.chargeOperation(eq(USER_ID), anyString(), eq(20), eq(StoryBibleService.OPERATION_NAME))).thenReturn(Mono.empty());
+        when(creditService.chargeOperation(eq(USER_ID), anyString(), eq(java.math.BigDecimal.valueOf(20)), eq(StoryBibleService.OPERATION_NAME), eq("config-1"))).thenReturn(Mono.empty());
         when(repository.findJobById(anyString())).thenAnswer(invocation -> Mono.just(job(invocation.getArgument(0), "queued")));
-        StepVerifier.create(service.startAnalysis(new StoryBibleDtos.StartRequest(PROJECT_ID, MODEL, null, "req-1", 20, 3, 4)))
+        StepVerifier.create(service.startAnalysis(new StoryBibleDtos.StartRequest(PROJECT_ID, MODEL, null, "req-1", java.math.BigDecimal.valueOf(20), 3, 4)))
                 .assertNext(status -> {
                     assertEquals("queued", status.status());
-                    assertEquals(90, status.creditBalance());
+                    assertEquals(0, java.math.BigDecimal.valueOf(90).compareTo(status.creditBalance()));
                 })
                 .verifyComplete();
         verify(queue).enqueue(eq("config-1"), anyString());
@@ -194,12 +194,12 @@ class StoryBibleServiceTest {
      */
     @Test
     void shouldNotEnqueueWhenCreditsInsufficient() {
-        stubQuote(List.of(new StoryBibleDtos.PricingTier(1, null, 20)));
+        stubQuote(List.of(new StoryBibleDtos.PricingTier(1, null, java.math.BigDecimal.valueOf(20))));
         when(repository.findJobByRequest(USER_ID, "req-1")).thenReturn(Mono.empty());
         when(repository.insertJob(any())).thenReturn(Mono.empty());
-        when(creditService.chargeOperation(eq(USER_ID), anyString(), eq(20), anyString()))
+        when(creditService.chargeOperation(eq(USER_ID), anyString(), eq(java.math.BigDecimal.valueOf(20)), anyString(), anyString()))
                 .thenReturn(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "积分不足")));
-        StepVerifier.create(service.startAnalysis(new StoryBibleDtos.StartRequest(PROJECT_ID, MODEL, null, "req-1", 20, 3, 4)))
+        StepVerifier.create(service.startAnalysis(new StoryBibleDtos.StartRequest(PROJECT_ID, MODEL, null, "req-1", java.math.BigDecimal.valueOf(20), 3, 4)))
                 .expectErrorMatches(error -> error.getMessage().contains("积分不足"))
                 .verify();
         verify(queue, never()).enqueue(anyString(), anyString());
@@ -211,10 +211,10 @@ class StoryBibleServiceTest {
     @Test
     void shouldReturnExistingJobForDuplicateRequest() {
         when(repository.findJobByRequest(USER_ID, "req-1")).thenReturn(Mono.just(job("job-1", "running")));
-        StepVerifier.create(service.startAnalysis(new StoryBibleDtos.StartRequest(PROJECT_ID, MODEL, null, "req-1", 20, 3, 4)))
+        StepVerifier.create(service.startAnalysis(new StoryBibleDtos.StartRequest(PROJECT_ID, MODEL, null, "req-1", java.math.BigDecimal.valueOf(20), 3, 4)))
                 .assertNext(status -> assertEquals("job-1", status.jobId()))
                 .verifyComplete();
-        verify(creditService, never()).chargeOperation(anyLong(), anyString(), anyInt(), anyString());
+        verify(creditService, never()).chargeOperation(anyLong(), anyString(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), anyString());
         verify(repository, never()).insertJob(any());
     }
 
@@ -229,18 +229,18 @@ class StoryBibleServiceTest {
                 .thenReturn(Mono.just(true)).thenReturn(Mono.just(false));
         when(repository.findJobById("job-1")).thenReturn(Mono.just(job("job-1", "canceled")));
         when(repository.batchSettlement("job-1")).thenReturn(Mono.just(new StoryBibleRepository.BatchSettlement(2)));
-        when(creditService.refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, 12)).thenReturn(Mono.empty());
-        when(creditService.getOperationRefundAmount(USER_ID, "job-1", StoryBibleService.OPERATION_NAME)).thenReturn(Mono.just(12));
+        when(creditService.refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, java.math.BigDecimal.valueOf(12).setScale(6))).thenReturn(Mono.empty());
+        when(creditService.getOperationRefundAmount(USER_ID, "job-1", StoryBibleService.OPERATION_NAME)).thenReturn(Mono.just(java.math.BigDecimal.valueOf(12)));
         StepVerifier.create(service.cancelAnalysis(new StoryBibleDtos.JobRequest(PROJECT_ID, "job-1")))
                 .assertNext(status -> {
                     assertEquals("canceled", status.status());
-                    assertEquals(12, status.refundedCredits());
+                    assertEquals(0, java.math.BigDecimal.valueOf(12).compareTo(status.refundedCredits()));
                 })
                 .verifyComplete();
         StepVerifier.create(service.cancelAnalysis(new StoryBibleDtos.JobRequest(PROJECT_ID, "job-1")))
                 .expectError(BusinessException.class)
                 .verify();
-        verify(creditService).refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, 12);
+        verify(creditService).refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, java.math.BigDecimal.valueOf(12).setScale(6));
         verify(creditService, never()).refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME);
     }
 
@@ -253,11 +253,11 @@ class StoryBibleServiceTest {
         when(repository.findJob(PROJECT_ID, "job-1")).thenReturn(Mono.just(job("job-1", "queued")));
         when(repository.transitJob(eq("job-1"), any(), eq("canceled"), anyString())).thenReturn(Mono.just(true));
         when(repository.batchSettlement("job-1")).thenReturn(Mono.just(new StoryBibleRepository.BatchSettlement(0)));
-        when(creditService.refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, 20)).thenReturn(Mono.empty());
+        when(creditService.refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, java.math.BigDecimal.valueOf(20).setScale(6))).thenReturn(Mono.empty());
         when(repository.findJobById("job-1")).thenReturn(Mono.just(job("job-1", "canceled")));
         StepVerifier.create(service.cancelAnalysis(new StoryBibleDtos.JobRequest(PROJECT_ID, "job-1")))
                 .assertNext(status -> assertEquals("canceled", status.status())).verifyComplete();
-        verify(creditService).refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, 20);
+        verify(creditService).refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, java.math.BigDecimal.valueOf(20).setScale(6));
     }
 
     /**
@@ -269,11 +269,11 @@ class StoryBibleServiceTest {
         when(repository.findJob(PROJECT_ID, "job-1")).thenReturn(Mono.just(job("job-1", "running")));
         when(repository.transitJob(eq("job-1"), any(), eq("canceled"), anyString())).thenReturn(Mono.just(true));
         when(repository.batchSettlement("job-1")).thenReturn(Mono.just(new StoryBibleRepository.BatchSettlement(1)));
-        when(creditService.refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, 16)).thenReturn(Mono.empty());
+        when(creditService.refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, java.math.BigDecimal.valueOf(16).setScale(6))).thenReturn(Mono.empty());
         when(repository.findJobById("job-1")).thenReturn(Mono.just(job("job-1", "canceled")));
         StepVerifier.create(service.cancelAnalysis(new StoryBibleDtos.JobRequest(PROJECT_ID, "job-1")))
                 .expectNextCount(1).verifyComplete();
-        verify(creditService).refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, 16);
+        verify(creditService).refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, java.math.BigDecimal.valueOf(16).setScale(6));
     }
 
     /**
@@ -285,7 +285,7 @@ class StoryBibleServiceTest {
         when(repository.findJob(PROJECT_ID, "job-1")).thenReturn(Mono.just(job("job-1", "running")));
         when(repository.transitJob(eq("job-1"), any(), eq("canceled"), anyString())).thenReturn(Mono.just(true));
         when(repository.batchSettlement("job-1")).thenReturn(Mono.just(new StoryBibleRepository.BatchSettlement(2)));
-        when(creditService.refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, 12))
+        when(creditService.refundOperation(USER_ID, "job-1", StoryBibleService.OPERATION_NAME, java.math.BigDecimal.valueOf(12).setScale(6)))
                 .thenReturn(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "退款失败")));
         StepVerifier.create(service.cancelAnalysis(new StoryBibleDtos.JobRequest(PROJECT_ID, "job-1")))
                 .expectErrorMatches(error -> error.getMessage().equals("退款失败")).verify();
@@ -304,7 +304,7 @@ class StoryBibleServiceTest {
         StepVerifier.create(service.retryAnalysis(new StoryBibleDtos.JobRequest(PROJECT_ID, "job-1")))
                 .assertNext(status -> assertEquals("queued", status.status()))
                 .verifyComplete();
-        verify(creditService, never()).chargeOperation(anyLong(), anyString(), anyInt(), anyString());
+        verify(creditService, never()).chargeOperation(anyLong(), anyString(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), anyString());
         verify(queue).enqueue("config-1", "job-1");
     }
 
@@ -464,9 +464,9 @@ class StoryBibleServiceTest {
     private void stubQuote(List<StoryBibleDtos.PricingTier> tiers) {
         when(sourceRepository.findByProject(USER_ID, PROJECT_ID)).thenReturn(Mono.just(document(3, 3L)));
         when(modelFactory.resolveTextModel(MODEL)).thenReturn(Mono.just(
-                new AgentScopeModelFactory.TextModelSelection(null, MODEL, "gpt", "openai", 0)));
+                new AgentScopeModelFactory.TextModelSelection(null, MODEL, "gpt", "openai", java.math.BigDecimal.ZERO, 0L)));
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(new PersistenceDtos.ModelConfig(
-                "config-1", "channel-1", "gpt", "text", List.of(), false, 0, 0, false, null))));
+                "config-1", "channel-1", "gpt", "text", List.of(), false, 0, java.math.BigDecimal.valueOf(0), false, null))));
         when(sourceRepository.normalizedText("doc-1")).thenReturn(Mono.just(TEXT));
         lenient().when(pricingService.find("config-1")).thenReturn(Mono.just(new StoryBibleRepository.Pricing("config-1", tiers, 4, new StoryBibleDtos.QuickConfiguration(1_000_000, 100_000, 20_000, 3))));
         lenient().when(sourceRepository.listSections("doc-1")).thenReturn(reactor.core.publisher.Flux.just(
@@ -494,7 +494,7 @@ class StoryBibleServiceTest {
      */
     private StoryBibleRepository.Job job(String id, String status) {
         return new StoryBibleRepository.Job(id, PROJECT_ID, "doc-1", USER_ID, "req-1", MODEL, "config-1", List.of(),
-                List.of(new int[]{0, TEXT.length()}), 10, 20, 4, 3, status, "extract", 0, 0, 1, "", null, null, 0, 5);
+                List.of(new int[]{0, TEXT.length()}), 10, java.math.BigDecimal.valueOf(20), 4, 3, status, "extract", 0, 0, 1, "", null, null, 0, 5);
     }
 
     /**

@@ -13,6 +13,7 @@ import { Camera, Copy, LockKeyhole, LogIn, Save } from "lucide-react";
 import { changeCurrentUserPassword, getCurrentUserInfo, getInvitationInfo, updateCurrentUserProfile } from "@/services/api/server";
 import { uploadMediaFile } from "@/features/storage/services/file-storage";
 import { useUserStore, type ServerUserProfile } from "@/features/auth/stores/use-user-store";
+import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 
 type ProfileFormValues = Pick<ServerUserProfile, "username" | "nickname" | "avatar">;
@@ -103,6 +104,7 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
     const localAvatarPreviewUrlRef = useRef("");
     const setUser = useUserStore((state) => state.setUser);
     const [submitting, setSubmitting] = useState(false);
+    const team = useTeamStore((state) => state.team);
     const [uploadingAvatar, setUploadingAvatar] = useState(false);
     const [selectedAvatarFile, setSelectedAvatarFile] = useState<File | null>(null);
     const [avatarPreview, setAvatarPreview] = useState(profile.avatar);
@@ -193,9 +195,11 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
                     <Form.Item
                         name="username"
                         label={translate("profile.username")}
+                        extra={translate("auth.usernameRule")}
                         rules={[
                             { required: true, whitespace: true, message: translate("profile.enterUsername") },
                             { max: 50, message: translate("profile.usernameMustNotExceed50Characters") },
+                            { validator: (_, value: string) => !value || value.trim() === profile.username || !/[@\s]/u.test(value.trim()) ? Promise.resolve() : Promise.reject(new Error(translate("auth.usernameRule"))) },
                         ]}
                     >
                         <Input autoComplete="username" maxLength={50} placeholder={translate("profile.enterUsername")} />
@@ -215,7 +219,7 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
                     <Button icon={<LockKeyhole className="size-4" />} onClick={() => setPasswordModalOpen(true)}>
                         {translate("profile.changePassword")}</Button>
                 </div>
-                <InvitationLinkPanel />
+                {!team ? <InvitationLinkPanel /> : null}
             </section>
             <ChangePasswordModal open={passwordModalOpen} onClose={() => setPasswordModalOpen(false)} />
             <input
@@ -233,14 +237,15 @@ function ProfileEditor({ profile, onProfileUpdated }: { profile: ServerUserProfi
 }
 
 /**
- * 展示当前用户长期有效的专属邀请链接。
+ * 仅在平台空间展示当前用户的专属邀请链接，不受其团队成员或管理员身份影响。
  *
  * @return 邀请链接面板
  */
 function InvitationLinkPanel() {
     const translate = useTranslation();
     const copyText = useCopyText();
-    const invitationQuery = useQuery({ queryKey: ["invitation-info"], queryFn: getInvitationInfo });
+    const userId = useUserStore((state) => state.user?.id);
+    const invitationQuery = useQuery({ queryKey: ["invitation-info", userId], queryFn: getInvitationInfo, enabled: Boolean(userId) });
     const invitationLink = invitationQuery.data && typeof window !== "undefined"
         ? `${window.location.origin}/auth?invitationCode=${encodeURIComponent(invitationQuery.data.invitationCode)}`
         : "";
@@ -361,7 +366,7 @@ function ProfileSkeleton() {
 
 function accountInformation(profile: ServerUserProfile) {
     return [
-        { key: "email", label: translate("profile.email"), children: profile.email },
+        { key: "email", label: translate("profile.email"), children: profile.email || translate("administration.noEmail") },
         { key: "id", label: translate("profile.userID"), children: String(profile.id) },
         { key: "role", label: translate("profile.character"), children: profile.role === "admin" ? translate("profile.administrator") : translate("profile.user") },
         { key: "credit", label: translate("profile.availableCredits"), children: Number(profile.creditBalance || 0).toLocaleString(currentLanguageTag()) },

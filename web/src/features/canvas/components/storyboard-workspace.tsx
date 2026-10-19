@@ -1,4 +1,7 @@
 "use client";
+import { modelCreditBalance } from "@/features/team/credit-balance";
+import { useTeamStore } from "@/features/team/stores/use-team-store";
+import { creditAmount } from "@/shared/lib/credit-amounts";
 import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
@@ -43,7 +46,8 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
     const theme = useCanvasTheme();
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
-    const creditBalance = useUserStore((state) => state.user?.creditBalance);
+    useUserStore((state) => state.user?.creditBalance);
+    useTeamStore((state) => state.wallets);
     const [assetModalOpen, setAssetModalOpen] = useState(false);
     const [activeAssetKind, setActiveAssetKind] = useState<CanvasStoryboardAssetKind>("character");
     const [previewAssetId, setPreviewAssetId] = useState<string | null>(null);
@@ -233,15 +237,17 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
     const selectedAssetNameError = selectedAssets.find((asset) => !asset.name.trim());
     const assetModelCostConfigured = effectiveConfig.modelCosts.some((item) => item.taskType === "image" && item.model === assetImageSettings.model);
     const assetModelReady = Boolean(assetImageSettings.model && effectiveConfig.imageModels.includes(assetImageSettings.model) && assetModelCostConfigured && isAiConfigReady(effectiveConfig, assetImageSettings.model));
-    const assetBalanceInsufficient = typeof creditBalance === "number" && assetTotalCredits > creditBalance;
+    const creditBalance = modelCreditBalance(assetImageSettings.model);
+    const promptCreditBalance = modelCreditBalance(promptModel);
+    const assetBalanceInsufficient = creditBalance !== null && creditBalance !== undefined && creditAmount(assetTotalCredits).greaterThan(creditBalance);
     const allAssetsSelected = Boolean(storyboardAssets.length) && selectedAssetIds.length === storyboardAssets.length;
     const someAssetsSelected = selectedAssetIds.length > 0 && !allAssetsSelected;
     const selectedPromptShots = shots.filter((shot) => selectedPromptShotIds.includes(shot.id));
     const promptModelCost = readStoryboardModelCost(effectiveConfig.modelCosts, promptModel);
-    const promptTotalCredits = Math.max(0, promptModelCost) * selectedPromptShots.length;
+    const promptTotalCredits = creditAmount(promptModelCost).times(selectedPromptShots.length).toFixed();
     const promptModelCostConfigured = effectiveConfig.modelCosts.some((item) => item.taskType === "text" && item.model === promptModel);
     const promptModelReady = Boolean(promptModel && effectiveConfig.textModels.includes(promptModel) && promptModelCostConfigured && isAiConfigReady(effectiveConfig, promptModel));
-    const promptBalanceInsufficient = typeof creditBalance === "number" && promptTotalCredits > creditBalance;
+    const promptBalanceInsufficient = promptCreditBalance !== null && promptCreditBalance !== undefined && creditAmount(promptTotalCredits).greaterThan(promptCreditBalance);
     const allPromptShotsSelected = Boolean(shots.length) && selectedPromptShotIds.length === shots.length;
     const somePromptShotsSelected = selectedPromptShotIds.length > 0 && !allPromptShotsSelected;
     const generatedAssetCount = storyboardAssets.filter((asset) => Boolean(asset.image?.source?.trim())).length;
@@ -264,7 +270,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
             return;
         }
         if (promptBalanceInsufficient) {
-            message.error(translate("canvas.insufficientCreditsShotsNeedAvailable", { value0: selectedPromptShots.length, value1: promptTotalCredits, value2: creditBalance }));
+            message.error(translate("canvas.insufficientCreditsShotsNeedAvailable", { value0: selectedPromptShots.length, value1: promptTotalCredits, value2: promptCreditBalance }));
             return;
         }
         modal.confirm({
@@ -656,7 +662,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
                                 <span className="text-[var(--studio-muted)]">{translate("canvas.estimatedCost")}</span>
                                 <strong>{assetTotalCredits} {translate("canvas.credits_10939f")}</strong>
                             </div>
-                            {typeof creditBalance === "number" ? (
+                            {creditBalance !== null && creditBalance !== undefined ? (
                                 <div className="mt-2 flex items-center justify-between gap-3 text-xs text-[var(--studio-muted)]">
                                     <span>{translate("canvas.currentBalance")}</span>
                                     <span>{creditBalance} {translate("canvas.credits_10939f")}</span>

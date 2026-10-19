@@ -1,3 +1,5 @@
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { translateMessage as translate } from "@/features/locale/translate";
@@ -90,9 +92,9 @@ export function creditTransactionTypeLabel(transactionType: ServerCreditTransact
  * @param changeAmount 有符号积分变动，正数增加、负数消耗，可为空
  * @return 带符号千分位文本，如 +1,000 / -500
  */
-export function formatCreditChange(changeAmount: number | null | undefined) {
+export function formatCreditChange(changeAmount: CreditAmount | null | undefined) {
     const amount = changeAmount ?? 0;
-    return (amount > 0 ? "+" : "") + formatCredits(amount);
+    return (creditAmount(amount).greaterThan(0) ? "+" : "") + formatCredits(amount);
 }
 
 /**
@@ -135,9 +137,9 @@ export function generationSourceLabel(generationSource: ServerGenerationSource |
 export function normalizeGenerationDistribution(items: ServerCreditDistributionItem[]): ChartDataItem[] {
     const consumedCreditsByType = new Map(items.map((item) => [item.name, item.consumedCredits]));
     return [
-        { name: translate("credits.imageGeneration"), value: consumedCreditsByType.get("image") || 0 },
-        { name: translate("credits.videoGeneration"), value: consumedCreditsByType.get("video") || 0 },
-    ].filter((item) => item.value > 0);
+        { name: translate("credits.imageGeneration"), value: Number(consumedCreditsByType.get("image") || 0) },
+        { name: translate("credits.videoGeneration"), value: Number(consumedCreditsByType.get("video") || 0) },
+    ].filter((item) => creditAmount(item.value).greaterThan(0));
 }
 
 /**
@@ -147,7 +149,7 @@ export function normalizeGenerationDistribution(items: ServerCreditDistributionI
  * @return 可直接用于图表的数据
  */
 export function normalizeModelDistribution(items: ServerCreditDistributionItem[]): ChartDataItem[] {
-    return items.filter((item) => item.consumedCredits > 0).map((item) => ({ name: item.name, value: item.consumedCredits }));
+    return items.filter((item) => creditAmount(item.consumedCredits).greaterThan(0)).map((item) => ({ name: item.name, value: Number(item.consumedCredits) }));
 }
 
 /**
@@ -156,8 +158,8 @@ export function normalizeModelDistribution(items: ServerCreditDistributionItem[]
  * @param credits 积分数量
  * @return 带千分位的积分文本
  */
-export function formatCredits(credits: number | null | undefined) {
-    return (credits ?? 0).toLocaleString(currentLanguageTag());
+export function formatCredits(credits: CreditAmount | null | undefined) {
+    return creditText(credits ?? 0);
 }
 
 /**

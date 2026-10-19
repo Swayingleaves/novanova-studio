@@ -1,4 +1,6 @@
 "use client";
+
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
@@ -7,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { App, Button, Checkbox, Modal, Tag } from "antd";
 import { Clapperboard } from "lucide-react";
 
+import { useModelCreditBalance } from "@/features/team/credit-balance";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { VideoSettingsPanel } from "@/features/generation/components/video-settings-panel";
 import { videoGenerationModeLabel, videoModelSupportsMode } from "@/features/generation/lib/video-billing";
@@ -46,7 +49,7 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
     const theme = useCanvasTheme();
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
-    const creditBalance = useUserStore((state) => state.user?.creditBalance);
+    const creditBalance = useModelCreditBalance("video");
     const [selectedShotIds, setSelectedShotIds] = useState<string[]>([]);
     const [videoModel, setVideoModel] = useState("");
     const [videoSettings, setVideoSettings] = useState<StoryboardVideoGenerationSettings>(() => readVideoSettings(effectiveConfig));
@@ -89,7 +92,7 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
     const modelReady = Boolean(videoModel && storyboardModelOptions.includes(videoModel) && isAiConfigReady(effectiveConfig, videoModel));
     const videoQuote = readStoryboardVideoCost(effectiveConfig, videoModel, videoConfig, selectedShots, node?.storyboard.assets || [], referenceVideos);
     const totalCredits = videoQuote.available ? videoQuote.credits : null;
-    const balanceInsufficient = typeof creditBalance === "number" && totalCredits !== null && totalCredits > creditBalance;
+    const balanceInsufficient = creditBalance !== null && creditBalance !== undefined && totalCredits !== null && creditAmount(totalCredits).greaterThan(creditBalance);
     const allSelected = Boolean(selectableShotIds.length) && selectedShots.length === selectableShotIds.length;
     const partiallySelected = selectedShots.length > 0 && !allSelected;
     const creditUnit = effectiveConfig.videoModelBillingConfigurations.find((item) => item.model === videoModel)?.videoBillingConfiguration?.billingUnit;
@@ -122,7 +125,7 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
         }
         modal.confirm({
             title: translate("canvas.confirmBatchVideoGeneration"),
-            content: translate("canvas.confirmBatchVideoGenerationDetails", { value0: videoConfig.size || translate("canvas.auto"), value1: videoConfig.vquality || translate("canvas.default"), value2: selectedShots.length, value3: totalCredits }),
+            content: translate("canvas.confirmBatchVideoGenerationDetails", { value0: videoConfig.size || translate("canvas.auto"), value1: videoConfig.vquality || translate("canvas.default"), value2: selectedShots.length, value3: totalCredits ?? "0" }),
             okText: translate("canvas.confirmGeneration"),
             cancelText: translate("canvas.cancel"),
             onOk: () => {

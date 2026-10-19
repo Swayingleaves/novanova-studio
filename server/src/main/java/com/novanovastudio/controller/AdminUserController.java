@@ -127,4 +127,14 @@ public class AdminUserController {
     public Mono<ApiResponse<String>> unlockUserPassword(@Valid @RequestBody UserDtos.UnlockUserPasswordRequest request) {
         return adminGuard.requireAdmin().then(userService.unlockUserPassword(request)).thenReturn(ApiResponse.ok("ok"));
     }
+
+    /**
+     * 超级管理员重置无邮箱账号的全局密码。
+     * @param request 目标账号与新密码
+     * @return 重置完成响应
+     */
+    @PostMapping("/resetUserPassword")
+    public Mono<ApiResponse<String>> resetUserPassword(@Valid @RequestBody UserDtos.AdminResetPasswordRequest request) {
+        return adminGuard.requireAdmin().then(userService.resetUserPassword(request)).thenReturn(ApiResponse.ok("ok"));
+    }
 }

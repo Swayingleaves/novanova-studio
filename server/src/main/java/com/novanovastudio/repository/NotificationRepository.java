@@ -142,7 +142,7 @@ public class NotificationRepository {
         return databaseClient.sql("""
                 INSERT INTO user_notification_reads(user_id, notification_id)
                 VALUES (:userId, :notificationId)
-                ON CONFLICT (user_id, notification_id) DO NOTHING
+                ON CONFLICT (team_id, user_id, notification_id) DO NOTHING
                 """).bind("userId", userId).bind("notificationId", notificationId).fetch().rowsUpdated().then();
     }
 
@@ -158,7 +158,7 @@ public class NotificationRepository {
                 SELECT :userId, notifications.id
                 FROM system_notifications notifications
                 WHERE notifications.status = 1
-                ON CONFLICT (user_id, notification_id) DO NOTHING
+                ON CONFLICT (team_id, user_id, notification_id) DO NOTHING
                 """).bind("userId", userId).fetch().rowsUpdated().then();
     }
 }

@@ -1,5 +1,6 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
 import com.novanovastudio.common.SystemMessage;
 
 import com.alibaba.fastjson2.JSON;
@@ -57,6 +58,8 @@ import reactor.core.scheduler.Schedulers;
 @RequiredArgsConstructor
 @Slf4j
 public class VideoCompositionTaskService {
+    /** 后台合成任务的团队恢复。 */
+    private final TeamTaskScopeService teamTaskScopeService;
 
     /** 等待状态 */
     private static final String STATUS_PENDING = "pending";
@@ -160,7 +163,7 @@ public class VideoCompositionTaskService {
                                 .flatMap(ignored -> repository.requeueInactiveRunningTask(task.getId()))
                                 .filter(Boolean::booleanValue)
                                 .flatMap(ignored -> taskDispatcher.enqueue(task.getId()))))
-                .then();
+                .then().contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true));
     }
 
     /**
@@ -172,7 +175,7 @@ public class VideoCompositionTaskService {
     public Mono<VideoCompositionDtos.VideoCompositionTaskResponse> createTask(
             VideoCompositionDtos.CreateVideoCompositionRequest request) {
         List<String> sourceStorageKeys = normalizeSourceStorageKeys(request == null ? null : request.sourceStorageKeys());
-        return currentUserProvider.currentUserId().flatMap(userId -> Flux.fromIterable(sourceStorageKeys)
+        return currentUserProvider.currentUserId().flatMap(userId -> persistenceService.requireStorageWritable(userId).then(Mono.defer(() -> Flux.fromIterable(sourceStorageKeys)
                 .concatMap(storageKey -> persistenceService.validateVideoMediaForUser(userId, storageKey))
                 .then(Mono.defer(() -> {
                     VideoCompositionTask task = new VideoCompositionTask();
@@ -189,7 +192,7 @@ public class VideoCompositionTaskService {
                             .then(repository.createTask(task))
                             .then(taskDispatcher.enqueue(task.getId()))
                             .thenReturn(taskResponse(task));
-                })));
+                })))));
     }
 
     /**
@@ -199,7 +202,7 @@ public class VideoCompositionTaskService {
      */
     public Mono<VideoCompositionDtos.VideoCompositionTaskResponse> exportStoryboardVideo(
             VideoCompositionDtos.ExportStoryboardVideoRequest request) {
-        return currentUserProvider.currentUserId().flatMap(userId -> comicDramaRepository.getProject(userId, request.projectId())
+        return currentUserProvider.currentUserId().flatMap(userId -> persistenceService.requireStorageWritable(userId).then(Mono.defer(() -> comicDramaRepository.getProject(userId, request.projectId())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "漫剧项目不存在")))
                 .flatMap(project -> Mono.zip(comicDramaRepository.getSettings(request.projectId()),
                         comicDramaRepository.listShots(request.projectId(), null, null).collectList(),
@@ -224,7 +227,7 @@ public class VideoCompositionTaskService {
                     log.info("创建分镜导出任务: taskId={}, projectId={}, episodeId={}", task.getId(), request.projectId(), request.episodeId());
                     return cancellation.clearCancellation(task.getId()).then(repository.createTask(task))
                             .then(taskDispatcher.enqueue(task.getId())).thenReturn(taskResponse(task));
-                }));
+                }))));
     }
 
     /**
@@ -366,9 +369,14 @@ public class VideoCompositionTaskService {
      * @return Mono<Void> 执行结果
      */
     public Mono<Void> executeQueuedTask(String taskId) {
+        return teamTaskScopeService.execute("video_composition_tasks", taskId, () -> executeQueuedTaskInTeam(taskId));
+    }
+    /** @param taskId 持久化任务标识 @return 原空间任务执行 */
+    private Mono<Void> executeQueuedTaskInTeam(String taskId) {
         return repository.getTaskById(taskId)
                 .switchIfEmpty(Mono.fromRunnable(() -> log.info("跳过视频合成任务执行: taskId={}, reason={}", taskId, "任务不存在")).then(Mono.empty()))
-                .flatMap(this::executeTask)
+                .flatMap(task -> teamTaskScopeService.requireActive(task.getUserId()).then(persistenceService.requireStorageWritable(task.getUserId()))
+                        .then(executeTask(task)).onErrorResume(error -> repository.cancelTask(task.getUserId(), taskId).then(Mono.error(error))))
                 .onErrorResume(exception -> {
                     log.error("执行视频合成任务发生未处理异常: taskId={}", taskId, exception);
                     return Mono.empty();

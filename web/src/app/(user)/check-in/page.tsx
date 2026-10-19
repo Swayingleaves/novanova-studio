@@ -1,4 +1,8 @@
 "use client";
+
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { translateMessage as translate } from "@/features/locale/translate";
@@ -55,7 +59,7 @@ function pickBlessing() {
  * @param credits 积分数量
  * @return 带千分位的积分文本
  */
-function formatCredits(credits: number | null | undefined) {
+function formatCredits(credits: CreditAmount | null | undefined) {
     return (credits ?? 0).toLocaleString(currentLanguageTag());
 }
 
@@ -70,8 +74,8 @@ export default function CheckInPage() {
     const queryClient = useQueryClient();
     const setCreditBalance = useUserStore((state) => state.setCreditBalance);
     const [month, setMonth] = useState(() => dayjs().format("YYYY-MM"));
-    const [rewardBurst, setRewardBurst] = useState<{ id: number; credits: number } | null>(null);
-    const [rewardCard, setRewardCard] = useState<{ id: number; credits: number; blessing: string } | null>(null);
+    const [rewardBurst, setRewardBurst] = useState<{ id: number; credits: CreditAmount } | null>(null);
+    const [rewardCard, setRewardCard] = useState<{ id: number; credits: CreditAmount; blessing: string } | null>(null);
 
     const statusQuery = useQuery({
         queryKey: [CHECK_IN_STATUS_QUERY_KEY, month],
@@ -85,7 +89,7 @@ export default function CheckInPage() {
             setCreditBalance(result.creditBalance);
             setMonth(dayjs(result.checkInDate).format("YYYY-MM"));
             void queryClient.invalidateQueries({ queryKey: [CHECK_IN_STATUS_QUERY_KEY] });
-            if (result.earnedCredits > 0) {
+            if (creditAmount(result.earnedCredits).greaterThan(0)) {
                 const id = Date.now();
                 setRewardBurst({ id, credits: result.earnedCredits });
                 setRewardCard({ id, credits: result.earnedCredits, blessing: pickBlessing() });
@@ -236,7 +240,7 @@ export default function CheckInPage() {
                     </section>
 
                     <section className="studio-glass relative flex flex-col overflow-hidden rounded-2xl p-5 lg:justify-center" aria-labelledby="check-in-today-title">
-                        {rewardBurst && rewardBurst.credits > 0 ? <RewardBurst key={rewardBurst.id} credits={rewardBurst.credits} /> : null}
+                        {rewardBurst && creditAmount(rewardBurst.credits).greaterThan(0) ? <RewardBurst key={rewardBurst.id} credits={rewardBurst.credits} /> : null}
                         <div className="flex items-center gap-2">
                             <Gift className="size-4 text-[var(--studio-primary)]" aria-hidden />
                             <h2 id="check-in-today-title" className="text-base font-semibold text-[var(--studio-ink)]">{translate("checkIn.dailyCheckIn_c1d4a2")}</h2>
@@ -310,7 +314,7 @@ function RewardRow({ icon, label, value }: { icon: ReactNode; label: string; val
  * @param props 本次获得的积分
  * @return 积分飘出动效元素
  */
-function RewardBurst({ credits }: { credits: number }) {
+function RewardBurst({ credits }: { credits: CreditAmount }) {
     const [flying, setFlying] = useState(false);
 
     useEffect(() => {
@@ -355,7 +359,7 @@ function GiftIllustration() {
  * @param props 本次获得的积分、随机祝福语与关闭回调
  * @return 签到成功奖励弹层
  */
-function CheckInRewardCard({ credits, blessing, onClose }: { credits: number; blessing: string; onClose: () => void }) {
+function CheckInRewardCard({ credits, blessing, onClose }: { credits: CreditAmount; blessing: string; onClose: () => void }) {
     const translate = useTranslation();
     const [visible, setVisible] = useState(false);
     const [reduceMotion, setReduceMotion] = useState(false);

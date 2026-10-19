@@ -1,5 +1,9 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.service.TeamTaskScopeService;
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.repository.NovelAdaptationJobRepository;
@@ -35,6 +39,9 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 @Slf4j
 public class EpisodeBodiesRunner {
+
+    /** 持久化任务的团队作用域恢复。 */
+    private final TeamTaskScopeService teamTaskScopeService;
     /** 执行租约秒数。 */
     public static final int LEASE_SECONDS = 300;
     /** 失败原因最大长度。 */
@@ -68,6 +75,15 @@ public class EpisodeBodiesRunner {
      * @return Mono&lt;Void&gt; 执行结果
      */
     public Mono<Void> process(String jobId) {
+        return teamTaskScopeService.execute("novel_adaptation_jobs", jobId, () -> processInTeam(jobId));
+    }
+
+    /**
+     * 在原任务空间内执行业务，保留现有错误收尾与退款。
+     * @param jobId 任务标识
+     * @return 执行完成信号
+     */
+    private Mono<Void> processInTeam(String jobId) {
         return jobRepository.claim(jobId, LEASE_SECONDS).flatMap(claimed -> {
             if (!claimed) return Mono.<Void>empty();
             Disposable renewal = Flux.interval(Duration.ofSeconds(LEASE_SECONDS / 3))
@@ -231,7 +247,7 @@ public class EpisodeBodiesRunner {
                         List<WholeBookAdaptationRepository.Unit> units = input.getT2().stream()
                                 .filter(unit -> EpisodeBodiesService.PHASE_BODIES.equals(unit.phase())).toList();
                         int done = (int) units.stream().filter(unit -> finished(unit, apply)).count();
-                        int unitPrice = input.getT1().unitPrice();
+                        BigDecimal unitPrice = input.getT1().unitPrice();
                         Set<String> charges = new HashSet<>(units.stream()
                                 .map(WholeBookAdaptationRepository.Unit::chargeId).toList());
                         return transactionalOperator.transactional(jobRepository
@@ -248,13 +264,13 @@ public class EpisodeBodiesRunner {
     /** 按单个预扣标识下未完成的分集数退回积分。 */
     private Mono<Void> refund(NovelAdaptationJobRepository.Job job,
                               List<WholeBookAdaptationRepository.Unit> units, boolean apply,
-                              String chargeId, int unitPrice) {
-        if (unitPrice <= 0) return Mono.empty();
+                              String chargeId, BigDecimal unitPrice) {
+        if (CreditAmounts.of(unitPrice).compareTo(CreditAmounts.of(0)) <= 0) return Mono.empty();
         int unfinished = (int) units.stream()
                 .filter(unit -> chargeId.equals(unit.chargeId()))
                 .filter(unit -> !finished(unit, apply)).count();
         return unfinished == 0 ? Mono.empty()
-                : creditService.refundOperation(job.userId(), chargeId, "分集正文批量生成", unfinished * unitPrice);
+                : creditService.refundOperation(job.userId(), chargeId, "分集正文批量生成", CreditAmounts.multiply(unitPrice, unfinished));
     }
 
     /** 截断失败原因，避免超出列长度。 */

@@ -1,3 +1,5 @@
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 
 import { translateMessage as translate } from "@/features/locale/translate";
 import type { AiConfig, VideoBillingConfiguration, VideoGenerationMode, VideoResolution } from "@/features/settings/stores/use-config-store";
@@ -38,9 +40,9 @@ export function videoGenerationModeLabel(mode: VideoGenerationMode): string {
 export type VideoGenerationQuote =
     | {
           available: true;
-          credits: number;
+          credits: CreditAmount;
           billingUnit: "generation" | "second";
-          unitPrice: number;
+          unitPrice: CreditAmount;
           durationSeconds: number;
           taskCount: number;
       }
@@ -107,8 +109,8 @@ export function quoteVideoGeneration(input: VideoGenerationQuoteInput): VideoGen
     }
     const taskCount = parsePositiveInteger(input.taskCount ?? 1);
     if (taskCount === null) return { available: false, reason: translate("generation.videoTaskCountMustBeAPositiveInteger") };
-    const total = configuration.billingUnit === "second" ? unitPrice * seconds * taskCount : unitPrice * taskCount;
-    if (!Number.isSafeInteger(total)) return { available: false, reason: translate("generation.generationCreditCalculationExceedsRange") };
+    const total = creditText(creditAmount(unitPrice).times(configuration.billingUnit === "second" ? seconds : 1).times(taskCount));
+    if (!creditAmount(total).isFinite()) return { available: false, reason: translate("generation.generationCreditCalculationExceedsRange") };
     return { available: true, credits: total, billingUnit: configuration.billingUnit, unitPrice, durationSeconds: seconds, taskCount };
 }
 
@@ -142,6 +144,6 @@ function parsePositiveInteger(value: string | number) {
     return Number.isSafeInteger(number) && number > 0 ? number : null;
 }
 
-function isValidVideoPrice(value: unknown): value is number {
-    return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+function isValidVideoPrice(value: unknown): value is CreditAmount {
+    return (typeof value === "number" || typeof value === "string") && creditAmount(value).isFinite() && !creditAmount(value).isNegative();
 }

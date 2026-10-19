@@ -1,5 +1,7 @@
 "use client";
 
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
+
 import { serverGet, serverPost, serverUpload } from "./server";
 import type {
     AnalysisReport,
@@ -65,7 +67,7 @@ export function quoteWholeBookAdaptation(input: WholeBookAdaptationInput) {
     return serverPost<WholeBookAdaptationQuote>(`${WHOLE_BOOK_ADAPTATION_PATH}/quote`, input);
 }
 
-export function startWholeBookAdaptation(input: WholeBookAdaptationInput & { clientRequestId: string; expectedCredits: number; expectedFingerprint: string }) {
+export function startWholeBookAdaptation(input: WholeBookAdaptationInput & { clientRequestId: string; expectedCredits: CreditAmount; expectedFingerprint: string }) {
     return serverPost<WholeBookAdaptationJob>(`${WHOLE_BOOK_ADAPTATION_PATH}/start`, input);
 }
 
@@ -110,7 +112,7 @@ export function quoteEpisodeBodies(input: EpisodeBodiesInput) {
     return serverPost<EpisodeBodiesQuote>(`${EPISODE_BODIES_PATH}/quote`, input);
 }
 
-export function startEpisodeBodies(input: EpisodeBodiesInput & { clientRequestId: string; expectedCredits: number; expectedFingerprint: string }) {
+export function startEpisodeBodies(input: EpisodeBodiesInput & { clientRequestId: string; expectedCredits: CreditAmount; expectedFingerprint: string }) {
     return serverPost<EpisodeBodiesJob>(`${EPISODE_BODIES_PATH}/start`, input);
 }
 
@@ -297,7 +299,7 @@ export function quoteStoryBibleAnalysis(projectId: string, model: string, sectio
     return serverPost<StoryBibleQuote>(`${STORY_BIBLE_PATH}/quoteAnalysis`, { projectId, model, sectionIds });
 }
 
-export function startStoryBibleAnalysis(input: { projectId: string; model: string; sectionIds: string[]; clientRequestId: string; expectedCredits: number; expectedSourceRevision: number; expectedPricingRevision: number }) {
+export function startStoryBibleAnalysis(input: { projectId: string; model: string; sectionIds: string[]; clientRequestId: string; expectedCredits: CreditAmount; expectedSourceRevision: number; expectedPricingRevision: number }) {
     return serverPost<StoryBibleJob>(`${STORY_BIBLE_PATH}/startAnalysis`, input);
 }
 
@@ -362,6 +364,6 @@ export function getEpisodeBodiesPricing() {
     return serverGet<EpisodeBodiesModelPricing[]>("/admin/episodeBodies/getPricing");
 }
 
-export function saveEpisodeBodiesPricing(modelConfigId: string, expectedRevision: number, credits: number) {
+export function saveEpisodeBodiesPricing(modelConfigId: string, expectedRevision: number, credits: CreditAmount) {
     return serverPost<EpisodeBodiesModelPricing>("/admin/episodeBodies/savePricing", { modelConfigId, expectedRevision, credits });
 }

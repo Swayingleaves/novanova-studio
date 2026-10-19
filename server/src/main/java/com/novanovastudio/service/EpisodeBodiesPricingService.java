@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
+
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -81,7 +83,7 @@ public class EpisodeBodiesPricingService {
      * @param modelConfigId String 模型配置标识
      * @return Mono&lt;Integer&gt; 每集积分
      */
-    public Mono<Integer> findCredits(String modelConfigId) {
+    public Mono<BigDecimal> findCredits(String modelConfigId) {
         return repository.findPricing(modelConfigId).map(EpisodeBodiesPricingRepository.Pricing::credits);
     }
 
@@ -96,6 +98,6 @@ public class EpisodeBodiesPricingService {
                                                      EpisodeBodiesPricingRepository.Pricing saved) {
         return new EpisodeBodiesDtos.ModelPricing(config.id(), config.channelId() + "::" + config.modelName(),
                 StringUtils.hasText(config.displayName()) ? config.displayName() : config.modelName(),
-                saved == null ? 0 : saved.credits(), saved == null ? 0 : saved.revision());
+                saved == null ? BigDecimal.ZERO : saved.credits(), saved == null ? 0 : saved.revision());
     }
 }

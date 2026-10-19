@@ -1,5 +1,8 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -149,7 +152,7 @@ public class EpisodeBodiesService {
                 .switchIfEmpty(Mono.defer(() -> prepare(userId, request.projectId(), request.expectedRevision(),
                                 request.model(), request.mode(), request.episodeIds())
                         .flatMap(prepared -> {
-                            if (prepared.credits() != request.expectedCredits()
+                            if (CreditAmounts.of(prepared.credits()).compareTo(CreditAmounts.of(request.expectedCredits())) != 0
                                     || !prepared.fingerprint().equals(request.expectedFingerprint())) {
                                 return Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT,
                                         "分集、模型价格或项目内容已变化，请重新报价"));
@@ -170,7 +173,7 @@ public class EpisodeBodiesService {
                                             .then(repository.planEpisodes(jobId, PHASE_BODIES, STAGE_BODY,
                                                     prepared.episodeIds(), chargeId))
                                             .then(creditService.chargeOperation(userId, chargeId, prepared.credits(),
-                                                    OPERATION_NAME)))
+                                                    OPERATION_NAME, prepared.modelConfigId())))
                                     .then(scriptService.createCheckpointVersion(request.projectId(),
                                             prepared.revision(), userId, "批量生成分集正文前",
                                             "发起逐集正文批量生成：" + prepared.episodeIds().size() + " 集"))
@@ -257,10 +260,10 @@ public class EpisodeBodiesService {
                         boolean apply = MODE_APPLY.equals(mode(job));
                         List<WholeBookAdaptationRepository.Unit> bodies = bodies(input.getT2());
                         int done = (int) bodies.stream().filter(unit -> finished(unit, apply)).count();
-                        int refund = (bodies.size() - done) * input.getT1().unitPrice();
+                        BigDecimal refund = CreditAmounts.multiply(input.getT1().unitPrice(), (bodies.size() - done));
                         return transactionalOperator.transactional(jobRepository
                                         .finish(job.id(), "canceled", "", done)
-                                        .flatMap(finished -> finished && refund > 0
+                                        .flatMap(finished -> finished && CreditAmounts.of(refund).compareTo(CreditAmounts.of(0)) > 0
                                                 ? creditService.refundOperation(job.userId(),
                                                         WholeBookAdaptationService.chargeId(job.id(), PHASE_BODIES),
                                                         OPERATION_NAME, refund)
@@ -444,7 +447,7 @@ public class EpisodeBodiesService {
                 .flatMap(data -> scriptService.getSnapshotForUser(job.userId(), job.projectId(), revision)
                         .flatMap(snapshot -> scriptService.saveAiDraft(job.userId(), job.projectId(), revision,
                                         "novelAdaptationepisode", "episode", episodeId, "批量生成分集正文",
-                                        job.modelValue(), 0,
+                                        job.modelValue(), BigDecimal.ZERO,
                                         scriptService.targetSnapshot(snapshot, "episode", episodeId), data)
                                 .flatMap(draft -> novelAdaptationRepository.saveDraft(draft.id(), job.projectId(),
                                                 "episode", adaptationSettings(job), List.of())
@@ -487,9 +490,9 @@ public class EpisodeBodiesService {
                 .map(input -> {
                     List<WholeBookAdaptationRepository.Unit> bodies = bodies(input.getT1());
                     int done = (int) bodies.stream().filter(unit -> finished(unit, apply)).count();
-                    int unitPrice = job.estimatedCalls() <= 0 ? 0 : job.credits() / Math.max(1, job.estimatedCalls());
-                    int refunded = Set.of("canceled", "failed").contains(job.status())
-                            ? (bodies.size() - done) * unitPrice : 0;
+                    BigDecimal unitPrice = job.estimatedCalls() <= 0 ? BigDecimal.ZERO : CreditAmounts.divide(job.credits(), Math.max(1, job.estimatedCalls()));
+                    BigDecimal refunded = Set.of("canceled", "failed").contains(job.status())
+                            ? CreditAmounts.multiply(unitPrice, (bodies.size() - done)) : BigDecimal.ZERO;
                     List<String> remaining = bodies.stream().filter(unit -> !finished(unit, apply))
                             .map(unit -> unit.input().getString("episodeId")).filter(Objects::nonNull).toList();
                     return new EpisodeBodiesDtos.Job(job.id(), job.phase(), job.status(), mode(job), bodies.size(),
@@ -630,10 +633,10 @@ public class EpisodeBodiesService {
     }
 
     /** 一次启动的输入快照与规划。 */
-    private record Prepared(long revision, String modelValue, String modelConfigId, int unitPrice,
+    private record Prepared(long revision, String modelValue, String modelConfigId, BigDecimal unitPrice,
                             List<StoryBibleRepository.Item> facts, List<String> episodeIds, String mode,
                             NovelAdaptationDtos.Settings settings, String fingerprint) {
-        int credits() { return episodeIds.size() * unitPrice; }
+        BigDecimal credits() { return CreditAmounts.multiply(unitPrice, episodeIds.size()); }
         EpisodeBodiesDtos.Quote quote() {
             return new EpisodeBodiesDtos.Quote(revision, episodeIds.size(), episodeIds.size(), credits(),
                     fingerprint, episodeIds);

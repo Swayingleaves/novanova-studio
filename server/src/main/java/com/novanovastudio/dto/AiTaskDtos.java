@@ -1,5 +1,9 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+
 import com.novanovastudio.common.SystemMessage;
 
 import com.alibaba.fastjson2.JSONObject;
@@ -199,7 +203,7 @@ public final class AiTaskDtos {
 
     /** 视频工作流阶段报价。 */
     public record VideoWorkflowStageQuote(String role, String displayName, String taskType, String model,
-                                          Integer taskCount, Integer credits, String videoGenerationMode) {
+                                          Integer taskCount, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits, String videoGenerationMode) {
 
         /**
          * 创建不适用视频模式的阶段报价，保留非视频阶段的原有构造方式。
@@ -212,14 +216,14 @@ public final class AiTaskDtos {
          * @param credits Integer 阶段积分
          */
         public VideoWorkflowStageQuote(String role, String displayName, String taskType, String model,
-                                       Integer taskCount, Integer credits) {
+                                       Integer taskCount, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal credits) {
             this(role, displayName, taskType, model, taskCount, credits, null);
         }
     }
 
     /** 视频工作流报价响应。 */
     public record VideoWorkflowQuoteResponse(Boolean available, String workflowType,
-                                             List<VideoWorkflowStageQuote> stages, Integer credits,
+                                             List<VideoWorkflowStageQuote> stages, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits,
                                              String reason, List<String> requiredCapabilities) {
     }
 
@@ -231,7 +235,7 @@ public final class AiTaskDtos {
      * @param delta String 流式文本增量片段，仅text-delta事件使用，其它事件为null
      * @param creditBalance Integer 可用积分，仅credit-balance事件使用，其它事件为null
      */
-    public record AiTaskEvent(String type, AiGenerationTaskResponse task, String delta, Integer creditBalance) {
+    public record AiTaskEvent(String type, AiGenerationTaskResponse task, String delta, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditBalance) {
 
         /**
          * 构造任务状态事件，delta默认为null
@@ -271,17 +275,36 @@ public final class AiTaskDtos {
      * @param icon String 模型展示图标标识，可为null
      */
     public record AiModelOption(String value, String label, String capability, String provider, String apiFormat,
-                                Boolean defaultModel, Integer creditCost, String creditUnit, List<String> capabilities,
+                                Boolean defaultModel, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditCost, String creditUnit, List<String> capabilities,
+                                VideoBillingConfiguration videoBillingConfiguration, String icon, Long ownerTeamId) {
+        /**
+         * 创建平台模型展示记录。
+         * @param value 模型配置字段
+         * @param label 模型配置字段
+         * @param capability 模型配置字段
+         * @param provider 模型配置字段
+         * @param apiFormat 模型配置字段
+         * @param defaultModel 模型配置字段
+         * @param creditCost 模型配置字段
+         * @param creditUnit 模型配置字段
+         * @param capabilities 模型配置字段
+         * @param videoBillingConfiguration 模型配置字段
+         * @param icon 模型配置字段
+         */
+        public AiModelOption(String value, String label, String capability, String provider, String apiFormat,
+                                Boolean defaultModel, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost, String creditUnit, List<String> capabilities,
                                 VideoBillingConfiguration videoBillingConfiguration, String icon) {
+            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, creditUnit, capabilities, videoBillingConfiguration, icon, 0L);
+        }
         /** 保持既有调用方不返回视频分档计费配置。 */
         public AiModelOption(String value, String label, String capability, String provider, String apiFormat,
-                             Boolean defaultModel, Integer creditCost, String creditUnit) {
+                             Boolean defaultModel, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost, String creditUnit) {
             this(value, label, capability, provider, apiFormat, defaultModel, creditCost, creditUnit, List.of(), null, null);
         }
 
         /** 保持旧调用方按次计费。 */
         public AiModelOption(String value, String label, String capability, String provider, String apiFormat,
-                             Boolean defaultModel, Integer creditCost) {
+                             Boolean defaultModel, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost) {
             this(value, label, capability, provider, apiFormat, defaultModel, creditCost, "generation", List.of(), null, null);
         }
     }

@@ -10,17 +10,19 @@ import React from "react";
 import { getWebsiteLocale } from "@/features/locale/server";
 import { languageTag } from "@/features/locale/locale";
 import { websiteMessages } from "@/features/locale/messages";
+import { resolveSpaceBrand } from "@/features/team/space-brand";
 
 export async function generateMetadata(): Promise<Metadata> {
     const locale = await getWebsiteLocale();
+    const platformBrand = resolveSpaceBrand(null);
     const editionsPage = (await headers()).get("x-novanova-pathname") === "/editions";
     return {
-        title: editionsPage ? websiteMessages[locale].editions.compareEditionsNovanovaStudio : "Novanova Studio",
+        title: editionsPage ? websiteMessages[locale].editions.compareEditionsNovanovaStudio : platformBrand.name,
         description: editionsPage ? websiteMessages[locale].editions.compareEnterpriseFeaturesAcrossNovanovaStudioEditions : websiteMessages[locale].website.description,
         icons: {
-            icon: "/novanovastudio.png",
-            shortcut: "/novanovastudio.png",
-            apple: "/novanovastudio.png",
+            icon: platformBrand.iconUrl,
+            shortcut: platformBrand.iconUrl,
+            apple: platformBrand.iconUrl,
         },
     };
 }

@@ -87,7 +87,7 @@ class NovelAdaptationRetryTest {
         NovelAdaptationDtos.RetryQuote quote = service.quoteRetryPipeline(new NovelAdaptationDtos.JobRequest("project-a", "job-a")).block();
         assertEquals(1, quote.completedCalls());
         assertEquals(1, quote.remainingCalls());
-        assertEquals(10, quote.credits());
+        assertEquals(0, java.math.BigDecimal.valueOf(10).compareTo(quote.credits()));
         verifyNoInteractions(creditService, queue);
     }
 
@@ -96,9 +96,9 @@ class NovelAdaptationRetryTest {
     void shouldChargeRemainingBudgetWithIndependentAttemptIdentifier() {
         NovelAdaptationJobRepository.Job failed = job("failed", 0);
         when(jobRepository.find("job-a")).thenReturn(Mono.just(failed), Mono.just(job("queued", 1)));
-        when(jobRepository.retry(failed, 1, 1, 20)).thenReturn(Mono.just(true));
+        when(jobRepository.retry(failed, 1, 1, java.math.BigDecimal.valueOf(20).setScale(6))).thenReturn(Mono.just(true));
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Void>>any())).thenAnswer(invocation -> invocation.getArgument(0));
-        when(creditService.chargeOperation(1L, "job-a:retry:1", 10, NovelAdaptationService.OPERATION_NAME)).thenReturn(Mono.empty());
+        when(creditService.chargeOperation(1L, "job-a:retry:1", java.math.BigDecimal.valueOf(10).setScale(6), NovelAdaptationService.OPERATION_NAME, "model-config")).thenReturn(Mono.empty());
         when(queueProvider.getObject()).thenReturn(queue);
         when(queue.enqueue("model-config", "job-a")).thenReturn(Mono.empty());
         when(novelAdaptationRepository.listJobDrafts("job-a")).thenReturn(Flux.empty());
@@ -106,7 +106,7 @@ class NovelAdaptationRetryTest {
         NovelAdaptationDtos.JobView result = service.retryPipeline(request(10)).block();
 
         assertEquals("queued", result.status());
-        verify(creditService).chargeOperation(1L, "job-a:retry:1", 10, NovelAdaptationService.OPERATION_NAME);
+        verify(creditService).chargeOperation(1L, "job-a:retry:1", java.math.BigDecimal.valueOf(10).setScale(6), NovelAdaptationService.OPERATION_NAME, "model-config");
         verify(queue).enqueue("model-config", "job-a");
         verify(novelAdaptationRepository, never()).deletePendingAdaptationDrafts(any());
     }
@@ -150,7 +150,7 @@ class NovelAdaptationRetryTest {
      */
     private NovelAdaptationJobRepository.Job job(String status, int retryCount) {
         return new NovelAdaptationJobRepository.Job("job-a", "project-a", 1, "request-a", "channel::model", "model-config",
-                JSONObject.of("episodeCount", 2), List.of("fact-a"), "drafts", "episode", status, 2, 1, 2, 1, 20, "失败", null, retryCount);
+                JSONObject.of("episodeCount", 2), List.of("fact-a"), "drafts", "episode", status, 2, 1, 2, 1, java.math.BigDecimal.valueOf(20), "失败", null, retryCount);
     }
 
     /**
@@ -159,7 +159,7 @@ class NovelAdaptationRetryTest {
      * @return RetryJobRequest 恢复请求
      */
     private NovelAdaptationDtos.RetryJobRequest request(int credits) {
-        return new NovelAdaptationDtos.RetryJobRequest("project-a", "job-a", 24, 1, credits, 0);
+        return new NovelAdaptationDtos.RetryJobRequest("project-a", "job-a", 24, 1, java.math.BigDecimal.valueOf(credits), 0);
     }
 
     /**

@@ -1,5 +1,9 @@
 package com.novanovastudio.entity;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+
 import java.time.OffsetDateTime;
 import lombok.Data;
 
@@ -69,6 +73,8 @@ public final class PersistenceRecords {
      */
     @Data
     public static class MediaFileRecord {
+        /** 实际上传使用的对象存储配置。 */
+        private String objectStorageConfigId;
 
         /** 媒体存储键 */
         private String storageKey;
@@ -131,6 +137,9 @@ public final class PersistenceRecords {
     @Data
     public static class UserAiChannelRecord {
 
+        /** 资源所属团队，零表示平台。 */
+        private Long teamId;
+
         /** 主键ID */
         private Long id;
 
@@ -174,6 +183,9 @@ public final class PersistenceRecords {
     @Data
     public static class UserAiModelConfigRecord {
 
+        /** 资源所属团队，零表示平台。 */
+        private Long teamId;
+
         /** 主键ID */
         private Long id;
 
@@ -202,7 +214,8 @@ public final class PersistenceRecords {
         private Integer sortOrder;
 
         /** 当前计费单位对应的积分单价 */
-        private Integer creditCost;
+        @JSONField(serializeUsing = CreditAmountWriter.class)
+        private BigDecimal creditCost;
 
         /** 积分计费单位：generation按次，second按视频秒数 */
         private String creditUnit;
@@ -246,6 +259,9 @@ public final class PersistenceRecords {
      */
     @Data
     public static class UserObjectStorageRecord {
+
+        /** 资源所属团队，零表示平台。 */
+        private Long teamId;
 
         /** 主键ID */
         private Long id;

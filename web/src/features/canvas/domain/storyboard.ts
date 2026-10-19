@@ -1,3 +1,5 @@
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 
 import { translateMessage as translate } from "@/features/locale/translate";
 import type { CanvasStoryboardAsset, CanvasStoryboardAssetGenerationSettings, CanvasStoryboardAssetGenerationState, CanvasStoryboardAssetKind, CanvasStoryboardNode, CanvasStoryboardShot, CanvasStoryboardShotSize } from "../types";
@@ -40,18 +42,18 @@ export const createStoryboardAssetKindLabels = (translator: typeof translate = t
 
 export const STORYBOARD_ASSET_KIND_LABELS = createStoryboardAssetKindLabels();
 
-export function readStoryboardModelCost(modelCosts: Array<{ model: string; taskType: string; credits: number }>, model: string): number {
+export function readStoryboardModelCost(modelCosts: Array<{ model: string; taskType: string; credits: CreditAmount }>, model: string): CreditAmount {
     return modelCosts.find((item) => item.taskType === "text" && item.model === model)?.credits ?? 0;
 }
 
 /** 计算当前勾选资产的一次性图片生成预估积分。 */
-export function readStoryboardAssetImageCost(modelCosts: Array<{ model: string; taskType: string; credits: number }>, model: string, selectedCount: number): number {
+export function readStoryboardAssetImageCost(modelCosts: Array<{ model: string; taskType: string; credits: CreditAmount }>, model: string, selectedCount: number): CreditAmount {
     const unitCost = modelCosts.find((item) => item.taskType === "image" && item.model === model)?.credits ?? 0;
-    return Math.max(0, Math.floor(selectedCount)) * Math.max(0, unitCost);
+    return creditText(creditAmount(unitCost).times(Math.max(0, Math.floor(selectedCount))));
 }
 
 /** 分镜批量视频报价结果。 */
-export type StoryboardVideoBatchQuote = { available: true; credits: number } | { available: false; reason: string };
+export type StoryboardVideoBatchQuote = { available: true; credits: CreditAmount } | { available: false; reason: string };
 
 /** 根据镜头实际参考素材自动判定视频生成模式：有视频参考（含与图片混合）判为全能参考，仅有图片判为图生视频，无参考判为文生视频。 */
 export function readStoryboardVideoGenerationMode(shot: CanvasStoryboardShot, assets: CanvasStoryboardAsset[], referenceVideos: ReferenceVideo[] = []): VideoGenerationMode {
@@ -88,12 +90,12 @@ export function quoteStoryboardVideo(config: AiConfig, model: string, videoConfi
 
 /** 计算已选分镜镜头的视频分档报价，任何一个镜头不可报价时整批不可提交。 */
 export function readStoryboardVideoCost(config: AiConfig, model: string, videoConfig: AiConfig, shots: CanvasStoryboardShot[], assets: CanvasStoryboardAsset[], referenceVideos: ReferenceVideo[] = []): StoryboardVideoBatchQuote {
-    let credits = 0;
+    let credits: CreditAmount = "0";
     for (const shot of shots) {
         const quote = quoteStoryboardVideo(config, model, videoConfig, shot, assets, referenceVideos);
         if (!quote.available) return { available: false, reason: translate("canvas.cannotQuoteShot", { value0: shot.shotNumber, value1: quote.reason }) };
-        if (!Number.isSafeInteger(credits + quote.credits)) return { available: false, reason: translate("canvas.storyboardVideoCreditCalculationExceedsRange") };
-        credits += quote.credits;
+        if (!creditAmount(credits).plus(quote.credits).isFinite()) return { available: false, reason: translate("canvas.storyboardVideoCreditCalculationExceedsRange") };
+        credits = creditText(creditAmount(credits).plus(quote.credits));
     }
     return { available: true, credits };
 }

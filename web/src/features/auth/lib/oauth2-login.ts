@@ -1,5 +1,7 @@
 
 import { translateMessage as translate } from "@/features/locale/translate";
+import { resolveAuthenticationRedirect } from "./authentication-path";
+import { parseSpacePath } from "@/features/team/space-path";
 const OAUTH2_REDIRECT_SESSION_KEY = "novanova:oauth2:redirect:v1";
 
 const OAUTH2_ERROR_MESSAGES: Record<string, string> = {
@@ -20,17 +22,15 @@ const OAUTH2_ERROR_MESSAGES: Record<string, string> = {
 
 /** 校验站内重定向目标，拒绝外部地址和认证页面循环跳转。 */
 export function safeAuthRedirect(value: string | null | undefined) {
-    if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
-    if (value.includes("\\") || /[\u0000-\u001f\u007f]/.test(value)) return "/";
-    if (value.startsWith("/auth")) return "/";
-    return value;
+    try { return resolveAuthenticationRedirect(value, null); }
+    catch { return "/"; }
 }
 
 /** 保存OAuth2登录完成后的站内跳转目标。 */
 export function storeOAuth2Redirect(value: string | null | undefined) {
     if (typeof window === "undefined") return false;
     try {
-        window.sessionStorage.setItem(OAUTH2_REDIRECT_SESSION_KEY, safeAuthRedirect(value));
+        window.sessionStorage.setItem(OAUTH2_REDIRECT_SESSION_KEY, resolveAuthenticationRedirect(value, parseSpacePath(window.location.pathname).teamSlug));
         return true;
     } catch {
         return false;
@@ -40,13 +40,14 @@ export function storeOAuth2Redirect(value: string | null | undefined) {
 /** 读取并清除OAuth2登录完成后的站内跳转目标。 */
 export function consumeOAuth2Redirect() {
     if (typeof window === "undefined") return "/";
+    let value: string | null;
     try {
-        const redirect = safeAuthRedirect(window.sessionStorage.getItem(OAUTH2_REDIRECT_SESSION_KEY));
+        value = window.sessionStorage.getItem(OAUTH2_REDIRECT_SESSION_KEY);
         window.sessionStorage.removeItem(OAUTH2_REDIRECT_SESSION_KEY);
-        return redirect;
     } catch {
         return null;
     }
+    return resolveAuthenticationRedirect(value, null);
 }
 
 /** 将服务端固定OAuth2错误码转换为中文提示。 */

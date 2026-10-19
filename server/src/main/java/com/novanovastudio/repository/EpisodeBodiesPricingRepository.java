@@ -1,5 +1,7 @@
 package com.novanovastudio.repository;
 
+import java.math.BigDecimal;
+
 import io.r2dbc.spi.Row;
 import lombok.RequiredArgsConstructor;
 import org.springframework.r2dbc.core.DatabaseClient;
@@ -51,7 +53,7 @@ public class EpisodeBodiesPricingRepository {
      * @param expectedRevision long 期望修订号
      * @return Mono&lt;Boolean&gt; 是否保存成功
      */
-    public Mono<Boolean> savePricing(String modelConfigId, int credits, long expectedRevision) {
+    public Mono<Boolean> savePricing(String modelConfigId, BigDecimal credits, long expectedRevision) {
         String sql = expectedRevision == 0
                 ? "INSERT INTO episode_bodies_pricing(model_config_id,credits,revision) VALUES (:id,:credits,1) ON CONFLICT (model_config_id) DO NOTHING"
                 : "UPDATE episode_bodies_pricing SET credits=:credits,revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE model_config_id=:id AND revision=:revision";
@@ -64,12 +66,12 @@ public class EpisodeBodiesPricingRepository {
 
     /** 组装定价行，缺省值兜住理论上不会出现的空列。 */
     private Pricing mapPricing(Row row) {
-        Integer credits = row.get("credits", Integer.class);
+        BigDecimal credits = row.get("credits", BigDecimal.class);
         Long revision = row.get("revision", Long.class);
-        return new Pricing(row.get("model_config_id", String.class), credits == null ? 0 : credits,
+        return new Pricing(row.get("model_config_id", String.class), credits == null ? BigDecimal.ZERO : credits,
                 revision == null ? 0L : revision);
     }
 
     /** 单个模型的每集积分与修订号。 */
-    public record Pricing(String modelConfigId, int credits, long revision) { }
+    public record Pricing(String modelConfigId, BigDecimal credits, long revision) { }
 }

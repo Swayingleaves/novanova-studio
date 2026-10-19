@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useLayoutEffect } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname } from "@/shared/lib/team-navigation";
 import { ProConfigProvider, enUSIntl, zhCNIntl } from "@ant-design/pro-components";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App, ConfigProvider } from "antd";
@@ -16,6 +16,11 @@ import { websiteMessages } from "@/features/locale/messages";
 import { useLanguageStore } from "@/features/locale/language-store";
 import { isWebsiteLocale, languageTag, type WebsiteLocale } from "@/features/locale/locale";
 
+import { TeamBoundary } from "@/features/team/components/team-boundary";
+import { TeamSwitcherModal } from "@/features/team/components/team-switcher-modal";
+import { useTeamSwitcherStore } from "@/features/team/stores/use-team-switcher-store";
+import { useSpaceBrand } from "@/features/team/use-space-brand";
+import { synchronizeDocumentBrand } from "@/features/team/space-brand";
 import { ClientRootInit } from "@/features/app-shell/components/client-root-init";
 import { getAntThemeConfig } from "@/shared/lib/app-theme";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
@@ -43,6 +48,8 @@ export function AppProviders({
     initialResolvedTheme: ResolvedTheme;
 }) {
     const selectedLocale = useLanguageStore((state) => state.locale);
+    const teamSwitcherOpen = useTeamSwitcherStore((state) => state.open);
+    const brand = useSpaceBrand();
     const pathname = usePathname();
     const documentLocale = pathname.match(/^\/docs\/(zh-cn|en)(?:\/|$)/)?.[1];
     const locale = isWebsiteLocale(documentLocale) ? documentLocale : selectedLocale ?? initialLocale;
@@ -50,14 +57,12 @@ export function AppProviders({
         document.documentElement.lang = languageTag(locale);
         document.documentElement.dataset.language = locale;
         dayjs.locale(locale);
-        const description = document.querySelector('meta[name="description"]');
-        if (!pathname.startsWith("/docs")) {
-            description?.setAttribute("content", pathname === "/editions"
-                ? websiteMessages[locale].editions.compareEnterpriseFeaturesAcrossNovanovaStudioEditions
-                : websiteMessages[locale].website.description);
-            document.title = pathname === "/editions" ? websiteMessages[locale].editions.compareEditionsNovanovaStudio : "Novanova Studio";
-        }
-    }, [locale, pathname]);
+        synchronizeDocumentBrand(brand, pathname, {
+            description: websiteMessages[locale].website.description,
+            editionsTitle: websiteMessages[locale].editions.compareEditionsNovanovaStudio,
+            editionsDescription: websiteMessages[locale].editions.compareEnterpriseFeaturesAcrossNovanovaStudioEditions,
+        });
+    }, [brand, locale, pathname]);
 
     useEffect(() => {
         // 根布局会被客户端导航复用，显式文档路径始终同步到当前浏览器偏好。
@@ -95,7 +100,8 @@ export function AppProviders({
                 <ProConfigProvider intl={locale === "en" ? enUSIntl : zhCNIntl} dark={isDarkResolvedTheme(effectiveResolvedTheme)}>
                     <App>
                         <QueryClientProvider client={queryClient}>
-                            <ClientRootInit>{children}</ClientRootInit>
+                            {teamSwitcherOpen ? <TeamSwitcherModal /> : null}
+                            <TeamBoundary><ClientRootInit>{children}</ClientRootInit></TeamBoundary>
                         </QueryClientProvider>
                     </App>
                 </ProConfigProvider>

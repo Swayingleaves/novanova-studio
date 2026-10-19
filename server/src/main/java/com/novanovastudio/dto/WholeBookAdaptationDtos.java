@@ -1,5 +1,9 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import java.util.List;
@@ -21,7 +25,7 @@ public final class WholeBookAdaptationDtos {
     /** 启动时确认费用与输入指纹，避免报价后事实或模型价格变化。 */
     public record StartRequest(@NotBlank String projectId, @Min(0) long expectedRevision,
                                @NotBlank @Size(max=64) String clientRequestId, @NotBlank String model,
-                               @NotNull @Valid Options options, @Min(0) int expectedCredits,
+                               @NotNull @Valid Options options, @Min(0) @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal expectedCredits,
                                @NotBlank String expectedFingerprint) { }
     /** 免费报价请求。 */
     public record QuoteRequest(@NotBlank String projectId, @Min(0) long expectedRevision,
@@ -38,7 +42,7 @@ public final class WholeBookAdaptationDtos {
                                  @Min(0) long expectedRevision, @Min(0) int expectedRetryCount,
                                  @Min(0) @Max(1000) int episodeCount) { }
     /** 生成单元及其价格的不可变报价。 */
-    public record Quote(long revision, String phase, int calls, int credits, String fingerprint) { }
+    public record Quote(long revision, String phase, int calls, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits, String fingerprint) { }
     /** 一个输入批次的归纳，只允许简明摘要，不复制全部事件正文。 */
     public record Material(String summary) { }
     /** 全局故事阶段，通过根汇总单元保留完整来源范围。 */
@@ -66,7 +70,7 @@ public final class WholeBookAdaptationDtos {
                           List<ScriptDtos.EpisodeDetail> bodies, int oldEpisodeCount, int oldSceneCount) { }
     /** 返回当前阶段预算和策略，历史工作流不会自动升级。 */
     public record View(String jobId, String phase, String stage, String status, int totalUnits,
-                       int processedUnits, int credits, int refundedCredits, String errorMessage,
+                       int processedUnits, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal refundedCredits, String errorMessage,
                        long revision, int retryCount, Options options, Strategy strategy,
                        int lockedEpisodeCount, List<Slot> slots, boolean historical) { }
 }

@@ -1,5 +1,10 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -25,7 +30,7 @@ public final class CreditDtos {
      *
      * @param initialCredits Integer 新用户初始积分
      */
-    public record CreditSettingsResponse(Integer initialCredits) {
+    public record CreditSettingsResponse(@jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal initialCredits) {
     }
 
     /**
@@ -33,7 +38,7 @@ public final class CreditDtos {
      *
      * @param initialCredits Integer 新用户初始积分
      */
-    public record UpdateCreditSettingsRequest(@NotNull(message = "business.initialCreditsAreRequired") @Min(value = 0, message = "business.initialCreditsMustNotBeNegative") Integer initialCredits) {
+    public record UpdateCreditSettingsRequest(@NotNull(message = "business.initialCreditsAreRequired") @Min(value = 0, message = "business.initialCreditsMustNotBeNegative") @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal initialCredits) {
     }
 
     /**
@@ -44,7 +49,7 @@ public final class CreditDtos {
      * @param reason String 调整原因
      */
     public record AdjustUserCreditsRequest(@NotNull(message = "business.userIDIsRequired") Long userId,
-                                           @NotNull(message = "business.creditChangeIsRequired") Integer changeAmount,
+                                           @NotNull(message = "business.creditChangeIsRequired") @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal changeAmount,
                                            @NotBlank(message = "business.adjustmentReasonIsRequired") @Size(max = 200, message = "business.reasonMustNotExceed200Characters") String reason) {
     }
 
@@ -54,7 +59,7 @@ public final class CreditDtos {
      * @param userId Long 用户ID
      * @param creditBalance Integer 可用积分
      */
-    public record CreditBalanceResponse(Long userId, Integer creditBalance) {
+    public record CreditBalanceResponse(Long userId, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditBalance) {
     }
 
     /**
@@ -63,7 +68,7 @@ public final class CreditDtos {
      * @param name String 分组名称
      * @param consumedCredits Long 消耗积分
      */
-    public record CreditDistributionItem(String name, Long consumedCredits) {
+    public record CreditDistributionItem(String name, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal consumedCredits) {
     }
 
     /**
@@ -72,7 +77,7 @@ public final class CreditDtos {
      * @param period String 日或月周期
      * @param consumedCredits Long 消耗积分
      */
-    public record CreditTrendItem(String period, Long consumedCredits) {
+    public record CreditTrendItem(String period, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal consumedCredits) {
     }
 
     /**
@@ -101,7 +106,7 @@ public final class CreditDtos {
                                         String generationType,
                                         String model,
                                         String generationSource,
-                                        Long consumedCredits,
+                                        @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal consumedCredits,
                                         String createdAt) {
     }
 
@@ -143,9 +148,9 @@ public final class CreditDtos {
                                              String generationType,
                                              String model,
                                              String generationSource,
-                                             Long changeAmount,
+                                             @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal changeAmount,
                                              String reason,
-                                             Long balanceAfter,
+                                             @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal balanceAfter,
                                              Long invitedUserId,
                                              String createdAt) {
     }
@@ -180,9 +185,9 @@ public final class CreditDtos {
                                             String generationType,
                                             String model,
                                             String generationSource,
-                                            Long changeAmount,
+                                            @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal changeAmount,
                                             String reason,
-                                            Long balanceAfter,
+                                            @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal balanceAfter,
                                             Long invitedUserId,
                                             String createdAt) {
     }

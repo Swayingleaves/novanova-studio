@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.CreditAmounts;
+import com.novanovastudio.service.TeamTaskScopeService;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentScopeAgentFactory;
@@ -41,6 +43,9 @@ import reactor.core.publisher.Mono;
 @Service
 @RequiredArgsConstructor
 public class StoryBibleAnalysisRunner {
+
+    /** 持久化任务的团队作用域恢复。 */
+    private final TeamTaskScopeService teamTaskScopeService;
     /** 任务执行租约秒数。 */
     public static final int LEASE_SECONDS = 300;
     /** 故事线归纳每批事件数。 */
@@ -74,6 +79,15 @@ public class StoryBibleAnalysisRunner {
      * @return Mono&lt;Void&gt; 执行结果
      */
     public Mono<Void> process(String jobId) {
+        return teamTaskScopeService.execute("story_bible_analysis_jobs", jobId, () -> processInTeam(jobId));
+    }
+
+    /**
+     * 在原任务空间内执行业务，保留现有错误收尾与退款。
+     * @param jobId 任务标识
+     * @return 执行完成信号
+     */
+    private Mono<Void> processInTeam(String jobId) {
         return repository.claimJob(jobId, LEASE_SECONDS).flatMap(claimed -> {
             if (!claimed) {
                 return Mono.<Void>empty();
@@ -457,7 +471,7 @@ public class StoryBibleAnalysisRunner {
             log.error("故事知识库分析最终失败: jobId={}", jobId, error);
             return transactionalOperator.transactional(
                     repository.transitJob(jobId, List.of("running"), "failed", message)
-                            .flatMap(updated -> updated && job.credits() > 0
+                            .flatMap(updated -> updated && CreditAmounts.of(job.credits()).compareTo(CreditAmounts.of(0)) > 0
                                     ? creditService.refundOperation(job.userId(), jobId, StoryBibleService.OPERATION_NAME)
                                     : Mono.<Void>empty()));
         }

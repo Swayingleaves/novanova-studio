@@ -1,3 +1,4 @@
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import type { EpisodeDetail, EpisodeSummary, ProductionReadiness, ScriptCharacter, ScriptLocation, ScriptProjectDetail, ScriptScene } from "@/features/script/types";
 
 /** 漫剧生产阶段。 */
@@ -21,9 +22,9 @@ export type ComicDramaShot = { id: string; sourceEpisodeId?: string | null; sour
 /** 保存正式镜头所需字段。 */
 export type ComicDramaShotInput = Omit<ComicDramaShot, "createdAt" | "updatedAt">;
 /** 镜头拆分草稿。 */
-export type ComicDramaShotDraft = { id: string; projectId: string; scopeType: string; scopeId?: string | null; baseProjectRevision: number; baseScriptRevision: number; instruction: string; model: string; draftData: Record<string, unknown>; chargedCredits: number; status: "pending" | "confirmed" | "discarded"; createdAt?: string; confirmedAt?: string | null };
+export type ComicDramaShotDraft = { id: string; projectId: string; scopeType: string; scopeId?: string | null; baseProjectRevision: number; baseScriptRevision: number; instruction: string; model: string; draftData: Record<string, unknown>; chargedCredits: CreditAmount; status: "pending" | "confirmed" | "discarded"; createdAt?: string; confirmedAt?: string | null };
 /** 提示词版本。 */
-export type ComicDramaPromptVersion = { id: string; shotId: string; versionNumber: number; sourceType: "ai" | "manual"; prompt: string; sourceSnapshot: Record<string, unknown>; model: string; chargedCredits: number; status: "draft" | "adopted" | "superseded" | "needsUpdate"; createdAt?: string };
+export type ComicDramaPromptVersion = { id: string; shotId: string; versionNumber: number; sourceType: "ai" | "manual"; prompt: string; sourceSnapshot: Record<string, unknown>; model: string; chargedCredits: CreditAmount; status: "draft" | "adopted" | "superseded" | "needsUpdate"; createdAt?: string };
 /** 媒体结果。 */
 export type ComicDramaMediaResult = { id: string; targetType: string; targetId: string; mediaType: "image" | "video" | "audio" | "composite"; taskId?: string | null; inputSnapshot: Record<string, unknown>; resultData: Record<string, unknown>; status: "quoted" | "queued" | "processing" | "completed" | "failed" | "needsUpdate"; adopted: boolean; failureReason?: string | null; createdAt?: string; updatedAt?: string };
 /** 上游变化影响。 */
@@ -38,7 +39,7 @@ export type ComicDramaTimelineText = { id: string; content: string; startMs: num
 /** 保存文字片段所需字段。 */
 export type ComicDramaTimelineTextInput = Omit<ComicDramaTimelineText, "createdAt" | "updatedAt">;
 /** 批量任务。 */
-export type ComicDramaBatchTask = { id: string; batchType: string; scopeType: string; scope: Record<string, unknown>; modelSettings: Record<string, unknown>; estimatedCredits: number; totalCount: number; queuedCount: number; processingCount: number; completedCount: number; failedCount: number; needsUpdateCount: number; status: string; confirmedAt?: string | null; createdAt?: string; updatedAt?: string };
+export type ComicDramaBatchTask = { id: string; batchType: string; scopeType: string; scope: Record<string, unknown>; modelSettings: Record<string, unknown>; estimatedCredits: CreditAmount; totalCount: number; queuedCount: number; processingCount: number; completedCount: number; failedCount: number; needsUpdateCount: number; status: string; confirmedAt?: string | null; createdAt?: string; updatedAt?: string };
 /** 画布绑定。 */
 export type ComicDramaCanvasBinding = { id: string; entityType: string; entityId: string; canvasProjectId: string; nodeId: string; bindingData: Record<string, unknown>; createdAt?: string; updatedAt?: string };
 /** 连续性问题。 */

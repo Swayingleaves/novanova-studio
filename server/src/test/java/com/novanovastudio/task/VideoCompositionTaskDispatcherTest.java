@@ -80,7 +80,8 @@ class VideoCompositionTaskDispatcherTest {
 
         Assertions.assertTrue(released.await(2, TimeUnit.SECONDS));
         verify(taskQueue).releaseActiveTask("task-1");
-        verify(taskQueue).claimAvailable();
+        // 初次入队与释放后的补位各检查一次，等待异步补位完成后验证。
+        verify(taskQueue, org.mockito.Mockito.timeout(2000).times(2)).claimAvailable();
     }
 
     /**

@@ -1,0 +1,22 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { Alert, App, Button, DatePicker, Form, InputNumber, Select, Table } from "antd";
+import { useState } from "react";
+import { serverGet, serverPost } from "@/services/api/server";
+import { listAvailableResources } from "@/services/api/team";
+import { useTeamStore } from "@/features/team/stores/use-team-store";
+import { creditText } from "@/shared/lib/credit-amounts";
+
+/** 资源所有者显式启用存储计费并查看生效版本，授权资源不允许改价。 */
+export function StorageBillingManagement() {
+    const { message } = App.useApp();
+    const teamId = useTeamStore((state) => state.team?.id || 0);
+    const resources = useQuery({ queryKey: ["storageBillingResources", teamId], queryFn: listAvailableResources });
+    const rates = useQuery({ queryKey: ["storageBillingRates", teamId], queryFn: () => serverGet<{ storageId: string; effectiveAt: string; creditsPerGigabyteMonth: string }[]>("/storage/listBillingRates") });
+    const usage = useQuery({ queryKey: ["teamStorageUsage", teamId], queryFn: () => serverGet<{ storageId: string; ownerTeamId: number; objectCount: number; fileBytes: string }[]>("/storage/getTeamUsage") });
+    const historical = useQuery({ queryKey: ["unregisteredStorageGroups", teamId], queryFn: () => serverGet<{ provider: string; bucket: string; region: string; objectCount: number; fileBytes: string }[]>("/storage/listUnregisteredStorageGroups") });
+    const [historicalStorageId, setHistoricalStorageId] = useState<string>();
+    const [busy, setBusy] = useState(false);
+    return <div className="flex flex-col gap-5"><Table rowKey="storageId" dataSource={usage.data || []} pagination={false} columns={[{ title: "存储配置", dataIndex: "storageId" }, { title: "归属", render: (_, item) => item.ownerTeamId === 0 ? "平台" : "团队" }, { title: "实际对象数", dataIndex: "objectCount" }, { title: "占用字节", dataIndex: "fileBytes" }]} />{historical.data?.length ? <div className="flex flex-col gap-3"><Alert type="warning" showIcon title="历史文件尚未确认存储配置。请按桶信息明确选择实际使用的配置，确认后才允许启用计费。" /><Table rowKey={(item) => `${item.provider}:${item.bucket}:${item.region}`} pagination={false} dataSource={historical.data} columns={[{ title: "提供方", dataIndex: "provider" }, { title: "存储桶", dataIndex: "bucket" }, { title: "区域", dataIndex: "region" }, { title: "对象数", dataIndex: "objectCount" }]} /><Select placeholder="选择该桶实际使用的自有存储配置" value={historicalStorageId} onChange={setHistoricalStorageId} options={(resources.data || []).filter((resource) => resource.resourceType === "objectStorage" && resource.ownerTeamId === teamId).map((resource) => ({ value: resource.resourceId, label: resource.name }))} /><Button className="self-start" disabled={!historicalStorageId} loading={busy} onClick={async () => { setBusy(true); try { await serverPost("/storage/registerExistingMedia", { storageId: historicalStorageId }); await historical.refetch(); message.success("已按确认的配置补录历史对象"); } catch (error) { message.error(error instanceof Error ? error.message : "确认失败"); } finally { setBusy(false); } }}>确认历史文件归属</Button></div> : null}<Alert type="info" showIcon title="默认不收费。首次设置费率与启用日期后开始计量，不补收历史费用；修改价格下月生效。1 GB = 1,000,000,000 字节。" /><Form layout="vertical" onFinish={async (values) => { setBusy(true); try { await serverPost("/storage/saveBillingRate", { ...values, enabledDate: values.enabledDate?.format("YYYY-MM-DD") }); await rates.refetch(); message.success("存储费率已保存"); } catch (error) { message.error(error instanceof Error ? error.message : "保存失败"); } finally { setBusy(false); } }}><div className="grid gap-4 md:grid-cols-3"><Form.Item name="storageId" label="自有对象存储" rules={[{ required: true }]}><Select options={(resources.data || []).filter((resource) => resource.resourceType === "objectStorage" && resource.ownerTeamId === teamId).map((resource) => ({ value: resource.resourceId, label: resource.name }))} /></Form.Item><Form.Item name="creditsPerGigabyteMonth" label="每 GB 月积分" rules={[{ required: true }]}><InputNumber<string> stringMode min="0" precision={6} className="w-full!" /></Form.Item><Form.Item name="enabledDate" label="首次启用日期"><DatePicker className="w-full!" /></Form.Item></div><Button htmlType="submit" type="primary" loading={busy}>保存费率</Button></Form><Table rowKey={(record) => `${record.storageId}:${record.effectiveAt}`} dataSource={rates.data || []} columns={[{ title: "对象存储", dataIndex: "storageId" }, { title: "每 GB 月积分", render: (_, rate) => creditText(rate.creditsPerGigabyteMonth) }, { title: "生效时间", dataIndex: "effectiveAt" }]} /></div>;
+}

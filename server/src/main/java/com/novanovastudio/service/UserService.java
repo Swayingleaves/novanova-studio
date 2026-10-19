@@ -1,6 +1,8 @@
 package com.novanovastudio.service;
 
 import com.novanovastudio.common.SystemMessage;
+import com.novanovastudio.common.AccountIdentifier;
+import com.novanovastudio.security.TeamScope;
 
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -252,17 +254,17 @@ public class UserService {
     }
 
     /**
-     * 邮箱密码登录
+     * 用户名或邮箱密码登录
      *
      * @param request LoginRequest 登录请求
      * @return Mono<AuthResponse> 登录响应
      */
     public Mono<UserDtos.AuthResponse> login(UserDtos.LoginRequest request) {
-        // 按标准化邮箱查找用户，并统一返回账号密码错误以避免枚举邮箱。
-        String email = normalizeEmail(request.email());
-        log.info("用户登录: email={}", email);
-        return userRepository.findByEmail(email)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.incorrectEmailOrPassword"))))
+        // 账号类型在查询前确定，密码错误后不尝试另一种标识。
+        AccountIdentifier account = AccountIdentifier.parse(request.account());
+        log.info("用户登录: account={}", account.value());
+        return findAccount(account)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.incorrectAccountOrPassword"))))
                 .flatMap(user -> passwordLoginLockService.remainingLockDuration(user.getId())
                         .flatMap(duration -> Mono.<UserDtos.AuthResponse>error(passwordLockException(duration)))
                         .switchIfEmpty(matchesPassword(request.password(), user.getPassword()).flatMap(matches -> {
@@ -356,8 +358,12 @@ public class UserService {
         String nickname = request.nickname() == null ? "" : request.nickname().trim();
         String avatar = request.avatar() == null ? "" : request.avatar().trim();
         return currentUserProvider.currentUserId()
-                .flatMap(userId -> userRepository.updateCurrentUserProfile(userId, username, nickname, avatar)
-                        .flatMap(updated -> {
+                .flatMap(userId -> userRepository.findById(userId)
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.userNotFound"))))
+                        .flatMap(existing -> {
+                            if (!username.equals(existing.getUsername())) AccountIdentifier.username(username);
+                            return userRepository.updateCurrentUserProfile(userId, username, nickname, avatar);
+                        }).flatMap(updated -> {
                             if (!updated) {
                                 return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.usernameAlreadyTaken")));
                             }
@@ -426,7 +432,7 @@ public class UserService {
                 .collectList()
                 .flatMap(users -> passwordLoginLockService.lockedUntilByUserIds(users.stream().map(User::getId).toList())
                         .map(passwordLockedUntilByUserId -> users.stream()
-                                .map(user -> userProfile(user, passwordLockedUntilByUserId.get(user.getId())))
+                                .map(user -> userProfile(user, passwordLockedUntilByUserId.get(user.getId()), user.getEmail() == null))
                                 .toList()))
                 .zipWith(userRepository.countUsers(keyword, userId, role, status, createdAfter, createdBefore))
                 .map(tuple -> new UserDtos.UserListResponse(tuple.getT1(), tuple.getT2()));
@@ -500,24 +506,51 @@ public class UserService {
      * @return Mono<Void>
      */
     public Mono<Void> adminCreateUser(UserDtos.AdminCreateUserRequest request) {
-        String email = normalizeEmail(request.email());
-        return userRepository.findByEmail(email)
-                .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered"))))
-                .switchIfEmpty(encodePassword(request.password())
-                        .flatMap(passwordHash -> {
-                            User user = new User();
-                            user.setUsername(email);
-                            user.setPassword(passwordHash);
-                            user.setEmail(email);
-                            user.setNickname(firstNonEmpty(request.nickname(), emailName(email)));
-                            user.setRole(ROLE_ADMIN.equals(request.role()) ? ROLE_ADMIN : ROLE_USER);
-                            user.setStatus(STATUS_NORMAL);
-                            user.setInvitationCode(invitationService.generateInvitationCode());
-                            user.setRegisteredAt(java.time.OffsetDateTime.now());
-                            return userRepository.createUser(user)
-                                    .flatMap(userId -> creditService.initializeAccount(userId))
-                                    .as(transactionalOperator::transactional);
-                        }));
+        AccountIdentifier account = AccountIdentifier.parse(request.account());
+        account.validateCreation();
+        AccountIdentifier.validatePassword(request.password());
+        return currentUserProvider.currentUserId().flatMap(operator -> findAccount(account)
+                .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.accountAlreadyExists"))))
+                .switchIfEmpty(Mono.defer(() -> encodePassword(request.password()).flatMap(passwordHash -> {
+                    User user = new User();
+                    user.setUsername(account.value()); user.setEmail(account.email()); user.setPassword(passwordHash);
+                    user.setNickname(firstNonEmpty(request.nickname(), account.defaultNickname()));
+                    user.setRole(ROLE_ADMIN.equals(request.role()) ? ROLE_ADMIN : ROLE_USER);
+                    user.setStatus(STATUS_NORMAL); user.setCreatedByUserId(operator);
+                    user.setInvitationCode(invitationService.generateInvitationCode());
+                    user.setRegisteredAt(OffsetDateTime.now(ZoneOffset.UTC));
+                    return userRepository.createUser(user).flatMap(creditService::initializeAccount);
+                }))).as(transactionalOperator::transactional));
+    }
+
+    /**
+     * 超级管理员在平台空间重置无邮箱账号密码，提交后清除错误锁定。
+     * @param request 目标账号及新密码
+     * @return 重置完成信号
+     */
+    public Mono<Void> resetUserPassword(UserDtos.AdminResetPasswordRequest request) {
+        AccountIdentifier.validatePassword(request.newPassword());
+        return currentUserProvider.currentUser().filter(operator -> ROLE_ADMIN.equals(operator.role()))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, SystemMessage.of("business.permissionDenied"))))
+                .flatMap(operator -> TeamScope.current().filter(scope -> scope.teamId() == 0)
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, SystemMessage.of("business.permissionDenied"))))
+                        .then(Mono.defer(() -> userRepository.lockUser(request.userId())
+                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.userNotFound"))))))
+                        .flatMap(user -> user.getEmail() != null
+                                ? Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, SystemMessage.of("business.onlyPasswordAccountsCanBeReset")))
+                                : encodePassword(request.newPassword()).flatMap(encoded -> userRepository.updatePasswordAfterReset(user.getId(), encoded)))
+                        .as(transactionalOperator::transactional)
+                        .then(Mono.defer(() -> passwordLoginLockService.clear(request.userId())))
+                        .doOnSuccess(ignored -> log.info("超级管理员重置无邮箱账号密码：operatorUserId={}, userId={}", operator.id(), request.userId())));
+    }
+
+    /**
+     * 根据已确定的标识类型查询唯一账号。
+     * @param account 标准化账号
+     * @return 用户记录
+     */
+    private Mono<User> findAccount(AccountIdentifier account) {
+        return account.email() == null ? userRepository.findByUsername(account.value()) : userRepository.findByEmail(account.email());
     }
 
     /**
@@ -584,7 +617,7 @@ public class UserService {
      * @return UserProfile 用户公开资料
      */
     private UserDtos.UserProfile userProfile(User user) {
-        return userProfile(user, null);
+        return userProfile(user, null, false);
     }
 
     /**
@@ -592,9 +625,10 @@ public class UserService {
      *
      * @param user User 用户信息
      * @param passwordLockedUntil OffsetDateTime 密码锁定截止时间
+     * @param canResetPassword 是否可由当前管理入口重置密码
      * @return UserProfile 用户公开资料
      */
-    private UserDtos.UserProfile userProfile(User user, OffsetDateTime passwordLockedUntil) {
+    private UserDtos.UserProfile userProfile(User user, OffsetDateTime passwordLockedUntil, boolean canResetPassword) {
         // 只返回前端需要的公开字段，密码哈希等敏感字段不进入响应。
         return new UserDtos.UserProfile(
                 user.getId(),
@@ -608,7 +642,8 @@ public class UserService {
                 formatTime(user.getCreatedAt()),
                 formatTime(user.getLastLoginAt()),
                 user.getWelcomeReadAt() != null,
-                passwordLockedUntil == null ? null : formatTime(passwordLockedUntil)
+                passwordLockedUntil == null ? null : formatTime(passwordLockedUntil),
+                canResetPassword
         );
     }
 
@@ -638,7 +673,7 @@ public class UserService {
             case 6 -> new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.tooManyIncorrectPasswordsTryIn10Minutes"));
             default -> lockState.failedAttempts() >= 7
                     ? new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.tooManyIncorrectPasswordsAccountLockedFor2Hours"))
-                    : new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.incorrectEmailOrPassword"));
+                    : new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.incorrectAccountOrPassword"));
         };
     }
 
@@ -663,10 +698,7 @@ public class UserService {
      * @param password String 密码
      */
     private void validatePassword(String password) {
-        // 通过码点数量判断长度，避免多字节字符被错误计算。
-        if (password == null || password.codePointCount(0, password.length()) < MIN_PASSWORD_LENGTH) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.passwordNeedsAtLeastCharacters", MIN_PASSWORD_LENGTH));
-        }
+        AccountIdentifier.validatePassword(password);
     }
 
     /**

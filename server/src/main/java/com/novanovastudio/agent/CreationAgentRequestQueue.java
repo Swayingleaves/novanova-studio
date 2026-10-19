@@ -582,7 +582,7 @@ public class CreationAgentRequestQueue {
             return null;
         }
         String[] values = partition.substring(1, partition.length() - 1).split(":", 2);
-        if (values.length != 2 || !CreationEntrySource.supported(values[1])) {
+        if (values.length != 2 || !CreationEntrySource.supported(values[1].substring(values[1].lastIndexOf(':') + 1))) {
             return null;
         }
         try {

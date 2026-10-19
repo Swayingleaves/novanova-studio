@@ -4,7 +4,7 @@ import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/shared/lib/team-navigation";
 import { nanoid } from "nanoid";
 import { App, Button, Input, Modal, Select } from "antd";
 import { Upload } from "lucide-react";

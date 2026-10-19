@@ -1,4 +1,9 @@
 "use client";
+
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
+import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { translateMessage as translate } from "@/features/locale/translate";
 
 
@@ -140,7 +145,7 @@ export type ServerVideoWorkflowStageQuote = {
     model?: string | null;
     taskCount: number;
     /** 阶段定价失败（报价整体不可用）时为 null，仅保留阶段骨架供前端识别工作流构成。 */
-    credits?: number | null;
+    credits?: CreditAmount | null;
     videoGenerationMode?: "text-to-video" | "image-to-video" | "reference-to-video" | "first-last-frame-to-video" | string | null;
 };
 
@@ -148,7 +153,7 @@ export type ServerVideoWorkflowQuote = {
     available: boolean;
     workflowType?: string;
     stages: ServerVideoWorkflowStageQuote[];
-    credits?: number | null;
+    credits?: CreditAmount | null;
     reason?: string;
     requiredCapabilities: string[];
 };
@@ -218,7 +223,8 @@ export type ServerAiModelList = {
         provider: string;
         apiFormat: ApiCallFormat;
         defaultModel: boolean;
-        creditCost: number;
+        creditCost: CreditAmount;
+        ownerTeamId?: number;
         creditUnit: ModelCreditUnit;
         capabilities: string[];
         videoBillingConfiguration: VideoBillingConfiguration | null;
@@ -255,7 +261,7 @@ export type InvitationInfo = {
 };
 
 export type InvitationRewardSettings = {
-    invitationRewardCredits: number;
+    invitationRewardCredits: CreditAmount;
 };
 
 export type UserListResponse = {
@@ -296,7 +302,8 @@ export type ServerModelConfig = {
     capabilities: string[];
     defaultModel: boolean;
     sortOrder: number;
-    creditCost: number;
+    creditCost: CreditAmount;
+        ownerTeamId?: number;
     creditUnit: ModelCreditUnit;
     thinkingEnabled: boolean;
     reasoningEffort: "high" | "max";
@@ -310,22 +317,22 @@ export type ServerModelConfig = {
 };
 
 export type CreditSettings = {
-    initialCredits: number;
+    initialCredits: CreditAmount;
 };
 
 export type CreditBalance = {
     userId: number;
-    creditBalance: number;
+    creditBalance: CreditAmount;
 };
 
 export type ServerCreditDistributionItem = {
     name: string;
-    consumedCredits: number;
+    consumedCredits: CreditAmount;
 };
 
 export type ServerCreditTrendItem = {
     period: string;
-    consumedCredits: number;
+    consumedCredits: CreditAmount;
 };
 
 export type ServerCreditOverview = {
@@ -347,9 +354,9 @@ export type ServerUserCreditTransaction = {
     generationType: Exclude<ServerAiTaskType, "text"> | null;
     model: string | null;
     generationSource: ServerGenerationSource | null;
-    changeAmount: number;
+    changeAmount: CreditAmount;
     reason: string;
-    balanceAfter: number;
+    balanceAfter: CreditAmount;
     invitedUserId: number | null;
     createdAt: string;
 };
@@ -376,25 +383,25 @@ export type ServerCheckInStatus = {
     checkedInToday: boolean;
     monthCheckedCount: number;
     monthCheckedDates: string[];
-    dailyCredits: number;
-    todayCredits: number;
+    dailyCredits: CreditAmount;
+    todayCredits: CreditAmount;
 };
 
 export type ServerCheckInResult = {
     checkInDate: string;
-    earnedCredits: number;
-    creditBalance: number;
+    earnedCredits: CreditAmount;
+    creditBalance: CreditAmount;
 };
 
 export type ServerCheckInRewardSettings = {
-    checkInCredits: number;
+    checkInCredits: CreditAmount;
 };
 
 export type ServerRedeemCreditsResponse = {
     cardId: number;
     cardMasked: string;
-    credits: number;
-    creditBalance: number;
+    credits: CreditAmount;
+    creditBalance: CreditAmount;
     redeemedAt: string;
 };
 
@@ -404,8 +411,8 @@ export type ServerRedemptionRecord = {
     cardCode: string;
     cardMasked: string;
     cardSuffix: string;
-    credits: number;
-    balanceAfter: number;
+    credits: CreditAmount;
+    balanceAfter: CreditAmount;
     redeemedAt: string;
 };
 
@@ -417,7 +424,7 @@ export type ServerRedemptionRecordList = {
 export type ServerCreditCardBatch = {
     id: number;
     quantity: number;
-    creditsPerCard: number;
+    creditsPerCard: CreditAmount;
     redeemedCount: number;
     availableCount: number;
     createdByUserId: number;
@@ -437,7 +444,7 @@ export type ServerCreditCard = {
     code: string | null;
     codeMasked: string;
     codeSuffix: string;
-    credits: number;
+    credits: CreditAmount;
     status: "available" | "redeemed";
     redeemedByUserId: number | null;
     redeemedByUsername: string | null;
@@ -446,7 +453,7 @@ export type ServerCreditCard = {
     redeemedAt: string;
     createdAt: string;
     transactionId: number | null;
-    balanceAfter: number | null;
+    balanceAfter: CreditAmount | null;
 };
 
 export type ServerCreditCardList = {
@@ -470,7 +477,7 @@ export function registerByEmail(input: { email: string; code: string; password: 
     return serverPost<AuthResponse>("/auth/register", input, { auth: false });
 }
 
-export function loginByEmail(input: { email: string; password: string }) {
+export function loginByAccount(input: { account: string; password: string }) {
     return serverPost<AuthResponse>("/auth/login", input, { auth: false });
 }
 
@@ -518,8 +525,9 @@ export function changeCurrentUserPassword(input: { currentPassword: string; newP
     return serverPost("/auth/changePassword", input);
 }
 
-export function listServerUsers(params: { page: number; pageSize: number; keyword?: string; userId?: string; role?: string; status?: number; createdAfter?: string; createdBefore?: string }) {
+export function listServerUsers(params: { page: number; pageSize: number; filterTeamId?: number; keyword?: string; userId?: string; role?: string; status?: number; createdAfter?: string; createdBefore?: string }) {
     const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
+    if (params.filterTeamId !== undefined) query.set("filterTeamId", String(params.filterTeamId));
     if (params.keyword) query.set("keyword", params.keyword);
     if (params.userId) query.set("userId", params.userId);
     if (params.role) query.set("role", params.role);
@@ -529,8 +537,8 @@ export function listServerUsers(params: { page: number; pageSize: number; keywor
     return serverGet<UserListResponse>(`/admin/user/listUsers?${query}`);
 }
 
-export function getServerUserStatistics() {
-    return serverGet<UserStatisticsResponse>("/admin/user/getUserStatistics");
+export function getServerUserStatistics(filterTeamId?: number) {
+    return serverGet<UserStatisticsResponse>(`/admin/user/getUserStatistics${filterTeamId === undefined ? "" : `?filterTeamId=${filterTeamId}`}`);
 }
 
 export function updateServerUserStatus(userId: number, status: number) {
@@ -541,7 +549,7 @@ export function updateServerUserRole(userId: number, role: "user" | "admin") {
     return serverPost("/admin/user/updateUserRole", { userId, role });
 }
 
-export function adminCreateUser(input: { email: string; password: string; nickname?: string; role?: string }) {
+export function adminCreateUser(input: { account: string; password: string; nickname?: string; role?: string }) {
     return serverPost("/admin/user/createUser", input);
 }
 
@@ -571,8 +579,12 @@ export function listAdminApiLogs(params: { page: number; pageSize: number; keywo
     return serverGet<ServerApiLogList>(`/admin/apiLog/listApiLogs?${query}`);
 }
 
-export function adjustServerUserCredits(input: { userId: number; changeAmount: number; reason: string }) {
+export function adjustServerUserCredits(input: { userId: number; changeAmount: CreditAmount; reason: string }) {
     return serverPost<CreditBalance>("/admin/user/adjustUserCredits", input);
+}
+
+export function resetServerUserPassword(input: { userId: number; newPassword: string }) {
+    return serverPost("/admin/user/resetUserPassword", input);
 }
 
 export function unlockServerUserPassword(userId: number) {
@@ -628,7 +640,7 @@ export type HomepageShowcaseInput = {
 };
 
 export function listHomepageShowcases(limit = 24) {
-    return serverGet<{ items: HomepageShowcase[]; total: number }>(`/homepage/listShowcases?limit=${limit}`, { auth: false });
+    return serverGet<{ items: HomepageShowcase[]; total: number }>(`/homepage/listShowcases?limit=${limit}`, { auth: Boolean(useUserStore.getState().token) });
 }
 
 export function listAdminHomepageShowcases() {
@@ -1090,7 +1102,7 @@ export function getCreditSettings() {
     return serverGet<CreditSettings>("/config/credit/getCreditSettings");
 }
 
-export function updateCreditSettings(initialCredits: number) {
+export function updateCreditSettings(initialCredits: CreditAmount) {
     return serverPost<CreditSettings>("/config/credit/updateCreditSettings", { initialCredits });
 }
 
@@ -1098,7 +1110,7 @@ export function getInvitationRewardSettings() {
     return serverGet<InvitationRewardSettings>("/config/invitation/getInvitationRewardSettings");
 }
 
-export function updateInvitationRewardSettings(invitationRewardCredits: number) {
+export function updateInvitationRewardSettings(invitationRewardCredits: CreditAmount) {
     return serverPost<InvitationRewardSettings>("/config/invitation/updateInvitationRewardSettings", { invitationRewardCredits });
 }
 
@@ -1149,27 +1161,29 @@ export function listRedemptionRecords(params: { startDate?: string; endDate?: st
     return serverGet<ServerRedemptionRecordList>(`/credit/listRedemptionRecords?${query}`);
 }
 
-export function getAdminCreditOverview(params: { userId?: number; startDate: string; endDate: string; generationType?: "image" | "video"; trendUnit: "day" | "month" }) {
+export function getAdminCreditOverview(params: { filterTeamId?: number; userId?: number; startDate: string; endDate: string; generationType?: "image" | "video"; trendUnit: "day" | "month" }) {
     const query = new URLSearchParams({ startDate: params.startDate, endDate: params.endDate, trendUnit: params.trendUnit });
+    if (params.filterTeamId !== undefined) query.set("filterTeamId", String(params.filterTeamId));
     if (params.userId !== undefined) query.set("userId", String(params.userId));
     if (params.generationType) query.set("generationType", params.generationType);
     return serverGet<ServerCreditOverview>(`/admin/credit/getCreditOverview?${query}`);
 }
 
-export function listAdminCreditTransactions(params: { userId?: number; startDate: string; endDate: string; generationType?: "image" | "video"; page: number; pageSize: number }) {
+export function listAdminCreditTransactions(params: { filterTeamId?: number; userId?: number; startDate: string; endDate: string; generationType?: "image" | "video"; page: number; pageSize: number }) {
     const query = new URLSearchParams({
         startDate: params.startDate,
         endDate: params.endDate,
         page: String(params.page),
         pageSize: String(params.pageSize),
     });
+    if (params.filterTeamId !== undefined) query.set("filterTeamId", String(params.filterTeamId));
     if (params.userId !== undefined) query.set("userId", String(params.userId));
     if (params.generationType) query.set("generationType", params.generationType);
     return serverGet<ServerAdminCreditTransactionList>(`/admin/credit/listCreditTransactions?${query}`);
 }
 
-export function generateCreditCards(input: { quantity?: number; creditsPerCard: number }) {
-    return serverPost<{ batchId: number; quantity: number; creditsPerCard: number; cardCodes: string[]; createdAt: string }>("/admin/credit/generateCreditCards", input);
+export function generateCreditCards(input: { quantity?: number; creditsPerCard: CreditAmount }) {
+    return serverPost<{ batchId: number; quantity: number; creditsPerCard: CreditAmount; cardCodes: string[]; createdAt: string }>("/admin/credit/generateCreditCards", input);
 }
 
 export function listCreditCardBatches(params: { page: number; pageSize: number }) {
@@ -1309,8 +1323,8 @@ function readOptionalText(value: unknown): string | undefined {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-export async function serverGet<T>(path: string, options?: { auth?: boolean }) {
-    return serverFetch<T>(path, { method: "GET" }, options);
+export async function serverGet<T>(path: string, options?: { auth?: boolean; signal?: AbortSignal }) {
+    return serverFetch<T>(path, { method: "GET", signal: options?.signal }, options);
 }
 
 export async function serverPost<T = string>(path: string, body: unknown, options?: { auth?: boolean; allowEmpty?: boolean }) {
@@ -1346,6 +1360,8 @@ async function serverFetch<T>(path: string, init: RequestInit, options: { auth?:
 async function requestServer(path: string, init: RequestInit, options: { auth?: boolean } = {}) {
     const headers = new Headers(init.headers);
     headers.set("Accept-Language", currentLanguageTag());
+    const teamId = useTeamStore.getState().team?.id;
+    if (teamId) headers.set("X-Team-Id", String(teamId));
     if (options.auth !== false) {
         const token = getAuthToken();
         if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -1356,10 +1372,11 @@ async function requestServer(path: string, init: RequestInit, options: { auth?: 
         cache: "no-store",
         credentials: "include",
     });
-    if (response.status === 401) {
+    if (response.status === 401 && options.auth !== false && !init.signal?.aborted) {
         const store = useUserStore.getState();
-        store.clearSession();
-        store.openAuthModal();
+        // 旧请求的失败不能退出后来登录的新账号；会话失效由空间边界统一导航。
+        if (headers.get("Authorization") === `Bearer ${store.token}` && store.token) store.clearSession();
+        else if (!headers.has("Authorization") && !store.token) store.openAuthModal();
     }
     return response;
 }
@@ -1373,7 +1390,7 @@ export function serverBaseUrl() {
 
 type AiTaskListener = (task: ServerAiTask) => void;
 type AiTaskDeltaListener = (taskId: string, delta: string) => void;
-type CreditBalanceListener = (creditBalance: number) => void;
+type CreditBalanceListener = (creditBalance: CreditAmount) => void;
 
 const aiTaskListeners = new Set<AiTaskListener>();
 const aiTaskDeltaListeners = new Set<AiTaskDeltaListener>();
@@ -1412,8 +1429,9 @@ function ensureAiTaskEventSource() {
     if (aiTaskEventSource || typeof window === "undefined") return;
     const token = getAuthToken();
     if (!token) return;
-    const source = new EventSource(`${serverBaseUrl()}/ai/task/subscribe?token=${encodeURIComponent(token)}&locale=${currentWebsiteLocale()}`);
+    const source = new EventSource(`${serverBaseUrl()}/ai/task/subscribe?token=${encodeURIComponent(token)}&locale=${currentWebsiteLocale()}&teamId=${useTeamStore.getState().team?.id || 0}`);
     aiTaskEventSource = source;
+    source.addEventListener("wallet-change", () => { void import("./team").then((module) => module.getWalletBalances()).then((wallets) => useTeamStore.getState().setWallets(wallets)).catch((error) => console.error("刷新积分钱包失败", error)); });
     source.addEventListener("task", (event) => {
         const payload = parseAiTaskEventData((event as MessageEvent).data);
         if (!payload.task) return;
@@ -1427,7 +1445,7 @@ function ensureAiTaskEventSource() {
     source.addEventListener("credit-balance", (event) => {
         const payload = parseAiTaskEventData((event as MessageEvent).data);
         const creditBalance = payload.creditBalance;
-        if (typeof creditBalance !== "number" || !Number.isInteger(creditBalance) || creditBalance < 0) return;
+        if (creditBalance === undefined || !creditAmount(creditBalance).isFinite() || creditAmount(creditBalance).isNegative()) return;
         creditBalanceListeners.forEach((listener) => listener(creditBalance));
     });
     source.onerror = () => {
@@ -1457,9 +1475,9 @@ function isFinalAiTaskStatus(status: ServerAiTaskStatus) {
     return status === "success" || status === "failed" || status === "canceled";
 }
 
-function parseAiTaskEventData(data: string): { task?: ServerAiTask; delta?: string; creditBalance?: number } {
-    const payload = JSON.parse(data) as { task?: ServerAiTask; delta?: string; creditBalance?: number } | string;
-    return typeof payload === "string" ? (JSON.parse(payload) as { task?: ServerAiTask; delta?: string; creditBalance?: number }) : payload;
+function parseAiTaskEventData(data: string): { task?: ServerAiTask; delta?: string; creditBalance?: CreditAmount } {
+    const payload = JSON.parse(data) as { task?: ServerAiTask; delta?: string; creditBalance?: CreditAmount } | string;
+    return typeof payload === "string" ? (JSON.parse(payload) as { task?: ServerAiTask; delta?: string; creditBalance?: CreditAmount }) : payload;
 }
 
 function withServerApiPrefix(baseUrl: string) {

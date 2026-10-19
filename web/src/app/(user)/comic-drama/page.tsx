@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams } from "@/shared/lib/team-navigation";
 import { Spin } from "antd";
 
 import { ComicDramaProjectLibrary } from "@/features/comic-drama/components/comic-drama-project-library";

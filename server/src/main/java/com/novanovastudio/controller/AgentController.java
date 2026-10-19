@@ -57,6 +57,8 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 @Slf4j
 public class AgentController {
+    /** 团队失效后终止事件订阅。 */
+    private final com.novanovastudio.service.TeamTaskScopeService teamTaskScopeService;
 
     private final CreationAgentOrchestrator creationAgentOrchestrator;
     private final AgentEventEmitter eventEmitter;
@@ -205,7 +207,7 @@ public class AgentController {
     @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<AgentEvent>> subscribe(ServerWebExchange exchange) {
         return currentUserProvider.currentUserId()
-            .flatMapMany(eventEmitter::subscribe)
+            .flatMapMany(userId -> teamTaskScopeService.guardEvents(eventEmitter.subscribe(userId)))
             .map(event -> ServerSentEvent.<AgentEvent>builder()
                 .event(event.type())
                 .data(event.withLocale(WebsiteLanguage.resolve(exchange)))
@@ -223,7 +225,7 @@ public class AgentController {
         log.info("Agent 工具结果回传: sessionId={}, requestId={}, callId={}",
                 request.sessionId(), request.requestId(), request.callId());
         return currentUserProvider.currentUserId()
-            .flatMap(userId -> toolResultRelay.publish(userId, request))
+            .flatMap(userId -> teamTaskScopeService.requireSessionAccess(userId, request.sessionId()).then(toolResultRelay.publish(userId, request)))
             .thenReturn(ApiResponse.ok(null));
     }
     /**

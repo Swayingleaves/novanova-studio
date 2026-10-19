@@ -1,5 +1,8 @@
 "use client";
 
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
+
+
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, App, Button, Empty, InputNumber, Select, Space, Tag } from "antd";
@@ -13,7 +16,7 @@ export function EpisodeBodiesPricingManagement() {
     const { message } = App.useApp();
     const query = useQuery({ queryKey: ["admin", "episodeBodiesPricing"], queryFn: getEpisodeBodiesPricing });
     const [modelConfigId, setModelConfigId] = useState("");
-    const [credits, setCredits] = useState(0);
+    const [credits, setCredits] = useState<CreditAmount>(0);
     const [saving, setSaving] = useState(false);
     const models = query.data || [];
     const current: EpisodeBodiesModelPricing | undefined = models.find((item) => item.modelConfigId === modelConfigId);

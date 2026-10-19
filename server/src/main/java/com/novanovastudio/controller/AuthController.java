@@ -57,7 +57,7 @@ public class AuthController {
     }
 
     /**
-     * 邮箱登录
+     * 用户名或邮箱密码登录
      *
      * @param request LoginRequest 登录请求
      * @param httpRequest ServerHttpRequest HTTP请求

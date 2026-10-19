@@ -1,5 +1,8 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.agent.AgentScopeModelFactory;
 import com.novanovastudio.ai.AiTaskTypes;
@@ -286,7 +289,7 @@ public class NovelAdaptationService {
                                             novelAdaptationRepository.deletePendingAdaptationDrafts(request.projectId())
                                                     .then(jobRepository.insert(job))
                                                     .then(creditService.chargeOperation(userId, jobId,
-                                                            prepared.credits(), OPERATION_NAME)))
+                                                            prepared.credits(), OPERATION_NAME, prepared.modelConfigId())))
                                     .onErrorMap(DataIntegrityViolationException.class, error ->
                                             new BusinessException(ErrorCode.BUSINESS_ERROR,
                                                     "该项目已有进行中的改编任务，请等待完成或取消后再试"))
@@ -350,15 +353,15 @@ public class NovelAdaptationService {
                     && job.retryCount() == request.expectedRetryCount() + 1) return view(job);
             return prepareRetry(job).flatMap(quote -> {
                 if (quote.revision() != request.expectedRevision() || quote.remainingCalls() != request.expectedRemainingCalls()
-                        || quote.credits() != request.expectedCredits() || job.retryCount() != request.expectedRetryCount()) {
+                        || CreditAmounts.of(quote.credits()).compareTo(CreditAmounts.of(request.expectedCredits())) != 0 || job.retryCount() != request.expectedRetryCount()) {
                     return Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT, "续跑条件或费用已变化，请重新确认"));
                 }
-                int perCall = job.estimatedCalls() == 0 ? 0 : job.credits() / job.estimatedCalls();
+                BigDecimal perCall = job.estimatedCalls() == 0 ? BigDecimal.ZERO : CreditAmounts.divide(job.credits(), job.estimatedCalls());
                 return transactionalOperator.transactional(jobRepository.retry(job, quote.completedCalls(), quote.remainingCalls(),
-                                (quote.completedCalls() + quote.remainingCalls()) * perCall)
+                                CreditAmounts.multiply(perCall, (quote.completedCalls() + quote.remainingCalls())))
                         .flatMap(updated -> updated
                                 ? creditService.chargeOperation(job.userId(), job.id() + ":retry:" + (job.retryCount() + 1),
-                                        quote.credits(), OPERATION_NAME)
+                                        quote.credits(), OPERATION_NAME, job.modelConfigId())
                                 : Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT, "任务状态已变化，请刷新后重试"))))
                         .onErrorMap(DataIntegrityViolationException.class, error -> new BusinessException(ErrorCode.DATA_CONFLICT,
                                 "该项目已有进行中的改编任务，不能继续旧任务"))
@@ -401,9 +404,9 @@ public class NovelAdaptationService {
                                 remaining += episodeCount * NovelAdaptationPlan.units("drafts", items,
                                         List.of(new ScriptDtos.EpisodeSummary("planned", 1, "预期分集", "", "", "", "", "", 0, "planning", 0))).size();
                             }
-                            int perCall = job.estimatedCalls() == 0 ? 0 : job.credits() / job.estimatedCalls();
+                            BigDecimal perCall = job.estimatedCalls() == 0 ? BigDecimal.ZERO : CreditAmounts.divide(job.credits(), job.estimatedCalls());
                             NovelAdaptationDtos.RetryQuote quote = new NovelAdaptationDtos.RetryQuote(snapshot.project().revision(),
-                                    job.phase(), checkpoints.size(), remaining, remaining * perCall, job.retryCount());
+                                    job.phase(), checkpoints.size(), remaining, CreditAmounts.multiply(perCall, remaining), job.retryCount());
                             return validateCheckpoints(job, snapshot, current, checkpoints)
                                     .thenReturn(quote);
                         }));
@@ -492,9 +495,9 @@ public class NovelAdaptationService {
         return requireJob(request.projectId(), request.jobId()).flatMap(job -> {
             if (!Set.of("queued", "running", "awaiting").contains(job.status())) return view(job);
             int settled = Math.min(job.settledCalls(), job.estimatedCalls());
-            int refund = refundableCredits(job, settled);
+            BigDecimal refund = refundableCredits(job, settled);
             return transactionalOperator.transactional(jobRepository.finish(job.id(), "canceled", "", settled)
-                    .flatMap(finished -> finished && refund > 0
+                    .flatMap(finished -> finished && CreditAmounts.of(refund).compareTo(CreditAmounts.of(0)) > 0
                             ? creditService.refundOperation(job.userId(), chargeOperationId(job), OPERATION_NAME, refund).then()
                             : Mono.<Void>empty()))
                     .then(Mono.defer(() -> jobRepository.find(job.id())))
@@ -619,8 +622,8 @@ public class NovelAdaptationService {
 
     /** 组装任务状态视图。 */
     private Mono<NovelAdaptationDtos.JobView> view(NovelAdaptationJobRepository.Job job) {
-        int refunded = Set.of("canceled", "failed").contains(job.status())
-                ? refundableCredits(job, job.settledCalls()) : 0;
+        BigDecimal refunded = Set.of("canceled", "failed").contains(job.status())
+                ? refundableCredits(job, job.settledCalls()) : BigDecimal.ZERO;
         return jobDrafts(job).map(drafts -> new NovelAdaptationDtos.JobView(job.id(), job.phase(), job.stage(),
                 job.status(), job.totalUnits(), job.processedUnits(), job.estimatedCalls(), job.settledCalls(),
                 job.credits(), refunded, job.errorMessage(),
@@ -633,10 +636,10 @@ public class NovelAdaptationService {
     }
 
     /** 按单次调用价格计算未结算部分应退积分。 */
-    private int refundableCredits(NovelAdaptationJobRepository.Job job, int settled) {
-        if (job.estimatedCalls() <= 0) return 0;
-        int perCall = job.credits() / job.estimatedCalls();
-        return Math.max(0, perCall * (job.estimatedCalls() - Math.min(settled, job.estimatedCalls())));
+    private BigDecimal refundableCredits(NovelAdaptationJobRepository.Job job, int settled) {
+        if (job.estimatedCalls() <= 0) return BigDecimal.ZERO;
+        BigDecimal perCall = CreditAmounts.divide(job.credits(), job.estimatedCalls());
+        return CreditAmounts.multiply(perCall, Math.max(0, job.estimatedCalls() - Math.min(settled, job.estimatedCalls())));
     }
 
     /** 写入改编队列，失败时交由恢复扫描补发。 */
@@ -672,10 +675,10 @@ public class NovelAdaptationService {
     }
 
     /** 一键改编的输入快照与报价。 */
-    private record Prepared(List<String> factIds, String modelConfigId, int creditCost,
+    private record Prepared(List<String> factIds, String modelConfigId, BigDecimal creditCost,
                             int skeletonCalls, int episodeCalls) {
         int calls() { return skeletonCalls + episodeCalls; }
-        int credits() { return calls() * creditCost; }
+        BigDecimal credits() { return CreditAmounts.multiply(creditCost, calls()); }
     }
 
     /**

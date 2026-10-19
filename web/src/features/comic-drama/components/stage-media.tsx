@@ -1,5 +1,8 @@
 "use client";
 
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
+
+
 import { productionParameterLabel } from "../lib/production-labels";
 
 import { translateMessage } from "@/features/locale/translate";
@@ -136,7 +139,7 @@ export function StageMedia() {
     const [estimating, setEstimating] = useState(false);
     const [generating, setGenerating] = useState(false);
     const [syncing, setSyncing] = useState(false);
-    const [estimatedCredits, setEstimatedCredits] = useState<number | null>(null);
+    const [estimatedCredits, setEstimatedCredits] = useState<CreditAmount | null>(null);
     const [cancelingMediaId, setCancelingMediaId] = useState<string | null>(null);
     const [versionsByAsset, setVersionsByAsset] = useState<Record<string, ComicDramaAssetVersion[]>>({});
 

@@ -47,12 +47,12 @@ class StoryBibleSupportTest {
     @Test
     void shouldSelectTierAtBoundaries() {
         List<StoryBibleDtos.PricingTier> tiers = StoryBibleSupport.validateTiers(List.of(
-                new StoryBibleDtos.PricingTier(100_001, 500_000, 300),
-                new StoryBibleDtos.PricingTier(1, 100_000, 100)));
-        assertEquals(100, StoryBibleSupport.selectTier(tiers, 1).credits());
-        assertEquals(100, StoryBibleSupport.selectTier(tiers, 100_000).credits());
-        assertEquals(300, StoryBibleSupport.selectTier(tiers, 100_001).credits());
-        assertEquals(300, StoryBibleSupport.selectTier(tiers, 500_000).credits());
+                new StoryBibleDtos.PricingTier(100_001, 500_000, java.math.BigDecimal.valueOf(300)),
+                new StoryBibleDtos.PricingTier(1, 100_000, java.math.BigDecimal.valueOf(100))));
+        assertEquals(0, java.math.BigDecimal.valueOf(100).compareTo(StoryBibleSupport.selectTier(tiers, 1).credits()));
+        assertEquals(0, java.math.BigDecimal.valueOf(100).compareTo(StoryBibleSupport.selectTier(tiers, 100_000).credits()));
+        assertEquals(0, java.math.BigDecimal.valueOf(300).compareTo(StoryBibleSupport.selectTier(tiers, 100_001).credits()));
+        assertEquals(0, java.math.BigDecimal.valueOf(300).compareTo(StoryBibleSupport.selectTier(tiers, 500_000).credits()));
         assertNull(StoryBibleSupport.selectTier(tiers, 500_001));
     }
 
@@ -62,8 +62,8 @@ class StoryBibleSupportTest {
     @Test
     void shouldAllowOpenEndedLastTier() {
         List<StoryBibleDtos.PricingTier> tiers = StoryBibleSupport.validateTiers(List.of(
-                new StoryBibleDtos.PricingTier(1, 10, 1), new StoryBibleDtos.PricingTier(11, null, 5)));
-        assertEquals(5, StoryBibleSupport.selectTier(tiers, 1_175_300).credits());
+                new StoryBibleDtos.PricingTier(1, 10, java.math.BigDecimal.valueOf(1)), new StoryBibleDtos.PricingTier(11, null, java.math.BigDecimal.valueOf(5))));
+        assertEquals(0, java.math.BigDecimal.valueOf(5).compareTo(StoryBibleSupport.selectTier(tiers, 1_175_300).credits()));
     }
 
     /**
@@ -72,15 +72,15 @@ class StoryBibleSupportTest {
     @Test
     void shouldRejectInvalidTiers() {
         assertThrows(BusinessException.class, () -> StoryBibleSupport.validateTiers(List.of(
-                new StoryBibleDtos.PricingTier(1, 100, 1), new StoryBibleDtos.PricingTier(100, 200, 2))));
+                new StoryBibleDtos.PricingTier(1, 100, java.math.BigDecimal.valueOf(1)), new StoryBibleDtos.PricingTier(100, 200, java.math.BigDecimal.valueOf(2)))));
         assertThrows(BusinessException.class, () -> StoryBibleSupport.validateTiers(List.of(
-                new StoryBibleDtos.PricingTier(1, 100, 1), new StoryBibleDtos.PricingTier(102, 200, 2))));
+                new StoryBibleDtos.PricingTier(1, 100, java.math.BigDecimal.valueOf(1)), new StoryBibleDtos.PricingTier(102, 200, java.math.BigDecimal.valueOf(2)))));
         assertThrows(BusinessException.class, () -> StoryBibleSupport.validateTiers(List.of(
-                new StoryBibleDtos.PricingTier(2, 100, 1))));
+                new StoryBibleDtos.PricingTier(2, 100, java.math.BigDecimal.valueOf(1)))));
         assertThrows(BusinessException.class, () -> StoryBibleSupport.validateTiers(List.of(
-                new StoryBibleDtos.PricingTier(1, null, 1), new StoryBibleDtos.PricingTier(101, 200, 2))));
+                new StoryBibleDtos.PricingTier(1, null, java.math.BigDecimal.valueOf(1)), new StoryBibleDtos.PricingTier(101, 200, java.math.BigDecimal.valueOf(2)))));
         assertThrows(BusinessException.class, () -> StoryBibleSupport.validateTiers(List.of(
-                new StoryBibleDtos.PricingTier(1, 100, -1))));
+                new StoryBibleDtos.PricingTier(1, 100, java.math.BigDecimal.valueOf(-1)))));
     }
 
     /**

@@ -6,10 +6,11 @@ import { useTranslation } from "@/features/locale/use-translation";
 import { Suspense, useState } from "react";
 import { App, Alert, Button, Form, Input } from "antd";
 import { ArrowRight } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams } from "@/shared/lib/team-navigation";
 
 import { resetPassword, ServerRequestError } from "@/services/api/server";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
+import { teamPath } from "@/features/team/stores/use-team-store";
 
 type ResetPasswordForm = {
     newPassword: string;
@@ -62,7 +63,7 @@ function ResetPasswordContent() {
                     <>
                         <h1 id="reset-password-title" className="studio-title mb-4 text-2xl font-semibold">{translate("auth.invalidResetLink")}</h1>
                         <Alert type="error" showIcon title={translate("auth.missingResetLink")} description={translate("auth.resendTheResetEmailAndUseTheLatestLink")} />
-                        <Button type="primary" size="large" block className="mt-6" href="/auth/forgotPassword">
+                        <Button type="primary" size="large" block className="mt-6" href={teamPath("/auth/forgotPassword")}>
                             {translate("auth.resendResetEmail")}</Button>
                     </>
                 ) : completed ? (
@@ -71,7 +72,7 @@ function ResetPasswordContent() {
                             <h1 id="reset-password-title" className="studio-title text-2xl font-semibold">{translate("auth.passwordReset")}</h1>
                             <p className="studio-subtitle mt-2 text-sm">{translate("auth.oldSessionsOnAllDevicesWereInvalidatedSignIn")}</p>
                         </div>
-                        <Button type="primary" size="large" block href="/auth" icon={<ArrowRight className="size-4" />} iconPlacement="end">
+                        <Button type="primary" size="large" block href={teamPath("/auth")} icon={<ArrowRight className="size-4" />} iconPlacement="end">
                             {translate("auth.signIn")}</Button>
                     </div>
                 ) : (
@@ -83,7 +84,7 @@ function ResetPasswordContent() {
                         {resetLinkInvalid ? (
                             <div className="mb-4 space-y-3">
                                 <Alert type="error" showIcon title={translate("auth.resetLinkExpired")} description={translate("auth.resendEmailAndUseTheLatestResetLink")} />
-                                <Button type="link" href="/auth/forgotPassword" className="h-auto px-0">{translate("auth.resendResetEmail")}</Button>
+                                <Button type="link" href={teamPath("/auth/forgotPassword")} className="h-auto px-0">{translate("auth.resendResetEmail")}</Button>
                             </div>
                         ) : null}
                         <Form form={form} layout="vertical" requiredMark={false} onFinish={submit}>

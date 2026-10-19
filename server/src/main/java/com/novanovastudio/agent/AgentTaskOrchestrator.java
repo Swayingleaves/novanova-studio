@@ -6,6 +6,7 @@
  */
 package com.novanovastudio.agent;
 
+import com.novanovastudio.security.TeamScope;
 import com.novanovastudio.common.SystemMessage;
 
 import com.alibaba.fastjson2.JSON;
@@ -101,7 +102,7 @@ public class AgentTaskOrchestrator {
     private final ConcurrentHashMap<String, ConcurrentHashMap<String, PendingFrontendCall>> pendingFrontendCalls = new ConcurrentHashMap<>();
 
     /** userId → 当前活跃的 sessionId，防止同一用户并发启动多个 Agent Loop */
-    private final ConcurrentHashMap<Long, String> activeLoops = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, String> activeLoops = new ConcurrentHashMap<>();
 
     /** sessionId → 初始视频生成轮次，用于停止时更新同一条待生成记录 */
     private final ConcurrentHashMap<String, InitialVideoRound> initialVideoRounds = new ConcurrentHashMap<>();
@@ -156,9 +157,10 @@ public class AgentTaskOrchestrator {
         AgentLoopProfile profile = resolveProfile(request.profile());
         // 1. 创建或加载 Session
         return sessionService.getOrCreateSession(userId, request.sessionId(), request.profile())
-            .flatMap(session -> {
-                // 2. 并发去重
-                String existing = activeLoops.putIfAbsent(userId, session.id());
+            .flatMap(session -> Mono.deferContextual(teamContext -> {
+                // 2. 用户与空间共同限定活跃会话。
+                String scopeKey = TeamScope.from(teamContext).teamId() + ":" + userId;
+                String existing = activeLoops.putIfAbsent(scopeKey, session.id());
                 if (existing != null) {
                     log.warn("用户已有活跃的 Agent Loop，忽略重复请求: userId={}, activeSession={}", userId, existing);
                     return Mono.just(existing);
@@ -186,6 +188,7 @@ public class AgentTaskOrchestrator {
                         initialVideoRounds.put(session.id(), initialVideoRound);
                     }
                     var subscription = runAgentLoop(userId, session, profile, request)
+                        .contextWrite(TeamScope.from(teamContext)::apply)
                         .contextWrite(context -> MappedDiagnosticContext.put(
                             MappedDiagnosticContext.put(
                                 MappedDiagnosticContext.putAll(
@@ -196,7 +199,7 @@ public class AgentTaskOrchestrator {
                             MappedDiagnosticContext.SESSION_ID, session.id()))
                         .subscribeOn(Schedulers.boundedElastic())
                         .doFinally(signal -> {
-                            activeLoops.remove(userId, session.id());
+                            activeLoops.remove(scopeKey, session.id());
                             initialVideoRounds.remove(session.id());
                             generationRoundIds.remove(session.id());
                             creationSettingsBySession.remove(session.id());
@@ -209,13 +212,13 @@ public class AgentTaskOrchestrator {
                     executionRegistry.attachSubscription(session.id(), subscription);
                     return session.id();
                 })).doOnError(error -> {
-                    activeLoops.remove(userId, session.id());
+                    activeLoops.remove(scopeKey, session.id());
                     initialVideoRounds.remove(session.id());
                     generationRoundIds.remove(session.id());
                     creationSettingsBySession.remove(session.id());
                     executionRegistry.complete(session.id());
                 });
-            });
+            }));
     }
 
     /**
@@ -290,7 +293,9 @@ public class AgentTaskOrchestrator {
      * @return Mono<Void> 取消完成信号
      */
     public Mono<Void> cancelChat(Long userId, String sessionId) {
-        if (!sessionId.equals(activeLoops.get(userId))) {
+        return Mono.deferContextual(context -> {
+        String scopeKey = TeamScope.from(context).teamId() + ":" + userId;
+        if (!sessionId.equals(activeLoops.get(scopeKey))) {
             return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.noRunningGenerationInThisConversation")));
         }
         AgentExecutionRegistry.AgentCancellation cancellation = executionRegistry.requestCancellation(userId, sessionId);
@@ -313,11 +318,12 @@ public class AgentTaskOrchestrator {
                     return cancellation.tasks().isEmpty() ? saveCanceledInitialVideoRound(userId, sessionId) : Mono.empty();
                 })
                 .doOnSuccess(ignored -> {
-                    activeLoops.remove(userId, sessionId);
+                    activeLoops.remove(scopeKey, sessionId);
                     executionRegistry.disposeWhenReady(sessionId);
                     eventEmitter.emit(userId, AgentEvent.canceled(sessionId, "已停止生成"));
                     log.info("已停止 Agent 对话: userId={}, sessionId={}, taskCount={}", userId, sessionId, cancellation.tasks().size());
                 });
+        });
     }
 
     /**
@@ -1110,6 +1116,7 @@ public class AgentTaskOrchestrator {
                                        boolean requireTool, Consumer<String> textDeltaConsumer) {
         AiTaskDtos.AiChannelConfig channel = textModel.channel();
         JSONObject customBodyParameters = textModel.customBodyParameters();
+        return aiTaskService.requireModelCallAccess(channelModelValue(channel)).then(Mono.defer(() -> {
         if ("openai".equalsIgnoreCase(channel.apiFormat())) {
             return callStreamingChatCompletionsApi(channel, profile, messages, requireTool, textDeltaConsumer,
                     new ThinkingConfiguration(textModel.thinkingEnabled(), textModel.reasoningEffort()), customBodyParameters);
@@ -1118,6 +1125,7 @@ public class AgentTaskOrchestrator {
             return callStreamingAnthropicMessagesApi(channel, profile, messages, requireTool, textDeltaConsumer, customBodyParameters);
         }
         return callStreamingChatCompletionsApi(channel, profile, messages, requireTool, textDeltaConsumer, null, customBodyParameters);
+        }));
     }
 
     /**

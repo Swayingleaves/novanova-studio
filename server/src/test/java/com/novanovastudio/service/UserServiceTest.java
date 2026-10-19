@@ -62,7 +62,7 @@ class UserServiceTest {
         emailCode.setId(3L);
         emailCode.setCodeHash("code-hash");
         User createdUser = normalUser(8L);
-        createdUser.setCreditBalance(100);
+        createdUser.setCreditBalance(java.math.BigDecimal.valueOf(100));
         when(context.invitationService.resolveInviterUserId("INVITATIONCODE01")).thenReturn(Mono.just(5L));
         when(context.userRepository.findByEmail("new@example.com")).thenReturn(Mono.empty());
         when(context.userRepository.latestValidEmailCode("new@example.com", "register")).thenReturn(Mono.just(emailCode));
@@ -284,12 +284,13 @@ class UserServiceTest {
         TestContext context = testContext();
         when(context.currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
         when(context.userRepository.updateCurrentUserProfile(8L, "creator", "", "")).thenReturn(Mono.just(false));
+        when(context.userRepository.findById(8L)).thenReturn(Mono.just(normalUser(8L)));
 
         StepVerifier.create(context.service.updateCurrentUserProfile(new UserDtos.UpdateCurrentUserProfileRequest("creator", "", "")))
                 .expectErrorMatches(error -> error instanceof BusinessException && "用户名已被占用".equals(error.getMessage()))
                 .verify();
 
-        verify(context.userRepository, never()).findById(8L);
+        verify(context.userRepository).findById(8L);
     }
 
     /**
@@ -375,14 +376,14 @@ class UserServiceTest {
         User user = normalUser(8L);
         when(context.currentUserProvider.currentUserId()).thenReturn(Mono.just(1L));
         when(context.userRepository.findById(8L)).thenReturn(Mono.just(user));
-        when(context.creditService.adjustUserCredits(8L, 1L, 20, "活动补发")).thenReturn(Mono.just(new CreditDtos.CreditBalanceResponse(8L, 120)));
+        when(context.creditService.adjustUserCredits(8L, 1L, java.math.BigDecimal.valueOf(20), "活动补发")).thenReturn(Mono.just(new CreditDtos.CreditBalanceResponse(8L, java.math.BigDecimal.valueOf(120))));
         when(context.eventPublisher.publish(eq(8L), any(AiTaskDtos.AiTaskEvent.class))).thenReturn(Mono.empty());
 
-        StepVerifier.create(context.service.adjustUserCredits(new CreditDtos.AdjustUserCreditsRequest(8L, 20, "活动补发")))
-                .assertNext(response -> assertTrue(response.creditBalance() == 120))
+        StepVerifier.create(context.service.adjustUserCredits(new CreditDtos.AdjustUserCreditsRequest(8L, java.math.BigDecimal.valueOf(20), "活动补发")))
+                .assertNext(response -> assertTrue(response.creditBalance().compareTo(java.math.BigDecimal.valueOf(120)) == 0))
                 .verifyComplete();
 
-        verify(context.eventPublisher).publish(eq(8L), argThat(event -> "credit-balance".equals(event.type()) && Integer.valueOf(120).equals(event.creditBalance())));
+        verify(context.eventPublisher).publish(eq(8L), argThat(event -> "credit-balance".equals(event.type()) && java.math.BigDecimal.valueOf(120).compareTo(event.creditBalance()) == 0));
     }
 
     /**
@@ -418,10 +419,10 @@ class UserServiceTest {
      */
     private static Stream<Arguments> passwordLockScenarios() {
         return Stream.of(
-                Arguments.of(1, Duration.ZERO, false, "邮箱或密码错误"),
-                Arguments.of(2, Duration.ZERO, false, "邮箱或密码错误"),
-                Arguments.of(3, Duration.ZERO, false, "邮箱或密码错误"),
-                Arguments.of(4, Duration.ZERO, false, "邮箱或密码错误"),
+                Arguments.of(1, Duration.ZERO, false, "账号或密码错误"),
+                Arguments.of(2, Duration.ZERO, false, "账号或密码错误"),
+                Arguments.of(3, Duration.ZERO, false, "账号或密码错误"),
+                Arguments.of(4, Duration.ZERO, false, "账号或密码错误"),
                 Arguments.of(5, Duration.ofMinutes(5), true, "密码错误次数过多，请5分钟后再试"),
                 Arguments.of(6, Duration.ofMinutes(10), true, "密码错误次数过多，请10分钟后再试"),
                 Arguments.of(7, Duration.ofHours(2), true, "密码错误次数过多，账号已被锁定2小时")
@@ -507,6 +508,91 @@ class UserServiceTest {
 
         verify(context.userRepository).listUsers(1, 20, null, 8L, null, null, null, null);
         verify(context.userRepository).countUsers(null, 8L, null, null, null, null);
+    }
+
+    /** 无邮箱账号按大小写敏感的用户名登录，不查询邮箱。 */
+    @Test
+    void shouldLoginByUsernameWithoutEmailFallback() {
+        TestContext context = testContext();
+        User user = normalUser(8L);
+        user.setUsername("Creator"); user.setEmail(null); user.setPassword("encoded-password");
+        when(context.userRepository.findByUsername("Creator")).thenReturn(Mono.just(user));
+        when(context.passwordLoginLockService.remainingLockDuration(8L)).thenReturn(Mono.empty());
+        when(context.passwordEncoder.matches("correct-password", "encoded-password")).thenReturn(true);
+        when(context.passwordLoginLockService.clear(8L)).thenReturn(Mono.empty());
+        when(context.userRepository.updateLastLoginAt(8L)).thenReturn(Mono.empty());
+        when(context.tokenService.sign(8L, UserService.ROLE_USER, 0)).thenReturn(new TokenService.SignedToken("token", OffsetDateTime.now().plusHours(1)));
+        StepVerifier.create(context.service.login(new UserDtos.LoginRequest(" Creator ", "correct-password")))
+                .assertNext(response -> assertTrue("Creator".equals(response.user().username()) && response.user().email().isEmpty()))
+                .verifyComplete();
+        verify(context.userRepository, never()).findByEmail(any());
+    }
+
+    /** 用户名不存在或大小写不一致时统一拒绝，不再按邮箱查找。 */
+    @Test
+    void shouldNotFallbackForUnknownUsername() {
+        TestContext context = testContext();
+        when(context.userRepository.findByUsername("creator")).thenReturn(Mono.empty());
+        StepVerifier.create(context.service.login(new UserDtos.LoginRequest("creator", "password123")))
+                .expectErrorMatches(error -> error instanceof BusinessException && error.getMessage().equals("账号或密码错误")).verify();
+        verify(context.userRepository, never()).findByEmail(any());
+    }
+
+    /** 管理员手工创建用户名账号不填虚拟邮箱，记录实际操作人。 */
+    @Test
+    void shouldCreateUsernameAccountWithExistingPlatformCreditRules() {
+        TestContext context = testContext();
+        when(context.currentUserProvider.currentUserId()).thenReturn(Mono.just(1L));
+        when(context.userRepository.findByUsername("Creator")).thenReturn(Mono.empty());
+        when(context.passwordEncoder.encode("password123")).thenReturn("encoded");
+        when(context.invitationService.generateInvitationCode()).thenReturn("INVITATION01");
+        when(context.userRepository.createUser(any())).thenReturn(Mono.just(8L));
+        when(context.creditService.initializeAccount(8L)).thenReturn(Mono.empty());
+        StepVerifier.create(context.service.adminCreateUser(new UserDtos.AdminCreateUserRequest("Creator", "password123", null, "user"))).verifyComplete();
+        verify(context.userRepository).createUser(argThat(user -> user.getEmail() == null && "Creator".equals(user.getUsername())
+                && user.getCreatedByUserId().equals(1L) && user.getCreatedByTeamId() == null));
+        verify(context.creditService).initializeAccount(8L);
+    }
+
+    /** 平台管理员重置无邮箱账号后更新令牌版本，并清除错误锁定。 */
+    @Test
+    void shouldResetPasswordAccountByPlatformAdministrator() {
+        TestContext context = testContext();
+        when(context.currentUserProvider.currentUser()).thenReturn(Mono.just(new com.novanovastudio.security.CurrentUser(1L, "admin@example.com", "admin", 1)));
+        User target = normalUser(8L); target.setEmail(null);
+        when(context.userRepository.lockUser(8L)).thenReturn(Mono.just(target));
+        when(context.passwordEncoder.encode("new-password")).thenReturn("new-hash");
+        when(context.userRepository.updatePasswordAfterReset(8L, "new-hash")).thenReturn(Mono.empty());
+        when(context.passwordLoginLockService.clear(8L)).thenReturn(Mono.empty());
+        StepVerifier.create(context.service.resetUserPassword(new UserDtos.AdminResetPasswordRequest(8L, "new-password"))).verifyComplete();
+        var order = org.mockito.Mockito.inOrder(context.userRepository, context.passwordLoginLockService);
+        order.verify(context.userRepository).lockUser(8L);
+        order.verify(context.userRepository).updatePasswordAfterReset(8L, "new-hash");
+        order.verify(context.passwordLoginLockService).clear(8L);
+    }
+
+    /** 有邮箱账号仍使用邮件找回，不允许该入口越过邮箱身份校验。 */
+    @Test
+    void shouldRejectResetForEmailAccount() {
+        TestContext context = testContext();
+        User user = normalUser(8L); user.setEmail("member@example.com");
+        when(context.currentUserProvider.currentUser()).thenReturn(Mono.just(new com.novanovastudio.security.CurrentUser(1L, "admin@example.com", "admin", 1)));
+        when(context.userRepository.lockUser(8L)).thenReturn(Mono.just(user));
+        StepVerifier.create(context.service.resetUserPassword(new UserDtos.AdminResetPasswordRequest(8L, "new-password")))
+                .expectError(BusinessException.class).verify();
+        verify(context.userRepository, never()).updatePasswordAfterReset(any(), any());
+        verify(context.passwordLoginLockService, never()).clear(any());
+    }
+
+    /** 团队上下文即使持有全局角色也不能调用平台重置入口。 */
+    @Test
+    void shouldRejectPlatformPasswordResetFromTeamContext() {
+        TestContext context = testContext();
+        when(context.currentUserProvider.currentUser()).thenReturn(Mono.just(new com.novanovastudio.security.CurrentUser(1L, "admin@example.com", "admin", 1)));
+        StepVerifier.create(context.service.resetUserPassword(new UserDtos.AdminResetPasswordRequest(8L, "new-password"))
+                        .contextWrite(new com.novanovastudio.security.TeamScope(101, "administrator")::apply))
+                .expectError(BusinessException.class).verify();
+        verify(context.userRepository, never()).lockUser(any());
     }
 
     /**

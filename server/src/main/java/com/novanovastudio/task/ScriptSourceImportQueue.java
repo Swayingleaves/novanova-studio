@@ -75,7 +75,7 @@ public class ScriptSourceImportQueue {
         // 多实例部署时不能在启动时直接重置执行中任务，只重投等待中与租约已过期的任务。
         Mono<Void> ready = ensureGroup().cache();
         ready.thenMany(repository.recoverableTaskIds().concatMap(this::enqueue))
-                .then().subscribe(ignored -> { }, error -> log.error("恢复原文导入任务失败", error));
+                .then().contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true)).subscribe(ignored -> { }, error -> log.error("恢复原文导入任务失败", error));
         subscription = ready.thenMany(Flux.interval(Duration.ofSeconds(1)))
                 .flatMap(ignored -> read(consumer).onErrorResume(error -> {
                     log.error("读取原文导入消息失败", error);
@@ -85,7 +85,7 @@ public class ScriptSourceImportQueue {
                 .flatMap(ignored -> repository.recoverableTaskIds().concatMap(this::enqueue).onErrorResume(error -> {
                     log.error("补发原文导入任务失败", error);
                     return Mono.empty();
-                })).subscribe();
+                })).contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true)).subscribe();
     }
 
     /**

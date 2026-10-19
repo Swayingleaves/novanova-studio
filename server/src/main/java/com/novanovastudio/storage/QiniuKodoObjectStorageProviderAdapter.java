@@ -42,6 +42,23 @@ public class QiniuKodoObjectStorageProviderAdapter implements ObjectStorageProvi
     }
 
     /**
+     * 物理删除对象，七牛的612表示文件已经不存在。
+     * @param config 对象存储配置
+     * @param key 对象键
+     * @throws BusinessException 删除失败时抛出
+     */
+    @Override
+    public void deletePrivateObject(PersistenceDtos.ObjectStorageConfig config, String key) {
+        validate(config);
+        try {
+            new com.qiniu.storage.BucketManager(Auth.create(config.accessKey(), config.secretKey()),
+                    Configuration.create(Region.createWithRegionId(config.region()))).delete(config.bucket(), key);
+        } catch (QiniuException exception) {
+            if (exception.code() != 612) throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "删除七牛对象失败：" + exception.getMessage());
+        }
+    }
+
+    /**
      * 校验七牛云Kodo配置。
      *
      * @param config ObjectStorageConfig 对象存储配置

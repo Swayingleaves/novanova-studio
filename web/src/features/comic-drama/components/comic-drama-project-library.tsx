@@ -4,7 +4,7 @@ import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/shared/lib/team-navigation";
 import { Alert, App, Button, Empty, Input, Modal, Pagination, Progress, Select, Skeleton } from "antd";
 import { BookOpenText, CheckCircle2, CircleAlert, Clapperboard, Clock3, FilePlus2, ListChecks, RefreshCw, Search } from "lucide-react";
 

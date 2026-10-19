@@ -5,7 +5,7 @@ import { productionParameterLabel } from "../lib/production-labels";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/shared/lib/team-navigation";
 import { App, Button, Card, Empty, Form, Input, Modal, Select, Space, Table, Tag } from "antd";
 import { ExternalLink, Layers, Link2, Plus, SendToBack } from "lucide-react";
 

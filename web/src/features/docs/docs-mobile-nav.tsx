@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/shared/lib/team-navigation";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
 import type { DocGroup, DocPage } from "./docs";

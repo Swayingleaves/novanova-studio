@@ -1,5 +1,8 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentScopeModelFactory;
@@ -116,7 +119,7 @@ public class WholeBookAdaptationService {
                         .switchIfEmpty(Mono.defer(() -> prepare(userId, request.projectId(), request.expectedRevision(),
                                         request.model(), request.options())
                                 .flatMap(prepared -> {
-                                    if (prepared.credits() != request.expectedCredits()
+                                    if (CreditAmounts.of(prepared.credits()).compareTo(CreditAmounts.of(request.expectedCredits())) != 0
                                             || !prepared.fingerprint().equals(request.expectedFingerprint())) {
                                         return Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT,
                                                 "事实、模型价格或改编设置已变化，请重新报价"));
@@ -136,7 +139,7 @@ public class WholeBookAdaptationService {
                                                     .then(repository.insert(workflow))
                                                     .then(repository.plan(jobId, PHASE_MATERIALS, prepared.units(), chargeId))
                                                     .then(creditService.chargeOperation(userId, chargeId,
-                                                            prepared.credits(), OPERATION_NAME)))
+                                                            prepared.credits(), OPERATION_NAME, prepared.modelConfigId())))
                                             .onErrorMap(DataIntegrityViolationException.class, error ->
                                                     new BusinessException(ErrorCode.BUSINESS_ERROR,
                                                             "该项目已有进行中的改编任务，请等待完成或取消后再试"))
@@ -206,7 +209,7 @@ public class WholeBookAdaptationService {
                         List<WholeBookAdaptationPlanner.Unit> planned = WholeBookAdaptationPlanner.planning(
                                 strategy, slots, workflow.facts(), arcFactIds(units, strategy));
                         String chargeId = chargeId(job.id(), PHASE_PLANNING);
-                        int credits = planned.size() * workflow.unitPrice();
+                        BigDecimal credits = CreditAmounts.multiply(workflow.unitPrice(), planned.size());
                         return transactionalOperator.transactional(repository.strategy(job.id(), strategy)
                                         .then(repository.configuration(job.id(), workflow.revision(), slots))
                                         .then(repository.plan(job.id(), PHASE_PLANNING, planned, chargeId))
@@ -214,7 +217,7 @@ public class WholeBookAdaptationService {
                                                 .flatMap(staged -> staged ? Mono.<Void>empty()
                                                         : Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT,
                                                                 "任务状态已变化，请刷新后重试"))))
-                                        .then(creditService.chargeOperation(job.userId(), chargeId, credits, OPERATION_NAME)))
+                                        .then(creditService.chargeOperation(job.userId(), chargeId, credits, OPERATION_NAME, job.modelConfigId())))
                                 .doOnSuccess(ignored -> log.info("全书改编已确认集数并进入统一规划: jobId={}, episodeCount={}, "
                                                 + "arcs={}, units={}, credits={}", job.id(), request.episodeCount(),
                                         strategy.arcs().size(), planned.size(), credits))
@@ -290,14 +293,14 @@ public class WholeBookAdaptationService {
                                     "所有生成单元都已成功，请直接确认应用或取消任务"));
                         }
                         int completed = units.size() - unfinished;
-                        int credits = unfinished * workflow.unitPrice();
+                        BigDecimal credits = CreditAmounts.multiply(workflow.unitPrice(), unfinished);
                         String chargeId = chargeId(job.id(), job.phase()) + ":retry:" + (job.retryCount() + 1);
                         return transactionalOperator.transactional(repository.reassign(job.id(), job.phase(), chargeId)
                                         .then(jobRepository.retry(job, completed, unfinished, credits))
                                         .flatMap(staged -> staged ? Mono.<Void>empty()
                                                 : Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT,
                                                         "任务状态已变化，请刷新后重试")))
-                                        .then(creditService.chargeOperation(job.userId(), chargeId, credits, OPERATION_NAME)))
+                                        .then(creditService.chargeOperation(job.userId(), chargeId, credits, OPERATION_NAME, job.modelConfigId())))
                                 .doOnSuccess(ignored -> log.info("全书改编从失败单元继续: jobId={}, completed={}, "
                                                 + "unfinished={}, credits={}", job.id(), completed, unfinished, credits))
                                 .then(enqueue(job.modelConfigId(), job.id()))
@@ -348,10 +351,10 @@ public class WholeBookAdaptationService {
                     .flatMap(input -> {
                         List<WholeBookAdaptationRepository.Unit> units = input.getT2();
                         int unfinished = (int) units.stream().filter(unit -> unit.output() == null).count();
-                        int refund = unfinished * input.getT1().unitPrice();
+                        BigDecimal refund = CreditAmounts.multiply(input.getT1().unitPrice(), unfinished);
                         return transactionalOperator.transactional(jobRepository
                                         .finish(job.id(), "canceled", "", units.size() - unfinished)
-                                        .flatMap(finished -> finished && refund > 0
+                                        .flatMap(finished -> finished && CreditAmounts.of(refund).compareTo(CreditAmounts.of(0)) > 0
                                                 ? creditService.refundOperation(job.userId(),
                                                         chargeId(job.id(), job.phase()), OPERATION_NAME, refund)
                                                 : Mono.<Void>empty()))
@@ -408,10 +411,10 @@ public class WholeBookAdaptationService {
                                                    List<WholeBookAdaptationRepository.Unit> units) {
         int processed = (int) units.stream().filter(unit -> unit.output() != null).count();
         List<Slot> slots = workflow == null ? List.of() : workflow.slots();
-        int unitPrice = workflow == null || workflow.unitPrice() <= 0
+        BigDecimal unitPrice = workflow == null || CreditAmounts.of(workflow.unitPrice()).compareTo(CreditAmounts.of(0)) <= 0
                 ? perCall(job) : workflow.unitPrice();
-        int refunded = Set.of("canceled", "failed").contains(job.status())
-                ? (units.size() - processed) * unitPrice : 0;
+        BigDecimal refunded = Set.of("canceled", "failed").contains(job.status())
+                ? CreditAmounts.multiply(unitPrice, (units.size() - processed)) : BigDecimal.ZERO;
         return new WholeBookAdaptationDtos.View(job.id(), job.phase(), job.stage(), job.status(),
                 units.isEmpty() ? job.totalUnits() : units.size(), processed, job.credits(), refunded,
                 job.errorMessage(), workflow == null ? 0L : workflow.revision(),
@@ -445,8 +448,8 @@ public class WholeBookAdaptationService {
     }
 
     /** 按单次调用价格推算单价，仅用于历史任务或快照缺失时的退化展示。 */
-    private int perCall(NovelAdaptationJobRepository.Job job) {
-        return job.estimatedCalls() <= 0 ? 0 : job.credits() / job.estimatedCalls();
+    private BigDecimal perCall(NovelAdaptationJobRepository.Job job) {
+        return job.estimatedCalls() <= 0 ? BigDecimal.ZERO : CreditAmounts.divide(job.credits(), job.estimatedCalls());
     }
 
     /** 写入改编队列，失败时交由恢复扫描补发。 */
@@ -475,13 +478,13 @@ public class WholeBookAdaptationService {
     }
 
     /** 一次启动的输入快照与单元规划。 */
-    private record Prepared(long revision, String modelValue, String modelConfigId, int unitPrice,
+    private record Prepared(long revision, String modelValue, String modelConfigId, BigDecimal unitPrice,
                             List<StoryBibleRepository.Item> facts, List<JSONObject> links,
                             List<WholeBookAdaptationPlanner.Unit> units, String fingerprint,
                             WholeBookAdaptationDtos.Options options) {
         List<String> factIds() { return facts.stream().map(StoryBibleRepository.Item::id).toList(); }
         int calls() { return units.size(); }
-        int credits() { return calls() * unitPrice; }
+        BigDecimal credits() { return CreditAmounts.multiply(unitPrice, calls()); }
         WholeBookAdaptationDtos.Quote quote() {
             return new WholeBookAdaptationDtos.Quote(revision, PHASE_MATERIALS, calls(), credits(), fingerprint);
         }

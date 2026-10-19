@@ -3,12 +3,13 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { Drawer } from "antd";
-import Link from "next/link";
+import Link from "@/shared/lib/team-navigation";
 
 import { LanguageMenu } from "@/features/locale/components/language-menu";
 import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
 import { NAV_GROUPS, navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
 import { cn } from "@/shared/lib/utils";
+import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 
 type MobileNavDrawerProps = {
@@ -20,7 +21,7 @@ type MobileNavDrawerProps = {
 export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDrawerProps) {
     const translate = useTranslation();
     const user = useUserStore((state) => state.user);
-    const visibleNavigationTools = navigationTools.filter((tool) => !tool.adminOnly || user?.role === "admin");
+    const visibleNavigationTools = navigationTools.filter((tool) => !tool.adminOnly || canManageCurrentSpace());
 
     return (
         <Drawer title={translate("appShell.navigation")} placement="left" size={292} open={open} onClose={onClose} className="md:hidden">

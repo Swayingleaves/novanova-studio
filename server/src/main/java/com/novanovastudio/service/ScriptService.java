@@ -1,5 +1,7 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -1099,7 +1101,7 @@ public class ScriptService {
      */
     public Mono<ScriptDtos.AiDraft> saveAiDraft(Long userId, String projectId, long revision, String actionType,
                                                 String targetType, String targetId, String instruction, String model,
-                                                int chargedCredits, JSONObject sourceData, JSONObject draftData) {
+                                                BigDecimal chargedCredits, JSONObject sourceData, JSONObject draftData) {
         // 单集草稿的场次与正文块标识由模型自造，必须在落库前换成唯一标识，否则应用时必然撞上其他项目。
         if ("episode".equals(targetType)) assignEpisodeIds(draftData);
         normalizeBlockOrigins(targetType, draftData);
@@ -1195,7 +1197,7 @@ public class ScriptService {
      * @return 已持久化分析报告
      */
     public Mono<ScriptDtos.AnalysisReport> saveAnalysisReport(Long userId, String projectId, String scopeType,
-                                                              String scopeId, String model, int chargedCredits,
+                                                              String scopeId, String model, BigDecimal chargedCredits,
                                                               long sourceRevision, ScriptDtos.GeneratedAnalysis generated) {
         String reportId = UUID.randomUUID().toString();
         List<ScriptDtos.AnalysisIssue> issues = new ArrayList<>();

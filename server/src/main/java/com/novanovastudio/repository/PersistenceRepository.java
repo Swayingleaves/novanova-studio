@@ -30,7 +30,7 @@ public class PersistenceRepository {
     public Flux<PersistenceRecords.UserAiChannelRecord> listUserAiChannels(Long userId) {
         // 渠道按用户和排序值读取，只返回正常状态记录。
         return databaseClient.sql("""
-                SELECT id, user_id, channel_id, name, base_url, api_key_encrypted, api_format, models::text AS models, sort_order, status, created_at, updated_at
+                SELECT id, team_id, user_id, channel_id, name, base_url, api_key_encrypted, api_format, models::text AS models, sort_order, status, created_at, updated_at
                 FROM user_ai_channels
                 WHERE user_id = :userId AND status = 1
                 ORDER BY sort_order ASC, id ASC
@@ -83,7 +83,7 @@ public class PersistenceRepository {
     /** 查询单个用户渠道。 */
     public Mono<PersistenceRecords.UserAiChannelRecord> getUserAiChannel(Long userId, String channelId) {
         return databaseClient.sql("""
-                SELECT id, user_id, channel_id, name, base_url, api_key_encrypted, api_format, models::text AS models, sort_order, status, created_at, updated_at
+                SELECT id, team_id, user_id, channel_id, name, base_url, api_key_encrypted, api_format, models::text AS models, sort_order, status, created_at, updated_at
                 FROM user_ai_channels WHERE user_id = :userId AND channel_id = :channelId AND status = 1
                 """).bind("userId", userId).bind("channelId", channelId)
                 .map((row, metadata) -> RowMappers.userAiChannel(row)).one();
@@ -122,7 +122,7 @@ public class PersistenceRepository {
     /** 查询用户模型配置。 */
     public Flux<PersistenceRecords.UserAiModelConfigRecord> listUserAiModelConfigs(Long userId) {
         return databaseClient.sql("""
-                SELECT id, user_id, model_config_id, channel_id, model_name, model_type,
+                SELECT id, team_id, user_id, model_config_id, channel_id, model_name, model_type,
                        capabilities::text AS capabilities, is_default, sort_order, 0 AS credit_cost, 'generation' AS credit_unit,
                        thinking_enabled, reasoning_effort, 1 AS request_concurrency, '{}'::jsonb AS custom_body_parameters,
                        NULL::text AS video_billing_configuration, created_at, updated_at
@@ -133,7 +133,7 @@ public class PersistenceRepository {
     /** 查询单个用户模型配置。 */
     public Mono<PersistenceRecords.UserAiModelConfigRecord> getUserAiModelConfig(Long userId, String modelConfigId) {
         return databaseClient.sql("""
-                SELECT id, user_id, model_config_id, channel_id, model_name, model_type,
+                SELECT id, team_id, user_id, model_config_id, channel_id, model_name, model_type,
                        capabilities::text AS capabilities, is_default, sort_order, 0 AS credit_cost, 'generation' AS credit_unit,
                        thinking_enabled, reasoning_effort, 1 AS request_concurrency, '{}'::jsonb AS custom_body_parameters,
                        NULL::text AS video_billing_configuration, created_at, updated_at
@@ -193,7 +193,7 @@ public class PersistenceRepository {
     public Flux<PersistenceRecords.UserObjectStorageRecord> listUserObjectStorages(Long userId) {
         // 对象存储按默认项优先、更新时间倒序读取。
         return databaseClient.sql("""
-                SELECT id, user_id, storage_id, name, provider, access_key_encrypted, secret_key_encrypted, bucket, region, endpoint, directory, public_base_url, is_default, last_tested_at, status, created_at, updated_at
+                SELECT id, team_id, user_id, storage_id, name, provider, access_key_encrypted, secret_key_encrypted, bucket, region, endpoint, directory, public_base_url, is_default, last_tested_at, status, created_at, updated_at
                 FROM user_object_storage_configs
                 WHERE user_id = :userId AND status = 1
                 ORDER BY is_default DESC, updated_at DESC, id ASC
@@ -209,7 +209,7 @@ public class PersistenceRepository {
     public Mono<PersistenceRecords.UserObjectStorageRecord> getDefaultUserObjectStorage(Long userId) {
         // 上传链路只读取默认对象存储配置。
         return databaseClient.sql("""
-                SELECT id, user_id, storage_id, name, provider, access_key_encrypted, secret_key_encrypted, bucket, region, endpoint, directory, public_base_url, is_default, last_tested_at, status, created_at, updated_at
+                SELECT id, team_id, user_id, storage_id, name, provider, access_key_encrypted, secret_key_encrypted, bucket, region, endpoint, directory, public_base_url, is_default, last_tested_at, status, created_at, updated_at
                 FROM user_object_storage_configs
                 WHERE user_id = :userId AND status = 1 AND is_default = TRUE
                 ORDER BY updated_at DESC
@@ -268,7 +268,7 @@ public class PersistenceRepository {
     /** 查询单个用户对象存储。 */
     public Mono<PersistenceRecords.UserObjectStorageRecord> getUserObjectStorage(Long userId, String storageId) {
         return databaseClient.sql("""
-                SELECT id, user_id, storage_id, name, provider, access_key_encrypted, secret_key_encrypted, bucket, region,
+                SELECT id, team_id, user_id, storage_id, name, provider, access_key_encrypted, secret_key_encrypted, bucket, region,
                        endpoint, directory, public_base_url, is_default, last_tested_at, status, created_at, updated_at
                 FROM user_object_storage_configs WHERE user_id=:userId AND storage_id=:storageId AND status=1
                 """).bind("userId", userId).bind("storageId", storageId)
@@ -315,7 +315,7 @@ public class PersistenceRepository {
      */
     public Flux<PersistenceRecords.UserAiChannelRecord> listPlatformAiChannels() {
         return databaseClient.sql("""
-                SELECT id, NULL::BIGINT AS user_id, channel_id, name, base_url, api_key_encrypted, api_format,
+                SELECT id, team_id, NULL::BIGINT AS user_id, channel_id, name, base_url, api_key_encrypted, api_format,
                        models::text AS models, sort_order, status, created_at, updated_at
                 FROM platform_ai_channels
                 WHERE status = 1
@@ -331,7 +331,7 @@ public class PersistenceRepository {
      */
     public Mono<PersistenceRecords.UserAiChannelRecord> getPlatformAiChannel(String channelId) {
         return databaseClient.sql("""
-                SELECT id, NULL::BIGINT AS user_id, channel_id, name, base_url, api_key_encrypted, api_format,
+                SELECT id, team_id, NULL::BIGINT AS user_id, channel_id, name, base_url, api_key_encrypted, api_format,
                        models::text AS models, sort_order, status, created_at, updated_at
                 FROM platform_ai_channels
                 WHERE channel_id = :channelId AND status = 1
@@ -401,7 +401,7 @@ public class PersistenceRepository {
      */
     public Flux<PersistenceRecords.UserAiModelConfigRecord> listPlatformAiModelConfigs() {
         return databaseClient.sql("""
-                SELECT id, NULL::BIGINT AS user_id, model_config_id, channel_id, model_name, model_type,
+                SELECT id, team_id, NULL::BIGINT AS user_id, model_config_id, channel_id, model_name, model_type,
                        capabilities::text AS capabilities, is_default, sort_order, credit_cost, credit_unit,
                        thinking_enabled, reasoning_effort, request_concurrency, custom_body_parameters::text AS custom_body_parameters,
                        video_billing_configuration::text AS video_billing_configuration, display_name, model_icon,
@@ -419,7 +419,7 @@ public class PersistenceRepository {
      */
     public Mono<PersistenceRecords.UserAiModelConfigRecord> getPlatformAiModelConfig(String modelConfigId) {
         return databaseClient.sql("""
-                SELECT id, NULL::BIGINT AS user_id, model_config_id, channel_id, model_name, model_type,
+                SELECT id, team_id, NULL::BIGINT AS user_id, model_config_id, channel_id, model_name, model_type,
                        capabilities::text AS capabilities, is_default, sort_order, credit_cost, credit_unit,
                        thinking_enabled, reasoning_effort, request_concurrency, custom_body_parameters::text AS custom_body_parameters,
                        video_billing_configuration::text AS video_billing_configuration, display_name, model_icon,
@@ -537,7 +537,7 @@ public class PersistenceRepository {
      */
     public Flux<PersistenceRecords.UserObjectStorageRecord> listPlatformObjectStorages() {
         return databaseClient.sql("""
-                SELECT id, NULL::BIGINT AS user_id, storage_id, name, provider, access_key_encrypted, secret_key_encrypted,
+                SELECT id, team_id, NULL::BIGINT AS user_id, storage_id, name, provider, access_key_encrypted, secret_key_encrypted,
                        bucket, region, endpoint, directory, public_base_url, is_default, last_tested_at, status, created_at, updated_at
                 FROM platform_object_storage_configs
                 WHERE status = 1
@@ -552,10 +552,10 @@ public class PersistenceRepository {
      */
     public Mono<PersistenceRecords.UserObjectStorageRecord> getDefaultPlatformObjectStorage() {
         return databaseClient.sql("""
-                SELECT id, NULL::BIGINT AS user_id, storage_id, name, provider, access_key_encrypted, secret_key_encrypted,
+                SELECT id, team_id, NULL::BIGINT AS user_id, storage_id, name, provider, access_key_encrypted, secret_key_encrypted,
                        bucket, region, endpoint, directory, public_base_url, is_default, last_tested_at, status, created_at, updated_at
                 FROM platform_object_storage_configs
-                WHERE status = 1 AND is_default = TRUE
+                WHERE status = 1 AND ((current_team_id() = 0 AND is_default = TRUE) OR (current_team_id() > 0 AND EXISTS (SELECT 1 FROM team_resource_preferences preferences WHERE preferences.team_id = current_team_id() AND preferences.resource_type = 'objectStorage' AND preferences.resource_id = storage_id AND preferences.enabled AND preferences.is_default)))
                 ORDER BY updated_at DESC
                 LIMIT 1
                 """).map((row, metadata) -> RowMappers.userObjectStorage(row)).one();
@@ -569,11 +569,21 @@ public class PersistenceRepository {
      */
     public Mono<PersistenceRecords.UserObjectStorageRecord> getPlatformObjectStorage(String storageId) {
         return databaseClient.sql("""
-                SELECT id, NULL::BIGINT AS user_id, storage_id, name, provider, access_key_encrypted, secret_key_encrypted,
+                SELECT id, team_id, NULL::BIGINT AS user_id, storage_id, name, provider, access_key_encrypted, secret_key_encrypted,
                        bucket, region, endpoint, directory, public_base_url, is_default, last_tested_at, status, created_at, updated_at
                 FROM platform_object_storage_configs
                 WHERE storage_id = :storageId AND status = 1
                 """).bind("storageId", storageId).map((row, metadata) -> RowMappers.userObjectStorage(row)).one();
+    }
+
+    /**
+     * 清理已确认归属的对象时读取原存储，配置停用不能阻止物理删除。
+     * @param storageId 原配置标识
+     * @return 包含停用配置的存储记录
+     */
+    public Mono<PersistenceRecords.UserObjectStorageRecord> getObjectStorageForCleanup(String storageId) {
+        return databaseClient.sql("SELECT *, NULL::BIGINT AS user_id FROM platform_object_storage_configs WHERE storage_id = :storageId")
+                .bind("storageId", storageId).map((row, metadata) -> RowMappers.userObjectStorage(row)).one();
     }
 
     /**
@@ -622,7 +632,7 @@ public class PersistenceRepository {
      * @return Mono<Long> 删除行数
      */
     public Mono<Long> deletePlatformObjectStorage(String storageId) {
-        return databaseClient.sql("DELETE FROM platform_object_storage_configs WHERE storage_id = :storageId")
+        return databaseClient.sql("UPDATE platform_object_storage_configs SET status = 0, is_default = FALSE, updated_at = CURRENT_TIMESTAMP WHERE storage_id = :storageId")
                 .bind("storageId", storageId).fetch().rowsUpdated();
     }
 
@@ -648,7 +658,7 @@ public class PersistenceRepository {
     public Flux<PersistenceRecords.SnapshotRecord> listProjects(Long userId) {
         // 只返回未软删除的项目，并按更新时间倒序排列。
         return databaseClient.sql("""
-                SELECT id, user_id, NULL AS record_type, title, project_data::text AS record_data, status, created_at, updated_at
+                SELECT id, team_id, user_id, NULL AS record_type, title, project_data::text AS record_data, status, created_at, updated_at
                 FROM canvas_projects
                 WHERE user_id = :userId AND status = 1
                 ORDER BY updated_at DESC
@@ -665,7 +675,7 @@ public class PersistenceRepository {
     public Mono<PersistenceRecords.SnapshotRecord> getProject(Long userId, String id) {
         // 项目详情同时限定用户ID和项目ID。
         return databaseClient.sql("""
-                SELECT id, user_id, NULL AS record_type, title, project_data::text AS record_data, status, created_at, updated_at
+                SELECT id, team_id, user_id, NULL AS record_type, title, project_data::text AS record_data, status, created_at, updated_at
                 FROM canvas_projects
                 WHERE user_id = :userId AND id = :id AND status = 1
                 """).bind("userId", userId).bind("id", id).map((row, metadata) -> RowMappers.snapshot(row)).one();
@@ -722,7 +732,7 @@ public class PersistenceRepository {
     public Flux<PersistenceRecords.SnapshotRecord> listAssets(Long userId) {
         // 只返回当前用户未软删除素材。
         return databaseClient.sql("""
-                SELECT id, user_id, kind AS record_type, title, asset_data::text AS record_data, status, created_at, updated_at
+                SELECT id, team_id, user_id, kind AS record_type, title, asset_data::text AS record_data, status, created_at, updated_at
                 FROM assets
                 WHERE user_id = :userId AND status = 1
                 ORDER BY updated_at DESC
@@ -782,7 +792,7 @@ public class PersistenceRepository {
     public Flux<PersistenceRecords.GenerationLogRecord> listGenerationLogs(Long userId, String logType) {
         // 基础查询限定用户和未删除状态，可选类型筛选按参数决定。
         String sql = """
-                SELECT id, user_id, log_type AS record_type, title, log_data::text AS record_data, status,
+                SELECT id, team_id, user_id, log_type AS record_type, title, log_data::text AS record_data, status,
                        generation_status, generation_completed_at, generation_viewed_at, created_at, updated_at
                 FROM generation_logs
                 WHERE user_id = :userId AND status = 1
@@ -807,7 +817,7 @@ public class PersistenceRepository {
      */
     public Mono<PersistenceRecords.GenerationLogRecord> findGenerationLogById(Long userId, String id) {
         return databaseClient.sql("""
-                SELECT id, user_id, log_type AS record_type, title, log_data::text AS record_data, status,
+                SELECT id, team_id, user_id, log_type AS record_type, title, log_data::text AS record_data, status,
                        generation_status, generation_completed_at, generation_viewed_at, created_at, updated_at
                 FROM generation_logs
                 WHERE user_id = :userId AND id = :id AND status = 1
@@ -966,10 +976,10 @@ public class PersistenceRepository {
     public Mono<Void> saveMedia(PersistenceRecords.MediaFileRecord record) {
         // 媒体元数据保存使用storage_key做冲突键，并限制只能覆盖同一用户记录。
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                INSERT INTO media_files(storage_key, user_id, kind, source_url, object_storage_provider, object_storage_url, object_storage_key, bucket, region, mime_type, bytes, width, height, duration_ms, metadata, status)
-                VALUES (:storageKey, :userId, :kind, :sourceUrl, :objectStorageProvider, :objectStorageUrl, :objectStorageKey, :bucket, :region, :mimeType, :bytes, :width, :height, :durationMs, CAST(:metadata AS jsonb), 1)
+                INSERT INTO media_files(storage_key, user_id, kind, source_url, object_storage_config_id, object_storage_provider, object_storage_url, object_storage_key, bucket, region, mime_type, bytes, width, height, duration_ms, metadata, status)
+                VALUES (:storageKey, :userId, :kind, :sourceUrl, :objectStorageConfigId, :objectStorageProvider, :objectStorageUrl, :objectStorageKey, :bucket, :region, :mimeType, :bytes, :width, :height, :durationMs, CAST(:metadata AS jsonb), 1)
                 ON CONFLICT (storage_key) DO UPDATE
-                SET kind = EXCLUDED.kind, source_url = EXCLUDED.source_url, object_storage_provider = EXCLUDED.object_storage_provider,
+                SET kind = EXCLUDED.kind, source_url = EXCLUDED.source_url, object_storage_config_id = EXCLUDED.object_storage_config_id, object_storage_provider = EXCLUDED.object_storage_provider,
                     object_storage_url = EXCLUDED.object_storage_url, object_storage_key = EXCLUDED.object_storage_key,
                     bucket = EXCLUDED.bucket, region = EXCLUDED.region, mime_type = EXCLUDED.mime_type, bytes = EXCLUDED.bytes,
                     width = EXCLUDED.width, height = EXCLUDED.height, duration_ms = EXCLUDED.duration_ms, metadata = EXCLUDED.metadata,
@@ -983,6 +993,7 @@ public class PersistenceRepository {
         spec = spec.bind("objectStorageProvider", record.getObjectStorageProvider() == null ? "" : record.getObjectStorageProvider());
         spec = R2dbcBindings.bindNullable(spec, "objectStorageUrl", record.getObjectStorageUrl(), String.class);
         spec = R2dbcBindings.bindNullable(spec, "objectStorageKey", record.getObjectStorageKey(), String.class);
+        spec = R2dbcBindings.bindNullable(spec, "objectStorageConfigId", record.getObjectStorageConfigId(), String.class);
         spec = R2dbcBindings.bindNullable(spec, "bucket", record.getBucket(), String.class);
         spec = R2dbcBindings.bindNullable(spec, "region", record.getRegion(), String.class);
         spec = spec.bind("mimeType", record.getMimeType()).bind("bytes", record.getBytes());
@@ -1004,7 +1015,7 @@ public class PersistenceRepository {
      */
     public Mono<PersistenceRecords.MediaFileRecord> getMedia(Long userId, String storageKey) {
         // 媒体读取同时限定用户、存储键和未删除状态。
-        return databaseClient.sql("SELECT storage_key, user_id, kind, source_url, object_storage_provider, object_storage_url, object_storage_key, bucket, region, mime_type, bytes, width, height, duration_ms, metadata::text AS metadata, status, created_at, updated_at FROM media_files WHERE user_id = :userId AND storage_key = :storageKey AND status = 1")
+        return databaseClient.sql("SELECT storage_key, user_id, kind, source_url, object_storage_config_id, object_storage_provider, object_storage_url, object_storage_key, bucket, region, mime_type, bytes, width, height, duration_ms, metadata::text AS metadata, status, created_at, updated_at FROM media_files WHERE user_id = :userId AND storage_key = :storageKey AND status = 1")
                 .bind("userId", userId)
                 .bind("storageKey", storageKey)
                 .map((row, metadata) -> RowMappers.media(row))

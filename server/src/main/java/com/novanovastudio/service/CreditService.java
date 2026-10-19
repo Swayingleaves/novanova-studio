@@ -1,5 +1,8 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.novanovastudio.common.SystemMessage;
 
 import com.novanovastudio.common.BusinessException;
@@ -9,6 +12,7 @@ import com.novanovastudio.dto.InvitationDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.repository.CreditRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.security.TeamScope;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
@@ -78,6 +82,22 @@ public class CreditService {
     /** 响应式事务操作器 */
     private final TransactionalOperator transactionalOperator;
 
+    /** 按实际模型选择平台或团队钱包。 */
+    private final TeamTaskScopeService teamTaskScopeService;
+
+    /**
+     * 指定模型的业务扣费入口，钱包在扣费前由服务端资源归属解析。
+     * @param userId 用户标识
+     * @param operationId 稳定业务标识
+     * @param credits 扣费金额
+     * @param operationName 业务名称
+     * @param modelConfigId 模型配置标识
+     * @return 扣费完成信号
+     */
+    public Mono<Void> chargeOperation(Long userId, String operationId, BigDecimal credits, String operationName, String modelConfigId) {
+        return teamTaskScopeService.usingModel(modelConfigId, chargeOperation(userId, operationId, credits, operationName));
+    }
+
     /**
      * 查询积分设置。
      *
@@ -129,7 +149,7 @@ public class CreditService {
     public Mono<Void> initializeAccount(Long userId) {
         return creditRepository.getInitialCredits()
                 .flatMap(initialCredits -> creditRepository.createAccount(userId, initialCredits)
-                        .then(initialCredits == 0
+                        .then(CreditAmounts.of(initialCredits).compareTo(CreditAmounts.of(0)) == 0
                                 ? Mono.empty()
                                 : creditRepository.createTransaction(userId, TRANSACTION_INITIAL_GRANT, null, initialCredits, initialCredits, "新用户初始发放")));
     }
@@ -146,7 +166,7 @@ public class CreditService {
     public Mono<Void> grantInvitationReward(Long inviterUserId, Long invitedUserId) {
         return creditRepository.getInvitationRewardCredits()
                 .flatMap(rewardCredits -> {
-                    if (rewardCredits == 0) {
+                    if (CreditAmounts.of(rewardCredits).compareTo(CreditAmounts.of(0)) == 0) {
                         return Mono.empty();
                     }
                     return creditRepository.claimInvitationRewardTransaction(
@@ -171,11 +191,11 @@ public class CreditService {
      * @param generationSource String 生成来源
      * @return Mono<Void> 操作完成信号
      */
-    public Mono<Void> chargeTask(Long userId, String taskId, int credits, String taskType, String generationSource) {
-        if (credits == 0) {
+    public Mono<Void> chargeTask(Long userId, String taskId, BigDecimal credits, String taskType, String generationSource) {
+        if (CreditAmounts.of(credits).compareTo(CreditAmounts.of(0)) == 0) {
             return Mono.empty();
         }
-        return creditRepository.claimTaskTransaction(userId, taskId, TRANSACTION_TASK_CHARGE, -credits, taskReason(taskType, "扣费"), generationSource)
+        return creditRepository.claimTaskTransaction(userId, taskId, TRANSACTION_TASK_CHARGE, credits.negate(), taskReason(taskType, "扣费"), generationSource)
                 .flatMap(transactionId -> creditGrantService.consumeCredits(userId, credits)
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.insufficientCreditsToCreateGenerationTask"))))
                         .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
@@ -191,12 +211,12 @@ public class CreditService {
      * @return Mono<Void> 操作完成信号
      */
     public Mono<Void> refundTask(Long userId, String taskId, String taskType) {
-        return creditRepository.getTaskChargeAmount(taskId)
+        return creditRepository.originalWallet(taskId, userId, "").flatMap(wallet -> creditRepository.getTaskChargeAmount(taskId)
                 .flatMap(credits -> creditRepository.claimTaskTransaction(userId, taskId, TRANSACTION_TASK_REFUND, credits, taskReason(taskType, "退款"), null)
                         .flatMap(transactionId -> creditRepository.changeBalance(userId, credits)
                                 .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
                         .then())
-                .then();
+                .as(transactionalOperator::transactional).contextWrite(context -> context.put(TeamScope.WALLET_KEY, wallet)));
     }
 
     /**
@@ -210,15 +230,15 @@ public class CreditService {
      * @param operationName String 业务名称
      * @return Mono<Void> 操作完成信号
      */
-    public Mono<Void> chargeOperation(Long userId, String operationId, int credits, String operationName) {
-        if (credits < 0) {
+    public Mono<Void> chargeOperation(Long userId, String operationId, BigDecimal credits, String operationName) {
+        if (CreditAmounts.of(credits).compareTo(CreditAmounts.of(0)) < 0) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.creditChargeMustNotBeNegative")));
         }
-        if (credits == 0) {
+        if (CreditAmounts.of(credits).compareTo(CreditAmounts.of(0)) == 0) {
             return Mono.empty();
         }
         String chargeReason = operationReason(operationName, "扣费", operationId);
-        return creditRepository.claimOperationTransaction(userId, operationId, TRANSACTION_TASK_CHARGE, -credits, chargeReason)
+        return creditRepository.claimOperationTransaction(userId, operationId, TRANSACTION_TASK_CHARGE, credits.negate(), chargeReason)
                 .flatMap(transactionId -> creditGrantService.consumeCredits(userId, credits)
                         .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.insufficientCreditsFor", operationName))))
                         .flatMap(balance -> creditRepository.updateTransactionBalance(transactionId, balance)))
@@ -236,11 +256,11 @@ public class CreditService {
      */
     public Mono<Void> refundOperation(Long userId, String operationId, String operationName) {
         String chargeReason = operationReason(operationName, "扣费", operationId);
-        return creditRepository.getOperationChargeAmount(userId, chargeReason)
+        return creditRepository.originalWallet("", userId, chargeReason).flatMap(wallet -> creditRepository.getOperationChargeAmount(userId, chargeReason)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.noChargeFoundToRefund", operationName))))
                 .flatMap(credits -> refundOperationAmount(userId, operationId, operationName, credits))
                 .then()
-                .as(transactionalOperator::transactional);
+                .as(transactionalOperator::transactional).contextWrite(context -> context.put(TeamScope.WALLET_KEY, wallet)));
     }
 
     /**
@@ -252,17 +272,17 @@ public class CreditService {
      * @param credits int 本次应退积分，零表示不退款
      * @return Mono&lt;Void&gt; 退款完成信号
      */
-    public Mono<Void> refundOperation(Long userId, String operationId, String operationName, int credits) {
-        if (credits < 0) {
+    public Mono<Void> refundOperation(Long userId, String operationId, String operationName, BigDecimal credits) {
+        if (CreditAmounts.of(credits).compareTo(CreditAmounts.of(0)) < 0) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "退款积分不能小于0"));
         }
-        if (credits == 0) return Mono.empty();
-        return creditRepository.getOperationChargeAmount(userId, operationReason(operationName, "扣费", operationId))
+        if (CreditAmounts.of(credits).compareTo(CreditAmounts.of(0)) == 0) return Mono.empty();
+        return creditRepository.originalWallet("", userId, operationReason(operationName, "扣费", operationId)).flatMap(wallet -> creditRepository.getOperationChargeAmount(userId, operationReason(operationName, "扣费", operationId))
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.noChargeFoundToRefund", operationName))))
-                .flatMap(charged -> credits <= charged
+                .flatMap(charged -> CreditAmounts.of(credits).compareTo(CreditAmounts.of(charged)) <= 0
                         ? refundOperationAmount(userId, operationId, operationName, credits)
                         : Mono.<Void>error(new BusinessException(ErrorCode.PARAM_INVALID, "退款积分不能超过原始扣费")))
-                .as(transactionalOperator::transactional);
+                .as(transactionalOperator::transactional).contextWrite(context -> context.put(TeamScope.WALLET_KEY, wallet)));
     }
 
     /**
@@ -273,9 +293,9 @@ public class CreditService {
      * @param operationName String 业务名称
      * @return Mono&lt;Integer&gt; 已退积分，尚无退款流水时为零
      */
-    public Mono<Integer> getOperationRefundAmount(Long userId, String operationId, String operationName) {
+    public Mono<BigDecimal> getOperationRefundAmount(Long userId, String operationId, String operationName) {
         return creditRepository.getOperationRefundAmount(userId, operationReason(operationName, "退款", operationId))
-                .defaultIfEmpty(0);
+                .defaultIfEmpty(BigDecimal.ZERO);
     }
 
     /**
@@ -287,7 +307,7 @@ public class CreditService {
      * @param credits int 已校验的退款积分
      * @return Mono&lt;Void&gt; 退款完成信号
      */
-    private Mono<Void> refundOperationAmount(Long userId, String operationId, String operationName, int credits) {
+    private Mono<Void> refundOperationAmount(Long userId, String operationId, String operationName, BigDecimal credits) {
         return creditRepository.claimOperationTransaction(userId, operationId, TRANSACTION_TASK_REFUND, credits,
                         operationReason(operationName, "退款", operationId))
                 .flatMap(transactionId -> creditRepository.changeBalance(userId, credits)
@@ -305,13 +325,13 @@ public class CreditService {
      * @param reason String 调整原因
      * @return Mono<CreditBalanceResponse> 调整后的用户积分余额
      */
-    public Mono<CreditDtos.CreditBalanceResponse> adjustUserCredits(Long userId, Long operatorUserId, int changeAmount, String reason) {
-        if (changeAmount == 0) {
+    public Mono<CreditDtos.CreditBalanceResponse> adjustUserCredits(Long userId, Long operatorUserId, BigDecimal changeAmount, String reason) {
+        if (CreditAmounts.of(changeAmount).compareTo(CreditAmounts.of(0)) == 0) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.creditChangeMustNotBeZero")));
         }
-        Mono<Integer> balanceChange = changeAmount > 0
+        Mono<BigDecimal> balanceChange = CreditAmounts.of(changeAmount).compareTo(CreditAmounts.of(0)) > 0
                 ? creditRepository.changeBalance(userId, changeAmount)
-                : creditGrantService.consumeCredits(userId, -changeAmount);
+                : creditGrantService.consumeCredits(userId, changeAmount.negate());
         return balanceChange
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.insufficientCreditsForDeduction"))))
                 .flatMap(balance -> creditRepository.createTransaction(userId, TRANSACTION_ADMIN_ADJUSTMENT, operatorUserId, changeAmount, balance, reason.trim())
@@ -345,7 +365,8 @@ public class CreditService {
      * @return Mono<CreditOverviewResponse> 积分消耗概览
      */
     public Mono<CreditDtos.CreditOverviewResponse> getAdminCreditOverview(Long userId, LocalDate startDate, LocalDate endDate, String generationType, String trendUnit) {
-        return Mono.defer(() -> queryCreditOverview(userId, startDate, endDate, generationType, trendUnit));
+        return Mono.defer(() -> queryCreditOverview(userId, startDate, endDate, generationType, trendUnit))
+                .contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
     }
 
     /**
@@ -402,7 +423,7 @@ public class CreditService {
                             creditRepository.listAdminCreditTransactions(query, page, pageSize).collectList(),
                             creditRepository.countAdminTransactions(query))
                     .map(result -> new CreditDtos.AdminCreditTransactionListResponse(result.getT1(), result.getT2()));
-        });
+        }).contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
     }
 
     /**
@@ -499,15 +520,15 @@ public class CreditService {
                                                             LocalDate endDate,
                                                             String trendUnit,
                                                             List<CreditDtos.CreditTrendItem> trendItems) {
-        Map<String, Long> consumedCreditsByPeriod = new HashMap<>();
+        Map<String, BigDecimal> consumedCreditsByPeriod = new HashMap<>();
         trendItems.forEach(item -> consumedCreditsByPeriod.put(item.period(), item.consumedCredits()));
         LocalDate currentDate = TREND_UNIT_DAY.equals(trendUnit) ? startDate : startDate.withDayOfMonth(1);
         LocalDate lastDate = TREND_UNIT_DAY.equals(trendUnit) ? endDate : endDate.withDayOfMonth(1);
         DateTimeFormatter formatter = TREND_UNIT_DAY.equals(trendUnit) ? DateTimeFormatter.ISO_LOCAL_DATE : DateTimeFormatter.ofPattern("yyyy-MM");
-        java.util.ArrayList<CreditDtos.CreditTrendItem> completedTrend = new java.util.ArrayList<>();
+        java.util.ArrayList < CreditDtos.CreditTrendItem> completedTrend = new java.util.ArrayList<>();
         while (!currentDate.isAfter(lastDate)) {
             String period = currentDate.format(formatter);
-            completedTrend.add(new CreditDtos.CreditTrendItem(period, consumedCreditsByPeriod.getOrDefault(period, 0L)));
+            completedTrend.add(new CreditDtos.CreditTrendItem(period, consumedCreditsByPeriod.getOrDefault(period, BigDecimal.ZERO)));
             currentDate = TREND_UNIT_DAY.equals(trendUnit) ? currentDate.plusDays(1) : currentDate.plusMonths(1);
         }
         return completedTrend;

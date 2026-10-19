@@ -6,7 +6,7 @@ import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/shared/lib/team-navigation";
 import { App, Alert, Button, Checkbox, Empty, Input, Modal, Pagination, Progress, Select, Spin, Tag } from "antd";
 import { BookOpenText, Clock3, FilePlus2, Search, Trash2, Upload } from "lucide-react";
 

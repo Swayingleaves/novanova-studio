@@ -1,5 +1,9 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.service.TeamTaskScopeService;
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.BusinessException;
@@ -43,6 +47,9 @@ import reactor.core.publisher.Mono;
 @Slf4j
 public class WholeBookAdaptationRunner {
 
+    /** 持久化任务的团队作用域恢复。 */
+    private final TeamTaskScopeService teamTaskScopeService;
+
     /** 执行租约秒数。 */
     public static final int LEASE_SECONDS = 300;
 
@@ -77,6 +84,15 @@ public class WholeBookAdaptationRunner {
      * @return Mono&lt;Void&gt; 执行结果
      */
     public Mono<Void> process(String jobId) {
+        return teamTaskScopeService.execute("novel_adaptation_jobs", jobId, () -> processInTeam(jobId));
+    }
+
+    /**
+     * 在原任务空间内执行业务，保留现有错误收尾与退款。
+     * @param jobId 任务标识
+     * @return 执行完成信号
+     */
+    private Mono<Void> processInTeam(String jobId) {
         return jobRepository.claim(jobId, LEASE_SECONDS).flatMap(claimed -> {
             if (!claimed) return Mono.<Void>empty();
             Disposable renewal = Flux.interval(Duration.ofSeconds(LEASE_SECONDS / 3))
@@ -552,7 +568,7 @@ public class WholeBookAdaptationRunner {
                             : Mono.just(data);
                     return checked.flatMap(validated -> scriptService.saveAiDraft(job.userId(), job.projectId(),
                                     workflow.revision(), "novelAdaptation" + draftStage(unit.stage()), targetType,
-                                    null, instruction, job.modelValue(), 0, source, validated));
+                                    null, instruction, job.modelValue(), BigDecimal.ZERO, source, validated));
                 })
                 .flatMap(saved -> novelAdaptationRepository.saveDraft(saved.id(), job.projectId(),
                                 draftStage(unit.stage()), adaptationSettings(job, workflow), List.of())
@@ -622,15 +638,15 @@ public class WholeBookAdaptationRunner {
 
     /** 按每个预扣标识下未完成的单元数退回积分。 */
     private Mono<Void> refundUnfinished(NovelAdaptationJobRepository.Job job,
-                                        List<WholeBookAdaptationRepository.Unit> units, int unitPrice,
+                                        List<WholeBookAdaptationRepository.Unit> units, BigDecimal unitPrice,
                                         Set<String> charges) {
-        if (unitPrice <= 0) return Mono.empty();
+        if (CreditAmounts.of(unitPrice).compareTo(CreditAmounts.of(0)) <= 0) return Mono.empty();
         return Flux.fromIterable(charges).concatMap(chargeId -> {
             int unfinished = (int) units.stream()
                     .filter(unit -> chargeId.equals(unit.chargeId()) && unit.output() == null).count();
             return unfinished == 0 ? Mono.empty()
                     : creditService.refundOperation(job.userId(), chargeId,
-                            WholeBookAdaptationService.OPERATION_NAME, unfinished * unitPrice);
+                            WholeBookAdaptationService.OPERATION_NAME, CreditAmounts.multiply(unitPrice, unfinished));
         }).then();
     }
 

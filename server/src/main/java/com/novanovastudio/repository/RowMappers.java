@@ -1,5 +1,7 @@
 package com.novanovastudio.repository;
 
+import java.math.BigDecimal;
+
 import com.novanovastudio.entity.AiGenerationTask;
 import com.novanovastudio.entity.ApiAccessLog;
 import com.novanovastudio.entity.EmailVerificationCode;
@@ -39,12 +41,14 @@ public final class RowMappers {
         user.setUsername(row.get("username", String.class));
         user.setPassword(row.get("password", String.class));
         user.setEmail(row.get("email", String.class));
+        user.setCreatedByTeamId(row.get("created_by_team_id", Long.class));
+        user.setCreatedByUserId(row.get("created_by_user_id", Long.class));
         user.setNickname(row.get("nickname", String.class));
         user.setAvatar(row.get("avatar", String.class));
         user.setRole(row.get("role", String.class));
         user.setStatus(row.get("status", Integer.class));
         user.setTokenVersion(row.get("token_version", Integer.class));
-        user.setCreditBalance(row.get("credit_balance", Integer.class));
+        user.setCreditBalance(row.get("credit_balance", BigDecimal.class));
         user.setInvitationCode(row.get("invitation_code", String.class));
         user.setInvitedByUserId(row.get("invited_by_user_id", Long.class));
         user.setLastLoginAt(row.get("last_login_at", OffsetDateTime.class));
@@ -123,6 +127,7 @@ public final class RowMappers {
     public static PersistenceRecords.UserAiChannelRecord userAiChannel(Row row) {
         // 将user_ai_channels表字段转换为用户AI渠道记录。
         PersistenceRecords.UserAiChannelRecord record = new PersistenceRecords.UserAiChannelRecord();
+        record.setTeamId(row.get("team_id", Long.class));
         record.setId(row.get("id", Long.class));
         record.setUserId(row.get("user_id", Long.class));
         record.setChannelId(row.get("channel_id", String.class));
@@ -146,6 +151,7 @@ public final class RowMappers {
      */
     public static PersistenceRecords.UserAiModelConfigRecord userAiModelConfig(Row row) {
         PersistenceRecords.UserAiModelConfigRecord record = new PersistenceRecords.UserAiModelConfigRecord();
+        record.setTeamId(row.get("team_id", Long.class));
         record.setId(row.get("id", Long.class));
         record.setUserId(row.get("user_id", Long.class));
         record.setModelConfigId(row.get("model_config_id", String.class));
@@ -155,7 +161,7 @@ public final class RowMappers {
         record.setCapabilities(row.get("capabilities", String.class));
         record.setDefaultModel(row.get("is_default", Boolean.class));
         record.setSortOrder(row.get("sort_order", Integer.class));
-        record.setCreditCost(row.get("credit_cost", Integer.class));
+        record.setCreditCost(row.get("credit_cost", BigDecimal.class));
         record.setCreditUnit(row.get("credit_unit", String.class));
         record.setThinkingEnabled(row.get("thinking_enabled", Boolean.class));
         record.setReasoningEffort(row.get("reasoning_effort", String.class));
@@ -180,6 +186,7 @@ public final class RowMappers {
     public static PersistenceRecords.UserObjectStorageRecord userObjectStorage(Row row) {
         // 将user_object_storage_configs表字段转换为对象存储记录。
         PersistenceRecords.UserObjectStorageRecord record = new PersistenceRecords.UserObjectStorageRecord();
+        record.setTeamId(row.get("team_id", Long.class));
         record.setId(row.get("id", Long.class));
         record.setUserId(row.get("user_id", Long.class));
         record.setStorageId(row.get("storage_id", String.class));
@@ -257,6 +264,7 @@ public final class RowMappers {
         record.setKind(row.get("kind", String.class));
         record.setSourceUrl(row.get("source_url", String.class));
         record.setObjectStorageProvider(row.get("object_storage_provider", String.class));
+        record.setObjectStorageConfigId(row.get("object_storage_config_id", String.class));
         record.setObjectStorageUrl(row.get("object_storage_url", String.class));
         record.setObjectStorageKey(row.get("object_storage_key", String.class));
         record.setBucket(row.get("bucket", String.class));

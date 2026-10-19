@@ -1,5 +1,9 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+
 import com.alibaba.fastjson2.JSONObject;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -317,7 +321,7 @@ public final class ScriptDtos {
     /** AI草稿。 */
     public record AiDraft(String id, String projectId, String actionType, String targetType, String targetId,
                           long baseRevision, String instruction, JSONObject sourceData, JSONObject draftData,
-                          String model, int chargedCredits, String status, OffsetDateTime createdAt) {
+                          String model, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal chargedCredits, String status, OffsetDateTime createdAt) {
     }
 
     /** 应用AI草稿请求。 */
@@ -407,7 +411,7 @@ public final class ScriptDtos {
 
     /** 分析报告。 */
     public record AnalysisReport(String id, String projectId, String scopeType, String scopeId, String summary,
-                                 String model, int chargedCredits, long sourceRevision,
+                                 String model, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal chargedCredits, long sourceRevision,
                                  OffsetDateTime createdAt, List<AnalysisIssue> issues) {
     }
 

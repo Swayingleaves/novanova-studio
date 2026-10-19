@@ -15,9 +15,10 @@ import { GenerationStyleCover, GenerationStyleMenu } from "@/features/generation
 import { filterGenerationStyles, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { getStyleCommandRange, parseGenerationStyleMessage, removeStyleCommand } from "@/features/generation/lib/style-command";
 import type { SkillOption } from "@/services/api/server";
+import { useSpaceBrand } from "@/features/team/use-space-brand";
 
 export function CreationComposer({
-    agentLabel = "Novanova Agent",
+    agentLabel,
     value,
     placeholder,
     references,
@@ -48,6 +49,7 @@ export function CreationComposer({
     notice,
 }: CreationComposerProps) {
     const translate = useTranslation();
+    const brand = useSpaceBrand();
     const { message } = App.useApp();
     const inputRef = useRef<TextAreaRef>(null);
     const focusedValueRef = useRef(false);
@@ -185,7 +187,7 @@ export function CreationComposer({
                                 <span className="size-1.5 rounded-full bg-[var(--studio-action)] shadow-[0_0_0_3px_var(--studio-primary-soft)]" />
                             </span>
                             <span className="sr-only">{translate("generation.agentReady")}</span>
-                            <span className="truncate">{agentLabel}</span>
+                            <span className="truncate">{agentLabel ?? brand.agentName}</span>
                         </span>
                         <span>{queued ? translate("generation.queued") : running ? translate("generation.generating") : `${value.length} / 2000`}</span>
                     </div>

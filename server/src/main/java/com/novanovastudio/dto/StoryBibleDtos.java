@@ -1,5 +1,9 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+
 import com.alibaba.fastjson2.JSONObject;
 import java.util.List;
 
@@ -20,22 +24,22 @@ public final class StoryBibleDtos {
     public record QuoteRequest(String projectId, String model, List<String> sectionIds) { }
 
     /** 分析报价。 */
-    public record Quote(String model, int billableChars, int credits, int tierMinChars, Integer tierMaxChars,
+    public record Quote(String model, int billableChars, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits, int tierMinChars, Integer tierMaxChars,
                         long sourceRevision, long pricingRevision, int estimatedBatches,
                         QuickConfiguration quickConfiguration) { }
 
     /** 启动分析请求，携带报价快照用于校验。 */
     public record StartRequest(String projectId, String model, List<String> sectionIds, String clientRequestId,
-                               int expectedCredits, long expectedSourceRevision, long expectedPricingRevision) { }
+                               @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal expectedCredits, long expectedSourceRevision, long expectedPricingRevision) { }
 
     /** 分析任务请求。 */
     public record JobRequest(String projectId, String jobId) { }
 
     /** 分析任务状态，credits为预扣积分，refundedCredits为已退积分。 */
     public record JobStatus(String jobId, String status, String stage, int processedUnits, int totalUnits,
-                            String model, int billableChars, int credits, List<String> sectionIds, String errorMessage,
-                            String createdAt, Integer creditBalance, int supplementCalls,
-                            List<AnalysisGap> gaps, int refundedCredits) { }
+                            String model, int billableChars, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits, List<String> sectionIds, String errorMessage,
+                            String createdAt, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditBalance, int supplementCalls,
+                            List<AnalysisGap> gaps, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal refundedCredits) { }
 
     /** 分析容量，输入字符上限由管理员按渠道实际能力验证，不能把上下文Token数当作字数。 */
     public record QuickConfiguration(Integer contextWindowTokens, Integer maximumInputCharacters,
@@ -105,7 +109,7 @@ public final class StoryBibleDtos {
                                List<String> aliasIds, List<String> evidenceIds) { }
 
     /** 价格档位，maxChars为空表示无上限。 */
-    public record PricingTier(Integer minChars, Integer maxChars, Integer credits) { }
+    public record PricingTier(Integer minChars, Integer maxChars, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits) { }
 
     /** 单个文本模型的价格配置。 */
     public record ModelPricing(String modelConfigId, String model, String displayName, List<PricingTier> tiers,

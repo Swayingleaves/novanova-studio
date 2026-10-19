@@ -1,4 +1,8 @@
 "use client";
+
+import { creditText, creditAmount } from "@/shared/lib/credit-amounts";
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
+
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { useTranslation } from "@/features/locale/use-translation";
@@ -31,7 +35,7 @@ export function CreditCardManagement() {
     const { message } = App.useApp();
     const copyText = useCopyText();
     const [quantity, setQuantity] = useState<number | null>(100);
-    const [creditsPerCard, setCreditsPerCard] = useState<number | null>(null);
+    const [creditsPerCard, setCreditsPerCard] = useState<CreditAmount | null>(null);
     const [generated, setGenerated] = useState<{ batchId: number; cardCodes: string[] } | null>(null);
     const [batchPage, setBatchPage] = useState(1);
     const [cardPage, setCardPage] = useState(1);
@@ -53,7 +57,7 @@ export function CreditCardManagement() {
     });
 
     const handleGenerate = async () => {
-        if (!creditsPerCard || creditsPerCard < 1) {
+        if (!creditsPerCard || creditAmount(creditsPerCard).lessThan(0)) {
             message.warning(translate("administration.enterPositiveIntegerCreditsPerCard"));
             return;
         }
@@ -74,7 +78,7 @@ export function CreditCardManagement() {
 
     const batchColumns: TableProps<ServerCreditCardBatch>["columns"] = [
         { title: translate("administration.batch"), dataIndex: "id", width: 90, render: (value: number) => <span className="font-mono tabular-nums">#{value}</span> },
-        { title: translate("administration.creditsPerCard"), dataIndex: "creditsPerCard", width: 110, render: (value: number) => <span className="font-semibold tabular-nums">{value.toLocaleString(currentLanguageTag())}</span> },
+        { title: translate("administration.creditsPerCard"), dataIndex: "creditsPerCard", width: 110, render: (value: CreditAmount) => <span className="font-semibold tabular-nums">{creditText(value)}</span> },
         { title: translate("administration.stock"), dataIndex: "quantity", width: 180, render: (_: number, record) => <span className="tabular-nums">{record.availableCount} {translate("administration.available")}{record.redeemedCount} {translate("administration.redeemed")}</span> },
         { title: translate("administration.createAdministrator"), dataIndex: "createdByName", render: (_: string, record) => <div><div className="text-[var(--studio-ink)]">{record.createdByName}</div><div className="text-xs text-[var(--studio-muted)]">{record.createdByEmail}</div></div> },
         { title: translate("administration.createdAt"), dataIndex: "createdAt", width: 180, render: (value: string) => value ? new Date(value).toLocaleString(currentLanguageTag()) : "-" },
@@ -83,7 +87,7 @@ export function CreditCardManagement() {
     const cardColumns: TableProps<ServerCreditCard>["columns"] = [
         { title: translate("administration.redemptionCode"), dataIndex: "codeMasked", width: 240, render: (_: string, record) => <span className="font-mono text-xs">{record.code || record.codeMasked}</span> },
         { title: translate("administration.batch"), dataIndex: "batchId", width: 80, render: (value: number) => <span className="font-mono">#{value}</span> },
-        { title: translate("administration.credits"), dataIndex: "credits", width: 100, render: (value: number) => <span className="font-semibold tabular-nums">{value.toLocaleString(currentLanguageTag())}</span> },
+        { title: translate("administration.credits"), dataIndex: "credits", width: 100, render: (value: CreditAmount) => <span className="font-semibold tabular-nums">{creditText(value)}</span> },
         { title: translate("administration.status"), dataIndex: "status", width: 100, render: (value: ServerCreditCard["status"]) => value === "redeemed" ? <Tag color="green">{translate("administration.redeemed_b71c76")}</Tag> : <Tag color="blue">{translate("administration.notRedeemed")}</Tag> },
         { title: translate("administration.redeemedBy"), dataIndex: "redeemedByEmail", width: 220, render: (_: string | null, record) => record.redeemedByEmail ? <div><div className="truncate text-[var(--studio-ink)]">{record.redeemedByNickname || record.redeemedByUsername || record.redeemedByEmail}</div><div className="truncate text-xs text-[var(--studio-muted)]">{record.redeemedByEmail}</div></div> : <span className="text-[var(--studio-faint)]">-</span> },
         { title: translate("administration.redeemedAt"), dataIndex: "redeemedAt", width: 180, render: (value: string) => value ? new Date(value).toLocaleString(currentLanguageTag()) : "-" },
@@ -100,7 +104,7 @@ export function CreditCardManagement() {
                     </div>
                     <Space.Compact>
                         <InputNumber min={1} max={1000} precision={0} value={quantity} onChange={setQuantity} addonBefore={translate("administration.quantity")} />
-                        <InputNumber min={1} precision={0} value={creditsPerCard} onChange={(value) => setCreditsPerCard(value)} addonBefore={translate("administration.creditsPerCard")} />
+                        <InputNumber<string> stringMode min="0.000001" precision={6} value={creditsPerCard === null ? null : String(creditsPerCard)} onChange={(value) => setCreditsPerCard(value)} addonBefore={translate("administration.creditsPerCard")} />
                         <Button type="primary" icon={<Plus className="size-4" />} onClick={() => void handleGenerate()}>{translate("administration.generate")}</Button>
                     </Space.Compact>
                 </div>

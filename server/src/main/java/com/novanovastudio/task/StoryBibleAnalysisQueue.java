@@ -69,7 +69,7 @@ public class StoryBibleAnalysisQueue {
                             log.error("补发故事知识库分析任务失败", error);
                             return Mono.empty();
                         }))
-                .subscribe();
+                .contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true)).subscribe();
     }
 
     /**

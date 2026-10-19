@@ -1,5 +1,6 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.common.CreditAmounts;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.StoryBibleDtos;
@@ -92,7 +93,7 @@ public final class StoryBibleSupport {
             if (tier.minChars() != expectedMin) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, "价格档位必须从1字开始且首尾相接、不能重叠");
             }
-            if (tier.credits() < 0) {
+            if (CreditAmounts.of(tier.credits()).compareTo(CreditAmounts.of(0)) < 0) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, "档位积分不能小于0");
             }
             if (tier.maxChars() == null) {

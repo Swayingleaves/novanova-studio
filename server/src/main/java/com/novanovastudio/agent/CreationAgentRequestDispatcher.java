@@ -94,8 +94,8 @@ public class CreationAgentRequestDispatcher {
      * @return Mono<Void> 入队和调度完成信号
      */
     public Mono<Void> enqueue(CreationAgentRequest request) {
-        return requestQueue.enqueue(request.getUserId(), request.getEntrySource(), request.getId())
-                .then(dispatchAvailable(request.getUserId(), request.getEntrySource()));
+        return requestQueue.enqueue(request.getUserId(), request.getQueueSource(), request.getId())
+                .then(Mono.defer(() -> dispatchAvailable(request.getUserId(), request.getQueueSource())));
     }
 
     /**
@@ -140,7 +140,7 @@ public class CreationAgentRequestDispatcher {
                                     request.getId(), "queued", "排队中"));
                             return enqueue(request);
                         }))
-                .then();
+                .then().contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true));
     }
 
     /**
@@ -155,7 +155,7 @@ public class CreationAgentRequestDispatcher {
                 .flatMap(request -> requestQueue.claimCanceledActiveRecovery(activeRequest.userId(),
                                 activeRequest.entrySource(), activeRequest.requestId())
                         .flatMap(recoveryClaim -> recoverWithClaim(recoveryClaim, "主Agent请求已取消")
-                                .then(dispatchAvailable(activeRequest.userId(), activeRequest.entrySource()))
+                                .then(Mono.defer(() -> dispatchAvailable(activeRequest.userId(), activeRequest.entrySource())))
                                 .onErrorResume(exception -> requestQueue.releaseRecoveryClaim(recoveryClaim)
                                         .then(Mono.error(exception)))))
                 .then();
@@ -174,7 +174,7 @@ public class CreationAgentRequestDispatcher {
     private Mono<Void> recoverExpiredActiveRequest(CreationAgentRequestQueue.ExpiredActiveRequest expiredRequest) {
         CreationAgentRequestQueue.RecoveryClaim recoveryClaim = expiredRequest.recoveryClaim();
         return recoverWithClaim(recoveryClaim, "主Agent请求活动租约已失效，已中断")
-                .then(dispatchAvailable(expiredRequest.userId(), expiredRequest.entrySource()))
+                .then(Mono.defer(() -> dispatchAvailable(expiredRequest.userId(), expiredRequest.entrySource())))
                 .onErrorResume(exception -> requestQueue.releaseRecoveryClaim(recoveryClaim)
                         .then(Mono.error(exception)));
     }
@@ -261,7 +261,7 @@ public class CreationAgentRequestDispatcher {
             interruptLostLeaseRequest(userId, entrySource, requestId).block();
         } catch (Exception exception) {
             log.error("执行主Agent请求失败: requestId={}", requestId, exception);
-            finishUnexpectedFailure(requestId, exception).block();
+            finishUnexpectedFailure(requestId, exception).contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true)).block();
         } finally {
             if (executionDisposable != null && !executionDisposable.isDisposed()) {
                 executionDisposable.dispose();
@@ -285,7 +285,7 @@ public class CreationAgentRequestDispatcher {
      */
     private void releaseAndDispatch(Long userId, String entrySource, String requestId) {
         requestQueue.releaseActiveRequest(userId, entrySource, requestId)
-                .then(dispatchAvailable(userId, entrySource))
+                .then(Mono.defer(() -> dispatchAvailable(userId, entrySource)))
                 .subscribe(
                         ignored -> {
                         },
@@ -304,7 +304,7 @@ public class CreationAgentRequestDispatcher {
         log.warn("主Agent请求活动租约续期未生效: requestId={}", requestId);
         return requestQueue.claimMissingLeaseRecovery(userId, entrySource, requestId)
                 .flatMap(recoveryClaim -> recoverWithClaim(recoveryClaim, message)
-                        .then(dispatchAvailable(userId, entrySource))
+                        .then(Mono.defer(() -> dispatchAvailable(userId, entrySource)))
                         .onErrorResume(exception -> requestQueue.releaseRecoveryClaim(recoveryClaim)
                                 .then(Mono.error(exception))));
     }
@@ -348,14 +348,14 @@ public class CreationAgentRequestDispatcher {
      * @return Mono<Void> 处理完成信号
      */
     private Mono<Void> interruptIfLeaseExpired(CreationAgentRequest request) {
-        return requestQueue.hasActiveRequest(request.getUserId(), request.getEntrySource(), request.getId())
+        return requestQueue.hasActiveRequest(request.getUserId(), request.getQueueSource(), request.getId())
                 .filter(active -> !active)
-                .flatMap(ignored -> requestQueue.claimMissingLeaseRecovery(request.getUserId(), request.getEntrySource(), request.getId())
-                        .flatMap(recoveryClaim -> requestQueue.hasActiveRequest(request.getUserId(), request.getEntrySource(), request.getId())
+                .flatMap(ignored -> requestQueue.claimMissingLeaseRecovery(request.getUserId(), request.getQueueSource(), request.getId())
+                        .flatMap(recoveryClaim -> requestQueue.hasActiveRequest(request.getUserId(), request.getQueueSource(), request.getId())
                                 .flatMap(active -> Boolean.TRUE.equals(active)
                                         ? requestQueue.releaseRecoveryClaim(recoveryClaim)
                                         : recoverWithClaim(recoveryClaim, "服务重启导致请求已中断")
-                                                .then(dispatchAvailable(request.getUserId(), request.getEntrySource())))
+                                                .then(Mono.defer(() -> dispatchAvailable(request.getUserId(), request.getQueueSource()))))
                                 .onErrorResume(exception -> requestQueue.releaseRecoveryClaim(recoveryClaim)
                                         .then(Mono.error(exception)))))
                 .then();
@@ -410,7 +410,7 @@ public class CreationAgentRequestDispatcher {
                     case "canceled" -> finishCanceledRequest(request, recoveryClaim);
                     default -> requestQueue.releaseRecoveredActiveRequest(recoveryClaim);
                 })
-                .switchIfEmpty(Mono.just(requestQueue.releaseRecoveredActiveRequest(recoveryClaim)))
+                .switchIfEmpty(Mono.defer(() -> Mono.just(requestQueue.releaseRecoveredActiveRequest(recoveryClaim))))
                 .flatMap(recovery -> recovery);
     }
 
@@ -481,7 +481,7 @@ public class CreationAgentRequestDispatcher {
     private Mono<Void> cancelPersistedRequest(CreationAgentRequest request) {
         Mono<Void> cancelPlan = request.getPlanId() == null || request.getPlanId().isBlank()
                 ? Mono.empty()
-                : planRepository.cancelPlan(request.getPlanId());
+                : Mono.defer(() -> planRepository.cancelPlan(request.getPlanId()));
         return Flux.fromIterable(requestRepository.taskIds(request))
                 .concatMap(taskId -> aiTaskService.cancelTaskForUser(request.getUserId(), taskId)
                         .onErrorResume(exception -> {
@@ -514,7 +514,7 @@ public class CreationAgentRequestDispatcher {
     private Mono<Void> interruptRequest(CreationAgentRequest request, String message) {
         Mono<Void> failPlan = request.getPlanId() == null || request.getPlanId().isBlank()
                 ? Mono.empty()
-                : planRepository.markInterruptedPlanFailed(request.getPlanId(), message);
+                : Mono.defer(() -> planRepository.markInterruptedPlanFailed(request.getPlanId(), message));
         return Flux.fromIterable(requestRepository.taskIds(request))
                 .concatMap(taskId -> aiTaskService.cancelTaskForUser(request.getUserId(), taskId)
                         .onErrorResume(exception -> {

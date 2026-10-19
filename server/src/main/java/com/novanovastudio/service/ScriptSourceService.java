@@ -1,5 +1,6 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.service.TeamTaskScopeService;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.ScriptSourceDtos;
@@ -52,6 +53,12 @@ import reactor.core.scheduler.Schedulers;
 @Service
 @RequiredArgsConstructor
 public class ScriptSourceService {
+
+    /** 持久化任务的团队作用域恢复。 */
+    private final TeamTaskScopeService teamTaskScopeService;
+
+    /** 原文实际存储计量。 */
+    private final StorageBillingService storageBillingService;
 
     /** 沿用现有上传上限。 */
     private static final long MAX_FILE_BYTES = 50L * 1024 * 1024;
@@ -299,6 +306,15 @@ public class ScriptSourceService {
      * @return Mono&lt;Void&gt; 处理结果
      */
     public Mono<Void> process(String taskId) {
+        return teamTaskScopeService.execute("script_source_import_tasks", taskId, () -> processInTeam(taskId));
+    }
+
+    /**
+     * 在原任务空间内执行业务，保留现有错误收尾与退款。
+     * @param taskId 任务标识
+     * @return 执行完成信号
+     */
+    private Mono<Void> processInTeam(String taskId) {
         return repository.claim(taskId, TASK_LEASE_SECONDS)
                 .flatMap(claimed -> {
                     if (!claimed) {
@@ -369,7 +385,7 @@ public class ScriptSourceService {
      * @return Mono&lt;Prepared&gt; 私有存储结果
      */
     private Mono<Prepared> storeOriginal(long userId, String documentId, String extension, Path staged, long bytes) {
-        return persistenceService.getPlatformObjectStorageConfig().flatMap(config -> Mono.fromCallable(() -> {
+        return storageBillingService.requireWritable(userId).then(persistenceService.getPlatformObjectStorageConfig().flatMap(config -> Mono.fromCallable(() -> {
             // 假设默认桶保持私有；一旦匿名可读立即中止导入，避免原文泄漏。
             if (!objectStorageService.verifyPrivateBucket(config)) {
                 throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前默认对象存储桶允许匿名读取，已停止导入原文，请联系管理员修正存储权限");
@@ -377,7 +393,7 @@ public class ScriptSourceService {
             String objectKey = "script-source/" + userId + "/" + documentId + "/original." + extension;
             objectStorageService.putPrivateObject(config, objectKey, staged);
             return new Prepared(config.id(), objectKey, sha256(staged), bytes);
-        }));
+        }).flatMap(prepared -> storageBillingService.registerObject(config.id(), prepared.objectKey(), bytes).thenReturn(prepared))));
     }
 
     /**
@@ -409,7 +425,7 @@ public class ScriptSourceService {
             return repository.fail(document.id(), "无法创建解析暂存文件");
         }
         Path staged = temp;
-        return downloadAndParse(document, staged)
+        return teamTaskScopeService.requireCurrentActive().then(downloadAndParse(document, staged))
                 .flatMap(parsed -> persist(document, parsed))
                 .onErrorResume(error -> {
                     log.error("原文解析失败: documentId={}", document.id(), error);
@@ -618,19 +634,7 @@ public class ScriptSourceService {
      * @return Mono&lt;Void&gt; 清理结果
      */
     private Mono<Void> deleteStoredObject(Prepared prepared) {
-        return persistenceService.getPlatformObjectStorageConfig(prepared.storageId())
-                .doOnNext(config -> {
-                    try {
-                        objectStorageService.deletePrivateObject(config, prepared.objectKey());
-                    } catch (RuntimeException exception) {
-                        log.error("清理原文对象失败: key={}", prepared.objectKey(), exception);
-                    }
-                })
-                .onErrorResume(error -> {
-                    log.error("读取对象存储配置失败，无法清理原文对象: key={}", prepared.objectKey(), error);
-                    return Mono.empty();
-                })
-                .then();
+        return storageBillingService.requestObjectDeletion(prepared.storageId(), prepared.objectKey());
     }
 
     /**

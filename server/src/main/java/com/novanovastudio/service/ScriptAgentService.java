@@ -1,5 +1,8 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentScopeAgentFactory;
@@ -184,14 +187,14 @@ public class ScriptAgentService {
         ScriptDtos.GenerateDraftRequest draftRequest = new ScriptDtos.GenerateDraftRequest(request.projectId(),
                 request.expectedRevision(), actionType, targetType, targetId, instruction, request.model());
         return currentUserProvider.currentUserId().flatMap(userId -> modelFactory.resolveTextModel(request.model())
-                .flatMap(model -> executeChargedOperation(userId, prepaid ? 0 : model.creditCost(), "小说改编草稿生成", operationId ->
+                .flatMap(model -> executeChargedOperation(userId, model.ownerTeamId(), prepaid ? BigDecimal.ZERO : model.creditCost(), "小说改编草稿生成", operationId ->
                         callDraftAgent(userId, operationId, model, draftRequest, context)
                                 .flatMap(generated -> validateGeneratedDraft(generated, actionType, targetType, targetId, snapshot))
                                 .flatMap(data -> {
                                     Mono<ScriptDtos.AiDraft> save = scriptService.saveAiDraft(userId,
                                                     request.projectId(), request.expectedRevision(),
                                                     "novelAdaptation" + request.stage(), targetType, targetId,
-                                                    instruction, model.modelValue(), prepaid ? 0 : model.creditCost(), sourceData, data)
+                                                    instruction, model.modelValue(), prepaid ? BigDecimal.ZERO : model.creditCost(), sourceData, data)
                                             .flatMap(draft -> novelAdaptationRepository.saveDraft(draft.id(),
                                                     request.projectId(), request.stage(), request.settings(), facts)
                                                     .then(jobId == null ? Mono.<Void>empty() : novelAdaptationRepository.attachJob(draft.id(), jobId))
@@ -246,7 +249,7 @@ public class ScriptAgentService {
         context.put("confirmedFacts", facts);
         validateContextSize(context, "project");
         return currentUserProvider.currentUserId().flatMap(userId -> modelFactory.resolveTextModel(request.model())
-                .flatMap(model -> executeChargedOperation(userId, model.creditCost(), "小说改编深入一致性检查", operationId -> {
+                .flatMap(model -> executeChargedOperation(userId, model.ownerTeamId(), model.creditCost(), "小说改编深入一致性检查", operationId -> {
                     Map<String, Object> input = new LinkedHashMap<>();
                     input.put("requestType", "analysis");
                     input.put("scopeType", "project");
@@ -277,7 +280,7 @@ public class ScriptAgentService {
                     Object context = buildContext(snapshot, request.targetType(), request.targetId());
                     validateContextSize(context, request.targetType());
                     return modelFactory.resolveTextModel(request.model()).flatMap(model -> executeChargedOperation(
-                            userId, model.creditCost(), "剧本AI草稿生成", operationId -> callDraftAgent(
+                            userId, model.ownerTeamId(), model.creditCost(), "剧本AI草稿生成", operationId -> callDraftAgent(
                                     userId, operationId, model, request, context)
                                     .flatMap(generated -> validateGeneratedDraft(generated, request.actionType(),
                                             request.targetType(), request.targetId(), snapshot))
@@ -307,13 +310,13 @@ public class ScriptAgentService {
      * @param <T> 业务结果类型
      * @return Mono&lt;T&gt; Agent业务结果
      */
-    private <T> Mono<T> executeChargedOperation(Long userId, int credits, String operationName,
+    private <T> Mono<T> executeChargedOperation(Long userId, long ownerTeamId, BigDecimal credits, String operationName,
                                                   Function<String, Mono<T>> operation) {
         String operationId = UUID.randomUUID().toString();
         AtomicBoolean charged = new AtomicBoolean(false);
         return creditService.chargeOperation(userId, operationId, credits, operationName)
                 .then(Mono.defer(() -> {
-                    charged.set(credits > 0);
+                    charged.set(CreditAmounts.of(credits).compareTo(CreditAmounts.of(0)) > 0);
                     log.info("开始执行剧本Agent操作: operationId={}, userId={}, operationName={}, credits={}",
                             operationId, userId, operationName, credits);
                     return operation.apply(operationId);
@@ -327,7 +330,7 @@ public class ScriptAgentService {
                     return creditService.refundOperation(userId, operationId, operationName)
                             .doOnSuccess(ignored -> log.info("剧本Agent操作退款完成: operationId={}, userId={}", operationId, userId))
                             .then(Mono.error(exception));
-                });
+                }).contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.WALLET_KEY, ownerTeamId));
     }
 
     /**

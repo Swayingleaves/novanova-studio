@@ -1,3 +1,5 @@
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 
 import { translateMessage as translate } from "@/features/locale/translate";
 import type { AiConfig, VideoGenerationMode } from "@/features/settings/stores/use-config-store";
@@ -12,7 +14,7 @@ export type VideoWorkflowStageQuote = {
     taskType: "image" | "video";
     model: string;
     taskCount: number;
-    credits: number;
+    credits: CreditAmount;
 };
 
 /** 视频工作流报价结果。 */
@@ -20,7 +22,7 @@ export type VideoWorkflowQuote =
     | {
           available: true;
           workflowType: string;
-          credits: number;
+          credits: CreditAmount;
           stages: VideoWorkflowStageQuote[];
           requiredCapabilities: string[];
       }
@@ -83,7 +85,7 @@ export function quoteVideoWorkflow(input: VideoWorkflowQuoteInput): VideoWorkflo
     if (definition.imageStages.length && !input.config.modelCosts.some((item) => item.model === imageModel && item.taskType === "image")) {
         return { available: false, reason: translate("generation.imageGenerationPricingIsNotConfigured") };
     }
-    const imageCredits = imageStageCredits * definition.imageStages.length;
+    const imageCredits = creditText(creditAmount(imageStageCredits).times(definition.imageStages.length));
     let videoQuote: ReturnType<typeof quoteVideoGeneration> | null = null;
     let selectedMode: VideoGenerationMode | null = null;
     const modeReasons: string[] = [];
@@ -108,8 +110,8 @@ export function quoteVideoWorkflow(input: VideoWorkflowQuoteInput): VideoWorkflo
         return { available: false, reason: modeReasons.join("；") || translate("generation.noAvailableVideoModeForThisWorkflow") };
     }
 
-    const credits = imageCredits + videoQuote.credits;
-    if (!Number.isSafeInteger(credits)) return { available: false, reason: translate("generation.workflowCreditCalculationExceedsRange") };
+    const credits = creditText(creditAmount(imageCredits).plus(videoQuote.credits));
+    if (!creditAmount(credits).isFinite()) return { available: false, reason: translate("generation.workflowCreditCalculationExceedsRange") };
     return {
         available: true,
         workflowType: input.workflowType,

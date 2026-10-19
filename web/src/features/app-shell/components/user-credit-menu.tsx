@@ -1,4 +1,6 @@
 "use client";
+
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { useTranslation } from "@/features/locale/use-translation";
@@ -7,10 +9,11 @@ import { useTranslation } from "@/features/locale/use-translation";
 import { useState } from "react";
 import type { MenuProps } from "antd";
 import { CalendarCheck, History, LogOut, ShoppingCart, Ticket, UserCircle, Users, Zap } from "lucide-react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import Link from "@/shared/lib/team-navigation";
+import { usePathname } from "@/shared/lib/team-navigation";
 import { App, Dropdown } from "antd";
 
+import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { logoutCurrentUser } from "@/services/api/server";
 import { cn } from "@/shared/lib/utils";
@@ -24,19 +27,20 @@ type UserCreditMenuProps = {
 /**
  * 右上角用户入口：积分（左）与头像（右）合并为一个 chip；hover 弹出合并下拉菜单（用户信息 + 购买/兑换 + 用户菜单）。
  * <p>
- * 未登录时显示「登录」按钮（点击打开 AuthModal）。
+ * 未登录时显示「登录」按钮，平台打开弹窗，团队进入对应登录页。
  * 积分实时值直接订阅 useUserStore，SSE 刷新由 client-root-init 驱动，无需额外接入。
  */
 export function UserCreditMenu({ className }: UserCreditMenuProps) {
     const translate = useTranslation();
     const pathname = usePathname();
-    const router = useRouter();
     const { message } = App.useApp();
     const user = useUserStore((state) => state.user);
     const clearSession = useUserStore((state) => state.clearSession);
     const [menuOpen, setMenuOpen] = useState(false);
 
-    const creditBalance = user && Number.isInteger(user.creditBalance) ? user.creditBalance : null;
+    const team = useTeamStore((state) => state.team);
+    const wallets = useTeamStore((state) => state.wallets);
+    const creditBalance = user ? user.creditBalance : null;
 
     const handleLogout = async () => {
         try {
@@ -46,7 +50,6 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
         }
         clearSession();
         message.success(translate("appShell.signedOut"));
-        router.replace("/");
     };
 
     // 未登录：右上角保留登录入口
@@ -144,7 +147,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
                     {translate("appShell.creditRecords")}</Link>
             ),
         },
-        ...(user.role === "admin"
+        ...(canManageCurrentSpace()
             ? [
                   {
                       key: "adminSystem",
@@ -166,7 +169,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
     ];
 
     return (
-        <Dropdown open={menuOpen} onOpenChange={setMenuOpen} trigger={["hover"]} placement="bottomRight" mouseEnterDelay={0} menu={{ items }}>
+        <Dropdown open={menuOpen} onOpenChange={setMenuOpen} trigger={["hover"]} placement="bottomRight" mouseEnterDelay={0} menu={{ items: team ? items.filter((item) => !item || !("key" in item) || !["checkIn", "purchase", "redeem", "invitation"].includes(String(item.key))) : items }}>
             <button
                 type="button"
                 className={cn(
@@ -178,7 +181,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
                 {creditBalance !== null ? (
                     <span className="inline-flex items-center gap-0.5 text-xs font-semibold tabular-nums text-[var(--studio-primary)]">
                         <Zap className="size-3 fill-current" strokeWidth={2.4} />
-                        <span className="max-w-14 truncate">{creditNumberFormatter.format(creditBalance)}</span>
+                        <span title={team ? "平台积分 / 团队积分" : "平台积分"} className="max-w-40 truncate">{creditText(wallets?.platformBalance || creditBalance)}{team ? ` / ${wallets ? creditText(wallets.teamBalance) : "加载中"}` : ""}</span>
                     </span>
                 ) : null}
                 <span className="inline-flex size-5 shrink-0 items-center justify-center overflow-hidden rounded-full">

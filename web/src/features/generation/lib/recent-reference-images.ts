@@ -1,3 +1,4 @@
+import { teamStorageKey } from "@/features/team/stores/use-team-store";
 import localforage from "localforage";
 
 export const RECENT_REFERENCE_IMAGE_LIMIT = 20;
@@ -31,12 +32,12 @@ export function prependRecentReferenceImageUrl(urls: unknown, url: string): stri
 
 export async function loadRecentReferenceImageUrls(userId?: string): Promise<string[]> {
     if (!userId) return [];
-    return normalizeRecentReferenceImageUrls(await recentReferenceImageStorage.getItem<unknown>(recentReferenceImageStorageKey(userId)));
+    return normalizeRecentReferenceImageUrls(await recentReferenceImageStorage.getItem<unknown>(teamStorageKey(recentReferenceImageStorageKey(userId))));
 }
 
 export function saveRecentReferenceImageUrls(userId: string | undefined, urls: unknown): Promise<void> {
     if (!userId) return Promise.resolve();
-    const key = recentReferenceImageStorageKey(userId);
+    const key = teamStorageKey(recentReferenceImageStorageKey(userId));
     const queue = (writeQueues.get(key) || Promise.resolve())
         .catch(() => undefined)
         .then(() => recentReferenceImageStorage.setItem(key, normalizeRecentReferenceImageUrls(urls)))

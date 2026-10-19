@@ -6,7 +6,7 @@ import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter } from "@/shared/lib/team-navigation";
 import { nanoid } from "nanoid";
 import { App, Alert, Button, Drawer, Progress, Spin, Tag } from "antd";
 import { ArrowLeft, Bot, BookOpenText, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, FileClock, FileText, Globe2, Library, ListTree, Plus, Save, ScrollText, Sparkles, Users } from "lucide-react";

@@ -5,7 +5,7 @@ import { readinessItemText } from "@/features/script/lib/script-localization";
 import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/shared/lib/team-navigation";
 import { Alert, Button, Card, Tag } from "antd";
 import { ArrowRight, CheckCircle2, CircleAlert, ExternalLink, Sparkles, XCircle } from "lucide-react";
 

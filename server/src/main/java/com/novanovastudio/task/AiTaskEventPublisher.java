@@ -2,6 +2,7 @@ package com.novanovastudio.task;
 
 import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.dto.AiTaskDtos;
+import com.novanovastudio.security.TeamScope;
 import jakarta.annotation.PostConstruct;
 import java.time.Duration;
 import java.util.Map;
@@ -41,7 +42,7 @@ public class AiTaskEventPublisher {
     private final ReactiveRedisMessageListenerContainer listenerContainer;
 
     /** 本地用户事件流 */
-    private final Map<Long, UserEventSink> userSinks = new ConcurrentHashMap<>();
+    private final Map<String, UserEventSink> userSinks = new ConcurrentHashMap<>();
 
     /**
      * 初始化Redis事件订阅
@@ -53,7 +54,7 @@ public class AiTaskEventPublisher {
                 .flatMap(message -> {
                     String channel = message.getChannel();
                     String payload = message.getMessage();
-                    Long userId = parseChannelUserId(channel);
+                    String userId = channel.substring(EVENT_CHANNEL_PREFIX.length());
                     if (userId == null) {
                         return Mono.empty();
                     }
@@ -79,6 +80,15 @@ public class AiTaskEventPublisher {
      * @return Flux<AiTaskEvent> 事件流
      */
     public Flux<AiTaskDtos.AiTaskEvent> subscribe(Long userId) {
+        return Flux.deferContextual(context -> subscribeInTeam(TeamScope.from(context).teamId() + ":" + userId));
+    }
+
+    /**
+     * 订阅用户在唯一团队的事件。
+     * @param userId 团队与用户组合键
+     * @return 隔离事件流
+     */
+    private Flux<AiTaskDtos.AiTaskEvent> subscribeInTeam(String userId) {
         // 为当前用户创建或复用本地事件流，并在订阅建立时先发一个ping事件。
         UserEventSink sink = userSinks.computeIfAbsent(userId, ignored -> new UserEventSink(Sinks.many().multicast().directBestEffort(), new AtomicInteger()));
         return Flux.concat(
@@ -110,7 +120,7 @@ public class AiTaskEventPublisher {
         // 只发布到Redis Pub/Sub，再由统一订阅链路转发到本地事件流，避免同实例重复推送。
         log.debug("发布AI任务事件: userId={}, event={}", userId, JSON.toJSONString(event));
         String payload = JSON.toJSONString(event);
-        return redisTemplate.convertAndSend(EVENT_CHANNEL_PREFIX + userId, payload)
+        return Mono.deferContextual(context -> redisTemplate.convertAndSend(EVENT_CHANNEL_PREFIX + TeamScope.from(context).teamId() + ":" + userId, payload))
                 .doOnError(exception -> log.error("发布AI任务Redis事件失败: userId={}", userId, exception))
                 .onErrorResume(exception -> Mono.empty())
                 .then();
@@ -136,22 +146,6 @@ public class AiTaskEventPublisher {
     public Mono<Boolean> isCancelRequested(String taskId) {
         // 异步执行线程通过该键判断是否应提前停止。
         return redisTemplate.hasKey(CANCEL_KEY_PREFIX + taskId).defaultIfEmpty(false);
-    }
-
-    /**
-     * 解析通道中的用户ID
-     *
-     * @param channel String 通道名
-     * @return Long 用户ID
-     */
-    private Long parseChannelUserId(String channel) {
-        // 通道名固定为novanova:ai-task:event:{userId}格式。
-        try {
-            int index = channel.lastIndexOf(':');
-            return index < 0 ? null : Long.parseLong(channel.substring(index + 1));
-        } catch (Exception exception) {
-            return null;
-        }
     }
 
     /**

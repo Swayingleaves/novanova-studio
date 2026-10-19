@@ -1316,7 +1316,7 @@ public class ComicDramaRepository {
                 row.get("scope_type", String.class), row.get("scope_id", String.class),
                 value(row, "base_project_revision", Long.class, 0L),
                 value(row, "base_script_revision", Long.class, 0L), row.get("instruction", String.class),
-                row.get("model", String.class), object(row, "draft_data"), value(row, "charged_credits", Integer.class, 0),
+                row.get("model", String.class), object(row, "draft_data"), value(row, "charged_credits", BigDecimal.class, BigDecimal.ZERO),
                 row.get("status", String.class), row.get("created_at", OffsetDateTime.class),
                 row.get("confirmed_at", OffsetDateTime.class));
     }
@@ -1341,7 +1341,7 @@ public class ComicDramaRepository {
         return new ComicDramaDtos.PromptVersion(row.get("id", String.class), row.get("shot_id", String.class),
                 value(row, "version_number", Integer.class, 1), row.get("source_type", String.class),
                 row.get("prompt_text", String.class), object(row, "source_snapshot"), row.get("model", String.class),
-                value(row, "charged_credits", Integer.class, 0), row.get("status", String.class),
+                value(row, "charged_credits", BigDecimal.class, BigDecimal.ZERO), row.get("status", String.class),
                 row.get("created_at", OffsetDateTime.class));
     }
 
@@ -1395,7 +1395,7 @@ public class ComicDramaRepository {
     private ComicDramaDtos.BatchTask mapBatchTask(Row row) {
         return new ComicDramaDtos.BatchTask(row.get("id", String.class), row.get("batch_type", String.class),
                 row.get("scope_type", String.class), object(row, "scope_data"), object(row, "model_settings"),
-                value(row, "estimated_credits", Integer.class, 0), value(row, "total_count", Integer.class, 0),
+                value(row, "estimated_credits", BigDecimal.class, BigDecimal.ZERO), value(row, "total_count", Integer.class, 0),
                 value(row, "queued_count", Integer.class, 0), value(row, "processing_count", Integer.class, 0),
                 value(row, "completed_count", Integer.class, 0), value(row, "failed_count", Integer.class, 0),
                 value(row, "needs_update_count", Integer.class, 0), row.get("status", String.class),

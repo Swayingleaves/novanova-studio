@@ -1,5 +1,9 @@
 package com.novanovastudio.repository;
 
+import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.common.SystemMessage;
+import org.springframework.dao.DuplicateKeyException;
 import com.novanovastudio.entity.EmailVerificationCode;
 import com.novanovastudio.entity.PasswordResetToken;
 import com.novanovastudio.entity.User;
@@ -32,10 +36,20 @@ public class UserRepository {
      */
     public Mono<User> findById(Long id) {
         // 按主键查询单个用户。
-        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id WHERE users.id = :id")
+        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id AND accounts.team_id = 0 WHERE users.id = :id")
                 .bind("id", id)
                 .map((row, metadata) -> RowMappers.user(row))
                 .one();
+    }
+
+    /**
+     * 锁定账号以串行处理密码重置与资料变更。
+     * @param id 用户标识
+     * @return 已锁定账号
+     */
+    public Mono<User> lockUser(Long id) {
+        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id AND accounts.team_id = 0 WHERE users.id = :id FOR UPDATE OF users")
+                .bind("id", id).map((row, metadata) -> RowMappers.user(row)).one();
     }
 
     /**
@@ -46,7 +60,7 @@ public class UserRepository {
      */
     public Mono<User> findByEmail(String email) {
         // 邮箱字段有唯一索引，适合登录和注册占用校验。
-        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id WHERE users.email = :email")
+        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id AND accounts.team_id = 0 WHERE users.email = :email")
                 .bind("email", email)
                 .map((row, metadata) -> RowMappers.user(row))
                 .one();
@@ -59,8 +73,8 @@ public class UserRepository {
      * @return Mono<User> 用户信息
      */
     public Mono<User> findByUsername(String username) {
-        // 用户名字段有唯一索引，主要用于初始管理员兼容查找。
-        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id WHERE users.username = :username")
+        // 用户名使用全平台唯一索引精确匹配，保留大小写。
+        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id AND accounts.team_id = 0 WHERE users.username = :username")
                 .bind("username", username)
                 .map((row, metadata) -> RowMappers.user(row))
                 .one();
@@ -75,14 +89,16 @@ public class UserRepository {
     public Mono<Long> createUser(User user) {
         // 插入用户并通过RETURNING直接取回数据库生成的主键ID。
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                INSERT INTO users(username, password, email, nickname, avatar, role, status, invitation_code, invited_by_user_id, registered_at)
-                VALUES (:username, :password, :email, :nickname, :avatar, :role, :status, :invitationCode, :invitedByUserId, :registeredAt)
+                INSERT INTO users(username, password, email, nickname, avatar, role, status, invitation_code, invited_by_user_id, registered_at, created_by_team_id, created_by_user_id)
+                VALUES (:username, :password, :email, :nickname, :avatar, :role, :status, :invitationCode, :invitedByUserId, :registeredAt, :createdByTeamId, :createdByUserId)
                 RETURNING id
                 """)
                 .bind("username", user.getUsername())
                 .bind("password", user.getPassword())
-                .bind("email", user.getEmail())
                 .bind("nickname", user.getNickname());
+        spec = R2dbcBindings.bindNullable(spec, "email", user.getEmail(), String.class);
+        spec = R2dbcBindings.bindNullable(spec, "createdByTeamId", user.getCreatedByTeamId(), Long.class);
+        spec = R2dbcBindings.bindNullable(spec, "createdByUserId", user.getCreatedByUserId(), Long.class);
         spec = R2dbcBindings.bindNullable(spec, "avatar", user.getAvatar(), String.class)
                 .bind("role", user.getRole())
                 .bind("status", user.getStatus())
@@ -91,7 +107,8 @@ public class UserRepository {
                 .bind("registeredAt", user.getRegisteredAt());
         return spec
                 .map((row, metadata) -> row.get("id", Long.class))
-                .one();
+                .one()
+                .onErrorMap(DuplicateKeyException.class, exception -> new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.accountAlreadyExists")));
     }
 
     /**
@@ -321,7 +338,7 @@ public class UserRepository {
      * @return Flux<User> 用户列表
      */
     public Flux<User> listUsers(int page, int pageSize, String keyword, Long userId, String role, Integer status, String createdAfter, String createdBefore) {
-        StringBuilder sql = new StringBuilder("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id WHERE 1=1");
+        StringBuilder sql = new StringBuilder("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id AND accounts.team_id = 0 WHERE (current_admin_team_filter() < 1 OR EXISTS(SELECT 1 FROM team_members members WHERE members.user_id=users.id AND members.team_id=current_admin_team_filter() AND members.member_status <> 'removed'))");
         if (StringUtils.hasText(keyword)) sql.append(" AND (users.username ILIKE :keyword OR users.nickname ILIKE :keyword OR users.email ILIKE :keyword)");
         if (userId != null) sql.append(" AND users.id = :userId");
         if (StringUtils.hasText(role)) sql.append(" AND users.role = :role");
@@ -353,7 +370,7 @@ public class UserRepository {
      * @return Mono<Long> 用户总数
      */
     public Mono<Long> countUsers(String keyword, Long userId, String role, Integer status, String createdAfter, String createdBefore) {
-        StringBuilder sql = new StringBuilder("SELECT COUNT(*) AS total FROM users WHERE 1=1");
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*) AS total FROM users WHERE (current_admin_team_filter() < 1 OR EXISTS(SELECT 1 FROM team_members members WHERE members.user_id=users.id AND members.team_id=current_admin_team_filter() AND members.member_status <> 'removed'))");
         if (StringUtils.hasText(keyword)) sql.append(" AND (username ILIKE :keyword OR nickname ILIKE :keyword OR email ILIKE :keyword)");
         if (userId != null) sql.append(" AND id = :userId");
         if (StringUtils.hasText(role)) sql.append(" AND role = :role");
@@ -384,7 +401,7 @@ public class UserRepository {
                 SELECT COUNT(*) AS total_users,
                        COUNT(*) FILTER (WHERE created_at >= :monthStart) AS monthly_new_users,
                        COUNT(*) FILTER (WHERE created_at >= :dayStart) AS daily_new_users
-                FROM users
+                FROM users WHERE (current_admin_team_filter() < 1 OR EXISTS(SELECT 1 FROM team_members members WHERE members.user_id=users.id AND members.team_id=current_admin_team_filter() AND members.member_status <> 'removed'))
                 """)
                 .bind("monthStart", monthStart)
                 .bind("dayStart", dayStart)

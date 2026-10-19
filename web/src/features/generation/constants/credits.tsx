@@ -1,5 +1,7 @@
 "use client";
 
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
+
 import { currentLanguageTag } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 import type { ComponentProps } from "react";
@@ -31,7 +33,7 @@ export function CreditSymbol({ className, ...props }: ComponentProps<"span">) {
  * @param props span 元素属性
  * @return 积分图标与数值
  */
-export function CreditCostDisplay({ creditCost, className, ...props }: ComponentProps<"span"> & { creditCost: number }) {
+export function CreditCostDisplay({ creditCost, className, ...props }: ComponentProps<"span"> & { creditCost: CreditAmount }) {
     const translate = useTranslation();
     const formattedCreditCost = creditCost.toLocaleString(currentLanguageTag());
     const description = translate("generation.costsCredits", { value0: formattedCreditCost });

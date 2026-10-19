@@ -689,3 +689,59 @@ V51 新增逐集正文批量生成，复用全书改编的任务、工作流快�
 ## 网站双语任务提示（V55）
 
 `V55__Add_Localized_Task_Messages.sql` 为 `ai_generation_tasks`、`creation_agent_request`、`video_composition_tasks` 同步增加 `error_message_key` 与 `error_message_arguments`。写入终态时原子保存诊断、消息键和JSON参数；查询及事件订阅按当前请求语言格式化。主Agent的运行态、取消、中断和失败路径使用相同约束，不需要按语言增加索引。
+
+
+## 团队空间与小数钱包（V56、V57）
+
+新增迁移 `V56__Add_Team_Spaces.sql`、`V57__Add_Team_Wallets_And_Storage_Billing.sql`，原数据保留在 `team_id=0` 平台空间，不修改已执行迁移。积分相关整数列精确转换为 `NUMERIC(24,6)`，服务端使用 `BigDecimal`，接口输出十进制字符串，禁止用浮点数累计积分。
+
+| 表 | 用途与主要约束 |
+| --- | --- |
+| `teams` | 名称、介绍、Logo、唯一 `team_slug`、唯一主管理员、启用状态、必填子账号上限；零号为平台占位 |
+| `team_members` | `(team_id,user_id)` 主键；每团队一名主管理员；禁用成员占名额，移除释放；数据库行锁触发器防止并发超额 |
+| `team_invitations` | 绑定邮箱、团队、角色及7天有效期；本人接受、撤销、重新邀请；待接受不占名额 |
+| `team_resource_grants` | 按模型或对象存储显式授权平台资源；新增模型不自动开放 |
+| `team_resource_preferences` | 团队启用及默认项；平台资源参数、价格、密钥不由团队修改 |
+| `team_configuration_modes` | 提示词、通知、风格、技能、首页分别选择实时继承或团队独立内容 |
+| `team_disabled_periods` | 禁用起止区间，按实际重叠秒数免收存储费用 |
+| `team_member_cleanup_jobs` | 可重试移除清理；取消任务并按原钱包退款，物理对象删除确认后清理本空间私有数据 |
+| `storage_objects` | 实际对象大小、用户、空间、配置、资源所有者、写入时间、删除请求及确认时间；配置和对象键唯一，重复引用不重复收费 |
+| `storage_billing_rates` | 费率版本及生效时间；首次启用不追收历史，后续改价下月生效 |
+| `storage_bills` | 用户、发生空间、收费方、自然月唯一；保存用量和费率快照，欠费与实收分开 |
+
+`user_credit_accounts` 主键调整为 `(user_id,team_id)`，零号钱包是用户通用平台余额，团队钱包互不通用。`frozen` 标记成员移除后的余额，清理完成并重新接受邀请后恢复。
+
+`user_credit_transactions` 增加发生空间 `team_id`、扣款钱包 `wallet_team_id`、收入归属 `beneficiary_team_id`、资源标识及唯一结算引用。退款恢复原钱包并冲减原收入；发放和欠费不计收入。账本与全局账号不随成员移除而删除。
+
+画布、资产、媒体、生成记录、剧本及子表、小说改编、Agent会话、计划、队列请求、后台任务及用户业务配置增加 `team_id`。数据库启用并强制执行行级安全策略（Row Level Security，RLS），关联触发器检查跨空间外键引用；创作数据仍由既有用户归属校验保持成员私有。平台授权资源只读开放，继承内容只从一个明确空间读取，独立空内容保持为空。
+
+R2DBC连接在每次借出时切换至无登录、无RLS绕过权限的 `novanova_pro_runtime` 角色，并覆盖团队、钱包、系统扫描和管理员筛选参数。迁移账户需要创建及授予此角色的权限。后台扫描可以跨团队读取，执行前从任务记录恢复用户与空间并撤销扫描权限。AI及视频合成任务保存创建时的OSS标识，AI任务额外记录模型提供方；修改默认配置不改变原任务归属。
+
+存储费用以十亿字节为1GB，上海时区自然月实际秒数折算，扣除团队禁用时间后按用户、空间和收费方汇总，四舍五入为6位小数。每日00:10补结已结束月份，月初结上月，停机后支持补结。余额不足时整单保留欠费及余额，补款后定时按旧账单优先重试；欠费空间禁止新增上传和产生文件的任务。对象删除失败保留台账及错误，确认成功后停止计量。文件公开链接保持原行为。
+
+接口与管理流程见 [团队管理接口](team-management-api.md)。
+
+`media_files.object_storage_config_id` 明确关联实际上传配置。历史原文按原配置补录，历史媒体按唯一存储身份登记；存在多个相同提供方、桶和区域的配置时，管理员通过存储计费页确认归属后才能启用费率。成员移除后，AI任务标记 `data_purged` 并清空请求及结果，账本关联字段保留，重新入团不能读取已清理任务内容。
+
+
+## 用户名账号与邀请目标（V58）
+
+`users.email` 允许为空，无邮箱账号不使用虚拟邮箱。`username` 保持全平台唯一、区分大小写；邮箱账号初始用户名沿用邮箱，新用户名为1–50字符且禁止空白和 `@`。
+
+| 表与字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `users.created_by_team_id` | `BIGINT NULL` | 首次创建账号的团队，引用 `teams.id` 且必须大于0。平台创建及历史账号为空，入团和移除不改变。 |
+| `users.created_by_user_id` | `BIGINT NULL` | 首次创建账号的管理员，引用 `users.id`；公开注册及历史账号为空。 |
+| `team_invitations.invited_user_id` | `BIGINT NULL` | 已注册目标账号的稳定标识，引用 `users.id`，改名不改变。 |
+| `team_invitations.invited_account` | `VARCHAR(255) NOT NULL` | 发出邀请时的用户名或邮箱展示快照，不参与已绑定用户的鉴权。 |
+| `team_invitations.email` | `VARCHAR(255) NULL` | 受邀邮箱；无邮箱用户名邀请为空。邮箱和目标用户标识至少一项非空。 |
+
+迁移将已有邮箱邀请匹配到已注册用户，填充展示快照，不回填历史账号的创建归属。保留待处理邮箱唯一索引，增加待处理用户唯一索引 `(team_id, invited_user_id)` 及本人邀请查询索引 `(invited_user_id, invitation_status, expires_at)`。重复邀请先撤销原目标的待处理邀请，再写入新邀请；团队锁与唯一索引共同阻止并发重复。
+
+管理员密码重置复用 `users.token_version`：在锁定用户行的事务中更新密码哈希并递增版本；团队重置先持有团队行锁并校验来源及成员状态，不能修改全局角色、启用状态或其他空间数据。
+
+## 团队成员身份授权（V59）
+
+`team_members.member_role` 保留 `administrator`（团队管理员）和 `member`（普通成员）两种值。移除限制同一团队只能存在一名管理员的 `uk_team_administrator` 索引；`teams.administrator_user_id` 继续唯一指定主管理员，成员授权不会变更该字段。成员列表返回 `is_primary_administrator` 的接口映射 `isPrimaryAdministrator` 区分主管理员与授权管理员。
+
+成员人数、管理列表统计与 `enforce_team_member_limit` 触发器统一按未移除且非主管理员的账号统计。授权管理员、禁用成员均占名额，身份升降不会释放名额；创建主管理员时在同一事务内先设置主管理员归属，再写入成员关系，保证零名额团队仍可建立主管理员。角色调整仅更新当前团队和目标用户主键对应的成员记录，不变更全局用户角色、状态、钱包或其他团队身份。

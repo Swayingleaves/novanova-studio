@@ -44,6 +44,8 @@ class NovelAdaptationRunnerTest {
     @Mock private CreditService creditService;
     /** 响应式事务操作器。 */
     @Mock private TransactionalOperator transactionalOperator;
+    /** 明确在平台空间执行既有任务。 */
+    private final TeamTaskScopeService teamTaskScopeService = com.novanovastudio.TeamTestSupport.taskScope();
     /** 被测执行器。 */
     @InjectMocks private NovelAdaptationRunner runner;
 
@@ -75,7 +77,7 @@ class NovelAdaptationRunnerTest {
         org.junit.jupiter.api.Assertions.assertEquals("second", request.getValue().episodeId());
         org.junit.jupiter.api.Assertions.assertEquals(24, request.getValue().expectedRevision());
         verify(jobRepository).await("job-a", "drafts", "episode", 2);
-        verify(creditService, never()).refundOperation(any(), any(), any(), org.mockito.ArgumentMatchers.anyInt());
+        verify(creditService, never()).refundOperation(any(), any(), any(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class));
     }
 
     /** 验证保存后进度尚未更新就失败时，仍只退未完成部分并使用本次续跑的计费标识。 */
@@ -86,14 +88,14 @@ class NovelAdaptationRunnerTest {
                 Mono.just(job("running", 0)), Mono.just(job("failed", 1)));
         when(novelAdaptationRepository.listCheckpoints("job-a")).thenReturn(Flux.just(checkpoint()));
         when(jobRepository.finish("job-a", "failed", "模拟执行中断", 1)).thenReturn(Mono.just(true));
-        when(creditService.refundOperation(1L, "job-a:retry:1", NovelAdaptationService.OPERATION_NAME, 10)).thenReturn(Mono.empty());
+        when(creditService.refundOperation(1L, "job-a:retry:1", NovelAdaptationService.OPERATION_NAME, java.math.BigDecimal.valueOf(10).setScale(6))).thenReturn(Mono.empty());
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Void>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         runner.process("job-a").block();
 
         verify(jobRepository).finish("job-a", "failed", "模拟执行中断", 1);
-        verify(creditService).refundOperation(1L, "job-a:retry:1", NovelAdaptationService.OPERATION_NAME, 10);
+        verify(creditService).refundOperation(1L, "job-a:retry:1", NovelAdaptationService.OPERATION_NAME, java.math.BigDecimal.valueOf(10).setScale(6));
         verify(transactionalOperator).transactional(org.mockito.ArgumentMatchers.<Mono<Void>>any());
     }
 
@@ -105,7 +107,7 @@ class NovelAdaptationRunnerTest {
      */
     private NovelAdaptationJobRepository.Job job(String status, int settledCalls) {
         return new NovelAdaptationJobRepository.Job("job-a", "project-a", 1, "request-a", "channel::model", "model-config",
-                JSONObject.of("episodeCount", 2), List.of("fact-a"), "drafts", "episode", status, 2, 0, 2, settledCalls, 20, "", null, 1);
+                JSONObject.of("episodeCount", 2), List.of("fact-a"), "drafts", "episode", status, 2, 0, 2, settledCalls, java.math.BigDecimal.valueOf(20), "", null, 1);
     }
 
     /**

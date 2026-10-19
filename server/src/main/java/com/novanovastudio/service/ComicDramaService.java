@@ -1,5 +1,8 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiTaskSources;
@@ -13,6 +16,7 @@ import com.novanovastudio.dto.StoryboardDtos;
 import com.novanovastudio.repository.ComicDramaRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -449,7 +453,7 @@ public class ComicDramaService {
                         return conflict();
                     }
                     ComicDramaDtos.PromptVersion prompt = new ComicDramaDtos.PromptVersion(id(), request.shotId(), version,
-                            "manual", request.prompt().trim(), new JSONObject(), "", 0, "adopted", OffsetDateTime.now());
+                            "manual", request.prompt().trim(), new JSONObject(), "", BigDecimal.ZERO, "adopted", OffsetDateTime.now());
                     return transactionalOperator.transactional(repository.createPromptVersion(request.projectId(), prompt)
                             .then(advance(userId, request.projectId(), request.expectedRevision())).thenReturn(prompt));
                 }));
@@ -489,7 +493,7 @@ public class ComicDramaService {
                     return aiTaskService.quoteTaskCredits(quoteRequest).map(unitCredits -> {
                         try {
                             return new ComicDramaDtos.GenerationEstimate(request.targetType(), request.targetIds().size(),
-                                    Math.multiplyExact(unitCredits, request.targetIds().size()), request.model(), request.settings());
+                                    CreditAmounts.multiply(unitCredits, request.targetIds().size()), request.model(), request.settings());
                         } catch (ArithmeticException exception) {
                             throw new BusinessException(ErrorCode.PARAM_INVALID, "预计积分超出允许范围");
                         }
@@ -834,7 +838,7 @@ public class ComicDramaService {
                             return aiTaskService.quoteTaskCredits(new AiTaskDtos.CreateAiTaskRequest(request.taskType(), "漫剧批量生成费用预估",
                                     request.model(), quoteParameters, sampleReferences, null, AiTaskSources.STORYBOARD, videoMode))
                                     .flatMap(unitCredits -> {
-                                        int credits = Math.multiplyExact(unitCredits, request.targetIds().size());
+                                        BigDecimal credits = CreditAmounts.multiply(unitCredits, request.targetIds().size());
                                         JSONObject scope = new JSONObject();
                                         scope.put("type", request.scope());
                                         scope.put("targetIds", request.targetIds());

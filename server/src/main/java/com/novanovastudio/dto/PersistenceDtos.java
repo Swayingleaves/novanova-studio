@@ -1,5 +1,9 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+
 import com.alibaba.fastjson2.JSONObject;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -70,13 +74,41 @@ public final class PersistenceDtos {
 
     /** 用户模型配置。 */
     public record ModelConfig(String id, String channelId, String modelName, String modelType,
-                              List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
+                              List<String> capabilities, Boolean defaultModel, Integer sortOrder, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditCost,
+                              Boolean thinkingEnabled, String reasoningEffort, String creditUnit, Integer requestConcurrency,
+                              JSONObject customBodyParameters, VideoBillingConfiguration videoBillingConfiguration, String displayName,
+                              String modelIcon, Boolean isCustomModel, Map<String, CustomModelGroupConfig> customModelConfig, Long ownerTeamId) {
+        /**
+         * 创建平台模型展示记录。
+         * @param id 模型配置字段
+         * @param channelId 模型配置字段
+         * @param modelName 模型配置字段
+         * @param modelType 模型配置字段
+         * @param capabilities 模型配置字段
+         * @param defaultModel 模型配置字段
+         * @param sortOrder 模型配置字段
+         * @param creditCost 模型配置字段
+         * @param thinkingEnabled 模型配置字段
+         * @param reasoningEffort 模型配置字段
+         * @param creditUnit 模型配置字段
+         * @param requestConcurrency 模型配置字段
+         * @param customBodyParameters 模型配置字段
+         * @param videoBillingConfiguration 模型配置字段
+         * @param displayName 模型配置字段
+         * @param modelIcon 模型配置字段
+         * @param isCustomModel 模型配置字段
+         * @param customModelConfig 模型配置字段
+         */
+        public ModelConfig(String id, String channelId, String modelName, String modelType,
+                              List<String> capabilities, Boolean defaultModel, Integer sortOrder, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost,
                               Boolean thinkingEnabled, String reasoningEffort, String creditUnit, Integer requestConcurrency,
                               JSONObject customBodyParameters, VideoBillingConfiguration videoBillingConfiguration, String displayName,
                               String modelIcon, Boolean isCustomModel, Map<String, CustomModelGroupConfig> customModelConfig) {
+            this(id, channelId, modelName, modelType, capabilities, defaultModel, sortOrder, creditCost, thinkingEnabled, reasoningEffort, creditUnit, requestConcurrency, customBodyParameters, videoBillingConfiguration, displayName, modelIcon, isCustomModel, customModelConfig, 0L);
+        }
         /** 保持旧调用方使用空视频分档计费配置。 */
         public ModelConfig(String id, String channelId, String modelName, String modelType,
-                           List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
+                           List<String> capabilities, Boolean defaultModel, Integer sortOrder, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost,
                            Boolean thinkingEnabled, String reasoningEffort, String creditUnit, Integer requestConcurrency,
                            JSONObject customBodyParameters) {
             this(id, channelId, modelName, modelType, capabilities, defaultModel, sortOrder, creditCost,
@@ -85,7 +117,7 @@ public final class PersistenceDtos {
 
         /** 保持旧调用方使用空自定义请求体参数。 */
         public ModelConfig(String id, String channelId, String modelName, String modelType,
-                           List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
+                           List<String> capabilities, Boolean defaultModel, Integer sortOrder, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost,
                            Boolean thinkingEnabled, String reasoningEffort, String creditUnit, Integer requestConcurrency) {
             this(id, channelId, modelName, modelType, capabilities, defaultModel, sortOrder, creditCost,
                     thinkingEnabled, reasoningEffort, creditUnit, requestConcurrency, new JSONObject(), null, null, null, false, null);
@@ -93,7 +125,7 @@ public final class PersistenceDtos {
 
         /** 保持旧调用方使用默认并发数。 */
         public ModelConfig(String id, String channelId, String modelName, String modelType,
-                           List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
+                           List<String> capabilities, Boolean defaultModel, Integer sortOrder, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost,
                            Boolean thinkingEnabled, String reasoningEffort, String creditUnit) {
             this(id, channelId, modelName, modelType, capabilities, defaultModel, sortOrder, creditCost,
                     thinkingEnabled, reasoningEffort, creditUnit, 1, new JSONObject(), null, null, null, false, null);
@@ -101,7 +133,7 @@ public final class PersistenceDtos {
 
         /** 保持旧调用方按次计费。 */
         public ModelConfig(String id, String channelId, String modelName, String modelType,
-                           List<String> capabilities, Boolean defaultModel, Integer sortOrder, Integer creditCost,
+                           List<String> capabilities, Boolean defaultModel, Integer sortOrder, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost,
                            Boolean thinkingEnabled, String reasoningEffort) {
             this(id, channelId, modelName, modelType, capabilities, defaultModel, sortOrder, creditCost,
                     thinkingEnabled, reasoningEffort, "generation", 1, new JSONObject(), null, null, null, false, null);
@@ -117,7 +149,7 @@ public final class PersistenceDtos {
                                            @NotBlank(message = "business.modelNameIsRequired") String modelName,
                                            @NotBlank(message = "business.modelTypeIsRequired") String modelType,
                                            List<String> capabilities, Integer sortOrder,
-                                           @Min(value = 0, message = "business.modelCreditsMustNotBeNegative") Integer creditCost,
+                                           @Min(value = 0, message = "business.modelCreditsMustNotBeNegative") @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditCost,
                                            Boolean thinkingEnabled,
                                            @Pattern(regexp = "high|max", message = "business.thinkingIntensityMustBeHighOrMax") String reasoningEffort,
                                            @Pattern(regexp = "generation|second", message = "business.billingUnitMustBeGenerationOrSecond") String creditUnit,
@@ -130,7 +162,7 @@ public final class PersistenceDtos {
                                            Map<String, CustomModelGroupConfig> customModelConfig) {
         /** 保持旧调用方使用空视频分档计费配置。 */
         public CreateModelConfigRequest(String channelId, String modelName, String modelType, List<String> capabilities,
-                                        Integer sortOrder, Integer creditCost, Boolean thinkingEnabled, String reasoningEffort,
+                                        Integer sortOrder, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost, Boolean thinkingEnabled, String reasoningEffort,
                                         String creditUnit, Integer requestConcurrency, JSONObject customBodyParameters) {
             this(channelId, modelName, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort,
                     creditUnit, requestConcurrency, customBodyParameters, null, null, null, false, null);
@@ -138,7 +170,7 @@ public final class PersistenceDtos {
 
         /** 保持旧调用方使用空自定义请求体参数。 */
         public CreateModelConfigRequest(String channelId, String modelName, String modelType, List<String> capabilities,
-                                        Integer sortOrder, Integer creditCost, Boolean thinkingEnabled, String reasoningEffort,
+                                        Integer sortOrder, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost, Boolean thinkingEnabled, String reasoningEffort,
                                         String creditUnit, Integer requestConcurrency) {
             this(channelId, modelName, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort,
                     creditUnit, requestConcurrency, new JSONObject(), null, null, null, false, null);
@@ -146,7 +178,7 @@ public final class PersistenceDtos {
 
         /** 保持旧调用方使用默认并发数。 */
         public CreateModelConfigRequest(String channelId, String modelName, String modelType, List<String> capabilities,
-                                        Integer sortOrder, Integer creditCost, Boolean thinkingEnabled, String reasoningEffort,
+                                        Integer sortOrder, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost, Boolean thinkingEnabled, String reasoningEffort,
                                         String creditUnit) {
             this(channelId, modelName, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort,
                     creditUnit, 1, new JSONObject(), null, null, null, false, null);
@@ -154,7 +186,7 @@ public final class PersistenceDtos {
 
         /** 保持旧调用方按次计费。 */
         public CreateModelConfigRequest(String channelId, String modelName, String modelType, List<String> capabilities,
-                                        Integer sortOrder, Integer creditCost, Boolean thinkingEnabled, String reasoningEffort) {
+                                        Integer sortOrder, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost, Boolean thinkingEnabled, String reasoningEffort) {
             this(channelId, modelName, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort,
                     "generation", 1, new JSONObject(), null, null, null, false, null);
         }
@@ -164,7 +196,7 @@ public final class PersistenceDtos {
     public record UpdateModelConfigRequest(@NotBlank(message = "business.modelConfigurationIDIsRequired") String id,
                                            @NotBlank(message = "business.modelTypeIsRequired") String modelType,
                                            List<String> capabilities, Integer sortOrder,
-                                           @Min(value = 0, message = "business.modelCreditsMustNotBeNegative") Integer creditCost,
+                                           @Min(value = 0, message = "business.modelCreditsMustNotBeNegative") @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditCost,
                                            Boolean thinkingEnabled,
                                            @Pattern(regexp = "high|max", message = "business.thinkingIntensityMustBeHighOrMax") String reasoningEffort,
                                            @Pattern(regexp = "generation|second", message = "business.billingUnitMustBeGenerationOrSecond") String creditUnit,
@@ -177,7 +209,7 @@ public final class PersistenceDtos {
                                            Map<String, CustomModelGroupConfig> customModelConfig) {
         /** 保持旧调用方使用空视频分档计费配置。 */
         public UpdateModelConfigRequest(String id, String modelType, List<String> capabilities, Integer sortOrder,
-                                        Integer creditCost, Boolean thinkingEnabled, String reasoningEffort, String creditUnit,
+                                        @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost, Boolean thinkingEnabled, String reasoningEffort, String creditUnit,
                                         Integer requestConcurrency, JSONObject customBodyParameters) {
             this(id, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort, creditUnit,
                     requestConcurrency, customBodyParameters, null, null, null, false, null);
@@ -185,7 +217,7 @@ public final class PersistenceDtos {
 
         /** 保持旧调用方使用空自定义请求体参数。 */
         public UpdateModelConfigRequest(String id, String modelType, List<String> capabilities, Integer sortOrder,
-                                        Integer creditCost, Boolean thinkingEnabled, String reasoningEffort, String creditUnit,
+                                        @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost, Boolean thinkingEnabled, String reasoningEffort, String creditUnit,
                                         Integer requestConcurrency) {
             this(id, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort, creditUnit,
                     requestConcurrency, new JSONObject(), null, null, null, false, null);
@@ -193,14 +225,14 @@ public final class PersistenceDtos {
 
         /** 保持旧调用方省略并发数时沿用原配置。 */
         public UpdateModelConfigRequest(String id, String modelType, List<String> capabilities, Integer sortOrder,
-                                        Integer creditCost, Boolean thinkingEnabled, String reasoningEffort, String creditUnit) {
+                                        @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost, Boolean thinkingEnabled, String reasoningEffort, String creditUnit) {
             this(id, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort, creditUnit,
                     null, new JSONObject(), null, null, null, false, null);
         }
 
         /** 保持旧调用方按次计费。 */
         public UpdateModelConfigRequest(String id, String modelType, List<String> capabilities, Integer sortOrder,
-                                        Integer creditCost, Boolean thinkingEnabled, String reasoningEffort) {
+                                        @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost, Boolean thinkingEnabled, String reasoningEffort) {
             this(id, modelType, capabilities, sortOrder, creditCost, thinkingEnabled, reasoningEffort,
                     "generation", null, new JSONObject(), null, null, null, false, null);
         }

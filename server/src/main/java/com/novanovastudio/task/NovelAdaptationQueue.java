@@ -78,7 +78,7 @@ public class NovelAdaptationQueue {
                             log.error("补发小说改编任务失败", error);
                             return Mono.empty();
                         }))
-                .subscribe();
+                .contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true)).subscribe();
     }
 
     /**
@@ -123,7 +123,7 @@ public class NovelAdaptationQueue {
                             : workflowRepository.exists(jobId)
                                     .flatMap(wholeBook -> wholeBook ? wholeBookRunner.process(jobId)
                                             : legacyRunner.process(jobId)))
-                    .block();
+                    .contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true)).block();
         } catch (Exception error) {
             log.error("执行小说改编任务失败: jobId={}", jobId, error);
         } finally {

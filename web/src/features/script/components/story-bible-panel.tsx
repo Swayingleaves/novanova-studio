@@ -1,4 +1,8 @@
 "use client";
+import { getWalletBalances } from "@/services/api/team";
+import { useTeamStore } from "@/features/team/stores/use-team-store";
+
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 
 import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
@@ -317,7 +321,7 @@ function AnalysisBar({ projectId, onCompleted }: { projectId: string; onComplete
         jobUpdateVersionRef.current += 1;
         jobRef.current = next;
         setJob(next);
-        if (next.creditBalance != null) setCreditBalance(next.creditBalance);
+        if (next.creditBalance != null) void getWalletBalances().then((wallets) => { useTeamStore.getState().setWallets(wallets); setCreditBalance(wallets.platformBalance); }).catch((error) => message.error(error instanceof Error ? error.message : "读取积分钱包失败"));
     };
 
     const start = async () => {
@@ -404,7 +408,7 @@ function AnalysisBar({ projectId, onCompleted }: { projectId: string; onComplete
                     {active ? <span>{getStageLabels(translate)[job.stage] || job.stage} · {job.processedUnits} / {job.totalUnits || "?"}</span> : null}
                     {active ? <Progress percent={percent} size="small" className="w-40" showInfo={false} strokeColor="var(--studio-primary)" /> : null}
                     <span>{translate("script.countCharactersCountCreditsReservedCount_50129a", { value0: job.billableChars.toLocaleString(translate.locale), value1: job.credits, value2: job.sectionIds.length ? translate("script.partial") : translate("script.entireBook") })}</span>
-                    {job.status === "canceled" || job.status === "failed" ? <span>{translate("script.refundedCountCreditsChargedCountCredits_83e127", { value0: job.refundedCredits, value1: job.credits - job.refundedCredits })}</span> : null}
+                    {job.status === "canceled" || job.status === "failed" ? <span>{translate("script.refundedCountCreditsChargedCountCredits_83e127", { value0: job.refundedCredits, value1: creditAmount(job.credits).minus(job.refundedCredits).toFixed() })}</span> : null}
                     {job.errorMessage ? <span className="text-[var(--studio-danger)]">{job.errorMessage}</span> : null}
                     {job.status === "retryable" ? <Button size="small" type="primary" loading={busy} onClick={() => void act(() => retryStoryBibleAnalysis(projectId, job.jobId), translate("script.analysisResumed"))}>{translate("script.resume")}</Button> : null}
                     {active ? <Button size="small" danger loading={busy} onClick={() => modal.confirm({ title: translate("script.cancelAnalysis"), content: translate("script.onlySuccessfulInitialBatchesAreChargedOtherCreditsAreRefunded"), okText: translate("script.confirmCancellation"), cancelText: translate("script.continueAnalysis"), onOk: () => act(() => cancelStoryBibleAnalysis(projectId, job.jobId), translate("script.canceledCompletedContentIsRetained"), true) })}>{translate("script.cancel")}</Button> : null}

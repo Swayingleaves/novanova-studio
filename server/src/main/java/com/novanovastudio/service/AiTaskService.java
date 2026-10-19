@@ -1,5 +1,9 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.service.TeamTaskScopeService;
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.novanovastudio.common.WebsiteLanguage;
 
 import com.novanovastudio.common.SystemMessage;
@@ -65,6 +69,9 @@ import reactor.core.scheduler.Schedulers;
 @RequiredArgsConstructor
 @Slf4j
 public class AiTaskService {
+
+    /** 持久化任务的团队作用域恢复。 */
+    private final TeamTaskScopeService teamTaskScopeService;
 
     /** 图片任务类型 */
     private static final String TYPE_IMAGE = AiTaskTypes.IMAGE;
@@ -220,7 +227,7 @@ public class AiTaskService {
                         return new AiTaskDtos.VideoWorkflowQuoteResponse(false, definition.workflowType(),
                                 List.copyOf(stageSkeleton), null, firstError, List.copyOf(capabilitySet));
                     }
-                    int total = succeeded.stream().mapToInt(AiTaskDtos.VideoWorkflowStageQuote::credits).sum();
+                    BigDecimal total = succeeded.stream().map(AiTaskDtos.VideoWorkflowStageQuote::credits).reduce(BigDecimal.ZERO, BigDecimal::add);
                     succeeded.stream().map(AiTaskDtos.VideoWorkflowStageQuote::videoGenerationMode)
                             .filter(StringUtils::hasText).forEach(capabilitySet::add);
                     return new AiTaskDtos.VideoWorkflowQuoteResponse(true, definition.workflowType(), succeeded,
@@ -277,7 +284,7 @@ public class AiTaskService {
                 AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(taskType, "工作流阶段报价",
                         selectedModel, parameters, references, List.of(), AiTaskSources.VIDEO_PAGE, null, null, mode);
                 try {
-                    int credits = Math.multiplyExact(calculateTaskCredits(taskRequest, model), stage.taskCount());
+                    BigDecimal credits = CreditAmounts.multiply(calculateTaskCredits(taskRequest, model), stage.taskCount());
                     return new AiTaskDtos.VideoWorkflowStageQuote(stage.role(), stage.displayName(), taskType, selectedModel,
                             stage.taskCount(), credits, mode);
                 } catch (BusinessException exception) {
@@ -307,6 +314,7 @@ public class AiTaskService {
                 .thenMany(repository.listRecoverableTasks(runningRecoverBefore))
                 // 按创建时间顺序恢复，避免同一模型的等待任务在并发订阅时乱序。
                 .concatMap(this::dispatchRecoveredTask)
+                .contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true))
                 .subscribeOn(Schedulers.boundedElastic())
                 .subscribe(
                         ignored -> {
@@ -331,10 +339,19 @@ public class AiTaskService {
      * @param request 待报价的标准AI任务请求
      * @return 单个任务的精确预计积分
      */
-    public Mono<Integer> quoteTaskCredits(AiTaskDtos.CreateAiTaskRequest request) {
+    public Mono<BigDecimal> quoteTaskCredits(AiTaskDtos.CreateAiTaskRequest request) {
         AiTaskDtos.CreateAiTaskRequest normalizedRequest = normalizeVideoGenerationMode(request);
         return resolveModel(normalizedRequest.taskType(), normalizedRequest.model())
                 .map(model -> calculateTaskCredits(normalizedRequest, model));
+    }
+
+    /**
+     * 旧Agent循环每次派发前复用统一权限和启用模型校验，不改变已经确定的调用参数。
+     * @param model 固定的渠道与模型编码
+     * @return 派发权限验证完成信号
+     */
+    public Mono<Void> requireModelCallAccess(String model) {
+        return teamTaskScopeService.requireCurrentActive().then(resolveModel(TYPE_TEXT, model)).then();
     }
 
     /**
@@ -374,14 +391,14 @@ public class AiTaskService {
                 })
                 : Mono.empty();
         // 校验视频请求后再解析风格，避免无效视频请求创建无关的优化任务。
-        return videoPreflight.then(Mono.defer(() -> prepareStyledRequest(userId, normalizedRequest))).flatMap(preparedRequest -> Mono.defer(() -> {
+        return (TYPE_TEXT.equals(normalizedRequest.taskType()) ? Mono.<Void>empty() : persistenceService.requireStorageWritable(userId)).then(videoPreflight).then(Mono.defer(() -> prepareStyledRequest(userId, normalizedRequest))).flatMap(preparedRequest -> Mono.defer(() -> {
             validateTaskType(preparedRequest.taskType());
             validateGenerationSource(preparedRequest.taskType(), preparedRequest.generationSource());
             return resolveModel(preparedRequest.taskType(), preparedRequest.model()).flatMap(resolvedModel -> {
                 String taskId = UUID.randomUUID().toString();
                 VideoBillingQuote videoBillingQuote = TYPE_VIDEO.equals(preparedRequest.taskType())
                         ? validateVideoTask(preparedRequest, resolvedModel) : null;
-                int creditCost = videoBillingQuote == null
+                BigDecimal creditCost = videoBillingQuote == null
                         ? calculateTaskCredits(preparedRequest, resolvedModel) : videoBillingQuote.chargedCredits();
                 log.info("创建AI生成任务: taskId={}, userId={}, taskType={}, generationSource={}, model={}, channel={},image={}. imageCount={},video={}. videoCount={},audio={}. audioCount={}",
                         taskId, userId, preparedRequest.taskType(), preparedRequest.generationSource(), preparedRequest.model(), resolvedModel.channel().name(),
@@ -402,11 +419,11 @@ public class AiTaskService {
                 task.setProgress(0);
                 task.setRequestData(toTaskRequestSnapshot(preparedRequest, videoBillingQuote));
                 task.setResultData("{}");
-                return repository.createTask(task)
+                return teamTaskScopeService.usingModel(resolvedModel.modelConfigId(), repository.createTask(task)
                         .then(creditService.chargeTask(userId, taskId, creditCost, preparedRequest.taskType(), preparedRequest.generationSource()))
                         .then(getTaskResponse(taskId, userId))
                         .flatMap(response -> beforeEnqueue.apply(response).thenReturn(response))
-                        .as(transactionalOperator::transactional)
+                        .as(transactionalOperator::transactional))
                         .flatMap(response -> Mono.fromRunnable(() -> orchestrator.prepareTask(taskId, preparedRequest))
                                 .subscribeOn(Schedulers.boundedElastic())
                                 .then(Mono.defer(() -> eventPublisher.publish(userId, new AiTaskDtos.AiTaskEvent(EVENT_TASK, response))
@@ -605,7 +622,7 @@ public class AiTaskService {
     public Flux<ServerSentEvent<AiTaskDtos.AiTaskEvent>> subscribe() {
         // 将当前用户绑定到事件发布器维护的响应式事件流。
         return currentUserProvider.currentUserId()
-                .flatMapMany(eventPublisher::subscribe)
+                .flatMapMany(userId -> teamTaskScopeService.guardEvents(eventPublisher.subscribe(userId)))
                 .map(event -> ServerSentEvent.<AiTaskDtos.AiTaskEvent>builder()
                         .event(event.type())
                         .data(event)
@@ -634,7 +651,7 @@ public class AiTaskService {
                                     .map(channel -> new AiTaskDtos.AiModelOption(
                                             config.channelId() + CHANNEL_MODEL_SEPARATOR + config.modelName(),
                                             StringUtils.hasText(config.displayName()) ? config.displayName() : config.modelName(), config.modelType(), channel.name(), channel.apiFormat(), config.defaultModel(),
-                                            config.creditCost(), config.creditUnit(), config.capabilities(), config.videoBillingConfiguration(), config.modelIcon()))
+                                            config.creditCost(), config.creditUnit(), config.capabilities(), config.videoBillingConfiguration(), config.modelIcon(), config.ownerTeamId()))
                                     .orElse(null))
                             .filter(java.util.Objects::nonNull)
                             .toList();
@@ -654,6 +671,15 @@ public class AiTaskService {
      * @return Mono<Void> 执行结果
      */
     public Mono<Void> executeQueuedTask(String taskId) {
+        return teamTaskScopeService.execute("ai_generation_tasks", taskId, () -> executeQueuedTaskInTeam(taskId));
+    }
+
+    /**
+     * 在原任务空间内执行业务，保留现有错误收尾与退款。
+     * @param taskId 任务标识
+     * @return 执行完成信号
+     */
+    private Mono<Void> executeQueuedTaskInTeam(String taskId) {
         // 每次执行前从数据库读取最新任务，避免处理已终止任务。
         return repository.getTaskById(taskId)
                 .switchIfEmpty(Mono.fromRunnable(() -> log.info("跳过AI生成任务执行: taskId={}, reason={}", taskId, "任务不存在")).then(Mono.empty()))
@@ -687,7 +713,7 @@ public class AiTaskService {
                                                                 ? Mono.fromRunnable(() -> validateVideoTask(request, resolvedModel))
                                                                         .then(validateVideoReferences(task.getUserId(), request))
                                                                 : Mono.empty();
-                                                        return executionPreflight.then(Mono.defer(() -> {
+                                                        return (TYPE_TEXT.equals(task.getTaskType()) ? Mono.<Void>empty() : persistenceService.requireStorageWritable(task.getUserId())).then(executionPreflight).then(Mono.defer(() -> {
                                                         // 自定义模型任务直接使用自定义适配器，不经过适配器注册表。
                                                         AiProviderAdapter adapter = resolvedModel.isCustomModel()
                                                                 ? customProviderAdapter
@@ -706,7 +732,8 @@ public class AiTaskService {
                                                                 resolvedModel.isCustomModel(),
                                                                 resolvedModel.customModelConfig()
                                                         );
-                                                        return adapter.execute(context);
+                                                        return teamTaskScopeService.requireActive(task.getUserId()).then(Mono.defer(() -> adapter.execute(context))
+                                                                .contextWrite(teamContext -> teamContext.put(com.novanovastudio.security.TeamScope.IN_FLIGHT_KEY, true)));
                                                         }));
                                                     })
                                                     .flatMap(result -> updateTaskState(taskId, STATUS_SUCCESS, 100, null, toJson(result)))
@@ -985,7 +1012,7 @@ public class AiTaskService {
         }
         validateChannelSupport(channel, capability);
         validateUserChannelAccess(channel);
-        return new ResolvedModel(channel, model, "", 0, CREDIT_UNIT_GENERATION, List.of(), null, true, "high", new JSONObject(),
+        return new ResolvedModel(channel, model, "", BigDecimal.ZERO, CREDIT_UNIT_GENERATION, List.of(), null, true, "high", new JSONObject(),
                 false, null);
     }
 
@@ -1108,15 +1135,15 @@ public class AiTaskService {
      * @param resolvedModel ResolvedModel 已解析模型
      * @return int 应扣积分
      */
-    private int calculateTaskCredits(AiTaskDtos.CreateAiTaskRequest request, ResolvedModel resolvedModel) {
+    private BigDecimal calculateTaskCredits(AiTaskDtos.CreateAiTaskRequest request, ResolvedModel resolvedModel) {
         if (TYPE_TEXT.equals(request.taskType())) {
-            return 0;
+            return BigDecimal.ZERO;
         }
         if (TYPE_VIDEO.equals(request.taskType())) {
             return validateVideoTask(request, resolvedModel).chargedCredits();
         }
-        Integer unitCost = resolvedModel.creditCost();
-        if (unitCost == null || unitCost < 0) {
+        BigDecimal unitCost = resolvedModel.creditCost();
+        if (unitCost == null || CreditAmounts.of(unitCost).compareTo(CreditAmounts.of(0)) < 0) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.invalidModelCredits"));
         }
         String creditUnit = resolvedModel.creditUnit();
@@ -1128,9 +1155,9 @@ public class AiTaskService {
         }
         int count = TYPE_IMAGE.equals(request.taskType()) ? imageCount(request.parameters()) : 1;
         try {
-            int total = Math.multiplyExact(unitCost, count);
+            BigDecimal total = CreditAmounts.multiply(unitCost, count);
             return CREDIT_UNIT_SECOND.equals(creditUnit)
-                    ? Math.multiplyExact(total, videoSeconds(request.parameters()))
+                    ? CreditAmounts.multiply(total, videoSeconds(request.parameters()))
                     : total;
         } catch (ArithmeticException exception) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.generationCreditCalculationExceedsRange"));
@@ -1207,7 +1234,7 @@ public class AiTaskService {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.invalidVideoTierPricing"));
         }
         String resolution = videoResolution(request.parameters());
-        Map<String, Integer> modePrices = configuration.modePrices() == null ? null : configuration.modePrices().get(mode);
+        Map<String, BigDecimal> modePrices = configuration.modePrices() == null ? null : configuration.modePrices().get(mode);
         if (modePrices == null || !modePrices.containsKey(resolution)) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.noPriceForResolutionInThisMode", resolution));
         }
@@ -1215,13 +1242,13 @@ public class AiTaskService {
         if (seconds < configuration.minimumDurationSeconds()) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoDurationMustBeAtLeastSeconds", configuration.minimumDurationSeconds()));
         }
-        Integer unitPrice = modePrices.get(resolution);
-        if (unitPrice == null || unitPrice < 0) {
+        BigDecimal unitPrice = modePrices.get(resolution);
+        if (unitPrice == null || CreditAmounts.of(unitPrice).compareTo(CreditAmounts.of(0)) < 0) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.invalidVideoResolutionPrices"));
         }
         try {
-            int chargedCredits = CREDIT_UNIT_SECOND.equals(configuration.billingUnit())
-                    ? Math.multiplyExact(unitPrice, seconds) : unitPrice;
+            BigDecimal chargedCredits = CREDIT_UNIT_SECOND.equals(configuration.billingUnit())
+                    ? CreditAmounts.multiply(unitPrice, seconds) : unitPrice;
             return new VideoBillingQuote(mode, resolution, configuration.billingUnit(), unitPrice, seconds, chargedCredits);
         } catch (ArithmeticException exception) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.generationCreditCalculationExceedsRange"));
@@ -1369,9 +1396,9 @@ public class AiTaskService {
             billing.put("videoGenerationMode", quote.mode());
             billing.put("resolution", quote.resolution());
             billing.put("billingUnit", quote.billingUnit());
-            billing.put("unitPrice", quote.unitPrice());
+            billing.put("unitPrice", CreditAmounts.text(quote.unitPrice()));
             billing.put("durationSeconds", quote.durationSeconds());
-            billing.put("chargedCredits", quote.chargedCredits());
+            billing.put("chargedCredits", CreditAmounts.text(quote.chargedCredits()));
             snapshot.put("videoBilling", billing);
         }
         return snapshot.toJSONString();
@@ -1604,7 +1631,7 @@ public class AiTaskService {
      * @param channel AiChannelConfig 渠道配置
      * @param model String 模型名称
      */
-    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, String modelConfigId, Integer creditCost,
+    private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, String modelConfigId, BigDecimal creditCost,
                                  String creditUnit, List<String> capabilities, VideoBillingConfiguration videoBillingConfiguration,
                                  boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters,
                                  boolean isCustomModel, Map<String, PersistenceDtos.CustomModelGroupConfig> customModelConfig) {
@@ -1620,8 +1647,8 @@ public class AiTaskService {
      * @param durationSeconds int 请求视频时长
      * @param chargedCredits int 实际扣除积分
      */
-    private record VideoBillingQuote(String mode, String resolution, String billingUnit, int unitPrice,
-                                     int durationSeconds, int chargedCredits) {
+    private record VideoBillingQuote(String mode, String resolution, String billingUnit, BigDecimal unitPrice,
+                                     int durationSeconds, BigDecimal chargedCredits) {
     }
     /**
      * 翻译当前已注册工作流的固定阶段名称。

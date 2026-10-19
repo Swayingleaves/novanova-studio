@@ -54,7 +54,8 @@ public class TokenAuthenticationWebFilter implements WebFilter {
             PathPatternParser.defaultInstance.parse("/api/v1/auth/oauth/**"),
             PathPatternParser.defaultInstance.parse("/api/v1/ai/model/listModels"),
             PathPatternParser.defaultInstance.parse("/api/v1/config/getRuntimeConfig"),
-            PathPatternParser.defaultInstance.parse("/api/v1/homepage/listShowcases")
+            PathPatternParser.defaultInstance.parse("/api/v1/homepage/listShowcases"),
+            PathPatternParser.defaultInstance.parse("/api/v1/team/getPublicTeam")
     );
 
     /** Token服务 */
@@ -93,8 +94,10 @@ public class TokenAuthenticationWebFilter implements WebFilter {
             TokenService.TokenClaims claims = tokenService.parse(token);
             return userRepository.findById(claims.userId())
                     .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, SystemMessage.of("business.userNotFound"))))
-                    .flatMap(user -> authenticateUser(exchange, chain, user, claims))
-                    .onErrorResume(BusinessException.class, exception -> writeAuthError(exchange, exception));
+                    .flatMap(user -> authenticateUser(user, claims))
+                    .onErrorResume(BusinessException.class, exception -> writeAuthError(exchange, exception).then(Mono.empty()))
+                    .flatMap(currentUser -> chain.filter(exchange).contextWrite(context -> MappedDiagnosticContext.put(
+                            context.put(CurrentUserProvider.CURRENT_USER_CONTEXT_KEY, currentUser), MappedDiagnosticContext.USER_ID, currentUser.id())));
         } catch (BusinessException exception) {
             return writeAuthError(exchange, exception);
         }
@@ -103,13 +106,11 @@ public class TokenAuthenticationWebFilter implements WebFilter {
     /**
      * 认证用户并写入上下文
      *
-     * @param exchange ServerWebExchange 当前请求交换对象
-     * @param chain WebFilterChain 过滤器链
      * @param user User 用户实体
      * @param claims TokenClaims 登录令牌声明
-     * @return Mono<Void> 过滤执行结果
+     * @return Mono<CurrentUser> 已验证的登录身份
      */
-    private Mono<Void> authenticateUser(ServerWebExchange exchange, WebFilterChain chain, User user, TokenService.TokenClaims claims) {
+    private Mono<CurrentUser> authenticateUser(User user, TokenService.TokenClaims claims) {
         // 确认账号仍处于启用状态，再把当前用户写入Reactor上下文。
         if (user.getStatus() == null || user.getStatus() != 1) {
             return Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, SystemMessage.of("business.accountDisabled")));
@@ -118,9 +119,7 @@ public class TokenAuthenticationWebFilter implements WebFilter {
             return Mono.error(new BusinessException(ErrorCode.TOKEN_INVALID, SystemMessage.of("business.sessionInvalidSignInAgain")));
         }
         CurrentUser currentUser = new CurrentUser(user.getId(), user.getEmail(), user.getRole(), user.getStatus());
-        return chain.filter(exchange).contextWrite(context -> MappedDiagnosticContext.put(
-                context.put(CurrentUserProvider.CURRENT_USER_CONTEXT_KEY, currentUser),
-                MappedDiagnosticContext.USER_ID, user.getId()));
+        return Mono.just(currentUser);
     }
 
     /**

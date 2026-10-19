@@ -1,5 +1,9 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+
 import jakarta.validation.constraints.*;
 import java.util.List;
 
@@ -34,7 +38,7 @@ public final class EpisodeBodiesDtos {
                                @NotBlank @Size(max=64) String clientRequestId, @NotBlank String model,
                                @NotBlank @Pattern(regexp=MODE_PATTERN) String mode,
                                @NotNull @Size(max=1000) List<@NotBlank String> episodeIds,
-                               @Min(0) int expectedCredits, @NotBlank String expectedFingerprint) { }
+                               @Min(0) @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal expectedCredits, @NotBlank String expectedFingerprint) { }
 
     /** 任务查询与取消请求。 */
     public record JobRequest(@NotBlank String projectId, @NotBlank String jobId) { }
@@ -43,23 +47,23 @@ public final class EpisodeBodiesDtos {
     public record ProjectRequest(@NotBlank String projectId) { }
 
     /** 报价：本次要生成的分集、调用次数与预扣积分。 */
-    public record Quote(long revision, int episodes, int calls, int credits, String fingerprint, List<String> episodeIds) { }
+    public record Quote(long revision, int episodes, int calls, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits, String fingerprint, List<String> episodeIds) { }
 
     /** 任务进度：分集级进度、当前阶段与结算情况。 */
     public record Job(String jobId, String phase, String status, String mode, int totalEpisodes, int processedEpisodes,
-                      int credits, int refundedCredits, String errorMessage, long revision, int retryCount,
+                      @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal refundedCredits, String errorMessage, long revision, int retryCount,
                       List<String> failedEpisodeIds) { }
 
     /** 管理员维护的分集正文定价：文本模型及其每集积分。 */
-    public record ModelPricing(String modelConfigId, String model, String displayName, int credits, long revision) { }
+    public record ModelPricing(String modelConfigId, String model, String displayName, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits, long revision) { }
 
     /** 保存分集正文定价请求。 */
-    public record SavePricingRequest(@NotBlank String modelConfigId, @Min(0) int credits,
+    public record SavePricingRequest(@NotBlank String modelConfigId, @Min(0) @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits,
                                      @Min(0) long expectedRevision) { }
 
     /** 查询所选模型单价的请求。 */
     public record UnitPriceRequest(@NotBlank String model) { }
 
     /** 所选模型的每集积分，未配置时为空，供界面在报价前显示单价。 */
-    public record UnitPrice(Integer unitPrice) { }
+    public record UnitPrice(@jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal unitPrice) { }
 }

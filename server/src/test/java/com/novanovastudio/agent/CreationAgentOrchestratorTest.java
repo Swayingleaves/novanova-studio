@@ -428,7 +428,7 @@ class CreationAgentOrchestratorTest {
     private CreationAgentOrchestrator orchestrator(AgentSessionService sessionService,
                                                     AgentScopeModelFactory modelFactory,
                                                     AgentPlanRepository planRepository) {
-        return new CreationAgentOrchestrator(
+        return new CreationAgentOrchestrator(com.novanovastudio.TeamTestSupport.taskScope(),
                 sessionService,
                 mock(AgentEventEmitter.class),
                 mock(AgentExecutionRegistry.class),
@@ -466,7 +466,7 @@ class CreationAgentOrchestratorTest {
                                                           CreationAgentRequestRepository requestRepository,
                                                           CreationAgentRequestDispatcher requestDispatcher,
                                                           CreationAgentRequestQueue requestQueue) {
-        return new CreationAgentOrchestrator(
+        return new CreationAgentOrchestrator(com.novanovastudio.TeamTestSupport.taskScope(),
                 sessionService,
                 eventEmitter,
                 mock(AgentExecutionRegistry.class),

@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useTranslation } from "@/features/locale/use-translation";

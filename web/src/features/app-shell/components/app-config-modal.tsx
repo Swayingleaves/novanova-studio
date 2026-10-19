@@ -1,4 +1,8 @@
 "use client";
+
+import { creditText } from "@/shared/lib/credit-amounts";
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
+
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { translateMessage as translate } from "@/features/locale/translate";
@@ -11,6 +15,7 @@ import { nanoid } from "nanoid";
 import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { MODEL_ICON_OPTIONS } from "@/features/settings/components/model-icon";
@@ -174,12 +179,12 @@ export function AppConfigModal() {
     const [draftModelConfigs, setDraftModelConfigs] = useState<ServerModelConfig[]>([]);
     const [objectStorageBaseline, setObjectStorageBaseline] = useState<ObjectStorageConfig[]>([]);
     const [draftObjectStorages, setDraftObjectStorages] = useState<ObjectStorageConfig[]>([]);
-    const [creditBaseline, setCreditBaseline] = useState(100);
-    const [draftInitialCredits, setDraftInitialCredits] = useState(100);
-    const [invitationRewardBaseline, setInvitationRewardBaseline] = useState(0);
-    const [draftInvitationRewardCredits, setDraftInvitationRewardCredits] = useState(0);
-    const [checkInBaseline, setCheckInBaseline] = useState(0);
-    const [draftCheckInCredits, setDraftCheckInCredits] = useState(0);
+    const [creditBaseline, setCreditBaseline] = useState<CreditAmount>(100);
+    const [draftInitialCredits, setDraftInitialCredits] = useState<CreditAmount>(100);
+    const [invitationRewardBaseline, setInvitationRewardBaseline] = useState<CreditAmount>(0);
+    const [draftInvitationRewardCredits, setDraftInvitationRewardCredits] = useState<CreditAmount>(0);
+    const [checkInBaseline, setCheckInBaseline] = useState<CreditAmount>(0);
+    const [draftCheckInCredits, setDraftCheckInCredits] = useState<CreditAmount>(0);
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
     const [collapsedEditingCapabilities, setCollapsedEditingCapabilities] = useState<string[]>([]);
@@ -187,7 +192,7 @@ export function AppConfigModal() {
     const editingModelIsMedia = Boolean(editingModelConfig && (editingModelConfig.modelType === "image" || editingModelConfig.modelType === "video"));
 
     const resetChannelDraft = useCallback((resetCollapsed = false) => {
-        const channels = cloneChannels(useConfigStore.getState().config.channels);
+        const channels = cloneChannels(useConfigStore.getState().managedChannels);
         setChannelBaseline(channels);
         setDraftChannels(cloneChannels(channels));
         if (resetCollapsed) setCollapsedChannelIds(channels.map((channel) => channel.id));
@@ -229,7 +234,7 @@ export function AppConfigModal() {
         initializedRef.current = true;
         setDraftsReady(false);
         let active = true;
-        void Promise.all([refreshModelConfiguration(), refreshObjectStorages(), getCreditSettings(), getInvitationRewardSettings(), getCheckInRewardSettings()])
+        void Promise.all([refreshModelConfiguration(), refreshObjectStorages(), useTeamStore.getState().team ? Promise.resolve({ initialCredits: "0" }) : getCreditSettings(), useTeamStore.getState().team ? Promise.resolve({ invitationRewardCredits: "0" }) : getInvitationRewardSettings(), useTeamStore.getState().team ? Promise.resolve({ checkInCredits: "0" }) : getCheckInRewardSettings()])
             .then(([, , creditSettings, invitationRewardSettings, checkInSettings]) => {
                 if (!active) return;
                 resetAllDrafts();
@@ -252,7 +257,7 @@ export function AppConfigModal() {
     }, [isConfigOpen, message, refreshModelConfiguration, refreshObjectStorages, resetAllDrafts]);
 
     useEffect(() => {
-        if (user?.role !== "admin" && isConfigOpen) setConfigDialogOpen(false);
+        if (!canManageCurrentSpace() && isConfigOpen) setConfigDialogOpen(false);
     }, [isConfigOpen, setConfigDialogOpen, user?.role]);
 
     const draftConfig = useMemo(() => {
@@ -356,7 +361,7 @@ export function AppConfigModal() {
             message.success(translate("appShell.channelConfigurationSaved"));
         } catch (error) {
             await refreshChannels().catch(() => undefined);
-            setChannelBaseline(cloneChannels(useConfigStore.getState().config.channels));
+            setChannelBaseline(cloneChannels(useConfigStore.getState().managedChannels));
             message.error(error instanceof Error ? error.message : translate("appShell.failedToSaveChannelConfiguration"));
         } finally {
             setSavingTab("");
@@ -732,7 +737,7 @@ export function AppConfigModal() {
         });
     };
 
-    if (user?.role !== "admin") return null;
+    if (!canManageCurrentSpace()) return null;
 
     return (
         <Modal title={<div className="text-lg font-semibold">{translate("appShell.configurationPreferences")}</div>} open={isConfigOpen} width={980} centered onCancel={closeConfigDialog} footer={null} styles={{ body: { height: "72vh", overflowY: "auto", paddingRight: 12 } }}>
@@ -932,7 +937,7 @@ export function AppConfigModal() {
                                         <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.appliesOnlyToNewRegisteredAdminCreatedOrFirst")}</div>
                                         <div className="mt-5 flex flex-wrap items-end gap-3">
                                             <Form.Item label={translate("appShell.initialCredits")} className="mb-0">
-                                                <InputNumber min={0} precision={0} value={draftInitialCredits} disabled={isSaving} className="w-40" onChange={(value) => setDraftInitialCredits(Math.max(0, Number(value) || 0))} />
+                                                <InputNumber<string> stringMode min="0" precision={6} value={String(draftInitialCredits)} disabled={isSaving} className="w-40" onChange={(value) => setDraftInitialCredits(creditText(value || "0"))} />
                                             </Form.Item>
                                             <Button type="primary" disabled={!creditsDirty || isSaving} loading={savingTab === "credits"} onClick={() => void saveCreditSettings()}>
                                                 {translate("appShell.save")}</Button>
@@ -952,13 +957,13 @@ export function AppConfigModal() {
                                             {translate("appShell.referralRewardsGoToTheInviterAfterEmailRegistration")}</div>
                                         <div className="mt-5 flex flex-wrap items-end gap-3">
                                             <Form.Item label={translate("appShell.creditsPerNewUser")} className="mb-0">
-                                                <InputNumber
-                                                    min={0}
-                                                    precision={0}
-                                                    value={draftInvitationRewardCredits}
+                                                <InputNumber<string> stringMode
+                                                    min="0"
+                                                    precision={6}
+                                                    value={String(draftInvitationRewardCredits)}
                                                     disabled={isSaving}
                                                     className="w-48"
-                                                    onChange={(value) => setDraftInvitationRewardCredits(Math.max(0, Number(value) || 0))}
+                                                    onChange={(value) => setDraftInvitationRewardCredits(creditText(value || "0"))}
                                                 />
                                             </Form.Item>
                                             <Button
@@ -984,13 +989,13 @@ export function AppConfigModal() {
                                             {translate("appShell.dailyCheckInGrantsTheseCreditsValidFor24")}</div>
                                         <div className="mt-5 flex flex-wrap items-end gap-3">
                                             <Form.Item label={translate("appShell.dailyCheckInCredits")} className="mb-0">
-                                                <InputNumber
-                                                    min={0}
-                                                    precision={0}
-                                                    value={draftCheckInCredits}
+                                                <InputNumber<string> stringMode
+                                                    min="0"
+                                                    precision={6}
+                                                    value={String(draftCheckInCredits)}
                                                     disabled={isSaving}
                                                     className="w-40"
-                                                    onChange={(value) => setDraftCheckInCredits(Math.max(0, Number(value) || 0))}
+                                                    onChange={(value) => setDraftCheckInCredits(creditText(value || "0"))}
                                                 />
                                             </Form.Item>
                                             <Button
@@ -1138,7 +1143,7 @@ export function AppConfigModal() {
                                 </Form>
                             ),
                         },
-                    ]}
+                    ].filter((item) => !useTeamStore.getState().team || !["credits", "invitationReward", "checkIn"].includes(item.key))}
                 />
             )}
             <Modal
@@ -1330,11 +1335,11 @@ export function AppConfigModal() {
                                                             </span>
                                                             <span className="min-w-0 flex-1">
                                                                 <span className="block text-xs font-medium">{resolution.label}</span>
-                                                                <InputNumber
-                                                                    min={0}
-                                                                    precision={0}
+                                                                <InputNumber<string> stringMode
+                                                                    min="0"
+                                                                    precision={6}
                                                                     placeholder={translate("appShell.notConfigured")}
-                                                                    value={prices[resolution.value]}
+                                                                    value={prices[resolution.value] === undefined ? undefined : String(prices[resolution.value])}
                                                                     className="mt-0.5 w-full"
                                                                     disabled={!modeEnabled}
                                                                     controls={false}
@@ -1428,7 +1433,7 @@ export function AppConfigModal() {
                         </Form.Item>
                         {editingModelConfig.modelType !== "video" ? (
                             <Form.Item label={translate("appShell.creditsPerRun")}>
-                                <InputNumber min={0} precision={0} value={editingModelConfig.creditCost} className="w-full" onChange={(value) => updateEditingModelConfig({ creditCost: Math.max(0, Number(value) || 0) })} />
+                                <InputNumber<string> min="0" stringMode precision={6} value={String(editingModelConfig.creditCost)} className="w-full" onChange={(value) => updateEditingModelConfig({ creditCost: creditText(value || "0") })} />
                             </Form.Item>
                         ) : null}
                         {editingModelConfig.modelType === "image" ? (
@@ -1623,11 +1628,11 @@ function cloneVideoBillingConfiguration(configuration: VideoBillingConfiguration
     };
 }
 
-function updateVideoResolutionPrice(configuration: VideoBillingConfiguration, mode: VideoGenerationMode, resolution: VideoResolution, value: number | null) {
+function updateVideoResolutionPrice(configuration: VideoBillingConfiguration, mode: VideoGenerationMode, resolution: VideoResolution, value: CreditAmount | null) {
     const modePrices = { ...(configuration.modePrices || {}) };
     const prices = { ...(modePrices[mode] || {}) };
     if (value === null) delete prices[resolution];
-    else prices[resolution] = Math.max(0, Math.floor(Number(value) || 0));
+    else prices[resolution] = creditText(value);
     modePrices[mode] = prices;
     return { ...configuration, modePrices };
 }

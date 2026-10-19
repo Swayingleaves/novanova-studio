@@ -1,5 +1,9 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -75,19 +79,19 @@ public final class NovelAdaptationDtos {
                                   @NotBlank @Size(max = 256) String model) { }
 
     /** 一键改编报价，调用次数按阶段分流后估算。 */
-    public record JobQuote(int factCount, int skeletonCalls, int episodeCalls, int estimatedCalls, int credits) { }
+    public record JobQuote(int factCount, int skeletonCalls, int episodeCalls, int estimatedCalls, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits) { }
 
     /** 一键改编任务请求。 */
     public record JobRequest(@NotBlank @Size(max = 64) String projectId,
                              @NotBlank @Size(max = 64) String jobId) { }
 
     /** 失败续跑报价，费用仅涵盖尚未生成成功的内容。 */
-    public record RetryQuote(long revision, String phase, int completedCalls, int remainingCalls, int credits, int retryCount) { }
+    public record RetryQuote(long revision, String phase, int completedCalls, int remainingCalls, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits, int retryCount) { }
 
     /** 用户确认失败续跑报价，修订、费用和续跑次数必须与服务端重新计算结果一致。 */
     public record RetryJobRequest(@NotBlank @Size(max = 64) String projectId,
                                   @NotBlank @Size(max = 64) String jobId, @Min(0) long expectedRevision,
-                                  @Min(0) int expectedRemainingCalls, @Min(0) int expectedCredits,
+                                  @Min(0) int expectedRemainingCalls, @Min(0) @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal expectedCredits,
                                   @Min(0) int expectedRetryCount) { }
 
     /** 任务产出的草稿摘要。 */
@@ -95,6 +99,6 @@ public final class NovelAdaptationDtos {
 
     /** 一键改编任务状态与进度。 */
     public record JobView(String jobId, String phase, String stage, String status, int totalUnits, int processedUnits,
-                          int estimatedCalls, int settledCalls, int credits, int refundedCredits, String errorMessage,
+                          int estimatedCalls, int settledCalls, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal refundedCredits, String errorMessage,
                           String createdAt, List<JobDraft> drafts) { }
 }

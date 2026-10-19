@@ -1,5 +1,9 @@
 package com.novanovastudio.service;
 
+import com.novanovastudio.service.TeamTaskScopeService;
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.NovelAdaptationDtos;
@@ -30,6 +34,9 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 @Slf4j
 public class NovelAdaptationRunner {
+
+    /** 持久化任务的团队作用域恢复。 */
+    private final TeamTaskScopeService teamTaskScopeService;
 
     /** 执行租约秒数。 */
     public static final int LEASE_SECONDS = 300;
@@ -65,6 +72,15 @@ public class NovelAdaptationRunner {
      * @return Mono&lt;Void&gt; 执行结果
      */
     public Mono<Void> process(String jobId) {
+        return teamTaskScopeService.execute("novel_adaptation_jobs", jobId, () -> processInTeam(jobId));
+    }
+
+    /**
+     * 在原任务空间内执行业务，保留现有错误收尾与退款。
+     * @param jobId 任务标识
+     * @return 执行完成信号
+     */
+    private Mono<Void> processInTeam(String jobId) {
         return jobRepository.claim(jobId, LEASE_SECONDS).flatMap(claimed -> {
             if (!claimed) return Mono.<Void>empty();
             Disposable renewal = Flux.interval(Duration.ofSeconds(LEASE_SECONDS / 3))
@@ -157,16 +173,16 @@ public class NovelAdaptationRunner {
 
     /** 退还未结算的调用积分。 */
     private Mono<Void> refundUnsettled(NovelAdaptationJobRepository.Job job) {
-        int credits = refundableCredits(job);
-        if (credits <= 0) return Mono.empty();
+        BigDecimal credits = refundableCredits(job);
+        if (CreditAmounts.of(credits).compareTo(CreditAmounts.of(0)) <= 0) return Mono.empty();
         return creditService.refundOperation(job.userId(), NovelAdaptationService.chargeOperationId(job), NovelAdaptationService.OPERATION_NAME, credits);
     }
 
     /** 按单次调用价格计算未结算部分应退积分。 */
-    private int refundableCredits(NovelAdaptationJobRepository.Job job) {
-        if (job.estimatedCalls() <= 0) return 0;
-        int perCall = job.credits() / job.estimatedCalls();
-        return Math.max(0, perCall * (job.estimatedCalls() - job.settledCalls()));
+    private BigDecimal refundableCredits(NovelAdaptationJobRepository.Job job) {
+        if (job.estimatedCalls() <= 0) return BigDecimal.ZERO;
+        BigDecimal perCall = CreditAmounts.divide(job.credits(), job.estimatedCalls());
+        return CreditAmounts.multiply(perCall, Math.max(0, job.estimatedCalls() - job.settledCalls()));
     }
 
     /** 截断失败原因，避免超出列长度。 */

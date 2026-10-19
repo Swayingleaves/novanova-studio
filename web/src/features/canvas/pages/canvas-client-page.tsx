@@ -1,11 +1,18 @@
 "use client";
+import { modelCreditBalance } from "@/features/team/credit-balance";
+import { getWalletBalances } from "@/services/api/team";
+import { useTeamStore } from "@/features/team/stores/use-team-store";
+
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter } from "@/shared/lib/team-navigation";
 import dynamic from "next/dynamic";
 import { Trash2 } from "lucide-react";
 import { saveAs } from "file-saver";
@@ -2511,7 +2518,8 @@ function CanvasWorkspacePage() {
             }
             const normalizedSettings: CanvasStoryboardAssetGenerationSettings = { ...settings, model: normalizedModel };
             const totalCredits = readStoryboardAssetImageCost(effectiveConfig.modelCosts, normalizedModel, selectedAssets.length);
-            if (typeof creditBalance === "number" && totalCredits > creditBalance) {
+            const creditBalance = modelCreditBalance(normalizedModel);
+            if (creditBalance !== null && creditBalance !== undefined && creditAmount(totalCredits).greaterThan(creditBalance)) {
                 message.error(translate("canvas.insufficientCreditsAssetsNeedAvailable", { value0: selectedAssets.length, value1: totalCredits, value2: creditBalance }));
                 return;
             }
@@ -2640,7 +2648,8 @@ function CanvasWorkspacePage() {
                 message.error(videoQuote.reason);
                 return;
             }
-            if (typeof creditBalance === "number" && videoQuote.credits > creditBalance) {
+            const creditBalance = modelCreditBalance(normalizedModel);
+            if (creditBalance !== null && creditBalance !== undefined && creditAmount(videoQuote.credits).greaterThan(creditBalance)) {
                 message.error(translate("canvas.insufficientCreditsVideosNeedAvailable", { value0: selectedShots.length, value1: videoQuote.credits, value2: creditBalance }));
                 return;
             }
@@ -2788,7 +2797,8 @@ function CanvasWorkspacePage() {
             if (!currentNode || currentNode.execution.phase === "running") return;
             const request = resolveStoryboardRequest(currentNode);
             if (!request) return;
-            if (typeof creditBalance === "number" && request.modelCost > creditBalance) {
+            const creditBalance = modelCreditBalance(request.model);
+            if (creditBalance !== null && creditBalance !== undefined && creditAmount(request.modelCost).greaterThan(creditBalance)) {
                 message.error(translate("canvas.insufficientCreditsInitialGenerationNeedsAvailable", { value0: request.modelCost, value1: creditBalance }));
                 return;
             }
@@ -2837,14 +2847,15 @@ function CanvasWorkspacePage() {
             }
             const request = resolveStoryboardRequest(currentNode, selectedModel);
             if (!request) return;
+            const creditBalance = modelCreditBalance(request.model);
             const compositionAssets = collectStoryboardCompositionAssets(selectedShots, currentNode.storyboard.assets);
             const validationError = validateStoryboardComposition(selectedShots, compositionAssets);
             if (validationError) {
                 message.error(validationError);
                 return;
             }
-            const totalCredits = request.modelCost * selectedShots.length;
-            if (typeof creditBalance === "number" && totalCredits > creditBalance) {
+            const totalCredits = creditText(creditAmount(request.modelCost).times(selectedShots.length));
+            if (creditBalance !== null && creditBalance !== undefined && creditAmount(totalCredits).greaterThan(creditBalance)) {
                 message.error(translate("canvas.insufficientCreditsShotsNeedAvailable", { value0: selectedShots.length, value1: totalCredits, value2: creditBalance }));
                 return;
             }
@@ -2900,13 +2911,14 @@ function CanvasWorkspacePage() {
             }
             const request = resolveStoryboardRequest(currentNode);
             if (!request) return;
+            const creditBalance = modelCreditBalance(request.model);
             const compositionAssets = collectStoryboardCompositionAssets([shot], currentNode.storyboard.assets);
             const validationError = validateStoryboardComposition([shot], compositionAssets);
             if (validationError) {
                 message.error(validationError);
                 return;
             }
-            if (typeof creditBalance === "number" && request.modelCost > creditBalance) {
+            if (creditBalance !== null && creditBalance !== undefined && creditAmount(request.modelCost).greaterThan(creditBalance)) {
                 message.error(translate("canvas.insufficientCreditsShotNeedsAvailable", { value0: shot.shotNumber, value1: request.modelCost, value2: creditBalance }));
                 return;
             }
@@ -5652,10 +5664,9 @@ function readCanvasGenerationMode(value: unknown): CanvasGenerationMode | null {
     return value === "text" || value === "image" || value === "video" ? value : null;
 }
 
-function applyStoryboardCreditCharge(credits: number, setCreditBalance: (creditBalance: number) => void): void {
-    if (!Number.isInteger(credits) || credits <= 0) return;
-    const currentBalance = useUserStore.getState().user?.creditBalance;
-    if (typeof currentBalance === "number") setCreditBalance(Math.max(0, currentBalance - credits));
+function applyStoryboardCreditCharge(credits: CreditAmount, setCreditBalance: (creditBalance: CreditAmount) => void): void {
+    if (!creditAmount(credits).isFinite() || creditAmount(credits).lessThanOrEqualTo(0)) return;
+    void getWalletBalances().then((wallets) => { useTeamStore.getState().setWallets(wallets); setCreditBalance(wallets.platformBalance); }).catch((error) => console.error("刷新积分钱包失败", error));
 }
 
 /** 写入新一轮分镜结果，并清理上一轮资产批量生图状态，避免新资产显示旧任务。 */

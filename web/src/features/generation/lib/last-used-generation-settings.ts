@@ -1,3 +1,4 @@
+import { teamStorageKey } from "@/features/team/stores/use-team-store";
 import localforage from "localforage";
 
 export type ImageLastUsedSettings = {
@@ -39,27 +40,27 @@ let imageSettingsWriteQueue = Promise.resolve();
 let videoSettingsWriteQueue = Promise.resolve();
 
 export async function loadImageLastUsedSettings(): Promise<ImageLastUsedSettings> {
-    const saved = await settingsStorage.getItem<Partial<ImageLastUsedSettings>>("image");
+    const saved = await settingsStorage.getItem<Partial<ImageLastUsedSettings>>(teamStorageKey("image"));
     return { ...DEFAULT_IMAGE_LAST_USED_SETTINGS, ...saved };
 }
 
 export function saveImageLastUsedSettings(settings: Partial<ImageLastUsedSettings>): Promise<void> {
     imageSettingsWriteQueue = imageSettingsWriteQueue.catch(() => undefined).then(async () => {
         const current = await loadImageLastUsedSettings();
-        await settingsStorage.setItem("image", { ...current, ...settings });
+        await settingsStorage.setItem(teamStorageKey("image"), { ...current, ...settings });
     });
     return imageSettingsWriteQueue;
 }
 
 export async function loadVideoLastUsedSettings(): Promise<VideoLastUsedSettings> {
-    const saved = await settingsStorage.getItem<Partial<VideoLastUsedSettings>>("video");
+    const saved = await settingsStorage.getItem<Partial<VideoLastUsedSettings>>(teamStorageKey("video"));
     return { ...DEFAULT_VIDEO_LAST_USED_SETTINGS, ...saved };
 }
 
 export function saveVideoLastUsedSettings(settings: Partial<VideoLastUsedSettings>): Promise<void> {
     videoSettingsWriteQueue = videoSettingsWriteQueue.catch(() => undefined).then(async () => {
         const current = await loadVideoLastUsedSettings();
-        await settingsStorage.setItem("video", { ...current, ...settings });
+        await settingsStorage.setItem(teamStorageKey("video"), { ...current, ...settings });
     });
     return videoSettingsWriteQueue;
 }

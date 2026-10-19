@@ -264,7 +264,7 @@ class ScriptServiceTest {
         ScriptRepository.ProjectRecord project = new ScriptRepository.ProjectRecord("project-a", 8L, overview,
                 "idea", 0, 4L, null, OffsetDateTime.now(), OffsetDateTime.now());
         ScriptDtos.AiDraft draft = new ScriptDtos.AiDraft("draft-a", "project-a", "polish", "overview", null,
-                3L, "", new JSONObject(), new JSONObject(), "text-model", 1, "pending", OffsetDateTime.now());
+                3L, "", new JSONObject(), new JSONObject(), "text-model", java.math.BigDecimal.valueOf(1), "pending", OffsetDateTime.now());
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
         when(repository.getProject(8L, "project-a")).thenReturn(Mono.just(project));
         when(repository.getPendingAiDraft("project-a", "draft-a")).thenReturn(Mono.just(draft));
@@ -404,7 +404,7 @@ class ScriptServiceTest {
         JSONObject source = JSON.parseObject(JSON.toJSONString(new ScriptDtos.OutlineDraft(sections, events)));
         when(repository.getPendingAiDraft("project-a", "draft-a")).thenReturn(Mono.just(new ScriptDtos.AiDraft(
                 "draft-a", "project-a", actionType, "outline", null, 4L, "", source,
-                JSON.parseObject(data.toJSONString()), "text-model", 1, "pending", OffsetDateTime.now())));
+                JSON.parseObject(data.toJSONString()), "text-model", java.math.BigDecimal.valueOf(1), "pending", OffsetDateTime.now())));
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<ScriptDtos.MutationResult>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }

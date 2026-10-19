@@ -38,7 +38,7 @@ class AgentScopeModelFactoryTest {
         when(adapterRegistry.normalizeApiFormat("openai")).thenReturn("openai");
         when(adapterRegistry.normalizeApiFormat("gemini")).thenReturn("gemini");
         when(adapterRegistry.normalizeApiFormat("anthropic")).thenReturn("anthropic");
-        AgentScopeModelFactory factory = new AgentScopeModelFactory(null, adapterRegistry);
+        AgentScopeModelFactory factory = new AgentScopeModelFactory(null, com.novanovastudio.TeamTestSupport.teamRepository(), com.novanovastudio.TeamTestSupport.taskScope(), adapterRegistry);
 
         Model openAi = factory.createModel(channel("openai", "gpt-test"));
         Model gemini = factory.createModel(channel("gemini", "gemini-test"));
@@ -61,19 +61,19 @@ class AgentScopeModelFactoryTest {
         AiProviderAdapterRegistry adapterRegistry = mock(AiProviderAdapterRegistry.class);
         AiTaskDtos.AiChannelConfig channel = channel("openai", "story-model");
         PersistenceDtos.ModelConfig modelConfig = new PersistenceDtos.ModelConfig(
-                "model-config-1", "channel", "story-model", AiTaskTypes.TEXT, List.of(), true, 1, 6, false, "high");
+                "model-config-1", "channel", "story-model", AiTaskTypes.TEXT, List.of(), true, 1, java.math.BigDecimal.valueOf(6), false, "high");
         when(persistenceService.getPlatformAiChannels()).thenReturn(Mono.just(List.of(channel)));
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(modelConfig)));
         when(adapterRegistry.supports(org.mockito.ArgumentMatchers.any(AiTaskDtos.AiChannelConfig.class), org.mockito.ArgumentMatchers.eq(AiTaskTypes.TEXT))).thenReturn(true);
         when(adapterRegistry.normalizeApiFormat("openai")).thenReturn("openai");
-        AgentScopeModelFactory factory = new AgentScopeModelFactory(persistenceService, adapterRegistry);
+        AgentScopeModelFactory factory = new AgentScopeModelFactory(persistenceService, com.novanovastudio.TeamTestSupport.teamRepository(), com.novanovastudio.TeamTestSupport.taskScope(), adapterRegistry);
 
         StepVerifier.create(factory.resolveTextModel("channel::story-model"))
                 .assertNext(selection -> {
                     Assertions.assertEquals("channel::story-model", selection.modelValue());
                     Assertions.assertEquals("story-model", selection.modelName());
                     Assertions.assertEquals("测试渠道", selection.provider());
-                    Assertions.assertEquals(6, selection.creditCost());
+                    Assertions.assertEquals(0, java.math.BigDecimal.valueOf(6).compareTo(selection.creditCost()));
                     Assertions.assertEquals("story-model", selection.agentModel().getModelName());
                 })
                 .verifyComplete();
@@ -84,7 +84,7 @@ class AgentScopeModelFactoryTest {
      */
     @Test
     void shouldRejectTextModelWithoutChannelIdentifier() {
-        AgentScopeModelFactory factory = new AgentScopeModelFactory(mock(PersistenceService.class), mock(AiProviderAdapterRegistry.class));
+        AgentScopeModelFactory factory = new AgentScopeModelFactory(mock(PersistenceService.class), com.novanovastudio.TeamTestSupport.teamRepository(), com.novanovastudio.TeamTestSupport.taskScope(), mock(AiProviderAdapterRegistry.class));
 
         StepVerifier.create(factory.resolveTextModel("story-model"))
                 .expectErrorSatisfies(error -> {
@@ -101,7 +101,7 @@ class AgentScopeModelFactoryTest {
     void shouldRejectUnsupportedAgentScopeFormat() {
         AiProviderAdapterRegistry adapterRegistry = mock(AiProviderAdapterRegistry.class);
         when(adapterRegistry.normalizeApiFormat("agnes")).thenReturn("agnes");
-        AgentScopeModelFactory factory = new AgentScopeModelFactory(null, adapterRegistry);
+        AgentScopeModelFactory factory = new AgentScopeModelFactory(null, com.novanovastudio.TeamTestSupport.teamRepository(), com.novanovastudio.TeamTestSupport.taskScope(), adapterRegistry);
 
         Assertions.assertThrows(IllegalStateException.class,
                 () -> factory.createModel(channel("agnes", "text-model")));
@@ -114,7 +114,7 @@ class AgentScopeModelFactoryTest {
     void shouldConfigureOpenAiThinkingParameters() throws Exception {
         AiProviderAdapterRegistry adapterRegistry = mock(AiProviderAdapterRegistry.class);
         when(adapterRegistry.normalizeApiFormat("openai")).thenReturn("openai");
-        AgentScopeModelFactory factory = new AgentScopeModelFactory(null, adapterRegistry);
+        AgentScopeModelFactory factory = new AgentScopeModelFactory(null, com.novanovastudio.TeamTestSupport.teamRepository(), com.novanovastudio.TeamTestSupport.taskScope(), adapterRegistry);
 
         GenerateOptions enabled = configuredOptions(factory.createModel(channel("openai", "deepseek-reasoner"), true, "max"));
         GenerateOptions disabled = configuredOptions(factory.createModel(channel("openai", "deepseek-reasoner"), false, "max"));

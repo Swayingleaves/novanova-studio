@@ -49,6 +49,7 @@ class CreditServiceTest {
     @BeforeEach
     void setUp() {
         creditRepository = mock(CreditRepository.class);
+        when(creditRepository.originalWallet(anyString(), anyLong(), anyString())).thenReturn(Mono.just(0L));
         creditGrantService = mock(CreditGrantService.class);
         currentUserProvider = mock(CurrentUserProvider.class);
         PersistenceService persistenceService = mock(PersistenceService.class);
@@ -56,7 +57,7 @@ class CreditServiceTest {
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        creditService = new CreditService(creditRepository, creditGrantService, persistenceService, currentUserProvider, transactionalOperator);
+        creditService = new CreditService(creditRepository, creditGrantService, persistenceService, currentUserProvider, transactionalOperator, com.novanovastudio.TeamTestSupport.taskScope());
     }
 
     /**
@@ -64,15 +65,15 @@ class CreditServiceTest {
      */
     @Test
     void shouldRejectTaskChargeWhenBalanceIsInsufficient() {
-        when(creditRepository.claimTaskTransaction(8L, "task-1", CreditService.TRANSACTION_TASK_CHARGE, -12, "图片生成任务扣费", "imagePage"))
+        when(creditRepository.claimTaskTransaction(8L, "task-1", CreditService.TRANSACTION_TASK_CHARGE, java.math.BigDecimal.valueOf(-12), "图片生成任务扣费", "imagePage"))
                 .thenReturn(Mono.just(9L));
-        when(creditGrantService.consumeCredits(8L, 12)).thenReturn(Mono.empty());
+        when(creditGrantService.consumeCredits(8L, java.math.BigDecimal.valueOf(12))).thenReturn(Mono.empty());
 
-        StepVerifier.create(creditService.chargeTask(8L, "task-1", 12, "image", "imagePage"))
+        StepVerifier.create(creditService.chargeTask(8L, "task-1", java.math.BigDecimal.valueOf(12), "image", "imagePage"))
                 .expectError(BusinessException.class)
                 .verify();
 
-        verify(creditRepository, org.mockito.Mockito.never()).updateTransactionBalance(anyLong(), anyInt());
+        verify(creditRepository, org.mockito.Mockito.never()).updateTransactionBalance(anyLong(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class));
     }
 
     /**
@@ -80,15 +81,15 @@ class CreditServiceTest {
      */
     @Test
     void shouldGrantPositiveInvitationReward() {
-        when(creditRepository.getInvitationRewardCredits()).thenReturn(Mono.just(20));
-        when(creditRepository.claimInvitationRewardTransaction(5L, 8L, 20, "邀请新用户注册奖励")).thenReturn(Mono.just(30L));
-        when(creditRepository.changeBalance(5L, 20)).thenReturn(Mono.just(120));
-        when(creditRepository.updateTransactionBalance(30L, 120)).thenReturn(Mono.empty());
+        when(creditRepository.getInvitationRewardCredits()).thenReturn(Mono.just(java.math.BigDecimal.valueOf(20)));
+        when(creditRepository.claimInvitationRewardTransaction(5L, 8L, java.math.BigDecimal.valueOf(20), "邀请新用户注册奖励")).thenReturn(Mono.just(30L));
+        when(creditRepository.changeBalance(5L, java.math.BigDecimal.valueOf(20))).thenReturn(Mono.just(java.math.BigDecimal.valueOf(120)));
+        when(creditRepository.updateTransactionBalance(30L, java.math.BigDecimal.valueOf(120))).thenReturn(Mono.empty());
 
         StepVerifier.create(creditService.grantInvitationReward(5L, 8L)).verifyComplete();
 
-        verify(creditRepository).changeBalance(5L, 20);
-        verify(creditRepository).updateTransactionBalance(30L, 120);
+        verify(creditRepository).changeBalance(5L, java.math.BigDecimal.valueOf(20));
+        verify(creditRepository).updateTransactionBalance(30L, java.math.BigDecimal.valueOf(120));
     }
 
     /**
@@ -96,12 +97,12 @@ class CreditServiceTest {
      */
     @Test
     void shouldSkipZeroInvitationRewardTransaction() {
-        when(creditRepository.getInvitationRewardCredits()).thenReturn(Mono.just(0));
+        when(creditRepository.getInvitationRewardCredits()).thenReturn(Mono.just(java.math.BigDecimal.valueOf(0)));
 
         StepVerifier.create(creditService.grantInvitationReward(5L, 8L)).verifyComplete();
 
-        verify(creditRepository, never()).claimInvitationRewardTransaction(anyLong(), anyLong(), anyInt(), anyString());
-        verify(creditRepository, never()).changeBalance(anyLong(), anyInt());
+        verify(creditRepository, never()).claimInvitationRewardTransaction(anyLong(), anyLong(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), anyString());
+        verify(creditRepository, never()).changeBalance(anyLong(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class));
     }
 
     /**
@@ -109,15 +110,15 @@ class CreditServiceTest {
      */
     @Test
     void shouldUpdateInvitationRewardSettingsIndependently() {
-        when(creditRepository.updateInvitationRewardCredits(30)).thenReturn(Mono.empty());
+        when(creditRepository.updateInvitationRewardCredits(java.math.BigDecimal.valueOf(30))).thenReturn(Mono.empty());
 
         StepVerifier.create(creditService.updateInvitationRewardSettings(
-                        new InvitationDtos.UpdateInvitationRewardSettingsRequest(30)))
-                .expectNextMatches(settings -> settings.invitationRewardCredits() == 30)
+                        new InvitationDtos.UpdateInvitationRewardSettingsRequest(java.math.BigDecimal.valueOf(30))))
+                .expectNextMatches(settings -> settings.invitationRewardCredits().compareTo(java.math.BigDecimal.valueOf(30)) == 0)
                 .verifyComplete();
 
-        verify(creditRepository).updateInvitationRewardCredits(30);
-        verify(creditRepository, never()).updateInitialCredits(anyInt());
+        verify(creditRepository).updateInvitationRewardCredits(java.math.BigDecimal.valueOf(30));
+        verify(creditRepository, never()).updateInitialCredits(org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class));
     }
 
     /**
@@ -125,12 +126,12 @@ class CreditServiceTest {
      */
     @Test
     void shouldNotGrantDuplicateInvitationReward() {
-        when(creditRepository.getInvitationRewardCredits()).thenReturn(Mono.just(20));
-        when(creditRepository.claimInvitationRewardTransaction(5L, 8L, 20, "邀请新用户注册奖励")).thenReturn(Mono.empty());
+        when(creditRepository.getInvitationRewardCredits()).thenReturn(Mono.just(java.math.BigDecimal.valueOf(20)));
+        when(creditRepository.claimInvitationRewardTransaction(5L, 8L, java.math.BigDecimal.valueOf(20), "邀请新用户注册奖励")).thenReturn(Mono.empty());
 
         StepVerifier.create(creditService.grantInvitationReward(5L, 8L)).verifyComplete();
 
-        verify(creditRepository, never()).changeBalance(anyLong(), anyInt());
+        verify(creditRepository, never()).changeBalance(anyLong(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class));
     }
 
     /**
@@ -138,15 +139,33 @@ class CreditServiceTest {
      */
     @Test
     void shouldRefundOriginalTaskChargeOnlyOnce() {
-        when(creditRepository.getTaskChargeAmount("task-1")).thenReturn(Mono.just(12));
-        when(creditRepository.claimTaskTransaction(8L, "task-1", CreditService.TRANSACTION_TASK_REFUND, 12, "图片生成任务退款", null))
+        when(creditRepository.getTaskChargeAmount("task-1")).thenReturn(Mono.just(java.math.BigDecimal.valueOf(12)));
+        when(creditRepository.claimTaskTransaction(8L, "task-1", CreditService.TRANSACTION_TASK_REFUND, java.math.BigDecimal.valueOf(12), "图片生成任务退款", null))
                 .thenReturn(Mono.just(10L));
-        when(creditRepository.changeBalance(8L, 12)).thenReturn(Mono.just(100));
-        when(creditRepository.updateTransactionBalance(10L, 100)).thenReturn(Mono.empty());
+        when(creditRepository.changeBalance(8L, java.math.BigDecimal.valueOf(12))).thenReturn(Mono.just(java.math.BigDecimal.valueOf(100)));
+        when(creditRepository.updateTransactionBalance(10L, java.math.BigDecimal.valueOf(100))).thenReturn(Mono.empty());
 
         StepVerifier.create(creditService.refundTask(8L, "task-1", "image")).verifyComplete();
 
-        verify(creditRepository).updateTransactionBalance(10L, 100);
+        verify(creditRepository).updateTransactionBalance(10L, java.math.BigDecimal.valueOf(100));
+    }
+
+    /** 混用平台模型与团队空间时，精确退款必须返回原平台钱包。 */
+    @Test
+    void shouldRefundFractionalChargeToOriginalWallet() {
+        var amount = new java.math.BigDecimal("0.123456");
+        when(creditRepository.originalWallet("shared-task", 8L, "")).thenReturn(Mono.just(0L));
+        when(creditRepository.getTaskChargeAmount("shared-task")).thenReturn(Mono.just(amount));
+        when(creditRepository.claimTaskTransaction(8L, "shared-task", CreditService.TRANSACTION_TASK_REFUND, amount, "图片生成任务退款", null))
+                .thenReturn(Mono.just(22L));
+        when(creditRepository.changeBalance(8L, amount)).thenReturn(Mono.deferContextual(context -> {
+            Assertions.assertEquals(0L, context.<Long>get(com.novanovastudio.security.TeamScope.WALLET_KEY).longValue());
+            return Mono.just(new java.math.BigDecimal("9.123456"));
+        }));
+        when(creditRepository.updateTransactionBalance(22L, new java.math.BigDecimal("9.123456"))).thenReturn(Mono.empty());
+        StepVerifier.create(creditService.refundTask(8L, "shared-task", "image")
+                .contextWrite(context -> new com.novanovastudio.security.TeamScope(101, "member").apply(context)
+                        .put(com.novanovastudio.security.TeamScope.WALLET_KEY, 101L))).verifyComplete();
     }
 
     /**
@@ -156,15 +175,15 @@ class CreditServiceTest {
     void shouldChargeStoryboardOperation() {
         String operationId = "storyboard-operation-1";
         String reason = "分镜首次生成扣费（操作ID：" + operationId + "）";
-        when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_CHARGE, -6, reason))
+        when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_CHARGE, java.math.BigDecimal.valueOf(-6), reason))
                 .thenReturn(Mono.just(11L));
-        when(creditGrantService.consumeCredits(8L, 6)).thenReturn(Mono.just(94));
-        when(creditRepository.updateTransactionBalance(11L, 94)).thenReturn(Mono.empty());
+        when(creditGrantService.consumeCredits(8L, java.math.BigDecimal.valueOf(6))).thenReturn(Mono.just(java.math.BigDecimal.valueOf(94)));
+        when(creditRepository.updateTransactionBalance(11L, java.math.BigDecimal.valueOf(94))).thenReturn(Mono.empty());
 
-        StepVerifier.create(creditService.chargeOperation(8L, operationId, 6, "分镜首次生成"))
+        StepVerifier.create(creditService.chargeOperation(8L, operationId, java.math.BigDecimal.valueOf(6), "分镜首次生成"))
                 .verifyComplete();
 
-        verify(creditRepository).updateTransactionBalance(11L, 94);
+        verify(creditRepository).updateTransactionBalance(11L, java.math.BigDecimal.valueOf(94));
     }
 
     /**
@@ -174,15 +193,15 @@ class CreditServiceTest {
     void shouldRejectStoryboardOperationWhenBalanceIsInsufficient() {
         String operationId = "storyboard-operation-2";
         String reason = "分镜提示词合成扣费（操作ID：" + operationId + "）";
-        when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_CHARGE, -18, reason))
+        when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_CHARGE, java.math.BigDecimal.valueOf(-18), reason))
                 .thenReturn(Mono.just(12L));
-        when(creditGrantService.consumeCredits(8L, 18)).thenReturn(Mono.empty());
+        when(creditGrantService.consumeCredits(8L, java.math.BigDecimal.valueOf(18))).thenReturn(Mono.empty());
 
-        StepVerifier.create(creditService.chargeOperation(8L, operationId, 18, "分镜提示词合成"))
+        StepVerifier.create(creditService.chargeOperation(8L, operationId, java.math.BigDecimal.valueOf(18), "分镜提示词合成"))
                 .expectError(BusinessException.class)
                 .verify();
 
-        verify(creditRepository, never()).updateTransactionBalance(anyLong(), anyInt());
+        verify(creditRepository, never()).updateTransactionBalance(anyLong(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class));
     }
 
     /**
@@ -193,16 +212,16 @@ class CreditServiceTest {
         String operationId = "storyboard-operation-3";
         String chargeReason = "分镜提示词合成扣费（操作ID：" + operationId + "）";
         String refundReason = "分镜提示词合成退款（操作ID：" + operationId + "）";
-        when(creditRepository.getOperationChargeAmount(8L, chargeReason)).thenReturn(Mono.just(18));
-        when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_REFUND, 18, refundReason))
+        when(creditRepository.getOperationChargeAmount(8L, chargeReason)).thenReturn(Mono.just(java.math.BigDecimal.valueOf(18)));
+        when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_REFUND, java.math.BigDecimal.valueOf(18), refundReason))
                 .thenReturn(Mono.just(13L));
-        when(creditRepository.changeBalance(8L, 18)).thenReturn(Mono.just(100));
-        when(creditRepository.updateTransactionBalance(13L, 100)).thenReturn(Mono.empty());
+        when(creditRepository.changeBalance(8L, java.math.BigDecimal.valueOf(18))).thenReturn(Mono.just(java.math.BigDecimal.valueOf(100)));
+        when(creditRepository.updateTransactionBalance(13L, java.math.BigDecimal.valueOf(100))).thenReturn(Mono.empty());
 
         StepVerifier.create(creditService.refundOperation(8L, operationId, "分镜提示词合成"))
                 .verifyComplete();
 
-        verify(creditRepository).updateTransactionBalance(13L, 100);
+        verify(creditRepository).updateTransactionBalance(13L, java.math.BigDecimal.valueOf(100));
     }
 
     /**
@@ -213,16 +232,16 @@ class CreditServiceTest {
         String operationId = "storyboard-operation-4";
         String chargeReason = "分镜提示词合成扣费（操作ID：" + operationId + "）";
         String refundReason = "分镜提示词合成退款（操作ID：" + operationId + "）";
-        when(creditRepository.getOperationChargeAmount(8L, chargeReason)).thenReturn(Mono.just(18));
-        when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_REFUND, 18, refundReason))
+        when(creditRepository.getOperationChargeAmount(8L, chargeReason)).thenReturn(Mono.just(java.math.BigDecimal.valueOf(18)));
+        when(creditRepository.claimOperationTransaction(8L, operationId, CreditService.TRANSACTION_TASK_REFUND, java.math.BigDecimal.valueOf(18), refundReason))
                 .thenReturn(Mono.just(14L));
-        when(creditRepository.changeBalance(8L, 18)).thenReturn(Mono.empty());
+        when(creditRepository.changeBalance(8L, java.math.BigDecimal.valueOf(18))).thenReturn(Mono.empty());
 
         StepVerifier.create(creditService.refundOperation(8L, operationId, "分镜提示词合成"))
                 .expectErrorMatches(error -> error instanceof BusinessException && "分镜提示词合成退款失败".equals(error.getMessage()))
                 .verify();
 
-        verify(creditRepository, never()).updateTransactionBalance(anyLong(), anyInt());
+        verify(creditRepository, never()).updateTransactionBalance(anyLong(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class));
     }
 
     /**
@@ -231,7 +250,7 @@ class CreditServiceTest {
     @Test
     void shouldRejectZeroCreditAdjustment() {
         BusinessException exception = Assertions.assertThrows(BusinessException.class,
-                () -> creditService.adjustUserCredits(8L, 1L, 0, "测试调整").block());
+                () -> creditService.adjustUserCredits(8L, 1L, java.math.BigDecimal.valueOf(0), "测试调整").block());
 
         Assertions.assertEquals("积分变动值不能为0", exception.getMessage());
     }
@@ -243,15 +262,15 @@ class CreditServiceTest {
     void shouldCompleteDailyCreditTrend() {
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
         when(creditRepository.listGenerationTypeDistribution(org.mockito.ArgumentMatchers.any()))
-                .thenReturn(Flux.just(new CreditDtos.CreditDistributionItem("image", 12L)));
+                .thenReturn(Flux.just(new CreditDtos.CreditDistributionItem("image", java.math.BigDecimal.valueOf(12L))));
         when(creditRepository.listModelDistribution(org.mockito.ArgumentMatchers.any()))
-                .thenReturn(Flux.just(new CreditDtos.CreditDistributionItem("模型一", 12L)));
+                .thenReturn(Flux.just(new CreditDtos.CreditDistributionItem("模型一", java.math.BigDecimal.valueOf(12L))));
         when(creditRepository.listTrend(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("day")))
-                .thenReturn(Flux.just(new CreditDtos.CreditTrendItem("2026-07-02", 12L)));
+                .thenReturn(Flux.just(new CreditDtos.CreditTrendItem("2026-07-02", java.math.BigDecimal.valueOf(12L))));
 
         StepVerifier.create(creditService.getCreditOverview(LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 3), null, "day"))
                 .assertNext(overview -> {
-                    Assertions.assertEquals(List.of(0L, 12L, 0L), overview.trend().stream().map(CreditDtos.CreditTrendItem::consumedCredits).toList());
+                    Assertions.assertEquals(List.of("0", "12", "0"), overview.trend().stream().map(item -> item.consumedCredits().stripTrailingZeros().toPlainString()).toList());
                     Assertions.assertEquals("模型一", overview.modelDistribution().getFirst().name());
                 })
                 .verifyComplete();
@@ -263,14 +282,14 @@ class CreditServiceTest {
     @Test
     void shouldQueryAllUsersCreditOverviewForAdministrator() {
         when(creditRepository.listGenerationTypeDistribution(org.mockito.ArgumentMatchers.any()))
-                .thenReturn(Flux.just(new CreditDtos.CreditDistributionItem("image", 12L)));
+                .thenReturn(Flux.just(new CreditDtos.CreditDistributionItem("image", java.math.BigDecimal.valueOf(12L))));
         when(creditRepository.listModelDistribution(org.mockito.ArgumentMatchers.any()))
-                .thenReturn(Flux.just(new CreditDtos.CreditDistributionItem("模型一", 12L)));
+                .thenReturn(Flux.just(new CreditDtos.CreditDistributionItem("模型一", java.math.BigDecimal.valueOf(12L))));
         when(creditRepository.listTrend(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq("day")))
-                .thenReturn(Flux.just(new CreditDtos.CreditTrendItem("2026-07-01", 12L)));
+                .thenReturn(Flux.just(new CreditDtos.CreditTrendItem("2026-07-01", java.math.BigDecimal.valueOf(12L))));
 
         StepVerifier.create(creditService.getAdminCreditOverview(null, LocalDate.of(2026, 7, 1), LocalDate.of(2026, 7, 1), null, "day"))
-                .assertNext(overview -> Assertions.assertEquals(12L, overview.trend().getFirst().consumedCredits()))
+                .assertNext(overview -> Assertions.assertEquals(0, java.math.BigDecimal.valueOf(12).compareTo(overview.trend().getFirst().consumedCredits())))
                 .verifyComplete();
 
         verify(currentUserProvider, never()).currentUserId();
@@ -283,7 +302,7 @@ class CreditServiceTest {
     void shouldListSelectedUserCreditTransactionsForAdministrator() {
         CreditDtos.AdminCreditTransactionItem transaction = new CreditDtos.AdminCreditTransactionItem(
                 10L, 8L, "user-8", "用户八", "user8@example.com", CreditService.TRANSACTION_TASK_CHARGE, "spend",
-                "image", "模型一", "imagePage", -12L, "图片生成任务扣费", 88L, null, "2026-07-01T08:00:00+08:00");
+                "image", "模型一", "imagePage", java.math.BigDecimal.valueOf(-12L), "图片生成任务扣费", java.math.BigDecimal.valueOf(88L), null, "2026-07-01T08:00:00+08:00");
         when(creditRepository.listAdminCreditTransactions(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.eq(1), org.mockito.ArgumentMatchers.eq(20)))
                 .thenReturn(Flux.just(transaction));
         when(creditRepository.countAdminTransactions(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.just(1L));
@@ -292,7 +311,7 @@ class CreditServiceTest {
                 .assertNext(result -> {
                     Assertions.assertEquals(1L, result.total());
                     Assertions.assertEquals("user8@example.com", result.transactions().getFirst().email());
-                    Assertions.assertEquals(-12L, result.transactions().getFirst().changeAmount());
+                    Assertions.assertEquals(0, java.math.BigDecimal.valueOf(-12).compareTo(result.transactions().getFirst().changeAmount()));
                 })
                 .verifyComplete();
     }

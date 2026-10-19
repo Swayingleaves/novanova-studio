@@ -173,6 +173,7 @@ public class ModelTaskExecutionDispatcher {
     private Mono<Integer> currentRequestConcurrency(String modelConfigId) {
         return persistenceRepository.getPlatformModelRequestConcurrency(modelConfigId)
                 .filter(value -> value != null && value > 0)
-                .switchIfEmpty(Mono.error(new IllegalStateException("模型配置不存在或并发数不合法: " + modelConfigId)));
+                .switchIfEmpty(Mono.error(new IllegalStateException("模型配置不存在或并发数不合法: " + modelConfigId)))
+                .contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true));
     }
 }

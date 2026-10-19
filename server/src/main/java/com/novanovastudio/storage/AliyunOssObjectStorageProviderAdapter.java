@@ -41,6 +41,19 @@ public class AliyunOssObjectStorageProviderAdapter implements ObjectStorageProvi
     }
 
     /**
+     * 物理删除对象，缺失对象由云端SDK按幂等删除处理。
+     * @param config 对象存储配置
+     * @param key 对象键
+     */
+    @Override
+    public void deletePrivateObject(PersistenceDtos.ObjectStorageConfig config, String key) {
+        validate(config);
+        OSS client = new OSSClientBuilder().build(config.endpoint(), config.accessKey(), config.secretKey());
+        try { client.deleteObject(config.bucket(), key); }
+        finally { client.shutdown(); }
+    }
+
+    /**
      * 校验阿里云OSS配置。
      *
      * @param config ObjectStorageConfig 对象存储配置

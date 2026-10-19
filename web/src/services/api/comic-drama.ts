@@ -1,3 +1,4 @@
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { serverGet, serverPost, type ServerAiTask } from "./server";
 import type { VideoCompositionTask } from "./video-composition";
 import type {
@@ -118,7 +119,7 @@ export function saveComicDramaPrompt(projectId: string, expectedRevision: number
     return serverPost<ComicDramaPromptVersion>(`${COMIC_DRAMA_PATH}/savePrompt`, { projectId, expectedRevision, shotId, prompt, expectedPromptVersion });
 }
 
-export type ComicDramaGenerationEstimate = { targetType: string; taskCount: number; estimatedCredits: number; model: string; settings: Record<string, unknown> };
+export type ComicDramaGenerationEstimate = { targetType: string; taskCount: number; estimatedCredits: CreditAmount; model: string; settings: Record<string, unknown> };
 
 export function estimateComicDramaGeneration(input: { projectId: string; targetType: string; targetIds: string[]; model: string; settings: Record<string, unknown> }) {
     return serverPost<ComicDramaGenerationEstimate>(`${COMIC_DRAMA_PATH}/estimateGeneration`, input);

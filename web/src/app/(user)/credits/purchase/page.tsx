@@ -4,7 +4,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { Button } from "antd";
 import { ArrowLeft, ExternalLink, ShoppingCart } from "lucide-react";
-import Link from "next/link";
+import Link from "@/shared/lib/team-navigation";
 
 const creditStoreUrl = process.env.NEXT_PUBLIC_CREDIT_STORE_URL?.trim();
 

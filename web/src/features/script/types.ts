@@ -1,3 +1,4 @@
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 export type ScriptStage = "idea" | "outline" | "writing" | "completed" | "production";
 export type ScriptContentType = "comicDrama" | "liveActionShort" | "animation" | "advertisement" | "musicVideo" | "storyShort";
 export type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error" | "conflict";
@@ -173,12 +174,12 @@ export type ScriptAiDraft = {
     sourceData: Record<string, unknown>;
     draftData: Record<string, unknown>;
     model: string;
-    chargedCredits: number;
+    chargedCredits: CreditAmount;
     status: "pending" | "applied" | "discarded";
     createdAt: string;
 };
 export type AnalysisIssue = { id: string; category: string; severity: "info" | "warning" | "important"; episodeId?: string; sceneId?: string; blockId?: string; title: string; reason: string; suggestion: string; sortOrder: number };
-export type AnalysisReport = { id: string; projectId: string; scopeType: "project" | "episode"; scopeId?: string; summary: string; model: string; chargedCredits: number; sourceRevision: number; createdAt: string; issues: AnalysisIssue[] };
+export type AnalysisReport = { id: string; projectId: string; scopeType: "project" | "episode"; scopeId?: string; summary: string; model: string; chargedCredits: CreditAmount; sourceRevision: number; createdAt: string; issues: AnalysisIssue[] };
 export type ReadinessItem = { key: string; status: "ready" | "suggested" | "missing"; title: string; description: string; targetSection: string };
 export type ProductionReadiness = { projectId: string; ready: boolean; items: ReadinessItem[] };
 
@@ -215,7 +216,7 @@ export type WholeBookAdaptationArc = { title: string; summary: string; sourceKey
 export type WholeBookAdaptationStrategy = { mainPlot: string; ending: string; reasoning: string; compression: string; arcs: WholeBookAdaptationArc[] };
 /** 服务端固定生成的分集身份，模型只能填写内容。 */
 export type WholeBookAdaptationSlot = { id: string; episodeNumber: number; sortOrder: number; arcIndex: number };
-export type WholeBookAdaptationQuote = { revision: number; phase: string; calls: number; credits: number; fingerprint: string };
+export type WholeBookAdaptationQuote = { revision: number; phase: string; calls: number; credits: CreditAmount; fingerprint: string };
 /** 全书改编任务视图，素材与策略阶段的进度、策略与锁定集数都在这里。 */
 export type WholeBookAdaptationJob = {
     jobId: string;
@@ -224,8 +225,8 @@ export type WholeBookAdaptationJob = {
     status: NovelAdaptationJobStatus;
     totalUnits: number;
     processedUnits: number;
-    credits: number;
-    refundedCredits: number;
+    credits: CreditAmount;
+    refundedCredits: CreditAmount;
     errorMessage: string;
     revision: number;
     retryCount: number;
@@ -240,7 +241,7 @@ export type WholeBookAdaptationJob = {
 /** 逐集正文生成模式：只出草稿先审阅，或生成后立即写入正式剧本。 */
 export type EpisodeBodiesMode = "draft" | "apply";
 /** 逐集正文批量报价：本次要生成的分集、调用次数与预扣积分。 */
-export type EpisodeBodiesQuote = { revision: number; episodes: number; calls: number; credits: number; fingerprint: string; episodeIds: string[] };
+export type EpisodeBodiesQuote = { revision: number; episodes: number; calls: number; credits: CreditAmount; fingerprint: string; episodeIds: string[] };
 /** 逐集正文批量任务进度，分集身份由全书改编固定，这里只反映生成到第几集。 */
 export type EpisodeBodiesJob = {
     jobId: string;
@@ -250,8 +251,8 @@ export type EpisodeBodiesJob = {
     mode: EpisodeBodiesMode;
     totalEpisodes: number;
     processedEpisodes: number;
-    credits: number;
-    refundedCredits: number;
+    credits: CreditAmount;
+    refundedCredits: CreditAmount;
     errorMessage: string;
     revision: number;
     retryCount: number;
@@ -312,7 +313,7 @@ export type StoryBibleItemStatus = "pending" | "confirmed" | "rejected";
 export type StoryBibleJobStatus = "queued" | "running" | "retryable" | "completed" | "partial" | "failed" | "canceled";
 export type StoryBibleQuickConfiguration = { contextWindowTokens: number; maximumInputCharacters: number; maximumOutputTokens: number; maximumSupplementCalls: number };
 export type StoryBibleAnalysisGap = { sectionId: string; title: string; startOffset: number; endOffset: number; reason: string };
-export type StoryBibleQuote = { model: string; billableChars: number; credits: number; tierMinChars: number; tierMaxChars: number | null; sourceRevision: number; pricingRevision: number; estimatedBatches: number; quickConfiguration: StoryBibleQuickConfiguration };
+export type StoryBibleQuote = { model: string; billableChars: number; credits: CreditAmount; tierMinChars: number; tierMaxChars: number | null; sourceRevision: number; pricingRevision: number; estimatedBatches: number; quickConfiguration: StoryBibleQuickConfiguration };
 export type StoryBibleJob = {
     jobId: string;
     status: StoryBibleJobStatus;
@@ -321,14 +322,14 @@ export type StoryBibleJob = {
     totalUnits: number;
     model: string;
     billableChars: number;
-    credits: number;
+    credits: CreditAmount;
     sectionIds: string[];
     errorMessage: string;
     createdAt: string | null;
-    creditBalance: number | null;
+    creditBalance: CreditAmount | null;
     supplementCalls: number;
     gaps: StoryBibleAnalysisGap[];
-    refundedCredits: number;
+    refundedCredits: CreditAmount;
 };
 export type StoryBibleItem = {
     id: string;
@@ -375,8 +376,8 @@ export type StoryBibleSaveItemInput = {
     storyTimeStatus: "known" | "uncertain";
     storyOrder: number | null;
 };
-export type StoryBiblePricingTier = { minChars: number; maxChars: number | null; credits: number };
+export type StoryBiblePricingTier = { minChars: number; maxChars: number | null; credits: CreditAmount };
 export type StoryBibleModelPricing = { modelConfigId: string; model: string; displayName: string; tiers: StoryBiblePricingTier[]; revision: number; quickConfiguration: StoryBibleQuickConfiguration | null };
 
 /** 分集正文生成定价：一集一次调用，所以每集一个固定积分。 */
-export type EpisodeBodiesModelPricing = { modelConfigId: string; model: string; displayName: string; credits: number; revision: number };
+export type EpisodeBodiesModelPricing = { modelConfigId: string; model: string; displayName: string; credits: CreditAmount; revision: number };

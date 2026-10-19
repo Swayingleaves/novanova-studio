@@ -7,7 +7,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { Check, Download, Pencil, Trash2, X } from "lucide-react";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/shared/lib/team-navigation";
 import { App, Button, Input } from "antd";
 
 import { useCanvasStore } from "../stores/use-canvas-store";

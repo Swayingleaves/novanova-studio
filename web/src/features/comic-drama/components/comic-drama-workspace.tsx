@@ -4,7 +4,7 @@ import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/shared/lib/team-navigation";
 import { Alert, App, Badge, Button, Modal, Progress, Spin, Tag } from "antd";
 import {
     ArrowLeft,

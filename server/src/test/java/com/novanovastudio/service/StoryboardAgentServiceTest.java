@@ -304,14 +304,15 @@ class StoryboardAgentServiceTest {
      */
     @Test
     void shouldRefundChargedStoryboardOperationAfterFailure() {
-        when(creditService.chargeOperation(eq(8L), anyString(), eq(6), eq("测试分镜操作"))).thenReturn(Mono.empty());
+        when(creditService.chargeOperation(eq(8L), anyString(), eq(java.math.BigDecimal.valueOf(6)), eq("测试分镜操作"))).thenReturn(Mono.empty());
         when(creditService.refundOperation(eq(8L), anyString(), eq("测试分镜操作"))).thenReturn(Mono.empty());
         @SuppressWarnings("unchecked")
         Mono<String> result = (Mono<String>) invoke(
                 "executeChargedOperation",
-                new Class<?>[]{Long.class, int.class, String.class, Function.class},
+                new Class<?>[]{Long.class, long.class, java.math.BigDecimal.class, String.class, Function.class},
                 8L,
-                6,
+                0L,
+                java.math.BigDecimal.valueOf(6),
                 "测试分镜操作",
                 (Function<String, Mono<String>>) ignored -> Mono.error(new IllegalStateException("Agent调用失败")));
 
