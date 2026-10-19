@@ -266,7 +266,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
         }
         if (!promptModelReady) {
             onMissingTextModelConfig?.();
-            message.error(translate("canvas.selectATextModelBeforeGeneratingFinalPrompts"));
+            message.warning(translate("settings.contactAdministratorForModel"));
             return;
         }
         if (promptBalanceInsufficient) {
@@ -308,7 +308,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
         }
         if (!assetModelReady) {
             onMissingImageModelConfig?.();
-            message.error(translate("canvas.selectAnImageModelBeforeGeneratingAssets"));
+            message.warning(translate("settings.contactAdministratorForModel"));
             return;
         }
         if (assetBalanceInsufficient) {

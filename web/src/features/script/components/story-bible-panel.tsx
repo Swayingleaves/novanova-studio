@@ -13,7 +13,8 @@ import { Plus, RefreshCw } from "lucide-react";
 import { nanoid } from "nanoid";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
-import { modelOptionLabel, selectableModelsByCapability, useConfigStore, useEffectiveConfig } from "@/features/settings/stores/use-config-store";
+import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-configuration-guard";
+import { modelOptionLabel, selectableModelsByCapability, useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import {
     cancelStoryBibleAnalysis,
@@ -255,7 +256,7 @@ function AnalysisBar({ projectId, onCompleted }: { projectId: string; onComplete
     const translate = useTranslation();
     const { message, modal } = App.useApp();
     const config = useEffectiveConfig();
-    const openConfig = useConfigStore((state) => state.openConfigDialog);
+    const ensureModelConfiguration = useModelConfigurationGuard();
     const setCreditBalance = useUserStore((state) => state.setCreditBalance);
     const [model, setModel] = useState("");
     const [sectionIds, setSectionIds] = useState<string[]>([]);
@@ -325,10 +326,7 @@ function AnalysisBar({ projectId, onCompleted }: { projectId: string; onComplete
     };
 
     const start = async () => {
-        if (!model) {
-            message.warning(translate("script.selectATextModel"));
-            return;
-        }
+        if (!ensureModelConfiguration("text", model)) return;
         setBusy(true);
         try {
             const quote = await quoteStoryBibleAnalysis(projectId, model, sectionIds);
@@ -398,7 +396,7 @@ function AnalysisBar({ projectId, onCompleted }: { projectId: string; onComplete
             {treeError ? <Alert type="info" showIcon className="mb-2" title={treeError.includes("没有") ? translate("script.thisProjectHasNoImportedSourceStoryBibleAnalysisRequires") : treeError} /> : null}
             {tree && !confirmed ? <Alert type="warning" showIcon className="mb-2" title={translate("script.reviewAndConfirmChaptersAndScenesInSourceBeforeStarting")} /> : null}
             <div className="flex flex-wrap items-center gap-2">
-                <div className="w-60"><ModelPicker config={config} value={model} onChange={setModel} capability="text" fullWidth onMissingConfig={() => openConfig(true, "models")} /></div>
+                <div className="w-60"><ModelPicker config={config} value={model} onChange={setModel} capability="text" fullWidth /></div>
                 <TreeSelect className="min-w-56 flex-1" treeData={treeData} value={sectionIds} onChange={setSectionIds} treeCheckable showCheckedStrategy={TreeSelect.SHOW_PARENT} placeholder={translate("script.analysisScopeEntireBookSelectChaptersOrScenesToReanalyze")} allowClear maxTagCount={3} disabled={!tree} />
                 <Button type="primary" loading={busy && !active} disabled={!confirmed || active} onClick={() => void start()}>{translate("script.getQuoteAndAnalyze")}</Button>
             </div>

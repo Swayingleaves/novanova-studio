@@ -8,7 +8,6 @@ import Link from "@/shared/lib/team-navigation";
 import { BookOpen, Layers3, Menu } from "lucide-react";
 
 import { AppSidebar } from "@/features/app-shell/components/app-sidebar";
-import { AppConfigModal } from "@/features/app-shell/components/app-config-modal";
 import { GitHubLink } from "@/features/app-shell/components/github-link";
 import { UserCreditMenu } from "@/features/app-shell/components/user-credit-menu";
 import { WelcomeModal } from "@/features/app-shell/components/welcome-modal";
@@ -78,7 +77,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <div className={`min-h-0 flex-1 ${hideSidebar ? "overflow-hidden" : "overflow-y-auto"}`}>{children}</div>
             </div>
 
-            <AppConfigModal />
             <AuthModal />
             <WelcomeModal />
         </div>

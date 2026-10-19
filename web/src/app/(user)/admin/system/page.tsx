@@ -65,6 +65,7 @@ import { getHomepageTargetPath } from "@/features/homepage/api/homepage-showcase
 import { adminCreditFilterKey, adminCreditUserLabel } from "./admin-credit-utils";
 import { TeamContentScope } from "./components/team-content-scope";
 import { TeamManagement, CurrentTeamManagement } from "./components/team-management";
+import { SystemConfiguration } from "./components/system-configuration";
 import { ResetAccountPasswordModal } from "./components/reset-account-password-modal";
 import { StorageBillingManagement } from "./components/storage-billing-management";
 import { CreditCardManagement } from "./components/credit-card-management";
@@ -111,9 +112,13 @@ export default function AdminSystemPage() {
                     <p className="studio-subtitle mt-2 text-sm">{translate("administration.operationsConsoleForUsersAnnouncementsAndPrompts")}</p>
                 </header>
                 <Tabs
+                    key={team?.id ?? 0}
                     defaultActiveKey={team ? "team" : "teams"}
+                    destroyOnHidden={false}
                     items={[
-                        ...(team ? [{ key: "team", label: "团队管理", children: <CurrentTeamManagement /> }] : [{ key: "teams", label: "团队管理", children: <TeamManagement /> }, { key: "users", label: translate("administration.userManagement"), children: <UserManagement /> }]),
+                        ...(team ? [{ key: "team", label: "团队管理", children: <CurrentTeamManagement /> }] : [{ key: "teams", label: "团队管理", children: <TeamManagement /> }]),
+                        { key: "configuration", label: translate("appShell.configurationPreferences"), children: <SystemConfiguration /> },
+                        ...(!team ? [{ key: "users", label: translate("administration.userManagement"), children: <UserManagement /> }] : []),
                         ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), children: <CreditConsumptionManagement /> }] : []),
                         ...(!team ? [{ key: "creditCards", label: translate("administration.redemptionCodes"), children: <CreditCardManagement /> }] : []),
                         { key: "notifications", label: translate("administration.messageManagement"), children: <TeamContentScope moduleName="notifications"><NotificationManagement /></TeamContentScope> },

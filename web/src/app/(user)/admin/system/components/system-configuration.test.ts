@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const source = readFileSync(new URL("./app-config-modal.tsx", import.meta.url), "utf8");
+const source = readFileSync(new URL("./system-configuration.tsx", import.meta.url), "utf8");
 
 test("图像和视频模型显示最小为1的整数同时并发数输入", () => {
     assert.match(source, /editingModelConfig\.modelType === "image" \|\| editingModelConfig\.modelType === "video"/);

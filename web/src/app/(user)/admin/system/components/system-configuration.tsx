@@ -9,14 +9,13 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { Alert, App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Switch, Tabs } from "antd";
+import { Alert, App, Button, Checkbox, Form, Grid, Input, InputNumber, Modal, Select, Space, Switch, Tabs } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { nanoid } from "nanoid";
 import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
-import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { MODEL_ICON_OPTIONS } from "@/features/settings/components/model-icon";
 import { createModelCapabilityOptions,
@@ -29,7 +28,6 @@ import { createModelCapabilityOptions,
     normalizeModelOptionValue,
     useConfigStore,
     type ApiCallFormat,
-    type ConfigDialogTabKey,
     type CustomModelGroupConfig,
     type ModelCapability,
     type ModelChannel,
@@ -63,6 +61,9 @@ import {
 } from "@/services/api/server";
 import type { ObjectStorageConfig, ObjectStorageProvider } from "@/shared/types/object-storage";
 import { blockingModelConfigDependencyIssues, createDraftModelConfigs, modelConfigDependencyIssues, reconcileModelConfigDraft, updateModelConfigSelection } from "./model-config-draft";
+import { useConfigurationLeaveGuard } from "../use-configuration-leave-guard";
+
+type ConfigurationTabKey = "channels" | "models" | "credits" | "invitationReward" | "checkIn" | "objectStorage";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -148,23 +149,22 @@ const createObjectStorageProviderFields = (translator: typeof translate = transl
     },
 });
 
-export function AppConfigModal() {
+export function SystemConfiguration() {
     const translate = useTranslation();
     const { message, modal } = App.useApp();
-    const user = useUserStore((state) => state.user);
+    const team = useTeamStore((state) => state.team);
+    const screens = Grid.useBreakpoint();
     const config = useConfigStore((state) => state.config);
     const modelConfigs = useConfigStore((state) => state.modelConfigs);
     const objectStorages = useConfigStore((state) => state.objectStorages);
-    const isConfigOpen = useConfigStore((state) => state.isConfigOpen);
-    const configDialogTab = useConfigStore((state) => state.configDialogTab);
-    const setConfigDialogTab = useConfigStore((state) => state.setConfigDialogTab);
-    const setConfigDialogOpen = useConfigStore((state) => state.setConfigDialogOpen);
     const refreshChannels = useConfigStore((state) => state.refreshChannels);
     const refreshModelConfiguration = useConfigStore((state) => state.refreshModelConfiguration);
     const refreshObjectStorages = useConfigStore((state) => state.refreshObjectStorages);
-    const [activeTab, setActiveTab] = useState<ConfigDialogTabKey>("channels");
+    const [activeTab, setActiveTab] = useState<ConfigurationTabKey>("channels");
     const [draftsReady, setDraftsReady] = useState(false);
-    const [savingTab, setSavingTab] = useState<ConfigDialogTabKey | "">("");
+    const [loadError, setLoadError] = useState("");
+    const [loadAttempt, setLoadAttempt] = useState(0);
+    const [savingTab, setSavingTab] = useState<ConfigurationTabKey | "">("");
     const [loadingChannelId, setLoadingChannelId] = useState("");
     const [refreshingObjectStorages, setRefreshingObjectStorages] = useState(false);
     const [testingObjectStorageId, setTestingObjectStorageId] = useState("");
@@ -188,7 +188,6 @@ export function AppConfigModal() {
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
     const [collapsedEditingCapabilities, setCollapsedEditingCapabilities] = useState<string[]>([]);
-    const initializedRef = useRef(false);
     const editingModelIsMedia = Boolean(editingModelConfig && (editingModelConfig.modelType === "image" || editingModelConfig.modelType === "video"));
 
     const resetChannelDraft = useCallback((resetCollapsed = false) => {
@@ -221,18 +220,9 @@ export function AppConfigModal() {
     }, [resetChannelDraft, resetModelConfigDraft, resetObjectStorageDraft]);
 
     useEffect(() => {
-        if (isConfigOpen) setActiveTab(configDialogTab);
-    }, [configDialogTab, isConfigOpen]);
-
-    useEffect(() => {
-        if (!isConfigOpen) {
-            initializedRef.current = false;
-            setDraftsReady(false);
-            return;
-        }
-        if (initializedRef.current) return;
-        initializedRef.current = true;
+        if (!canManageCurrentSpace()) return;
         setDraftsReady(false);
+        setLoadError("");
         let active = true;
         void Promise.all([refreshModelConfiguration(), refreshObjectStorages(), useTeamStore.getState().team ? Promise.resolve({ initialCredits: "0" }) : getCreditSettings(), useTeamStore.getState().team ? Promise.resolve({ invitationRewardCredits: "0" }) : getInvitationRewardSettings(), useTeamStore.getState().team ? Promise.resolve({ checkInCredits: "0" }) : getCheckInRewardSettings()])
             .then(([, , creditSettings, invitationRewardSettings, checkInSettings]) => {
@@ -246,19 +236,14 @@ export function AppConfigModal() {
                 setDraftCheckInCredits(checkInSettings.checkInCredits);
                 setDraftsReady(true);
             })
-            .catch(() => {
+            .catch((error) => {
                 if (!active) return;
-                message.error(translate("appShell.failedToLoadConfiguration"));
-                setDraftsReady(true);
+                setLoadError(error instanceof Error ? error.message : translate("appShell.failedToLoadConfiguration"));
             });
         return () => {
             active = false;
         };
-    }, [isConfigOpen, message, refreshModelConfiguration, refreshObjectStorages, resetAllDrafts]);
-
-    useEffect(() => {
-        if (!canManageCurrentSpace() && isConfigOpen) setConfigDialogOpen(false);
-    }, [isConfigOpen, setConfigDialogOpen, user?.role]);
+    }, [loadAttempt, refreshModelConfiguration, refreshObjectStorages, resetAllDrafts]);
 
     const draftConfig = useMemo(() => {
         const nextConfig = configFromModelConfigs(draftChannels, draftModelConfigs, config);
@@ -274,8 +259,11 @@ export function AppConfigModal() {
     const creditsDirty = draftInitialCredits !== creditBaseline;
     const invitationRewardDirty = draftInvitationRewardCredits !== invitationRewardBaseline;
     const checkInDirty = draftCheckInCredits !== checkInBaseline;
-    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty;
+    const editingModelBaseline = editingModelConfig && draftModelConfigs.find((item) => item.id === editingModelConfig.id);
+    const modelEditorDirty = Boolean(editingModelConfig && (!sameValue(editingModelConfig, editingModelBaseline) || editingCustomBodyParameters !== JSON.stringify(editingModelBaseline?.customBodyParameters || {}, null, 2)));
+    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || modelEditorDirty;
     const isSaving = Boolean(savingTab);
+    useConfigurationLeaveGuard(draftsReady && hasUnsavedChanges);
 
     const updateDraftChannel = (id: string, patch: Partial<ModelChannel>) => {
         setDraftChannels((channels) => channels.map((channel) => (channel.id === id ? { ...channel, ...patch, models: patch.models ? uniqueModels(patch.models) : channel.models } : channel)));
@@ -348,7 +336,7 @@ export function AppConfigModal() {
                 }
             }
             for (const channel of deletedChannels) await deleteServerChannel(channel.id);
-            await refreshChannels();
+            await refreshModelConfiguration();
             resetChannelDraft();
             if (channelIdMapping.size) {
                 setDraftModelConfigs((configs) =>
@@ -717,37 +705,20 @@ export function AppConfigModal() {
     };
 
     const changeActiveTab = (tabKey: string) => {
-        const nextTab = tabKey as ConfigDialogTabKey;
-        setActiveTab(nextTab);
-        setConfigDialogTab(nextTab);
-    };
-
-    const closeConfigDialog = () => {
-        if (!hasUnsavedChanges) {
-            setConfigDialogOpen(false);
-            return;
-        }
-        modal.confirm({
-            title: translate("appShell.discardUnsavedChanges"),
-            content: translate("appShell.closingWillDiscardUnsavedChangesInAllTabs"),
-            okText: translate("appShell.discardChanges"),
-            okType: "danger",
-            cancelText: translate("appShell.continueEditing"),
-            onOk: () => setConfigDialogOpen(false),
-        });
+        setActiveTab(tabKey as ConfigurationTabKey);
     };
 
     if (!canManageCurrentSpace()) return null;
 
     return (
-        <Modal title={<div className="text-lg font-semibold">{translate("appShell.configurationPreferences")}</div>} open={isConfigOpen} width={980} centered onCancel={closeConfigDialog} footer={null} styles={{ body: { height: "72vh", overflowY: "auto", paddingRight: 12 } }}>
-            {!draftsReady ? (
+        <div className="min-w-0">
+            {loadError ? <Alert type="error" showIcon title={loadError} action={<Button onClick={() => setLoadAttempt((attempt) => attempt + 1)}>{translate("appShell.retryConfiguration")}</Button>} /> : !draftsReady ? (
                 <div className="flex h-40 items-center justify-center text-sm text-[var(--studio-muted)]">{translate("appShell.loadingConfiguration")}</div>
             ) : (
                 <Tabs
                     activeKey={activeTab}
-                    tabPlacement="start"
-                    tabBarStyle={{ width: 112 }}
+                    tabPlacement={screens.md ? "start" : "top"}
+                    tabBarStyle={screens.md ? { width: 112 } : undefined}
                     onChange={changeActiveTab}
                     items={[
                         {
@@ -1143,7 +1114,7 @@ export function AppConfigModal() {
                                 </Form>
                             ),
                         },
-                    ].filter((item) => !useTeamStore.getState().team || !["credits", "invitationReward", "checkIn"].includes(item.key))}
+                    ].filter((item) => !team || !["credits", "invitationReward", "checkIn"].includes(item.key))}
                 />
             )}
             <Modal
@@ -1521,7 +1492,7 @@ export function AppConfigModal() {
                     </Form>
                 ) : null}
             </Modal>
-        </Modal>
+        </div>
     );
 }
 

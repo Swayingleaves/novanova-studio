@@ -5,6 +5,7 @@ import { usePathname as useOriginalPathname, useRouter as useOriginalRouter } fr
 import { useMemo, type ComponentProps } from "react";
 import { teamPath, useTeamStore } from "@/features/team/stores/use-team-store";
 import { parseSpacePath } from "@/features/team/space-path";
+import { confirmPageNavigation } from "./navigation-history-guard";
 
 export { useSearchParams, useParams, useSelectedLayoutSegment, useSelectedLayoutSegments, redirect, notFound } from "next/navigation";
 
@@ -16,7 +17,10 @@ export function usePathname() {
 /** 所有程序化业务导航统一保留当前团队，不修改已指定团队的目标。 */
 export function useRouter() {
     const router = useOriginalRouter();
-    return useMemo(() => ({ ...router, push: (href: string, options?: Parameters<typeof router.push>[1]) => router.push(teamPath(href), options), replace: (href: string, options?: Parameters<typeof router.replace>[1]) => router.replace(teamPath(href), options) }), [router]);
+    return useMemo(() => ({ ...router,
+        push: (href: string, options?: Parameters<typeof router.push>[1]) => { const destination = teamPath(href); void confirmPageNavigation(destination).then((allowed) => { if (allowed) router.push(destination, options); }); },
+        replace: (href: string, options?: Parameters<typeof router.replace>[1]) => { const destination = teamPath(href); void confirmPageNavigation(destination).then((allowed) => { if (allowed) router.replace(destination, options); }); },
+    }), [router]);
 }
 
 /** 链接在渲染时解析当前团队，同时供移动导航和桌面导航复用。 */

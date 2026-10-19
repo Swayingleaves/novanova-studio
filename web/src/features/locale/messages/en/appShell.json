@@ -94,7 +94,7 @@
     "editAModelToConfigureItsDisplayNameCredits": "Edit a model to configure its display name, credits, capabilities and custom JSON.",
     "default": "Default",
     "edit": "Edit",
-    "creditSettings": "Credit settings",
+    "creditSettings": "Registration credits",
     "initialCreditsForNewUsers": "Initial credits for new users",
     "appliesOnlyToNewRegisteredAdminCreatedOrFirst": "Applies only to new registered, admin-created or first-time third-party users. Existing balances stay the same.",
     "initialCredits": "Initial credits",
@@ -102,7 +102,7 @@
     "referralRegistrationCredits": "Referral registration credits",
     "referralRewardsGoToTheInviterAfterEmailRegistration": "Referral rewards go to the inviter after email registration or first third-party sign-in. Set 0 to pause; historical referrals are unaffected.",
     "creditsPerNewUser": "Credits per new user",
-    "checkInCredits": "Check-in credits",
+    "checkInCredits": "Check-in rewards",
     "dailyCheckInCredits": "Daily check-in credits",
     "dailyCheckInGrantsTheseCreditsValidFor24": "Daily check-in grants these credits, valid for 24 hours. Unused credits expire. Set 0 to allow check-in without credits.",
     "objectStorage_2caed1": "Object storage",
@@ -232,6 +232,7 @@
     "thisChannelWillBeDeletedFromTheServerWhen": "This channel will be deleted from the server when you save.",
     "thisObjectStorageConfigurationWillBeDeletedFromThe": "This object storage configuration will be deleted from the server when you save.",
     "refreshingWillDiscardUnsavedChangesInTheObjectStorage": "Refreshing will discard unsaved changes in the object storage tab.",
-    "closingWillDiscardUnsavedChangesInAllTabs": "Closing will discard unsaved changes in all tabs.",
-    "failedToSaveModelConfiguration": "Failed to save model configuration"
+    "failedToSaveModelConfiguration": "Failed to save model configuration",
+    "retryConfiguration": "Reload",
+    "leavingDiscardsConfigurationChanges": "Leaving administration will discard unsaved configuration changes. Discard changes?"
 }

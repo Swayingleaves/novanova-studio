@@ -8,7 +8,8 @@ import { App, Alert, Button, InputNumber, Progress, Select, Steps, Tag } from "a
 import { nanoid } from "nanoid";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
-import { useConfigStore, useEffectiveConfig } from "@/features/settings/stores/use-config-store";
+import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-configuration-guard";
+import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { advanceWholeBookAdaptation, cancelWholeBookAdaptation, confirmWholeBookAdaptation, listActiveWholeBookAdaptation, quoteWholeBookAdaptation, retryWholeBookAdaptation, startWholeBookAdaptation, wholeBookAdaptationStatus } from "@/services/api/script";
 import { useScriptStore } from "../stores/use-script-store";
 import type { EpisodeBodiesJob, WholeBookAdaptationJob, WholeBookAdaptationOptions } from "../types";
@@ -83,7 +84,7 @@ export function NovelAdaptationPanel() {
     const saveStatus = useScriptStore((state) => state.saveStatus);
     const reloadProject = useScriptStore((state) => state.reloadProject);
     const config = useEffectiveConfig();
-    const openConfig = useConfigStore((state) => state.openConfigDialog);
+    const ensureModelConfiguration = useModelConfigurationGuard();
     const [model, setModel] = useState("");
     const [settings, setSettings] = useState<WholeBookAdaptationOptions>({ format: "comicDrama", episodeDurationSeconds: 180, pacing: "balanced", adaptationLevel: "balanced" });
     const [loadError, setLoadError] = useState("");
@@ -126,7 +127,7 @@ export function NovelAdaptationPanel() {
 
     /** 全书改编：先用全部已确认事实报价素材与策略阶段，确认后交给后台异步执行。 */
     const runWholeBook = async () => {
-        if (!model) return message.warning(translate("script.selectATextModel"));
+        if (!ensureModelConfiguration("text", model)) return;
         if (!["saved", "idle"].includes(saveStatus)) return message.warning(translate("script.saveScriptChangesBeforeStartingAdaptation"));
         setJobBusy(true);
         try {
@@ -377,7 +378,7 @@ export function NovelAdaptationPanel() {
                         <label className="block text-sm">{translate("script.narrativePacing")}<Select className="mt-1 w-full" value={settings.pacing} options={[{ value: "slow", label: translate("script.relaxed") }, { value: "balanced", label: translate("script.balanced") }, { value: "fast", label: translate("script.fastPaced") }]} onChange={(value) => setSettings((current) => ({ ...current, pacing: value }))} /></label>
                         <label className="block text-sm">{translate("script.adaptationApproach")}<Select className="mt-1 w-full" value={settings.adaptationLevel} options={[{ value: "faithful", label: translate("script.faithful") }, { value: "balanced", label: translate("script.balanced") }, { value: "bold", label: translate("script.bold") }]} onChange={(value) => setSettings((current) => ({ ...current, adaptationLevel: value }))} /></label>
                     </div>
-                    <label className="block text-sm">{translate("script.textModel")}<div className="mt-1"><ModelPicker config={config} value={model} onChange={setModel} capability="text" fullWidth onMissingConfig={() => openConfig(true, "models")} /></div></label>
+                    <label className="block text-sm">{translate("script.textModel")}<div className="mt-1"><ModelPicker config={config} value={model} onChange={setModel} capability="text" fullWidth /></div></label>
                     <Alert type="info" showIcon title={translate("script.textModelPriceCount", { value0: creditCost === undefined ? translate("script.notConfigured") : translate("script.countCreditsCall", { value0: creditCost }) })} description={translate("script.creditsAreReservedInBatchesForSourceStrategyAndPlanning")} />
                 </div> : <p className="text-xs text-[var(--studio-muted)]">{translate("script.theCurrentTaskSettingsWereFixedAtLaunchReturnHere")}</p>) : null}
                 {detailStep === BODIES_STEP_INDEX ? <EpisodeBodiesPanel onJobChange={setBodiesJob} /> : null}

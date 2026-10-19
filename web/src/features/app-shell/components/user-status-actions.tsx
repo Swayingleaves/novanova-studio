@@ -6,7 +6,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { type CSSProperties, useEffect, useState } from "react";
 import type { MenuProps } from "antd";
-import { Bell, Keyboard, LogOut, Cog, UserCircle, Users } from "lucide-react";
+import { Bell, Keyboard, LogOut, UserCircle, Users } from "lucide-react";
 import { App, Badge, Dropdown, Popover } from "antd";
 import Link from "@/shared/lib/team-navigation";
 
@@ -14,24 +14,22 @@ import { GitHubLink } from "@/features/app-shell/components/github-link";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { logoutCurrentUser } from "@/services/api/server";
-import { useConfigStore } from "@/features/settings/stores/use-config-store";
 import { useNotificationStore } from "@/features/notification/stores/use-notification-store";
 import { NotificationDetailModal } from "@/features/notification/components/notification-detail-modal";
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
+import { confirmPageNavigation } from "@/shared/lib/navigation-history-guard";
 
 type UserStatusActionsProps = {
-    showConfig?: boolean;
     variant?: "default" | "canvas";
     onOpenShortcuts?: () => void;
 };
 
-export function UserStatusActions({ showConfig = true, variant = "default", onOpenShortcuts }: UserStatusActionsProps) {
+export function UserStatusActions({ variant = "default", onOpenShortcuts }: UserStatusActionsProps) {
     const translate = useTranslation();
     const { message } = App.useApp();
     const user = useUserStore((state) => state.user);
     const clearSession = useUserStore((state) => state.clearSession);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const { notifications, unreadCount, loadNotifications } = useNotificationStore();
     const [detailNotification, setDetailNotification] = useState<typeof notifications[number] | null>(null);
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
@@ -47,6 +45,7 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
     }, [user, loadNotifications]);
 
     const logout = async () => {
+        if (!await confirmPageNavigation()) return;
         try {
             await logoutCurrentUser();
         } catch {
@@ -118,11 +117,6 @@ export function UserStatusActions({ showConfig = true, variant = "default", onOp
         <>
             <NotificationDetailModal notification={detailNotification} onClose={() => setDetailNotification(null)} />
             <div className="inline-flex shrink-0 items-center gap-1">
-                {showConfig && canManageCurrentSpace() ? (
-                    <button type="button" className={naturalIconClass} style={iconStyle} onClick={() => openConfigDialog(false)} aria-label={translate("appShell.configure")} title={translate("appShell.configure")}>
-                        <Cog className="size-4" />
-                    </button>
-                ) : null}
                 <GitHubLink className={`${gitHubClassName} bg-transparent hover:bg-transparent`} style={gitHubStyle} />
                 {onOpenShortcuts ? (
                     <button type="button" className={naturalIconClass} style={iconStyle} onClick={onOpenShortcuts} aria-label={translate("appShell.keyboardShortcuts")} title={translate("appShell.keyboardShortcuts")}>

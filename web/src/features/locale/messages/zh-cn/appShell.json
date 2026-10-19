@@ -94,7 +94,7 @@
     "editAModelToConfigureItsDisplayNameCredits": "点击模型后的编辑按钮配置展示名称、积分、能力与自定义 JSON 参数。",
     "default": "默认",
     "edit": "编辑",
-    "creditSettings": "积分设置",
+    "creditSettings": "注册积分",
     "initialCreditsForNewUsers": "新用户初始积分",
     "appliesOnlyToNewRegisteredAdminCreatedOrFirst": "仅影响之后注册、后台创建或首次第三方登录的新用户，已有用户积分不会自动变更。",
     "initialCredits": "初始积分",
@@ -102,7 +102,7 @@
     "referralRegistrationCredits": "邀请注册奖励积分",
     "referralRewardsGoToTheInviterAfterEmailRegistration": "新用户通过有效邀请链接完成邮箱注册或首次第三方登录后，奖励发放给邀请人。设置为 0 表示暂停发放；只影响之后注册的用户，不追溯历史邀请。",
     "creditsPerNewUser": "每名新用户奖励积分",
-    "checkInCredits": "签到积分",
+    "checkInCredits": "签到奖励",
     "dailyCheckInCredits": "每日签到积分",
     "dailyCheckInGrantsTheseCreditsValidFor24": "用户每天签到一次即可获得该积分；签到积分自签到起 24 小时内有效，到期未使用的部分自动作废。设置为 0 表示仍可签到但不发放积分。",
     "objectStorage_2caed1": "对象存储",
@@ -232,6 +232,7 @@
     "thisChannelWillBeDeletedFromTheServerWhen": "该渠道会在点击保存后从服务端删除。",
     "thisObjectStorageConfigurationWillBeDeletedFromThe": "该对象存储会在点击保存后从服务端删除。",
     "refreshingWillDiscardUnsavedChangesInTheObjectStorage": "刷新会丢弃对象存储 Tab 中的未保存修改。",
-    "closingWillDiscardUnsavedChangesInAllTabs": "关闭后会丢弃所有 Tab 中未保存的修改。",
-    "failedToSaveModelConfiguration": "保存模型配置失败"
+    "failedToSaveModelConfiguration": "保存模型配置失败",
+    "retryConfiguration": "重新加载",
+    "leavingDiscardsConfigurationChanges": "离开管理后台将丢弃未保存的配置，是否放弃修改？"
 }

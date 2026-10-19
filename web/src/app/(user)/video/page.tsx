@@ -45,6 +45,7 @@ import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
+import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-configuration-guard";
 import { useAgentThinking } from "@/features/chat/use-agent-thinking";
 import type { AgentActivityState, ChatAttachment, ChatMessageItem, ToolCallState } from "@/features/chat/types";
 import { buildChatThreadSection } from "@/features/generation/components/chat-thread-section";
@@ -213,14 +214,13 @@ export default function VideoPage() {
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const configHydrated = useConfigStore((state) => state.hydrated);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const userId = useUserStore((state) => state.user?.id);
-    const userRole = useUserStore((state) => state.user?.role);
     const creditBalance = useModelCreditBalance("video");
     const addAsset = useAssetStore((state) => state.addAsset);
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
     const theme = canvasThemes[resolvedTheme];
     const { optimizingOperationId, optimizePrompt } = usePromptOptimization();
+    const ensureModelConfiguration = useModelConfigurationGuard();
     const { recentReferenceImageUrls, recordRecentReferenceImage } = useRecentReferenceImages(userId);
     const isPromptOptimizing = optimizingOperationId === "video-page";
 
@@ -885,6 +885,7 @@ export default function VideoPage() {
             message.error(translate("video.enterVideoPrompt"));
             return;
         }
+        if (!ensureModelConfiguration("video", model) || !ensureModelConfiguration("text")) return;
 
         resetThinkings();
 
@@ -982,6 +983,7 @@ export default function VideoPage() {
         if (isStreaming || isQueued) return;
         const text = value.trim();
         if (!text) return;
+        if (!ensureModelConfiguration("video", model) || !ensureModelConfiguration("text")) return;
         // 点击"确认生成"即真实扣费：报价不可用或余额不足时拦截；调整提示词等其余选项免费
         if (workflowChargingNext && text === "确认生成") {
             if (!workflowImageSelectionComplete) {
@@ -1062,6 +1064,7 @@ export default function VideoPage() {
     };
 
     const submitPromptEdit = () => {
+        if (!ensureModelConfiguration("video", model) || !ensureModelConfiguration("text")) return;
         const values = promptEditValue;
         if (promptEditMode === "three") {
             if (![values.firstFrame, values.lastFrame, values.video].some((item) => item.trim())) {
@@ -1083,6 +1086,7 @@ export default function VideoPage() {
     /** 技能引导中"上传图片"按钮选择文件后：上传参考素材并在对话区回显，随后自动发送带附件的消息。 */
     const handleUploadFromChoice = async (files?: FileList | null) => {
         if (!files?.length) return;
+        if (!ensureModelConfiguration("video", model) || !ensureModelConfiguration("text")) return;
         const { images, videos } = await addReferences(files);
         const attachments = [...imageReferenceAttachments(images), ...videoReferenceAttachments(videos)];
         if (!attachments.length || isStreaming || isQueued) return;
@@ -1129,6 +1133,7 @@ export default function VideoPage() {
     const regenerateRound = async (round: Round) => {
         if (!canChangeSession()) return;
         const videoModel = round.config.videoModel || round.config.model || model;
+        if (!ensureModelConfiguration("video", videoModel) || !ensureModelConfiguration("text")) return;
         const size = round.config.size;
         const resolution = round.config.vquality;
         const attachments = [...imageReferenceAttachments(round.references), ...videoReferenceAttachments(round.videoReferences)];
@@ -1522,7 +1527,6 @@ export default function VideoPage() {
                     onChange={(value) => updateWorkflowImageSelection({ imageModel: value })}
                     capability="image"
                     fullWidth
-                    onMissingConfig={() => (userRole === "admin" ? openConfigDialog(false) : message.error(translate("video.askTheAdministratorToConfigureAnImageModel")))}
                 />
             </div>
         </div>
@@ -1787,7 +1791,6 @@ export default function VideoPage() {
                                     capability="video"
                                     modelOptions={availableVideoModelsForMode(effectiveConfig, config.videoGenerationMode)}
                                     fullWidth
-                                    onMissingConfig={() => (userRole === "admin" ? openConfigDialog(false) : message.error(translate("video.askTheAdministratorToConfigureAVideoModel")))}
                                 />
                             </div>
                         </div>

@@ -24,6 +24,7 @@ import { synchronizeDocumentBrand } from "@/features/team/space-brand";
 import { ClientRootInit } from "@/features/app-shell/components/client-root-init";
 import { getAntThemeConfig } from "@/shared/lib/app-theme";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
+import { trackNavigationHistory } from "@/shared/lib/navigation-history-guard";
 import { isDarkResolvedTheme, type ResolvedTheme, type ThemePreference } from "@/shared/lib/theme-preference";
 
 const queryClient = new QueryClient({
@@ -78,6 +79,8 @@ export function AppProviders({
     useLayoutEffect(() => {
         hydrateTheme(initialThemePreference);
     }, [hydrateTheme, initialThemePreference]);
+
+    useLayoutEffect(trackNavigationHistory, []);
 
     useEffect(() => {
         if (typeof window.matchMedia !== "function") return;

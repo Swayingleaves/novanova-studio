@@ -3,6 +3,7 @@
     "defaultClapperboard": "Default (Clapperboard)",
     "seedanceByteDance": "Seedance (ByteDance)",
     "selectModel": "Select model",
+    "contactAdministratorForModel": "Please contact an administrator to configure the required model",
     "configureModelOptionsAboveFirst": "Configure model options above first",
     "addAChannelAndModelInSettingsFirst": "Add a channel and model in settings first",
     "noMatchingModels": "No matching {value0} models",

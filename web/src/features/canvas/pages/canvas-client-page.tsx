@@ -352,20 +352,13 @@ function CanvasWorkspacePage() {
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
     const updateConfig = useConfigStore((state) => state.updateConfig);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
-    const userRole = useUserStore((state) => state.user?.role);
     const creditBalance = useUserStore((state) => state.user?.creditBalance);
     const setCreditBalance = useUserStore((state) => state.setCreditBalance);
     const showMissingAiConfig = useCallback(
-        (mode: CanvasNodeGenerationMode) => {
-            if (userRole === "admin") {
-                openConfigDialog(true);
-                return;
-            }
-            const label = mode === "image" ? translate("canvas.generateImage") : mode === "video" ? translate("canvas.generateVideo") : translate("canvas.text_dd8186");
-            message.error(translate("canvas.askTheAdministratorToConfigureADefaultModel", { value0: label }));
+        (_mode: CanvasNodeGenerationMode) => {
+            message.warning(translate("settings.contactAdministratorForModel"));
         },
-        [message, openConfigDialog, userRole],
+        [message, translate],
     );
     const addAsset = useAssetStore((state) => state.addAsset);
     const assets = useAssetStore((state) => state.assets);
@@ -1239,8 +1232,6 @@ function CanvasWorkspacePage() {
             const stateOps: CanvasAgentOp[] = [];
             safeOps.forEach((operation) => (operation.type === "run_generation" ? generationOps : stateOps).push(operation));
             const next = applyCanvasAgentOps(before, stateOps);
-            setAgentUndoSnapshot(before);
-            commitAgentSnapshot(next);
             for (const operation of generationOps) {
                 if (!operation.nodeId) throw new Error(translate("canvas.generationNodeIDIsRequired"));
                 const target = next.nodes.find((node) => node.id === operation.nodeId);
@@ -1250,8 +1241,10 @@ function CanvasWorkspacePage() {
                 const generationConfig = buildGenerationConfig(effectiveConfig, target, mode);
                 if (isAiConfigReady(generationConfig, generationConfig.model)) continue;
                 showMissingAiConfig(mode);
-                throw new Error(translate("canvas.generationNodeCreatedButModelConfigurationIsIncomplete", { value0: mode === "image" ? translate("canvas.image") : mode === "video" ? translate("canvas.video") : translate("canvas.text_dd8186") }));
+                throw new Error(translate("settings.contactAdministratorForModel"));
             }
+            setAgentUndoSnapshot(before);
+            commitAgentSnapshot(next);
             if (!generationOps.length) {
                 return { snapshot: { ...next, projectId, title: currentDocument?.identity.title || translate("canvas.untitledCanvas") } };
             }
@@ -2399,7 +2392,7 @@ function CanvasWorkspacePage() {
             const modelValue = selectedModel === undefined ? node.content.model || effectiveConfig.textModel : selectedModel;
             const model = normalizeModelOptionValue(modelValue, effectiveConfig.channels);
             if (!model || !effectiveConfig.textModels.includes(model) || !isAiConfigReady(effectiveConfig, model)) {
-                message.error(translate("canvas.selectATextModelBeforeGeneratingStoryboard"));
+                message.warning(translate("settings.contactAdministratorForModel"));
                 return null;
             }
             return {
@@ -2508,7 +2501,7 @@ function CanvasWorkspacePage() {
             }
             const normalizedModel = normalizeModelOptionValue(settings.model, effectiveConfig.channels);
             if (!normalizedModel || !effectiveConfig.imageModels.includes(normalizedModel) || !isAiConfigReady(effectiveConfig, normalizedModel)) {
-                message.error(translate("canvas.selectAnImageModelBeforeGeneratingAssets"));
+                message.warning(translate("settings.contactAdministratorForModel"));
                 return;
             }
             const unnamedAsset = selectedAssets.find((asset) => !asset.name.trim());
@@ -2633,7 +2626,7 @@ function CanvasWorkspacePage() {
                 canvasVideoCount: "1",
             };
             if (!normalizedModel || !effectiveConfig.videoModels.includes(normalizedModel) || !isAiConfigReady(generationConfig, normalizedModel)) {
-                message.error(translate("canvas.selectAnAvailableVideoModelFirst"));
+                message.warning(translate("settings.contactAdministratorForModel"));
                 return;
             }
             const storyboardReferenceVideos = readStoryboardVideoReferences(nodeId, nodesRef.current, connectionsRef.current);

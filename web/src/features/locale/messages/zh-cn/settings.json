@@ -3,6 +3,7 @@
     "defaultClapperboard": "默认（Clapperboard）",
     "seedanceByteDance": "Seedance（字节跳动）",
     "selectModel": "选择模型",
+    "contactAdministratorForModel": "请联系管理员配置对应模型",
     "configureModelOptionsAboveFirst": "请先在上方配置可选模型",
     "addAChannelAndModelInSettingsFirst": "请先到配置里添加渠道和模型",
     "noMatchingModels": "暂无匹配的{value0}模型",

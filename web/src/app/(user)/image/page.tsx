@@ -12,6 +12,7 @@ import { nanoid } from "nanoid";
 
 import { ImageGeneratingCard, renderPendingImageToolCall } from "./components/pending-image-tool-call";
 import { regenerateImageRound } from "./image-round-regenerate";
+import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-configuration-guard";
 import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -115,10 +116,8 @@ export default function ImagePage() {
     const effectiveConfig = useEffectiveConfig();
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const configHydrated = useConfigStore((state) => state.hydrated);
-    const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
+    const ensureModelConfiguration = useModelConfigurationGuard();
     const userId = useUserStore((state) => state.user?.id);
-    const userRole = useUserStore((state) => state.user?.role);
     const addAsset = useAssetStore((state) => state.addAsset);
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
     const theme = canvasThemes[resolvedTheme];
@@ -546,6 +545,7 @@ export default function ImagePage() {
             message.error(translate("image.enterImagePrompt"));
             return;
         }
+        if (!ensureModelConfiguration("image", model) || !ensureModelConfiguration("text")) return;
 
         resetThinkings();
 
@@ -571,6 +571,7 @@ export default function ImagePage() {
         if (isStreaming || isQueued) return;
         const text = value.trim();
         if (!text) return;
+        if (!ensureModelConfiguration("image", model) || !ensureModelConfiguration("text")) return;
         // 技能引导中选择生成比例时同步页面尺寸配置，保证最终生成任务按用户选择的比例（而非页面默认 1:1）
         if (/^\d+:\d+$/.test(text)) {
             updateConfig("size", text);
@@ -588,6 +589,7 @@ export default function ImagePage() {
     /** 技能引导中"上传图片"按钮选择文件后：上传参考图并在对话区回显，随后自动发送带附件的消息。 */
     const handleUploadFromChoice = async (files?: FileList | null) => {
         if (!files?.length) return;
+        if (!ensureModelConfiguration("image", model) || !ensureModelConfiguration("text")) return;
         const uploaded = await addReferences(files);
         if (!uploaded.length || isStreaming || isQueued) return;
         const text = translate("image.productImageUploaded");
@@ -608,6 +610,7 @@ export default function ImagePage() {
 
     const regenerateRound = async (round: Round) => {
         if (!canChangeSession()) return;
+        if (!ensureModelConfiguration("image", round.config.imageModel || round.config.model || model) || !ensureModelConfiguration("text")) return;
         await regenerateImageRound(round, {
             fallbackModel: model,
             appendUserMessage: (text, generationStyles) => {
@@ -1100,7 +1103,6 @@ export default function ImagePage() {
                                     }}
                                     capability="image"
                                     fullWidth
-                                    onMissingConfig={() => (userRole === "admin" ? openConfigDialog(false) : message.error(translate("image.askTheAdministratorToConfigureAnImageModel")))}
                                 />
                             </div>
                         </div>

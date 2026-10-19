@@ -4,7 +4,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Cog, createLucideIcon } from "lucide-react";
+import { Bell, createLucideIcon } from "lucide-react";
 import Link from "@/shared/lib/team-navigation";
 import { usePathname } from "@/shared/lib/team-navigation";
 import { Popover, Tooltip } from "antd";
@@ -15,7 +15,6 @@ import { navigationTools, type NavigationToolSlug } from "@/shared/constants/nav
 import { canManageCurrentSpace } from "@/features/team/stores/use-team-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { cn } from "@/shared/lib/utils";
-import { useConfigStore } from "@/features/settings/stores/use-config-store";
 import { useNotificationStore } from "@/features/notification/stores/use-notification-store";
 import { NotificationDetailModal } from "@/features/notification/components/notification-detail-modal";
 import { listMyTeams } from "@/services/api/team";
@@ -38,7 +37,6 @@ export function AppSidebar() {
     const pathname = usePathname();
     const user = useUserStore((state) => state.user);
     const myTeams = useQuery({ queryKey: ["myTeams", user?.id], queryFn: listMyTeams, enabled: Boolean(user && user.role !== "admin") });
-    const openConfigDialog = useConfigStore((state) => state.openConfigDialog);
     const { notifications, unreadCount, loadNotifications } = useNotificationStore();
     const [detailNotification, setDetailNotification] = useState<(typeof notifications)[number] | null>(null);
     const teamSwitcherOpen = useTeamSwitcherStore((state) => state.open);
@@ -134,13 +132,6 @@ export function AppSidebar() {
                             </button>
                         )}
                     </Tooltip>
-                    {canManageCurrentSpace() ? (
-                        <Tooltip title={translate("appShell.configure")} placement="right">
-                            <button type="button" className="sidebar-rail-action sidebar-rail-action-emphasis" onClick={() => openConfigDialog(false)} aria-label={translate("appShell.configure")}>
-                                <Cog className="size-4.5" />
-                            </button>
-                        </Tooltip>
-                    ) : null}
                     <LanguageMenu />
                     {showTeamSwitcher ? (
                         <Tooltip title="切换团队" placement="right">

@@ -17,6 +17,7 @@ import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { logoutCurrentUser } from "@/services/api/server";
 import { cn } from "@/shared/lib/utils";
+import { confirmPageNavigation } from "@/shared/lib/navigation-history-guard";
 
 const creditNumberFormatter = { format: (value: number) => new Intl.NumberFormat(currentLanguageTag()).format(value) };
 
@@ -43,6 +44,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
     const creditBalance = user ? user.creditBalance : null;
 
     const handleLogout = async () => {
+        if (!await confirmPageNavigation()) return;
         try {
             await logoutCurrentUser();
         } catch {

@@ -8,7 +8,8 @@ import { App, Alert, Button, Progress, Radio, Select, Tag } from "antd";
 import { nanoid } from "nanoid";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
-import { useConfigStore, useEffectiveConfig } from "@/features/settings/stores/use-config-store";
+import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-configuration-guard";
+import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { cancelEpisodeBodies, episodeBodiesStatus, episodeBodiesUnitPrice, latestEpisodeBodies, quoteEpisodeBodies, retryEpisodeBodies, startEpisodeBodies } from "@/services/api/script";
 import { useScriptStore } from "../stores/use-script-store";
 import type { EpisodeBodiesJob, EpisodeBodiesMode, NovelAdaptationJobStatus } from "../types";
@@ -38,7 +39,7 @@ export function EpisodeBodiesPanel({ onJobChange }: { onJobChange?: (job: Episod
     const saveStatus = useScriptStore((state) => state.saveStatus);
     const reloadProject = useScriptStore((state) => state.reloadProject);
     const config = useEffectiveConfig();
-    const openConfig = useConfigStore((state) => state.openConfigDialog);
+    const ensureModelConfiguration = useModelConfigurationGuard();
     const [model, setModel] = useState("");
     const [mode, setMode] = useState<EpisodeBodiesMode>("apply");
     const [episodeIds, setEpisodeIds] = useState<string[]>([]);
@@ -105,7 +106,7 @@ export function EpisodeBodiesPanel({ onJobChange }: { onJobChange?: (job: Episod
 
     /** 批量生成正文：先按所选分集报价，确认后交给后台逐集排队。 */
     const runBatch = async () => {
-        if (!model) return message.warning(translate("script.selectATextModel"));
+        if (!ensureModelConfiguration("text", model)) return;
         if (!episodeIds.length) return message.warning(translate("script.selectAtLeastOneEpisodeToGenerate"));
         if (!["saved", "idle"].includes(saveStatus)) return message.warning(translate("script.saveYourScriptChangesBeforeGenerating"));
         setJobBusy(true);
@@ -229,7 +230,7 @@ export function EpisodeBodiesPanel({ onJobChange }: { onJobChange?: (job: Episod
                 <Radio.Group value={mode} onChange={(event) => setMode(event.target.value)} options={[{ value: "apply", label: getModeLabels(translate).apply }, { value: "draft", label: getModeLabels(translate).draft }]} />
                 <p className="text-xs text-[var(--studio-muted)]">{getModeDetails(translate)[mode]}</p>
             </div>
-            <label className="block text-sm">{translate("script.textModel")}<div className="mt-1"><ModelPicker config={config} value={model} onChange={setModel} capability="text" fullWidth onMissingConfig={() => openConfig(true, "models")} /></div></label>
+            <label className="block text-sm">{translate("script.textModel")}<div className="mt-1"><ModelPicker config={config} value={model} onChange={setModel} capability="text" fullWidth /></div></label>
             <Alert type={unitPriceFailed ? "warning" : "info"} showIcon
                 title={translate("script.textModelPriceCount", { value0: unitPriceFailed ? translate("script.couldNotLoadRefreshThePageAndTryAgain") : unitPrice === undefined ? translate("script.loading") : unitPrice === null ? translate("script.notConfiguredSetThePriceUnderScriptPricingEpisodeText") : translate("script.countCreditsEpisode", { value0: unitPrice }) })}
                 description={translate("script.oneCallPerEpisodeCreditsAreReservedForTheSelected")} />

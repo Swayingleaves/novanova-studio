@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { App } from "antd";
 
 import { optimizeGenerationPrompt } from "@/features/generation/api/prompt-optimization";
+import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-configuration-guard";
 import type { PromptOptimizationType } from "@/services/api/server";
 
 type OptimizePromptOptions = {
@@ -25,6 +26,7 @@ type OptimizePromptOptions = {
 export function usePromptOptimization() {
     const translate = useTranslation();
     const { message } = App.useApp();
+    const ensureModelConfiguration = useModelConfigurationGuard();
     const [optimizingOperationId, setOptimizingOperationId] = useState<string | null>(null);
     const optimizingOperationIdRef = useRef<string | null>(null);
     const controllerRef = useRef<AbortController | null>(null);
@@ -35,6 +37,7 @@ export function usePromptOptimization() {
         async ({ operationId, generationType, prompt, generationStyleIds, onSuccess }: OptimizePromptOptions) => {
             const normalizedPrompt = prompt.trim();
             if (!normalizedPrompt || optimizingOperationIdRef.current) return;
+            if (!ensureModelConfiguration("text")) return;
 
             const controller = new AbortController();
             controllerRef.current = controller;
@@ -54,7 +57,7 @@ export function usePromptOptimization() {
                 setOptimizingOperationId((current) => (current === operationId ? null : current));
             }
         },
-        [message],
+        [ensureModelConfiguration, message],
     );
 
     return { optimizingOperationId, optimizePrompt };
