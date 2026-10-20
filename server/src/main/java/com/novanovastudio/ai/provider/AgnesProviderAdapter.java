@@ -211,7 +211,10 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
         Map<String, Object> payload = new java.util.LinkedHashMap<>();
         payload.put("model", context.model());
         payload.put("prompt", context.request().prompt());
-        payload.put("size", resolveAgnesRequestSize(context));
+        // 手写size优先，不为已覆盖的参数查询尺寸映射。
+        if (context.customBodyParameters() == null || !context.customBodyParameters().containsKey("size")) {
+            payload.put("size", resolveAgnesRequestSize(context));
+        }
         payload.put("extra_body", extraBody);
         return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/images/generations", com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .flatMap(response -> {
@@ -476,41 +479,7 @@ public class AgnesProviderAdapter implements AiProviderAdapter {
         if (!StringUtils.hasText(size) || "auto".equalsIgnoreCase(size)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.agnesRequiresSizeSelectAspectRatioOrPixelDimensions"));
         }
-        if (size.matches("^\\d+x\\d+$")) {
-            return size;
-        }
-        if (!size.contains(":")) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.unsupportedAgnesSizeUse916Or1024x1024"));
-        }
-        return resolveImageSize(AiTaskParameterReader.stringParameter(context.request().parameters(), "resolution", "2K"), size);
-    }
-
-    /**
-     * 按比例解析图片像素尺寸
-     *
-     * @param resolution String 图片清晰度
-     * @param ratio String 图片比例
-     * @return String 像素尺寸
-     */
-    private static String resolveImageSize(String resolution, String ratio) {
-        int longSide = switch (resolution.trim().toLowerCase()) {
-            case "1k" -> 1024;
-            case "2k" -> 2048;
-            case "4k" -> 4096;
-            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageResolutionMustBe1K2KOr4K"));
-        };
-        String[] parts = ratio.split(":");
-        if (parts.length != 2) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.aspectRatioMustBePositiveEG916"));
-        }
-        double widthRatio = parsePositiveDouble(parts[0], SystemMessage.of("business.aspectRatioMustBePositiveEG916"));
-        double heightRatio = parsePositiveDouble(parts[1], SystemMessage.of("business.aspectRatioMustBePositiveEG916"));
-        boolean landscape = widthRatio >= heightRatio;
-        double longRatio = landscape ? widthRatio / heightRatio : heightRatio / widthRatio;
-        int shortSide = Math.max(16, (int) (Math.round(longSide / longRatio / 16) * 16));
-        int width = landscape ? longSide : shortSide;
-        int height = landscape ? shortSide : longSide;
-        return width + "x" + height;
+        return AiImageSizeSupport.resolveSize(context.request().parameters(), context.convertImageSizeToPixels(), context.imageSizeMappings());
     }
 
     /**

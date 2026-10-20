@@ -8,6 +8,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.alibaba.fastjson2.TypeReference;
 import com.novanovastudio.ai.AiErrorSupport;
 import com.novanovastudio.ai.AiHttpClient;
+import com.novanovastudio.ai.AiImageSizeSupport;
 import com.novanovastudio.ai.AiJsonUtils;
 import com.novanovastudio.ai.AiMediaSupport;
 import com.novanovastudio.ai.AiProviderAdapter;
@@ -124,7 +125,11 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
         payload.put("response_format", "url");
         payload.put("output_format", "png");
         AiTaskParameterReader.putNonAuto(payload, context.request().parameters(), "quality");
-        putImageSize(payload, context.request().parameters());
+        // 手写size优先，不为已覆盖的参数查询尺寸映射。
+        if (context.customBodyParameters() == null || !context.customBodyParameters().containsKey("size")) {
+            String imageSize = AiImageSizeSupport.resolveSize(context.request().parameters(), context.convertImageSizeToPixels(), context.imageSizeMappings());
+            if (StringUtils.hasText(imageSize)) payload.put("size", imageSize);
+        }
         return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/images/generations", com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .flatMap(response -> storeImageItems(context, AiJsonUtils.responseArrayPayload(response, "data")));
     }
@@ -151,7 +156,7 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
                     parts.add(aiHttpClient.formPart("output_format", "png"));
                     String quality = AiTaskParameterReader.stringParameter(context.request().parameters(), "quality", "");
                     if (StringUtils.hasText(quality) && !"auto".equalsIgnoreCase(quality)) parts.add(aiHttpClient.formPart("quality", quality));
-                    String imageSize = normalizeImageSize(context.request().parameters());
+                    String imageSize = AiImageSizeSupport.resolveSize(context.request().parameters(), context.convertImageSizeToPixels(), context.imageSizeMappings());
                     if (StringUtils.hasText(imageSize)) parts.add(aiHttpClient.formPart("size", imageSize));
                     parts.addAll(fileParts);
                     return aiHttpClient.sendMultipartRequest(context.channel(), "/images/edits", "----NovanovaNewApiImageBoundary" + UUID.randomUUID(), parts);
@@ -383,48 +388,6 @@ public class NewApiProviderAdapter implements AiProviderAdapter {
                         .map(media -> JSON.parseObject(JSON.toJSONString(media), new TypeReference<Map<String, Object>>() {})))
                 .collectList()
                 .map(items -> AiJsonUtils.jsonObject(Map.of("items", items)));
-    }
-
-    /**
-     * 写入图片像素尺寸。
-     *
-     * @param payload Map<String, Object> 请求体
-     * @param parameters Map<String, Object> 图片参数
-     * @return void 无返回值
-     */
-    private static void putImageSize(Map<String, Object> payload, Map<String, Object> parameters) {
-        String imageSize = normalizeImageSize(parameters);
-        if (StringUtils.hasText(imageSize)) payload.put("size", imageSize);
-    }
-
-    /**
-     * 规范化图片比例或尺寸。
-     *
-     * @param parameters Map<String, Object> 图片参数
-     * @return String 像素尺寸
-     */
-    private static String normalizeImageSize(Map<String, Object> parameters) {
-        String size = AiTaskParameterReader.parameterText(parameters, "size", "").trim();
-        if (!StringUtils.hasText(size) || "auto".equalsIgnoreCase(size)) return "";
-        if (size.matches("^\\d+x\\d+$")) return size;
-        int longSide = switch (AiTaskParameterReader.parameterText(parameters, "resolution", "2K").trim().toLowerCase(Locale.ROOT)) {
-            case "1k" -> 1024;
-            case "2k" -> 2048;
-            case "4k" -> 4096;
-            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageResolutionMustBe1K2KOr4K"));
-        };
-        String[] ratio = size.split(":");
-        if (ratio.length != 2) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageAspectRatioMustBePositiveEG916"));
-        try {
-            double width = Double.parseDouble(ratio[0]);
-            double height = Double.parseDouble(ratio[1]);
-            if (!Double.isFinite(width) || !Double.isFinite(height) || width <= 0 || height <= 0) throw new NumberFormatException();
-            boolean landscape = width >= height;
-            int shortSide = Math.max(16, (int) (Math.round(longSide / (landscape ? width / height : height / width) / 16) * 16));
-            return landscape ? longSide + "x" + shortSide : shortSide + "x" + longSide;
-        } catch (NumberFormatException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageAspectRatioMustBePositiveEG916"));
-        }
     }
 
     /**

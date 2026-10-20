@@ -65,7 +65,7 @@ class NewApiProviderAdapterTest {
         Assertions.assertEquals("gpt-image-1", payloads.getFirst().getString("model"));
         Assertions.assertEquals("生成一只小猫", payloads.getFirst().getString("prompt"));
         Assertions.assertEquals(2, payloads.getFirst().getIntValue("n"));
-        Assertions.assertEquals("1024x688", payloads.getFirst().getString("size"));
+        Assertions.assertEquals("3:2", payloads.getFirst().getString("size"));
     }
 
     /**

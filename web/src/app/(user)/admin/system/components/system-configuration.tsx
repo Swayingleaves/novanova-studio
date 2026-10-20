@@ -62,6 +62,8 @@ import {
 import type { ObjectStorageConfig, ObjectStorageProvider } from "@/shared/types/object-storage";
 import { blockingModelConfigDependencyIssues, createDraftModelConfigs, modelConfigDependencyIssues, reconcileModelConfigDraft, updateModelConfigSelection } from "./model-config-draft";
 import { useConfigurationLeaveGuard } from "../use-configuration-leave-guard";
+import { cloneImageSizeMappings, normalizeImageSizeMappings, type ImageSizeMappings } from "@/features/generation/lib/image-size-mappings";
+import { ImageSizeMappingsEditor } from "./image-size-mappings-editor";
 
 type ConfigurationTabKey = "channels" | "models" | "credits" | "invitationReward" | "checkIn" | "objectStorage";
 
@@ -382,10 +384,12 @@ export function SystemConfiguration() {
     const saveModelConfigEditor = () => {
         if (!editingModelConfig) return;
         let customBodyParameters: Record<string, unknown>;
+        let imageSizeMappings: ImageSizeMappings | null;
         try {
             const parsed = JSON.parse(editingCustomBodyParameters.trim() || "{}");
             if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(translate("appShell.customModelJSONMustBeAnObject"));
             customBodyParameters = parsed as Record<string, unknown>;
+            imageSizeMappings = editingModelConfig.modelType === "image" ? normalizeImageSizeMappings(editingModelConfig.imageSizeMappings) : null;
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("appShell.invalidCustomModelJSON"));
             return;
@@ -393,6 +397,7 @@ export function SystemConfiguration() {
         const nextConfig = {
             ...editingModelConfig,
             customBodyParameters,
+            imageSizeMappings,
             displayName: editingModelConfig.displayName === editingModelConfig.modelName ? null : editingModelConfig.displayName,
         };
         setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.id === nextConfig.id ? nextConfig : configItem)));
@@ -442,6 +447,8 @@ export function SystemConfiguration() {
                     thinkingEnabled: normalizedConfig.thinkingEnabled,
                     reasoningEffort: normalizedConfig.reasoningEffort,
                     requestConcurrency: normalizedConfig.requestConcurrency,
+                    convertImageSizeToPixels: normalizedConfig.convertImageSizeToPixels,
+                    imageSizeMappings: normalizedConfig.imageSizeMappings,
                     customBodyParameters: normalizedConfig.customBodyParameters,
                     videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
                     displayName: normalizedConfig.displayName,
@@ -469,6 +476,8 @@ export function SystemConfiguration() {
                         thinkingEnabled: normalizedConfig.thinkingEnabled,
                         reasoningEffort: normalizedConfig.reasoningEffort,
                         requestConcurrency: normalizedConfig.requestConcurrency,
+                        convertImageSizeToPixels: normalizedConfig.convertImageSizeToPixels,
+                        imageSizeMappings: normalizedConfig.imageSizeMappings,
                         customBodyParameters: normalizedConfig.customBodyParameters,
                         videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
                         displayName: normalizedConfig.displayName,
@@ -1412,6 +1421,27 @@ export function SystemConfiguration() {
                                 <InputNumber min={1} precision={0} value={editingModelConfig.requestConcurrency} className="w-full" onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })} />
                             </Form.Item>
                         ) : null}
+                        {editingModelConfig.modelType === "image" ? (
+                            <Form.Item
+                                label={translate("appShell.convertImageSizeToPixels")}
+                                htmlFor="convert-image-size-to-pixels"
+                                extra={<span id="convert-image-size-to-pixels-description">{translate("appShell.convertImageSizeToPixelsDescription")}</span>}
+                            >
+                                <Switch
+                                    id="convert-image-size-to-pixels"
+                                    aria-label={translate("appShell.convertImageSizeToPixels")}
+                                    aria-describedby="convert-image-size-to-pixels-description"
+                                    checked={Boolean(editingModelConfig.convertImageSizeToPixels)}
+                                    onChange={(checked) => updateEditingModelConfig({ convertImageSizeToPixels: checked })}
+                                />
+                            </Form.Item>
+                        ) : null}
+                        {editingModelConfig.modelType === "image" && editingModelConfig.convertImageSizeToPixels ? (
+                            <Form.Item>
+                                <ImageSizeMappingsEditor value={editingModelConfig.imageSizeMappings ?? cloneImageSizeMappings()}
+                                    onChange={(imageSizeMappings) => updateEditingModelConfig({ imageSizeMappings })} />
+                            </Form.Item>
+                        ) : null}
                         <Form.Item label={translate("appShell.capabilities")}>
                             {editingModelConfig.modelType === "image" && editingModelConfig.isCustomModel ? (
                                 <div className="space-y-3">
@@ -1510,6 +1540,7 @@ function cloneModelConfig(config: ServerModelConfig): ServerModelConfig {
         capabilities: [...config.capabilities],
         customBodyParameters: { ...(config.customBodyParameters || {}) },
         customModelConfig: cloneCustomModelConfig(config.customModelConfig),
+        imageSizeMappings: config.modelType === "image" ? cloneImageSizeMappings(config.imageSizeMappings) : null,
         videoBillingConfiguration: config.modelType === "video" ? cloneVideoBillingConfiguration(config.videoBillingConfiguration || createVideoBillingConfiguration()) : null,
     };
 }
@@ -1538,6 +1569,8 @@ function normalizeModelConfigForSave(config: ServerModelConfig): ServerModelConf
         capabilities,
         videoBillingConfiguration,
         isCustomModel: config.isCustomModel && config.modelType !== "text",
+        convertImageSizeToPixels: config.modelType === "image" && Boolean(config.convertImageSizeToPixels),
+        imageSizeMappings: config.modelType === "image" ? normalizeImageSizeMappings(config.imageSizeMappings) : null,
         customModelConfig,
     };
 }
@@ -1560,6 +1593,8 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         thinkingEnabled: true,
         reasoningEffort: "high",
         requestConcurrency: 1,
+        convertImageSizeToPixels: false,
+        imageSizeMappings: modelType === "image" ? cloneImageSizeMappings() : null,
         customBodyParameters: {},
         videoBillingConfiguration: modelType === "video" ? createVideoBillingConfiguration() : null,
         displayName: null,
@@ -1580,6 +1615,8 @@ function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelC
         first.creditCost === second.creditCost &&
         first.creditUnit === second.creditUnit &&
         first.requestConcurrency === second.requestConcurrency &&
+        first.convertImageSizeToPixels === second.convertImageSizeToPixels &&
+        sameValue(first.imageSizeMappings, second.imageSizeMappings) &&
         first.thinkingEnabled === second.thinkingEnabled &&
         first.reasoningEffort === second.reasoningEffort &&
         (first.displayName || null) === (second.displayName || null) &&

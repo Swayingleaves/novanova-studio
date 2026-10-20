@@ -166,6 +166,8 @@ public final class RowMappers {
         record.setThinkingEnabled(row.get("thinking_enabled", Boolean.class));
         record.setReasoningEffort(row.get("reasoning_effort", String.class));
         record.setRequestConcurrency(row.get("request_concurrency", Integer.class));
+        record.setConvertImageSizeToPixels(row.get("convert_image_size_to_pixels", Boolean.class));
+        record.setImageSizeMappings(row.get("image_size_mappings", String.class));
         record.setCustomBodyParameters(row.get("custom_body_parameters", String.class));
         record.setVideoBillingConfiguration(row.get("video_billing_configuration", String.class));
         record.setDisplayName(row.get("display_name", String.class));

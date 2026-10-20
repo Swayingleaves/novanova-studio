@@ -6,6 +6,7 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiHttpClient;
+import com.novanovastudio.ai.AiImageSizeSupport;
 import com.novanovastudio.ai.AiJsonUtils;
 import com.novanovastudio.ai.AiMediaSupport;
 import com.novanovastudio.ai.AiProviderAdapter;
@@ -236,7 +237,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
             return buildBodyWithAgent(context, group, group.aiRequestPrompt(), "请求体", referenceUrls, videoReferenceUrls, audioReferenceUrls, null);
         }
         return Mono.fromCallable(() -> parseRenderedBody(
-                renderTemplate(group.requestTemplate(), buildPlaceholders(context, group, referenceUrls, videoReferenceUrls, audioReferenceUrls, null)), "请求示例"));
+                renderTemplate(group.requestTemplate(), buildPlaceholders(context, group, group.requestTemplate(), referenceUrls, videoReferenceUrls, audioReferenceUrls, null)), "请求示例"));
     }
 
     /**
@@ -310,7 +311,7 @@ public class CustomProviderAdapter implements AiProviderAdapter {
             return buildBodyWithAgent(context, group, group.aiQueryPrompt(), "查询请求体", List.of(), List.of(), List.of(), taskId);
         }
         return Mono.fromCallable(() -> parseRenderedBody(
-                renderTemplate(group.queryRequestTemplate(), buildPlaceholders(context, group, List.of(), List.of(), List.of(), taskId)), "查询请求示例"));
+                renderTemplate(group.queryRequestTemplate(), buildPlaceholders(context, group, group.queryRequestTemplate(), List.of(), List.of(), List.of(), taskId)), "查询请求示例"));
     }
 
     /**
@@ -395,9 +396,16 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         if (StringUtils.hasText(size)) {
             builder.append("- 画幅: ").append(size).append('\n');
         }
-        String resolution = AiTaskParameterReader.stringParameter(parameters, "resolution", "");
+        String resolution = AiTaskParameterReader.stringParameter(parameters, "resolution",
+                AiTaskTypes.IMAGE.equals(context.task().getTaskType()) ? "2K" : "");
         if (StringUtils.hasText(resolution)) {
             builder.append("- 分辨率: ").append(resolution).append('\n');
+        }
+        if (AiTaskTypes.IMAGE.equals(context.task().getTaskType()) && StringUtils.hasText(size)) {
+            String requestSize = AiImageSizeSupport.resolveSize(parameters, context.convertImageSizeToPixels(), context.imageSizeMappings());
+            builder.append("- size比例转像素: ").append(context.convertImageSizeToPixels() ? "开启" : "关闭").append('\n');
+            builder.append("- 请求size: ").append(StringUtils.hasText(requestSize) ? requestSize : size).append('\n');
+            builder.append("- 尺寸规则: 用户构造要求明确写死size时保留该值；否则直接使用上述请求size，不要自行换算。\n");
         }
         String seconds = AiTaskParameterReader.stringParameter(parameters, "seconds", "");
         if (StringUtils.hasText(seconds)) {
@@ -524,13 +532,14 @@ public class CustomProviderAdapter implements AiProviderAdapter {
      *
      * @param context           AiTaskExecutionContext AI任务执行上下文
      * @param group             PersistenceDtos.CustomModelGroupConfig 当前分组配置
+     * @param template          String 当前实际使用的请求或查询模板
      * @param referenceUrls     List<String> 参考图片URL列表
      * @param videoReferenceUrls List<String> 参考视频URL列表
      * @param audioReferenceUrls List<String> 参考音频URL列表
      * @param taskId            String 轮询任务ID，提交阶段为null
      * @return Map<String, Object> 占位符值表
      */
-    private Map<String, Object> buildPlaceholders(AiTaskExecutionContext context, PersistenceDtos.CustomModelGroupConfig group,
+    private Map<String, Object> buildPlaceholders(AiTaskExecutionContext context, PersistenceDtos.CustomModelGroupConfig group, String template,
                                                   List<String> referenceUrls, List<String> videoReferenceUrls,
                                                   List<String> audioReferenceUrls, String taskId) {
         Map<String, Object> placeholders = new LinkedHashMap<>();
@@ -548,7 +557,10 @@ public class CustomProviderAdapter implements AiProviderAdapter {
         Map<String, Object> parameters = context.request().parameters() == null ? Map.of() : context.request().parameters();
         String size = AiTaskParameterReader.stringParameter(parameters, "size", "");
         if (StringUtils.hasText(size)) {
-            placeholders.put("size", size);
+            // 模板未引用size时保留其手写值，不要求无关的尺寸映射完整。
+            String requestSize = AiTaskTypes.IMAGE.equals(context.task().getTaskType()) && template != null && template.contains("{{size}}")
+                    ? AiImageSizeSupport.resolveSize(parameters, context.convertImageSizeToPixels(), context.imageSizeMappings()) : size;
+            placeholders.put("size", StringUtils.hasText(requestSize) ? requestSize : size);
         }
         String resolution = AiTaskParameterReader.stringParameter(parameters, "resolution", "");
         if (StringUtils.hasText(resolution)) {

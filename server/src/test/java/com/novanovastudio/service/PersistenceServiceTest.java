@@ -795,7 +795,7 @@ class PersistenceServiceTest {
 
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
                 "channel-1", "video-model", "video", List.of(VideoGenerationMode.REFERENCE_TO_VIDEO, AudioInputSupport.CAPABILITY), 0, java.math.BigDecimal.valueOf(0),
-                true, "high", "generation", 1, new JSONObject(), configuration, null, null, false, null)).block();
+                true, "high", "generation", 1, new JSONObject(), configuration, null, null, false, null, false, null)).block();
 
         Assertions.assertNotNull(created);
         Assertions.assertEquals(List.of(VideoGenerationMode.REFERENCE_TO_VIDEO, AudioInputSupport.CAPABILITY), created.capabilities());
@@ -820,7 +820,7 @@ class PersistenceServiceTest {
 
         Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
                 "channel-1", "video-model", "video", List.of(AudioInputSupport.CAPABILITY), 0, java.math.BigDecimal.valueOf(0),
-                true, "high", "generation", 1, new JSONObject(), null, null, null, false, null)).block());
+                true, "high", "generation", 1, new JSONObject(), null, null, null, false, null, false, null)).block());
         verify(repository, times(0)).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
     }
 
@@ -835,7 +835,7 @@ class PersistenceServiceTest {
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
                 "channel-1", "video-model", "video", List.of(VideoGenerationMode.TEXT_TO_VIDEO), 0, java.math.BigDecimal.valueOf(0), true, "high",
                 "generation", 1, new JSONObject(), new VideoBillingConfiguration("generation", 3,
-                java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", java.math.BigDecimal.valueOf(6)))), null, null, false, null)).block();
+                java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", java.math.BigDecimal.valueOf(6)))), null, null, false, null, false, null)).block();
 
         Assertions.assertNotNull(created);
         ArgumentCaptor<PersistenceRecords.UserAiModelConfigRecord> captor = ArgumentCaptor.forClass(PersistenceRecords.UserAiModelConfigRecord.class);
@@ -845,7 +845,7 @@ class PersistenceServiceTest {
         when(repository.updatePlatformAiModelConfig(record)).thenReturn(Mono.just(1L));
 
         PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
-                created.id(), "image", List.of(), 0, java.math.BigDecimal.valueOf(4), true, "high", "generation", 1, new JSONObject(), null, null, null, null, null)).block();
+                created.id(), "image", List.of(), 0, java.math.BigDecimal.valueOf(4), true, "high", "generation", 1, new JSONObject(), null, null, null, null, null, false, null)).block();
 
         Assertions.assertNotNull(updated);
         Assertions.assertNull(updated.videoBillingConfiguration());
@@ -866,7 +866,7 @@ class PersistenceServiceTest {
 
         Assertions.assertThrows(BusinessException.class, () -> service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
                 "model-1", "image", List.of(), 0, java.math.BigDecimal.valueOf(0), true, "high", "generation", 1,
-                new JSONObject(), configuration, null, null, null, null)).block());
+                new JSONObject(), configuration, null, null, null, null, false, null)).block());
         verify(repository, times(0)).updatePlatformAiModelConfig(record);
     }
 
@@ -882,7 +882,7 @@ class PersistenceServiceTest {
 
         Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
                 "channel-1", "video-model", "video", List.of(VideoGenerationMode.TEXT_TO_VIDEO), 0, java.math.BigDecimal.valueOf(0),
-                true, "high", "generation", 1, new JSONObject(), configuration, null, null, false, null)).block());
+                true, "high", "generation", 1, new JSONObject(), configuration, null, null, false, null, false, null)).block());
         verify(repository, times(0)).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
     }
 
@@ -914,6 +914,68 @@ class PersistenceServiceTest {
         Assertions.assertNotNull(updated);
         Assertions.assertEquals(false, updated.customBodyParameters().getBoolean("like"));
         Assertions.assertEquals(1, updated.customBodyParameters().getInteger("seed"));
+    }
+
+    /** 图片尺寸转换开关应默认关闭，并在保存、查询和再次关闭时完整往返。 */
+    @Test
+    void shouldRoundTripImageSizeConversion() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"image-model\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+        PersistenceDtos.ModelConfig defaultCreated = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "image-model", "image", List.of(), 0, java.math.BigDecimal.ZERO, false, "high")).block();
+        Assertions.assertFalse(defaultCreated.convertImageSizeToPixels());
+        Assertions.assertEquals("2880x2880", defaultCreated.imageSizeMappings().get("1:1").get("4K"));
+
+        java.util.Map<String, java.util.Map<String, String>> mappings = java.util.Map.of("1:1", java.util.Map.of("4K", "4096x4096"));
+
+        PersistenceDtos.CreateModelConfigRequest request = new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "image-model", "image", List.of(), 0, java.math.BigDecimal.ZERO, false, "high", "generation", 1,
+                new JSONObject(), null, null, null, false, null, true, mappings);
+        PersistenceDtos.ModelConfig created = service.createModelConfig(JSON.parseObject(JSON.toJSONString(request), PersistenceDtos.CreateModelConfigRequest.class)).block();
+        Assertions.assertTrue(created.convertImageSizeToPixels());
+        Assertions.assertEquals(mappings, created.imageSizeMappings());
+        Assertions.assertTrue(JSON.parseObject(JSON.toJSONString(created)).getBooleanValue("convertImageSizeToPixels"));
+        ArgumentCaptor<PersistenceRecords.UserAiModelConfigRecord> records = ArgumentCaptor.forClass(PersistenceRecords.UserAiModelConfigRecord.class);
+        verify(repository, times(2)).createPlatformAiModelConfig(records.capture());
+        PersistenceRecords.UserAiModelConfigRecord enabled = records.getAllValues().getLast();
+        Assertions.assertTrue(enabled.getConvertImageSizeToPixels());
+        Assertions.assertEquals("4096x4096", JSON.parseObject(enabled.getImageSizeMappings()).getJSONObject("1:1").getString("4K"));
+        Assertions.assertFalse(records.getAllValues().getFirst().getConvertImageSizeToPixels());
+        when(repository.listPlatformAiModelConfigs()).thenReturn(Flux.just(enabled));
+        Assertions.assertTrue(service.listModelConfigs().block().getFirst().convertImageSizeToPixels());
+        Assertions.assertEquals(mappings, service.listModelConfigs().block().getFirst().imageSizeMappings());
+
+        when(repository.getPlatformAiModelConfig(created.id())).thenReturn(Mono.just(enabled));
+        when(repository.updatePlatformAiModelConfig(enabled)).thenReturn(Mono.just(1L));
+        PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
+                created.id(), "image", List.of(), 0, java.math.BigDecimal.ZERO, false, "high", "generation", 1,
+                new JSONObject(), null, null, null, false, null, false, mappings)).block();
+        Assertions.assertFalse(updated.convertImageSizeToPixels());
+        Assertions.assertEquals(mappings, updated.imageSizeMappings());
+        Assertions.assertFalse(enabled.getConvertImageSizeToPixels());
+        Assertions.assertFalse(service.listModelConfigs().block().getFirst().convertImageSizeToPixels());
+    }
+
+    /**
+     * 文本和视频模型不能开启图片比例转换。
+     *
+     * @param modelType String 非图片模型类型
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"text", "video"})
+    void shouldDisableImageSizeConversionForOtherModelTypes(String modelType) {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"model\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+
+        PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "model", modelType, List.of(), 0, java.math.BigDecimal.ZERO, false, "high", "generation", 1,
+                new JSONObject(), null, null, null, false, null, true, null)).block();
+
+        Assertions.assertFalse(created.convertImageSizeToPixels());
     }
 
     /** 模型同时并发数应默认取1，并在创建、更新和查询间完整往返。 */

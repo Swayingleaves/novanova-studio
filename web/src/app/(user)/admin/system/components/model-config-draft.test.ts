@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelChannel } from "@/features/settings/stores/use-config-store";
+import { normalizeServerModelConfig } from "@/features/settings/stores/use-config-store";
 import type { ServerModelConfig } from "@/services/api/server";
 import { blockingModelConfigDependencyIssues, createDraftModelConfigs, modelConfigDependencyIssues, reconcileModelConfigDraft, updateModelConfigSelection } from "./model-config-draft";
 
@@ -19,6 +20,7 @@ function configuration(id: string, modelName: string, patch: Partial<ServerModel
         thinkingEnabled: true,
         reasoningEffort: "high",
         requestConcurrency: 1,
+        convertImageSizeToPixels: false, imageSizeMappings: null,
         customBodyParameters: {},
         videoBillingConfiguration: null,
         displayName: null,
@@ -30,6 +32,19 @@ function configuration(id: string, modelName: string, patch: Partial<ServerModel
 }
 
 const channels: ModelChannel[] = [{ id: "channel", name: "已保存渠道", models: ["new-model"], apiKey: "", apiFormat: "openai", baseUrl: "" }];
+
+test("图片转换开关在服务端回显和草稿恢复时按模型保留，非图片配置不启用", () => {
+    const enabled = normalizeServerModelConfig(configuration("image-1", "first-image", { modelType: "image", convertImageSizeToPixels: true }));
+    const disabled = normalizeServerModelConfig(configuration("image-2", "second-image", { modelType: "image", convertImageSizeToPixels: false }));
+    assert.equal(enabled.convertImageSizeToPixels, true);
+    assert.equal(disabled.convertImageSizeToPixels, false);
+    assert.equal(enabled.imageSizeMappings?.["1:1"]["4K"], "2880x2880");
+    enabled.imageSizeMappings!["1:1"]["4K"] = "4096x4096";
+    assert.equal(disabled.imageSizeMappings?.["1:1"]["4K"], "2880x2880");
+    const restored = reconcileModelConfigDraft([enabled, disabled], [{ ...enabled, id: "saved-image-1" }, { ...disabled, id: "saved-image-2" }]);
+    assert.deepEqual(restored.map((item) => [item.id, item.convertImageSizeToPixels]), [["saved-image-1", true], ["saved-image-2", false]]);
+    assert.equal(normalizeServerModelConfig(configuration("text", "text", { convertImageSizeToPixels: true })).convertImageSizeToPixels, false);
+});
 
 test("失效旧模型不阻塞其他模型新增，修改失效模型或将其设为默认仍被明确阻止", () => {
     const stale = configuration("persisted", "removed-model");

@@ -106,10 +106,10 @@ class OpenAiProviderAdapterTest {
         task.setUserId(1L);
         return new AiTaskExecutionContext(task,
                 new AiTaskDtos.AiChannelConfig("channel-1", "OpenAI", "https://api.example.com", "test-key", "openai", List.of("gpt-image-2")),
-                "gpt-image-2", false, "",
+                "gpt-image-2", false, "", new JSONObject(),
                 new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.IMAGE, "生成一只小猫", "gpt-image-2",
                         Map.of("count", 1, "quality", "medium", "size", size, "resolution", resolution),
                         List.of(), List.of(), "imagePage"),
-                () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty());
+                () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty(), false, null, true, null);
     }
 }

@@ -27,6 +27,8 @@ import reactor.core.publisher.Mono;
  * @param deltaEmitter Function<String, Mono<Void>> 流式文本片段推送器，输入增量文本，返回推送结果
  * @param isCustomModel boolean 是否启用自定义模型调用
  * @param customModelConfig Map<String, PersistenceDtos.CustomModelGroupConfig> 自定义模型按能力或模式分组的请求/响应模板配置
+ * @param convertImageSizeToPixels boolean 是否将图片size比例转换为像素尺寸
+ * @param imageSizeMappings Map<String, Map<String, String>> 模型独立的图片尺寸映射，null使用系统默认表
  */
 public record AiTaskExecutionContext(AiGenerationTask task,
                                      AiTaskDtos.AiChannelConfig channel,
@@ -39,7 +41,9 @@ public record AiTaskExecutionContext(AiGenerationTask task,
                                      IntFunction<Mono<Void>> progressReporter,
                                      Function<String, Mono<Void>> deltaEmitter,
                                      boolean isCustomModel,
-                                     Map<String, PersistenceDtos.CustomModelGroupConfig> customModelConfig) {
+                                     Map<String, PersistenceDtos.CustomModelGroupConfig> customModelConfig,
+                                     boolean convertImageSizeToPixels,
+                                     Map<String, Map<String, String>> imageSizeMappings) {
 
     /** 保持旧调用方使用空自定义请求体参数。 */
     public AiTaskExecutionContext(AiGenerationTask task, AiTaskDtos.AiChannelConfig channel, String model,
@@ -47,7 +51,7 @@ public record AiTaskExecutionContext(AiGenerationTask task,
                                   Supplier<Mono<Boolean>> cancelChecker, IntFunction<Mono<Void>> progressReporter,
                                   Function<String, Mono<Void>> deltaEmitter) {
         this(task, channel, model, thinkingEnabled, reasoningEffort, new JSONObject(), request, cancelChecker, progressReporter, deltaEmitter,
-                false, null);
+                false, null, false, null);
     }
 
     /**

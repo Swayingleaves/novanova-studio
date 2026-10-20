@@ -1,6 +1,6 @@
 
 import { translateMessage as translate } from "@/features/locale/translate";
-import { getAiTaskInfo, saveGenerationLog, type ServerAiTask, type ServerAiTaskStatus } from "@/services/api/server";
+import { getAiTaskInfo, type ServerAiTask, type ServerAiTaskStatus } from "@/services/api/server";
 
 type GenerationLogType = "image" | "video";
 
@@ -12,16 +12,14 @@ type GenerationTaskLog = {
 type JsonRecord = Record<string, unknown>;
 
 /**
- * 根据服务端任务状态校准遗留的等待生成记录。
+ * 根据服务端任务恢复等待或缺少媒体的生成记录，仅用于当前页面展示。
  *
  * @param logType 生成记录类型
  * @param logs 当前读取到的生成记录
  * @return 校准后的生成记录
  */
 export async function reconcileGenerationLogTasks<Log extends GenerationTaskLog>(logType: GenerationLogType, logs: Log[]): Promise<Log[]> {
-    const taskIds = [...new Set(logs.flatMap(findPendingTaskIds))];
-    if (!taskIds.length) return persistReconciledLogs(logType, logs, new Map<string, ServerAiTask>());
-
+    const taskIds = [...new Set(logs.flatMap((log) => findTaskIdsToReconcile(logType, log)))];
     const tasks = new Map<string, ServerAiTask>();
     await Promise.all(
         taskIds.map(async (taskId) => {
@@ -33,46 +31,27 @@ export async function reconcileGenerationLogTasks<Log extends GenerationTaskLog>
             }
         }),
     );
-    if (!tasks.size) return logs;
-
-    return persistReconciledLogs(logType, logs, tasks);
+    if (taskIds.length && !tasks.size) return logs;
+    // 查询与后台终态保存可能并发，不能把读取到的旧快照回写并覆盖完整媒体或其他轮次。
+    return logs.map((log) => reconcileGenerationLog(logType, log, tasks));
 }
 
-async function persistReconciledLogs<Log extends GenerationTaskLog>(logType: GenerationLogType, logs: Log[], tasks: ReadonlyMap<string, ServerAiTask>): Promise<Log[]> {
-    return Promise.all(
-        logs.map(async (log) => {
-            const reconciled = reconcileGenerationLog(log, tasks);
-            if (!reconciled.changed || !log.id) return reconciled.log;
-            try {
-                await saveGenerationLog(logType, withoutGenerationStatus(reconciled.log));
-                return reconciled.log;
-            } catch (error) {
-                console.error("保存生成任务状态失败", error);
-                return log;
-            }
-        }),
-    );
-}
-
-function reconcileGenerationLog<Log extends GenerationTaskLog>(log: Log, tasks: ReadonlyMap<string, ServerAiTask>): { log: Log; changed: boolean } {
-    if (!Array.isArray(log.rounds)) return { log, changed: false };
+function reconcileGenerationLog<Log extends GenerationTaskLog>(logType: GenerationLogType, log: Log, tasks: ReadonlyMap<string, ServerAiTask>): Log {
+    if (!Array.isArray(log.rounds)) return log;
 
     let changed = false;
     const rounds = log.rounds.map((round) => {
         if (!isRecord(round)) return round;
-        const nextRound = reconcileRound(round, tasks);
+        const nextRound = reconcileRound(logType, round, tasks);
         changed ||= nextRound !== round;
         return nextRound;
     });
-    if (!changed) return { log, changed: false };
+    if (!changed) return log;
 
-    return {
-        log: { ...log, rounds, generationStatus: generationStatus(rounds) } as Log,
-        changed: true,
-    };
+    return { ...log, rounds, generationStatus: generationStatus(rounds) } as Log;
 }
 
-function reconcileRound(round: JsonRecord, tasks: ReadonlyMap<string, ServerAiTask>): JsonRecord {
+function reconcileRound(logType: GenerationLogType, round: JsonRecord, tasks: ReadonlyMap<string, ServerAiTask>): JsonRecord {
     const roundTaskId = text(round.taskId);
     const resultKeys = ["results", "result"] as const;
     let changed = false;
@@ -81,14 +60,14 @@ function reconcileRound(round: JsonRecord, tasks: ReadonlyMap<string, ServerAiTa
     for (const key of resultKeys) {
         const value = round[key];
         if (Array.isArray(value)) {
-            const results = value.map((result) => reconcileResult(result, roundTaskId, tasks));
-            if (results.some((result, index) => result !== value[index])) {
+            const results = value.flatMap((result) => reconcileResult(logType, result, roundTaskId, tasks));
+            if (results.length !== value.length || results.some((result, index) => result !== value[index])) {
                 nextRound[key] = results;
                 changed = true;
             }
             continue;
         }
-        const result = reconcileResult(value, roundTaskId, tasks);
+        const result = reconcileResult(logType, value, roundTaskId, tasks)[0];
         if (result !== value) {
             nextRound[key] = result;
             changed = true;
@@ -107,7 +86,7 @@ function reconcileRound(round: JsonRecord, tasks: ReadonlyMap<string, ServerAiTa
 
     if (changed || text(round.status) !== "pending") return changed ? nextRound : round;
     const task = roundTaskId ? tasks.get(roundTaskId) : undefined;
-    return task ? updatePendingResult(round, task) : updateMissingTaskResult(round);
+    return task ? updatePendingResult(round, task) : roundTaskId ? round : updateMissingTaskResult(round);
 }
 
 function reconcileWorkflowItem(value: unknown, tasks: ReadonlyMap<string, ServerAiTask>): unknown {
@@ -118,11 +97,40 @@ function reconcileWorkflowItem(value: unknown, tasks: ReadonlyMap<string, Server
     return updatePendingResult(value, task);
 }
 
-function reconcileResult(value: unknown, roundTaskId: string, tasks: ReadonlyMap<string, ServerAiTask>): unknown {
-    if (!isRecord(value) || text(value.status) !== "pending") return value;
+/** 同时恢复终态与媒体，一次生成多张图片时展开全部结果，并保持结果标识稳定。 */
+function reconcileResult(logType: GenerationLogType, value: unknown, roundTaskId: string, tasks: ReadonlyMap<string, ServerAiTask>): unknown[] {
+    if (!needsResultReconciliation(logType, value)) return [value];
     const taskId = text(value.taskId) || roundTaskId;
     const task = taskId ? tasks.get(taskId) : undefined;
-    return task ? updatePendingResult(value, task) : taskId ? value : updateMissingTaskResult(value);
+    if (!task) return [taskId ? value : updateMissingTaskResult(value)];
+    const result = updatePendingResult(value, task);
+    if (task.status !== "success") return [result];
+
+    const data = isRecord(task.resultData) ? task.resultData : {};
+    const candidates = Array.isArray(data.items) ? data.items : data.item === undefined ? [] : [data.item];
+    const mediaItems = candidates.filter((item): item is JsonRecord => isRecord(item) && Boolean(text(item.url)));
+    if (!mediaItems.length) {
+        return [{ ...result, status: "failed", error: translate(logType === "image" ? "generation.imageTaskCompletedWithoutImages" : "generation.videoTaskReturnedNoResult") }];
+    }
+    const resultId = text(value.id) || task.id;
+    return mediaItems.map((item, index) => ({
+        ...result,
+        id: index === 0 ? resultId : `${resultId}-${index}`,
+        [logType]: {
+            ...item,
+            id: text(item.id) || text(item.storageKey) || `${resultId}-${index}`,
+            ...(logType === "image" ? { dataUrl: text(item.url) } : {}),
+        },
+    }));
+}
+
+/** 已完成却没有媒体的历史结果也需查询任务，不能只检查pending。 */
+function needsResultReconciliation(logType: GenerationLogType, value: unknown): value is JsonRecord {
+    if (!isRecord(value)) return false;
+    if (text(value.status) === "pending") return true;
+    if (text(value.status) !== "success") return false;
+    const media = value[logType];
+    return !isRecord(media) || ![media.url, media.storageKey, ...(logType === "image" ? [media.dataUrl] : [])].some((value) => Boolean(text(value)));
 }
 
 function updatePendingResult(result: JsonRecord, task: ServerAiTask): JsonRecord {
@@ -139,7 +147,7 @@ function updateMissingTaskResult(result: JsonRecord): JsonRecord {
     return { ...result, status: "failed", progress: 100, error: translate("generation.missingGenerationTaskID") };
 }
 
-function findPendingTaskIds(log: GenerationTaskLog): string[] {
+function findTaskIdsToReconcile(logType: GenerationLogType, log: GenerationTaskLog): string[] {
     if (!Array.isArray(log.rounds)) return [];
     return log.rounds.flatMap((round) => {
         if (!isRecord(round)) return [];
@@ -148,7 +156,7 @@ function findPendingTaskIds(log: GenerationTaskLog): string[] {
             ...(Array.isArray(round.results) ? round.results : []),
             ...(round.result === undefined ? [] : [round.result]),
         ];
-        const taskIds = results.flatMap((result) => isRecord(result) && text(result.status) === "pending" ? [text(result.taskId) || roundTaskId] : []);
+        const taskIds = results.flatMap((result) => needsResultReconciliation(logType, result) ? [text(result.taskId) || roundTaskId] : []);
         const workflowTaskIds = ["stages", "tasks"].flatMap((key) => Array.isArray(round[key])
             ? round[key].flatMap((item) => isRecord(item) && ["pending", "running"].includes(text(item.status)) && text(item.taskId) ? [text(item.taskId)] : [])
             : []);
@@ -176,11 +184,6 @@ function roundStatuses(round: unknown): string[] {
     const workflowStatuses = ["stages", "tasks"].flatMap((key) => Array.isArray(round[key]) ? round[key].flatMap((item) => isRecord(item) ? [text(item.status)] : []).filter(Boolean) : []);
     statuses.push(...workflowStatuses);
     return statuses.length ? statuses : [text(round.status)].filter(Boolean);
-}
-
-function withoutGenerationStatus(log: GenerationTaskLog): JsonRecord {
-    const { generationStatus: _generationStatus, generationCompletedAt: _generationCompletedAt, generationViewedAt: _generationViewedAt, ...snapshot } = log as unknown as JsonRecord;
-    return snapshot;
 }
 
 function isTerminalTaskStatus(status: ServerAiTaskStatus): boolean {

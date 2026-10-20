@@ -9,6 +9,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.agent.AgentTaskOrchestrator;
 import com.novanovastudio.ai.AiProviderAdapter;
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
@@ -241,6 +243,34 @@ class AiTaskServiceTest {
         service.executeQueuedTask("task-1").block();
 
         verify(creditService).refundTask(7L, "task-1", AiTaskTypes.IMAGE);
+    }
+
+    /** 图片任务执行时应读取绑定模型的开关，不能修改持久化的原始比例。 */
+    @Test
+    void shouldPassImageSizeConversionToBoundModelExecution() {
+        PersistenceDtos.ModelConfig enabled = new PersistenceDtos.ModelConfig(
+                "model-config-1", "channel-1", "model-1", AiTaskTypes.IMAGE, List.of(), true, 0, java.math.BigDecimal.ZERO,
+                false, "high", "generation", 1, new JSONObject(), null, null, null, false, null, 0L, true,
+                Map.of("9:16", Map.of("2K", "1440x2560")));
+        when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(enabled)));
+        AiGenerationTask queuedTask = task("task-1");
+        queuedTask.setRequestData(JSON.toJSONString(new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.IMAGE, "图片", "model-1",
+                Map.of("size", "9:16", "resolution", "2K"), List.of(), List.of(), AiTaskSources.IMAGE_PAGE)));
+        when(repository.getTaskById("task-1")).thenReturn(Mono.just(queuedTask));
+        when(repository.markTaskRunningIfExecutable("task-1")).thenReturn(Mono.just(true));
+        when(eventPublisher.isCancelRequested("task-1")).thenReturn(Mono.just(false));
+        when(providerAdapter.execute(any())).thenAnswer(invocation -> {
+            com.novanovastudio.ai.AiTaskExecutionContext context = invocation.getArgument(0);
+            Assertions.assertTrue(context.convertImageSizeToPixels());
+            Assertions.assertEquals("1440x2560", context.imageSizeMappings().get("9:16").get("2K"));
+            Assertions.assertEquals("9:16", context.request().parameters().get("size"));
+            return Mono.just(new JSONObject());
+        });
+
+        service.executeQueuedTask("task-1").block();
+
+        verify(providerAdapter).execute(any());
+        Assertions.assertEquals("9:16", JSON.parseObject(queuedTask.getRequestData()).getJSONObject("parameters").getString("size"));
     }
 
     /** 已持久化模型配置缺失时，图片任务不得按同名模型改投。 */

@@ -23,6 +23,9 @@ import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.entity.AiGenerationTask;
 import com.novanovastudio.service.PersistenceService;
+import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.model.ChatResponse;
+import io.agentscope.core.model.Model;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -35,8 +38,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Flux;
 
 /**
  * 自定义模型图片结果解析与存储测试。
@@ -180,6 +185,131 @@ class CustomProviderAdapterTest {
     }
 
     /**
+     * 自定义图片能力均应按模型开关替换size，同时保留模板写死的size。
+     *
+     * @param conversion boolean 是否转换为像素
+     * @param editing boolean 是否为图生图
+     * @param custom boolean 是否使用模型独立的尺寸映射
+     */
+    @ParameterizedTest
+    @CsvSource({"false,false,false", "true,false,false", "false,true,false", "true,true,false",
+            "false,false,true", "true,false,true", "false,true,true", "true,true,true"})
+    void shouldResolveTemplateSizeWithoutChangingOriginalRatio(boolean conversion, boolean editing, boolean custom) {
+        AiTaskExecutionContext context = imageContext(conversion, editing, "{\"size\":\"{{size}}\",\"resolution\":\"{{resolution}}\"}", null,
+                custom ? Map.of("9:16", Map.of("2K", "1440x2560")) : null);
+        stubImageResult();
+
+        adapter.execute(context).block();
+
+        ArgumentCaptor<JSONObject> body = ArgumentCaptor.forClass(JSONObject.class);
+        verify(aiHttpClient).sendBearerJsonUrlRequest(any(), eq("POST"), anyString(), body.capture());
+        Assertions.assertEquals(conversion ? custom ? "1440x2560" : "1152x2048" : "9:16", body.getValue().getString("size"));
+        Assertions.assertEquals("2K", body.getValue().getString("resolution"));
+        Assertions.assertEquals("9:16", context.request().parameters().get("size"));
+        verifyNoInteractions(modelFactory);
+    }
+
+    /**
+     * 模板未引用size时无需查表，手写值与省略size均不受缺失映射影响。
+     *
+     * @param editing boolean 是否为图生图
+     * @param fixedSize boolean 模板是否写死size
+     */
+    @ParameterizedTest
+    @CsvSource({"false,false", "false,true", "true,false", "true,true"})
+    void shouldSkipConversionForTemplateWithoutSizePlaceholder(boolean editing, boolean fixedSize) {
+        stubImageResult();
+
+        String template = fixedSize ? "{\"size\":\"1024x1024\"}" : "{\"prompt\":\"{{prompt}}\"}";
+        adapter.execute(imageContext(true, editing, template, null, Map.of())).block();
+
+        ArgumentCaptor<JSONObject> body = ArgumentCaptor.forClass(JSONObject.class);
+        verify(aiHttpClient).sendBearerJsonUrlRequest(any(), eq("POST"), anyString(), body.capture());
+        Assertions.assertEquals(fixedSize ? "1024x1024" : null, body.getValue().getString("size"));
+        verifyNoInteractions(modelFactory);
+    }
+
+    /**
+     * AI构造请求应接收原始比例、分辨率和计算好的size，不自行换算。
+     *
+     * @param conversion boolean 是否转换为像素
+     * @param expectedSize String 应传递的请求尺寸
+     * @param custom boolean 是否使用模型尺寸表
+     */
+    @ParameterizedTest
+    @CsvSource({"true,1152x2048,false", "false,9:16,false", "true,1440x2560,true"})
+    void shouldDescribeCalculatedSizeToRequestAgent(boolean conversion, String expectedSize, boolean custom) {
+        Model model = mock(Model.class);
+        ChatResponse response = mock(ChatResponse.class);
+        when(response.getContent()).thenReturn(List.of(TextBlock.builder().text("{\"size\":\"" + expectedSize + "\"}").build()));
+        when(modelFactory.defaultTextModel()).thenReturn(Mono.just(model));
+        when(model.stream(any(), any(), any())).thenAnswer(invocation -> {
+            List<io.agentscope.core.message.Msg> messages = invocation.getArgument(0);
+            String prompt = messages.getFirst().getTextContent();
+            Assertions.assertTrue(prompt.contains("画幅: 9:16"));
+            Assertions.assertTrue(prompt.contains("分辨率: 2K"));
+            Assertions.assertTrue(prompt.contains("请求size: " + expectedSize));
+            Assertions.assertTrue(prompt.contains("不要自行换算"));
+            return Flux.just(response);
+        });
+        stubImageResult();
+
+        adapter.execute(imageContext(conversion, false, "{}", "按参数构造size", custom ? Map.of("9:16", Map.of("2K", "1440x2560")) : null)).block();
+
+        ArgumentCaptor<JSONObject> body = ArgumentCaptor.forClass(JSONObject.class);
+        verify(aiHttpClient).sendBearerJsonUrlRequest(any(), eq("POST"), anyString(), body.capture());
+        Assertions.assertEquals(expectedSize, body.getValue().getString("size"));
+    }
+
+    /** 选择未配置的档位时应在发起供应商请求前失败。 */
+    @Test
+    void shouldRejectUnconfiguredSizeBeforeSendingRequest() {
+        AiTaskExecutionContext context = imageContext(true, false, "{\"size\":\"{{size}}\"}", null, Map.of());
+        Assertions.assertThrows(BusinessException.class, () -> adapter.execute(context).block());
+        verifyNoInteractions(aiHttpClient, persistenceService, modelFactory);
+    }
+
+    /** 模拟已完成的图片接口及其媒体登记。 */
+    private void stubImageResult() {
+        String sourceUrl = "https://provider.example/generated.png";
+        when(aiHttpClient.sendBearerJsonUrlRequest(any(), eq("POST"), anyString(), any()))
+                .thenReturn(Mono.just(JSON.parseObject("{\"data\":{\"url\":\"" + sourceUrl + "\"}}")));
+        when(aiHttpClient.readRemoteMediaHeaders(sourceUrl))
+                .thenReturn(Mono.just(new AiHttpClient.RemoteMediaHeaders(12L, "image/png")));
+        when(persistenceService.registerRemoteMediaForUser(eq(1L), any()))
+                .thenReturn(Mono.just(mediaResponse(sourceUrl, "image/png")));
+    }
+
+    /**
+     * 构造用于自定义图片请求尺寸验证的执行上下文。
+     *
+     * @param conversion boolean 是否转换为像素
+     * @param editing boolean 是否为图生图
+     * @param template String 请求模板
+     * @param agentPrompt String AI请求构造提示词
+     * @param mappings Map<String, Map<String, String>> 模型独立的尺寸映射
+     * @return AiTaskExecutionContext 图片任务上下文
+     */
+    private AiTaskExecutionContext imageContext(boolean conversion, boolean editing, String template, String agentPrompt,
+                                               Map<String, Map<String, String>> mappings) {
+        AiGenerationTask task = new AiGenerationTask();
+        task.setId("custom-size-task");
+        task.setUserId(1L);
+        task.setTaskType(AiTaskTypes.IMAGE);
+        PersistenceDtos.CustomModelGroupConfig group = new PersistenceDtos.CustomModelGroupConfig(
+                "/images/generations", "POST", "custom-image", template, agentPrompt,
+                "{}", "data.url", null, null, null, null, null, null);
+        List<AiTaskDtos.AiTaskMediaReference> references = editing ? List.of(new AiTaskDtos.AiTaskMediaReference(
+                "reference", "参考图片", "image/png", null, "https://provider.example/reference.png")) : List.of();
+        return new AiTaskExecutionContext(task,
+                new AiTaskDtos.AiChannelConfig("custom-channel", "自定义渠道", "https://provider.example/v1", "key", "custom", List.of()),
+                "custom-image", false, "", new JSONObject(),
+                new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.IMAGE, "生成小猫", "custom-image", Map.of("size", "9:16", "resolution", "2K"), references, List.of(), "imagePage"),
+                () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty(), true,
+                Map.of(editing ? "image-to-image" : "text-to-image", group), conversion, mappings);
+    }
+
+    /**
      * 构造与真实接口相同的结果路径并执行任务。
      *
      * @param taskKind String 任务类型
@@ -207,7 +337,7 @@ class CustomProviderAdapterTest {
                 "custom-image", false, "", new JSONObject(),
                 new AiTaskDtos.CreateAiTaskRequest(taskKind, "生成一只小猫", "custom-image", Map.of(), List.of(), List.of(), "imagePage"),
                 () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty(), true,
-                Map.of(AiTaskTypes.VIDEO.equals(taskKind) ? "text-to-video" : "text-to-image", group));
+                Map.of(AiTaskTypes.VIDEO.equals(taskKind) ? "text-to-video" : "text-to-image", group), false, null);
         return adapter.execute(context).block();
     }
 

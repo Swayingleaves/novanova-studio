@@ -118,9 +118,10 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
         payload.put("response_format", "url");
         payload.put("output_format", "png");
         AiTaskParameterReader.putNonAuto(payload, context.request().parameters(), "quality");
-        String imageSize = normalizeImageSize(context.request().parameters());
-        if (StringUtils.hasText(imageSize)) {
-            payload.put("size", imageSize);
+        // 手写size优先，不为已覆盖的参数查询尺寸映射。
+        if (context.customBodyParameters() == null || !context.customBodyParameters().containsKey("size")) {
+            String imageSize = AiImageSizeSupport.resolveSize(context.request().parameters(), context.convertImageSizeToPixels(), context.imageSizeMappings());
+            if (StringUtils.hasText(imageSize)) payload.put("size", imageSize);
         }
         return aiHttpClient.sendJsonRequest(context.channel(), "POST", "/images/generations", AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .flatMap(response -> storeImageItems(context, AiJsonUtils.responseArrayPayload(response, "data")));
@@ -210,7 +211,7 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
                     if (StringUtils.hasText(quality) && !"auto".equals(quality)) {
                         parts.add(aiHttpClient.formPart("quality", quality));
                     }
-                    String imageSize = normalizeImageSize(context.request().parameters());
+                    String imageSize = AiImageSizeSupport.resolveSize(context.request().parameters(), context.convertImageSizeToPixels(), context.imageSizeMappings());
                     if (StringUtils.hasText(imageSize)) {
                         parts.add(aiHttpClient.formPart("size", imageSize));
                     }
@@ -322,49 +323,6 @@ public class OpenAiProviderAdapter implements AiProviderAdapter {
         }
         JSONObject message = choices.getJSONObject(0).getJSONObject("message");
         return message == null ? "" : AiTaskParameterReader.firstNonEmpty(message.getString("content"));
-    }
-
-    /**
-     * 将图片比例和清晰度转换为OpenAI兼容接口要求的像素尺寸。
-     *
-     * @param parameters Map 图片生成参数
-     * @return String 宽x高像素尺寸；未指定或为auto时返回空字符串
-     * @throws BusinessException 比例或清晰度格式不合法时抛出
-     */
-    private String normalizeImageSize(Map<String, Object> parameters) {
-        String size = AiTaskParameterReader.parameterText(parameters, "size", "").trim();
-        if (!StringUtils.hasText(size) || "auto".equalsIgnoreCase(size)) {
-            return "";
-        }
-        if (size.matches("^\\d+x\\d+$")) {
-            return size;
-        }
-
-        String resolution = AiTaskParameterReader.parameterText(parameters, "resolution", "2K").trim();
-        int longSide = switch (resolution.toLowerCase()) {
-            case "1k" -> 1024;
-            case "2k" -> 2048;
-            case "4k" -> 4096;
-            default -> throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageResolutionMustBe1K2KOr4K"));
-        };
-        String[] ratioParts = size.split(":");
-        if (ratioParts.length != 2) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageAspectRatioMustBePositiveEG916"));
-        }
-        try {
-            double widthRatio = Double.parseDouble(ratioParts[0]);
-            double heightRatio = Double.parseDouble(ratioParts[1]);
-            if (!Double.isFinite(widthRatio) || !Double.isFinite(heightRatio)
-                    || widthRatio <= 0 || heightRatio <= 0) {
-                throw new NumberFormatException("比例必须大于0");
-            }
-            boolean landscape = widthRatio >= heightRatio;
-            double longRatio = landscape ? widthRatio / heightRatio : heightRatio / widthRatio;
-            int shortSide = Math.max(16, (int) (Math.round(longSide / longRatio / 16) * 16));
-            return landscape ? longSide + "x" + shortSide : shortSide + "x" + longSide;
-        } catch (NumberFormatException exception) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageAspectRatioMustBePositiveEG916"));
-        }
     }
 
     /**

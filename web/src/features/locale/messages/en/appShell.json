@@ -234,5 +234,13 @@
     "refreshingWillDiscardUnsavedChangesInTheObjectStorage": "Refreshing will discard unsaved changes in the object storage tab.",
     "failedToSaveModelConfiguration": "Failed to save model configuration",
     "retryConfiguration": "Reload",
-    "leavingDiscardsConfigurationChanges": "Leaving administration will discard unsaved configuration changes. Discard changes?"
+    "leavingDiscardsConfigurationChanges": "Leaving administration will discard unsaved configuration changes. Discard changes?",
+    "convertImageSizeToPixels": "Convert size ratios to pixels",
+    "convertImageSizeToPixelsDescription": "By default, size is sent as an aspect ratio, such as 1:1 or 9:16. Enable this to convert it into pixel dimensions using the selected 1K, 2K, or 4K resolution, using the exact dimensions in the table below, for example 1:1 + 4K → 2880x2880 and 9:16 + 1K → 720x1280.",
+    "imageSizeMappings": "Pixel size mappings",
+    "restoreDefaultImageSizes": "Restore defaults",
+    "imageSizeMappingsDescription": "Enter width x height, such as 1024x1024. Changes apply to this model only. Blank sizes are unconfigured and cause an error during generation instead of being estimated.",
+    "imageSizeMappingInputLabel": "{value0} · {value1} pixel dimensions",
+    "imageSizeNotConfigured": "Not configured",
+    "invalidImageSizeMappings": "Enter positive integer width x height values, such as 1024x1024."
 }

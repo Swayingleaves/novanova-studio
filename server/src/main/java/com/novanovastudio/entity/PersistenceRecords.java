@@ -229,6 +229,12 @@ public final class PersistenceRecords {
         /** 模型同时执行请求数量 */
         private Integer requestConcurrency;
 
+        /** 图像模型是否将size比例按分辨率转换为像素尺寸，默认关闭。 */
+        private Boolean convertImageSizeToPixels;
+
+        /** 图像模型的比例与分辨率档位的像素尺寸映射JSON，空值使用默认表。 */
+        private String imageSizeMappings;
+
         /** 模型JSON POST请求的自定义请求体参数JSON */
         private String customBodyParameters;
 

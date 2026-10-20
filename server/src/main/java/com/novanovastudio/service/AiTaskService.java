@@ -730,7 +730,9 @@ public class AiTaskService {
                                                                 progress -> updateTaskState(taskId, STATUS_RUNNING, progress, null, null),
                                                                 delta -> publishTextDelta(task, delta),
                                                                 resolvedModel.isCustomModel(),
-                                                                resolvedModel.customModelConfig()
+                                                                resolvedModel.customModelConfig(),
+                                                                resolvedModel.convertImageSizeToPixels(),
+                                                                resolvedModel.imageSizeMappings()
                                                         );
                                                         return teamTaskScopeService.requireActive(task.getUserId()).then(Mono.defer(() -> adapter.execute(context))
                                                                 .contextWrite(teamContext -> teamContext.put(com.novanovastudio.security.TeamScope.IN_FLIGHT_KEY, true)));
@@ -914,7 +916,8 @@ public class AiTaskService {
                     return new ResolvedModel(resolvedModel.channel(), resolvedModel.model(), selectedConfig.id(), selectedConfig.creditCost(), selectedConfig.creditUnit(),
                             selectedConfig.capabilities(), selectedConfig.videoBillingConfiguration(), thinkingEnabled(selectedConfig.thinkingEnabled()),
                             reasoningEffort(selectedConfig.reasoningEffort()), selectedConfig.customBodyParameters(),
-                            Boolean.TRUE.equals(selectedConfig.isCustomModel()), selectedConfig.customModelConfig());
+                            Boolean.TRUE.equals(selectedConfig.isCustomModel()), selectedConfig.customModelConfig(),
+                            TYPE_IMAGE.equals(capability) && Boolean.TRUE.equals(selectedConfig.convertImageSizeToPixels()), selectedConfig.imageSizeMappings());
                 });
     }
 
@@ -951,7 +954,8 @@ public class AiTaskService {
                     return new ResolvedModel(channelModel.channel(), channelModel.model(), modelConfig.id(), modelConfig.creditCost(),
                             modelConfig.creditUnit(), modelConfig.capabilities(), modelConfig.videoBillingConfiguration(),
                             thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort()), modelConfig.customBodyParameters(),
-                            Boolean.TRUE.equals(modelConfig.isCustomModel()), modelConfig.customModelConfig());
+                            Boolean.TRUE.equals(modelConfig.isCustomModel()), modelConfig.customModelConfig(),
+                            TYPE_IMAGE.equals(task.getTaskType()) && Boolean.TRUE.equals(modelConfig.convertImageSizeToPixels()), modelConfig.imageSizeMappings());
                 });
     }
 
@@ -1013,7 +1017,7 @@ public class AiTaskService {
         validateChannelSupport(channel, capability);
         validateUserChannelAccess(channel);
         return new ResolvedModel(channel, model, "", BigDecimal.ZERO, CREDIT_UNIT_GENERATION, List.of(), null, true, "high", new JSONObject(),
-                false, null);
+                false, null, false, null);
     }
 
 
@@ -1634,7 +1638,8 @@ public class AiTaskService {
     private record ResolvedModel(AiTaskDtos.AiChannelConfig channel, String model, String modelConfigId, BigDecimal creditCost,
                                  String creditUnit, List<String> capabilities, VideoBillingConfiguration videoBillingConfiguration,
                                  boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters,
-                                 boolean isCustomModel, Map<String, PersistenceDtos.CustomModelGroupConfig> customModelConfig) {
+                                 boolean isCustomModel, Map<String, PersistenceDtos.CustomModelGroupConfig> customModelConfig,
+                                 boolean convertImageSizeToPixels, Map<String, Map<String, String>> imageSizeMappings) {
     }
 
     /**

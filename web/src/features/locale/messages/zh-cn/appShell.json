@@ -234,5 +234,13 @@
     "refreshingWillDiscardUnsavedChangesInTheObjectStorage": "刷新会丢弃对象存储 Tab 中的未保存修改。",
     "failedToSaveModelConfiguration": "保存模型配置失败",
     "retryConfiguration": "重新加载",
-    "leavingDiscardsConfigurationChanges": "离开管理后台将丢弃未保存的配置，是否放弃修改？"
+    "leavingDiscardsConfigurationChanges": "离开管理后台将丢弃未保存的配置，是否放弃修改？",
+    "convertImageSizeToPixels": "将 size 比例转换为像素",
+    "convertImageSizeToPixelsDescription": "默认以比例传递 size，例如 1:1、9:16。开启后，根据所选的 1K、2K、4K 分辨率转换为像素尺寸，按下方尺寸映射表精确转换，例如 1:1 + 4K → 2880x2880，9:16 + 1K → 720x1280。",
+    "imageSizeMappings": "尺寸映射表",
+    "restoreDefaultImageSizes": "恢复默认",
+    "imageSizeMappingsDescription": "填写宽x高，例如1024x1024，仅影响当前模型。留空表示该档位未配置，生成时会报错，不会自动推算尺寸。",
+    "imageSizeMappingInputLabel": "{value0} · {value1} 像素尺寸",
+    "imageSizeNotConfigured": "未配置",
+    "invalidImageSizeMappings": "尺寸映射格式不正确，请填写正整数宽x高，例如1024x1024。"
 }

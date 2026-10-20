@@ -3,6 +3,7 @@
 import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 
 import type { CreditAmount } from "@/shared/lib/credit-amounts";
+import type { ImageSizeMappings } from "@/features/generation/lib/image-size-mappings";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { notifyStorageCapacityChanged } from "@/features/storage/capacity-events";
 import { translateMessage as translate } from "@/features/locale/translate";
@@ -309,6 +310,8 @@ export type ServerModelConfig = {
     thinkingEnabled: boolean;
     reasoningEffort: "high" | "max";
     requestConcurrency: number;
+    convertImageSizeToPixels: boolean;
+    imageSizeMappings: ImageSizeMappings | null;
     customBodyParameters: Record<string, unknown>;
     videoBillingConfiguration: VideoBillingConfiguration | null;
     displayName: string | null;
@@ -1106,7 +1109,7 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "customBodyParameters" | "videoBillingConfiguration" | "displayName" | "modelIcon" | "isCustomModel" | "customModelConfig">) {
+export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "convertImageSizeToPixels" | "imageSizeMappings" | "customBodyParameters" | "videoBillingConfiguration" | "displayName" | "modelIcon" | "isCustomModel" | "customModelConfig">) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 

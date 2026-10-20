@@ -14,6 +14,7 @@ import { useUserStore } from "@/features/auth/stores/use-user-store";
 import type { ObjectStorageConfig } from "@/shared/types/object-storage";
 
 import { normalizeChannelName } from "../lib/channel-name";
+import { cloneImageSizeMappings } from "@/features/generation/lib/image-size-mappings";
 import { refreshModelConfigurationSnapshot } from "../lib/model-configuration-refresh";
 
 export type ApiCallFormat = "openai" | "newapi" | "evolink" | "gemini" | "agnes" | "anthropic" | "seedance" | "minimax" | "custom";
@@ -646,6 +647,8 @@ export function normalizeServerModelConfig(config: ServerModelConfig): ServerMod
         customModelConfig: config.customModelConfig || {},
         creditUnit: normalizeModelCreditUnit(config.creditUnit, config.modelType),
         requestConcurrency: normalizeModelRequestConcurrency(config.requestConcurrency),
+        convertImageSizeToPixels: config.modelType === "image" && Boolean(config.convertImageSizeToPixels),
+        imageSizeMappings: config.modelType === "image" ? cloneImageSizeMappings(config.imageSizeMappings) : null,
     };
 }
 

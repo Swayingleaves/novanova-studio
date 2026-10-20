@@ -5,6 +5,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { type MouseEvent, type ReactNode, useMemo } from "react";
 import { ConfigProvider } from "antd";
+import { IMAGE_ASPECT_RATIOS } from "@/features/generation/lib/image-size-mappings";
 
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
@@ -39,21 +40,10 @@ type RatioPreset = {
     h: number;
 };
 
-const RATIO_PRESETS: RatioPreset[] = [
-    { value: "1:1", label: "1:1", w: 1024, h: 1024 },
-    { value: "1:2", label: "1:2", w: 512, h: 1024 },
-    { value: "2:1", label: "2:1", w: 1024, h: 512 },
-    { value: "9:16", label: "9:16", w: 1024, h: 1824 },
-    { value: "16:9", label: "16:9", w: 1824, h: 1024 },
-    { value: "3:4", label: "3:4", w: 1024, h: 1360 },
-    { value: "4:3", label: "4:3", w: 1360, h: 1024 },
-    { value: "3:2", label: "3:2", w: 1536, h: 1024 },
-    { value: "2:3", label: "2:3", w: 1024, h: 1536 },
-    { value: "5:4", label: "5:4", w: 1280, h: 1024 },
-    { value: "4:5", label: "4:5", w: 1024, h: 1280 },
-    { value: "21:9", label: "21:9", w: 2352, h: 1008 },
-    { value: "9:21", label: "9:21", w: 1008, h: 2352 },
-];
+const RATIO_PRESETS: RatioPreset[] = IMAGE_ASPECT_RATIOS.map((value) => {
+    const [w, h] = value.split(":").map(Number);
+    return { value, label: value, w, h };
+});
 
 const IMAGE_COUNT_PRESETS = [1, 2, 4] as const;
 
