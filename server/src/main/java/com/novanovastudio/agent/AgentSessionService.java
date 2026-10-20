@@ -10,10 +10,12 @@ import com.novanovastudio.common.SystemMessage;
 
 import com.novanovastudio.agent.dto.AgentMessage;
 import com.novanovastudio.agent.dto.AgentSession;
+import com.novanovastudio.agent.dto.AgentSessionHistoryMessage;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -142,6 +144,29 @@ public class AgentSessionService {
      */
     public Flux<AgentSession> listSessions(Long userId) {
         return repository.listByUserId(userId);
+    }
+
+    /**
+     * 查询当前用户在当前空间中的对话正文，用于恢复没有生成轮次的历史记录。
+     *
+     * @param userId Long 当前用户标识
+     * @param sessionId String 会话标识
+     * @return Mono<List<AgentSessionHistoryMessage>> 按保存顺序排列的用户和助手消息
+     * @throws BusinessException 会话标识为空或会话不属于当前用户和空间时抛出
+     */
+    public Mono<List<AgentSessionHistoryMessage>> getSessionHistory(Long userId, String sessionId) {
+        if (!StringUtils.hasText(sessionId)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "会话标识不能为空"));
+        }
+        // 仅查询既有会话；仓储同时受当前团队作用域约束，内部消息不返回前端。
+        return repository.findById(userId, sessionId)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND,
+                        SystemMessage.of("business.conversationNotFound"))))
+                .map(session -> session.messages().stream()
+                        .filter(message -> "user".equals(message.role()) || "assistant".equals(message.role()))
+                        .filter(message -> StringUtils.hasText(message.text()))
+                        .map(message -> new AgentSessionHistoryMessage(message.id(), message.role(), message.text()))
+                        .toList());
     }
 
     /**

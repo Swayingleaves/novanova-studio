@@ -924,6 +924,17 @@ export async function listGenerationLogs<T>(logType: "image" | "video") {
     return data.logs || [];
 }
 
+export type ServerAgentSessionHistoryMessage = {
+    id: string;
+    role: "user" | "assistant";
+    text: string;
+};
+
+/** 按当前用户和团队读取历史对话正文。 */
+export function getAgentSessionHistory(sessionId: string) {
+    return serverGet<ServerAgentSessionHistoryMessage[]>(`/ai/agent/getSessionHistory?sessionId=${encodeURIComponent(sessionId)}`);
+}
+
 export function saveGenerationLog(logType: "image" | "video", log: unknown) {
     return serverPost("/generationLogs/saveGenerationLog", { logType, log });
 }

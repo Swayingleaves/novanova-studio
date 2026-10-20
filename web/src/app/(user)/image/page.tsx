@@ -53,7 +53,7 @@ import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
-import { deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
+import { deleteGenerationLogs, getAgentSessionHistory, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
 
 type GeneratedImage = {
     id: string;
@@ -127,6 +127,8 @@ export default function ImagePage() {
 
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [activeId, setActiveId] = useState<string | null>(null);
+    const [conversationHistory, setConversationHistory] = useState<{ id: string; messages: ChatMessageItem[]; loading: boolean; error: string } | null>(null);
+    const historyRequestVersion = useRef(0);
     const [prompt, setPrompt] = useState("");
     const [styleOptions, setStyleOptions] = useState<CreationStyleOption[]>([]);
     const [selectedStyles, setSelectedStyles] = useState<CreationStyleOption[]>([]);
@@ -632,6 +634,8 @@ export default function ImagePage() {
         }
         setActiveId(null);
         activeIdRef.current = null;
+        historyRequestVersion.current += 1;
+        setConversationHistory(null);
         setImageDraftSettingsModified(false);
         setPrompt("");
         setReferences([]);
@@ -648,6 +652,22 @@ export default function ImagePage() {
         setStreamingText(null);
         streamingTextRef.current = null;
         resetSession();
+    };
+
+    const loadConversationHistory = async (conversation: Conversation) => {
+        const requestVersion = ++historyRequestVersion.current;
+        setConversationHistory(null);
+        // 没有生成轮次的记录仍有真实对话，按需读取会话正文，不能显示为新建页。
+        if (conversation.rounds.length) return;
+        setConversationHistory({ id: conversation.id, messages: [], loading: true, error: "" });
+        try {
+            const messages = await getAgentSessionHistory(conversation.id);
+            if (requestVersion !== historyRequestVersion.current || activeIdRef.current !== conversation.id) return;
+            setConversationHistory({ id: conversation.id, messages, loading: false, error: "" });
+        } catch (error) {
+            if (requestVersion !== historyRequestVersion.current || activeIdRef.current !== conversation.id) return;
+            setConversationHistory({ id: conversation.id, messages: [], loading: false, error: error instanceof Error ? error.message : translate("image.failedToLoadConversationHistory") });
+        }
     };
 
     const selectConversation = (conversation: Conversation) => {
@@ -676,6 +696,7 @@ export default function ImagePage() {
         setSelectedSkill(null);
         setMobileSidebarOpen(false);
         restoreSession(conversation.id);
+        void loadConversationHistory(conversation);
     };
 
     const toggleAll = () => {
@@ -978,7 +999,15 @@ export default function ImagePage() {
         renderPendingImageToolCall,
     );
     // 历史记录与当前生成中消息同时展示；当前待生成轮次仅在聊天区渲染。
-    const allThreadSections = chatThreadSection ? [...threadSections, chatThreadSection] : threadSections;
+    const activeHistory = conversationHistory?.id === activeId ? conversationHistory : null;
+    const historyThreadSection = activeHistory?.messages.length
+        ? buildChatThreadSection(activeHistory.messages, [], null, null, [], () => null)
+        : null;
+    const allThreadSections = [
+        ...(historyThreadSection ? [{ ...historyThreadSection, id: `history-${activeId}` }] : []),
+        ...threadSections,
+        ...(chatThreadSection ? [chatThreadSection] : []),
+    ];
 
     return (
         <>
@@ -1035,7 +1064,13 @@ export default function ImagePage() {
                         // 与页面"添加参考图"同一上传链路；上传完成后自动发送带附件消息，对话区回显图片
                         uploadChoiceInputRef.current?.click();
                     },
-                    emptyState: (
+                    emptyState: activeConversation ? (
+                        <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-[var(--studio-muted)]" role={activeHistory?.error ? "alert" : "status"}>
+                            {activeHistory?.loading ? <LoaderCircle className="size-5 animate-spin" /> : null}
+                            <span>{activeHistory?.loading ? translate("image.loadingConversationHistory") : activeHistory?.error || translate("generation.noConversations")}</span>
+                            {activeHistory?.error ? <Button onClick={() => void loadConversationHistory(activeConversation)}>{translate("image.retryLoadingConversationHistory")}</Button> : null}
+                        </div>
+                    ) : (
                         <div className="flex h-full flex-col justify-center pb-28 pt-12">
                             <div className="relative mx-auto w-full max-w-5xl px-6 sm:px-10 lg:-left-4 lg:px-3">
                                 <div className="relative -top-[10%] max-w-2xl">
