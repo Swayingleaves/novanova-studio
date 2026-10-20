@@ -4,6 +4,7 @@ import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 
 import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
+import { notifyStorageCapacityChanged } from "@/features/storage/capacity-events";
 import { translateMessage as translate } from "@/features/locale/translate";
 
 
@@ -341,11 +342,11 @@ export type ServerCreditOverview = {
     trend: ServerCreditTrendItem[];
 };
 
-export type ServerCreditTransactionType = "task_charge" | "task_refund" | "admin_adjustment" | "card_redeem" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired";
+export type ServerCreditTransactionType = "task_charge" | "task_refund" | "admin_adjustment" | "card_redeem" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired" | "storage_purchase" | "storage_charge";
 
 export type ServerCreditDirection = "add" | "spend";
 
-export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redeem" | "admin_adjustment" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired";
+export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redeem" | "admin_adjustment" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired" | "storage_purchase" | "storage_charge";
 
 export type ServerUserCreditTransaction = {
     id: number;
@@ -1354,6 +1355,7 @@ async function serverFetch<T>(path: string, init: RequestInit, options: { auth?:
     if (payload.code !== 0) {
         throw new ServerApiError(payload.msg || translate("common.serverRequestFailed_5ed90b"), response.status, payload.code, response.headers.get("X-System-Message-Key"));
     }
+    if (init.method === "POST" && /^\/(media|script\/source|storage)\//.test(path)) notifyStorageCapacityChanged();
     return payload.data;
 }
 

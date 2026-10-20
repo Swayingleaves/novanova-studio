@@ -58,6 +58,31 @@ public class TencentCosObjectStorageProviderAdapter implements ObjectStorageProv
     }
 
     /**
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @return 腾讯云SDK签发的临时GET地址
+     */
+    @Override
+    public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        validate(config);
+        COSClient client = createClient(config);
+        try {
+            var request = new com.qcloud.cos.model.GeneratePresignedUrlRequest(config.bucket(), key, com.qcloud.cos.http.HttpMethodName.GET);
+            request.setExpiration(java.util.Date.from(expiresAt));
+            var headers = new com.qcloud.cos.model.ResponseHeaderOverrides();
+            headers.setContentDisposition(org.springframework.http.ContentDisposition.builder(download ? "attachment" : "inline")
+                    .filename(fileName, java.nio.charset.StandardCharsets.UTF_8).build().toString());
+            headers.setContentType(mimeType);
+            request.setResponseHeaders(headers);
+            return client.generatePresignedUrl(request).toString();
+        } finally { client.shutdown(); }
+    }
+
+    /**
      * 校验腾讯云COS配置。
      *
      * @param config ObjectStorageConfig 对象存储配置

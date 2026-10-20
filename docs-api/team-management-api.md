@@ -94,9 +94,25 @@
 | `GET /listTeamBills` | 无 | 当前管理员查看本空间成员账单 |
 | `GET /listUnregisteredStorageGroups` | 无 | 历史文件待确认的提供方、桶、区域及数量，不返回成员私有内容 |
 | `POST /registerExistingMedia` | `storageId` | 管理员明确确认同一存储身份对应的自有配置后补录台账 |
-| `GET /listBillingRates` | 无 | 管理员查看可见资源费率历史 |
-| `POST /saveBillingRate` | `storageId,creditsPerGigabyteMonth,enabledDate?` | 仅自有资源；首次启用必须指定今天或未来日期，后续改价下月生效，单价0表示以后免收 |
+| `GET /getCapacity` | 无 | 本人免费、已购、已用、预占、总容量、分类及待删除占用，字节数为十进制字符串 |
+| `GET /listFiles` | `page?,pageSize?,keyword?,category?,sort?` | 本人当前空间实际云文件，默认第1页、20条，最多100条；分类为image/video/audio/document/other，排序为newest/oldest/largest/smallest |
+| `GET /getFileAccess` | `objectId,purpose` | purpose为preview或download，返回原存储提供方签发的五分钟只读url与expiresAt；删除中或已删除文件拒绝访问 |
+| `POST /deleteFile` | `objectId` | 幂等登记本人当前空间文件的异步删除，返回pendingDeletion或deleted；物理删除完成后释放容量 |
+| `GET /listCapacityPackages` | 无 | 默认存储提供方的上架套餐及扣款钱包 |
+| `POST /purchaseCapacity` | `packageId,revision,clientRequestId` | 按用户及空间幂等购买，永久增加当前空间容量 |
+| `GET /getCapacitySettings` | 无 | 当前空间管理员读取免费容量与自有套餐 |
+| `POST /saveCapacitySettings` | `freeGigabytes` | 配置每人免费整数G容量，立即对全部用户生效 |
+| `POST /saveCapacityPackage` | `id?,revision?,name,capacityGigabytes,credits,enabled` | 新增、编辑或上下架自有永久套餐 |
 
 账单 `billStatus` 为 `unpaid` 或 `paid`，`ownerTeamId=0` 表示扣平台积分，否则扣对应团队积分；用量明细保存实际对象、有效秒数与费率。欠费期间保留读取、下载和删除。移除成员后的实际对象删除失败会持续重试，清理完成前不能重新入团。
 
-历史原文按已保存的配置标识补入台账；历史媒体只有提供方、桶、区域唯一对应一个配置时自动登记，多配置歧义必须由管理员确认。存在待确认文件时该资源不能启用计费。存储配置删除改为停用并保留密钥供物理清理，已有对象时不能直接改变桶、区域、提供方或端点。
+历史原文按已保存的配置标识补入台账；历史媒体只有提供方、桶、区域唯一对应一个配置时自动登记，多配置歧义必须由管理员确认。待确认对象沿用显式存储归属确认流程。存储配置删除改为停用并保留密钥供物理清理，已有对象时不能直接改变桶、区域、提供方或端点。
+
+
+永久容量自V60启用，默认每人每空间3G，1G为十亿字节。免费额度由各空间独立管理，所有存储配置汇总计量；购买使用默认存储提供方的套餐和对应钱包，所得容量在当前空间通用。套餐为空时不售卖，不预设商业价格。套餐容量为正整数G，积分为正数且最多六位小数；编辑必须提交当前版本。降额保留文件，只限制新增。
+
+购买响应包含 `purchaseId,walletTeamId,creditBalance,capacity`，其中 `capacity` 为 `freeBytes,purchasedBytes,totalBytes,usedBytes,reservedBytes,pendingDeletionBytes,categories`，分类项为 `category,fileCount,usedBytes`。待删除容量已包含在已用容量中。重试沿用同一 `clientRequestId`，不同的一次购买使用新标识；套餐变价、下架或默认存储提供方变化时返回冲突，需重新确认。`storage_purchase` 流水表示实际扩容支出，不计入模型生成统计。
+
+文件列表返回 `items,total,page,pageSize`，每项包含 `objectId,fileName,category,mimeType,sourceType,fileBytes,storedAt,status`。对象标识和字节值为十进制字符串，状态为 `available/pendingDeletion/deletionFailed`；仅远程链接不列入实际云文件。名称搜索按字面匹配，不将百分号或下划线解释成通配符。图片、视频、音频可预览，文档及其他文件下载后查看。删除会使其他业务中的文件引用失效，但不删除业务记录和已解析内容。
+
+不再生成任何新月费账单或补出旧月份账单，费率维护接口已移除。已出账费用继续原钱包结清，欠费仍限制新增。上传租约先持久化预占服务端真实字节数，成功后原子转入对象台账；失败或中断后的预占在物理删除成功后释放。

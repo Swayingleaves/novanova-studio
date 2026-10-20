@@ -1277,11 +1277,12 @@ public class PersistenceService {
                                     String storedMimeType = "audio".equals(kind) ? probeResult.mimeType() : mimeType;
                                     String objectKey = buildObjectKey(objectStorageConfig, kind, file.filename(), storedMimeType);
                                     Integer actualDuration = probeResult.durationMs();
-                                    return putObject(objectStorageConfig, objectKey, fileBytes, storedMimeType)
+                                    return putObject(objectStorageConfig, objectKey, fileBytes, storedMimeType,
+                                                    StorageFileService.describe(file.filename(), kind, storedMimeType, "upload"))
                                             .flatMap(publicUrl -> {
                                                 Integer storedDuration = actualDuration < 0 ? null : actualDuration;
                                                 PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, kind, null, publicUrl, objectKey, objectStorageConfig, storedMimeType, (long) fileBytes.length, input.width(), input.height(), storedDuration, input.metadata());
-                                                return repository.saveMedia(record).thenReturn(mediaResponse(record));
+                                                return saveUploadedMedia(record);
                                             });
                                 });
                             });
@@ -1404,10 +1405,11 @@ public class PersistenceService {
             String normalizedKind = normalizeMediaKind(kind);
             String storageKey = normalizedKind + ":" + newId();
             String objectKey = buildObjectKey(objectStorageConfig, normalizedKind, fileName, mimeType);
-            return putObject(objectStorageConfig, objectKey, data, firstNonEmpty(mimeType, "application/octet-stream"))
+            return putObject(objectStorageConfig, objectKey, data, firstNonEmpty(mimeType, "application/octet-stream"),
+                            StorageFileService.describe(firstNonEmpty(fileName, objectKey), normalizedKind, mimeType, "generated"))
                     .flatMap(publicUrl -> {
                         PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, null, publicUrl, objectKey, objectStorageConfig, mimeType, (long) data.length, width, height, durationMs, null);
-                        return repository.saveMedia(record).thenReturn(mediaResponse(record));
+                        return saveUploadedMedia(record);
                     });
         });
     }
@@ -1435,11 +1437,12 @@ public class PersistenceService {
                     String normalizedKind = normalizeMediaKind(kind);
                     String storageKey = normalizedKind + ":" + newId();
                     String objectKey = buildObjectKey(objectStorageConfig, normalizedKind, fileName, mimeType);
-                    return putObject(objectStorageConfig, objectKey, file, firstNonEmpty(mimeType, "application/octet-stream"))
+                    return putObject(objectStorageConfig, objectKey, file, firstNonEmpty(mimeType, "application/octet-stream"),
+                                    StorageFileService.describe(firstNonEmpty(fileName, objectKey), normalizedKind, mimeType, "generated"))
                             .flatMap(publicUrl -> {
                                 PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, null, publicUrl, objectKey,
                                         objectStorageConfig, mimeType, bytes, width, height, durationMs, null);
-                                return repository.saveMedia(record).thenReturn(mediaResponse(record));
+                                return saveUploadedMedia(record);
                             });
                 }));
     }
@@ -1464,13 +1467,13 @@ public class PersistenceService {
                     String objectKey = buildObjectKey(objectStorageConfig, normalizedKind, fileName, mimeType);
                     log.info("保存派生媒体到对象存储: userId={}, storageKey={}, objectKey={}, bytes={}, mimeType={}",
                             userId, storageKey, objectKey, bytes, mimeType);
-                    return putObject(objectStorageConfig, objectKey, file, firstNonEmpty(mimeType, "application/octet-stream"))
+                    return putObject(objectStorageConfig, objectKey, file, firstNonEmpty(mimeType, "application/octet-stream"),
+                                    StorageFileService.describe(firstNonEmpty(fileName, objectKey), normalizedKind, mimeType, "generated"))
                             .flatMap(publicUrl -> {
                                 PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, null, publicUrl, objectKey,
                                         objectStorageConfig, mimeType, bytes, null, null, durationMs, null);
-                                return repository.saveMedia(record)
-                                        .doOnSuccess(ignored -> log.info("派生媒体记录保存成功: userId={}, storageKey={}, objectKey={}", userId, storageKey, objectKey))
-                                        .thenReturn(mediaResponse(record));
+                                return saveUploadedMedia(record)
+                                        .doOnSuccess(ignored -> log.info("派生媒体记录保存成功: userId={}, storageKey={}, objectKey={}", userId, storageKey, objectKey));
                             });
                 }));
     }
@@ -1661,7 +1664,8 @@ public class PersistenceService {
                                 String normalizedKind = normalizeMediaKind(record.getKind());
                                 String fileName = "generated-" + normalizedKind + mediaFileExtension(mimeType);
                                 String objectKey = buildObjectKey(objectStorageConfig, normalizedKind, fileName, mimeType);
-                                return putObject(objectStorageConfig, objectKey, binary.data(), mimeType)
+                                return putObject(objectStorageConfig, objectKey, binary.data(), mimeType,
+                                                StorageFileService.describe(firstNonEmpty(fileName, objectKey), normalizedKind, mimeType, "remoteImport"))
                                         .flatMap(publicUrl -> {
                                             record.setObjectStorageProvider(objectStorageConfig.provider());
                                             record.setObjectStorageConfigId(objectStorageConfig.id());
@@ -1671,9 +1675,8 @@ public class PersistenceService {
                                             record.setRegion(objectStorageConfig.region());
                                             record.setMimeType(mimeType);
                                             record.setBytes((long) binary.data().length);
-                                            return repository.saveMedia(record)
-                                                    .doOnSuccess(ignored -> log.info("远程媒体转存完成: userId={}, storageKey={}", userId, normalizedStorageKey))
-                                                    .thenReturn(mediaResponse(record));
+                                            return saveUploadedMedia(record)
+                                                    .doOnSuccess(ignored -> log.info("远程媒体转存完成: userId={}, storageKey={}", userId, normalizedStorageKey));
                                         });
                             }));
                 }));
@@ -1793,20 +1796,34 @@ public class PersistenceService {
     }
 
     /**
+     * 保存新上传对象的业务记录，失败或取消时持久化删除请求，避免文件不可见却持续占用容量。
+     * @param record 新上传对象对应的媒体记录
+     * @return 保存后的媒体响应
+     */
+    private Mono<PersistenceDtos.UploadedMediaResponse> saveUploadedMedia(PersistenceRecords.MediaFileRecord record) {
+        return Mono.usingWhen(Mono.just(record), value -> repository.saveMedia(value).thenReturn(mediaResponse(value)),
+                value -> Mono.empty(),
+                (value, error) -> storageBillingService.requestObjectDeletion(value.getObjectStorageConfigId(), value.getObjectStorageKey()),
+                value -> storageBillingService.requestObjectDeletion(value.getObjectStorageConfigId(), value.getObjectStorageKey()));
+    }
+
+    /**
      * 上传对象到对象存储
      *
      * @param config ObjectStorageConfig 对象存储配置
      * @param key String 对象Key
      * @param data byte[] 文件字节
      * @param mimeType String MIME类型
+     * @param metadata 已确认的文件元数据
      * @return Mono<String> 公开访问URL
      */
-    private Mono<String> putObject(PersistenceDtos.ObjectStorageConfig config, String key, byte[] data, String mimeType) {
+    private Mono<String> putObject(PersistenceDtos.ObjectStorageConfig config, String key, byte[] data, String mimeType, com.novanovastudio.dto.StorageFileDtos.Metadata metadata) {
         // COS上传使用阻塞HttpClient，放入boundedElastic执行。
-        return currentUserProvider.currentUserId().flatMap(storageBillingService::requireWritable).then(Mono.fromCallable(() -> objectStorageService.putObject(config, key, new java.io.ByteArrayInputStream(data), data.length, mimeType))
-                .subscribeOn(Schedulers.boundedElastic())
-                .switchIfEmpty(Mono.defer(() -> uploadedObjectUrlMissing(key)))
-                .flatMap(url -> requireUploadedObjectUrl(url, key)).flatMap(url -> storageBillingService.registerObject(config.id(), key, data.length).thenReturn(url)));
+        return storageBillingService.storeObject(config, key, data.length, metadata, () -> {
+            String url = objectStorageService.putObject(config, key, new java.io.ByteArrayInputStream(data), data.length, mimeType);
+            if (!StringUtils.hasText(url)) throw new BusinessException(ErrorCode.BUSINESS_ERROR, "对象存储上传未返回公开访问地址");
+            return url;
+        }).flatMap(url -> requireUploadedObjectUrl(url, key));
     }
 
     /**
@@ -1816,17 +1833,18 @@ public class PersistenceService {
      * @param key String 对象Key
      * @param file Path 本地文件
      * @param mimeType String MIME类型
+     * @param metadata 已确认的文件元数据
      * @return Mono<String> 公开访问URL
      */
-    private Mono<String> putObject(PersistenceDtos.ObjectStorageConfig config, String key, Path file, String mimeType) {
-        return currentUserProvider.currentUserId().flatMap(storageBillingService::requireWritable).then(Mono.fromCallable(() -> {
-            long bytes = Files.size(file);
-            try (InputStream inputStream = Files.newInputStream(file)) {
-                return objectStorageService.putObject(config, key, inputStream, bytes, mimeType);
-            }
-        }).subscribeOn(Schedulers.boundedElastic())
-                .switchIfEmpty(Mono.defer(() -> uploadedObjectUrlMissing(key)))
-                .flatMap(url -> requireUploadedObjectUrl(url, key)).flatMap(url -> Mono.fromCallable(() -> Files.size(file)).subscribeOn(Schedulers.boundedElastic()).flatMap(bytes -> storageBillingService.registerObject(config.id(), key, bytes)).thenReturn(url)));
+    private Mono<String> putObject(PersistenceDtos.ObjectStorageConfig config, String key, Path file, String mimeType, com.novanovastudio.dto.StorageFileDtos.Metadata metadata) {
+        return Mono.fromCallable(() -> Files.size(file)).subscribeOn(Schedulers.boundedElastic()).flatMap(bytes ->
+                storageBillingService.storeObject(config, key, bytes, metadata, () -> {
+                    try (InputStream inputStream = Files.newInputStream(file)) {
+                        String url = objectStorageService.putObject(config, key, inputStream, bytes, mimeType);
+                        if (!StringUtils.hasText(url)) throw new BusinessException(ErrorCode.BUSINESS_ERROR, "对象存储上传未返回公开访问地址");
+                        return url;
+                    }
+                })).flatMap(url -> requireUploadedObjectUrl(url, key));
     }
 
     /** 创建对象存储空地址错误，避免上传适配器返回null时静默结束响应式链路。 */

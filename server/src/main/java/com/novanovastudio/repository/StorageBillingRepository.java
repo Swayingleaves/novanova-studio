@@ -1,6 +1,9 @@
 package com.novanovastudio.repository;
 
 import com.alibaba.fastjson2.JSONObject;
+import com.novanovastudio.dto.StorageFileDtos;
+import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.common.ErrorCode;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.Map;
@@ -42,18 +45,36 @@ public class StorageBillingRepository {
      * @param storageId 存储配置
      * @param objectKey 实际对象键
      * @param bytes 实际大小
+     * @param metadata 服务端登记的文件名称、分类及来源
      * @return 完成信号
      */
-    public Mono<Void> register(long userId, long teamId, String storageId, String objectKey, long bytes) {
+    public Mono<Void> register(long userId, long teamId, String storageId, String objectKey, long bytes, StorageFileDtos.Metadata metadata) {
         return databaseClient.sql("""
-                INSERT INTO storage_objects(team_id, user_id, storage_id, owner_team_id, object_key, file_bytes)
-                SELECT :teamId, :userId, storage_id, team_id, :key, :bytes FROM platform_object_storage_configs WHERE storage_id = :storageId
+                INSERT INTO storage_objects(team_id, user_id, storage_id, owner_team_id, object_key, file_bytes, file_name, file_category, mime_type, source_type)
+                SELECT :teamId, :userId, storage_id, team_id, :key, :bytes, :name, :category, :mime, :source FROM platform_object_storage_configs WHERE storage_id = :storageId
                 ON CONFLICT(storage_id, object_key) DO NOTHING
                 """).bind("teamId", teamId).bind("userId", userId).bind("storageId", storageId).bind("key", objectKey).bind("bytes", bytes)
+                .bind("name", metadata.fileName()).bind("category", metadata.category()).bind("mime", metadata.mimeType()).bind("source", metadata.sourceType())
                 .fetch().rowsUpdated()
+                .then(databaseClient.sql("SELECT EXISTS(SELECT 1 FROM storage_objects WHERE team_id = :teamId AND user_id = :userId AND storage_id = :storageId AND object_key = :key AND deleted_at IS NULL) registered")
+                        .bind("teamId", teamId).bind("userId", userId).bind("storageId", storageId).bind("key", objectKey)
+                        .map((row, rowMetadata) -> row.get("registered", Boolean.class)).one())
+                .flatMap(registered -> registered ? Mono.empty() : Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT, "实际存储对象登记失败，不能释放上传预占")))
                 .then(databaseClient.sql("UPDATE storage_objects SET deletion_requested_at = CURRENT_TIMESTAMP WHERE storage_id = :storageId AND object_key = :key AND team_id > 0 AND EXISTS (SELECT 1 FROM team_members members WHERE members.team_id = storage_objects.team_id AND members.user_id = storage_objects.user_id AND member_status = 'removed')")
                         .bind("storageId", storageId).bind("key", objectKey).fetch().rowsUpdated())
                 .then().contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true));
+    }
+
+    /**
+     * @param userId 原文所属用户
+     * @param storageId 原存储配置
+     * @param objectKey 原对象键
+     * @return 对象是否仍可被读取，删除中的文件也不可开始新的导入
+     */
+    public Mono<Boolean> objectAvailable(long userId, String storageId, String objectKey) {
+        return databaseClient.sql("SELECT EXISTS(SELECT 1 FROM storage_objects WHERE team_id = current_team_id() AND user_id = :user AND storage_id = :storage AND object_key = :key AND deleted_at IS NULL AND deletion_requested_at IS NULL) available")
+                .bind("user", userId).bind("storage", storageId).bind("key", objectKey)
+                .map((row, metadata) -> row.get("available", Boolean.class)).one();
     }
 
     /**
@@ -103,9 +124,18 @@ public class StorageBillingRepository {
         return databaseClient.sql("UPDATE media_files media SET object_storage_config_id = storages.storage_id FROM platform_object_storage_configs storages WHERE storage_id = :storage AND media.team_id = storages.team_id AND media.object_storage_config_id IS NULL AND NULLIF(media.object_storage_key, '') IS NOT NULL AND media.object_storage_provider = storages.provider AND media.bucket = storages.bucket AND media.region = storages.region")
                 .bind("storage", storageId).fetch().rowsUpdated()
                 .then(databaseClient.sql("""
-                    INSERT INTO storage_objects(team_id, user_id, storage_id, owner_team_id, object_key, file_bytes, stored_at, deletion_requested_at)
+                    INSERT INTO storage_objects(team_id, user_id, storage_id, owner_team_id, object_key, file_bytes, stored_at, deletion_requested_at, file_name, file_category, mime_type, source_type)
                     SELECT DISTINCT ON(media.object_storage_key) media.team_id, media.user_id, media.object_storage_config_id, storages.team_id,
-                        media.object_storage_key, media.bytes, media.created_at, CASE WHEN media.status = 0 THEN CURRENT_TIMESTAMP ELSE NULL END
+                        media.object_storage_key, media.bytes, media.created_at, CASE WHEN media.status = 0 THEN CURRENT_TIMESTAMP ELSE NULL END,
+                        COALESCE(NULLIF(media.metadata->>'fileName', ''), regexp_replace(media.object_storage_key, '^.*/', '')),
+                        CASE WHEN media.mime_type LIKE 'image/%' OR media.kind IN ('image', 'avatar') THEN 'image'
+                            WHEN media.mime_type LIKE 'video/%' OR media.kind = 'video' THEN 'video'
+                            WHEN media.mime_type LIKE 'audio/%' OR media.kind = 'audio' THEN 'audio'
+                            WHEN media.mime_type LIKE 'text/%' OR media.mime_type IN ('application/pdf', 'application/msword', 'application/rtf')
+                                OR media.mime_type LIKE 'application/vnd.openxmlformats-officedocument.%'
+                                OR media.mime_type LIKE 'application/vnd.oasis.opendocument.%' THEN 'document' ELSE 'other' END,
+                        COALESCE(NULLIF(media.mime_type, ''), 'application/octet-stream'),
+                        CASE WHEN NULLIF(media.source_url, '') IS NOT NULL THEN 'remoteImport' ELSE 'unrecorded' END
                     FROM media_files media JOIN platform_object_storage_configs storages ON storages.storage_id = media.object_storage_config_id
                     WHERE storages.storage_id = :storage ORDER BY media.object_storage_key, media.created_at
                     ON CONFLICT(storage_id, object_key) DO NOTHING

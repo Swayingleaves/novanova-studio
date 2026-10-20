@@ -134,7 +134,7 @@ export default function AdminSystemPage() {
                                 ]}
                             />,
                         },
-                        { key: "storageBilling", label: "存储计费", children: <StorageBillingManagement /> },
+                        { key: "storageBilling", label: translate("storage.capacityManagement"), children: <StorageBillingManagement /> },
                         ...(!team ? [{ key: "apiLogs", label: translate("administration.aPIRecords"), children: <ApiLogsManagement /> }] : []),
                     ]}
                 />

@@ -51,7 +51,11 @@ public final class TeamTestSupport {
         StorageBillingService service = mock(StorageBillingService.class, org.mockito.Mockito.withSettings().strictness(org.mockito.quality.Strictness.LENIENT));
         when(service.requireWritable(anyLong())).thenReturn(Mono.empty());
         when(service.registerObject(any(), anyString(), anyLong())).thenReturn(Mono.empty());
+        when(service.requireObjectAvailable(anyLong(), anyString(), anyString())).thenReturn(Mono.empty());
+        when(service.storeObject(any(), anyString(), anyLong(), any())).thenAnswer(invocation -> Mono.fromCallable(invocation.getArgument(3)));
+        when(service.storeObject(any(), anyString(), anyLong(), any(), any())).thenAnswer(invocation -> Mono.fromCallable(invocation.getArgument(4)));
         when(service.requestMediaDeletion(anyLong(), any())).thenReturn(Mono.empty());
+        when(service.requestObjectDeletion(any(), anyString())).thenReturn(Mono.empty());
         return service;
     }
 }

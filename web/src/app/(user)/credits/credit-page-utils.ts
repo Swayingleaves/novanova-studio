@@ -23,6 +23,8 @@ export const CREDIT_DIRECTION_OPTIONS = createCreditDirectionOptions();
 /** 按调用方语言生成显示文案，业务值保持不变。 */
 export const createCreditSourceOptions = (translator: typeof translate = translate): { label: string; value: "all" | ServerCreditSource }[] => ([
     { get label() { return translator("credits.allSources"); }, value: "all" },
+    { get label() { return translator("storage.permanentExpansion"); }, value: "storage_purchase" },
+    { get label() { return translator("storage.historicalMonthlyStorage"); }, value: "storage_charge" },
     { get label() { return translator("credits.imageGeneration"); }, value: "image" },
     { get label() { return translator("credits.videoGeneration"); }, value: "video" },
     { get label() { return translator("credits.redeemCode"); }, value: "card_redeem" },
@@ -75,6 +77,8 @@ export function creditTransactionIcon(transaction: Pick<ServerUserCreditTransact
  * @return 中文流水类型文案
  */
 export function creditTransactionTypeLabel(transactionType: ServerCreditTransactionType | null | undefined) {
+    if (transactionType === "storage_purchase") return translate("storage.permanentExpansion");
+    if (transactionType === "storage_charge") return translate("storage.historicalMonthlyStorage");
     if (transactionType === "task_charge") return translate("credits.taskCharge");
     if (transactionType === "task_refund") return translate("credits.taskRefund");
     if (transactionType === "admin_adjustment") return translate("credits.adminAdjustment");

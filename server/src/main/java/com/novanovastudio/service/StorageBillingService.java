@@ -2,16 +2,12 @@ package com.novanovastudio.service;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.BusinessException;
-import com.novanovastudio.common.CreditAmounts;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.dto.StorageFileDtos;
 import com.novanovastudio.repository.StorageBillingRepository;
 import com.novanovastudio.repository.TeamRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.security.TeamScope;
-import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.time.ZoneId;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,8 +27,6 @@ import reactor.core.scheduler.Schedulers;
 @RequiredArgsConstructor
 @Slf4j
 public class StorageBillingService {
-    /** 统一账单时区。 */
-    private static final ZoneId TIME_ZONE = ZoneId.of("Asia/Shanghai");
     /** 存储计量仓储。 */
     private final StorageBillingRepository repository;
     /** 资源所有权查询。 */
@@ -43,6 +37,8 @@ public class StorageBillingService {
     private final CreditGrantService creditGrantService;
     /** 对象存储配置按需加载，避免与持久化服务形成循环构造。 */
     private final ObjectProvider<PersistenceService> persistenceServiceProvider;
+    /** 永久容量服务按需加载，沿用统一上传入口。 */
+    private final ObjectProvider<StorageCapacityService> capacityServiceProvider;
     /** 存储提供方适配器。 */
     private final com.novanovastudio.storage.ObjectStorageService objectStorageService;
     /** 事务操作器。 */
@@ -62,7 +58,7 @@ public class StorageBillingService {
             return teamRepository.findMembership(scope.teamId(), userId)
                     .filter(member -> member.getBooleanValue("enabled") && "active".equals(member.getString("memberStatus")))
                     .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, "团队或成员已停用，不能新增文件"))).then();
-        }));
+        })).then(capacityServiceProvider.getObject().requireAvailable(userId));
         });
     }
 
@@ -74,39 +70,56 @@ public class StorageBillingService {
      * @return 完成信号
      */
     public Mono<Void> registerObject(String storageId, String key, long bytes) {
-        return currentUserProvider.currentUserId().flatMap(userId -> TeamScope.current()
-                .flatMap(scope -> repository.register(userId, scope.teamId(), storageId, key, bytes)));
+        return registerObject(storageId, key, bytes, StorageFileService.describe(key, "", null, "unrecorded"));
     }
 
     /**
-     * 为存储所有者保存首次启用费率或下月费率。
-     * @param storageId 存储配置标识
-     * @param rate 每GB月积分
-     * @param enabledDate 首次生效日期，不能早于今天
-     * @return 完成信号
+     * @param storageId 实际存储配置
+     * @param key 实际对象键
+     * @param bytes 服务端实际大小
+     * @param metadata 已确认的文件元数据
+     * @return 登记完成信号
      */
-    public Mono<Void> saveRate(String storageId, BigDecimal rate, LocalDate enabledDate) {
-        BigDecimal amount = CreditAmounts.of(rate);
-        if (amount.signum() < 0) return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "存储单价不能为负数"));
-        return TeamScope.current().flatMap(scope -> teamRepository.findResource("objectStorage", storageId)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "对象存储不存在")))
-                .flatMap(resource -> {
-                    if (resource.getLongValue("teamId") != scope.teamId()) return Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, "只能设置自有存储费率"));
-                    return repository.hasUnregisteredMedia(storageId).flatMap(missing -> missing
-                            ? Mono.error(new BusinessException(ErrorCode.DATA_CONFLICT, "请先确认历史文件的存储配置归属，再启用或修改费率"))
-                            : repository.listRates().filter(item -> storageId.equals(item.getString("storageId"))).collectList().flatMap(rates -> {
-                        LocalDate today = LocalDate.now(TIME_ZONE);
-                        boolean existing = !rates.isEmpty();
-                        OffsetDateTime firstEffective = rates.stream().map(item -> OffsetDateTime.parse(item.getString("effectiveAt")))
-                                .min(OffsetDateTime::compareTo).orElse(null);
-                        // 首次预约尚未启用时保持原启用日期，不能借改价提前收费。
-                        if (firstEffective != null && firstEffective.isAfter(OffsetDateTime.now(TIME_ZONE))) return repository.saveRate(storageId, firstEffective, amount);
-                        LocalDate effective = existing ? today.withDayOfMonth(1).plusMonths(1) : enabledDate;
-                        if (effective == null || effective.isBefore(today)) return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "首次启用日期不能早于今天"));
-                        OffsetDateTime at = effective.equals(today) && !existing ? OffsetDateTime.now(TIME_ZONE) : effective.atStartOfDay(TIME_ZONE).toOffsetDateTime();
-                        return repository.saveRate(storageId, at, amount);
-                    }));
-                }));
+    public Mono<Void> registerObject(String storageId, String key, long bytes, StorageFileDtos.Metadata metadata) {
+        return currentUserProvider.currentUserId().flatMap(userId -> TeamScope.current()
+                .flatMap(scope -> repository.register(userId, scope.teamId(), storageId, key, bytes, metadata)));
+    }
+
+    /**
+     * @param userId 原文所属用户
+     * @param storageId 原存储配置
+     * @param key 实际对象键
+     * @return 原文件可读取的检查信号
+     */
+    public Mono<Void> requireObjectAvailable(long userId, String storageId, String key) {
+        return repository.objectAvailable(userId, storageId, key).flatMap(available -> available ? Mono.empty()
+                : Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "原文件已删除或正在删除，请重新上传导入")));
+    }
+
+    /**
+     * 统一执行容量预占、上传和真实对象登记。
+     * @param config 实际存储配置
+     * @param key 对象键
+     * @param bytes 服务端实际字节数
+     * @param upload 阻塞上传操作
+     * @param <T> 上传结果类型
+     * @return 上传及登记成功后的结果
+     */
+    public <T> Mono<T> storeObject(com.novanovastudio.dto.PersistenceDtos.ObjectStorageConfig config, String key, long bytes, java.util.concurrent.Callable<T> upload) {
+        return capacityServiceProvider.getObject().storeObject(config, key, bytes, upload);
+    }
+
+    /**
+     * @param config 实际存储配置
+     * @param key 对象键
+     * @param bytes 服务端实际字节数
+     * @param metadata 已确认的文件元数据
+     * @param upload 阻塞上传操作
+     * @param <T> 上传结果类型
+     * @return 上传及登记成功后的结果
+     */
+    public <T> Mono<T> storeObject(com.novanovastudio.dto.PersistenceDtos.ObjectStorageConfig config, String key, long bytes, StorageFileDtos.Metadata metadata, java.util.concurrent.Callable<T> upload) {
+        return capacityServiceProvider.getObject().storeObject(config, key, bytes, metadata, upload);
     }
 
     /** @return 仅含存储身份和数量的历史待确认分组 */
@@ -124,9 +137,6 @@ public class StorageBillingService {
                 .then(repository.registerExistingMedia(storageId))).as(transactionalOperator::transactional);
     }
 
-    /** @return 可见存储费率 */
-    public Mono<List<JSONObject>> listRates() { return repository.listRates().collectList(); }
-
     /**
      * 查询本人或当前团队的存储占用。
      * @param administrator 是否查询团队汇总，控制器先验证管理员
@@ -143,15 +153,6 @@ public class StorageBillingService {
      */
     public Mono<List<JSONObject>> listBills(boolean administrator) {
         return currentUserProvider.currentUserId().flatMap(userId -> TeamScope.current().flatMap(scope -> repository.listBills(scope.teamId(), administrator ? -1 : userId).collectList()));
-    }
-
-    /**
-     * 月度出账并尝试支付，所有账单独立事务且按时间顺序处理。
-     * @return 新建账单数量
-     */
-    public Mono<Long> settleMonthlyBills() {
-        return repository.createMonthlyBills().flatMap(count -> settleUnpaidBills().thenReturn(count))
-                .contextWrite(context -> context.put(TeamScope.SYSTEM_KEY, true));
     }
 
     /**

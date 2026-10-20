@@ -15,6 +15,21 @@ import java.nio.file.Path;
 public interface ObjectStorageProviderAdapter {
 
     /**
+     * 通过提供方SDK签发临时只读链接，不改变对象访问权限。
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否要求附件下载
+     * @param expiresAt 到期时间
+     * @return 临时只读链接
+     * @throws BusinessException 当前适配器不支持签名读取时抛出
+     */
+    default String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前对象存储不支持临时文件访问");
+    }
+
+    /**
      * 获取适配器支持的服务商标识。
      *
      * @return String 服务商标识

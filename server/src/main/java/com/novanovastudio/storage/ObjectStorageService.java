@@ -95,6 +95,19 @@ public class ObjectStorageService {
     }
 
     /**
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否作为附件下载
+     * @param expiresAt 到期时间
+     * @return 由原存储提供方签名的只读地址
+     */
+    public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        return providerAdapter(config).createReadUrl(config, key, fileName, mimeType, download, expiresAt);
+    }
+
+    /**
      * 校验对象存储配置。
      *
      * @param config ObjectStorageConfig 对象存储配置

@@ -487,7 +487,7 @@ public class CreditService {
         if (direction != null && !List.of("all", "add", "spend").contains(direction)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.creditDirectionMustBeAllAddOrSpend"));
         }
-        if (source != null && !List.of("image", "video", "task_refund", "card_redeem", "admin_adjustment", "initial_grant", "invitation_reward", TRANSACTION_DAILY_CHECK_IN, TRANSACTION_CREDIT_EXPIRED).contains(source)) {
+        if (source != null && !List.of("image", "video", "task_refund", "card_redeem", "admin_adjustment", "initial_grant", "invitation_reward", TRANSACTION_DAILY_CHECK_IN, TRANSACTION_CREDIT_EXPIRED, "storage_purchase", "storage_charge").contains(source)) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidCreditSourceFilter"));
         }
         OffsetDateTime startAt = startDate.atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime();

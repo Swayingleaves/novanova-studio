@@ -2,9 +2,8 @@
 import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
-
 import { useMemo, useRef, useState } from "react";
-import { App, Button, Empty, Input, Modal, Pagination, Segmented } from "antd";
+import { App, Button, Empty, Input, Modal, Pagination, Segmented, Tabs } from "antd";
 import { Download, Plus, Search, Upload } from "lucide-react";
 
 import { AssetEditorDialog } from "@/features/assets/components/asset-editor-dialog";
@@ -15,16 +14,42 @@ import { paginateAssets, queryAssets } from "@/features/assets/lib/asset-query";
 import { exportAssets, readAssetPackage } from "@/features/assets/lib/asset-transfer";
 import { useAssetStore, type Asset, type AssetKind } from "@/features/assets/stores/use-asset-store";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
+import { useRouter, useSearchParams } from "@/shared/lib/team-navigation";
+import { StorageOverview } from "./components/storage-overview";
+import { CloudFiles } from "./components/cloud-files";
 
-const createKindOptions = (translator: typeof translate = translate): Array<{ label: string; value: AssetKind | "all" }> => ([
-    { get label() { return translator("assets.all"); }, value: "all" },
-    { get label() { return translator("assets.text"); }, value: "text" },
-    { get label() { return translator("assets.image"); }, value: "image" },
-    { get label() { return translator("assets.video"); }, value: "video" },
-]);
+const createKindOptions = (translator: typeof translate = translate): Array<{ label: string; value: AssetKind | "all" }> => [
+    {
+        get label() {
+            return translator("assets.all");
+        },
+        value: "all",
+    },
+    {
+        get label() {
+            return translator("assets.text");
+        },
+        value: "text",
+    },
+    {
+        get label() {
+            return translator("assets.image");
+        },
+        value: "image",
+    },
+    {
+        get label() {
+            return translator("assets.video");
+        },
+        value: "video",
+    },
+];
 
 export default function AssetsPage() {
     const translate = useTranslation();
+    const router = useRouter();
+    const searchParameters = useSearchParams();
+    const activeTab = searchParameters.get("tab") === "cloudFiles" ? "cloudFiles" : "favorites";
     const { message } = App.useApp();
     const copyText = useCopyText();
     const importInputRef = useRef<HTMLInputElement>(null);
@@ -82,27 +107,108 @@ export default function AssetsPage() {
     };
 
     return (
-        <main className="studio-page h-full overflow-y-auto px-4 py-6 sm:px-6">
+        <main className="studio-page h-full overflow-y-auto px-4 pb-6 pt-16 sm:px-6 md:py-6">
             <div className="mx-auto flex max-w-7xl flex-col gap-5">
                 <header className="flex flex-col gap-4 border-b border-[var(--studio-line)] pb-5 lg:flex-row lg:items-end lg:justify-between">
-                    <div><p className="studio-caption text-xs">{translate("assets.contentResources")}</p><h1 className="studio-title mt-2 text-2xl font-semibold">{translate("assets.myAssets")}</h1><p className="studio-subtitle mt-2 text-sm">{translate("assets.manageTextImagesAndVideosCentrallyForReuseIn")}</p></div>
-                    <div className="flex flex-wrap gap-2"><Button icon={<Download className="size-4" />} onClick={() => void exportAll()}>{translate("assets.export")}</Button><Button icon={<Upload className="size-4" />} onClick={() => importInputRef.current?.click()}>{translate("assets.import")}</Button><Button type="primary" icon={<Plus className="size-4" />} onClick={openCreate}>{translate("assets.addAsset")}</Button></div>
+                    <div>
+                        <p className="studio-caption text-xs">{translate("assets.contentResources")}</p>
+                        <h1 className="studio-title mt-2 text-2xl font-semibold">{translate("assets.myAssets")}</h1>
+                        <p className="studio-subtitle mt-2 text-sm">{translate("assets.manageTextImagesAndVideosCentrallyForReuseIn")}</p>
+                    </div>
+                    {activeTab === "favorites" ? (
+                        <div className="flex flex-wrap gap-2">
+                            <Button icon={<Download className="size-4" />} onClick={() => void exportAll()}>
+                                {translate("assets.export")}
+                            </Button>
+                            <Button icon={<Upload className="size-4" />} onClick={() => importInputRef.current?.click()}>
+                                {translate("assets.import")}
+                            </Button>
+                            <Button type="primary" icon={<Plus className="size-4" />} onClick={openCreate}>
+                                {translate("assets.addAsset")}
+                            </Button>
+                        </div>
+                    ) : null}
                 </header>
+                <StorageOverview />
+                <Tabs
+                    activeKey={activeTab}
+                    destroyOnHidden
+                    onChange={(tab) => router.replace(tab === "cloudFiles" ? "/assets?tab=cloudFiles" : "/assets", { scroll: false })}
+                    items={[
+                        {
+                            key: "favorites",
+                            label: translate("storage.assetFavorites"),
+                            children: (
+                                <div className="flex flex-col gap-5">
+                                    <section className="studio-glass flex flex-col gap-3 rounded-lg p-3 sm:flex-row sm:items-center sm:justify-between" aria-label={translate("assets.filterAssets")}>
+                                        <Input
+                                            allowClear
+                                            prefix={<Search className="size-4 text-[var(--studio-faint)]" />}
+                                            value={keyword}
+                                            placeholder={translate("assets.searchTitleContentTagsOrSource")}
+                                            className="sm:max-w-lg"
+                                            onChange={(event) => changeQuery({ keyword: event.target.value })}
+                                        />
+                                        <Segmented options={createKindOptions(translate)} value={kind} onChange={(value) => changeQuery({ kind: value as AssetKind | "all" })} />
+                                    </section>
 
-                <section className="studio-glass flex flex-col gap-3 rounded-lg p-3 sm:flex-row sm:items-center sm:justify-between" aria-label={translate("assets.filterAssets")}>
-                    <Input allowClear prefix={<Search className="size-4 text-[var(--studio-faint)]" />} value={keyword} placeholder={translate("assets.searchTitleContentTagsOrSource")} className="sm:max-w-lg" onChange={(event) => changeQuery({ keyword: event.target.value })} />
-                    <Segmented options={createKindOptions(translate)} value={kind} onChange={(value) => changeQuery({ kind: value as AssetKind | "all" })} />
-                </section>
+                                    {result.items.length ? (
+                                        <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                                            {result.items.map((asset) => (
+                                                <AssetLibraryCard
+                                                    key={asset.id}
+                                                    asset={asset}
+                                                    onPreview={() => setPreviewAsset(asset)}
+                                                    onEdit={() => openEdit(asset)}
+                                                    onCopy={() => copyAsset(asset)}
+                                                    onDownload={() => downloadAsset(asset)}
+                                                    onDelete={() => setDeletingAsset(asset)}
+                                                />
+                                            ))}
+                                        </section>
+                                    ) : (
+                                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("assets.noAssetsFound")} className="py-20" />
+                                    )}
 
-                {result.items.length ? <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{result.items.map((asset) => <AssetLibraryCard key={asset.id} asset={asset} onPreview={() => setPreviewAsset(asset)} onEdit={() => openEdit(asset)} onCopy={() => copyAsset(asset)} onDownload={() => downloadAsset(asset)} onDelete={() => setDeletingAsset(asset)} />)}</section> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("assets.noAssetsFound")} className="py-20" />}
-
-                {result.total ? <Pagination className="self-center" current={result.page} pageSize={result.pageSize} total={result.total} showSizeChanger pageSizeOptions={[12, 24, 48]} onChange={(nextPage, nextPageSize) => { setPage(nextPage); setPageSize(nextPageSize); }} /> : null}
+                                    {result.total ? (
+                                        <Pagination
+                                            className="self-center"
+                                            current={result.page}
+                                            pageSize={result.pageSize}
+                                            total={result.total}
+                                            showSizeChanger
+                                            pageSizeOptions={[12, 24, 48]}
+                                            onChange={(nextPage, nextPageSize) => {
+                                                setPage(nextPage);
+                                                setPageSize(nextPageSize);
+                                            }}
+                                        />
+                                    ) : null}
+                                </div>
+                            ),
+                        },
+                        { key: "cloudFiles", label: translate("storage.cloudFiles"), children: <CloudFiles /> },
+                    ]}
+                />
             </div>
 
             <AssetEditorDialog open={editorOpen} asset={editingAsset} onClose={() => setEditorOpen(false)} />
             <AssetPreviewDialog asset={previewAsset} onClose={() => setPreviewAsset(null)} onCopy={() => previewAsset && copyAsset(previewAsset)} onDownload={() => previewAsset && downloadAsset(previewAsset)} />
             <input ref={importInputRef} hidden type="file" accept="application/zip,.zip" onChange={(event) => void importPackage(event.target.files?.[0])} />
-            <Modal title={translate("assets.deleteAsset")} open={Boolean(deletingAsset)} okText={translate("assets.confirmDeletion")} cancelText={translate("assets.cancel")} okButtonProps={{ danger: true }} onOk={confirmDelete} onCancel={() => setDeletingAsset(null)}><p>「{deletingAsset?.title}{translate("assets.willBeRemovedFromTheLibraryThisCannotBe")}</p></Modal>
+            <Modal
+                title={translate("assets.deleteAsset")}
+                open={Boolean(deletingAsset)}
+                okText={translate("assets.confirmDeletion")}
+                cancelText={translate("assets.cancel")}
+                okButtonProps={{ danger: true }}
+                onOk={confirmDelete}
+                onCancel={() => setDeletingAsset(null)}
+            >
+                <p>
+                    「{deletingAsset?.title}
+                    {translate("assets.willBeRemovedFromTheLibraryThisCannotBe")}
+                </p>
+            </Modal>
         </main>
     );
 }

@@ -28,7 +28,7 @@ public class TeamRepository {
             SELECT teams.*, users.email administrator_email, users.username administrator_username, users.nickname administrator_nickname,
                 (SELECT COUNT(*) FROM team_members WHERE team_id = teams.id AND user_id IS DISTINCT FROM teams.administrator_user_id AND member_status <> 'removed') member_count,
                 COALESCE((SELECT -SUM(change_amount) FROM user_credit_transactions transactions WHERE transactions.team_id = teams.id
-                    AND transaction_type IN ('task_charge', 'task_refund', 'storage_charge')), 0)::TEXT consumed_credits
+                    AND transaction_type IN ('task_charge', 'task_refund', 'storage_charge', 'storage_purchase')), 0)::TEXT consumed_credits
             FROM teams LEFT JOIN users ON users.id = teams.administrator_user_id
             """;
 
@@ -143,7 +143,7 @@ public class TeamRepository {
                     COALESCE(accounts.credit_balance, 0)::TEXT team_credit_balance,
                     COALESCE((SELECT -SUM(change_amount) FROM user_credit_transactions transactions
                         WHERE transactions.team_id = members.team_id AND transactions.user_id = members.user_id
-                          AND transaction_type IN ('task_charge', 'task_refund', 'storage_charge')), 0)::TEXT consumed_credits
+                          AND transaction_type IN ('task_charge', 'task_refund', 'storage_charge', 'storage_purchase')), 0)::TEXT consumed_credits
                 FROM team_members members JOIN users ON users.id = members.user_id JOIN teams ON teams.id = members.team_id
                 LEFT JOIN user_credit_accounts accounts ON accounts.user_id = members.user_id AND accounts.team_id = members.team_id
                 WHERE members.team_id = :teamId AND members.member_status <> 'removed' ORDER BY members.joined_at

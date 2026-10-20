@@ -175,8 +175,9 @@ public class ScriptSourceService {
             Mono<Void> updateEncoding = encoding == null ? Mono.empty()
                     : repository.resetParsedStructure(document.id())
                             .then(repository.updateEncoding(document.id(), normalizeEncoding(document.fileExtension(), encoding)));
-            return transactionalOperator.transactional(repository.retry(document.id())
-                            .flatMap(retried -> retried ? updateEncoding.thenReturn(true) : Mono.just(false)))
+            return storageBillingService.requireObjectAvailable(document.userId(), document.storageConfigId(), document.objectKey())
+                    .then(transactionalOperator.transactional(repository.retry(document.id())
+                            .flatMap(retried -> retried ? updateEncoding.thenReturn(true) : Mono.just(false))))
                     .flatMap(retried -> retried
                             ? repository.findTaskId(document.id())
                                     .flatMap(taskId -> enqueue(taskId).then(document(request.projectId())).flatMap(repository::status))
@@ -360,7 +361,7 @@ public class ScriptSourceService {
         return DataBufferUtils.write(file.content(), staged, StandardOpenOption.CREATE,
                         StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)
                 .then(Mono.fromCallable(() -> stagedFileSize(staged)))
-                .flatMap(bytes -> storeOriginal(userId, documentId, extension, staged, bytes))
+                .flatMap(bytes -> storeOriginal(userId, documentId, fileName, extension, staged, bytes))
                 .flatMap(prepared -> transactionalOperator.transactional(
                                 repository.createProject(projectId, userId, projectTitle, contentType)
                                         .then(repository.create(new ScriptSourceRepository.Document(documentId, projectId, userId,
@@ -379,13 +380,22 @@ public class ScriptSourceService {
      *
      * @param userId long 用户标识
      * @param documentId String 原文标识
+     * @param fileName String 原始文件名
      * @param extension String 扩展名
      * @param staged Path 暂存文件
      * @param bytes long 文件字节数
      * @return Mono&lt;Prepared&gt; 私有存储结果
      */
-    private Mono<Prepared> storeOriginal(long userId, String documentId, String extension, Path staged, long bytes) {
-        return storageBillingService.requireWritable(userId).then(persistenceService.getPlatformObjectStorageConfig().flatMap(config -> Mono.fromCallable(() -> {
+    private Mono<Prepared> storeOriginal(long userId, String documentId, String fileName, String extension, Path staged, long bytes) {
+        String mimeType = switch (extension) {
+            case "txt" -> "text/plain";
+            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case "pdf" -> "application/pdf";
+            default -> "application/octet-stream";
+        };
+        return persistenceService.getPlatformObjectStorageConfig().flatMap(config -> storageBillingService.storeObject(config,
+                "script-source/" + userId + "/" + documentId + "/original." + extension, bytes,
+                StorageFileService.describe(fileName, "document", mimeType, "sourceImport"), () -> {
             // 假设默认桶保持私有；一旦匿名可读立即中止导入，避免原文泄漏。
             if (!objectStorageService.verifyPrivateBucket(config)) {
                 throw new BusinessException(ErrorCode.BUSINESS_ERROR, "当前默认对象存储桶允许匿名读取，已停止导入原文，请联系管理员修正存储权限");
@@ -393,7 +403,7 @@ public class ScriptSourceService {
             String objectKey = "script-source/" + userId + "/" + documentId + "/original." + extension;
             objectStorageService.putPrivateObject(config, objectKey, staged);
             return new Prepared(config.id(), objectKey, sha256(staged), bytes);
-        }).flatMap(prepared -> storageBillingService.registerObject(config.id(), prepared.objectKey(), bytes).thenReturn(prepared))));
+        }));
     }
 
     /**
@@ -404,7 +414,8 @@ public class ScriptSourceService {
      * @return Mono&lt;ParsedSource&gt; 解析结果
      */
     private Mono<ScriptSourceParser.ParsedSource> downloadAndParse(ScriptSourceRepository.Document document, Path temp) {
-        return persistenceService.getPlatformObjectStorageConfig(document.storageConfigId())
+        return storageBillingService.requireObjectAvailable(document.userId(), document.storageConfigId(), document.objectKey())
+                .then(persistenceService.getPlatformObjectStorageConfig(document.storageConfigId()))
                 .map(config -> {
                     objectStorageService.downloadPrivateObject(config, document.objectKey(), temp);
                     return parser.parse(temp, document.fileExtension(), document.textEncoding(), document.sourceType());

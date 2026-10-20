@@ -42,6 +42,23 @@ public class QiniuKodoObjectStorageProviderAdapter implements ObjectStorageProvi
     }
 
     /**
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @return 七牛SDK签发的临时只读地址
+     */
+    @Override
+    public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        validate(config);
+        String url = ObjectStorageUrlBuilder.buildPublicUrl(config.publicBaseUrl(), key);
+        if (download) url += "?attname=" + java.net.URLEncoder.encode(fileName, java.nio.charset.StandardCharsets.UTF_8);
+        return Auth.create(config.accessKey(), config.secretKey()).privateDownloadUrlWithDeadline(url, expiresAt.getEpochSecond());
+    }
+
+    /**
      * 物理删除对象，七牛的612表示文件已经不存在。
      * @param config 对象存储配置
      * @param key 对象键
