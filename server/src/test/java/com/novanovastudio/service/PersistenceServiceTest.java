@@ -15,11 +15,14 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.PersistenceDtos;
+import com.novanovastudio.dto.TeamDtos;
 import com.novanovastudio.dto.VideoBillingConfiguration;
 import com.novanovastudio.entity.PersistenceRecords;
 import com.novanovastudio.repository.AiTaskRepository;
 import com.novanovastudio.repository.PersistenceRepository;
+import com.novanovastudio.repository.TeamRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.security.TeamScope;
 import com.novanovastudio.storage.ObjectStorageService;
 import com.novanovastudio.task.ModelTaskExecutionDispatcher;
 import java.time.OffsetDateTime;
@@ -29,6 +32,8 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -80,6 +85,9 @@ class PersistenceServiceTest {
     /** 待测试服务 */
     private PersistenceService service;
 
+    /** 团队资源偏好仓储 */
+    private TeamRepository teamRepository;
+
     /**
      * 初始化测试对象。
      */
@@ -88,8 +96,125 @@ class PersistenceServiceTest {
         org.mockito.Mockito.lenient().when(agentActivityService.activitiesForRound(
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(JSONObject.class)))
                 .thenReturn(new JSONArray());
-        service = new PersistenceService(repository, com.novanovastudio.TeamTestSupport.teamRepository(), com.novanovastudio.TeamTestSupport.storageBilling(), aiTaskRepository, agentActivityService, aiHttpClient, currentUserProvider, properties, objectStorageService, modelTaskExecutionDispatcher);
+        teamRepository = com.novanovastudio.TeamTestSupport.teamRepository();
+        service = new PersistenceService(repository, teamRepository, com.novanovastudio.TeamTestSupport.storageBilling(), aiTaskRepository, agentActivityService, aiHttpClient, currentUserProvider, properties, objectStorageService, modelTaskExecutionDispatcher);
         org.mockito.Mockito.lenient().when(modelTaskExecutionDispatcher.refresh(org.mockito.ArgumentMatchers.anyString())).thenReturn(Mono.empty());
+    }
+
+    /**
+     * 团队默认模型保存后重新查询应保留选择，模拟页面切换和再次进入。
+     * @param modelType 图片、视频或文本模型类型
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"image", "video", "text"})
+    void shouldRetainSavedTeamDefaultModelAfterReload(String modelType) {
+        AtomicReference<TeamDtos.ResourcePreferenceRequest> savedPreference = new AtomicReference<>();
+        TeamDtos.ResourcePreferenceRequest preference = new TeamDtos.ResourcePreferenceRequest("model", "model-1", true, true);
+        when(repository.listPlatformAiModelConfigs()).thenAnswer(invocation -> Flux.just(modelConfiguration("model-1", modelType, 101L, false)));
+        when(teamRepository.findResource("model", "model-1"))
+                .thenReturn(Mono.just(JSONObject.of("teamId", 101L, "modelType", modelType)));
+        when(teamRepository.savePreference(101L, preference, modelType))
+                .thenReturn(Mono.fromRunnable(() -> savedPreference.set(preference)));
+        when(teamRepository.listPreferences(101L)).thenAnswer(invocation -> savedPreference.get() == null ? Flux.empty()
+                : Flux.just(JSONObject.of("resourceType", "model", "resourceId", "model-1", "enabled", true, "isDefault", true)));
+
+        Assertions.assertFalse(service.listModelConfigs()
+                .contextWrite(context -> new TeamScope(101, "administrator").apply(context)).block().getFirst().defaultModel());
+        service.setDefaultModel(new PersistenceDtos.SetDefaultModelRequest("model-1", modelType))
+                .contextWrite(context -> new TeamScope(101, "administrator").apply(context)).block();
+
+        for (int reload = 0; reload < 2; reload++) {
+            List<PersistenceDtos.ModelConfig> configurations = service.listModelConfigs()
+                    .contextWrite(context -> new TeamScope(101, "administrator").apply(context)).block();
+            Assertions.assertEquals(1, configurations.size());
+            Assertions.assertTrue(configurations.getFirst().defaultModel());
+        }
+        Assertions.assertEquals(preference, savedPreference.get());
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+                .setDefaultPlatformAiModel(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    /** 团队管理列表只展示自有模型，并用团队偏好覆盖模型表的默认标记。 */
+    @Test
+    void shouldApplyTeamDefaultsOnlyToOwnedModelConfigurations() {
+        when(repository.listPlatformAiModelConfigs()).thenReturn(Flux.just(
+                modelConfiguration("selected-model", "image", 101L, false),
+                modelConfiguration("previous-model", "image", 101L, true),
+                modelConfiguration("platform-model", "image", 0L, true),
+                modelConfiguration("other-team-model", "image", 202L, true)));
+        when(teamRepository.listPreferences(101L)).thenReturn(Flux.just(
+                JSONObject.of("resourceType", "model", "resourceId", "selected-model", "enabled", true, "isDefault", true),
+                JSONObject.of("resourceType", "objectStorage", "resourceId", "previous-model", "enabled", true, "isDefault", true)));
+
+        List<PersistenceDtos.ModelConfig> configurations = service.listModelConfigs()
+                .contextWrite(context -> new TeamScope(101, "administrator").apply(context)).block();
+
+        Assertions.assertEquals(List.of("selected-model", "previous-model"), configurations.stream().map(PersistenceDtos.ModelConfig::id).toList());
+        Assertions.assertTrue(configurations.getFirst().defaultModel());
+        Assertions.assertFalse(configurations.getLast().defaultModel());
+    }
+
+    /** 没有默认偏好的团队不能沿用模型表中的默认标记。 */
+    @Test
+    void shouldLeaveTeamDefaultEmptyWithoutPreference() {
+        when(repository.listPlatformAiModelConfigs()).thenReturn(Flux.just(modelConfiguration("model-1", "text", 101L, true)));
+
+        List<PersistenceDtos.ModelConfig> configurations = service.listModelConfigs()
+                .contextWrite(context -> new TeamScope(101, "administrator").apply(context)).block();
+
+        Assertions.assertFalse(configurations.getFirst().defaultModel());
+    }
+
+    /** 查询不同团队的模型配置时必须分别读取各自的默认偏好。 */
+    @Test
+    void shouldKeepModelDefaultsIsolatedBetweenTeams() {
+        when(repository.listPlatformAiModelConfigs()).thenAnswer(invocation -> Flux.just(
+                modelConfiguration("team-101-model", "text", 101L, false),
+                modelConfiguration("team-202-model", "text", 202L, false)));
+        for (long teamId : List.of(101L, 202L)) {
+            when(teamRepository.listPreferences(teamId)).thenReturn(Flux.just(JSONObject.of(
+                    "resourceType", "model", "resourceId", "team-" + teamId + "-model", "enabled", true, "isDefault", true)));
+
+            List<PersistenceDtos.ModelConfig> configurations = service.listModelConfigs()
+                    .contextWrite(context -> new TeamScope(teamId, "administrator").apply(context)).block();
+
+            Assertions.assertEquals(List.of("team-" + teamId + "-model"), configurations.stream().map(PersistenceDtos.ModelConfig::id).toList());
+            Assertions.assertTrue(configurations.getFirst().defaultModel());
+            verify(teamRepository).listPreferences(teamId);
+        }
+    }
+
+    /** 平台默认模型继续使用模型表中的标记，不读取团队偏好。 */
+    @Test
+    void shouldPreservePlatformDefaultModelConfiguration() {
+        when(repository.listPlatformAiModelConfigs()).thenReturn(Flux.just(
+                modelConfiguration("default-model", "text", 0L, true),
+                modelConfiguration("other-model", "text", 0L, false)));
+
+        List<PersistenceDtos.ModelConfig> configurations = service.listModelConfigs().block();
+
+        Assertions.assertTrue(configurations.getFirst().defaultModel());
+        Assertions.assertFalse(configurations.getLast().defaultModel());
+        verifyNoInteractions(teamRepository);
+    }
+
+    /**
+     * 构造来自指定空间的模型配置记录。
+     * @param id 模型配置标识
+     * @param modelType 模型类型
+     * @param teamId 所属空间，零表示平台
+     * @param defaultModel 模型表中的默认标记
+     * @return 用于查询测试的模型记录
+     */
+    private PersistenceRecords.UserAiModelConfigRecord modelConfiguration(String id, String modelType, long teamId, boolean defaultModel) {
+        PersistenceRecords.UserAiModelConfigRecord record = new PersistenceRecords.UserAiModelConfigRecord();
+        record.setModelConfigId(id);
+        record.setChannelId("channel-1");
+        record.setModelName(id);
+        record.setModelType(modelType);
+        record.setTeamId(teamId);
+        record.setDefaultModel(defaultModel);
+        return record;
     }
 
     /** 团队管理员不能通过更新只读渠道触发平台密钥解密。 */

@@ -204,11 +204,24 @@ public class PersistenceService {
                     .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, "平台授权资源为只读，只能修改团队自有配置"))).then());
     }
 
-    /** 查询全站模型配置。 */
+    /**
+     * 查询当前空间自有模型配置，并按团队保存的偏好回填默认模型。
+     * @return 当前空间的模型配置列表
+     */
     public Mono<List<PersistenceDtos.ModelConfig>> listModelConfigs() {
-        return TeamScope.current().flatMap(scope -> repository.listPlatformAiModelConfigs()
-                .filter(record -> scope.teamId() == 0 || java.util.Objects.equals(record.getTeamId(), scope.teamId()))
-                .map(this::modelConfigDto).collectList());
+        return TeamScope.current().flatMap(scope -> {
+            // 团队默认模型保存在资源偏好中，平台仍使用模型表中的默认标记。
+            Mono<List<String>> defaultModelIds = scope.teamId() == 0 ? Mono.just(List.of())
+                    : teamRepository.listPreferences(scope.teamId())
+                        .filter(item -> "model".equals(item.getString("resourceType")) && item.getBooleanValue("isDefault"))
+                        .map(item -> item.getString("resourceId")).collectList();
+            return defaultModelIds.flatMap(defaults -> repository.listPlatformAiModelConfigs()
+                    .filter(record -> scope.teamId() == 0 || java.util.Objects.equals(record.getTeamId(), scope.teamId()))
+                    .map(record -> {
+                        if (scope.teamId() > 0) record.setDefaultModel(defaults.contains(record.getModelConfigId()));
+                        return modelConfigDto(record);
+                    }).collectList());
+        });
     }
 
     /** 查询全站模型配置，供任务执行和模型目录复用。 */
