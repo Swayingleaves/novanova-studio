@@ -55,7 +55,7 @@ import reactor.util.retry.Retry;
  * @createTime   2026-08-24 00:00
  * <p>
  * 按模型配置的请求示例模板组装请求体（{{prompt}}等占位符替换），POST到渠道baseUrl发起调用，
- * 再按响应示例中配置的结果路径（如data.image.url）提取媒体地址；视频模型支持提交后轮询查询接口，
+ * 再按配置的结果路径（如data.image.url、data[0].b64_json）提取媒体地址或图片内容；视频模型支持提交后轮询查询接口，
  * 全部提取失败时交给默认文本模型（LLM）从响应原文中提取媒体地址。
  */
 @Component
@@ -143,8 +143,8 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                 ? "text-to-image" : "image-to-image";
         PersistenceDtos.CustomModelGroupConfig group = requireGroup(context, mode);
         return resolveReferenceUrls(context, AiTaskParameterReader.safeReferences(context.request().references()))
-                .flatMap(referenceUrls -> submitAndResolveUrl(context, group, mode, AiTaskTypes.IMAGE, referenceUrls, List.of(), List.of()))
-                .flatMap(url -> registerMedia(context, AiTaskTypes.IMAGE, url));
+                .flatMap(referenceUrls -> submitAndResolveResult(context, group, mode, AiTaskTypes.IMAGE, referenceUrls, List.of(), List.of()))
+                .flatMap(result -> registerMedia(context, AiTaskTypes.IMAGE, result));
     }
 
     /**
@@ -160,15 +160,15 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                         resolveReferenceUrls(context, AiTaskParameterReader.safeReferences(context.request().references())),
                         resolveReferenceUrls(context, AiTaskParameterReader.safeReferences(context.request().videoReferences())),
                         resolveReferenceUrls(context, AiTaskParameterReader.safeReferences(context.request().audioReferences())))
-                .flatMap(tuple -> submitAndResolveUrl(context, group, mode, AiTaskTypes.VIDEO, tuple.getT1(), tuple.getT2(), tuple.getT3()))
+                .flatMap(tuple -> submitAndResolveResult(context, group, mode, AiTaskTypes.VIDEO, tuple.getT1(), tuple.getT2(), tuple.getT3()))
                 .flatMap(url -> registerMedia(context, AiTaskTypes.VIDEO, url));
     }
 
     /**
-     * 提交请求并解析最终媒体URL。
+     * 提交请求并解析最终媒体地址或图片内容。
      * <p>
-     * 提交响应按结果路径提取：命中http(s)地址直接成功；视频模式且配置了查询模板时，
-     * 将提取结果作为任务ID进入轮询；其余情况交给LLM回退提取。
+     * 提交响应按结果路径提取：图片返回地址或Base64内容，视频返回http(s)地址时直接成功；
+     * 视频配置查询模板时，将提取结果作为任务ID进入轮询；其余情况交给默认文本模型提取地址。
      *
      * @param context           AiTaskExecutionContext AI任务执行上下文
      * @param group             PersistenceDtos.CustomModelGroupConfig 当前能力或模式配置
@@ -177,9 +177,9 @@ public class CustomProviderAdapter implements AiProviderAdapter {
      * @param referenceUrls     List<String> 参考图片URL列表
      * @param videoReferenceUrls List<String> 参考视频URL列表
      * @param audioReferenceUrls List<String> 参考音频URL列表
-     * @return Mono<String> 媒体URL
+     * @return Mono<String> 媒体URL或Base64图片内容
      */
-    private Mono<String> submitAndResolveUrl(AiTaskExecutionContext context, PersistenceDtos.CustomModelGroupConfig group,
+    private Mono<String> submitAndResolveResult(AiTaskExecutionContext context, PersistenceDtos.CustomModelGroupConfig group,
                                              String mode, String taskKind, List<String> referenceUrls, List<String> videoReferenceUrls,
                                              List<String> audioReferenceUrls) {
         if (!StringUtils.hasText(group.requestPath())) {
@@ -201,7 +201,8 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                         return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.customModelRequestFailed", errorMessage)));
                     }
                     String extracted = extractByPath(response, group.resultPath());
-                    if (isHttpUrl(extracted)) {
+                    // 图片结果路径可指向纯Base64或data URL，无需交给文本模型提取HTTP地址。
+                    if (isHttpUrl(extracted) || (AiTaskTypes.IMAGE.equals(taskKind) && StringUtils.hasText(extracted))) {
                         return Mono.just(extracted);
                     }
                     if (AiTaskTypes.VIDEO.equals(taskKind) && StringUtils.hasText(group.queryPath())
@@ -444,16 +445,23 @@ public class CustomProviderAdapter implements AiProviderAdapter {
     }
 
     /**
-     * 登记生成媒体地址并返回任务结果。
+     * 登记生成媒体地址或转存Base64图片，并返回任务结果。
      *
      * @param context  AiTaskExecutionContext AI任务执行上下文
      * @param taskKind String 任务类型
-     * @param url      String 媒体URL
+     * @param result   String 媒体URL或Base64图片内容
      * @return Mono<JSONObject> 任务结果JSON
      */
-    private Mono<JSONObject> registerMedia(AiTaskExecutionContext context, String taskKind, String url) {
+    private Mono<JSONObject> registerMedia(AiTaskExecutionContext context, String taskKind, String result) {
+        String value = result.trim();
+        if (AiTaskTypes.IMAGE.equals(taskKind) && !isHttpUrl(value)) {
+            String field = value.regionMatches(true, 0, "data:", 0, 5) ? "url" : "b64_json";
+            return mediaSupport.storeGeneratedImageItem(context.task().getUserId(),
+                            new JSONObject(Map.of(field, value)), null, null, null)
+                    .map(media -> AiJsonUtils.jsonObject(Map.of("item", media)));
+        }
         String mimeType = AiTaskTypes.VIDEO.equals(taskKind) ? "video/mp4" : null;
-        return mediaSupport.registerGeneratedMediaUrl(context.task().getUserId(), taskKind, url, mimeType, null, null, null)
+        return mediaSupport.registerGeneratedMediaUrl(context.task().getUserId(), taskKind, value, mimeType, null, null, null)
                 .map(media -> AiJsonUtils.jsonObject(Map.of("item", media)));
     }
 

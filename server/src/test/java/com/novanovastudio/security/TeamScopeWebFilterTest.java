@@ -25,6 +25,23 @@ import reactor.test.StepVerifier;
  * @date 2026-10-18 10:00
  */
 class TeamScopeWebFilterTest {
+    /** 全局轮询配置无需登录，团队页面携带的空间标识不能触发成员校验。 */
+    @Test
+    void shouldReadPublicRuntimeConfigurationInPlatformScope() {
+        TeamRepository repository = mock(TeamRepository.class);
+        TeamScopeWebFilter filter = new TeamScopeWebFilter(repository, new CurrentUserProvider());
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/v1/config/getRuntimeConfig")
+                .header("X-Team-Id", "101"));
+
+        StepVerifier.create(filter.filter(exchange, request -> TeamScope.current().doOnNext(scope -> {
+            assertEquals(TeamScope.PLATFORM, scope);
+            request.getResponse().setStatusCode(HttpStatus.OK);
+        }).then())).verifyComplete();
+
+        assertEquals(HttpStatus.OK, exchange.getResponse().getStatusCode());
+        verifyNoInteractions(repository);
+    }
+
     /**
      * 授权查询中的团队是管理目标，平台超级管理员无需入团，普通账号仍受角色校验限制。
      *

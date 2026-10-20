@@ -39,7 +39,7 @@ public class TeamScopeWebFilter implements WebFilter {
     private static final Set<String> EVENT_STREAM_PATHS = Set.of("/api/v1/ai/task/subscribe", "/api/v1/ai/agent/events");
 
     /**
-     * 校验显式团队标识，身份接口始终在平台空间执行。
+     * 校验显式团队标识，身份和全局运行时配置接口始终在平台空间执行。
      * @param exchange 当前请求
      * @param chain 后续过滤器
      * @return 请求处理结果
@@ -63,7 +63,7 @@ public class TeamScopeWebFilter implements WebFilter {
                     .onErrorResume(BusinessException.class, error -> reject(exchange, error.getMessage()).then(Mono.empty()))
                     .flatMap(user -> chain.filter(exchange).contextWrite(context -> TeamScope.PLATFORM.apply(context).put(TeamScope.FILTER_KEY, filterTeamId)));
         }
-        if (teamValue == null || teamValue.isBlank() || "0".equals(teamValue) || isIdentityPath(path))
+        if (teamValue == null || teamValue.isBlank() || "0".equals(teamValue) || isPlatformPath(path))
             return chain.filter(exchange).contextWrite(TeamScope.PLATFORM::apply);
         long teamId;
         try { teamId = Long.parseLong(teamValue); if (teamId < 1) throw new NumberFormatException(); }
@@ -92,13 +92,13 @@ public class TeamScopeWebFilter implements WebFilter {
     }
 
     /**
-     * 全局身份和邀请管理接口不能被URL团队切换影响。
+     * 全局身份、邀请管理和公开运行时配置不受URL团队切换影响。
      * @param path 请求路径
      * @return 是否独立于团队上下文
      */
-    private boolean isIdentityPath(String path) {
+    private boolean isPlatformPath(String path) {
         return path.startsWith("/api/v1/auth/") || Set.of("/api/v1/team/getPublicTeam", "/api/v1/team/listMyTeams",
-                "/api/v1/team/listMyInvitations", "/api/v1/team/acceptInvitation").contains(path);
+                "/api/v1/team/listMyInvitations", "/api/v1/team/acceptInvitation", "/api/v1/config/getRuntimeConfig").contains(path);
     }
 
     /**

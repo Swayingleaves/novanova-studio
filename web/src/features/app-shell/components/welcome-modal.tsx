@@ -36,7 +36,7 @@ export function WelcomeModal() {
         }
     };
 
-    if (!user || user.welcomeRead) return null;
+    if (brand.isTeam || !user || user.welcomeRead) return null;
     const creditBalanceText = user.creditBalance.toLocaleString(currentLanguageTag());
 
     return (

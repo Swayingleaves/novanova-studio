@@ -9,6 +9,8 @@ import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.service.PersistenceService;
+import java.io.ByteArrayInputStream;
+import java.net.URLConnection;
 import java.util.Base64;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -62,7 +64,12 @@ public class AiMediaSupport {
     public Mono<GeneratedBinary> imageBinary(JSONObject item) {
         String base64 = AiTaskParameterReader.firstNonEmpty(item.getString("b64_json"));
         if (StringUtils.hasText(base64)) {
-            return Mono.fromSupplier(() -> new GeneratedBinary(Base64.getDecoder().decode(base64), "image/png"));
+            return Mono.fromCallable(() -> {
+                byte[] data = Base64.getDecoder().decode(base64);
+                // 识别图片文件头，避免JPEG内容被登记为PNG。
+                String mimeType = URLConnection.guessContentTypeFromStream(new ByteArrayInputStream(data));
+                return new GeneratedBinary(data, AiTaskParameterReader.firstNonEmpty(mimeType, "image/png"));
+            });
         }
         String url = AiTaskParameterReader.firstNonEmpty(item.getString("url"));
         if (StringUtils.hasText(url)) {
@@ -95,7 +102,8 @@ public class AiMediaSupport {
             // 保持默认行为：仅登记第三方URL，不下载后上传对象存储。
             return registerGeneratedMediaUrl(userId, AiTaskTypes.IMAGE, url, AiTaskParameterReader.firstNonEmpty(item.getString("mime_type"), item.getString("mimeType"), "image/png"), width, height, durationMs);
         }
-        return imageBinary(item).flatMap(binary -> storeGeneratedMedia(userId, AiTaskTypes.IMAGE, "generated.png", binary, width, height, durationMs));
+        return imageBinary(item).flatMap(binary -> storeGeneratedMedia(userId, AiTaskTypes.IMAGE,
+                "generated." + fileExtension(binary.mimeType(), "png"), binary, width, height, durationMs));
     }
 
     /**
