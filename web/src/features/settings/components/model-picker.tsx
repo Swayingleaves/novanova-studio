@@ -118,7 +118,8 @@ function ModelLabel({ config, model, showRealName }: { config: AiConfig; model: 
     );
 }
 
-function ModelIcon({ config, model }: { config: AiConfig; model: string }) {
+/** 模型图标：优先使用管理端配置的图标，其次按模型名和接口格式自动匹配。 */
+export function ModelIcon({ config, model }: { config: AiConfig; model: string }) {
     const modelName = model ? modelOptionName(model) : "";
     const apiFormat = model ? resolveModelRequestConfig(config, model).apiFormat : undefined;
     const configuredKey = model ? config.modelIcons?.[model] : undefined;

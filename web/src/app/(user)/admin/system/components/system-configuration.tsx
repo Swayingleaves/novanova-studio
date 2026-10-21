@@ -16,17 +16,18 @@ import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
-import { ModelPicker } from "@/features/settings/components/model-picker";
-import { MODEL_ICON_OPTIONS } from "@/features/settings/components/model-icon";
+import { ModelIcon } from "@/features/settings/components/model-picker";import { MODEL_ICON_OPTIONS } from "@/features/settings/components/model-icon";
 import { createModelCapabilityOptions,
     configFromModelConfigs,
     createModelChannel,
     createObjectStorageConfig,
     defaultBaseUrlForApiFormat,
     MODEL_CAPABILITY_OPTIONS,
+    modelOptionChannel,
     modelOptionLabelWithRealName,
     normalizeModelOptionValue,
     useConfigStore,
+    type AiConfig,
     type ApiCallFormat,
     type CustomModelGroupConfig,
     type ModelCapability,
@@ -64,6 +65,7 @@ import { blockingModelConfigDependencyIssues, createDraftModelConfigs, modelConf
 import { useConfigurationLeaveGuard } from "../use-configuration-leave-guard";
 import { cloneImageSizeMappings, normalizeImageSizeMappings, type ImageSizeMappings } from "@/features/generation/lib/image-size-mappings";
 import { ImageSizeMappingsEditor } from "./image-size-mappings-editor";
+import { ModelSelectModal, type ChannelModelGroup } from "./model-select-modal";
 
 type ConfigurationTabKey = "channels" | "models" | "credits" | "invitationReward" | "checkIn" | "objectStorage";
 
@@ -188,6 +190,7 @@ export function SystemConfiguration() {
     const [checkInBaseline, setCheckInBaseline] = useState<CreditAmount>(0);
     const [draftCheckInCredits, setDraftCheckInCredits] = useState<CreditAmount>(0);
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
+    const [modelPicker, setModelPicker] = useState<{ capability: ModelCapability; mode: "options" | "default" } | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
     const [collapsedEditingCapabilities, setCollapsedEditingCapabilities] = useState<string[]>([]);
     const editingModelIsMedia = Boolean(editingModelConfig && (editingModelConfig.modelType === "image" || editingModelConfig.modelType === "video"));
@@ -254,7 +257,15 @@ export function SystemConfiguration() {
         return nextConfig;
     }, [config, draftChannels, draftModelConfigs, translate.locale]);
     const dependencyIssues = useMemo(() => modelConfigDependencyIssues(channelBaseline, draftModelConfigs), [channelBaseline, draftModelConfigs, translate.locale]);
-    const modelOptions = useMemo(() => uniqueModels([...draftConfig.models, ...draftModelConfigs.map(modelConfigValue)]).map((model) => ({ label: modelOptionLabelWithRealName(draftConfig, model), value: model })), [draftConfig, draftModelConfigs, translate.locale]);
+    // 「我的模型」的模型选择走弹窗：左侧渠道、右侧该渠道的模型。
+    const modelGroups = useMemo(() => createChannelModelGroups(draftConfig, uniqueModels([...draftConfig.models, ...draftModelConfigs.map(modelConfigValue)]), translate), [draftConfig, draftModelConfigs, translate.locale]);
+    const capabilityModelGroups = useMemo(
+        () => new Map(createModelGroups(translate).map((group) => [group.capability, createChannelModelGroups(draftConfig, draftConfig[group.modelsKey], translate)])),
+        [draftConfig, translate.locale],
+    );
+    const modelPickerGroup = modelPicker ? createModelGroups(translate).find((group) => group.capability === modelPicker.capability) : undefined;
+    const modelPickerGroups: ChannelModelGroup[] = !modelPicker || !modelPickerGroup ? [] : modelPicker.mode === "options" ? modelGroups : capabilityModelGroups.get(modelPicker.capability) || [];
+    const modelPickerValues = !modelPicker || !modelPickerGroup ? [] : modelPicker.mode === "options" ? draftConfig[modelPickerGroup.modelsKey] : draftConfig[modelPickerGroup.modelKey] ? [draftConfig[modelPickerGroup.modelKey]] : [];
     const channelsDirty = !sameValue(draftChannels, channelBaseline);
     const modelConfigsDirty = !sameValue(draftModelConfigs, modelConfigBaseline);
     const objectStoragesDirty = !sameValue(draftObjectStorages, objectStorageBaseline);
@@ -362,9 +373,10 @@ export function SystemConfiguration() {
         const values = uniqueModels(models.map((model) => normalizeModelOptionValue(model, draftChannels)).filter(Boolean));
         if (values.some((value) => !value.includes("::"))) {
             message.warning(translate("appShell.addModelsInMyChannelsBeforeConfiguringOptions"));
-            return;
+            return false;
         }
         setDraftModelConfigs((configs) => updateModelConfigSelection(configs, modelConfigBaseline, group.capability, values, createDraftModelConfig));
+        return true;
     };
 
     const openModelConfigEditor = (configItem: ServerModelConfig) => {
@@ -420,6 +432,23 @@ export function SystemConfiguration() {
 
     const setDefaultDraftModel = (modelType: ModelCapability, model: string) => {
         setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType ? { ...configItem, defaultModel: modelConfigValue(configItem) === model } : configItem)));
+    };
+
+    const confirmModelPicker = (values: string[]) => {
+        if (!modelPicker || !modelPickerGroup) return;
+        if (modelPicker.mode === "options") {
+            // 依赖失效的模型会被拒绝，保留弹窗让用户取消勾选。
+            if (!updateCapabilityModels(modelPickerGroup, values)) return;
+        } else {
+            setDefaultDraftModel(modelPicker.capability, values[0] || "");
+        }
+        setModelPicker(null);
+    };
+
+    /** 弹窗里已存在的模型配置可以直接打开配置弹窗编辑，未保存的模型先确认加入再配置。 */
+    const configurePickedModel = (model: string) => {
+        const configItem = draftModelConfigs.find((item) => item.modelType === modelPicker?.capability && modelConfigValue(item) === model);
+        if (configItem) openModelConfigEditor(configItem);
     };
 
     const saveModelConfigs = async () => {
@@ -842,16 +871,14 @@ export function SystemConfiguration() {
                                     <div className="grid gap-4 md:grid-cols-2">
                                         {createModelGroups(translate).map((group) => (
                                             <Form.Item key={group.modelsKey} label={group.optionsLabel} className="mb-0">
-                                                <Select
-                                                    mode="tags"
-                                                    showSearch
-                                                    allowClear
-                                                    maxTagCount="responsive"
+                                                <ModelFieldTrigger
+                                                    config={draftConfig}
+                                                    models={draftConfig[group.modelsKey]}
+                                                    multiple
                                                     placeholder={draftConfig.models.length ? translate("appShell.selectOrEnter", { value0: group.optionsLabel }) : translate("appShell.enterOrFetchChannelModelsFirst")}
-                                                    value={draftConfig[group.modelsKey]}
-                                                    options={modelOptions}
+                                                    actionLabel={translate("appShell.selectModels")}
                                                     disabled={isSaving}
-                                                    onChange={(models) => updateCapabilityModels(group, models)}
+                                                    onOpen={() => setModelPicker({ capability: group.capability, mode: "options" })}
                                                 />
                                             </Form.Item>
                                         ))}
@@ -859,9 +886,14 @@ export function SystemConfiguration() {
                                     <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                                         {createModelGroups(translate).map((group) => (
                                             <Form.Item key={group.modelKey} label={group.defaultLabel} className="mb-0">
-                                                <div className={isSaving ? "pointer-events-none opacity-60" : ""}>
-                                                    <ModelPicker config={draftConfig} value={draftConfig[group.modelKey]} onChange={(model) => setDefaultDraftModel(group.capability, model)} capability={group.capability} fullWidth showRealName />
-                                                </div>
+                                                <ModelFieldTrigger
+                                                    config={draftConfig}
+                                                    models={draftConfig[group.modelKey] ? [draftConfig[group.modelKey]] : []}
+                                                    placeholder={translate("settings.selectModel")}
+                                                    actionLabel={translate("appShell.selectModels")}
+                                                    disabled={isSaving}
+                                                    onOpen={() => setModelPicker({ capability: group.capability, mode: "default" })}
+                                                />
                                             </Form.Item>
                                         ))}
                                     </div>
@@ -1126,6 +1158,19 @@ export function SystemConfiguration() {
                     ].filter((item) => !team || !["credits", "invitationReward", "checkIn"].includes(item.key))}
                 />
             )}
+            {modelPicker && modelPickerGroup ? (
+                <ModelSelectModal
+                    config={draftConfig}
+                    title={modelPicker.mode === "options" ? modelPickerGroup.optionsLabel : modelPickerGroup.defaultLabel}
+                    groups={modelPickerGroups}
+                    value={modelPickerValues}
+                    multiple={modelPicker.mode === "options"}
+                    configurableValues={draftModelConfigs.filter((item) => item.modelType === modelPicker.capability).map(modelConfigValue)}
+                    onConfigure={configurePickedModel}
+                    onCancel={() => setModelPicker(null)}
+                    onConfirm={confirmModelPicker}
+                />
+            ) : null}
             <Modal
                 title={
                     editingModelConfig ? (
@@ -1146,6 +1191,8 @@ export function SystemConfiguration() {
                 }
                 open={Boolean(editingModelConfig)}
                 centered
+                // 从模型选择弹窗里打开配置时叠在弹窗之上。
+                zIndex={modelPicker ? 1200 : undefined}
                 width={editingModelConfig?.modelType === "video" ? 980 : 760}
                 destroyOnHidden
                 okText={translate("appShell.confirm")}
@@ -1658,6 +1705,66 @@ function modelConfigValue(config: Pick<ServerModelConfig, "channelId" | "modelNa
 
 function uniqueModels(models: string[]) {
     return Array.from(new Set(models.map((model) => model.trim()).filter(Boolean)));
+}
+
+/** 按渠道聚合模型，供模型选择弹窗渲染。 */
+function createChannelModelGroups(config: AiConfig, models: string[], translator: typeof translate = translate): ChannelModelGroup[] {
+    const channels = config.channels.map((channel) => ({ channelId: channel.id, channelName: channel.name.trim() || translator("appShell.unnamedChannel"), models: [] as string[] }));
+    const channelsById = new Map(channels.map((channel) => [channel.channelId, channel]));
+    const unassigned: string[] = [];
+    for (const model of models) {
+        const channel = channelsById.get(modelOptionChannel(config, model)?.id || "");
+        if (channel) channel.models.push(model);
+        else unassigned.push(model);
+    }
+    const groups: ChannelModelGroup[] = channels
+        .filter((channel) => channel.models.length)
+        .map((channel) => ({ channelId: channel.channelId, channelName: channel.channelName, models: channel.models.map((model) => ({ value: model, label: modelOptionLabelWithRealName(config, model, false) })) }));
+    if (unassigned.length) {
+        groups.push({ channelId: "", channelName: translator("appShell.noChannelModels"), models: unassigned.map((model) => ({ value: model, label: modelOptionLabelWithRealName(config, model, false) })) });
+    }
+    return groups;
+}
+
+/** 模型选择弹窗的触发器：展示已选模型，点击按钮打开弹窗。 */
+function ModelFieldTrigger({ config, models, multiple = false, placeholder, actionLabel, disabled, onOpen }: {
+    config: AiConfig;
+    models: string[];
+    multiple?: boolean;
+    placeholder: string;
+    actionLabel: string;
+    disabled: boolean;
+    onOpen: () => void;
+}) {
+    return (
+        <div className="flex min-h-8 items-center gap-2 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2 py-1">
+            <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
+                {!models.length ? (
+                    <span className="truncate text-sm text-[var(--studio-muted)]">{placeholder}</span>
+                ) : multiple ? (
+                    <>
+                        {models.slice(0, 2).map((model) => (
+                            <span key={model} className="max-w-[8.5rem] shrink-0 truncate rounded bg-[var(--studio-surface-hover)] px-1.5 py-0.5 text-xs text-[var(--studio-text)]">{modelOptionLabelWithRealName(config, model)}</span>
+                        ))}
+                        {models.length > 2 ? <span className="shrink-0 text-xs text-[var(--studio-muted)]">+{models.length - 2}</span> : null}
+                    </>
+                ) : (
+                    <ModelOptionLabel config={config} model={models[0]} showChannel />
+                )}
+            </div>
+            <Button size="small" disabled={disabled} onClick={onOpen}>{actionLabel}</Button>
+        </div>
+    );
+}
+
+/** 模型展示：图标 + 展示名，渠道后缀在关闭态展示。 */
+function ModelOptionLabel({ config, model, showChannel = false }: { config: AiConfig; model: string; showChannel?: boolean }) {
+    return (
+        <span className="flex min-w-0 items-center gap-2">
+            <ModelIcon config={config} model={model} />
+            <span className="truncate">{modelOptionLabelWithRealName(config, model, showChannel)}</span>
+        </span>
+    );
 }
 
 /** 空的自定义模型分组配置。 */

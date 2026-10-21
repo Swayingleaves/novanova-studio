@@ -6,9 +6,11 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiErrorSupport;
 import com.novanovastudio.ai.AiHttpClient;
+import com.novanovastudio.ai.AiImageSizeSupport;
 import com.novanovastudio.ai.AiJsonUtils;
 import com.novanovastudio.ai.AiMediaSupport;
 import com.novanovastudio.ai.AiProviderAdapter;
+import com.novanovastudio.ai.AiRequestBodySupport;
 import com.novanovastudio.ai.AiTaskExecutionContext;
 import com.novanovastudio.ai.AiTaskParameterReader;
 import com.novanovastudio.ai.AiTaskPollingSupport;
@@ -31,7 +33,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
- * Evolink视频生成渠道适配器。
+ * Evolink视频与图片生成渠道适配器。
  *
  * @author   zhenglin.cn.cq@gmail.com
  * @date     2026-08-12 10:30
@@ -43,6 +45,8 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
 
     /** Evolink视频创建接口。 */
     private static final String VIDEO_GENERATION_PATH = "/videos/generations";
+    /** Evolink图片创建接口。 */
+    private static final String IMAGE_GENERATION_PATH = "/images/generations";
     /** Evolink任务查询接口前缀。 */
     private static final String TASK_PATH_PREFIX = "/tasks/";
     /** 最大轮询次数。 */
@@ -74,19 +78,20 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
      */
     @Override
     public boolean supports(String taskType) {
-        return AiTaskTypes.VIDEO.equals(taskType);
+        return AiTaskTypes.VIDEO.equals(taskType) || AiTaskTypes.IMAGE.equals(taskType);
     }
 
     /**
-     * 创建并等待Evolink视频任务。
+     * 创建并等待Evolink图片或视频任务。
      *
      * @param context AiTaskExecutionContext 当前AI任务上下文
-     * @return Mono<JSONObject> 已保存的视频媒体结果
+     * @return Mono<JSONObject> 已保存的媒体结果
      */
     @Override
     public Mono<JSONObject> execute(AiTaskExecutionContext context) {
-        if (!supports(context.task().getTaskType())) {
-            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.evolinkSupportsVideoTasksOnly")));
+        if (AiTaskTypes.IMAGE.equals(context.task().getTaskType())) return executeImageTask(context);
+        if (!AiTaskTypes.VIDEO.equals(context.task().getTaskType())) {
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.evolinkSupportsImageAndVideoTasksOnly")));
         }
         List<AiTaskDtos.AiTaskMediaReference> imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
         List<AiTaskDtos.AiTaskMediaReference> videoReferences = AiTaskParameterReader.safeReferences(context.request().videoReferences());
@@ -132,7 +137,7 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
         payload.put("generate_audio", true);
         payload.put("content_filter", true);
         log.info("创建Evolink视频任务: taskId={}, model={}, audioCount={}", context.task().getId(), context.model(), audioUrls.size());
-        return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_GENERATION_PATH, com.novanovastudio.ai.AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
+        return aiHttpClient.sendJsonRequest(context.channel(), "POST", VIDEO_GENERATION_PATH, AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .map(AiJsonUtils::responsePayload)
                 .flatMap(created -> {
                     String providerTaskId = created.getString("id");
@@ -164,13 +169,13 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
                                 return context.updateRunningProgress(Math.min(95, 10 + attempt)).then(Mono.defer(() -> {
                                     if ("completed".equals(status)) return Mono.just(response);
                                     if (PROCESSING_STATUSES.contains(status)) return Mono.empty();
-                                    if ("failed".equals(status) || "cancelled".equals(status)) return Mono.error(AiErrorSupport.providerTaskFailure(response, "Evolink视频生成失败"));
+                                    if ("failed".equals(status) || "cancelled".equals(status)) return Mono.error(AiErrorSupport.providerTaskFailure(response, "Evolink任务生成失败"));
                                     return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.unknownEvolinkTaskStatus", status)));
                                 }));
                             });
                 }))
                 .next()
-                .switchIfEmpty(Mono.error(AiErrorSupport.providerPollingTimeout("Evolink视频生成超时，请稍后重试")));
+                .switchIfEmpty(Mono.error(AiErrorSupport.providerPollingTimeout("Evolink任务生成超时，请稍后重试")));
     }
 
     /**
@@ -188,6 +193,90 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
         return aiHttpClient.downloadRemoteBinary(resultUrl, "video/mp4")
                 .flatMap(binary -> mediaSupport.storeGeneratedMedia(context.task().getUserId(), AiTaskTypes.VIDEO, "generated-evolink-video.mp4", binary, null, null, null))
                 .map(media -> AiJsonUtils.jsonObject(Map.of("item", media, "providerTaskId", providerTaskId)));
+    }
+
+    /**
+     * 创建并等待Evolink图片任务。
+     *
+     * @param context AiTaskExecutionContext 当前AI任务上下文
+     * @return Mono<JSONObject> 已保存的图片媒体结果
+     */
+    private Mono<JSONObject> executeImageTask(AiTaskExecutionContext context) {
+        List<AiTaskDtos.AiTaskMediaReference> imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
+        if (imageReferences.size() > 16) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.evolinkSupportsUpTo16Images")));
+        }
+        return resolveUrls(context, imageReferences).flatMap(imageUrls -> createImageTask(context, imageUrls));
+    }
+
+    /**
+     * 创建Evolink图片任务并轮询结果。
+     *
+     * @param context AiTaskExecutionContext 当前AI任务上下文
+     * @param imageUrls List<String> 参考图片地址
+     * @return Mono<JSONObject> 已保存的图片媒体结果
+     */
+    private Mono<JSONObject> createImageTask(AiTaskExecutionContext context, List<String> imageUrls) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("model", context.model());
+        payload.put("prompt", context.request().prompt());
+        if (!imageUrls.isEmpty()) payload.put("image_urls", imageUrls);
+        // 部分图片模型不接受n参数，只有需要多张时才显式传递。
+        int count = AiTaskParameterReader.intParameter(context.request().parameters(), "count", 1, 1, 10);
+        if (count > 1) payload.put("n", count);
+        // 手写size优先，其次按模型尺寸表转换；auto不传，交给供应商决定。
+        if (context.customBodyParameters() == null || !context.customBodyParameters().containsKey("size")) {
+            String imageSize = AiImageSizeSupport.resolveSize(context.request().parameters(), context.convertImageSizeToPixels(), context.imageSizeMappings());
+            if (StringUtils.hasText(imageSize)) payload.put("size", imageSize);
+        }
+        AiTaskParameterReader.putNonAuto(payload, context.request().parameters(), "quality");
+        log.info("创建Evolink图片任务: taskId={}, model={}, imageCount={}", context.task().getId(), context.model(), imageUrls.size());
+        return aiHttpClient.sendJsonRequest(context.channel(), "POST", IMAGE_GENERATION_PATH, AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
+                .map(AiJsonUtils::responsePayload)
+                .flatMap(created -> {
+                    String providerTaskId = created.getString("id");
+                    if (!StringUtils.hasText(providerTaskId)) {
+                        return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.evolinkReturnedNoTaskID")));
+                    }
+                    return context.updateRunningProgress(10)
+                            .then(pollTask(context, providerTaskId))
+                            .flatMap(finished -> storeImageResult(context, providerTaskId, finished));
+                });
+    }
+
+    /**
+     * 下载并保存Evolink图片结果。
+     * <p>
+     * Evolink生成的图片链接只有24小时有效期，必须转存到对象存储，否则历史记录很快失效。
+     *
+     * @param context AiTaskExecutionContext 当前AI任务上下文
+     * @param providerTaskId String Evolink任务ID
+     * @param response JSONObject Evolink完成任务响应
+     * @return Mono<JSONObject> 已保存的图片媒体结果
+     */
+    private Mono<JSONObject> storeImageResult(AiTaskExecutionContext context, String providerTaskId, JSONObject response) {
+        JSONArray results = response.getJSONArray("results");
+        if (results == null || results.isEmpty()) {
+            return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.evolinkTaskCompletedWithoutImageURL")));
+        }
+        return Flux.fromIterable(results)
+                .concatMap(url -> aiHttpClient.downloadRemoteBinary(String.valueOf(url), "image/png")
+                        .flatMap(binary -> mediaSupport.storeGeneratedMedia(context.task().getUserId(), AiTaskTypes.IMAGE, imageFileName(binary.mimeType()), binary, null, null, null)))
+                .collectList()
+                .map(items -> AiJsonUtils.jsonObject(Map.of("items", items, "providerTaskId", providerTaskId)));
+    }
+
+    /**
+     * 按图片MIME类型生成保存文件名。
+     *
+     * @param mimeType String 图片MIME类型
+     * @return String 保存文件名
+     */
+    private static String imageFileName(String mimeType) {
+        String normalized = mimeType == null ? "" : mimeType.trim().toLowerCase(Locale.ROOT);
+        if ("image/jpeg".equals(normalized) || "image/jpg".equals(normalized)) return "generated-evolink-image.jpg";
+        if ("image/webp".equals(normalized)) return "generated-evolink-image.webp";
+        return "generated-evolink-image.png";
     }
 
     /**

@@ -399,7 +399,7 @@ export function modelOptionLabel(config: AiConfig, model: string) {
 }
 
 /** 管理端「我的模型」页签专用：同时展示展示名与真实模型名，如「（dsf-v4）deepseek-v4-flash（渠道名）」。 */
-export function modelOptionLabelWithRealName(config: AiConfig, model: string) {
+export function modelOptionLabelWithRealName(config: AiConfig, model: string, showChannel = true) {
     const value = model.trim();
     const parsed = parseModelOption(value);
     if (!parsed) return value;
@@ -408,8 +408,14 @@ export function modelOptionLabelWithRealName(config: AiConfig, model: string) {
     const channel = config.channels.find((item) => item.id === parsed.channelId);
     const channelName = channel?.name;
     const displayPrefix = displayName ? `（${displayName}）` : "";
-    const channelSuffix = channelName ? `（${channelName}）` : "";
+    const channelSuffix = showChannel && channelName ? `（${channelName}）` : "";
     return `${displayPrefix}${realName}${channelSuffix}`;
+}
+
+/** 模型选项所属的渠道；没有渠道前缀或渠道已被删除时返回 undefined。 */
+export function modelOptionChannel(config: AiConfig, model: string) {
+    const parsed = parseModelOption(model.trim());
+    return parsed ? config.channels.find((channel) => channel.id === parsed.channelId) : undefined;
 }
 
 export function modelOptionsFromChannels(channels: ModelChannel[]) {
