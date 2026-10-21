@@ -109,7 +109,7 @@ test("服务端音频能力下发到画布配置时保留能力，价格维度�
     const serverConfig = normalizeServerModelConfig({
         id: "model-config", channelId: "channel", modelName: "MiniMax-H3", modelType: "video", capabilities: ["reference-to-video", "audio-input"], defaultModel: true,
         sortOrder: 0, creditCost: 0, creditUnit: "generation", thinkingEnabled: false, reasoningEffort: "high", requestConcurrency: 1, convertImageSizeToPixels: false, imageSizeMappings: null,
-        customBodyParameters: {}, videoBillingConfiguration: { billingUnit: "generation", minimumDurationSeconds: 3, modePrices: { "reference-to-video": { "720p": 20 } } }, displayName: null, modelIcon: null, isCustomModel: false, customModelConfig: {},
+        customBodyParameters: {}, videoBillingConfiguration: { billingUnit: "generation", minimumDurationSeconds: 3, modePrices: { "reference-to-video": { "720p": 20 } } }, imageBillingConfiguration: null, displayName: null, modelIcon: null, isCustomModel: false, customModelConfig: {},
     });
     const config = configFromModelConfigs([{ id: "channel", name: "测试", baseUrl: "https://example.com", apiKey: "", apiFormat: "minimax", models: ["MiniMax-H3"] }], [serverConfig]);
     assert.deepEqual(config.modelCapabilities, [{ model: "channel::MiniMax-H3", capabilities: ["reference-to-video", "audio-input"] }]);

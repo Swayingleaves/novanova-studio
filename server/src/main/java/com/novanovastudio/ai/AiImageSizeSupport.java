@@ -21,7 +21,7 @@ import org.springframework.util.StringUtils;
 public final class AiImageSizeSupport {
 
     /** 可配置的图片分辨率档位。 */
-    private static final List<String> RESOLUTIONS = List.of("1K", "2K", "4K");
+    public static final List<String> RESOLUTIONS = List.of("1K", "2K", "4K");
 
     /** 像素尺寸允许使用x或乘号，并统一输出小写x。 */
     private static final Pattern PIXEL_SIZE = Pattern.compile("([1-9]\\d*)\\s*[xX×]\\s*([1-9]\\d*)");

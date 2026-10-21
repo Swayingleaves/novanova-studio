@@ -76,11 +76,13 @@ export function quoteVideoWorkflow(input: VideoWorkflowQuoteInput): VideoWorkflo
 
     const imageModel = input.config.imageModel?.trim();
     if (definition.imageStages.length && !imageModel) return { available: false, reason: translate("generation.thisWorkflowRequiresAnImageModel") };
+    // 工作流图片阶段由服务端按默认2K计费，这里同样按2K取价，保持展示价与实扣一致。
     const imageStageCredits = requestCreditCost({
         modelCosts: input.config.modelCosts,
         model: imageModel || "",
         taskType: "image",
         count: 1,
+        resolution: "2K",
     });
     if (definition.imageStages.length && !input.config.modelCosts.some((item) => item.model === imageModel && item.taskType === "image")) {
         return { available: false, reason: translate("generation.imageGenerationPricingIsNotConfigured") };

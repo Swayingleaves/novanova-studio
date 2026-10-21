@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import reactor.core.publisher.Mono;
@@ -116,6 +117,95 @@ class ImageSizeProviderRequestTest {
             case "agnes" -> new AgnesProviderAdapter(client, mediaSupport, new NovanovaProperties());
             default -> throw new IllegalArgumentException("不支持的测试渠道");
         };
+    }
+
+    /**
+     * Evolink 图片任务在 size 为比例时必须同时发送 resolution，否则供应商按默认档位生成。
+     */
+    @Test
+    void shouldSendEvolinkImageResolutionWithRatioSize() {
+        AiHttpClient client = mock(AiHttpClient.class);
+        AiMediaSupport mediaSupport = mock(AiMediaSupport.class);
+        AiGenerationTask task = new AiGenerationTask();
+        task.setId("evolink-image-task");
+        task.setTaskType(AiTaskTypes.IMAGE);
+        task.setUserId(7L);
+        AiTaskDtos.CreateAiTaskRequest request = new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.IMAGE, "夜晚街头人像",
+                "gpt-image-2", Map.<String, Object>of("size", "9:16", "resolution", "2k", "quality", "medium"),
+                List.of(), List.of(), "imagePage");
+        AiTaskDtos.AiChannelConfig channel = new AiTaskDtos.AiChannelConfig("channel", "Evolink",
+                "https://api.evolink.ai/v1", "key", "evolink", List.of("gpt-image-2"));
+        when(client.sendJsonRequest(any(), eq("POST"), eq("/images/generations"), any()))
+                .thenAnswer(invocation -> {
+                    Map<?, ?> payload = invocation.getArgument(3);
+                    Assertions.assertEquals("9:16", payload.get("size"));
+                    Assertions.assertEquals("2K", payload.get("resolution"));
+                    Assertions.assertEquals("medium", payload.get("quality"));
+                    return Mono.error(new IllegalStateException("测试已捕获请求"));
+                });
+
+        AiTaskExecutionContext context = new AiTaskExecutionContext(task, channel, "gpt-image-2", false, "high", request,
+                () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty());
+
+        StepVerifier.create(new EvolinkProviderAdapter(client, mediaSupport, new NovanovaProperties()).execute(context))
+                .expectErrorMessage("测试已捕获请求").verify();
+    }
+
+    /**
+     * Gemini/Nano Banana 用 quality 表示分辨率档位：不能发 resolution，也不能发画质值。
+     */
+    @Test
+    void shouldSendGeminiResolutionAsQuality() {
+        AiHttpClient client = mock(AiHttpClient.class);
+        AiMediaSupport mediaSupport = mock(AiMediaSupport.class);
+        AiGenerationTask task = new AiGenerationTask();
+        task.setId("evolink-gemini-task");
+        task.setTaskType(AiTaskTypes.IMAGE);
+        task.setUserId(7L);
+        AiTaskDtos.CreateAiTaskRequest request = new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.IMAGE, "夜晚街头人像",
+                "gemini-nano-banana-2.1", Map.<String, Object>of("size", "9:16", "resolution", "4k", "quality", "medium", "count", 1),
+                List.of(), List.of(), "imagePage");
+        AiTaskDtos.AiChannelConfig channel = new AiTaskDtos.AiChannelConfig("channel", "Evolink",
+                "https://api.evolink.ai/v1", "key", "evolink", List.of("gemini-nano-banana-2.1"));
+        when(client.sendJsonRequest(any(), eq("POST"), eq("/images/generations"), any()))
+                .thenAnswer(invocation -> {
+                    Map<?, ?> payload = invocation.getArgument(3);
+                    Assertions.assertEquals("9:16", payload.get("size"));
+                    Assertions.assertEquals("4K", payload.get("quality"));
+                    Assertions.assertFalse(payload.containsKey("resolution"));
+                    Assertions.assertFalse(payload.containsKey("n"));
+                    return Mono.error(new IllegalStateException("测试已捕获请求"));
+                });
+
+        AiTaskExecutionContext context = new AiTaskExecutionContext(task, channel, "gemini-nano-banana-2.1", false, "high", request,
+                () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty());
+
+        StepVerifier.create(new EvolinkProviderAdapter(client, mediaSupport, new NovanovaProperties()).execute(context))
+                .expectErrorMessage("测试已捕获请求").verify();
+    }
+
+    /**
+     * Gemini 系列不支持一次生成多张，数量大于1时应在提交前拒绝。
+     */
+    @Test
+    void shouldRejectMultipleImagesForGeminiModel() {
+        AiHttpClient client = mock(AiHttpClient.class);
+        AiMediaSupport mediaSupport = mock(AiMediaSupport.class);
+        AiGenerationTask task = new AiGenerationTask();
+        task.setId("evolink-gemini-batch-task");
+        task.setTaskType(AiTaskTypes.IMAGE);
+        task.setUserId(7L);
+        AiTaskDtos.CreateAiTaskRequest request = new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.IMAGE, "夜晚街头人像",
+                "gemini-nano-banana-2.1", Map.<String, Object>of("size", "1:1", "resolution", "2K", "count", 2),
+                List.of(), List.of(), "imagePage");
+        AiTaskDtos.AiChannelConfig channel = new AiTaskDtos.AiChannelConfig("channel", "Evolink",
+                "https://api.evolink.ai/v1", "key", "evolink", List.of("gemini-nano-banana-2.1"));
+
+        AiTaskExecutionContext context = new AiTaskExecutionContext(task, channel, "gemini-nano-banana-2.1", false, "high", request,
+                () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty());
+
+        StepVerifier.create(new EvolinkProviderAdapter(client, mediaSupport, new NovanovaProperties()).execute(context))
+                .expectErrorMessage("Nano Banana 系列一次只能生成一张图片，请把图片数量设为1").verify();
     }
 
     /**

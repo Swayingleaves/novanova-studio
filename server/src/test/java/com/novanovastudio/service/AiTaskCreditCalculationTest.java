@@ -89,8 +89,42 @@ class AiTaskCreditCalculationTest {
         Assertions.assertTrue(exception.getMessage().contains("只有视频模型"));
     }
 
+    /** 配置分辨率价目表后，图片任务按所选清晰度和数量计费。 */
+    @Test
+    void shouldChargeImageByResolutionPrice() {
+        var configuration = new com.novanovastudio.dto.ImageBillingConfiguration(Map.of(
+                "1K", java.math.BigDecimal.ONE,
+                "2K", java.math.BigDecimal.valueOf(4),
+                "4K", java.math.BigDecimal.valueOf(9)));
+        var credits = calculate(new AiTaskDtos.CreateAiTaskRequest("image", "生成图片", "channel::model",
+                Map.of("count", 2, "resolution", "4K"), List.of(), List.of(), "imagePage"), 7, "generation", configuration);
+
+        Assertions.assertEquals(0, java.math.BigDecimal.valueOf(18).compareTo(credits));
+    }
+
+    /** 配置了价目表但缺少所选清晰度时必须报错，不能静默回退模型单价。 */
+    @Test
+    void shouldRejectMissingImageResolutionPrice() {
+        var configuration = new com.novanovastudio.dto.ImageBillingConfiguration(Map.of("1K", java.math.BigDecimal.ONE));
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> calculate(
+                new AiTaskDtos.CreateAiTaskRequest("image", "生成图片", "channel::model",
+                        Map.of("resolution", "4K"), List.of(), List.of(), "imagePage"), 7, "generation", configuration));
+
+        Assertions.assertTrue(exception.getMessage().contains("4K"));
+    }
+
+    /** 未配置价目表时沿用模型单价，保证历史模型行为不变。 */
+    @Test
+    void shouldFallbackToModelUnitPriceWithoutImagePricing() {
+        var credits = calculate(new AiTaskDtos.CreateAiTaskRequest("image", "生成图片", "channel::model",
+                Map.of("count", 2, "resolution", "4K"), List.of(), List.of(), "imagePage"), 7, "generation", null);
+
+        Assertions.assertEquals(0, java.math.BigDecimal.valueOf(14).compareTo(credits));
+    }
+
     /**
-     * 通过服务真实私有计算方法执行测试，避免复制计费公式造成测试失真。
+     * 未配置图片分辨率价目表时的计算入口。
      *
      * @param request CreateAiTaskRequest 任务请求
      * @param creditCost int 模型积分单价
@@ -98,12 +132,26 @@ class AiTaskCreditCalculationTest {
      * @return int 应扣积分
      */
     private java.math.BigDecimal calculate(AiTaskDtos.CreateAiTaskRequest request, int creditCost, String creditUnit) {
+        return calculate(request, creditCost, creditUnit, null);
+    }
+
+    /**
+     * 通过服务真实私有计算方法执行测试，避免复制计费公式造成测试失真。
+     *
+     * @param request CreateAiTaskRequest 任务请求
+     * @param creditCost int 模型积分单价
+     * @param creditUnit String 计费单位
+     * @param imageBillingConfiguration ImageBillingConfiguration 图片分辨率价目表，可为null
+     * @return int 应扣积分
+     */
+    private java.math.BigDecimal calculate(AiTaskDtos.CreateAiTaskRequest request, int creditCost, String creditUnit,
+                                           com.novanovastudio.dto.ImageBillingConfiguration imageBillingConfiguration) {
         try {
             Class<?> resolvedModelType = Class.forName("com.novanovastudio.service.AiTaskService$ResolvedModel");
             Constructor<?> constructor = resolvedModelType.getDeclaredConstructor(
                     AiTaskDtos.AiChannelConfig.class, String.class, String.class, java.math.BigDecimal.class, String.class,
                     List.class, VideoBillingConfiguration.class, boolean.class, String.class, com.alibaba.fastjson2.JSONObject.class,
-                    boolean.class, Map.class);
+                    boolean.class, Map.class, boolean.class, Map.class, com.novanovastudio.dto.ImageBillingConfiguration.class);
             constructor.setAccessible(true);
             boolean video = "video".equals(request.taskType());
             VideoBillingConfiguration videoBillingConfiguration = video
@@ -115,7 +163,7 @@ class AiTaskCreditCalculationTest {
                     "model", "model-config", java.math.BigDecimal.valueOf(creditCost), creditUnit,
                     video ? List.of(VideoGenerationMode.TEXT_TO_VIDEO) : List.of(), videoBillingConfiguration, true, "high",
                     new com.alibaba.fastjson2.JSONObject(),
-                    false, Map.of());
+                    false, Map.of(), false, null, imageBillingConfiguration);
             Method method = AiTaskService.class.getDeclaredMethod("calculateTaskCredits", AiTaskDtos.CreateAiTaskRequest.class, resolvedModelType);
             method.setAccessible(true);
             return (java.math.BigDecimal) method.invoke(new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), null, null, null, null, null, null, null, null, null, null, null, null), request, resolvedModel);

@@ -19,6 +19,7 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
+import com.novanovastudio.dto.PersistenceDtos;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -51,6 +52,10 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
     private static final String TASK_PATH_PREFIX = "/tasks/";
     /** 最大轮询次数。 */
     private static final int MAXIMUM_POLLING_ATTEMPTS = 120;
+    /** 单张图片转存超时，慢速CDN下载超过该时长就退化为登记远程地址。 */
+    private static final Duration IMAGE_TRANSFER_TIMEOUT = Duration.ofSeconds(150);
+    /** 登记远程图片地址超时。 */
+    private static final Duration IMAGE_REGISTER_TIMEOUT = Duration.ofSeconds(30);
     /** 处理中状态。 */
     private static final Set<String> PROCESSING_STATUSES = Set.of("pending", "processing");
     /** AI HTTP客户端。 */
@@ -203,10 +208,37 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
      */
     private Mono<JSONObject> executeImageTask(AiTaskExecutionContext context) {
         List<AiTaskDtos.AiTaskMediaReference> imageReferences = AiTaskParameterReader.safeReferences(context.request().references());
-        if (imageReferences.size() > 16) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.evolinkSupportsUpTo16Images")));
+        // Gemini/Nano Banana 单次最多14张参考图，其余模型16张。
+        int maximumImages = usesGeminiImageSemantics(context.model()) ? 14 : 16;
+        if (imageReferences.size() > maximumImages) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.evolinkSupportsUpToImages", maximumImages)));
         }
         return resolveUrls(context, imageReferences).flatMap(imageUrls -> createImageTask(context, imageUrls));
+    }
+
+    /**
+     * 判断模型是否使用Gemini/Nano Banana参数语义。
+     * <p>
+     * 该系列用 quality 表示分辨率档位（1K/2K/4K），没有 resolution 与 n 参数，size 只接受比例枚举。
+     *
+     * @param model String 模型名称
+     * @return boolean 是否使用Gemini参数语义
+     */
+    private static boolean usesGeminiImageSemantics(String model) {
+        String normalized = model == null ? "" : model.toLowerCase(Locale.ROOT);
+        return normalized.contains("gemini") || normalized.contains("nano-banana");
+    }
+
+    /**
+     * 读取图片清晰度档位，缺省或auto时按供应商默认的2K。
+     *
+     * @param parameters Map<String, Object> 任务参数
+     * @return String 1K、2K或4K
+     */
+    private static String imageResolution(Map<String, Object> parameters) {
+        String value = AiTaskParameterReader.parameterText(parameters, "resolution", "");
+        String normalized = value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
+        return AiImageSizeSupport.RESOLUTIONS.contains(normalized) ? normalized : "2K";
     }
 
     /**
@@ -217,20 +249,38 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
      * @return Mono<JSONObject> 已保存的图片媒体结果
      */
     private Mono<JSONObject> createImageTask(AiTaskExecutionContext context, List<String> imageUrls) {
+        boolean geminiSemantics = usesGeminiImageSemantics(context.model());
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", context.model());
         payload.put("prompt", context.request().prompt());
         if (!imageUrls.isEmpty()) payload.put("image_urls", imageUrls);
-        // 部分图片模型不接受n参数，只有需要多张时才显式传递。
+        // 部分图片模型不接受n参数，只有需要多张时才显式传递；Gemini系列不支持一次生成多张。
         int count = AiTaskParameterReader.intParameter(context.request().parameters(), "count", 1, 1, 10);
+        if (geminiSemantics && count > 1) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.evolinkGeminiDoesNotSupportMultipleImages")));
+        }
         if (count > 1) payload.put("n", count);
-        // 手写size优先，其次按模型尺寸表转换；auto不传，交给供应商决定。
+        // 手写size优先，其次按模型尺寸表转换；auto不传，交给供应商决定。Gemini只接受比例，忽略像素转换。
         if (context.customBodyParameters() == null || !context.customBodyParameters().containsKey("size")) {
-            String imageSize = AiImageSizeSupport.resolveSize(context.request().parameters(), context.convertImageSizeToPixels(), context.imageSizeMappings());
+            String imageSize = AiImageSizeSupport.resolveSize(context.request().parameters(),
+                    !geminiSemantics && context.convertImageSizeToPixels(), context.imageSizeMappings());
             if (StringUtils.hasText(imageSize)) payload.put("size", imageSize);
         }
-        AiTaskParameterReader.putNonAuto(payload, context.request().parameters(), "quality");
-        log.info("创建Evolink图片任务: taskId={}, model={}, imageCount={}", context.task().getId(), context.model(), imageUrls.size());
+        if (geminiSemantics) {
+            // Gemini用quality表达分辨率档位，没有独立画质参数，前端画质选择不参与该模型。
+            payload.put("quality", imageResolution(context.request().parameters()));
+        } else {
+            // size为比例时，实际像素档位由resolution决定，必须一起传给供应商；显式像素尺寸下该参数会被忽略。
+            if (context.customBodyParameters() == null || !context.customBodyParameters().containsKey("resolution")) {
+                String resolution = AiTaskParameterReader.parameterText(context.request().parameters(), "resolution", "");
+                if (StringUtils.hasText(resolution) && !"auto".equalsIgnoreCase(resolution)) {
+                    payload.put("resolution", resolution.trim().toUpperCase(Locale.ROOT));
+                }
+            }
+            AiTaskParameterReader.putNonAuto(payload, context.request().parameters(), "quality");
+        }
+        log.info("创建Evolink图片任务: taskId={}, model={}, imageCount={}, quality={}, resolution={}", context.task().getId(),
+                context.model(), imageUrls.size(), payload.get("quality"), payload.get("resolution"));
         return aiHttpClient.sendJsonRequest(context.channel(), "POST", IMAGE_GENERATION_PATH, AiRequestBodySupport.mergeCustomBodyParameters(payload, context.customBodyParameters()))
                 .map(AiJsonUtils::responsePayload)
                 .flatMap(created -> {
@@ -260,10 +310,28 @@ public class EvolinkProviderAdapter implements AiProviderAdapter {
             return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.evolinkTaskCompletedWithoutImageURL")));
         }
         return Flux.fromIterable(results)
-                .concatMap(url -> aiHttpClient.downloadRemoteBinary(String.valueOf(url), "image/png")
-                        .flatMap(binary -> mediaSupport.storeGeneratedMedia(context.task().getUserId(), AiTaskTypes.IMAGE, imageFileName(binary.mimeType()), binary, null, null, null)))
+                .concatMap(url -> storeImage(context, String.valueOf(url)))
                 .collectList()
                 .map(items -> AiJsonUtils.jsonObject(Map.of("items", items, "providerTaskId", providerTaskId)));
+    }
+
+    /**
+     * 转存单张图片；下载过慢时退化为登记远程地址，避免任务挂到等待超时。
+     *
+     * @param context AiTaskExecutionContext 当前AI任务上下文
+     * @param url String Evolink图片地址
+     * @return Mono<UploadedMediaResponse> 已保存的图片媒体
+     */
+    private Mono<PersistenceDtos.UploadedMediaResponse> storeImage(AiTaskExecutionContext context, String url) {
+        return aiHttpClient.downloadRemoteBinary(url, "image/png")
+                .timeout(IMAGE_TRANSFER_TIMEOUT)
+                .flatMap(binary -> mediaSupport.storeGeneratedMedia(context.task().getUserId(), AiTaskTypes.IMAGE, imageFileName(binary.mimeType()), binary, null, null, null))
+                .onErrorResume(error -> {
+                    // 供应商图片链接24小时内可用，转存超时或失败时先登记远程地址，保证任务能正常结束。
+                    log.warn("Evolink图片转存失败，改为登记远程地址: taskId={}, url={}, error={}", context.task().getId(), url, error.getMessage());
+                    return mediaSupport.storeGeneratedImageItem(context.task().getUserId(), AiJsonUtils.jsonObject(Map.of("url", url)), null, null, 0)
+                            .timeout(IMAGE_REGISTER_TIMEOUT);
+                });
     }
 
     /**

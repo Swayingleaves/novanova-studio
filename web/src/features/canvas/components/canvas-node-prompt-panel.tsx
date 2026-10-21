@@ -189,6 +189,7 @@ export function CanvasNodePromptPanel({
                   model: config.model,
                   taskType: mode,
                   count: mode === "image" ? config.count : 1,
+                  resolution: mode === "image" ? config.imageResolution : undefined,
               });
 
     useEffect(() => {

@@ -87,9 +87,10 @@ public class AiHttpClient {
             HttpRequest.Builder builder = baseBearerRequest(channel, path).header("Content-Type", "application/json");
             applyRequestMethod(builder, normalizedMethod, jsonBody);
             HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-            log.info("AI响应 状态码: {} body:{}", response.statusCode(), response.body().length() > MODEL_RESPONSE_LOG_MAXIMUM_CHARACTERS ? response.body().substring(0, MODEL_RESPONSE_LOG_MAXIMUM_CHARACTERS) + "..." : response.body());
             String stage = requestStage(normalizedMethod);
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                // 失败响应没有下游解析日志，这里保留状态码与原始响应体便于定位供应商问题。
+                log.info("AI响应 状态码: {} body:{}", response.statusCode(), abbreviateResponseForLog(response.body()));
                 throw AiErrorSupport.providerException(response.statusCode(), response.body(), stage);
             }
             JSONObject json = parseResponseBody(response.body(), stage);
@@ -116,9 +117,22 @@ public class AiHttpClient {
             JSONObject parsed = JSON.parseObject(body);
             return parsed == null ? new JSONObject() : parsed;
         } catch (Exception exception) {
-            log.error("AI响应体解析失败: stage={}, bodyLength={}, 错误={}", stage, body.length(), exception.getMessage());
+            log.error("AI响应体解析失败: stage={}, bodyLength={}, body={}, 错误={}", stage, body.length(),
+                    abbreviateResponseForLog(body), exception.getMessage());
             throw AiErrorSupport.malformedResponse(stage);
         }
+    }
+
+    /**
+     * 截断过长的响应体，避免日志被大对象撑爆。
+     *
+     * @param body String 响应体
+     * @return String 用于日志的响应体片段
+     */
+    private static String abbreviateResponseForLog(String body) {
+        if (body == null) return "";
+        return body.length() > MODEL_RESPONSE_LOG_MAXIMUM_CHARACTERS
+                ? body.substring(0, MODEL_RESPONSE_LOG_MAXIMUM_CHARACTERS) + "..." : body;
     }
 
     /**

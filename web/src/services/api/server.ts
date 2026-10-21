@@ -13,7 +13,7 @@ import { currentWebsiteLocale, currentLanguageTag } from "@/features/locale/tran
 import { useLanguageStore } from "@/features/locale/language-store";
 import type { ObjectStorageConfig, ObjectStorageFile } from "@/shared/types/object-storage";
 import { getAuthToken, useUserStore, type ServerUserProfile } from "@/features/auth/stores/use-user-store";
-import type { ApiCallFormat, CustomModelGroupConfig, ModelCreditUnit, VideoBillingConfiguration } from "@/features/settings/stores/use-config-store";
+import type { ApiCallFormat, CustomModelGroupConfig, ImageBillingConfiguration, ModelCreditUnit, VideoBillingConfiguration } from "@/features/settings/stores/use-config-store";
 
 type ApiResponse<T> = {
     code: number;
@@ -230,6 +230,7 @@ export type ServerAiModelList = {
         creditUnit: ModelCreditUnit;
         capabilities: string[];
         videoBillingConfiguration: VideoBillingConfiguration | null;
+        imageBillingConfiguration: ImageBillingConfiguration | null;
         icon: string | null;
     }>;
     imageModels: string[];
@@ -314,6 +315,7 @@ export type ServerModelConfig = {
     imageSizeMappings: ImageSizeMappings | null;
     customBodyParameters: Record<string, unknown>;
     videoBillingConfiguration: VideoBillingConfiguration | null;
+    imageBillingConfiguration: ImageBillingConfiguration | null;
     displayName: string | null;
     modelIcon: string | null;
     isCustomModel: boolean;
@@ -1109,7 +1111,7 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "convertImageSizeToPixels" | "imageSizeMappings" | "customBodyParameters" | "videoBillingConfiguration" | "displayName" | "modelIcon" | "isCustomModel" | "customModelConfig">) {
+export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "convertImageSizeToPixels" | "imageSizeMappings" | "customBodyParameters" | "videoBillingConfiguration" | "imageBillingConfiguration" | "displayName" | "modelIcon" | "isCustomModel" | "customModelConfig">) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 

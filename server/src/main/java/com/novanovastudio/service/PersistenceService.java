@@ -19,6 +19,7 @@ import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.common.SensitiveDataCrypto;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
+import com.novanovastudio.dto.ImageBillingConfiguration;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.dto.VideoBillingConfiguration;
 import com.novanovastudio.entity.PersistenceRecords;
@@ -43,6 +44,7 @@ import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -254,6 +256,8 @@ public class PersistenceService {
                     List<String> capabilities = normalizeModelCapabilities(request.modelType(), request.capabilities());
                     VideoBillingConfiguration videoBillingConfiguration = normalizeVideoBillingConfiguration(
                             request.modelType(), capabilities, request.videoBillingConfiguration());
+                    ImageBillingConfiguration imageBillingConfiguration = normalizeImageBillingConfiguration(
+                            request.modelType(), request.imageBillingConfiguration());
                     record.setCapabilities(JSON.toJSONString(capabilities));
                     AudioInputSupport.validateCapability(request.modelType(), capabilities);
                     record.setDefaultModel(false);
@@ -273,6 +277,7 @@ public class PersistenceService {
                             : normalizeCustomBodyParameters(request.customBodyParameters());
                     record.setCustomBodyParameters(JSON.toJSONString(customBodyParameters));
                     record.setVideoBillingConfiguration(videoBillingConfiguration == null ? null : JSON.toJSONString(videoBillingConfiguration));
+                    record.setImageBillingConfiguration(imageBillingConfiguration == null ? null : JSON.toJSONString(imageBillingConfiguration));
                     boolean isCustomModel = Boolean.TRUE.equals(request.isCustomModel());
                     record.setIsCustomModel(isCustomModel);
                     record.setCustomModelConfig(JSON.toJSONString(normalizeCustomModelConfig(request.modelType(), isCustomModel, capabilities, request.customModelConfig())));
@@ -305,6 +310,9 @@ public class PersistenceService {
                             : request.videoBillingConfiguration();
                     VideoBillingConfiguration videoBillingConfiguration = normalizeVideoBillingConfiguration(
                             request.modelType(), capabilities, requestedVideoBillingConfiguration);
+                    // 图片价目表以请求为准，null 表示清空；前端保存时始终携带该字段。
+                    ImageBillingConfiguration imageBillingConfiguration = normalizeImageBillingConfiguration(
+                            request.modelType(), request.imageBillingConfiguration());
                     AudioInputSupport.validateCapability(request.modelType(), capabilities);
                     record.setModelType(request.modelType());
                     record.setCapabilities(JSON.toJSONString(capabilities));
@@ -325,6 +333,7 @@ public class PersistenceService {
                             : normalizeCustomBodyParameters(request.customBodyParameters());
                     record.setCustomBodyParameters(JSON.toJSONString(customBodyParameters));
                     record.setVideoBillingConfiguration(videoBillingConfiguration == null ? null : JSON.toJSONString(videoBillingConfiguration));
+                    record.setImageBillingConfiguration(imageBillingConfiguration == null ? null : JSON.toJSONString(imageBillingConfiguration));
                     boolean isCustomModel = Boolean.TRUE.equals(request.isCustomModel());
                     record.setIsCustomModel(isCustomModel);
                     record.setCustomModelConfig(JSON.toJSONString(normalizeCustomModelConfig(request.modelType(), isCustomModel, capabilities, request.customModelConfig())));
@@ -396,7 +405,8 @@ public class PersistenceService {
                 "image".equals(record.getModelType()) && Boolean.TRUE.equals(record.getConvertImageSizeToPixels()),
                 "image".equals(record.getModelType()) ? AiImageSizeSupport.normalizeMappings(
                         record.getImageSizeMappings() == null ? null : JSON.parseObject(record.getImageSizeMappings(),
-                                new TypeReference<Map<String, Map<String, String>>>() {})) : null);
+                                new TypeReference<Map<String, Map<String, String>>>() {})) : null,
+                parseImageBillingConfiguration(record.getImageBillingConfiguration()));
     }
 
     /**
@@ -517,6 +527,52 @@ public class PersistenceService {
             return JSON.parseObject(value, VideoBillingConfiguration.class);
         } catch (Exception exception) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidVideoTierPricingFormat"));
+        }
+    }
+
+    /**
+     * 规范化图片模型的1K、2K、4K分辨率价目表。
+     *
+     * @param modelType String 模型类型
+     * @param configuration ImageBillingConfiguration 请求价目表
+     * @return ImageBillingConfiguration 规范化结果，非图片模型或未配置时返回null
+     */
+    private ImageBillingConfiguration normalizeImageBillingConfiguration(String modelType, ImageBillingConfiguration configuration) {
+        if (!"image".equals(modelType)) {
+            if (configuration != null) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.onlyImageModelsSupportResolutionPricing"));
+            }
+            return null;
+        }
+        if (configuration == null || configuration.resolutionPrices() == null || configuration.resolutionPrices().isEmpty()) {
+            return null;
+        }
+        Map<String, BigDecimal> prices = new LinkedHashMap<>();
+        for (Map.Entry<String, BigDecimal> entry : configuration.resolutionPrices().entrySet()) {
+            String resolution = entry.getKey() == null ? "" : entry.getKey().trim().toUpperCase(Locale.ROOT);
+            if (!AiImageSizeSupport.RESOLUTIONS.contains(resolution)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imagePriceTableContainsAnUnsupportedResolution"));
+            }
+            if (entry.getValue() == null || entry.getValue().signum() < 0) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageResolutionPriceMustBeANonnegativeNumber"));
+            }
+            prices.put(resolution, entry.getValue());
+        }
+        return new ImageBillingConfiguration(Map.copyOf(prices));
+    }
+
+    /**
+     * 解析数据库保存的图片分辨率价目表。
+     *
+     * @param value String JSON配置文本
+     * @return ImageBillingConfiguration 解析后的配置，未配置时返回null
+     */
+    private ImageBillingConfiguration parseImageBillingConfiguration(String value) {
+        if (!StringUtils.hasText(value) || "null".equals(value.trim())) return null;
+        try {
+            return JSON.parseObject(value, ImageBillingConfiguration.class);
+        } catch (Exception exception) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidImageResolutionPricingFormat"));
         }
     }
 

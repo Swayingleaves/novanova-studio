@@ -1,6 +1,7 @@
 import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import type { ModelCreditUnit } from "@/features/settings/stores/use-config-store";
+import type { ImageResolution } from "@/features/generation/lib/image-size-mappings";
 
 /** 单个模型的积分消耗定义。 */
 export interface ModelCreditCost {
@@ -8,6 +9,8 @@ export interface ModelCreditCost {
     taskType: "image" | "video" | "text";
     credits: CreditAmount;
     unit: ModelCreditUnit;
+    /** 图片模型按清晰度配置的单价，未配置的档位回退到 credits。 */
+    resolutionPrices?: Partial<Record<ImageResolution, CreditAmount>>;
 }
 
 /** 请求积分消耗计算入参。 */
@@ -20,11 +23,19 @@ export interface CreditCostOptions {
     taskType: Exclude<ModelCreditCost["taskType"], "video">;
     /** 请求次数，可为字符串。 */
     count?: string | number;
+    /** 图片请求的清晰度档位，用于取对应档位的单价。 */
+    resolution?: string;
 }
 
-/** 查询单个模型的积分单价，未配置时为0。 */
-function unitCost(modelCosts: ModelCreditCost[], model: string, taskType: ModelCreditCost["taskType"]): CreditAmount {
-    return modelCosts.find((item) => item.model === model && item.taskType === taskType)?.credits ?? 0;
+/** 查询单个模型的积分单价，未配置时为0；图片模型优先按清晰度取价。 */
+function unitCost(modelCosts: ModelCreditCost[], model: string, taskType: ModelCreditCost["taskType"], resolution?: string): CreditAmount {
+    const cost = modelCosts.find((item) => item.model === model && item.taskType === taskType);
+    if (!cost) return 0;
+    const resolutionKey = taskType === "image" && resolution ? (resolution.trim().toUpperCase() as ImageResolution) : undefined;
+    const resolutionPrice = resolutionKey ? cost.resolutionPrices?.[resolutionKey] : undefined;
+    // 空字符串不是合法金额，直接回退模型单价，避免 Decimal 抛错。
+    const priceText = String(resolutionPrice ?? "").trim();
+    return priceText === "" ? cost.credits : (resolutionPrice as CreditAmount);
 }
 
 /**
@@ -36,6 +47,6 @@ function unitCost(modelCosts: ModelCreditCost[], model: string, taskType: ModelC
 export function requestCreditCost(options: CreditCostOptions): CreditAmount {
     if (options.taskType === "text") return 0;
     const count = Math.max(1, Math.floor(Math.abs(Number(options.count)) || 1));
-    const credits = unitCost(options.modelCosts, options.model, options.taskType);
+    const credits = unitCost(options.modelCosts, options.model, options.taskType, options.resolution);
     return creditText(creditAmount(credits).times(count));
 }

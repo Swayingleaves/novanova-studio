@@ -273,10 +273,12 @@ public final class AiTaskDtos {
      * @param capabilities List<String> 模型细能力列表
      * @param videoBillingConfiguration VideoBillingConfiguration 视频分档计费配置
      * @param icon String 模型展示图标标识，可为null
+     * @param imageBillingConfiguration ImageBillingConfiguration 图片分辨率价目表，可为null
      */
     public record AiModelOption(String value, String label, String capability, String provider, String apiFormat,
                                 Boolean defaultModel, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditCost, String creditUnit, List<String> capabilities,
-                                VideoBillingConfiguration videoBillingConfiguration, String icon, Long ownerTeamId) {
+                                VideoBillingConfiguration videoBillingConfiguration, String icon, Long ownerTeamId,
+                                ImageBillingConfiguration imageBillingConfiguration) {
         /**
          * 创建平台模型展示记录。
          * @param value 模型配置字段
@@ -294,7 +296,7 @@ public final class AiTaskDtos {
         public AiModelOption(String value, String label, String capability, String provider, String apiFormat,
                                 Boolean defaultModel, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) BigDecimal creditCost, String creditUnit, List<String> capabilities,
                                 VideoBillingConfiguration videoBillingConfiguration, String icon) {
-            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, creditUnit, capabilities, videoBillingConfiguration, icon, 0L);
+            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, creditUnit, capabilities, videoBillingConfiguration, icon, 0L, null);
         }
         /** 保持既有调用方不返回视频分档计费配置。 */
         public AiModelOption(String value, String label, String capability, String provider, String apiFormat,

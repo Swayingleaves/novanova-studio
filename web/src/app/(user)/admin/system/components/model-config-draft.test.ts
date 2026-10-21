@@ -23,6 +23,7 @@ function configuration(id: string, modelName: string, patch: Partial<ServerModel
         convertImageSizeToPixels: false, imageSizeMappings: null,
         customBodyParameters: {},
         videoBillingConfiguration: null,
+        imageBillingConfiguration: null,
         displayName: null,
         modelIcon: null,
         isCustomModel: false,

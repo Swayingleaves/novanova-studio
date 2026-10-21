@@ -16,7 +16,9 @@ import com.novanovastudio.ai.AiProviderAdapter;
 import com.novanovastudio.ai.AiProviderAdapterRegistry;
 import com.novanovastudio.ai.AiErrorDetails;
 import com.novanovastudio.ai.AiErrorSupport;
+import com.novanovastudio.ai.AiImageSizeSupport;
 import com.novanovastudio.ai.AiTaskExecutionContext;
+import com.novanovastudio.ai.AiTaskParameterReader;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.ai.AiTaskTypes;
 import com.novanovastudio.ai.VideoGenerationMode;
@@ -29,6 +31,7 @@ import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.GenerationStyleDtos;
+import com.novanovastudio.dto.ImageBillingConfiguration;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.dto.VideoBillingConfiguration;
 import com.novanovastudio.entity.AiGenerationTask;
@@ -651,7 +654,7 @@ public class AiTaskService {
                                     .map(channel -> new AiTaskDtos.AiModelOption(
                                             config.channelId() + CHANNEL_MODEL_SEPARATOR + config.modelName(),
                                             StringUtils.hasText(config.displayName()) ? config.displayName() : config.modelName(), config.modelType(), channel.name(), channel.apiFormat(), config.defaultModel(),
-                                            config.creditCost(), config.creditUnit(), config.capabilities(), config.videoBillingConfiguration(), config.modelIcon(), config.ownerTeamId()))
+                                            config.creditCost(), config.creditUnit(), config.capabilities(), config.videoBillingConfiguration(), config.modelIcon(), config.ownerTeamId(), config.imageBillingConfiguration()))
                                     .orElse(null))
                             .filter(java.util.Objects::nonNull)
                             .toList();
@@ -917,7 +920,8 @@ public class AiTaskService {
                             selectedConfig.capabilities(), selectedConfig.videoBillingConfiguration(), thinkingEnabled(selectedConfig.thinkingEnabled()),
                             reasoningEffort(selectedConfig.reasoningEffort()), selectedConfig.customBodyParameters(),
                             Boolean.TRUE.equals(selectedConfig.isCustomModel()), selectedConfig.customModelConfig(),
-                            TYPE_IMAGE.equals(capability) && Boolean.TRUE.equals(selectedConfig.convertImageSizeToPixels()), selectedConfig.imageSizeMappings());
+                            TYPE_IMAGE.equals(capability) && Boolean.TRUE.equals(selectedConfig.convertImageSizeToPixels()), selectedConfig.imageSizeMappings(),
+                            selectedConfig.imageBillingConfiguration());
                 });
     }
 
@@ -955,7 +959,8 @@ public class AiTaskService {
                             modelConfig.creditUnit(), modelConfig.capabilities(), modelConfig.videoBillingConfiguration(),
                             thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort()), modelConfig.customBodyParameters(),
                             Boolean.TRUE.equals(modelConfig.isCustomModel()), modelConfig.customModelConfig(),
-                            TYPE_IMAGE.equals(task.getTaskType()) && Boolean.TRUE.equals(modelConfig.convertImageSizeToPixels()), modelConfig.imageSizeMappings());
+                            TYPE_IMAGE.equals(task.getTaskType()) && Boolean.TRUE.equals(modelConfig.convertImageSizeToPixels()), modelConfig.imageSizeMappings(),
+                            modelConfig.imageBillingConfiguration());
                 });
     }
 
@@ -1017,7 +1022,7 @@ public class AiTaskService {
         validateChannelSupport(channel, capability);
         validateUserChannelAccess(channel);
         return new ResolvedModel(channel, model, "", BigDecimal.ZERO, CREDIT_UNIT_GENERATION, List.of(), null, true, "high", new JSONObject(),
-                false, null, false, null);
+                false, null, false, null, null);
     }
 
 
@@ -1147,6 +1152,17 @@ public class AiTaskService {
             return validateVideoTask(request, resolvedModel).chargedCredits();
         }
         BigDecimal unitCost = resolvedModel.creditCost();
+        // 配置了分辨率价目表的图片模型按所选清晰度取价，未配置时沿用模型单价。
+        ImageBillingConfiguration imageBillingConfiguration = resolvedModel.imageBillingConfiguration();
+        if (TYPE_IMAGE.equals(request.taskType()) && imageBillingConfiguration != null
+                && imageBillingConfiguration.resolutionPrices() != null && !imageBillingConfiguration.resolutionPrices().isEmpty()) {
+            String resolution = imageResolution(request.parameters());
+            BigDecimal resolutionPrice = imageBillingConfiguration.resolutionPrices().get(resolution);
+            if (resolutionPrice == null) {
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.imageResolutionPriceNotConfigured", resolution));
+            }
+            unitCost = resolutionPrice;
+        }
         if (unitCost == null || CreditAmounts.of(unitCost).compareTo(CreditAmounts.of(0)) < 0) {
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.invalidModelCredits"));
         }
@@ -1528,6 +1544,22 @@ public class AiTaskService {
     }
 
     /**
+     * 解析图片请求的清晰度档位，未指定或auto时按默认2K计费。
+     *
+     * @param parameters Map<String, Object> 任务参数
+     * @return String 1K、2K或4K
+     */
+    private String imageResolution(Map<String, Object> parameters) {
+        String value = AiTaskParameterReader.parameterText(parameters, "resolution", "");
+        String normalized = value == null ? "" : value.trim().toUpperCase(Locale.ROOT);
+        if (!StringUtils.hasText(normalized) || "AUTO".equals(normalized)) return "2K";
+        if (!AiImageSizeSupport.RESOLUTIONS.contains(normalized)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageResolutionMustBe1K2KOr4K"));
+        }
+        return normalized;
+    }
+
+    /**
      * 解析JSON字符串
      *
      * @param value String JSON字符串
@@ -1639,7 +1671,8 @@ public class AiTaskService {
                                  String creditUnit, List<String> capabilities, VideoBillingConfiguration videoBillingConfiguration,
                                  boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters,
                                  boolean isCustomModel, Map<String, PersistenceDtos.CustomModelGroupConfig> customModelConfig,
-                                 boolean convertImageSizeToPixels, Map<String, Map<String, String>> imageSizeMappings) {
+                                 boolean convertImageSizeToPixels, Map<String, Map<String, String>> imageSizeMappings,
+                                 ImageBillingConfiguration imageBillingConfiguration) {
     }
 
     /**

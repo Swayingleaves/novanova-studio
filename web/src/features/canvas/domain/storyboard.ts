@@ -46,9 +46,16 @@ export function readStoryboardModelCost(modelCosts: Array<{ model: string; taskT
     return modelCosts.find((item) => item.taskType === "text" && item.model === model)?.credits ?? 0;
 }
 
-/** 计算当前勾选资产的一次性图片生成预估积分。 */
-export function readStoryboardAssetImageCost(modelCosts: Array<{ model: string; taskType: string; credits: CreditAmount }>, model: string, selectedCount: number): CreditAmount {
-    const unitCost = modelCosts.find((item) => item.taskType === "image" && item.model === model)?.credits ?? 0;
+/** 计算当前勾选资产的一次性图片生成预估积分，配置了分辨率价目表时按所选清晰度取价。 */
+export function readStoryboardAssetImageCost(
+    modelCosts: Array<{ model: string; taskType: string; credits: CreditAmount; resolutionPrices?: Partial<Record<string, CreditAmount>> }>,
+    model: string,
+    selectedCount: number,
+    resolution?: string,
+): CreditAmount {
+    const cost = modelCosts.find((item) => item.taskType === "image" && item.model === model);
+    const resolutionKey = resolution?.trim().toUpperCase();
+    const unitCost = (resolutionKey ? cost?.resolutionPrices?.[resolutionKey] : undefined) ?? cost?.credits ?? 0;
     return creditText(creditAmount(unitCost).times(Math.max(0, Math.floor(selectedCount))));
 }
 

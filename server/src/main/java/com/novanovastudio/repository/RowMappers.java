@@ -170,6 +170,7 @@ public final class RowMappers {
         record.setImageSizeMappings(row.get("image_size_mappings", String.class));
         record.setCustomBodyParameters(row.get("custom_body_parameters", String.class));
         record.setVideoBillingConfiguration(row.get("video_billing_configuration", String.class));
+        record.setImageBillingConfiguration(row.get("image_billing_configuration", String.class));
         record.setDisplayName(row.get("display_name", String.class));
         record.setModelIcon(row.get("model_icon", String.class));
         record.setIsCustomModel(row.get("is_custom_model", Boolean.class));
