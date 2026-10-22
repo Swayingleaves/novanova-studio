@@ -13,8 +13,12 @@ ENV NEXT_PUBLIC_CREDIT_STORE_URL=${NEXT_PUBLIC_CREDIT_STORE_URL}
 ENV NEXT_PUBLIC_ICP_RECORD_NUMBER=${NEXT_PUBLIC_ICP_RECORD_NUMBER}
 ENV NEXT_PUBLIC_GITHUB_URL=${NEXT_PUBLIC_GITHUB_URL}
 
+# corepack 下载 pnpm 本体时使用镜像源：它不读取 .npmrc 的 registry，默认的 npmjs.org 在部分网络下会返回 503。
+ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com/
 RUN corepack enable
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/.npmrc ./
+# 预热 packageManager 声明的 pnpm 版本，下载失败时在此报错，而不是等到 install 阶段。
+RUN corepack install
 RUN --mount=type=cache,id=novanova-studio-pro-pnpm,target=/app/web/.pnpm-store pnpm install --frozen-lockfile
 
 COPY web/ ./
