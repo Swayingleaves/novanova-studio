@@ -12,7 +12,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 import { Alert, App, Button, Checkbox, Form, Grid, Input, InputNumber, Modal, Select, Space, Switch, Tabs } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { nanoid } from "nanoid";
-import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
+import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Copy, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
@@ -36,7 +36,7 @@ import { createModelCapabilityOptions,
     type VideoGenerationMode,
     type VideoResolution,
 } from "@/features/settings/stores/use-config-store";
-import { createVideoGenerationCapabilityOptions, VIDEO_RESOLUTION_OPTIONS, createVideoBillingConfiguration } from "@/features/generation/lib/video-billing";
+import { createVideoGenerationCapabilityOptions, VIDEO_GENERATION_CAPABILITY_OPTIONS, VIDEO_RESOLUTION_OPTIONS, createVideoBillingConfiguration } from "@/features/generation/lib/video-billing";
 import { isObjectStorageReady, objectStorageReadyMessage, testObjectStorageUpload } from "@/features/storage/services/object-storage";
 import { isOpenAiTextModel, isReasoningEffortDisabled, reasoningEffortOptions } from "@/features/settings/lib/model-thinking-configuration";
 import {
@@ -66,6 +66,8 @@ import { useConfigurationLeaveGuard } from "../use-configuration-leave-guard";
 import { cloneImageSizeMappings, IMAGE_RESOLUTIONS, normalizeImageSizeMappings, type ImageResolution, type ImageSizeMappings } from "@/features/generation/lib/image-size-mappings";
 import { ImageSizeMappingsEditor } from "./image-size-mappings-editor";
 import { ModelSelectModal, type ChannelModelGroup } from "./model-select-modal";
+import { ModelConfigCopyModal } from "./model-config-copy-modal";
+import { applyCustomConfigCopy } from "./model-config-copy";
 
 type ConfigurationTabKey = "channels" | "models" | "credits" | "invitationReward" | "checkIn" | "objectStorage";
 
@@ -193,6 +195,7 @@ export function SystemConfiguration() {
     const [modelPicker, setModelPicker] = useState<{ capability: ModelCapability; mode: "options" | "default" } | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
     const [collapsedEditingCapabilities, setCollapsedEditingCapabilities] = useState<string[]>([]);
+    const [modelConfigCopyTarget, setModelConfigCopyTarget] = useState<ServerModelConfig | null>(null);
     const editingModelIsMedia = Boolean(editingModelConfig && (editingModelConfig.modelType === "image" || editingModelConfig.modelType === "video"));
 
     const resetChannelDraft = useCallback((resetCollapsed = false) => {
@@ -382,7 +385,8 @@ export function SystemConfiguration() {
     const openModelConfigEditor = (configItem: ServerModelConfig) => {
         setEditingModelConfig(cloneModelConfig(configItem));
         setEditingCustomBodyParameters(JSON.stringify(configItem.customBodyParameters || {}, null, 2));
-        setCollapsedEditingCapabilities([]);
+        setCollapsedEditingCapabilities(defaultCollapsedEditingCapabilities(configItem));
+        setModelConfigCopyTarget(null);
     };
 
     const toggleEditingCapabilityCollapsed = (capability: string) => {
@@ -391,6 +395,20 @@ export function SystemConfiguration() {
 
     const updateEditingModelConfig = (patch: Partial<ServerModelConfig>) => {
         setEditingModelConfig((configItem) => (configItem ? { ...configItem, ...patch } : configItem));
+    };
+
+    /** 从其他自定义模型复制指定模式的调用配置，覆盖目标已有内容。 */
+    const copyCustomConfigFromModel = (source: ServerModelConfig, modes: VideoGenerationMode[]) => {
+        if (!modelConfigCopyTarget) return;
+        const { config: nextConfig, copiedModes } = applyCustomConfigCopy(modelConfigCopyTarget, source, modes);
+        if (!copiedModes.length) return;
+        // 编辑弹窗持有独立副本，复制结果要同步过去，否则点击确定会被旧值覆盖。
+        if (editingModelConfig && editingModelConfig.id === nextConfig.id) {
+            setEditingModelConfig(nextConfig);
+        }
+        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.id === nextConfig.id ? nextConfig : configItem)));
+        setModelConfigCopyTarget(null);
+        message.success(translate("appShell.copiedCustomConfig", { value0: copiedModes.length }));
     };
 
     /** 图片分辨率价格留空表示该档位沿用模型单价。 */
@@ -425,6 +443,7 @@ export function SystemConfiguration() {
         };
         setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.id === nextConfig.id ? nextConfig : configItem)));
         setEditingModelConfig(null);
+        setModelConfigCopyTarget(null);
     };
 
     const formatEditingCustomBodyParameters = () => {        try {
@@ -1307,9 +1326,16 @@ export function SystemConfiguration() {
                                     </div>
                                     <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.configureCapabilitiesAndCreditPricesByResolution")}</p>
                                 </div>
-                                <span className="rounded-md border border-[var(--studio-line)] px-2.5 py-1 text-xs text-[var(--studio-muted)]">
-                                    {translate("appShell.pricing")}{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.creditsS") : translate("appShell.creditsRun")}
-                                </span>
+                                <div className="flex flex-wrap items-center gap-2">
+                                    {editingModelConfig.isCustomModel ? (
+                                        <Button size="small" icon={<Copy className="size-3.5" />} disabled={isSaving} onClick={() => setModelConfigCopyTarget(editingModelConfig)}>
+                                            {translate("appShell.copyConfig")}
+                                        </Button>
+                                    ) : null}
+                                    <span className="rounded-md border border-[var(--studio-line)] px-2.5 py-1 text-xs text-[var(--studio-muted)]">
+                                        {translate("appShell.pricing")}{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.creditsS") : translate("appShell.creditsRun")}
+                                    </span>
+                                </div>
                             </div>
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] p-4">
@@ -1602,6 +1628,15 @@ export function SystemConfiguration() {
                     </Form>
                 ) : null}
             </Modal>
+            {modelConfigCopyTarget ? (
+                <ModelConfigCopyModal
+                    target={modelConfigCopyTarget}
+                    configs={draftModelConfigs}
+                    config={draftConfig}
+                    onCancel={() => setModelConfigCopyTarget(null)}
+                    onCopy={copyCustomConfigFromModel}
+                />
+            ) : null}
         </div>
     );
 }
@@ -1630,6 +1665,18 @@ function cloneModelConfig(config: ServerModelConfig): ServerModelConfig {
 
 function cloneCustomModelConfig(config: ServerModelConfig["customModelConfig"] | null | undefined): ServerModelConfig["customModelConfig"] {
     return Object.fromEntries(Object.entries(config || {}).map(([key, group]) => [key, { ...group }]));
+}
+
+/**
+ * 打开模型配置时默认折叠的能力项。
+ * 视频折叠整个能力卡片（含分辨率价格），图片折叠自定义调用配置编辑器。
+ * 非自定义模型不预置折叠：它没有自定义调用配置，展开更省一次点击。
+ */
+function defaultCollapsedEditingCapabilities(config: ServerModelConfig) {
+    if (!config.isCustomModel) return [];
+    if (config.modelType === "video") return VIDEO_GENERATION_CAPABILITY_OPTIONS.map((option) => `video:${option.value}`);
+    if (config.modelType === "image") return MODEL_CAPABILITY_OPTIONS.image.map((option) => `image:${option.value}`);
+    return [];
 }
 
 function normalizeModelConfigForSave(config: ServerModelConfig): ServerModelConfig {
