@@ -113,11 +113,11 @@ export default function AdminSystemPage() {
                 </header>
                 <Tabs
                     key={team?.id ?? 0}
-                    defaultActiveKey={team ? "team" : "teams"}
+                    defaultActiveKey="configuration"
                     destroyOnHidden={false}
                     items={[
-                        ...(team ? [{ key: "team", label: "团队管理", children: <CurrentTeamManagement /> }] : [{ key: "teams", label: "团队管理", children: <TeamManagement /> }]),
                         { key: "configuration", label: translate("appShell.configurationPreferences"), children: <SystemConfiguration /> },
+                        ...(team ? [{ key: "team", label: "团队管理", children: <CurrentTeamManagement /> }] : [{ key: "teams", label: "团队管理", children: <TeamManagement /> }]),
                         ...(!team ? [{ key: "users", label: translate("administration.userManagement"), children: <UserManagement /> }] : []),
                         ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), children: <CreditConsumptionManagement /> }] : []),
                         ...(!team ? [{ key: "creditCards", label: translate("administration.redemptionCodes"), children: <CreditCardManagement /> }] : []),

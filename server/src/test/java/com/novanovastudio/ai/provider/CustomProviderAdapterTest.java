@@ -269,6 +269,127 @@ class CustomProviderAdapterTest {
         verifyNoInteractions(aiHttpClient, persistenceService, modelFactory);
     }
 
+    /**
+     * AI把模型名改写成近似标识时，服务端应回填为配置的请求模型名称。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldRestoreModelNameRewrittenByAgent() {
+        stubVideoAgentResult("{\"model\":\"seedance-2.0-fast-to-video\",\"prompt\":\"用户提示词\",\"duration\":5}");
+        stubVideoSubmitResult();
+
+        adapter.execute(videoContext("seedance-2.0-fast-text-to-video", "{\"model\":\"{{model}}\",\"prompt\":\"{{prompt}}\"}")).block();
+
+        ArgumentCaptor<JSONObject> body = ArgumentCaptor.forClass(JSONObject.class);
+        verify(aiHttpClient).sendBearerJsonUrlRequest(any(), eq("POST"), anyString(), body.capture());
+        Assertions.assertEquals("seedance-2.0-fast-text-to-video", body.getValue().getString("model"));
+    }
+
+    /**
+     * AI改写用户提示词时，服务端应回填为用户原始提示词。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldRestorePromptRewrittenByAgent() {
+        stubVideoAgentResult("{\"model\":\"seedance-2.0-fast-text-to-video\",\"prompt\":\"被改写的提示词\"}");
+        stubVideoSubmitResult();
+
+        adapter.execute(videoContext("seedance-2.0-fast-text-to-video", "{\"model\":\"{{model}}\",\"prompt\":\"{{prompt}}\"}")).block();
+
+        ArgumentCaptor<JSONObject> body = ArgumentCaptor.forClass(JSONObject.class);
+        verify(aiHttpClient).sendBearerJsonUrlRequest(any(), eq("POST"), anyString(), body.capture());
+        Assertions.assertEquals("真实电影感，清晨窗光下的木质桌面", body.getValue().getString("prompt"));
+    }
+
+    /**
+     * AI输出没有模型字段时不应擅自新增，避免引入用户未要求的字段。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldNotAddModelFieldWhenAgentOmitsIt() {
+        stubVideoAgentResult("{\"duration\":5}");
+        stubVideoSubmitResult();
+
+        adapter.execute(videoContext("seedance-2.0-fast-text-to-video", "{\"duration\":5}")).block();
+
+        ArgumentCaptor<JSONObject> body = ArgumentCaptor.forClass(JSONObject.class);
+        verify(aiHttpClient).sendBearerJsonUrlRequest(any(), eq("POST"), anyString(), body.capture());
+        Assertions.assertFalse(body.getValue().containsKey("model"));
+    }
+
+    /**
+     * 构造提示词里的模型占位符应替换为真实模型名，让模型直接照抄而无需翻译。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldRenderModelPlaceholderInAgentPrompt() {
+        Model model = mock(Model.class);
+        ChatResponse response = mock(ChatResponse.class);
+        when(response.getContent()).thenReturn(List.of(TextBlock.builder().text("{\"model\":\"x\"}").build()));
+        when(modelFactory.defaultTextModel()).thenReturn(Mono.just(model));
+        when(model.stream(any(), any(), any())).thenAnswer(invocation -> {
+            List<io.agentscope.core.message.Msg> messages = invocation.getArgument(0);
+            String prompt = messages.getFirst().getTextContent();
+            Assertions.assertTrue(prompt.contains("\"model\": \"seedance-2.0-fast-text-to-video\""));
+            Assertions.assertFalse(prompt.contains("{{model}}"));
+            return Flux.just(response);
+        });
+        stubVideoSubmitResult();
+
+        adapter.execute(videoContext("seedance-2.0-fast-text-to-video", "{}")).block();
+
+        verify(modelFactory).defaultTextModel();
+    }
+
+    /** 模拟AI构造请求体返回的JSON。 */
+    private void stubVideoAgentResult(String body) {
+        Model model = mock(Model.class);
+        ChatResponse response = mock(ChatResponse.class);
+        when(response.getContent()).thenReturn(List.of(TextBlock.builder().text(body).build()));
+        when(modelFactory.defaultTextModel()).thenReturn(Mono.just(model));
+        when(model.stream(any(), any(), any())).thenReturn(Flux.just(response));
+    }
+
+    /** 模拟视频提交接口直接返回媒体地址，避免进入轮询。 */
+    private void stubVideoSubmitResult() {
+        String sourceUrl = "https://provider.example/generated.mp4";
+        when(aiHttpClient.sendBearerJsonUrlRequest(any(), eq("POST"), eq("https://provider.example/v1/videos/generations"), any()))
+                .thenReturn(Mono.just(JSON.parseObject("{\"data\":{\"url\":\"" + sourceUrl + "\"}}")));
+        when(aiHttpClient.readRemoteMediaHeaders(sourceUrl))
+                .thenReturn(Mono.just(new AiHttpClient.RemoteMediaHeaders(12L, "video/mp4")));
+        when(persistenceService.registerRemoteMediaForUser(eq(1L), any()))
+                .thenReturn(Mono.just(mediaResponse(sourceUrl, "video/mp4")));
+    }
+
+    /**
+     * 构造用于AI构造请求体验证的视频任务上下文。
+     *
+     * @param requestModelName String 配置的请求模型名称
+     * @param template         String 请求模板
+     * @return AiTaskExecutionContext 视频任务上下文
+     */
+    private AiTaskExecutionContext videoContext(String requestModelName, String template) {
+        AiGenerationTask task = new AiGenerationTask();
+        task.setId("custom-video-task");
+        task.setUserId(1L);
+        task.setTaskType(AiTaskTypes.VIDEO);
+        PersistenceDtos.CustomModelGroupConfig group = new PersistenceDtos.CustomModelGroupConfig(
+                "/videos/generations", "POST", requestModelName, template,
+                "- model固定不变=" + requestModelName + "\n{\n  \"model\": \"{{model}}\",\n  \"prompt\": \"{{prompt}}\"\n}",
+                "{}", "data.url", null, null, null, null, null, null);
+        return new AiTaskExecutionContext(task,
+                new AiTaskDtos.AiChannelConfig("custom-channel", "自定义渠道", "https://provider.example/v1", "key", "custom", List.of()),
+                requestModelName, false, "", new JSONObject(),
+                new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.VIDEO, "真实电影感，清晨窗光下的木质桌面", requestModelName,
+                        Map.of("resolution", "480p", "seconds", "5"), List.of(), List.of(), "videoPage", List.of(), List.of(), "text-to-video", List.of()),
+                () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty(), true,
+                Map.of("text-to-video", group), false, null);
+    }
+
     /** 模拟已完成的图片接口及其媒体登记。 */
     private void stubImageResult() {
         String sourceUrl = "https://provider.example/generated.png";
