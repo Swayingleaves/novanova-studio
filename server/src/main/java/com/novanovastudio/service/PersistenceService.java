@@ -7,6 +7,7 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AudioInputSupport;
+import com.novanovastudio.ai.VideoGenerationConstraintSupport;
 import com.alibaba.fastjson2.TypeReference;
 import com.novanovastudio.ai.AudioMediaProbe;
 import com.novanovastudio.ai.AiHttpClient;
@@ -280,7 +281,7 @@ public class PersistenceService {
                     record.setImageBillingConfiguration(imageBillingConfiguration == null ? null : JSON.toJSONString(imageBillingConfiguration));
                     boolean isCustomModel = Boolean.TRUE.equals(request.isCustomModel());
                     record.setIsCustomModel(isCustomModel);
-                    record.setCustomModelConfig(JSON.toJSONString(normalizeCustomModelConfig(request.modelType(), isCustomModel, capabilities, request.customModelConfig())));
+                    record.setCustomModelConfig(JSON.toJSONString(normalizeCustomModelConfig(request.modelType(), isCustomModel, capabilities, request.customModelConfig(), videoBillingConfiguration)));
                     record.setDisplayName(normalizeDisplayName(request.displayName(), request.modelName()));
                     record.setModelIcon(normalizeModelIcon(request.modelIcon()));
                     return repository.createPlatformAiModelConfig(record)
@@ -336,7 +337,7 @@ public class PersistenceService {
                     record.setImageBillingConfiguration(imageBillingConfiguration == null ? null : JSON.toJSONString(imageBillingConfiguration));
                     boolean isCustomModel = Boolean.TRUE.equals(request.isCustomModel());
                     record.setIsCustomModel(isCustomModel);
-                    record.setCustomModelConfig(JSON.toJSONString(normalizeCustomModelConfig(request.modelType(), isCustomModel, capabilities, request.customModelConfig())));
+                    record.setCustomModelConfig(JSON.toJSONString(normalizeCustomModelConfig(request.modelType(), isCustomModel, capabilities, request.customModelConfig(), videoBillingConfiguration)));
                     record.setDisplayName(normalizeDisplayName(request.displayName(), record.getModelName()));
                     record.setModelIcon(normalizeModelIcon(request.modelIcon()));
                     PersistenceDtos.ModelConfig modelConfig = modelConfigDto(record);
@@ -603,7 +604,8 @@ public class PersistenceService {
                     group.getString("queryRequestTemplate"),
                     group.getString("aiQueryPrompt"),
                     group.getString("queryResponseExample"),
-                    group.getString("queryResultPath")));
+                    group.getString("queryResultPath"),
+                    group.getObject("videoGenerationConstraints", com.novanovastudio.dto.VideoGenerationConstraints.class)));
         }
         return Map.copyOf(result);
     }
@@ -615,11 +617,13 @@ public class PersistenceService {
      * @param isCustomModel boolean 是否启用自定义模型
      * @param capabilities List<String> 已配置模型能力
      * @param config Map<String, CustomModelGroupConfig> 请求中的自定义模型配置
+     * @param billing VideoBillingConfiguration 视频计费限制
      * @return Map<String, CustomModelGroupConfig> 规范化后的配置
      */
     private Map<String, PersistenceDtos.CustomModelGroupConfig> normalizeCustomModelConfig(String modelType, boolean isCustomModel,
                                                                                             List<String> capabilities,
-                                                                                            Map<String, PersistenceDtos.CustomModelGroupConfig> config) {
+                                                                                            Map<String, PersistenceDtos.CustomModelGroupConfig> config,
+                                                                                            VideoBillingConfiguration billing) {
         Map<String, PersistenceDtos.CustomModelGroupConfig> input = config == null ? Map.of() : config;
         if ("text".equals(modelType)) {
             if (isCustomModel || !input.isEmpty()) {
@@ -681,7 +685,16 @@ public class PersistenceService {
                     group.responseExample(), group.resultPath(),
                     group.queryPath() == null ? null : group.queryPath().trim(), queryMethod,
                     group.queryRequestTemplate(), group.aiQueryPrompt(),
-                    group.queryResponseExample(), group.queryResultPath()));
+                    group.queryResponseExample(), group.queryResultPath(), "video".equals(modelType) ? group.videoGenerationConstraints() : null));
+        }
+        // 启用的每个视频模式都必须配置，不能只遍历已提交的分组而遗漏整组缺失。
+        if ("video".equals(modelType)) {
+            for (String mode : capabilities) {
+                if (!VideoGenerationMode.isSupported(mode)) continue;
+                PersistenceDtos.CustomModelGroupConfig group = normalized.get(mode);
+                VideoGenerationConstraintSupport.validateConfiguration(mode,
+                        group == null ? null : group.videoGenerationConstraints(), capabilities, billing);
+            }
         }
         return Map.copyOf(normalized);
     }

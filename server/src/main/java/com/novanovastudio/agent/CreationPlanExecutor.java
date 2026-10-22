@@ -9,6 +9,7 @@ import com.novanovastudio.ai.AiErrorSupport;
 import com.novanovastudio.ai.AiProviderException;
 import com.novanovastudio.ai.AudioInputSupport;
 import com.novanovastudio.ai.VideoGenerationMode;
+import com.novanovastudio.ai.VideoGenerationConstraintSupport;
 import com.novanovastudio.agent.dto.AgentChatRequest;
 import com.novanovastudio.agent.dto.AgentEvent;
 import com.novanovastudio.agent.dto.CreationPlan;
@@ -27,6 +28,7 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.GenerationStyleDtos;
 import com.novanovastudio.dto.PersistenceDtos;
+import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.entity.SkillRecords;
 import com.novanovastudio.logging.MappedDiagnosticContext;
 import com.novanovastudio.service.PromptOptimizationService;
@@ -145,13 +147,28 @@ public class CreationPlanExecutor {
     public Mono<PlanExecutionSummary> execute(Long userId, String sessionId, CreationPlan plan,
                                               AgentChatRequest request, Model model) {
         Map<String, TaskExecutionResult> completed = new LinkedHashMap<>();
-        return planRepository.updateCreationAgentPlanStatus(plan.planId(), "running", "")
+        return validateWorkflowVideoConstraints(plan)
+                .then(planRepository.updateCreationAgentPlanStatus(plan.planId(), "running", ""))
                 .then(saveWorkflowRound(userId, sessionId, plan, request, "running", "", List.of()))
                 .then(executeLayer(userId, sessionId, plan, request, model, new ArrayList<>(plan.tasks()), completed))
                 .map(results -> summarize(plan, results))
                 .flatMap(summary -> isImageStagePlan(plan)
                         ? completeImageStage(userId, sessionId, plan, request, summary)
                         : completeFinalStage(userId, sessionId, plan, request, summary));
+    }
+
+    /**
+     * 在任何图片任务执行前检查后续视频输入限制，避免工作流半途才发现不满足条件。
+     * @param plan CreationPlan 已确认工作流计划
+     * @return Mono<Void> 视频限制预检完成信号
+     */
+    private Mono<Void> validateWorkflowVideoConstraints(CreationPlan plan) {
+        if (workflowDefinition(plan).isEmpty()) return Mono.empty();
+        CreationSettings settings = plan.creationSettings();
+        if (settings == null) return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoWorkflowHasNoGenerationSettings")));
+        String model = StringUtils.hasText(settings.videoModel()) ? settings.videoModel() : settings.model();
+        return aiTaskService.validateVideoWorkflowConstraints(new AiTaskDtos.VideoWorkflowQuoteRequest(plan.workflowType(), model,
+                settings.imageModel(), settings.resolution(), settings.seconds(), "image", settings.size()));
     }
 
     /**
@@ -1162,7 +1179,7 @@ public class CreationPlanExecutor {
         String toolName = toolName(task);
         String callId = buildExecutionCallId(plan, task, recoveryAttempt);
         Map<String, Object> effectiveArguments = new LinkedHashMap<>(arguments == null ? Map.of() : arguments);
-        return resolveWorkflowVideoMode(plan, task)
+        return resolveWorkflowVideoMode(plan, task, attachments)
                 .flatMap(videoMode -> {
                     applyGenerationSettings(effectiveArguments, plan.creationSettings(), task, workflowDefinition(plan).orElse(null), videoMode);
                     workflowDefinition(plan).ifPresent(definition -> effectiveArguments.put("prompt",
@@ -1217,6 +1234,8 @@ public class CreationPlanExecutor {
      * @param arguments Map<String, Object> 待执行工具参数
      * @param settings CreationSettings 页面提交的生成设置
      * @param task CreationTask 当前计划任务
+     * @param workflowDefinition VideoWorkflowDefinition 当前工作流定义
+     * @param workflowVideoMode String 已校验的视频生成模式
      * @return void 无返回值
      */
     private void applyGenerationSettings(Map<String, Object> arguments, CreationSettings settings, CreationTask task,
@@ -1265,9 +1284,10 @@ public class CreationPlanExecutor {
      *
      * @param plan CreationPlan 创作计划
      * @param task CreationTask 当前任务
+     * @param attachments List 当前实际素材
      * @return Mono<String> 实际视频模式
      */
-    private Mono<String> resolveWorkflowVideoMode(CreationPlan plan, CreationTask task) {
+    private Mono<String> resolveWorkflowVideoMode(CreationPlan plan, CreationTask task, List<AgentChatRequest.Attachment> attachments) {
         CreationSettings settings = plan.creationSettings();
         String configuredMode = VideoGenerationMode.defaultIfBlank(settings == null ? null : settings.videoGenerationMode());
         VideoWorkflowDefinition definition = workflowDefinition(plan).orElse(null);
@@ -1285,13 +1305,36 @@ public class CreationPlanExecutor {
             Set<String> capabilities = modelConfig.capabilities() == null ? Set.of() : Set.copyOf(modelConfig.capabilities());
             List<String> modes = definition.videoGenerationModes(task, configuredMode, capabilities);
             String resolution = settings.resolution() == null ? "" : settings.resolution().trim().toLowerCase();
-            return modes.stream()
+            List<String> pricedModes = modes.stream()
                     .filter(mode -> modelConfig.videoBillingConfiguration() != null
                             && modelConfig.videoBillingConfiguration().modePrices() != null
                             && modelConfig.videoBillingConfiguration().modePrices().get(mode) != null
                             && modelConfig.videoBillingConfiguration().modePrices().get(mode).containsKey(resolution))
-                    .findFirst()
-                    .orElseThrow(() -> new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.noPriceForResolutionInThisWorkflowMode", resolution)));
+                    .toList();
+            if (pricedModes.isEmpty()) throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.noPriceForResolutionInThisWorkflowMode", resolution));
+            if (!Boolean.TRUE.equals(modelConfig.isCustomModel())) return pricedModes.getFirst();
+            List<AgentChatRequest.Attachment> references = attachments == null ? List.of() : attachments;
+            int images = (int) references.stream().filter(item -> item.type() != null && item.type().startsWith("image/")).count();
+            int videos = (int) references.stream().filter(item -> item.type() != null && item.type().startsWith("video/")).count();
+            int audios = (int) references.stream().filter(item -> item.type() != null && item.type().startsWith("audio/")).count();
+            int seconds;
+            try {
+                seconds = Integer.parseInt(settings.seconds());
+            } catch (NumberFormatException exception) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoDurationMustBeAPositiveInteger"));
+            }
+            BusinessException firstError = null;
+            for (String mode : pricedModes) {
+                try {
+                    VideoGenerationConstraintSupport.validateInput(mode, modelConfig.customModelConfig() == null ? null : modelConfig.customModelConfig().get(mode),
+                            modelConfig.capabilities(), modelConfig.videoBillingConfiguration(), settings.size(), seconds, images, videos, audios);
+                    return mode;
+                } catch (BusinessException exception) {
+                    if (firstError == null) firstError = exception;
+                }
+            }
+            if (firstError != null) throw firstError;
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.videoModelLacksRequiredWorkflowCapabilities"));
         });
     }
 

@@ -62,7 +62,20 @@ public final class AudioInputSupport {
      */
     public static void validateMedia(List<PersistenceDtos.UploadedMediaResponse> media,
                                      List<com.novanovastudio.dto.AiTaskDtos.AiTaskMediaReference> references) {
-        if (media.size() > 3) throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.atMost3ReferenceAudioClips"));
+        validateMedia(media, references, 3);
+    }
+
+    /**
+     * 按调用模式的数量上限校验音频，格式、大小和裁剪规则仍统一执行。
+     * @param media List 可信媒体记录
+     * @param references List 原始引用及裁剪区间
+     * @param maximumCount int 已通过模式配置校验的音频数量上限
+     * @throws BusinessException 超出配置或媒体不合法时抛出
+     */
+    public static void validateMedia(List<PersistenceDtos.UploadedMediaResponse> media,
+            List<com.novanovastudio.dto.AiTaskDtos.AiTaskMediaReference> references, int maximumCount) {
+        if (media.size() > maximumCount) throw new BusinessException(ErrorCode.PARAM_INVALID,
+                SystemMessage.of("business.videoConstraintAudioMaximum", maximumCount, media.size()));
         long totalDuration = 0;
         for (int index = 0; index < media.size(); index++) {
             PersistenceDtos.UploadedMediaResponse item = media.get(index);

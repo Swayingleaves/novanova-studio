@@ -13,7 +13,7 @@ import { currentWebsiteLocale, currentLanguageTag } from "@/features/locale/tran
 import { useLanguageStore } from "@/features/locale/language-store";
 import type { ObjectStorageConfig, ObjectStorageFile } from "@/shared/types/object-storage";
 import { getAuthToken, useUserStore, type ServerUserProfile } from "@/features/auth/stores/use-user-store";
-import type { ApiCallFormat, CustomModelGroupConfig, ImageBillingConfiguration, ModelCreditUnit, VideoBillingConfiguration } from "@/features/settings/stores/use-config-store";
+import type { ApiCallFormat, CustomModelGroupConfig, ImageBillingConfiguration, ModelCreditUnit, VideoBillingConfiguration, VideoGenerationConstraints, VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 
 type ApiResponse<T> = {
     code: number;
@@ -230,6 +230,8 @@ export type ServerAiModelList = {
         creditUnit: ModelCreditUnit;
         capabilities: string[];
         videoBillingConfiguration: VideoBillingConfiguration | null;
+        isCustomModel: boolean;
+        videoGenerationConstraints: Partial<Record<VideoGenerationMode, VideoGenerationConstraints>>;
         imageBillingConfiguration: ImageBillingConfiguration | null;
         icon: string | null;
     }>;
@@ -1019,7 +1021,7 @@ export function createAiTask(input: ServerAiTaskCreateInput) {
     return serverPost<ServerAiTask>("/ai/task/createTask", input);
 }
 
-export function quoteVideoWorkflow(input: { workflowType: string; model: string; imageModel: string; resolution: string; seconds: string; stage?: "image" | "video" }) {
+export function quoteVideoWorkflow(input: { workflowType: string; model: string; imageModel: string; resolution: string; seconds: string; size?: string; stage?: "image" | "video" }) {
     return serverPost<ServerVideoWorkflowQuote>("/ai/video/workflowQuote", input);
 }
 

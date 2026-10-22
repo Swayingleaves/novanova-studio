@@ -29,7 +29,7 @@ spring:
   devtools:
     restart:
       # 是否启用开发工具热重启
-      enabled: true
+      enabled: false
       # 热重启时排除的静态资源目录，这些文件变更不触发重启
       additional-exclude: static/**,public/**,templates/**
 

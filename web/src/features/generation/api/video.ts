@@ -4,6 +4,7 @@ import { uploadMediaFile, type UploadedFile } from "@/features/storage/services/
 import { boolConfig } from "@/features/generation/lib/seedance-video";
 import { createAiTask, getAiTaskInfo, waitAiTask, type GenerationStyleSnapshot, type ServerAiTask, type ServerAiTaskMediaReference, type ServerGenerationSource } from "@/services/api/server";
 import type { AiConfig } from "@/features/settings/stores/use-config-store";
+import { readVideoGenerationConstraintIssue } from "@/features/generation/lib/video-generation-constraints";
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceAudio, ReferenceVideo } from "@/features/generation/types/media";
 
@@ -95,7 +96,10 @@ export async function storeGeneratedVideo(result: VideoGenerationResult): Promis
 }
 
 async function createServerVideoTask(config: AiConfig, prompt: string, references: ReferenceImage[], videoReferences: ReferenceVideo[], generationSource: ServerGenerationSource, options?: RequestOptions): Promise<ServerAiTask> {
-    const selectedModel = (config.model || config.videoModel).trim();
+    const selectedModel = (config.videoModel || config.model).trim();
+    const constraintIssue = readVideoGenerationConstraintIssue({ config, model: selectedModel, imageCount: references.length,
+        videoCount: videoReferences.length, audioCount: options?.audioReferences?.length || 0 });
+    if (constraintIssue) throw new Error(constraintIssue);
     const audioReferences = (options?.audioReferences || []).map(toServerMediaReference);
     console.info("[视频生成] 组装参考素材", {
         图片数量: references.length,
@@ -113,7 +117,8 @@ async function createServerVideoTask(config: AiConfig, prompt: string, reference
             resolution: config.vquality,
             watermark: boolConfig(config.videoWatermark, false),
         },
-        references: references.map(toServerImageReference),
+        references: references.map((reference, index) => ({ ...toServerImageReference(reference),
+            ...(config.videoGenerationMode === "first-last-frame-to-video" ? { role: index === 0 ? "first_frame" : "last_frame" } : {}) })),
         audioReferences,
         videoReferences: videoReferences.map(toServerMediaReference),
         generationSource,

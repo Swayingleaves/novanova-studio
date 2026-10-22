@@ -272,5 +272,13 @@
     "queryRequestTemplate": "Query request template",
     "aiQueryPrompt": "AI query construction prompt",
     "queryResponseExample": "Query response example",
-    "queryResultPath": "Query result path"
+    "queryResultPath": "Query result path",
+    "videoConstraintSection": "Video generation constraints",
+    "autoFill": "Auto fill",
+    "autoFillConfirm": "Fill",
+    "autoFillHint": "Pick a source mode to fill the empty fields of this mode with what that mode already has. Existing content is never overwritten.",
+    "autoFillOnlyEmpty": "Only empty fields are filled; existing content is kept.",
+    "autoFillSourceEmpty": "This mode has nothing to fill yet",
+    "autoFillTargetFilled": "Related fields in this mode are already filled",
+    "autoFilledFields": "Filled {value0} setting(s)"
 }

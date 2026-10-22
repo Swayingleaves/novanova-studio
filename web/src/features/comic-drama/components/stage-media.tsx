@@ -45,6 +45,7 @@ import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { ImageSettingsPanel } from "@/features/generation/components/image-settings-panel";
 import { VideoSettingsPanel, sizeFromAspectRatio } from "@/features/generation/components/video-settings-panel";
+import { readVideoGenerationConstraintIssue } from "@/features/generation/lib/video-generation-constraints";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { estimateComicDramaGeneration, listComicDramaAssetVersions, readComicDramaMediaUrl } from "@/services/api/comic-drama";
 import { cancelAiTask } from "@/services/api/server";
@@ -283,6 +284,9 @@ export function StageMedia() {
     }, [shotStoryboardImage, shotAssetImages]);
 
     const hasVideoReferences = videoReferences.length > 0;
+    const constraintIssue = mediaType === "video" ? readVideoGenerationConstraintIssue({ config, model,
+        mode: hasVideoReferences ? "image-to-video" : "text-to-video", size: mediaSettings.size,
+        seconds: mediaSettings.videoSeconds, imageCount: videoReferences.length }) : "";
 
     // 与生成页一致：适配器读 size/quality/resolution/seconds。有参考图时自适应为图生视频
     const taskSettings = mediaType === "video"
@@ -314,6 +318,7 @@ export function StageMedia() {
 
     // Estimate Credits
     const handleEstimate = async () => {
+        if (constraintIssue) { message.warning(constraintIssue); return; }
         if (!targetShotId || !model) {
             message.warning(translate("comicDrama.selectAShotAndGenerationModelFirst"));
             return;
@@ -338,6 +343,7 @@ export function StageMedia() {
 
     // Create generation task
     const handleCreateTask = async () => {
+        if (constraintIssue) { message.warning(constraintIssue); return; }
         if (!targetShotId || !model) {
             message.warning(translate("comicDrama.selectAShotAndGenerationModelFirst"));
             return;
@@ -633,8 +639,6 @@ export function StageMedia() {
                                 value={model}
                                 onChange={(val) => {
                                     setModel(val);
-                                    // 新模型可能不支持当前比例（面板只会把不支持的档位置灰，不会自动回退），按项目画面方向重新锚定
-                                    setMediaSettings((current) => ({ ...current, size: sizeForMediaType(mediaType, val) }));
                                     setEstimatedCredits(null);
                                 }}
                                 fullWidth
@@ -724,12 +728,13 @@ export function StageMedia() {
                         )}
                     </div>
 
+                    {constraintIssue ? <p role="alert" className="text-xs text-[var(--studio-danger)]">{constraintIssue}</p> : null}
                     <div className="mt-2 flex items-center justify-between border-t border-[var(--studio-line)] pt-3">
                         <div className="text-xs text-[var(--studio-muted)]">
                             {estimatedCredits !== null ? (
                                 <span>{translate("comicDrama.estimatedCost_657727")}<strong className="text-amber-500">{estimatedCredits}</strong> {translate("comicDrama.credits")}</span>
                             ) : (
-                                <Button size="small" loading={estimating} onClick={handleEstimate}>
+                                <Button size="small" loading={estimating} disabled={Boolean(constraintIssue)} onClick={handleEstimate}>
                                     {translate("comicDrama.estimatedCost_d79de0")}</Button>
                             )}
                         </div>
@@ -739,6 +744,7 @@ export function StageMedia() {
                             <Button
                                 type="primary"
                                 loading={generating}
+                                disabled={Boolean(constraintIssue)}
                                 icon={<Sparkles className="size-4" />}
                                 onClick={handleCreateTask}
                             >

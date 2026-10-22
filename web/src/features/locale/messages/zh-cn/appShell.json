@@ -272,5 +272,13 @@
     "queryRequestTemplate": "查询请求模板",
     "aiQueryPrompt": "AI 查询构造提示词",
     "queryResponseExample": "查询响应示例",
-    "queryResultPath": "查询结果路径"
+    "queryResultPath": "查询结果路径",
+    "videoConstraintSection": "视频生成限制",
+    "autoFill": "自动填充",
+    "autoFillConfirm": "填充",
+    "autoFillHint": "选择一个来源模式，把该模式已填写的内容补进当前模式未填写的项；当前已填写的内容不会被覆盖。",
+    "autoFillOnlyEmpty": "只会填充当前未填写的项，已有内容保持不变。",
+    "autoFillSourceEmpty": "该模式还没有可填充的内容",
+    "autoFillTargetFilled": "当前模式相关项都已填写，无需填充",
+    "autoFilledFields": "已填充 {value0} 项配置"
 }

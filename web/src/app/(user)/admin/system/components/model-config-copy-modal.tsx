@@ -11,8 +11,26 @@ import type { AiConfig, VideoGenerationMode } from "@/features/settings/stores/u
 import type { ServerModelConfig } from "@/services/api/server";
 
 import { copyableVideoSourceModels, planCustomConfigCopy } from "./model-config-copy";
-import type { CustomGroupTextField } from "./model-config-copy";
+import type { CustomGroupField } from "./model-config-copy";
 import { modelConfigIdentity } from "./model-config-draft";
+
+/** 自定义调用配置各字段的界面名称，复制与自动填充共用。 */
+export function customConfigFieldLabels(translate: ReturnType<typeof useTranslation>): Record<CustomGroupField, string> {
+    return {
+        videoGenerationConstraints: translate("generation.videoConstraintCopy"),
+        requestPath: translate("appShell.requestPath"),
+        requestModelName: translate("appShell.modelRequestName"),
+        requestTemplate: translate("appShell.requestTemplate"),
+        aiRequestPrompt: translate("appShell.aiRequestPrompt"),
+        responseExample: translate("appShell.responseExample"),
+        resultPath: translate("appShell.resultPath"),
+        queryPath: translate("appShell.queryPath"),
+        queryRequestTemplate: translate("appShell.queryRequestTemplate"),
+        aiQueryPrompt: translate("appShell.aiQueryPrompt"),
+        queryResponseExample: translate("appShell.queryResponseExample"),
+        queryResultPath: translate("appShell.queryResultPath"),
+    };
+}
 
 type ModelConfigCopyModalProps = {
     /** 当前正在编辑的目标模型。 */
@@ -33,19 +51,7 @@ export function ModelConfigCopyModal({ target, configs, config, onCancel, onCopy
     const sources = useMemo(() => copyableVideoSourceModels(configs, target), [configs, target]);
     const modeOptions = useMemo(() => createVideoGenerationCapabilityOptions(translate), [translate.locale]);
     const modeLabel = (mode: VideoGenerationMode) => modeOptions.find((option) => option.value === mode)?.label || mode;
-    const fieldLabels: Record<CustomGroupTextField, string> = {
-        requestPath: translate("appShell.requestPath"),
-        requestModelName: translate("appShell.modelRequestName"),
-        requestTemplate: translate("appShell.requestTemplate"),
-        aiRequestPrompt: translate("appShell.aiRequestPrompt"),
-        responseExample: translate("appShell.responseExample"),
-        resultPath: translate("appShell.resultPath"),
-        queryPath: translate("appShell.queryPath"),
-        queryRequestTemplate: translate("appShell.queryRequestTemplate"),
-        aiQueryPrompt: translate("appShell.aiQueryPrompt"),
-        queryResponseExample: translate("appShell.queryResponseExample"),
-        queryResultPath: translate("appShell.queryResultPath"),
-    };
+    const fieldLabels = customConfigFieldLabels(translate);
 
     const keyword = query.trim().toLowerCase();
     const visibleSources = useMemo(() => {

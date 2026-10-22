@@ -478,27 +478,9 @@ public class ComicDramaService {
         return withProject(request.projectId(), () -> Flux.fromIterable(request.targetIds())
                 .concatMap(targetId -> prepareSingleGeneration(generationRequest, targetId, mediaType))
                 .collectList()
-                .flatMap(plans -> {
-                    Map<String, Object> quoteParameters = new LinkedHashMap<>(request.settings());
-                    List<AiTaskDtos.AiTaskMediaReference> sampleReferences = plans.isEmpty() ? null : plans.get(0).references();
-                    if ("video".equals(mediaType) && sampleReferences != null && !sampleReferences.isEmpty()) {
-                        String mode = (String) quoteParameters.get("videoGenerationMode");
-                        if (!StringUtils.hasText(mode) || "text-to-video".equals(mode)) {
-                            quoteParameters.put("videoGenerationMode", "image-to-video");
-                        }
-                    }
-                    String videoMode = "video".equals(mediaType) ? (String) quoteParameters.get("videoGenerationMode") : null;
-                    AiTaskDtos.CreateAiTaskRequest quoteRequest = new AiTaskDtos.CreateAiTaskRequest(mediaType, "漫剧生成费用预估",
-                            request.model(), quoteParameters, sampleReferences, null, AiTaskSources.STORYBOARD, videoMode);
-                    return aiTaskService.quoteTaskCredits(quoteRequest).map(unitCredits -> {
-                        try {
-                            return new ComicDramaDtos.GenerationEstimate(request.targetType(), request.targetIds().size(),
-                                    CreditAmounts.multiply(unitCredits, request.targetIds().size()), request.model(), request.settings());
-                        } catch (ArithmeticException exception) {
-                            throw new BusinessException(ErrorCode.PARAM_INVALID, "预计积分超出允许范围");
-                        }
-                    });
-                }));
+                .flatMap(plans -> quoteGenerationPlans(generationRequest, plans, mediaType)
+                        .map(credits -> new ComicDramaDtos.GenerationEstimate(request.targetType(), plans.size(),
+                                credits, request.model(), request.settings()))));
     }
 
     /**
@@ -521,7 +503,7 @@ public class ComicDramaService {
         return currentUserProvider.currentUserId().flatMap(userId -> requireProject(userId, request.projectId())
                 .thenMany(Flux.fromIterable(request.targetIds())
                         .concatMap(targetId -> prepareSingleGeneration(request, targetId, mediaType))).collectList()
-                .flatMap(plans -> transactionalOperator.transactional(
+                .flatMap(plans -> quoteGenerationPlans(request, plans, mediaType).then(transactionalOperator.transactional(
                                 requireProjectRevision(userId, request.projectId(), request.expectedRevision())
                                         .then(advance(userId, request.projectId(), request.expectedRevision()))
                                          .thenMany(Flux.fromIterable(plans)
@@ -531,7 +513,7 @@ public class ComicDramaService {
                         .thenMany(Flux.fromIterable(plans)
                                 .concatMap(plan -> executeSingleGeneration(request, plan, mediaType)))
                         .collectList()
-                        .map(results -> new ComicDramaDtos.GenerationTaskResult(results, results.size()))));
+                        .map(results -> new ComicDramaDtos.GenerationTaskResult(results, results.size())))));
     }
 
     /** 查询项目媒体任务与结果。 */
@@ -826,19 +808,8 @@ public class ComicDramaService {
                         .concatMap(targetId -> prepareSingleGeneration(generationRequest, targetId, request.taskType()))
                         .collectList()
                         .flatMap(plans -> {
-                            Map<String, Object> quoteParameters = new LinkedHashMap<>(request.settings());
-                            List<AiTaskDtos.AiTaskMediaReference> sampleReferences = plans.isEmpty() ? null : plans.get(0).references();
-                            if ("video".equals(request.taskType()) && sampleReferences != null && !sampleReferences.isEmpty()) {
-                                String mode = (String) quoteParameters.get("videoGenerationMode");
-                                if (!StringUtils.hasText(mode) || "text-to-video".equals(mode)) {
-                                    quoteParameters.put("videoGenerationMode", "image-to-video");
-                                }
-                            }
-                            String videoMode = "video".equals(request.taskType()) ? (String) quoteParameters.get("videoGenerationMode") : null;
-                            return aiTaskService.quoteTaskCredits(new AiTaskDtos.CreateAiTaskRequest(request.taskType(), "漫剧批量生成费用预估",
-                                    request.model(), quoteParameters, sampleReferences, null, AiTaskSources.STORYBOARD, videoMode))
-                                    .flatMap(unitCredits -> {
-                                        BigDecimal credits = CreditAmounts.multiply(unitCredits, request.targetIds().size());
+                            return quoteGenerationPlans(generationRequest, plans, request.taskType())
+                                    .flatMap(credits -> {
                                         JSONObject scope = new JSONObject();
                                         scope.put("type", request.scope());
                                         scope.put("targetIds", request.targetIds());
@@ -944,6 +915,42 @@ public class ComicDramaService {
         });
     }
 
+    /**
+     * 在持久化和提交任何任务前逐个报价，保证整批输入都满足所选模型限制。
+     * @param request CreateGenerationTaskRequest 批量生成参数
+     * @param plans List 每个目标的实际素材计划
+     * @param mediaType String 媒体类型
+     * @return Mono<BigDecimal> 全部目标的精确总价
+     */
+    private Mono<BigDecimal> quoteGenerationPlans(ComicDramaDtos.CreateGenerationTaskRequest request,
+            List<GenerationPlan> plans, String mediaType) {
+        return Flux.fromIterable(plans)
+                .concatMap(plan -> aiTaskService.quoteTaskCredits(generationTaskRequest(request, plan, mediaType)))
+                .reduce(BigDecimal.ZERO, (total, amount) -> CreditAmounts.of(total.add(amount)));
+    }
+
+    /**
+     * 为报价与提交构造相同的参数，自动模式按每个镜头自己的素材判定。
+     * @param request CreateGenerationTaskRequest 生成设置
+     * @param plan GenerationPlan 当前目标计划
+     * @param mediaType String 媒体类型
+     * @return CreateAiTaskRequest 可报价或提交的任务请求
+     */
+    private AiTaskDtos.CreateAiTaskRequest generationTaskRequest(ComicDramaDtos.CreateGenerationTaskRequest request,
+            GenerationPlan plan, String mediaType) {
+        Map<String, Object> parameters = new LinkedHashMap<>(request.settings());
+        String videoMode = null;
+        if ("video".equals(mediaType)) {
+            String mode = (String) parameters.get("videoGenerationMode");
+            boolean hasReferences = plan.references() != null && !plan.references().isEmpty();
+            videoMode = !StringUtils.hasText(mode) || "text-to-video".equals(mode)
+                    ? (hasReferences ? "image-to-video" : "text-to-video") : mode;
+            parameters.put("videoGenerationMode", videoMode);
+        }
+        return new AiTaskDtos.CreateAiTaskRequest(mediaType, plan.prompt(), request.model(), parameters,
+                plan.references(), null, AiTaskSources.STORYBOARD, videoMode);
+    }
+
     /** 执行单个已预先持久化的媒体计划。 */
     private Mono<ComicDramaDtos.MediaResult> executeSingleGeneration(ComicDramaDtos.CreateGenerationTaskRequest request,
                                                                       GenerationPlan plan, String mediaType) {
@@ -966,20 +973,7 @@ public class ComicDramaService {
                                     request.settings().getString("quality"), request.settings().getString("resolution"),
                                     request.settings().getString("size"))), attachTask)));
         } else {
-            Map<String, Object> parameters = new LinkedHashMap<>(request.settings());
-            String videoMode = null;
-            if ("video".equals(mediaType)) {
-                String mode = (String) parameters.get("videoGenerationMode");
-                if (references != null && !references.isEmpty()) {
-                    if (!StringUtils.hasText(mode) || "text-to-video".equals(mode)) {
-                        mode = "image-to-video";
-                    }
-                }
-                videoMode = StringUtils.hasText(mode) ? mode : (references != null && !references.isEmpty() ? "image-to-video" : "text-to-video");
-                parameters.put("videoGenerationMode", videoMode);
-            }
-            task = aiTaskService.createTask(new AiTaskDtos.CreateAiTaskRequest(mediaType, prompt, request.model(),
-                    parameters, references, null, AiTaskSources.STORYBOARD, videoMode), attachTask);
+            task = aiTaskService.createTask(generationTaskRequest(request, plan, mediaType), attachTask);
         }
         return task.map(created -> new ComicDramaDtos.MediaResult(plan.media().id(), plan.media().targetType(), targetId,
                         mediaType, created.id(), plan.media().inputSnapshot(), new JSONObject(),

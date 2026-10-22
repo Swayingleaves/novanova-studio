@@ -28,6 +28,7 @@ import { MEDIA_FALLBACK_IMAGE, MediaPreview, useMediaFallback } from "@/features
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/features/generation/components/video-settings-panel";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { seedanceReferenceLabel, SEEDANCE_REFERENCE_LIMITS } from "@/features/generation/lib/seedance-video";
+import { readVideoGenerationConstraintIssue, readVideoModelConfiguration } from "@/features/generation/lib/video-generation-constraints";
 import { formatBytes, formatDuration } from "@/features/generation/lib/image-utils";
 import { formatVideoGenerationSettingsSummary } from "@/features/generation/lib/generation-settings-summary";
 import type { ReferenceImage } from "@/features/generation/types/image";
@@ -341,6 +342,7 @@ export default function VideoPage() {
 
     // 文生视频模式下上传参考素材时，按素材类型自动切换生成模式：仅图片 → 图生视频；含视频 → 全能参考。
     const autoSwitchModeForReferences = (addedImages: number, addedVideos: number) => {
+        if (readVideoModelConfiguration(effectiveConfig)?.isCustomModel) return;
         if (config.videoGenerationMode !== "text-to-video") return;
         if (videoReferences.length + addedVideos > 0) {
             handleVideoSettingsChange("videoGenerationMode", "reference-to-video");
@@ -662,6 +664,7 @@ export default function VideoPage() {
         mode: config.videoGenerationMode,
         resolution: config.vquality,
         seconds: config.videoSeconds,
+        size: config.size,
         imageReferenceCount: references.length,
         videoReferenceCount: videoReferences.length,
         requireReferences: false,
@@ -677,6 +680,7 @@ export default function VideoPage() {
         const quoteResolution = workflowImageConfirmNext ? workflowVideoResolution : config.vquality;
         const quoteSeconds = workflowImageConfirmNext ? workflowVideoSeconds : config.videoSeconds;
         void quoteVideoWorkflowOnServer({ workflowType: selectedSkill.workflowType, model, imageModel: workflowImageModel, resolution: quoteResolution, seconds: quoteSeconds,
+            size: workflowImageConfirmNext ? workflowVideoSize : selectedSkill.aspectRatio || config.size,
             stage: workflowImageConfirmNext ? "video" : "image" })
             .then((quote) => {
                 if (!cancelled) setServerWorkflowQuote(quote);
@@ -687,7 +691,7 @@ export default function VideoPage() {
         return () => {
             cancelled = true;
         };
-    }, [config.videoSeconds, config.vquality, workflowImageModel, workflowDraftRoundId, workflowImageConfirmNext, workflowVideoResolution, workflowVideoSeconds, model, selectedSkill?.workflowType]);
+    }, [config.size, config.videoSeconds, config.vquality, workflowImageModel, workflowDraftRoundId, workflowImageConfirmNext, workflowVideoResolution, workflowVideoSeconds, workflowVideoSize, model, selectedSkill?.aspectRatio, selectedSkill?.workflowType]);
     // 图片确认轮：本次确认仅生成视频，报价只取视频阶段（首/尾帧图片已按草案确认时参数生成完毕）。
     const workflowVideoStageQuote = workflowImageConfirmNext && serverWorkflowQuote ? (serverWorkflowQuote.stages.find((stage) => stage.role === "video") ?? null) : null;
     const workflowImageConfirmQuote = workflowVideoStageQuote
@@ -704,7 +708,9 @@ export default function VideoPage() {
             : (workflowImageConfirmQuote ?? (workflowImageConfirmNext ? { available: false as const, reason: translate("video.fetchingWorkflowQuote") } : null))
         : videoQuote;
     // 素材要求单独校验，用于「可生成」判定与提示，不阻断价格预览。
-    const referenceIssue = videoGenerationReferenceIssue(config.videoGenerationMode, references.length, videoReferences.length);
+    const referenceIssue = readVideoGenerationConstraintIssue({ config: effectiveConfig, model, mode: config.videoGenerationMode,
+        size: config.size, seconds: config.videoSeconds, imageCount: references.length, videoCount: videoReferences.length })
+        || videoGenerationReferenceIssue(config.videoGenerationMode, references.length, videoReferences.length);
     const creditCost = activeQuote === null ? undefined : activeQuote.available ? (activeQuote.credits ?? null) : null;
     const workflowBalanceInsufficient = Boolean(selectedSkill?.workflowType) && activeQuote !== null && activeQuote.available && creditBalance !== null && creditBalance !== undefined && creditAmount((activeQuote.credits ?? 0)).greaterThan(creditBalance);
     const draftSettingsSummary = videoDraftSettingsModified ? buildVideoSettingsSummary(config, effectiveConfig, model) : "";
@@ -782,6 +788,16 @@ export default function VideoPage() {
         };
     }, [conversations, refreshConversations]);
 
+    const canAddReferences = (images: number, videos: number) => {
+        const custom = readVideoModelConfiguration(effectiveConfig, model)?.isCustomModel;
+        const issue = custom ? readVideoGenerationConstraintIssue({ config: effectiveConfig, model, mode: config.videoGenerationMode,
+            imageCount: references.length + images, videoCount: videoReferences.length + videos, addingReferences: true })
+            : references.length + images > SEEDANCE_REFERENCE_LIMITS.images ? translate("video.addUpToReferenceImages", { value0: SEEDANCE_REFERENCE_LIMITS.images })
+            : videoReferences.length + videos > SEEDANCE_REFERENCE_LIMITS.videos ? translate("generation.atMostSeedanceReferenceVideos", { value0: SEEDANCE_REFERENCE_LIMITS.videos }) : "";
+        if (issue) message.warning(issue);
+        return !issue;
+    };
+
     const addReferences = async (files?: FileList | File[] | null): Promise<{ images: ReferenceImage[]; videos: ReferenceVideo[] }> => {
         try {
             const selectedFiles = Array.from(files || []);
@@ -790,8 +806,9 @@ export default function VideoPage() {
                 message.warning(translate("video.unsupportedReferencesIgnored"));
             }
 
-            const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.images - references.length);
-            const videoFiles = selectedFiles.filter((file) => file.type.startsWith("video/") && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes).slice(0, SEEDANCE_REFERENCE_LIMITS.videos - videoReferences.length);
+            const imageFiles = selectedFiles.filter((file) => file.type.startsWith("image/") && file.size <= SEEDANCE_REFERENCE_LIMITS.imageMaxBytes);
+            const videoFiles = selectedFiles.filter((file) => file.type.startsWith("video/") && file.size <= SEEDANCE_REFERENCE_LIMITS.videoMaxBytes);
+            if (!canAddReferences(imageFiles.length, videoFiles.length)) return { images: [], videos: [] };
             if (selectedFiles.some((file) => file.type.startsWith("image/") && file.size > SEEDANCE_REFERENCE_LIMITS.imageMaxBytes)) {
                 message.warning(translate("video.referenceImagesOver30MBIgnored"));
             }
@@ -815,8 +832,8 @@ export default function VideoPage() {
             if (!placeholders.length) {
                 return { images: [], videos: [] };
             }
-            setReferences((current) => [...current, ...imagePlaceholders].slice(0, SEEDANCE_REFERENCE_LIMITS.images));
-            setVideoReferences((current) => [...current, ...videoPlaceholders].slice(0, SEEDANCE_REFERENCE_LIMITS.videos));
+            setReferences((current) => [...current, ...imagePlaceholders]);
+            setVideoReferences((current) => [...current, ...videoPlaceholders]);
             autoSwitchModeForReferences(imageFiles.length, videoFiles.length);
             setUploadingReferenceIds((current) => [...current, ...placeholders.map((placeholder) => placeholder.id)]);
 
@@ -904,6 +921,7 @@ export default function VideoPage() {
             mode: config.videoGenerationMode,
             resolution: quality,
             seconds,
+            size,
             imageReferenceCount: allRefs.filter((reference) => reference.type.startsWith("image/")).length,
             videoReferenceCount: allRefs.filter((reference) => reference.type.startsWith("video/")).length,
         });
@@ -1102,6 +1120,7 @@ export default function VideoPage() {
             mode: config.videoGenerationMode,
             resolution: quality,
             seconds,
+            size,
             imageReferenceCount: attachments.filter((reference) => reference.type.startsWith("image/")).length,
             videoReferenceCount: attachments.filter((reference) => reference.type.startsWith("video/")).length,
         });
@@ -1335,6 +1354,7 @@ export default function VideoPage() {
     };
 
     const insertPickedAsset = (payload: InsertAssetPayload) => {
+        if (payload.kind === "image" && !canAddReferences(1, 0) || payload.kind === "video" && !canAddReferences(0, 1)) return;
         if (payload.kind === "text") {
             setPrompt(payload.content);
         } else if (payload.kind === "image") {
@@ -1352,7 +1372,7 @@ export default function VideoPage() {
                             storageKey: payload.storageKey,
                             objectStorage: payload.objectStorage,
                         },
-                    ].slice(0, SEEDANCE_REFERENCE_LIMITS.images),
+                    ],
                 );
                 autoSwitchModeForReferences(1, 0);
             }
@@ -1374,7 +1394,7 @@ export default function VideoPage() {
                         height: payload.height,
                         objectStorage: payload.objectStorage,
                     },
-                ].slice(0, SEEDANCE_REFERENCE_LIMITS.videos),
+                ],
             );
             autoSwitchModeForReferences(0, 1);
         }
@@ -1457,10 +1477,7 @@ export default function VideoPage() {
             }),
     ];
     const addRecentReference = (url: string) => {
-        if (references.length >= SEEDANCE_REFERENCE_LIMITS.images) {
-            message.warning(translate("video.addUpToReferenceImages", { value0: SEEDANCE_REFERENCE_LIMITS.images }));
-            return;
-        }
+        if (references.some((reference) => reference.dataUrl === url) || !canAddReferences(1, 0)) return;
         setReferences((current) => {
             if (current.some((reference) => reference.dataUrl === url)) return current;
             return [...current, { id: nanoid(), name: translate("video.recentReferenceImages"), type: "image/*", dataUrl: url }];
@@ -1472,7 +1489,7 @@ export default function VideoPage() {
             key: "upload",
             label: translate("video.assets"),
             icon: <Upload className="size-3.5" />,
-            popoverContent: <RecentReferenceImagePicker urls={recentReferenceImageUrls} selectedUrls={references.map((reference) => reference.dataUrl)} disabled={references.length >= SEEDANCE_REFERENCE_LIMITS.images} onSelect={addRecentReference} />,
+            popoverContent: <RecentReferenceImagePicker urls={recentReferenceImageUrls} selectedUrls={references.map((reference) => reference.dataUrl)} onSelect={addRecentReference} />,
             onClick: () => fileInputRef.current?.click(),
         },
         {

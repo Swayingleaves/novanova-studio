@@ -5,6 +5,7 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import type { CanvasStoryboardAsset, CanvasStoryboardAssetGenerationSettings, CanvasStoryboardAssetGenerationState, CanvasStoryboardAssetKind, CanvasStoryboardNode, CanvasStoryboardShot, CanvasStoryboardShotSize } from "../types";
 import { isAgnesVideoConfig, readAgnesVideoReferenceImageIssue } from "@/features/generation/lib/agnes-video";
 import { isVideoDurationSupported, readVideoDurationRange } from "@/features/generation/lib/video-duration";
+import { readVideoGenerationConstraintIssue, readVideoModelConfiguration } from "@/features/generation/lib/video-generation-constraints";
 import { availableVideoResolutions, quoteVideoGeneration, type VideoGenerationQuote } from "@/features/generation/lib/video-billing";
 import type { ReferenceImage } from "@/features/generation/types/image";
 import type { ReferenceVideo } from "@/features/generation/types/media";
@@ -90,6 +91,7 @@ export function quoteStoryboardVideo(config: AiConfig, model: string, videoConfi
         mode: readStoryboardVideoGenerationMode(shot, assets, referenceVideos),
         resolution: videoConfig.vquality,
         seconds: shot.durationSeconds,
+        size: videoConfig.size,
         imageReferenceCount: referenceImages.length,
         videoReferenceCount: referenceVideos.length,
     });
@@ -111,6 +113,8 @@ export function readStoryboardVideoCost(config: AiConfig, model: string, videoCo
 export function readStoryboardVideoShotIssue(shot: CanvasStoryboardShot, config: AiConfig): string {
     if (!shot.finalPrompt.trim()) return translate("canvas.generateFinalPromptFirst");
     if (!isPositiveDurationSeconds(shot.durationSeconds)) return translate("canvas.invalidShotDuration");
+    // 自定义模式由每个镜头的实际素材决定，统一在素材校验中检查时长与比例。
+    if (readVideoModelConfiguration(config)?.isCustomModel) return "";
     if (isVideoDurationSupported(config, shot.durationSeconds)) return "";
     const range = readVideoDurationRange(config);
     return translate("canvas.thisModelOnlySupportsSecondVideos", { value0: range.min, value1: range.max });
@@ -142,7 +146,10 @@ export function readStoryboardShotReferenceImages(shot: CanvasStoryboardShot, as
 }
 
 /** 返回镜头关联图片与当前视频模型不兼容的原因；空字符串表示可调用。 */
-export function readStoryboardVideoReferenceIssue(shot: CanvasStoryboardShot, assets: CanvasStoryboardAsset[], config: AiConfig): string {
+export function readStoryboardVideoReferenceIssue(shot: CanvasStoryboardShot, assets: CanvasStoryboardAsset[], config: AiConfig, referenceVideos: ReferenceVideo[] = []): string {
+    if (readVideoModelConfiguration(config)?.isCustomModel) return readVideoGenerationConstraintIssue({ config,
+        mode: readStoryboardVideoGenerationMode(shot, assets, referenceVideos), seconds: shot.durationSeconds,
+        imageCount: readStoryboardShotReferenceImages(shot, assets).length, videoCount: referenceVideos.length });
     if (!isAgnesVideoConfig(config)) return "";
     return readAgnesVideoReferenceImageIssue(readStoryboardShotReferenceImages(shot, assets).length);
 }

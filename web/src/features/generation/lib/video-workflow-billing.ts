@@ -34,6 +34,7 @@ type VideoWorkflowQuoteInput = {
     model: string;
     resolution: string;
     seconds: string | number;
+    size?: string;
 };
 
 /** 可注册的视频工作流报价定义。 */
@@ -98,8 +99,9 @@ export function quoteVideoWorkflow(input: VideoWorkflowQuoteInput): VideoWorkflo
             mode,
             resolution: input.resolution,
             seconds: input.seconds,
+            size: input.size,
             imageReferenceCount: definition.imageStages.length,
-            requireReferences: false,
+            requireReferences: true,
         });
         if (candidate.available) {
             videoQuote = candidate;

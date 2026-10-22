@@ -64,12 +64,36 @@ public final class PersistenceDtos {
      * @param aiQueryPrompt String AI构造查询请求体提示词，配置后由Agent生成查询请求体
      * @param queryResponseExample String 查询响应示例JSON，展示用
      * @param queryResultPath String 查询响应中媒体地址的点分路径
+     * @param videoGenerationConstraints VideoGenerationConstraints 自定义视频模式的必填生成限制
      */
     public record CustomModelGroupConfig(String requestPath, String requestMethod, String requestModelName,
                                          String requestTemplate, String aiRequestPrompt, String responseExample,
                                          String resultPath, String queryPath, String queryMethod,
                                          String queryRequestTemplate, String aiQueryPrompt, String queryResponseExample,
-                                         String queryResultPath) {
+                                         String queryResultPath, VideoGenerationConstraints videoGenerationConstraints) {
+        /**
+         * 构造不包含视频限制的图片调用配置。
+         * @param requestPath String 请求路径
+         * @param requestMethod String 请求方法
+         * @param requestModelName String 请求模型名称
+         * @param requestTemplate String 请求模板
+         * @param aiRequestPrompt String 请求构造提示词
+         * @param responseExample String 响应示例
+         * @param resultPath String 结果路径
+         * @param queryPath String 查询路径
+         * @param queryMethod String 查询方法
+         * @param queryRequestTemplate String 查询模板
+         * @param aiQueryPrompt String 查询构造提示词
+         * @param queryResponseExample String 查询响应示例
+         * @param queryResultPath String 查询结果路径
+         */
+        public CustomModelGroupConfig(String requestPath, String requestMethod, String requestModelName,
+                String requestTemplate, String aiRequestPrompt, String responseExample, String resultPath,
+                String queryPath, String queryMethod, String queryRequestTemplate, String aiQueryPrompt,
+                String queryResponseExample, String queryResultPath) {
+            this(requestPath, requestMethod, requestModelName, requestTemplate, aiRequestPrompt, responseExample,
+                    resultPath, queryPath, queryMethod, queryRequestTemplate, aiQueryPrompt, queryResponseExample, queryResultPath, null);
+        }
     }
 
     /**

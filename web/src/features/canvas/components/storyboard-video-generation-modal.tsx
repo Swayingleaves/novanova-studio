@@ -64,7 +64,6 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
         });
     }, [node?.storyboard.assets, node?.storyboard.shots, referenceVideos, videoConfig, videoModel, translate.locale]);
     const selectableShotIds = useMemo(() => shotStates.filter((item) => !item.issue).map((item) => item.shot.id), [shotStates, translate.locale]);
-    const selectableShotIdsKey = selectableShotIds.join("|");
 
     useEffect(() => {
         if (!open || !node) return;
@@ -73,15 +72,9 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
         setSelectedShotIds(node.storyboard.shots.filter((shot) => Boolean(shot.finalPrompt.trim()) && Number.isSafeInteger(shot.durationSeconds) && shot.durationSeconds > 0).map((shot) => shot.id));
     }, [effectiveConfig.size, effectiveConfig.videoGenerationMode, effectiveConfig.videoModel, effectiveConfig.videoSeconds, effectiveConfig.videoWatermark, effectiveConfig.vquality, node?.id, open]);
 
-    useEffect(() => {
-        if (!open) return;
-        const selectableShotIdSet = new Set(selectableShotIds);
-        setSelectedShotIds((current) => current.filter((shotId) => selectableShotIdSet.has(shotId)));
-    }, [open, selectableShotIdsKey]);
-
     const selectedShots = useMemo(() => {
         const selectedShotIdSet = new Set(selectedShotIds);
-        return shotStates.filter((item) => !item.issue && selectedShotIdSet.has(item.shot.id)).map((item) => item.shot);
+        return shotStates.filter((item) => selectedShotIdSet.has(item.shot.id)).map((item) => item.shot);
     }, [selectedShotIds, shotStates, translate.locale]);
     const automaticModes = useMemo(() => readStoryboardVideoGenerationModes(node?.storyboard.shots || [], node?.storyboard.assets || [], referenceVideos), [node?.storyboard.assets, node?.storyboard.shots, referenceVideos, translate.locale]);
     const storyboardModelOptions = useMemo(() => effectiveConfig.videoModels.filter((model) => automaticModes.every((mode) => videoModelSupportsMode(effectiveConfig, model, mode))), [automaticModes, effectiveConfig, translate.locale]);
@@ -93,11 +86,14 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
     const videoQuote = readStoryboardVideoCost(effectiveConfig, videoModel, videoConfig, selectedShots, node?.storyboard.assets || [], referenceVideos);
     const totalCredits = videoQuote.available ? videoQuote.credits : null;
     const balanceInsufficient = creditBalance !== null && creditBalance !== undefined && totalCredits !== null && creditAmount(totalCredits).greaterThan(creditBalance);
-    const allSelected = Boolean(selectableShotIds.length) && selectedShots.length === selectableShotIds.length;
-    const partiallySelected = selectedShots.length > 0 && !allSelected;
+    const selectedSelectableShotCount = selectedShotIds.filter((id) => selectableShotIds.includes(id)).length;
+    const allSelected = Boolean(selectableShotIds.length) && selectedSelectableShotCount === selectableShotIds.length;
+    const partiallySelected = selectedSelectableShotCount > 0 && !allSelected;
     const creditUnit = effectiveConfig.videoModelBillingConfigurations.find((item) => item.model === videoModel)?.videoBillingConfiguration?.billingUnit;
 
-    const toggleAll = () => setSelectedShotIds(allSelected ? [] : selectableShotIds);
+    const toggleAll = () => setSelectedShotIds((current) => allSelected
+        ? current.filter((id) => !selectableShotIds.includes(id))
+        : [...new Set([...current, ...selectableShotIds])]);
     const toggleShot = (shotId: string, checked: boolean) => {
         setSelectedShotIds((current) => (checked ? [...new Set([...current, shotId])] : current.filter((id) => id !== shotId)));
     };
@@ -172,8 +168,8 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
                                     <Checkbox
                                         className="mt-0.5"
                                         aria-label={translate("canvas.selectShot", { value0: shot.shotNumber })}
-                                        checked={selectable && selectedShotIds.includes(shot.id)}
-                                        disabled={!selectable || generating}
+                                        checked={selectedShotIds.includes(shot.id)}
+                                        disabled={generating}
                                         onChange={(event) => toggleShot(shot.id, event.target.checked)}
                                     />
                                     <div className="min-w-0 flex-1">
@@ -248,7 +244,7 @@ function readShotIssue(shot: CanvasStoryboardShot, assets: CanvasStoryboardAsset
     if (!shot.finalPrompt.trim()) return translate("canvas.generateFinalPromptFirst");
     if (!Number.isSafeInteger(shot.durationSeconds) || shot.durationSeconds < 1) return translate("canvas.invalidShotDuration");
     if (!videoModel) return "";
-    const issue = readStoryboardVideoShotIssue(shot, videoConfig) || readStoryboardVideoReferenceIssue(shot, assets, videoConfig);
+    const issue = readStoryboardVideoShotIssue(shot, videoConfig) || readStoryboardVideoReferenceIssue(shot, assets, videoConfig, referenceVideos);
     if (issue) return issue;
     const quote = quoteStoryboardVideo(videoConfig, videoModel, videoConfig, shot, assets, referenceVideos);
     return quote.available ? "" : quote.reason;

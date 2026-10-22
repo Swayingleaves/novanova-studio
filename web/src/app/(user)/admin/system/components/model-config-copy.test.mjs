@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { applyCustomConfigCopy, countCustomConfigFields, countCustomGroupFields, copyableVideoSourceModels, isCustomGroupBlank, planCustomConfigCopy } from "./model-config-copy";
+import { applyCustomConfigAutoFill, applyCustomConfigCopy, countCustomConfigFields, countCustomGroupFields, copyableVideoSourceModels, isCustomGroupBlank, planCustomConfigAutoFill, planCustomConfigCopy } from "./model-config-copy";
 
 const emptyGroup = () => ({
     requestPath: "",
@@ -44,6 +44,18 @@ const config = (patch) => ({
     isCustomModel: true,
     customModelConfig: {},
     ...patch,
+});
+
+test("复制视频限制时深复制嵌套对象和比例数组", () => {
+    const source = config({ customModelConfig: { "image-to-video": group({ videoGenerationConstraints: {
+        minimumDurationSeconds: 3, maximumDurationSeconds: 10, minimumImageCount: 1, maximumImageCount: 2, supportedAspectRatios: ["16:9", "auto"],
+    } }) } });
+    const result = applyCustomConfigCopy(config({}), source, ["image-to-video"]);
+    const copied = result.config.customModelConfig["image-to-video"].videoGenerationConstraints;
+    copied.supportedAspectRatios.push("9:16");
+    copied.maximumImageCount = 5;
+    assert.deepEqual(source.customModelConfig["image-to-video"].videoGenerationConstraints.supportedAspectRatios, ["16:9", "auto"]);
+    assert.equal(source.customModelConfig["image-to-video"].videoGenerationConstraints.maximumImageCount, 2);
 });
 
 test("复制来源排除自身与非自定义视频模型", () => {
@@ -129,4 +141,57 @@ test("逐模式计划给出来源与目标的填写字段", () => {
     assert.equal(textToVideo.targetFilledFieldCount, 2);
     assert.deepEqual(textToVideo.sourceFilledFields, ["requestPath"]);
     assert.deepEqual(textToVideo.targetFilledFields, ["requestPath", "requestTemplate"]);
+});
+
+test("自动填充只补当前模式的空字段，已有内容保持不变", () => {
+    const target = config({ customModelConfig: { "image-to-video": group({ requestPath: "/keep", queryPath: "" }) } });
+    const next = applyCustomConfigAutoFill(target, "image-to-video", group({ requestPath: "/new", requestTemplate: '{"a":1}', queryPath: "/q" }));
+
+    assert.equal(next.config.customModelConfig["image-to-video"].requestPath, "/keep");
+    assert.equal(next.config.customModelConfig["image-to-video"].requestTemplate, '{"a":1}');
+    assert.equal(next.config.customModelConfig["image-to-video"].queryPath, "/q");
+    assert.deepEqual(next.filledFields, ["requestTemplate", "queryPath"]);
+});
+
+test("自动填充逐项合并视频生成限制，空比例数组也算未填写", () => {
+    const target = config({ customModelConfig: { "reference-to-video": group({ videoGenerationConstraints: { minimumDurationSeconds: 5, supportedAspectRatios: [] } }) } });
+    const source = group({ videoGenerationConstraints: { minimumDurationSeconds: 2, maximumDurationSeconds: 8, supportedAspectRatios: ["16:9", "auto"] } });
+    const next = applyCustomConfigAutoFill(target, "reference-to-video", source);
+    const merged = next.config.customModelConfig["reference-to-video"].videoGenerationConstraints;
+
+    assert.equal(merged.minimumDurationSeconds, 5);
+    assert.equal(merged.maximumDurationSeconds, 8);
+    assert.deepEqual(merged.supportedAspectRatios, ["16:9", "auto"]);
+    assert.deepEqual(next.filledFields, ["videoGenerationConstraints"]);
+});
+
+test("自动填充计划排除当前模式，并跳过来源为空或目标已填满的模式", () => {
+    const target = config({ customModelConfig: { "image-to-video": group({ requestPath: "/filled" }) } });
+    const source = config({ customModelConfig: {
+        "text-to-video": group({ requestPath: "/t2v" }),
+        "image-to-video": group({ requestPath: "/keep-text" }),
+        "reference-to-video": group({}),
+    } });
+
+    const rows = planCustomConfigAutoFill(target, source, "image-to-video");
+    assert.deepEqual(rows.map((row) => row.mode), ["text-to-video", "reference-to-video", "first-last-frame-to-video"]);
+    assert.deepEqual(rows.find((row) => row.mode === "text-to-video").fillableFields, []);
+    assert.deepEqual(rows.find((row) => row.mode === "reference-to-video").sourceFilledFields, []);
+});
+
+test("自动填充计划在空目标下列出全部可填充字段", () => {
+    const source = config({ customModelConfig: { "text-to-video": group({ requestPath: "/t2v", requestTemplate: "{}", videoGenerationConstraints: { maximumImageCount: 2 } }) } });
+    const rows = planCustomConfigAutoFill(config({}), source, "reference-to-video");
+    const textToVideo = rows.find((row) => row.mode === "text-to-video");
+    assert.deepEqual(textToVideo.fillableFields, ["requestPath", "requestTemplate", "videoGenerationConstraints"]);
+});
+
+test("自动填充不改动其他模式，也不污染来源分组", () => {
+    const sourceGroup = group({ requestTemplate: '{"a":1}' });
+    const target = config({ customModelConfig: { "text-to-video": group({ requestPath: "/t2v" }) } });
+    const next = applyCustomConfigAutoFill(target, "image-to-video", sourceGroup);
+    next.config.customModelConfig["image-to-video"].requestTemplate = '{"b":2}';
+
+    assert.equal(next.config.customModelConfig["text-to-video"].requestPath, "/t2v");
+    assert.equal(sourceGroup.requestTemplate, '{"a":1}');
 });

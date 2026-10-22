@@ -184,7 +184,21 @@ public final class AiTaskDtos {
 
     /** 视频工作流报价请求。 */
     public record VideoWorkflowQuoteRequest(String workflowType, String model, String imageModel,
-                                            String resolution, String seconds, String stage) {
+                                            String resolution, String seconds, String stage, String size) {
+
+        /**
+         * 构造未指定视频比例的报价请求，视频自定义模式会显式拒绝缺失比例。
+         * @param workflowType String 工作流类型
+         * @param model String 视频模型
+         * @param imageModel String 图片模型
+         * @param resolution String 分辨率
+         * @param seconds String 时长
+         * @param stage String 报价阶段
+         */
+        public VideoWorkflowQuoteRequest(String workflowType, String model, String imageModel,
+                String resolution, String seconds, String stage) {
+            this(workflowType, model, imageModel, resolution, seconds, stage, null);
+        }
 
         /**
          * 兼容未指定报价阶段的调用，默认计算完整工作流报价。
@@ -274,11 +288,37 @@ public final class AiTaskDtos {
      * @param videoBillingConfiguration VideoBillingConfiguration 视频分档计费配置
      * @param icon String 模型展示图标标识，可为null
      * @param imageBillingConfiguration ImageBillingConfiguration 图片分辨率价目表，可为null
+     * @param isCustomModel Boolean 是否使用自定义调用，独立于渠道格式
+     * @param videoGenerationConstraints Map 按视频模式分组的公开限制
      */
     public record AiModelOption(String value, String label, String capability, String provider, String apiFormat,
                                 Boolean defaultModel, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditCost, String creditUnit, List<String> capabilities,
                                 VideoBillingConfiguration videoBillingConfiguration, String icon, Long ownerTeamId,
-                                ImageBillingConfiguration imageBillingConfiguration) {
+                                ImageBillingConfiguration imageBillingConfiguration, Boolean isCustomModel,
+                                Map<String, VideoGenerationConstraints> videoGenerationConstraints) {
+        /**
+         * 构造普通模型目录项。
+         * @param value String 模型标识
+         * @param label String 展示名称
+         * @param capability String 模型类型
+         * @param provider String 渠道名称
+         * @param apiFormat String 渠道格式
+         * @param defaultModel Boolean 是否默认
+         * @param creditCost BigDecimal 积分单价
+         * @param creditUnit String 计费单位
+         * @param capabilities List 模型能力
+         * @param videoBillingConfiguration VideoBillingConfiguration 视频计费
+         * @param icon String 图标
+         * @param ownerTeamId Long 所属空间
+         * @param imageBillingConfiguration ImageBillingConfiguration 图片计费
+         */
+        public AiModelOption(String value, String label, String capability, String provider, String apiFormat,
+                Boolean defaultModel, BigDecimal creditCost, String creditUnit, List<String> capabilities,
+                VideoBillingConfiguration videoBillingConfiguration, String icon, Long ownerTeamId,
+                ImageBillingConfiguration imageBillingConfiguration) {
+            this(value, label, capability, provider, apiFormat, defaultModel, creditCost, creditUnit, capabilities,
+                    videoBillingConfiguration, icon, ownerTeamId, imageBillingConfiguration, false, Map.of());
+        }
         /**
          * 创建平台模型展示记录。
          * @param value 模型配置字段

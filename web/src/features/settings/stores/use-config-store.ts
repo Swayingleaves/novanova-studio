@@ -32,6 +32,16 @@ export type VideoBillingConfiguration = {
 export type ImageBillingConfiguration = {
     resolutionPrices: Partial<Record<ImageResolution, CreditAmount>>;
 };
+/** 自定义视频模式限制；草稿和未补全配置允许缺失字段，使用前必须统一校验。 */
+export type VideoGenerationConstraints = {
+    minimumDurationSeconds?: number | null;
+    maximumDurationSeconds?: number | null;
+    minimumImageCount?: number | null;
+    maximumImageCount?: number | null;
+    supportedAspectRatios?: string[];
+    maximumVideoCount?: number | null;
+    maximumAudioCount?: number | null;
+};
 /** 自定义模型单能力/模式分组配置。 */
 export type CustomModelGroupConfig = {
     requestPath: string;
@@ -47,11 +57,14 @@ export type CustomModelGroupConfig = {
     aiQueryPrompt: string;
     queryResponseExample: string;
     queryResultPath: string;
+    videoGenerationConstraints?: VideoGenerationConstraints | null;
 };
 export type VideoModelBillingConfiguration = {
     model: string;
     capabilities: string[];
     videoBillingConfiguration: VideoBillingConfiguration | null;
+    isCustomModel?: boolean;
+    videoGenerationConstraints?: Partial<Record<VideoGenerationMode, VideoGenerationConstraints>>;
 };
 export type ModelCapabilityConfig = { model: string; capabilities: string[] };
 
@@ -498,6 +511,10 @@ export function configFromModelConfigs(channels: ModelChannel[], modelConfigs: S
                 model: `${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`,
                 capabilities: item.capabilities,
                 videoBillingConfiguration: item.videoBillingConfiguration || null,
+                isCustomModel: item.isCustomModel,
+                videoGenerationConstraints: Object.fromEntries(Object.entries(item.customModelConfig || {})
+                    .filter(([, group]) => group.videoGenerationConstraints)
+                    .map(([mode, group]) => [mode, group.videoGenerationConstraints!])),
             })),
         modelDisplayNames: Object.fromEntries(
             modelConfigs
@@ -563,6 +580,8 @@ function configFromServerModels(modelList: ServerAiModelList | null) {
                 model: model.value,
                 capabilities: model.capabilities || [],
                 videoBillingConfiguration: model.videoBillingConfiguration || null,
+                isCustomModel: model.isCustomModel,
+                videoGenerationConstraints: model.videoGenerationConstraints || {},
             })),
         modelDisplayNames: Object.fromEntries(
             models

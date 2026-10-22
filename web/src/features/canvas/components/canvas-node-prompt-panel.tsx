@@ -16,6 +16,7 @@ import { normalizeImageGenerationCount } from "@/features/generation/components/
 import { normalizeVideoGenerationCount } from "@/features/generation/components/video-settings-panel";
 import { CreditCostDisplay, requestCreditCost } from "@/features/generation/constants/credits";
 import { availableVideoModelsForMode, quoteVideoGeneration } from "@/features/generation/lib/video-billing";
+import { readVideoGenerationConstraintIssue, readVideoModelConfiguration } from "@/features/generation/lib/video-generation-constraints";
 import { uploadImage } from "@/features/storage/services/image-storage";
 import { isAudioFile, uploadAudioFile } from "@/features/storage/services/audio-storage";
 import { activateCanvasAudio, releaseCanvasAudio } from "../services/canvas-audio-playback";
@@ -104,6 +105,7 @@ export function CanvasNodePromptPanel({
     const promptPanelRef = useRef<HTMLDivElement>(null);
     const libraryPromptRef = useRef<string | null>(null);
     const config = buildNodeConfig(globalConfig, node, mode);
+    const isCustomVideoModel = mode === "video" && Boolean(readVideoModelConfiguration(config)?.isCustomModel);
     const nodePrompt = readNodePrompt(node);
     // 文本节点的正文只在节点内编辑，这里仅用于提示占位文案
     const hasTextContent = isTextNode(node) && Boolean(node.content.text.trim());
@@ -152,7 +154,7 @@ export function CanvasNodePromptPanel({
         mode === "video"
             ? quoteVideoGeneration({
                   config,
-                  model: config.model,
+                  model: config.videoModel || config.model,
                   mode: config.videoGenerationMode,
                   resolution: config.vquality,
                   seconds: config.videoSeconds,
@@ -175,10 +177,10 @@ export function CanvasNodePromptPanel({
     useEffect(() => {
         const audioCountIncreased = videoReferenceCounts.audios > previousAudioCountRef.current;
         previousAudioCountRef.current = videoReferenceCounts.audios;
-        if (mode === "video" && audioCountIncreased && modelSupportsAudio && !audioModeAllowed) {
+        if (mode === "video" && audioCountIncreased && modelSupportsAudio && !audioModeAllowed && !isCustomVideoModel) {
             onConfigChange(node.id, { videoGenerationMode: "reference-to-video" });
         }
-    }, [audioModeAllowed, mode, modelSupportsAudio, node.id, onConfigChange, videoReferenceCounts.audios]);
+    }, [audioModeAllowed, isCustomVideoModel, mode, modelSupportsAudio, node.id, onConfigChange, videoReferenceCounts.audios]);
     const creditCost =
         mode === "video"
             ? videoQuote?.available
@@ -278,7 +280,7 @@ export function CanvasNodePromptPanel({
             }
         }
         if (!onMentionSelect(reference)) return;
-        if (reference.kind === "audio" && !audioModeAllowed) {
+        if (reference.kind === "audio" && !audioModeAllowed && !isCustomVideoModel) {
             onConfigChange(node.id, { videoGenerationMode: "reference-to-video" });
         }
         const existingReference = mentionReferences.find((item) => item.nodeId === reference.nodeId);
@@ -321,6 +323,25 @@ export function CanvasNodePromptPanel({
             const audioReferences = [...(generation.audioReferences || [])];
             const videoReferences = [...(generation.videoReferences || [])];
             const videoStorages = [...(generation.videoReferenceObjectStorages || [])];
+            if (isCustomVideoModel) {
+                const added = Array.from(files).reduce((counts, file) => {
+                    if (isAudioFile(file)) counts.audios += 1;
+                    else if (file.type.startsWith("video/")) counts.videos += 1;
+                    else if (file.type.startsWith("image/")) counts.images += 1;
+                    return counts;
+                }, { images: 0, videos: 0, audios: 0 });
+                const issue = readVideoGenerationConstraintIssue({
+                    config,
+                    imageCount: videoReferenceCounts.images + added.images,
+                    videoCount: videoReferenceCounts.videos + added.videos,
+                    audioCount: videoReferenceCounts.audios + added.audios,
+                    addingReferences: true,
+                });
+                if (issue) {
+                    message.warning(issue);
+                    return;
+                }
+            }
             let addedAudio = false;
             for (const file of Array.from(files)) {
                 if (isAudioFile(file)) {
@@ -346,7 +367,7 @@ export function CanvasNodePromptPanel({
                 videoReferences,
                 videoReferenceObjectStorages: videoStorages,
                 audioReferences: mergeAudioReferences(audioReferences),
-                ...(addedAudio ? { videoGenerationMode: "reference-to-video" as const } : {}),
+                ...(addedAudio && !isCustomVideoModel ? { videoGenerationMode: "reference-to-video" as const } : {}),
             });
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("canvas.failedToUploadReference"));

@@ -12,8 +12,9 @@ import { App, Button, Checkbox, Modal, Space, Spin } from "antd";
 import { Coins, Sparkles } from "lucide-react";
 
 import { VideoSettingsPanel, sizeFromAspectRatio } from "@/features/generation/components/video-settings-panel";
+import { readVideoGenerationConstraintIssue } from "@/features/generation/lib/video-generation-constraints";
 import { ModelPicker } from "@/features/settings/components/model-picker";
-import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
+import { useEffectiveConfig, type VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { estimateComicDramaGeneration, readComicDramaMediaUrl } from "@/services/api/comic-drama";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
@@ -52,6 +53,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
     /** 批量模式下勾选要生成的镜头，打开弹窗时默认全选 */
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [estimatedCredits, setEstimatedCredits] = useState<CreditAmount | null>(null);
+    const [estimateError, setEstimateError] = useState("");
     const [estimating, setEstimating] = useState(false);
     const [generating, setGenerating] = useState(false);
 
@@ -106,6 +108,12 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
     const shotsWithPromptCount = targetShots.filter((shot) => adoptedPrompts.has(shot.id)).length;
     const shotsWithReferenceCount = targetShots.filter((shot) => (referenceCountByShot.get(shot.id) || 0) > 0).length;
     const allSelected = shots.length > 0 && targetShots.length === shots.length;
+    const videoGenerationMode: VideoGenerationMode = (isBatch ? shotsWithReferenceCount > 0 : referenceCount > 0) ? "image-to-video" : "text-to-video";
+    const constraintIssue = targetShots.map((shot) => {
+        const imageCount = referenceCountByShot.get(shot.id) || 0;
+        const issue = readVideoGenerationConstraintIssue({ config, model, mode: imageCount ? "image-to-video" : "text-to-video", size, seconds: videoSeconds, imageCount });
+        return issue ? `${shot.shotNumber}：${issue}` : "";
+    }).find(Boolean) || "";
 
     // 与生成页一致：适配器读 size/resolution/seconds
     const taskSettings = useMemo(
@@ -114,9 +122,9 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
             size,
             resolution: vquality,
             seconds: videoSeconds,
-            videoGenerationMode: (isBatch ? shotsWithReferenceCount > 0 : referenceCount > 0) ? "image-to-video" : "text-to-video",
+            videoGenerationMode: isBatch ? undefined : videoGenerationMode,
         }),
-        [size, vquality, videoSeconds, referenceCount, isBatch, shotsWithReferenceCount]
+        [size, vquality, videoSeconds, isBatch, videoGenerationMode]
     );
 
     // 每次打开都回到项目画幅与默认模型配置并默认全选镜头；单镜头沿用其分镜时长，批量时各镜头时长不一致，回落到默认视频时长。
@@ -136,7 +144,8 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
     // 模型、勾选范围或任何影响计费的参数变化后自动估算总价，用户不需要再手点一次。
     const targetIdsKey = targetIds.join(",");
     useEffect(() => {
-        if (!open || !projectId || !model || targetIds.length === 0) {
+        setEstimateError("");
+        if (!open || !projectId || !model || targetIds.length === 0 || constraintIssue) {
             setEstimatedCredits(null);
             setEstimating(false);
             return;
@@ -149,8 +158,11 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                 .then((res) => {
                     if (!cancelled) setEstimatedCredits(res.estimatedCredits);
                 })
-                .catch(() => {
-                    if (!cancelled) setEstimatedCredits(null);
+                .catch((error) => {
+                    if (!cancelled) {
+                        setEstimatedCredits(null);
+                        setEstimateError(error instanceof Error ? error.message : translate("comicDrama.estimateFailed"));
+                    }
                 })
                 .finally(() => {
                     if (!cancelled) setEstimating(false);
@@ -161,9 +173,13 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
             clearTimeout(timer);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open, projectId, model, targetIdsKey, taskSettings]);
+    }, [open, projectId, model, targetIdsKey, taskSettings, constraintIssue]);
 
     const handleCreate = async () => {
+        if (constraintIssue || estimateError) {
+            message.warning(constraintIssue || estimateError);
+            return;
+        }
         if (!model) {
             message.warning(translate("comicDrama.selectAGenerationModelFirst"));
             return;
@@ -292,8 +308,6 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                                 value={model}
                                 onChange={(value) => {
                                     setModel(value);
-                                    // 新模型可能不支持当前比例（面板只置灰不回退），按项目画幅重新锚定
-                                    setSize(sizeFromAspectRatio({ ...config, videoModel: value }, workspace?.settings.aspectRatio));
                                     setEstimatedCredits(null);
                                 }}
                                 fullWidth
@@ -310,7 +324,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                                 size,
                                 vquality,
                                 videoSeconds,
-                                videoGenerationMode: taskSettings.videoGenerationMode,
+                                videoGenerationMode,
                             }}
                             onConfigChange={handleSettingChange}
                             theme={settingsTheme}
@@ -331,6 +345,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                     </p>
 
                     <div className="mt-auto flex flex-col gap-3 border-t border-[var(--studio-line)] pt-3">
+                        {constraintIssue || estimateError ? <p role="alert" className="text-xs text-[var(--studio-danger)]">{constraintIssue || estimateError}</p> : null}
                         {/* 价格放在确认按钮正上方，用色块与大号数字提高可读性 */}
                         <div className="flex min-h-[52px] items-center justify-between gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2">
                             <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--studio-muted)]">
@@ -358,7 +373,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                                 <Button
                                     type="primary"
                                     loading={generating}
-                                    disabled={targetIds.length === 0}
+                                    disabled={targetIds.length === 0 || Boolean(constraintIssue || estimateError) || estimating}
                                     icon={<Sparkles className="size-4" />}
                                     onClick={handleCreate}
                                 >

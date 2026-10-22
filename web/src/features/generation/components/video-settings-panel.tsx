@@ -11,9 +11,10 @@ import { agnesVideoRatioOptions, isAgnesVideoConfig, normalizeAgnesVideoRatio, n
 import { isMiniMaxH3VideoConfig, normalizeMiniMaxH3Duration, normalizeMiniMaxH3Ratio } from "@/features/generation/lib/minimax-h3-video";
 import { isSeedanceVideoConfig, normalizeSeedanceRatio } from "@/features/generation/lib/seedance-video";
 import { readVideoDurationRange } from "@/features/generation/lib/video-duration";
+import { readCustomVideoConstraints, readVideoGenerationConstraintIssue, readVideoModelConfiguration } from "@/features/generation/lib/video-generation-constraints";
 import { createVideoGenerationModeOptions, VIDEO_RESOLUTION_OPTIONS, availableVideoResolutions } from "@/features/generation/lib/video-billing";
 import type { CanvasTheme } from "@/shared/lib/canvas-theme";
-import { resolveModelRequestConfig, type AiConfig, type VideoResolution } from "@/features/settings/stores/use-config-store";
+import { resolveModelRequestConfig, type AiConfig, type VideoGenerationMode, type VideoResolution } from "@/features/settings/stores/use-config-store";
 
 /** 视频设置面板支持的配置键。 */
 type VideoConfigKey = "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark";
@@ -78,17 +79,27 @@ export function VideoSettingsPanel({
     const seedance = isSeedanceVideoConfig(resolved);
     const agnes = isAgnesVideoConfig(resolved);
     const miniMaxH3 = isMiniMaxH3VideoConfig(resolved);
-    const ratio = resolveRatio(resolved.size, seedance, agnes, miniMaxH3);
+    const customVideo = Boolean(readVideoModelConfiguration(config)?.isCustomModel);
+    const constraints = readCustomVideoConstraints(config);
+    const constraintIssue = readVideoGenerationConstraintIssue({ config, requireReferences: false });
+    const ratio = customVideo ? resolved.size === "auto" ? "adaptive" : resolved.size : resolveRatio(resolved.size, seedance, agnes, miniMaxH3);
     const resolution = normalizeConfiguredResolution(resolved.vquality);
     const pricedResolutions = resolutionOptions || availableVideoResolutions(config, config.videoModel || config.model, config.videoGenerationMode);
     const resolutionPresets = [
         ...VIDEO_RESOLUTION_OPTIONS.filter((item) => pricedResolutions.includes(item.value)),
         ...(!pricedResolutions.includes(resolution as (typeof pricedResolutions)[number]) && VIDEO_RESOLUTION_OPTIONS.some((item) => item.value === resolution) ? VIDEO_RESOLUTION_OPTIONS.filter((item) => item.value === resolution) : []),
     ];
-    const providerDurationRange = readVideoDurationRange(resolved);
+    const providerDurationRange = readVideoDurationRange(config);
     const billingMinimumDuration = config.videoModelBillingConfigurations.find((item) => item.model === (config.videoModel || config.model))?.videoBillingConfiguration?.minimumDurationSeconds || 1;
-    const durationRange = { min: Math.max(providerDurationRange.min, billingMinimumDuration), max: providerDurationRange.max };
-    const durationRangeAvailable = durationRange.min <= durationRange.max;
+    const customMinimumDuration = constraints?.minimumDurationSeconds;
+    const customMaximumDuration = constraints?.maximumDurationSeconds;
+    const customDurationConfigured = !customVideo || typeof customMinimumDuration === "number" && Number.isSafeInteger(customMinimumDuration)
+        && typeof customMaximumDuration === "number" && Number.isSafeInteger(customMaximumDuration);
+    const durationRange = customVideo && typeof customMinimumDuration === "number" && Number.isSafeInteger(customMinimumDuration)
+        && typeof customMaximumDuration === "number" && Number.isSafeInteger(customMaximumDuration)
+        ? { min: Math.max(customMinimumDuration, billingMinimumDuration), max: customMaximumDuration }
+        : { min: Math.max(providerDurationRange.min, billingMinimumDuration), max: providerDurationRange.max };
+    const durationRangeAvailable = customDurationConfigured && durationRange.min <= durationRange.max;
     const displayDurationRange = durationRangeAvailable ? durationRange : providerDurationRange;
     const seconds = resolveSeconds(resolved, seedance, agnes, miniMaxH3, displayDurationRange);
     const [durationDraft, setDurationDraft] = useState(seconds);
@@ -104,28 +115,29 @@ export function VideoSettingsPanel({
         const currentMode = config.videoGenerationMode;
         const previous = previousModelMode.current;
         previousModelMode.current = { model: currentModel, mode: currentMode };
-        if (!previous) return;
+        if (!previous || customVideo) return;
         if (previous.model === currentModel && previous.mode === currentMode) return;
         if (pricedResolutions.length === 0) return;
         if (!pricedResolutions.includes(resolution as VideoResolution)) {
             onConfigChange("vquality", pricedResolutions[0]);
         }
-    }, [config.videoModel, config.videoGenerationMode, config.model, pricedResolutions, resolution, onConfigChange]);
+    }, [config.videoModel, config.videoGenerationMode, config.model, pricedResolutions, resolution, onConfigChange, customVideo]);
 
     const commitDuration = (value: number) => {
-        const normalized = String(normalizeDurationDraft(String(value), durationRange));
+        const normalized = String(customVideo ? value : normalizeDurationDraft(String(value), durationRange));
         if (normalized === config.videoSeconds) return;
         onConfigChange("videoSeconds", normalized);
     };
 
     const updateRatio = (value: RatioPreset["value"]) => {
-        onConfigChange("size", seedance || agnes || miniMaxH3 ? value : GENERIC_SIZE_BY_RATIO[value]);
+        onConfigChange("size", customVideo ? value === "adaptive" ? "auto" : value : seedance || agnes || miniMaxH3 ? value : GENERIC_SIZE_BY_RATIO[value]);
     };
 
     return (
         <ImageSettingsTheme theme={theme}>
             <div className={className} style={{ color: theme.node.text }} onMouseDown={stopDown}>
                 {showTitle ? <div className="text-base font-semibold">{translate("generation.videoSettings")}</div> : null}
+                {constraintIssue ? <p role="alert" className="text-xs text-[var(--studio-danger)]">{constraintIssue}</p> : null}
 
                 {showGenerationMode ? (
                     <Field label={translate("generation.generationMode")} theme={theme}>
@@ -136,7 +148,7 @@ export function VideoSettingsPanel({
                 <Field label={translate("generation.aspectRatio")} theme={theme}>
                     <div className="grid grid-cols-5 gap-2">
                         {RATIO_PRESETS.map((preset) => {
-                            const disabled = !supportsRatio(preset.value, seedance, agnes, miniMaxH3);
+                            const disabled = customVideo ? !constraints?.supportedAspectRatios?.includes(preset.value === "adaptive" ? "auto" : preset.value) : !supportsRatio(preset.value, seedance, agnes, miniMaxH3);
                             return <RatioButton key={preset.value} preset={preset} active={ratio === preset.value} disabled={disabled} theme={theme} onClick={() => updateRatio(preset.value)} />;
                         })}
                     </div>
@@ -164,7 +176,12 @@ export function VideoSettingsPanel({
 
                 {showDuration ? (
                     <Field label={translate("generation.videoDuration")} theme={theme}>
-                        {!durationRangeAvailable ? (
+                        {customVideo && durationRangeAvailable ? <p className="text-xs" style={{ color: theme.node.muted }}>{translate("generation.videoConstraintDurationBounds", { minimum: durationRange.min, maximum: durationRange.max })}</p> : null}
+                        {customVideo && !customDurationConfigured ? (
+                            <div role="alert" className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
+                                {constraintIssue || translate("generation.videoConstraintDurationRange", { minimum: "?", maximum: "?", current: config.videoSeconds })}
+                            </div>
+                        ) : !durationRangeAvailable ? (
                             <div className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: theme.node.stroke, color: theme.node.muted }}>
                                 {translate("generation.minimumOutputCountForThisConfiguration")}{durationRange.min} {translate("generation.sButThisModelSupportsUpTo")}{durationRange.max} {translate("generation.sGenerationUnavailable")}</div>
                         ) : (
@@ -181,7 +198,7 @@ export function VideoSettingsPanel({
                                     className="h-8 w-14 rounded-lg border bg-transparent px-2 text-center text-sm font-medium outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                                     style={{ borderColor: theme.node.stroke, color: theme.node.text, background: theme.node.fill }}
                                     onMouseDown={stopDown}
-                                    onChange={(event) => setDurationDraft(normalizeDurationDraft(event.currentTarget.value, durationRange))}
+                                    onChange={(event) => setDurationDraft(customVideo ? Number(event.currentTarget.value) : normalizeDurationDraft(event.currentTarget.value, durationRange))}
                                     onBlur={() => commitDuration(durationDraft)}
                                     onKeyDown={(event) => {
                                         if (event.key !== "Enter") return;
@@ -293,6 +310,7 @@ export function sizeFromAspectRatio(config: AiConfig, ratio?: string): string {
     const normalized = (ratio || "").trim();
     if (!normalized) return config.size || "16:9";
     const resolved = resolveModelRequestConfig(config, config.videoModel || config.model);
+    if (readVideoModelConfiguration(config)?.isCustomModel) return normalized === "adaptive" ? "auto" : normalized;
     if (isSeedanceVideoConfig(resolved) || isAgnesVideoConfig(resolved) || isMiniMaxH3VideoConfig(resolved)) {
         return normalized;
     }
