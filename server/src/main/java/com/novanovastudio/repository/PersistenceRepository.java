@@ -794,9 +794,11 @@ public class PersistenceRepository {
      *
      * @param userId Long 用户ID
      * @param logType String 记录类型
-     * @return Flux<SnapshotRecord> 生成记录列表
+     * @param offset long 已跳过的记录条数
+     * @param limit int 查询条数，包含判断下一页的额外一条
+     * @return Flux<GenerationLogRecord> 当前页生成记录
      */
-    public Flux<PersistenceRecords.GenerationLogRecord> listGenerationLogs(Long userId, String logType) {
+    public Flux<PersistenceRecords.GenerationLogRecord> listGenerationLogs(Long userId, String logType, long offset, int limit) {
         // 基础查询限定用户和未删除状态，可选类型筛选按参数决定。
         String sql = """
                 SELECT id, team_id, user_id, log_type AS record_type, title, log_data::text AS record_data, status,
@@ -807,8 +809,9 @@ public class PersistenceRepository {
         if (logType != null && !logType.isBlank()) {
             sql += " AND log_type = :logType";
         }
-        sql += " ORDER BY created_at DESC";
-        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(sql).bind("userId", userId);
+        // 相同创建时间按主键排序，保证相邻分页的顺序确定。
+        sql += " ORDER BY created_at DESC, id DESC LIMIT :limit OFFSET :offset";
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(sql).bind("userId", userId).bind("limit", limit).bind("offset", offset);
         if (logType != null && !logType.isBlank()) {
             spec = spec.bind("logType", logType);
         }

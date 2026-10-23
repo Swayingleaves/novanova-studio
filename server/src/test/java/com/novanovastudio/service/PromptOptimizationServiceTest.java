@@ -58,7 +58,7 @@ class PromptOptimizationServiceTest {
     }
 
     /**
-     * 视频优化应加载独立的视频策略。
+     * 视频优化应加载独立策略，并原样传递图片引用标记。
      */
     @Test
     void shouldCreateVideoPromptOptimizationTask() {
@@ -66,9 +66,11 @@ class PromptOptimizationServiceTest {
         SystemPromptTemplateService templateService = promptTemplateService();
         PromptOptimizationService service = new PromptOptimizationService(aiTaskService, templateService, null, new NovanovaProperties());
 
-        service.optimizePrompt(new PromptOptimizationDtos.OptimizePromptRequest(AiTaskTypes.VIDEO, "海边奔跑")).block();
+        String prompt = "以@图片1的人物在海边奔跑，参考@图片2的风格";
+        service.optimizePrompt(new PromptOptimizationDtos.OptimizePromptRequest(AiTaskTypes.VIDEO, prompt)).block();
 
         AiTaskDtos.CreateAiTaskRequest request = capturedRequest();
+        Assertions.assertEquals(prompt, request.prompt());
         Assertions.assertEquals(templateService.get(PromptTemplateType.OPTIMIZATION_VIDEO), request.parameters().get("systemPrompt"));
     }
 

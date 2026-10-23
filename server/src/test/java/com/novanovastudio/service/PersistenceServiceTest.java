@@ -587,13 +587,65 @@ class PersistenceServiceTest {
         record.setGenerationCompletedAt(completedAt);
         record.setGenerationViewedAt(viewedAt);
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(9L));
-        when(repository.listGenerationLogs(9L, "image")).thenReturn(Flux.just(record));
+        when(repository.listGenerationLogs(9L, "image", 0L, 16)).thenReturn(Flux.just(record));
 
-        JSONObject generationLog = service.listGenerationLogs("image").block().getFirst();
+        JSONObject generationLog = service.listGenerationLogs("image", 1).block().logs().getFirst();
 
         Assertions.assertEquals("success", generationLog.getString("generationStatus"));
         Assertions.assertEquals("2026-07-11T10:00:00Z", generationLog.getString("generationCompletedAt"));
         Assertions.assertEquals("2026-07-11T09:00:00Z", generationLog.getString("generationViewedAt"));
+    }
+
+    /**
+     * 生成记录每页最多返回15条，通过额外一条判断下一页。
+     *
+     * @param recordCount int 仓储返回条数，覆盖空页、未满页、整页和存在下一页
+     */
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 15, 16})
+    void shouldLimitGenerationLogPageAndDetectMore(int recordCount) {
+        List<PersistenceRecords.GenerationLogRecord> records = java.util.stream.IntStream.range(0, recordCount)
+                .mapToObj(index -> generationLogRecord(JSONObject.of("id", "conversation-" + index)))
+                .toList();
+        when(currentUserProvider.currentUserId()).thenReturn(Mono.just(9L));
+        when(repository.listGenerationLogs(9L, "image", 0L, 16)).thenReturn(Flux.fromIterable(records));
+
+        PersistenceDtos.GenerationLogListResponse response = service.listGenerationLogs("image", 1).block();
+
+        Assertions.assertNotNull(response);
+        Assertions.assertEquals(Math.min(recordCount, 15), response.logs().size());
+        Assertions.assertEquals(recordCount > 15, response.hasMore());
+        Assertions.assertEquals(records.stream().limit(15).map(record -> JSON.parseObject(record.getData()).getString("id")).toList(),
+                response.logs().stream().map(log -> log.getString("id")).toList());
+    }
+
+    /**
+     * 第二页从第16条开始查询，末页不再提供下一页。
+     */
+    @Test
+    void shouldReadSecondGenerationLogPageWithOffset() {
+        when(currentUserProvider.currentUserId()).thenReturn(Mono.just(9L));
+        when(repository.listGenerationLogs(9L, "video", 15L, 16))
+                .thenReturn(Flux.just(generationLogRecord(JSONObject.of("id", "conversation-16"))));
+
+        PersistenceDtos.GenerationLogListResponse response = service.listGenerationLogs("video", 2).block();
+
+        Assertions.assertNotNull(response);
+        Assertions.assertEquals("conversation-16", response.logs().getFirst().getString("id"));
+        Assertions.assertFalse(response.hasMore());
+        verify(repository).listGenerationLogs(9L, "video", 15L, 16);
+    }
+
+    /**
+     * 无效页码直接拒绝，不查询用户或数据库。
+     *
+     * @param page int 无效页码
+     */
+    @ParameterizedTest
+    @ValueSource(ints = {0, -1})
+    void shouldRejectInvalidGenerationLogPage(int page) {
+        Assertions.assertThrows(BusinessException.class, () -> service.listGenerationLogs("image", page).block());
+        verifyNoInteractions(currentUserProvider, repository);
     }
 
     /**

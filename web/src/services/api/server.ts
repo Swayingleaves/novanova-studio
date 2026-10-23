@@ -926,9 +926,11 @@ export function deleteAsset(ids: string[]) {
     return serverPost("/assets/deleteAsset", { ids });
 }
 
-export async function listGenerationLogs<T>(logType: "image" | "video") {
-    const data = await serverGet<{ logs: T[] }>(`/generationLogs/listGenerationLogs?logType=${encodeURIComponent(logType)}`);
-    return data.logs || [];
+export type ServerGenerationLogPage<T> = { logs: T[]; hasMore: boolean };
+
+/** 按页读取生成记录，服务端固定每页最多返回15条。 */
+export function listGenerationLogs<T>(logType: "image" | "video", page = 1) {
+    return serverGet<ServerGenerationLogPage<T>>(`/generationLogs/listGenerationLogs?logType=${encodeURIComponent(logType)}&page=${page}`);
 }
 
 export type ServerAgentSessionHistoryMessage = {

@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { App } from "antd";
 
 import { optimizeGenerationPrompt } from "@/features/generation/api/prompt-optimization";
+import { normalizeOptimizedImageMentions, type PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
 import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-configuration-guard";
 import type { PromptOptimizationType } from "@/services/api/server";
 
@@ -15,6 +16,7 @@ type OptimizePromptOptions = {
     generationType: PromptOptimizationType;
     prompt: string;
     generationStyleIds?: number[];
+    imageReferences?: PromptImageReference[];
     onSuccess: (prompt: string) => void;
 };
 
@@ -34,7 +36,7 @@ export function usePromptOptimization() {
     useEffect(() => () => controllerRef.current?.abort(), []);
 
     const optimizePrompt = useCallback(
-        async ({ operationId, generationType, prompt, generationStyleIds, onSuccess }: OptimizePromptOptions) => {
+        async ({ operationId, generationType, prompt, generationStyleIds, imageReferences, onSuccess }: OptimizePromptOptions) => {
             const normalizedPrompt = prompt.trim();
             if (!normalizedPrompt || optimizingOperationIdRef.current) return;
             if (!ensureModelConfiguration("text")) return;
@@ -46,7 +48,10 @@ export function usePromptOptimization() {
 
             try {
                 const optimizedPrompt = await optimizeGenerationPrompt(generationType, normalizedPrompt, generationStyleIds, controller.signal);
-                onSuccess(optimizedPrompt);
+                // 优化结果复用输入框的引用格式；缺失引用时明确报错，避免丢失用户选定的图片关系。
+                const nextPrompt = imageReferences ? normalizeOptimizedImageMentions(optimizedPrompt, normalizedPrompt, imageReferences) : optimizedPrompt;
+                if (nextPrompt === null) throw new Error(translate("generation.optimizationMissingImageReferences"));
+                onSuccess(nextPrompt);
                 message.success(translate("generation.promptOptimized"));
             } catch (error) {
                 if (error instanceof DOMException && error.name === "AbortError") return;

@@ -40,6 +40,11 @@ export function CreationWorkspace({ sidebar, thread, composer, settings }: Creat
                         <CreationConversationSidebar
                             heading={sidebar.heading}
                             items={sidebar.items}
+                            loading={sidebar.loading}
+                            hasMore={sidebar.hasMore}
+                            loadError={sidebar.loadError}
+                            onLoadMore={sidebar.onLoadMore}
+                            onRetry={sidebar.onRetry}
                             managementMode={sidebar.managementMode}
                             hasSelection={sidebar.hasSelection}
                             onCreate={sidebar.onCreate}
@@ -70,6 +75,11 @@ export function CreationWorkspace({ sidebar, thread, composer, settings }: Creat
                         <CreationConversationSidebar
                             heading={sidebar.heading}
                             items={sidebar.items}
+                            loading={sidebar.loading}
+                            hasMore={sidebar.hasMore}
+                            loadError={sidebar.loadError}
+                            onLoadMore={sidebar.onLoadMore}
+                            onRetry={sidebar.onRetry}
                             managementMode={sidebar.managementMode}
                             hasSelection={sidebar.hasSelection}
                             onCreate={sidebar.onCreate}

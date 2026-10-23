@@ -10,7 +10,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { BookOpen, CloudUpload, Download, FolderPlus, Cog, HelpCircle, Link2, LoaderCircle, Palette, Play, RefreshCw, Sparkles, TriangleAlert, Upload, VideoIcon } from "lucide-react";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Image, Input, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
 
@@ -62,12 +62,13 @@ import {
     upsertAgentActivityMessage,
 } from "@/features/generation/components/agent-activity";
 import { hasPendingVideoConversation } from "@/features/generation/lib/generation-conversation-recovery";
-import { reconcileGenerationLogTasks } from "@/features/generation/lib/generation-log-task-reconciliation";
+import { useGenerationConversations } from "@/features/generation/hooks/use-generation-conversations";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { selectGenerationAttachments } from "@/features/generation/lib/generation-retry";
 import { imageReferenceAttachments, referenceMediaType, referenceMediaUrl, videoReferenceAttachments } from "@/features/generation/lib/reference-attachments";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { useRecentReferenceImages } from "@/features/generation/hooks/use-recent-reference-images";
+import { reconcileImageMentions, type PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
 import { availableVideoModelsForMode, quoteVideoGeneration, videoGenerationReferenceIssue } from "@/features/generation/lib/video-billing";
@@ -76,7 +77,6 @@ import {
     cancelAiTask,
     deleteGenerationLogs,
     getAiTaskPollingIntervalMilliseconds,
-    listGenerationLogs,
     listGenerationStyles,
     listSkills,
     markGenerationLogViewed,
@@ -225,8 +225,9 @@ export default function VideoPage() {
     const { recentReferenceImageUrls, recordRecentReferenceImage } = useRecentReferenceImages(userId);
     const isPromptOptimizing = optimizingOperationId === "video-page";
 
-    const [conversations, setConversations] = useState<Conversation[]>([]);
     const [activeId, setActiveId] = useState<string | null>(null);
+    const activeIdRef = useRef(activeId);
+    const { conversations, setConversations, conversationsRef, refreshConversations, loadMoreConversations, conversationsLoading, hasMoreConversations, conversationsError, retryConversations } = useGenerationConversations("video", userId, activeIdRef, normalizeConversation);
     const [prompt, setPrompt] = useState("");
     const [styleOptions, setStyleOptions] = useState<CreationStyleOption[]>([]);
     const [selectedStyles, setSelectedStyles] = useState<CreationStyleOption[]>([]);
@@ -242,6 +243,23 @@ export default function VideoPage() {
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [videoReferences, setVideoReferences] = useState<ReferenceVideo[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
+    const imageReferences = useMemo<PromptImageReference[]>(() => references.map((reference, index) => ({
+        id: reference.id,
+        name: reference.name,
+        label: seedanceReferenceLabel("image", index),
+        previewUrl: reference.dataUrl,
+        disabled: uploadingReferenceIds.includes(reference.id),
+    })), [references, uploadingReferenceIds, translate.locale]);
+    const previousImageReferencesRef = useRef<PromptImageReference[]>([]);
+
+    useEffect(() => {
+        const previous = previousImageReferencesRef.current;
+        previousImageReferencesRef.current = imageReferences;
+        const currentLabels = new Map(imageReferences.map((image) => [image.id, image.label]));
+        if (!previous.some((image) => currentLabels.get(image.id) !== image.label)) return;
+        // 图片删除、上传失败或语言切换后，按素材标识更新编号，避免引用指向其他图片。
+        setPrompt((current) => reconcileImageMentions(current, previous, imageReferences));
+    }, [imageReferences]);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [videoDraftSettingsModified, setVideoDraftSettingsModified] = useState(false);
@@ -451,24 +469,6 @@ export default function VideoPage() {
     const toolCallsRef = useRef(toolCalls);
     const pendingVideoSizeRef = useRef("");
     const chatMessagesRef = useRef(chatMessages);
-    const conversationsRef = useRef(conversations);
-    const activeIdRef = useRef(activeId);
-
-    const refreshConversations = useCallback(async () => {
-        let nextConversations = await readConversations();
-        const activeConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
-        if (activeConversation && getGenerationConversationStatus(activeConversation) !== "none" && activeConversation.generationStatus !== "running") {
-            try {
-                await markGenerationLogViewed(activeConversation.id);
-                nextConversations = nextConversations.map((conversation) => (conversation.id === activeConversation.id ? { ...conversation, generationViewedAt: conversation.generationCompletedAt } : conversation));
-            } catch (error) {
-                console.error("标记视频生成记录已读失败", error);
-            }
-        }
-        conversationsRef.current = nextConversations;
-        setConversations(nextConversations);
-        return nextConversations;
-    }, []);
 
     const { sessionId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, canChangeSession, resetSession, restoreSession } = useAgentChatSSE({
         entrySource: "videoPage",
@@ -1506,7 +1506,14 @@ export default function VideoPage() {
             iconOnly: true,
             disabled: !prompt.trim() || isStreaming || isQueued || activeConversationPending || isPromptOptimizing,
             loading: isPromptOptimizing,
-            onClick: () => void optimizePrompt({ operationId: "video-page", generationType: "video", prompt, generationStyleIds: selectedStyles.map((style) => style.id), onSuccess: setPrompt }),
+            onClick: () => void optimizePrompt({
+                operationId: "video-page",
+                generationType: "video",
+                prompt,
+                generationStyleIds: selectedStyles.map((style) => style.id),
+                imageReferences,
+                onSuccess: (optimizedPrompt) => setPrompt(reconcileImageMentions(optimizedPrompt, imageReferences, previousImageReferencesRef.current)),
+            }),
         },
         {
             key: "assets",
@@ -1693,6 +1700,11 @@ export default function VideoPage() {
                 sidebar={{
                     heading: translate("video.startCreating"),
                     items: conversationItems,
+                    loading: conversationsLoading,
+                    hasMore: hasMoreConversations,
+                    loadError: conversationsError ? translate("generation.failedToLoadConversations") : null,
+                    onLoadMore: loadMoreConversations,
+                    onRetry: () => void retryConversations(),
                     managementMode,
                     hasSelection: selectedIds.length > 0,
                     mobileOpen: mobileSidebarOpen,
@@ -1744,6 +1756,7 @@ export default function VideoPage() {
                     value: prompt,
                     placeholder: translate("video.describeCameraMotionSubjectActionAtmosphereAndVisualStyle"),
                     references: referenceChips,
+                    imageReferences,
                     styleOptions,
                     selectedStyles,
                     styleLoading,
@@ -2437,21 +2450,6 @@ function FailedCard({ error, canceled, skipped }: { error: string; canceled?: bo
             </div>
         </div>
     );
-}
-
-async function readConversations() {
-    if (typeof window === "undefined") {
-        return [];
-    }
-
-    try {
-        const values = await listGenerationLogs<Conversation>("video");
-        const reconciledValues = await reconcileGenerationLogTasks("video", values);
-        const conversations = await Promise.all(reconciledValues.map(normalizeConversation));
-        return conversations.sort((left, right) => (right.updatedAt || right.createdAt || 0) - (left.updatedAt || left.createdAt || 0));
-    } catch {
-        return [];
-    }
 }
 
 async function normalizeConversation(raw: Partial<Conversation>): Promise<Conversation> {

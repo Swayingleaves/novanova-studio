@@ -407,11 +407,13 @@ public class PersistenceController {
      * 查询生成记录列表
      *
      * @param logType String 记录类型
+     * @param page int 从1开始的页码，每页最多15条
      * @return Mono<ApiResponse<GenerationLogListResponse>> 生成记录列表
      */
     @GetMapping("/generationLogs/listGenerationLogs")
-    public Mono<ApiResponse<PersistenceDtos.GenerationLogListResponse>> listGenerationLogs(@RequestParam(required = false) String logType) {
-        return persistenceService.listGenerationLogs(logType).map(logs -> ApiResponse.ok(new PersistenceDtos.GenerationLogListResponse(logs)));
+    public Mono<ApiResponse<PersistenceDtos.GenerationLogListResponse>> listGenerationLogs(
+            @RequestParam(required = false) String logType, @RequestParam(defaultValue = "1") int page) {
+        return persistenceService.listGenerationLogs(logType, page).map(ApiResponse::ok);
     }
 
     /**

@@ -5,7 +5,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 import type { MenuProps } from "antd";
 import { App, Button, Checkbox, Dropdown, Input, Modal, Tooltip } from "antd";
 import { CheckSquare, LoaderCircle, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { CreationConversationItem, CreationSidebarProps } from "@/features/generation/components/creation-workspace-types";
 import { MAX_CONVERSATION_TITLE_LENGTH, normalizeConversationTitle, validateConversationTitle } from "@/features/generation/lib/conversation-title";
@@ -21,6 +21,11 @@ type RenameTarget = {
 
 export function CreationConversationSidebar({
     items,
+    loading,
+    hasMore,
+    loadError,
+    onLoadMore,
+    onRetry,
     managementMode,
     hasSelection,
     onCreate,
@@ -39,6 +44,19 @@ export function CreationConversationSidebar({
     const [renameTitle, setRenameTitle] = useState("");
     const [renameError, setRenameError] = useState("");
     const [renaming, setRenaming] = useState(false);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const loadMoreTargetRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const container = scrollContainerRef.current;
+        const target = loadMoreTargetRef.current;
+        if (!container || !target || loading || loadError || !hasMore) return;
+        const observer = new IntersectionObserver((entries) => {
+            if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
+        }, { root: container, rootMargin: "0px 0px 80px 0px" });
+        observer.observe(target);
+        return () => observer.disconnect();
+    }, [loading, loadError, hasMore, onLoadMore]);
 
     const openRenameDialog = (item: CreationConversationItem) => {
         setRenameTarget({ id: item.id, title: item.title });
@@ -123,7 +141,7 @@ export function CreationConversationSidebar({
                     </div>
                 ) : null}
 
-                <div className="thin-scrollbar min-h-0 flex-1 overflow-y-auto">
+                <div ref={scrollContainerRef} className="thin-scrollbar min-h-0 flex-1 overflow-y-auto" role="region" aria-label={translate("generation.conversationList")} tabIndex={0} aria-busy={loading}>
                     {items.length ? (
                         <div className="space-y-1.5">
                             {items.map((item) => (
@@ -139,9 +157,16 @@ export function CreationConversationSidebar({
                                 />
                             ))}
                         </div>
-                    ) : (
+                    ) : !loading && !loadError ? (
                         <div className="py-12 text-center text-sm text-[var(--studio-faint)]">{translate("generation.noConversations")}</div>
-                    )}
+                    ) : null}
+                    <div ref={loadMoreTargetRef} className="flex min-h-12 flex-col items-center justify-center gap-2 py-3 text-center text-xs text-[var(--studio-faint)]" role={loadError ? "alert" : "status"}>
+                        {loading ? (
+                            <span className="flex items-center gap-2"><LoaderCircle className="size-3.5 animate-spin" />{translate("generation.loadingConversations")}</span>
+                        ) : loadError ? (
+                            <><span>{loadError}</span><Button type="text" size="small" onClick={onRetry}>{translate("generation.retryLoadingConversations")}</Button></>
+                        ) : items.length ? translate(hasMore ? "generation.scrollToLoadMoreConversations" : "generation.allConversationsLoaded") : null}
+                    </div>
                 </div>
             </div>
             <Modal title={translate("generation.editTitle")} open={Boolean(renameTarget)} onCancel={closeRenameDialog} onOk={() => void submitRename()} okText={translate("generation.save")} cancelText={translate("generation.cancel")} confirmLoading={renaming} destroyOnHidden>

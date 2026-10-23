@@ -404,8 +404,9 @@ public final class PersistenceDtos {
      * 生成记录列表响应
      *
      * @param logs List<JSONObject> 生成记录列表
+     * @param hasMore boolean 是否还有下一页
      */
-    public record GenerationLogListResponse(List<JSONObject> logs) {
+    public record GenerationLogListResponse(List<JSONObject> logs, boolean hasMore) {
     }
 
     /**

@@ -82,6 +82,9 @@ public class PersistenceService {
     /** 生成记录标题最大长度 */
     private static final int GENERATION_LOG_TITLE_MAX_LENGTH = 100;
 
+    /** 生成记录每页最多返回15条。 */
+    private static final int GENERATION_LOG_PAGE_SIZE = 15;
+
     /** 头像最大文件大小（字节） */
     private static final long AVATAR_MAX_FILE_SIZE_BYTES = 2L * 1024 * 1024;
 
@@ -1016,15 +1019,20 @@ public class PersistenceService {
     }
 
     /**
-     * 查询生成记录列表
+     * 分页查询生成记录，每页最多返回15条。
      *
      * @param logType String 记录类型
-     * @return Mono<List<JSONObject>> 生成记录列表
+     * @param page int 从1开始的页码
+     * @return Mono<GenerationLogListResponse> 生成记录和下一页标记
+     * @throws BusinessException 页码小于1时抛出
      */
-    public Mono<List<JSONObject>> listGenerationLogs(String logType) {
-        // 生成记录按用户和可选类型筛选，并附加任务状态及未读判断时间。
+    public Mono<PersistenceDtos.GenerationLogListResponse> listGenerationLogs(String logType, int page) {
+        if (page < 1) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidPaginationParameters")));
+        }
+        // 多查询一条判断下一页，避免为每次滚动执行全量计数。
         return currentUserProvider.currentUserId()
-                .flatMapMany(userId -> repository.listGenerationLogs(userId, logType))
+                .flatMapMany(userId -> repository.listGenerationLogs(userId, logType, (page - 1L) * GENERATION_LOG_PAGE_SIZE, GENERATION_LOG_PAGE_SIZE + 1))
                 .map(record -> {
                     JSONObject generationLog = parseJson(record.getData());
                     generationLog.put("generationStatus", record.getGenerationStatus());
@@ -1032,7 +1040,9 @@ public class PersistenceService {
                     generationLog.put("generationViewedAt", formatNullableTime(record.getGenerationViewedAt()));
                     return generationLog;
                 })
-                .collectList();
+                .collectList()
+                .map(logs -> new PersistenceDtos.GenerationLogListResponse(
+                        logs.subList(0, Math.min(logs.size(), GENERATION_LOG_PAGE_SIZE)), logs.size() > GENERATION_LOG_PAGE_SIZE));
     }
 
     /**

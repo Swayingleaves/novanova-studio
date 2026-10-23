@@ -153,6 +153,7 @@
     "smart": "Smart",
     "costsCredits": "Costs {value0} credits",
     "promptOptimized": "Prompt optimized",
+    "optimizationMissingImageReferences": "The optimized prompt omitted image references. Please try again; your original prompt has been kept.",
     "failedToOptimizePrompt": "Failed to optimize prompt",
     "landscape": "Landscape",
     "portrait": "Portrait",
@@ -244,5 +245,15 @@
     "videoConstraintField_supportedAspectRatios": "Supported video aspect ratios",
     "videoConstraintField_maximumVideoCount": "Maximum input videos",
     "videoConstraintField_maximumAudioCount": "Maximum input audio clips",
-    "videoConstraintCopy": "Video generation limits"
+    "videoConstraintCopy": "Video generation limits",
+    "uploadedImages": "Uploaded images",
+    "noMatchingImages": "No matching images",
+    "uploadImagesToMention": "Add reference images before mentioning them with @",
+    "videoPrompt": "Video prompt",
+    "conversationList": "Task list",
+    "loadingConversations": "Loading tasks…",
+    "failedToLoadConversations": "Failed to load tasks",
+    "retryLoadingConversations": "Retry loading",
+    "scrollToLoadMoreConversations": "Scroll down to load more",
+    "allConversationsLoaded": "All tasks loaded"
 }

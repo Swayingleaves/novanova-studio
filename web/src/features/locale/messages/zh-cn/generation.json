@@ -153,6 +153,7 @@
     "smart": "智能",
     "costsCredits": "当前会消耗 {value0} 积分",
     "promptOptimized": "提示词已优化",
+    "optimizationMissingImageReferences": "优化结果遗漏了图片引用，请重新优化；原提示词已保留",
     "failedToOptimizePrompt": "提示词优化失败",
     "landscape": "横屏",
     "portrait": "竖屏",
@@ -244,5 +245,15 @@
     "videoConstraintField_supportedAspectRatios": "支持的视频宽高比",
     "videoConstraintField_maximumVideoCount": "最多输入视频数",
     "videoConstraintField_maximumAudioCount": "最多输入音频数",
-    "videoConstraintCopy": "视频生成限制"
+    "videoConstraintCopy": "视频生成限制",
+    "uploadedImages": "已上传的图片",
+    "noMatchingImages": "没有匹配的图片",
+    "uploadImagesToMention": "请先添加参考图片，再输入 @ 引用",
+    "videoPrompt": "视频提示词",
+    "conversationList": "任务列表",
+    "loadingConversations": "正在加载任务…",
+    "failedToLoadConversations": "任务列表加载失败",
+    "retryLoadingConversations": "重试加载",
+    "scrollToLoadMoreConversations": "向下滑动加载更多",
+    "allConversationsLoaded": "已加载全部任务"
 }

@@ -30,7 +30,7 @@ import { ChoiceHistoryBar } from "@/features/generation/components/creation-mess
 import { ResultDetailDialog, type ResultDetail } from "@/features/generation/components/result-detail-dialog";
 import { createToolExecutionActivity, finishRoundAgentActivities, finishRunningAgentActivities, mergePlanTaskActivityMessage, normalizeHistoricalAgentActivities, updateAgentActivityMessage, upsertAgentActivityMessage } from "@/features/generation/components/agent-activity";
 import { findLatestPendingConversation, hasPendingImageConversation } from "@/features/generation/lib/generation-conversation-recovery";
-import { reconcileGenerationLogTasks } from "@/features/generation/lib/generation-log-task-reconciliation";
+import { useGenerationConversations } from "@/features/generation/hooks/use-generation-conversations";
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { selectGenerationAttachments } from "@/features/generation/lib/generation-retry";
 import { imageReferenceAttachments, referenceMediaType, referenceMediaUrl } from "@/features/generation/lib/reference-attachments";
@@ -53,7 +53,7 @@ import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
-import { deleteGenerationLogs, getAgentSessionHistory, getAiTaskPollingIntervalMilliseconds, listGenerationLogs, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
+import { deleteGenerationLogs, getAgentSessionHistory, getAiTaskPollingIntervalMilliseconds, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
 
 type GeneratedImage = {
     id: string;
@@ -125,8 +125,9 @@ export default function ImagePage() {
     const { recentReferenceImageUrls, recordRecentReferenceImage } = useRecentReferenceImages(userId);
     const isPromptOptimizing = optimizingOperationId === "image-page";
 
-    const [conversations, setConversations] = useState<Conversation[]>([]);
     const [activeId, setActiveId] = useState<string | null>(null);
+    const activeIdRef = useRef(activeId);
+    const { conversations, setConversations, conversationsRef, refreshConversations, loadMoreConversations, conversationsLoading, hasMoreConversations, conversationsError, retryConversations } = useGenerationConversations("image", userId, activeIdRef, normalizeConversation);
     const [conversationHistory, setConversationHistory] = useState<{ id: string; messages: ChatMessageItem[]; loading: boolean; error: string } | null>(null);
     const historyRequestVersion = useRef(0);
     const [prompt, setPrompt] = useState("");
@@ -244,24 +245,6 @@ export default function ImagePage() {
     const streamingTextRef = useRef(streamingText);
     const toolCallsRef = useRef(toolCalls);
     const chatMessagesRef = useRef(chatMessages);
-    const activeIdRef = useRef(activeId);
-    const conversationsRef = useRef(conversations);
-
-    const refreshConversations = useCallback(async () => {
-        let nextConversations = await readConversations();
-        const activeConversation = nextConversations.find((conversation) => conversation.id === activeIdRef.current);
-        if (activeConversation && getGenerationConversationStatus(activeConversation) !== "none" && activeConversation.generationStatus !== "running") {
-            try {
-                await markGenerationLogViewed(activeConversation.id);
-                nextConversations = nextConversations.map((conversation) => (conversation.id === activeConversation.id ? { ...conversation, generationViewedAt: conversation.generationCompletedAt } : conversation));
-            } catch (error) {
-                console.error("标记图片生成记录已读失败", error);
-            }
-        }
-        conversationsRef.current = nextConversations;
-        setConversations(nextConversations);
-        return nextConversations;
-    }, []);
 
     const { sessionId, isStreaming, isQueued, isStopping, sendMessage, cancelMessage, canChangeSession, resetSession, restoreSession } = useAgentChatSSE({
         entrySource: "imagePage",
@@ -1038,6 +1021,11 @@ export default function ImagePage() {
                 sidebar={{
                     heading: translate("image.startCreating"),
                     items: conversationItems,
+                    loading: conversationsLoading,
+                    hasMore: hasMoreConversations,
+                    loadError: conversationsError ? translate("generation.failedToLoadConversations") : null,
+                    onLoadMore: loadMoreConversations,
+                    onRetry: () => void retryConversations(),
                     managementMode,
                     hasSelection: selectedIds.length > 0,
                     mobileOpen: mobileSidebarOpen,
@@ -1610,21 +1598,6 @@ function FailedCard({ error, canceled }: { error: string; canceled?: boolean }) 
             </div>
         </div>
     );
-}
-
-async function readConversations() {
-    if (typeof window === "undefined") {
-        return [];
-    }
-
-    try {
-        const values = await listGenerationLogs<Conversation>("image");
-        const reconciledValues = await reconcileGenerationLogTasks("image", values);
-        const conversations = await Promise.all(reconciledValues.map(normalizeConversation));
-        return conversations.sort((left, right) => (right.updatedAt || right.createdAt || 0) - (left.updatedAt || left.createdAt || 0));
-    } catch {
-        return [];
-    }
 }
 
 async function normalizeConversation(raw: Partial<Conversation>): Promise<Conversation> {

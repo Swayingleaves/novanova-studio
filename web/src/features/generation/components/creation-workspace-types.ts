@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import type { AgentAction } from "@/features/canvas/api/agent";
 import type { AgentActivityState, ThinkingBlockState } from "@/features/chat/types";
 import type { GenerationStyleOption, SkillOption } from "@/services/api/server";
+import type { PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
 
 export type CreationConversationStatus = "running" | "unreadSuccess" | "unreadFailed" | "none";
 
@@ -56,6 +57,11 @@ export type CreationThreadSection = {
 export type CreationSidebarProps = {
     heading: string;
     items: CreationConversationItem[];
+    loading: boolean;
+    hasMore: boolean;
+    loadError: string | null;
+    onLoadMore: () => void;
+    onRetry: () => void;
     managementMode: boolean;
     hasSelection: boolean;
     onCreate: () => void;
@@ -98,6 +104,8 @@ export type CreationComposerProps = {
     value: string;
     placeholder: string;
     references: CreationReferenceChip[];
+    /** 启用行内图片引用；编号与本次提交的图片附件顺序一致。 */
+    imageReferences?: PromptImageReference[];
     styleOptions?: CreationStyleOption[];
     selectedStyles?: CreationStyleOption[];
     styleLoading?: boolean;
