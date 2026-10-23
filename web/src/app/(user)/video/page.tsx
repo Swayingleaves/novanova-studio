@@ -248,18 +248,31 @@ export default function VideoPage() {
         name: reference.name,
         label: seedanceReferenceLabel("image", index),
         previewUrl: reference.dataUrl,
+        kind: "image",
         disabled: uploadingReferenceIds.includes(reference.id),
     })), [references, uploadingReferenceIds, translate.locale]);
+    // 参考视频同样参与 @ 引用；编号跳过不可播放的视频，与上方素材 chip 保持一致。
+    const videoMentionReferences = useMemo<PromptImageReference[]>(() => videoReferences
+        .filter((reference) => hasPlayableVideoUrl(reference.url))
+        .map((reference, index) => ({
+            id: reference.id,
+            name: reference.name,
+            label: seedanceReferenceLabel("video", index),
+            previewUrl: reference.url,
+            kind: "video",
+            disabled: uploadingReferenceIds.includes(reference.id),
+        })), [videoReferences, uploadingReferenceIds, translate.locale]);
+    const promptReferences = useMemo(() => [...imageReferences, ...videoMentionReferences], [imageReferences, videoMentionReferences]);
     const previousImageReferencesRef = useRef<PromptImageReference[]>([]);
 
     useEffect(() => {
         const previous = previousImageReferencesRef.current;
-        previousImageReferencesRef.current = imageReferences;
-        const currentLabels = new Map(imageReferences.map((image) => [image.id, image.label]));
-        if (!previous.some((image) => currentLabels.get(image.id) !== image.label)) return;
-        // 图片删除、上传失败或语言切换后，按素材标识更新编号，避免引用指向其他图片。
-        setPrompt((current) => reconcileImageMentions(current, previous, imageReferences));
-    }, [imageReferences]);
+        previousImageReferencesRef.current = promptReferences;
+        const currentLabels = new Map(promptReferences.map((reference) => [reference.id, reference.label]));
+        if (!previous.some((reference) => currentLabels.get(reference.id) !== reference.label)) return;
+        // 素材删除、上传失败或语言切换后，按素材标识更新编号，避免引用指向其他素材。
+        setPrompt((current) => reconcileImageMentions(current, previous, promptReferences));
+    }, [promptReferences]);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [videoDraftSettingsModified, setVideoDraftSettingsModified] = useState(false);
@@ -1511,8 +1524,8 @@ export default function VideoPage() {
                 generationType: "video",
                 prompt,
                 generationStyleIds: selectedStyles.map((style) => style.id),
-                imageReferences,
-                onSuccess: (optimizedPrompt) => setPrompt(reconcileImageMentions(optimizedPrompt, imageReferences, previousImageReferencesRef.current)),
+                imageReferences: promptReferences,
+                onSuccess: (optimizedPrompt) => setPrompt(reconcileImageMentions(optimizedPrompt, promptReferences, previousImageReferencesRef.current)),
             }),
         },
         {
@@ -1756,7 +1769,7 @@ export default function VideoPage() {
                     value: prompt,
                     placeholder: translate("video.describeCameraMotionSubjectActionAtmosphereAndVisualStyle"),
                     references: referenceChips,
-                    imageReferences,
+                    imageReferences: promptReferences,
                     styleOptions,
                     selectedStyles,
                     styleLoading,

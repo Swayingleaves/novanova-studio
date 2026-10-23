@@ -1,8 +1,10 @@
+/** 提示词中可用 @ 引用的参考素材；图片与视频共用编号、装饰和落库为纯文本的引用写法。 */
 export type PromptImageReference = {
     id: string;
     name: string;
     label: string;
     previewUrl: string;
+    kind: "image" | "video";
     disabled?: boolean;
 };
 
@@ -19,7 +21,7 @@ export function imageMentionPattern(labels: string[], optionalAtSign = false) {
     return alternatives.length ? new RegExp(`@${optionalAtSign ? "?" : ""}(${alternatives.join("|")})(?![0-9])`, "g") : null;
 }
 
-/** 将优化结果中的已知图片编号统一为引用标记；遗漏原有引用时返回 null，阻止覆盖原文。 */
+/** 将优化结果中的已知素材编号统一为引用标记；遗漏原有引用时返回 null，阻止覆盖原文。 */
 export function normalizeOptimizedImageMentions(value: string, original: string, images: Pick<PromptImageReference, "label">[]) {
     const pattern = imageMentionPattern(images.map((image) => image.label), true);
     if (!pattern) return value;
@@ -28,7 +30,7 @@ export function normalizeOptimizedImageMentions(value: string, original: string,
     return Array.from(original.matchAll(pattern)).every((match) => returnedLabels.has(match[1])) ? normalized : null;
 }
 
-/** 删除素材后按稳定标识更新引用编号，同时移除被删除图片的引用。 */
+/** 删除素材后按稳定标识更新引用编号，同时移除被删除素材的引用。 */
 export function reconcileImageMentions(value: string, previous: Pick<PromptImageReference, "id" | "label">[], current: Pick<PromptImageReference, "id" | "label">[]) {
     const pattern = imageMentionPattern(previous.map((image) => image.label));
     if (!pattern) return value;

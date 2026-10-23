@@ -63,7 +63,7 @@
     "insufficientCreditsVideoNeedsCredits": "Insufficient credits; video needs {value0} credits",
     "startCreating": "Start creating",
     "startWithAPromptForCameraMotionSubjectAction": "Start with a prompt for camera motion, subject action and atmosphere. Results are saved by round for comparison and refinement.",
-    "describeCameraMotionSubjectActionAtmosphereAndVisualStyle": "Describe camera motion, subject action, atmosphere and visual style...",
+    "describeCameraMotionSubjectActionAtmosphereAndVisualStyle": "Describe camera motion, subject action, atmosphere and visual style. Reference media with @Image1 or @Video1, e.g. @Image1 turns to the camera as the shot pushes in...",
     "videoSettings": "Video settings",
     "workflowStageQuote": "Workflow stage quote:",
     "credits": "{value0} {value1} credits",

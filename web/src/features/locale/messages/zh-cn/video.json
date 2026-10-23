@@ -63,7 +63,7 @@
     "insufficientCreditsVideoNeedsCredits": "积分不足，生成视频需要 {value0} 积分",
     "startCreating": "开启创作",
     "startWithAPromptForCameraMotionSubjectAction": "从一个提示词开始组织镜头运动、主体动作与场景氛围。生成结果会按轮次保留在这里，便于继续比较与细化。",
-    "describeCameraMotionSubjectActionAtmosphereAndVisualStyle": "描述镜头运动、主体动作、场景氛围和画面风格...",
+    "describeCameraMotionSubjectActionAtmosphereAndVisualStyle": "描述镜头运动、主体动作、场景氛围和画面风格，可用 @图片1、@视频1 引用参考素材，例如「@图片1 中的女孩转身，镜头缓慢推近」...",
     "videoSettings": "视频设置",
     "workflowStageQuote": "工作流阶段报价：",
     "credits": "{value0} {value1} 积分",

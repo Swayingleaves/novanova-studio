@@ -104,7 +104,7 @@ export type CreationComposerProps = {
     value: string;
     placeholder: string;
     references: CreationReferenceChip[];
-    /** 启用行内图片引用；编号与本次提交的图片附件顺序一致。 */
+    /** 启用行内素材引用；编号与本次提交的图片/视频附件顺序一致。 */
     imageReferences?: PromptImageReference[];
     styleOptions?: CreationStyleOption[];
     selectedStyles?: CreationStyleOption[];
