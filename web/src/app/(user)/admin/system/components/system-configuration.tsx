@@ -68,7 +68,7 @@ import { ImageSizeMappingsEditor } from "./image-size-mappings-editor";
 import { ModelSelectModal, type ChannelModelGroup } from "./model-select-modal";
 import { ModelConfigCopyModal } from "./model-config-copy-modal";
 import { applyCustomConfigCopy } from "./model-config-copy";
-import type { CustomGroupField } from "./model-config-copy";
+import type { CustomGroupField, CustomModelMode } from "./model-config-copy";
 import { ModelConfigAutoFillModal } from "./model-config-auto-fill-modal";
 import { VideoGenerationConstraintsEditor } from "./video-generation-constraints-editor";
 import { videoConstraintConfigurationIssues } from "@/features/generation/lib/video-generation-constraints";
@@ -402,8 +402,8 @@ export function SystemConfiguration() {
         setEditingModelConfig((configItem) => (configItem ? { ...configItem, ...patch } : configItem));
     };
 
-    /** 从其他自定义模型复制指定模式的调用配置，覆盖目标已有内容。 */
-    const copyCustomConfigFromModel = (source: ServerModelConfig, modes: VideoGenerationMode[]) => {
+    /** 从其他同类型自定义模型复制指定模式的调用配置，覆盖目标已有内容。 */
+    const copyCustomConfigFromModel = (source: ServerModelConfig, modes: CustomModelMode[]) => {
         if (!modelConfigCopyTarget) return;
         const { config: nextConfig, copiedModes } = applyCustomConfigCopy(modelConfigCopyTarget, source, modes);
         if (!copiedModes.length) return;
@@ -1580,6 +1580,11 @@ export function SystemConfiguration() {
                         <Form.Item label={translate("appShell.capabilities")}>
                             {editingModelConfig.modelType === "image" && editingModelConfig.isCustomModel ? (
                                 <div className="space-y-3">
+                                    <div className="flex flex-wrap items-center justify-end gap-2">
+                                        <Button size="small" icon={<Copy className="size-3.5" />} disabled={isSaving} onClick={() => setModelConfigCopyTarget(editingModelConfig)}>
+                                            {translate("appShell.copyConfig")}
+                                        </Button>
+                                    </div>
                                     {createModelCapabilityOptions(translate).image.map((option) => (
                                         <div key={option.value} className="rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
                                             <div className="flex items-center justify-between gap-3">

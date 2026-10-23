@@ -3,8 +3,20 @@ import type { ServerModelConfig } from "@/services/api/server";
 
 import { modelConfigIdentity } from "./model-config-draft";
 
+/** 图片自定义模型的能力模式，与 MODEL_CAPABILITY_OPTIONS.image 的取值一致。 */
+export type ImageGenerationMode = "text-to-image" | "image-to-image";
+
+/** 自定义调用配置可复制的模式：图片的文生图、图生图与视频的四种生成模式。 */
+export type CustomModelMode = ImageGenerationMode | VideoGenerationMode;
+
 /** 视频自定义模型可复制的全部能力模式，顺序用于规范化 capabilities，保证重复复制幂等。 */
 export const COPYABLE_VIDEO_MODES: readonly VideoGenerationMode[] = ["text-to-video", "image-to-video", "reference-to-video", "first-last-frame-to-video"];
+
+/** 按模型类型给出可复制的模式，图片模型只复制图片能力，视频模型只复制视频能力。 */
+export const COPYABLE_CUSTOM_MODES: Record<"image" | "video", readonly CustomModelMode[]> = {
+    image: ["text-to-image", "image-to-image"],
+    video: COPYABLE_VIDEO_MODES,
+};
 
 /** 自定义调用配置里可复制的字段；请求方法单独处理，默认 POST 无法区分是否填写。 */
 export type CustomGroupField = Exclude<keyof CustomModelGroupConfig, "requestMethod" | "queryMethod">;
@@ -24,10 +36,10 @@ export const CUSTOM_GROUP_FIELDS: readonly CustomGroupField[] = [
     "videoGenerationConstraints",
 ];
 
-/** 视频自定义模型的复制源：当前空间草稿里的其他视频自定义模型。 */
-export function copyableVideoSourceModels(configs: ServerModelConfig[], target: Pick<ServerModelConfig, "channelId" | "modelName" | "modelType">) {
+/** 复制源：当前空间草稿里同类型的其他自定义模型（图片对图片、视频对视频）。 */
+export function copyableCustomSourceModels(configs: ServerModelConfig[], target: Pick<ServerModelConfig, "channelId" | "modelName" | "modelType">) {
     const targetIdentity = modelConfigIdentity(target);
-    return configs.filter((config) => config.modelType === "video" && config.isCustomModel && modelConfigIdentity(config) !== targetIdentity);
+    return configs.filter((config) => config.modelType === target.modelType && config.isCustomModel && modelConfigIdentity(config) !== targetIdentity);
 }
 
 /** 单个模式自定义调用配置里已填写的字段数。 */
@@ -43,13 +55,18 @@ export function isCustomGroupBlank(group: CustomModelGroupConfig | null | undefi
 
 /** 模型全部模式已填写的自定义字段总数，用于来源摘要。 */
 export function countCustomConfigFields(config: ServerModelConfig) {
-    return COPYABLE_VIDEO_MODES.reduce((total, mode) => total + countCustomGroupFields(config.customModelConfig?.[mode]), 0);
+    return copyableModes(config).reduce((total, mode) => total + countCustomGroupFields(config.customModelConfig?.[mode]), 0);
 }
 
 /** 某个模式已填写的字段名列表，用于提示具体会被覆盖哪些内容。 */
 export function customGroupFilledFields(group: CustomModelGroupConfig | null | undefined): CustomGroupField[] {
     if (!group) return [];
     return CUSTOM_GROUP_FIELDS.filter((field) => hasCustomGroupFieldValue(group[field], field));
+}
+
+/** 该模型类型可复制的模式；文本模型没有自定义调用配置。 */
+function copyableModes(config: Pick<ServerModelConfig, "modelType">): readonly CustomModelMode[] {
+    return config.modelType === "image" || config.modelType === "video" ? COPYABLE_CUSTOM_MODES[config.modelType] : [];
 }
 
 /** 判断文本字段和嵌套的视频限制对象是否实际填写。 */
@@ -119,7 +136,7 @@ export function applyCustomConfigAutoFill(target: ServerModelConfig, currentMode
 }
 
 export type CustomConfigCopyRow = {
-    mode: VideoGenerationMode;
+    mode: CustomModelMode;
     /** 来源该模式已填写的字段数，为 0 表示来源没有可复制的配置。 */
     sourceFilledFieldCount: number;
     /** 目标该模式已填写的字段数，大于 0 表示复制会覆盖已有内容。 */
@@ -132,7 +149,7 @@ export type CustomConfigCopyRow = {
 
 /** 逐模式状态，供弹窗展示来源摘要与覆盖确认。 */
 export function planCustomConfigCopy(source: ServerModelConfig, target: ServerModelConfig): CustomConfigCopyRow[] {
-    return COPYABLE_VIDEO_MODES.map((mode) => {
+    return copyableModes(target).map((mode) => {
         const sourceGroup = source.customModelConfig?.[mode];
         const targetGroup = target.customModelConfig?.[mode];
         return {
@@ -152,11 +169,11 @@ export function planCustomConfigCopy(source: ServerModelConfig, target: ServerMo
  * 同时把来源已启用的模式补进目标能力开关，否则保存时该模式的模板会被清理掉。
  * 价格、计费单位、并发数等其余配置保持目标原值。
  */
-export function applyCustomConfigCopy(target: ServerModelConfig, source: ServerModelConfig, modes: VideoGenerationMode[]) {
+export function applyCustomConfigCopy(target: ServerModelConfig, source: ServerModelConfig, modes: CustomModelMode[]) {
     const customModelConfig = { ...(target.customModelConfig || {}) };
     const capabilitySet = new Set(target.capabilities);
-    const copiedModes: VideoGenerationMode[] = [];
-    const overwrittenModes: VideoGenerationMode[] = [];
+    const copiedModes: CustomModelMode[] = [];
+    const overwrittenModes: CustomModelMode[] = [];
 
     modes.forEach((mode) => {
         const group = source.customModelConfig?.[mode];
@@ -176,9 +193,10 @@ export function applyCustomConfigCopy(target: ServerModelConfig, source: ServerM
         else capabilitySet.delete("audio-input");
     }
 
+    const orderedModes = copyableModes(target);
     const capabilities = [
-        ...COPYABLE_VIDEO_MODES.filter((mode) => capabilitySet.has(mode)),
-        ...Array.from(capabilitySet).filter((capability) => !COPYABLE_VIDEO_MODES.includes(capability as VideoGenerationMode)),
+        ...orderedModes.filter((mode) => capabilitySet.has(mode)),
+        ...Array.from(capabilitySet).filter((capability) => !orderedModes.includes(capability as CustomModelMode)),
     ];
 
     return {

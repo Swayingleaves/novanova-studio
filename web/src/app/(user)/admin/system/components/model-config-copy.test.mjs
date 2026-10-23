@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { applyCustomConfigAutoFill, applyCustomConfigCopy, countCustomConfigFields, countCustomGroupFields, copyableVideoSourceModels, isCustomGroupBlank, planCustomConfigAutoFill, planCustomConfigCopy } from "./model-config-copy";
+import { applyCustomConfigAutoFill, applyCustomConfigCopy, countCustomConfigFields, countCustomGroupFields, copyableCustomSourceModels, isCustomGroupBlank, planCustomConfigAutoFill, planCustomConfigCopy } from "./model-config-copy";
 
 const emptyGroup = () => ({
     requestPath: "",
@@ -60,7 +60,7 @@ test("复制视频限制时深复制嵌套对象和比例数组", () => {
 
 test("复制来源排除自身与非自定义视频模型", () => {
     const target = config({});
-    const sources = copyableVideoSourceModels(
+    const sources = copyableCustomSourceModels(
         [
             config({ id: "1", modelName: "model-a" }),
             config({ id: "2", modelName: "model-b" }),
@@ -194,4 +194,52 @@ test("自动填充不改动其他模式，也不污染来源分组", () => {
 
     assert.equal(next.config.customModelConfig["text-to-video"].requestPath, "/t2v");
     assert.equal(sourceGroup.requestTemplate, '{"a":1}');
+});
+
+test("图片模型只复制文生图与图生图，并同步开启对应能力", () => {
+    const target = config({ modelType: "image", capabilities: [], customModelConfig: {} });
+    const source = config({
+        id: "source",
+        modelName: "image-a",
+        modelType: "image",
+        capabilities: ["text-to-image", "image-to-image"],
+        customModelConfig: {
+            "text-to-image": group({ requestPath: "/v1/images", requestTemplate: "{}" }),
+            "image-to-image": group({ requestPath: "/v1/images/edit" }),
+            "text-to-video": group({ requestPath: "/v1/videos" }),
+        },
+    });
+
+    const { config: next, copiedModes } = applyCustomConfigCopy(target, source, ["text-to-image", "image-to-image"]);
+    assert.deepEqual(copiedModes, ["text-to-image", "image-to-image"]);
+    assert.deepEqual(next.capabilities, ["text-to-image", "image-to-image"]);
+    assert.equal(next.customModelConfig["image-to-image"].requestPath, "/v1/images/edit");
+    assert.equal(next.customModelConfig["text-to-video"], undefined);
+});
+
+test("图片模型的复制计划只包含图片能力", () => {
+    const target = config({ modelType: "image" });
+    const source = config({ modelName: "image-b", modelType: "image", customModelConfig: { "image-to-image": group({ requestPath: "/edit" }) } });
+    const rows = planCustomConfigCopy(source, target);
+
+    assert.deepEqual(rows.map((row) => row.mode), ["text-to-image", "image-to-image"]);
+    assert.equal(rows.find((row) => row.mode === "image-to-image").sourceFilledFieldCount, 1);
+});
+
+test("图片模型的复制来源只列出同类型自定义模型", () => {
+    const target = config({ modelType: "image", modelName: "image-a" });
+    const sources = copyableCustomSourceModels([
+        config({ id: "video", modelType: "video" }),
+        config({ id: "self", modelType: "image", modelName: "image-a" }),
+        config({ id: "plain", modelType: "image", modelName: "image-c", isCustomModel: false }),
+        config({ id: "custom", modelType: "image", modelName: "image-d" }),
+    ], target);
+
+    assert.deepEqual(sources.map((item) => item.id), ["custom"]);
+});
+
+test("字段总数按模型类型统计，不会串到另一种类型", () => {
+    const groups = { "text-to-video": group({ requestPath: "/v" }), "text-to-image": group({ requestPath: "/i", requestTemplate: "{}" }) };
+    assert.equal(countCustomConfigFields(config({ modelType: "video", customModelConfig: groups })), 1);
+    assert.equal(countCustomConfigFields(config({ modelType: "image", customModelConfig: groups })), 2);
 });

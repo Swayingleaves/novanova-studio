@@ -4,14 +4,13 @@ import { App, Button, Input, Modal, Tag } from "antd";
 import { Copy, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { createVideoGenerationCapabilityOptions } from "@/features/generation/lib/video-billing";
 import { useTranslation } from "@/features/locale/use-translation";
-import { modelOptionLabelWithRealName } from "@/features/settings/stores/use-config-store";
-import type { AiConfig, VideoGenerationMode } from "@/features/settings/stores/use-config-store";
+import { createModelCapabilityOptions, modelOptionLabelWithRealName } from "@/features/settings/stores/use-config-store";
+import type { AiConfig } from "@/features/settings/stores/use-config-store";
 import type { ServerModelConfig } from "@/services/api/server";
 
-import { copyableVideoSourceModels, planCustomConfigCopy } from "./model-config-copy";
-import type { CustomGroupField } from "./model-config-copy";
+import { copyableCustomSourceModels, planCustomConfigCopy } from "./model-config-copy";
+import type { CustomGroupField, CustomModelMode } from "./model-config-copy";
 import { modelConfigIdentity } from "./model-config-draft";
 
 /** 自定义调用配置各字段的界面名称，复制与自动填充共用。 */
@@ -39,18 +38,18 @@ type ModelConfigCopyModalProps = {
     configs: ServerModelConfig[];
     config: AiConfig;
     onCancel: () => void;
-    onCopy: (source: ServerModelConfig, modes: VideoGenerationMode[]) => void;
+    onCopy: (source: ServerModelConfig, modes: CustomModelMode[]) => void;
 };
 
-/** 从其他视频自定义模型复制自定义调用配置。 */
+/** 从同类型的其他自定义模型复制自定义调用配置。 */
 export function ModelConfigCopyModal({ target, configs, config, onCancel, onCopy }: ModelConfigCopyModalProps) {
     const translate = useTranslation();
     const { modal } = App.useApp();
     const [query, setQuery] = useState("");
 
-    const sources = useMemo(() => copyableVideoSourceModels(configs, target), [configs, target]);
-    const modeOptions = useMemo(() => createVideoGenerationCapabilityOptions(translate), [translate.locale]);
-    const modeLabel = (mode: VideoGenerationMode) => modeOptions.find((option) => option.value === mode)?.label || mode;
+    const sources = useMemo(() => copyableCustomSourceModels(configs, target), [configs, target]);
+    const modeOptions = useMemo(() => createModelCapabilityOptions(translate)[target.modelType], [translate.locale, target.modelType]);
+    const modeLabel = (mode: CustomModelMode) => modeOptions.find((option) => option.value === mode)?.label || mode;
     const fieldLabels = customConfigFieldLabels(translate);
 
     const keyword = query.trim().toLowerCase();
@@ -101,9 +100,11 @@ export function ModelConfigCopyModal({ target, configs, config, onCancel, onCopy
     };
 
     return (
-        <Modal open centered width={720} zIndex={1300} title={translate("appShell.copyVideoConfigTitle")} onCancel={onCancel} footer={<Button onClick={onCancel}>{translate("appShell.cancel")}</Button>}>
+        <Modal open centered width={720} zIndex={1300} title={translate("appShell.copyModelConfigTitle")} onCancel={onCancel} footer={<Button onClick={onCancel}>{translate("appShell.cancel")}</Button>}>
             <div className="space-y-3">
-                <p className="text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.copyVideoConfigHint")}</p>
+                <p className="text-xs leading-5 text-[var(--studio-muted)]">
+                    {translate(target.modelType === "image" ? "appShell.copyImageConfigHint" : "appShell.copyVideoConfigHint")}
+                </p>
                 <Input allowClear prefix={<Search className="size-4 text-[var(--studio-muted)]" />} placeholder={translate("appShell.searchSourceModel")} value={query} onChange={(event) => setQuery(event.target.value)} />
                 <div className="max-h-[52vh] space-y-2 overflow-y-auto pr-1">
                     {visibleSources.length ? visibleSources.map((source) => {
