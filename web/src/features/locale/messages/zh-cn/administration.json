@@ -361,7 +361,7 @@
   "newTeamAccountNotice": "已有账号将收到站内邀请；新账号需要设置密码，平台与团队初始积分均为零。",
   "existingAccountPasswordHint": "已有账号无需填写",
   "noEmail": "未绑定邮箱",
-  "inviteAcceptanceHint": "对方登录平台空间后，可在“我的团队”中接受邀请；用户名必须已存在，邮箱可在注册后接受。",
+  "inviteAcceptanceHint": "对方会收到邀请邮件，邮件链接可直接定位该邀请；也可登录后在“我的团队”中接受。用户名必须已存在，邮箱可在注册后接受。",
   "resendInvitation": "重新邀请",
   "pendingAdministratorInvitation": "等待接受管理员邀请",
   "teamIdentity": "团队身份",

@@ -16,15 +16,15 @@ type NotificationDetailModalProps = {
 };
 
 /**
- * 渲染固定尺寸的系统公告详情弹窗。
+ * 渲染固定尺寸的系统通知详情弹窗。
  *
- * @param props 当前公告与关闭回调
- * @return 公告详情弹窗
+ * @param props 当前通知与关闭回调
+ * @return 通知详情弹窗
  */
 export function NotificationDetailModal({ notification, onClose }: NotificationDetailModalProps) {
     const translate = useTranslation();
     const { message } = App.useApp();
-    const unreadCount = useNotificationStore((state) => state.unreadCount);
+    const hasUnreadAnnouncements = useNotificationStore((state) => state.notifications.some((item) => !item.read));
     const markRead = useNotificationStore((state) => state.markRead);
     const markAllRead = useNotificationStore((state) => state.markAllRead);
     const [pendingAction, setPendingAction] = useState<"current" | "all" | null>(null);
@@ -69,7 +69,7 @@ export function NotificationDetailModal({ notification, onClose }: NotificationD
                 <div className="flex justify-end gap-2">
                     <Button type="primary" disabled={Boolean(notification.read)} loading={pendingAction === "current"} onClick={() => void handleMarkCurrentRead()}>
                         {translate("notification.iHaveRead")}</Button>
-                    <Button disabled={unreadCount === 0} loading={pendingAction === "all"} onClick={() => void handleMarkAllRead()}>
+                    <Button disabled={!hasUnreadAnnouncements} loading={pendingAction === "all"} onClick={() => void handleMarkAllRead()}>
                         {translate("notification.markAllRead")}</Button>
                 </div>
             )}

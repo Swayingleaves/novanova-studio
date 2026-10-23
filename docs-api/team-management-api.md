@@ -37,7 +37,7 @@
 | 方法与路径 | 参数 | 行为 |
 | --- | --- | --- |
 | `GET /listTeams` | 无 | 团队、主管理员、子账号数、人数上限及状态 |
-| `POST /createTeam` | `name,teamSlug,memberLimit,account,password?,nickname?` | 团队名称最多50字；新账号设置至少8位密码，初始双钱包为0；已有用户名或邮箱发送主管理员站内邀请 |
+| `POST /createTeam` | `name,teamSlug,memberLimit,account,password?,nickname?` | 团队名称最多50字；新账号设置至少8位密码，初始双钱包为0；已有用户名或邮箱发送主管理员邀请并同步发送邀请邮件 |
 | `POST /updateTeamSettings` | `teamId,enabled,memberLimit` | 禁用或恢复、修改人数上限，不可低于现有子账号数 |
 | `GET /listResourceGrants` | `teamId` | 查看显式授权 |
 | `POST /updateResourceGrants` | `teamId,modelIds,objectStorageIds` | 完整替换授权；平台模型与OSS分别授权 |
@@ -58,9 +58,9 @@
 | `POST /updateTeam` | `name,introduction,logoUrl` | 当前管理员修改品牌；名称最多50字；介绍最多200字，可留空；Logo留空使用平台品牌 |
 | `GET /listMembers` | 无 | 成员用户名、邮箱、`canResetPassword`、当前团队余额与当前团队消费，不返回成员平台总余额 |
 | `POST /createMember` | `account,password,nickname?` | 新用户名或邮箱创建子账号；已有账号明确拒绝，必须邀请 |
-| `POST /inviteMember` | `account` | 用户名必须已存在，邮箱可等待注册；7天站内邀请，重复邀请撤销此前待接受邀请 |
+| `POST /inviteMember` | `account` | 用户名必须已存在，邮箱可等待注册；7天邀请，重复邀请撤销此前待接受邀请；目标有邮箱时同步发送邀请邮件，邮件链接为 `/teams?invitation={id}`，发信失败整体回滚 |
 | `GET /listInvitations` | 无 | 当前团队邀请管理 |
-| `POST /resendInvitation` | `invitationId` | 按原目标重新发出7天邀请，不通过旧用户名重新匹配账号 |
+| `POST /resendInvitation` | `invitationId` | 按原目标重新发出7天邀请并重发邀请邮件，不通过旧用户名重新匹配账号 |
 | `POST /resetMemberPassword` | `userId,newPassword` | 仅重置本团队创建、未移除、无邮箱且全局角色为普通用户的普通成员；禁用成员仍可重置 |
 | `POST /revokeInvitation` | `invitationId` | 撤销本团队待接受邀请 |
 | `POST /updateMemberStatus` | `userId,enabled` | 仅修改当前团队成员状态，不修改全局账号 |

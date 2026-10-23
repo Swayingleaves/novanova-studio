@@ -119,6 +119,12 @@ spring:
           starttls:
             # 是否启用 STARTTLS（与 SSL 二选一）
             enable: false
+          # 建立 SMTP 连接的超时时间（毫秒），避免邀请发信长期占用团队行锁
+          connectiontimeout: 5000
+          # 等待服务器响应的超时时间（毫秒）
+          timeout: 10000
+          # 写入数据到服务器的超时时间（毫秒）
+          writetimeout: 10000
 
   # ----------------------------------------------------------
   # WebFlux 编解码器配置

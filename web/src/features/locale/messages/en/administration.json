@@ -361,7 +361,7 @@
   "newTeamAccountNotice": "Existing accounts receive an in-app invitation. New accounts require a password and start with zero platform and team credits.",
   "existingAccountPasswordHint": "Leave empty for an existing account",
   "noEmail": "No email address",
-  "inviteAcceptanceHint": "The recipient can accept under My teams after signing in to the platform. A username must already exist; email recipients may register before accepting.",
+  "inviteAcceptanceHint": "The recipient receives an invitation email whose link opens this exact invitation, and can also accept under My teams after signing in. A username must already exist; email recipients may register before accepting.",
   "resendInvitation": "Resend invitation",
   "pendingAdministratorInvitation": "Awaiting administrator acceptance",
   "teamIdentity": "Team role",

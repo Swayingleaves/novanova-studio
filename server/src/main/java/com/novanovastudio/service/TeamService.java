@@ -24,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
+import org.springframework.util.StringUtils;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
@@ -37,6 +38,8 @@ import reactor.core.scheduler.Schedulers;
 @RequiredArgsConstructor
 @Slf4j
 public class TeamService {
+    /** 邀请人昵称缺失时的兜底展示名。 */
+    private static final String INVITER_FALLBACK_NAME = "团队管理员";
     /** 团队仓储。 */
     private final TeamRepository repository;
     /** 全局账号仓储。 */
@@ -51,6 +54,8 @@ public class TeamService {
     private final PasswordLoginLockService passwordLoginLockService;
     /** 邀请码生成器。 */
     private final InvitationService invitationService;
+    /** 团队邀请邮件。 */
+    private final TeamInvitationMailService teamInvitationMailService;
     /** 事务操作器。 */
     private final TransactionalOperator transactionalOperator;
 
@@ -89,8 +94,13 @@ public class TeamService {
         if ("platform".equals(request.teamSlug())) return Mono.error(invalid("平台路径不能用于团队"));
         return currentUserProvider.currentUserId().flatMap(operator -> repository.createTeam(request).flatMap(teamId ->
                 findAccount(account).map(Optional::of).defaultIfEmpty(Optional.empty()).flatMap(existing -> {
-                    if (existing.isPresent()) return repository.createInvitation(teamId, account.value(), existing.get().getEmail(), existing.get().getId(), "administrator", operator)
-                            .then(Mono.defer(() -> repository.findTeam(teamId)));
+                    if (existing.isPresent()) {
+                        String email = existing.get().getEmail();
+                        return requireInvitationMail(email)
+                                .then(Mono.defer(() -> repository.createInvitation(teamId, account.value(), email, existing.get().getId(), "administrator", operator)))
+                                .flatMap(invitationId -> sendInvitationMail(invitationId, email, request.name(), operator).thenReturn(invitationId))
+                                .then(Mono.defer(() -> repository.findTeam(teamId)));
+                    }
                     return createAccount(account, request.password(), request.nickname(), null, operator)
                             .flatMap(userId -> repository.addMember(teamId, userId, "administrator"))
                             .then(Mono.defer(() -> repository.findTeam(teamId)));
@@ -163,8 +173,11 @@ public class TeamService {
                     if (!team.getBooleanValue("enabled")) return Mono.error(denied("团队已禁用"));
                     return findAccount(account).map(Optional::of).defaultIfEmpty(Optional.empty()).flatMap(existing -> {
                         if (existing.isEmpty() && account.email() == null) return Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.userNotFound")));
-                        return repository.createInvitation(scope.teamId(), account.value(), existing.map(User::getEmail).orElse(account.email()),
-                                existing.map(User::getId).orElse(null), "member", operator);
+                        String email = existing.map(User::getEmail).orElse(account.email());
+                        return requireInvitationMail(email)
+                                .then(Mono.defer(() -> repository.createInvitation(scope.teamId(), account.value(), email,
+                                        existing.map(User::getId).orElse(null), "member", operator)))
+                                .flatMap(invitationId -> sendInvitationMail(invitationId, email, team.getString("name"), operator).thenReturn(invitationId));
                     });
                 }))).as(transactionalOperator::transactional);
     }
@@ -183,10 +196,14 @@ public class TeamService {
                                 if (invitation.getLongValue("teamId") != scope.teamId()) return Mono.error(denied("不能修改其他团队邀请"));
                                 if ("accepted".equals(invitation.getString("invitationStatus"))) return Mono.error(invalid("邀请已接受"));
                                 Long targetId = invitation.getLong("invitedUserId");
-                                if (targetId != null) return repository.createInvitation(scope.teamId(), invitation.getString("invitedAccount"), invitation.getString("email"), targetId, invitation.getString("memberRole"), operator);
-                                // 原目标是未注册邮箱时，仅解析该邮箱，不使用展示快照查找用户名。
-                                return userRepository.findByEmail(invitation.getString("email")).map(Optional::of).defaultIfEmpty(Optional.empty())
-                                        .flatMap(target -> repository.createInvitation(scope.teamId(), invitation.getString("invitedAccount"), invitation.getString("email"), target.map(User::getId).orElse(null), invitation.getString("memberRole"), operator));
+                                String email = invitation.getString("email");
+                                Mono<UUID> create = targetId != null
+                                        ? repository.createInvitation(scope.teamId(), invitation.getString("invitedAccount"), email, targetId, invitation.getString("memberRole"), operator)
+                                        // 原目标是未注册邮箱时，仅解析该邮箱，不使用展示快照查找用户名。
+                                        : userRepository.findByEmail(email).map(Optional::of).defaultIfEmpty(Optional.empty())
+                                                .flatMap(target -> repository.createInvitation(scope.teamId(), invitation.getString("invitedAccount"), email, target.map(User::getId).orElse(null), invitation.getString("memberRole"), operator));
+                                return requireInvitationMail(email).then(create)
+                                        .flatMap(invitationId -> sendInvitationMail(invitationId, email, team.getString("name"), operator).thenReturn(invitationId));
                             });
                 }))).as(transactionalOperator::transactional);
     }
@@ -446,6 +463,31 @@ public class TeamService {
             user.setInvitationCode(invitationService.generateInvitationCode());
             return userRepository.createUser(user).flatMap(userId -> creditRepository.createAccount(userId, BigDecimal.ZERO).thenReturn(userId));
         });
+    }
+
+    /**
+     * 有邮箱时先确认邮件服务可用，避免写完邀请才发现配置缺失。
+     * @param email 受邀邮箱，允许为空
+     * @return 校验完成信号
+     */
+    private Mono<Void> requireInvitationMail(String email) {
+        return email == null || email.isBlank() ? Mono.empty() : Mono.fromRunnable(teamInvitationMailService::requireConfigured);
+    }
+
+    /**
+     * 向受邀邮箱发送团队邀请邮件，无邮箱账号只保留站内邀请。
+     * @param invitationId 邀请标识
+     * @param email 受邀邮箱，允许为空
+     * @param teamName 团队名称
+     * @param operator 操作人
+     * @return 发送完成信号
+     */
+    private Mono<Void> sendInvitationMail(UUID invitationId, String email, String teamName, long operator) {
+        if (email == null || email.isBlank()) return Mono.empty();
+        return userRepository.findById(operator)
+                .map(user -> StringUtils.hasText(user.getNickname()) ? user.getNickname() : user.getUsername())
+                .defaultIfEmpty(INVITER_FALLBACK_NAME)
+                .flatMap(inviterName -> teamInvitationMailService.send(email, teamName, inviterName, invitationId));
     }
 
     /**

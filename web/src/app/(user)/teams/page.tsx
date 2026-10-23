@@ -1,17 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { App, Button, Empty, Skeleton, Tag } from "antd";
 import { UsersRound } from "lucide-react";
 import { acceptInvitation, listMyInvitations, listMyTeams } from "@/services/api/team";
 import { switchSpace } from "@/features/team/switch-space";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
+import { useNotificationStore } from "@/features/notification/stores/use-notification-store";
+import { cn } from "@/shared/lib/utils";
 
 /** 平台空间的团队切换与邀请确认，切换前先完成当前编辑保存。 */
 export default function TeamsPage() {
     const { message } = App.useApp();
     const [busy, setBusy] = useState(false);
+    const [highlightId, setHighlightId] = useState("");
+    const warnedRef = useRef(false);
     const user = useUserStore((state) => state.user);
     const teams = useQuery({ queryKey: ["myTeams", user?.id], queryFn: listMyTeams, enabled: Boolean(user) });
     const invitations = useQuery({ queryKey: ["myTeamInvitations", user?.id], queryFn: listMyInvitations, enabled: Boolean(user) });
@@ -19,6 +23,24 @@ export default function TeamsPage() {
         setBusy(true);
         if (!await switchSpace(path)) setBusy(false);
     };
+
+    /* 邮件邀请链接携带 ?invitation=<uuid>，整页加载时读取一次。 */
+    useEffect(() => {
+        const invitationId = new URLSearchParams(window.location.search).get("invitation");
+        if (invitationId) setHighlightId(invitationId);
+    }, []);
+
+    /* 邀请到位后定位并高亮，链接过期只提示一次。 */
+    useEffect(() => {
+        if (!highlightId || invitations.isLoading || !invitations.data) return;
+        if (!invitations.data.some((invitation) => invitation.id === highlightId)) {
+            if (warnedRef.current) return;
+            warnedRef.current = true;
+            message.warning("该邀请不存在或已被接受、撤销");
+            return;
+        }
+        document.getElementById(`invitation-${highlightId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, [highlightId, invitations.data, invitations.isLoading, message]);
     return <main className="studio-page h-full overflow-auto"><div className="mx-auto flex max-w-5xl flex-col gap-8 px-6 py-8">
         <header><h1 className="studio-title text-2xl font-semibold">我的团队</h1><p className="studio-subtitle mt-2">每个团队的配置、创作内容和团队积分独立保存。</p></header>
         <Button className="self-start" loading={busy} onClick={() => void enter("/")}>进入平台空间</Button>
@@ -58,12 +80,12 @@ export default function TeamsPage() {
             {invitations.error ? <p role="alert">{invitations.error.message}</p> : null}
             <Skeleton loading={invitations.isLoading} paragraph={{ rows: 1 }}>
                 {invitations.data?.length ? <ul role="list" className="divide-y divide-[var(--studio-line)]">
-                    {invitations.data.map((invitation) => <li key={invitation.id} className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+                    {invitations.data.map((invitation) => <li key={invitation.id} id={`invitation-${invitation.id}`} className={cn("flex flex-col gap-4 py-4 transition sm:flex-row sm:items-center sm:justify-between", invitation.id === highlightId && "rounded-lg bg-[var(--studio-primary-soft)] px-4 ring-2 ring-[var(--studio-primary)]")}>
                         <div className="min-w-0">
                             <p className="studio-title break-all">{invitation.name}</p>
                             <p className="studio-subtitle mt-1 text-sm">{invitation.memberRole === "administrator" ? "主管理员" : "成员"}邀请，有效期至 {new Date(invitation.expiresAt).toLocaleString("zh-CN")}</p>
                         </div>
-                        <Button className="self-start sm:shrink-0 sm:self-auto" loading={busy} onClick={async () => { setBusy(true); try { await acceptInvitation(invitation.id); await Promise.all([teams.refetch(), invitations.refetch()]); message.success("已加入团队"); } catch (error) { message.error(error instanceof Error ? error.message : "接受失败"); } finally { setBusy(false); } }}>接受邀请</Button>
+                        <Button className="self-start sm:shrink-0 sm:self-auto" loading={busy} onClick={async () => { setBusy(true); try { await acceptInvitation(invitation.id); await Promise.all([teams.refetch(), invitations.refetch()]); void useNotificationStore.getState().loadNotifications(); if (highlightId === invitation.id) { warnedRef.current = true; setHighlightId(""); } message.success("已加入团队"); } catch (error) { message.error(error instanceof Error ? error.message : "接受失败"); } finally { setBusy(false); } }}>接受邀请</Button>
                     </li>)}
                 </ul> : <Empty description="暂无邀请" />}
             </Skeleton>

@@ -60,9 +60,10 @@ class TeamAccountServiceTest {
         currentUser = mock(CurrentUserProvider.class); passwords = mock(PasswordEncoder.class);
         locks = mock(PasswordLoginLockService.class); credits = mock(CreditRepository.class);
         InvitationService invitationService = mock(InvitationService.class);
+        TeamInvitationMailService invitationMail = mock(TeamInvitationMailService.class);
         TransactionalOperator transactions = mock(TransactionalOperator.class);
         when(transactions.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        service = new TeamService(teams, accounts, credits, currentUser, passwords, locks, invitationService, transactions);
+        service = new TeamService(teams, accounts, credits, currentUser, passwords, locks, invitationService, invitationMail, transactions);
         when(currentUser.currentUserId()).thenReturn(Mono.just(1L));
         when(currentUser.currentUser()).thenReturn(Mono.just(new CurrentUser(1L, "admin@example.com", "user", 1)));
         team = JSONObject.of("id", 101L, "enabled", true, "memberLimit", 2);
@@ -75,6 +76,9 @@ class TeamAccountServiceTest {
         when(accounts.updatePasswordAfterReset(8L, "new-hash")).thenReturn(Mono.empty());
         when(locks.clear(8L)).thenReturn(Mono.empty());
         when(invitationService.generateInvitationCode()).thenReturn("INVITATION01");
+        // 有邮箱的邀请会查操作人昵称并发信，测试环境按无昵称、无真实邮件处理。
+        when(accounts.findById(1L)).thenReturn(Mono.empty());
+        when(invitationMail.send(any(), any(), any(), any())).thenReturn(Mono.empty());
     }
 
     /** 新建无邮箱子账号记录归属且只初始化零余额平台钱包。 */

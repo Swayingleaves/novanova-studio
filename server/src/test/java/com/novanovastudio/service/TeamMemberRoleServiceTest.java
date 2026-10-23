@@ -41,7 +41,7 @@ class TeamMemberRoleServiceTest {
         when(users.currentUserId()).thenReturn(Mono.just(1L));
         TransactionalOperator transactions = mock(TransactionalOperator.class);
         when(transactions.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        service = new TeamService(repository, null, null, users, null, null, null, transactions);
+        service = new TeamService(repository, null, null, users, null, null, null, null, transactions);
         team = JSONObject.of("id", 101L, "enabled", true, "administratorUserId", 2L);
         when(repository.lockTeam(101L)).thenReturn(Mono.just(team));
         when(repository.findMembership(101L, 1L)).thenReturn(Mono.just(JSONObject.of("memberRole", "administrator", "memberStatus", "active")));

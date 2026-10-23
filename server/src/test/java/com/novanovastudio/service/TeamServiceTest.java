@@ -45,7 +45,7 @@ class TeamServiceTest {
         when(users.currentUser()).thenReturn(Mono.just(new CurrentUser(9L, "member@example.com", "user", 1)));
         TransactionalOperator transactions = mock(TransactionalOperator.class);
         when(transactions.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        service = new TeamService(repository, null, null, users, null, null, null, transactions);
+        service = new TeamService(repository, null, null, users, null, null, null, null, transactions);
         team = JSONObject.of("id", 101L, "enabled", true, "memberLimit", 1);
         invitation = JSONObject.of("teamId", 101L, "email", "member@example.com", "memberRole", "member",
                 "invitationStatus", "pending", "expiresAt", OffsetDateTime.now().plusDays(7).toString());

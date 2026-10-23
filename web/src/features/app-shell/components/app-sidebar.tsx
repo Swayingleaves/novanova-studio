@@ -17,6 +17,7 @@ import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { cn } from "@/shared/lib/utils";
 import { useNotificationStore } from "@/features/notification/stores/use-notification-store";
 import { NotificationDetailModal } from "@/features/notification/components/notification-detail-modal";
+import { InvitationNotificationItem } from "@/features/notification/components/invitation-notification-item";
 import { listMyTeams } from "@/services/api/team";
 import { useTeamSwitcherStore } from "@/features/team/stores/use-team-switcher-store";
 import { useSpaceBrand } from "@/features/team/use-space-brand";
@@ -37,7 +38,7 @@ export function AppSidebar() {
     const pathname = usePathname();
     const user = useUserStore((state) => state.user);
     const myTeams = useQuery({ queryKey: ["myTeams", user?.id], queryFn: listMyTeams, enabled: Boolean(user && user.role !== "admin") });
-    const { notifications, unreadCount, loadNotifications } = useNotificationStore();
+    const { notifications, invitations, unreadCount, loadNotifications } = useNotificationStore();
     const [detailNotification, setDetailNotification] = useState<(typeof notifications)[number] | null>(null);
     const teamSwitcherOpen = useTeamSwitcherStore((state) => state.open);
 
@@ -71,23 +72,28 @@ export function AppSidebar() {
         <div className="w-72">
             <div className="border-b border-[var(--studio-line)] px-3 py-2 text-sm font-semibold text-[var(--studio-ink)]">{translate("appShell.announcements")}</div>
             <div className="max-h-72 overflow-y-auto">
-                {notifications.length ? (
-                    notifications.map((notification) => (
-                        <button
-                            key={notification.id}
-                            type="button"
-                            className={cn("block w-full border-b border-[var(--studio-line)] px-3 py-2.5 text-left transition hover:bg-[var(--studio-surface-hover)]", !notification.read && "bg-[var(--studio-primary-soft)]")}
-                            onClick={() => {
-                                setDetailNotification(notification);
-                            }}
-                        >
-                            <span className="flex items-start justify-between gap-2">
-                                <span className="line-clamp-1 text-sm font-medium text-[var(--studio-ink)]">{notification.title}</span>
-                                {!notification.read ? <span className="mt-1 size-1.5 shrink-0 rounded-full bg-[var(--studio-primary)]" /> : null}
-                            </span>
-                            {notification.content ? <span className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--studio-muted)]">{notification.content}</span> : null}
-                        </button>
-                    ))
+                {invitations.length || notifications.length ? (
+                    <>
+                        {invitations.map((invitation) => (
+                            <InvitationNotificationItem key={invitation.id} invitation={invitation} compact />
+                        ))}
+                        {notifications.map((notification) => (
+                            <button
+                                key={notification.id}
+                                type="button"
+                                className={cn("block w-full border-b border-[var(--studio-line)] px-3 py-2.5 text-left transition hover:bg-[var(--studio-surface-hover)]", !notification.read && "bg-[var(--studio-primary-soft)]")}
+                                onClick={() => {
+                                    setDetailNotification(notification);
+                                }}
+                            >
+                                <span className="flex items-start justify-between gap-2">
+                                    <span className="line-clamp-1 text-sm font-medium text-[var(--studio-ink)]">{notification.title}</span>
+                                    {!notification.read ? <span className="mt-1 size-1.5 shrink-0 rounded-full bg-[var(--studio-primary)]" /> : null}
+                                </span>
+                                {notification.content ? <span className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--studio-muted)]">{notification.content}</span> : null}
+                            </button>
+                        ))}
+                    </>
                 ) : (
                     <div className="px-3 py-8 text-center text-xs text-[var(--studio-faint)]">{translate("appShell.noAnnouncements")}</div>
                 )}

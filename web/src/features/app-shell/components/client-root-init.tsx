@@ -85,7 +85,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         return () => { active = false; window.clearInterval(timer); };
     }, [businessEnabled, user?.id, user?.creditBalance]);
 
-    // 公告轮询独立 effect，登录后每5分钟刷新。
+    // 通知与待接受邀请轮询独立 effect，登录后每30秒刷新。
     useEffect(() => {
         if (!businessEnabled) return;
         useNotificationStore.getState().loadNotifications();
