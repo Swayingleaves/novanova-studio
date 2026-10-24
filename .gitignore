@@ -37,3 +37,6 @@ volume/
 .test-out*.txt
 .diff-*.txt
 /artifacts/
+/web/public/manifest.webmanifest
+/web/public/novanova-sw.js
+/web/public/novanova-offline.html

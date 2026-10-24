@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__PWA_BRAND_NAME__</title>
+<style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+        background: __PWA_BG_LIGHT__;
+        color: #394037;
+    }
+    .offline-card {
+        text-align: center;
+        padding: 48px 40px;
+        max-width: 440px;
+    }
+    .offline-icon {
+        width: 72px;
+        height: 72px;
+        border-radius: 18px;
+        display: block;
+        margin: 0 auto;
+    }
+    .offline-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 20px 0 8px;
+    }
+    .offline-description {
+        font-size: 14px;
+        line-height: 1.7;
+        margin: 0 0 28px;
+        opacity: 0.78;
+    }
+    .offline-retry {
+        appearance: none;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        padding: 9px 28px;
+        border-radius: 999px;
+        background: __PWA_ACTION_LIGHT__;
+        color: #ffffff;
+        transition: opacity 0.15s ease;
+    }
+    .offline-retry:hover { opacity: 0.88; }
+    @media (prefers-color-scheme: dark) {
+        body { background: __PWA_BG_DARK__; color: #d8ded4; }
+        .offline-retry { background: __PWA_ACTION_DARK__; color: #050606; }
+    }
+</style>
+</head>
+<body>
+<main class="offline-card">
+    <img class="offline-icon" src="__PWA_ICON_URL__" alt="__PWA_BRAND_NAME__">
+    <h1 class="offline-title" data-i18n="offlineTitle"></h1>
+    <p class="offline-description" data-i18n="offlineDescription"></p>
+    <button type="button" class="offline-retry" data-i18n="offlineRetry" onclick="location.reload()"></button>
+</main>
+<script>
+    // 构建期内联的双语字典（来源：src/features/locale/messages/{zh-cn,en}/pwa.json）。
+    var OFFLINE_TEXT = __PWA_OFFLINE_DICT__;
+    (function () {
+        var language = (navigator.language || "en").toLowerCase();
+        var isChinese = language.indexOf("zh") === 0;
+        var text = OFFLINE_TEXT[isChinese ? "zh-cn" : "en"];
+        document.documentElement.lang = isChinese ? "zh-CN" : "en";
+        var nodes = document.querySelectorAll("[data-i18n]");
+        for (var i = 0; i < nodes.length; i++) {
+            var key = nodes[i].getAttribute("data-i18n");
+            nodes[i].textContent = text[key] || "";
+        }
+    })();
+</script>
+</body>
+</html>

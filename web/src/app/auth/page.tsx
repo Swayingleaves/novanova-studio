@@ -11,6 +11,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { AuthForm } from "@/features/auth/components/auth-form";
 import { AuthBackdrop } from "@/features/auth/components/auth-backdrop";
+import { PwaInstallButton } from "@/features/pwa/components/install-button";
 import { resolveAuthenticationRedirect } from "@/features/auth/lib/authentication-path";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -76,6 +77,7 @@ function AuthPageContent() {
                     {invitationCode ? <p className="mt-3 rounded-md bg-[var(--studio-surface-soft)] px-3 py-2 text-sm text-[var(--studio-text)]">{translate("auth.youAreSigningUpThroughAnInvitationYourInviter")}</p> : null}
                 </div>
                 {authenticationContent}
+                <PwaInstallButton />
             </div>}
         </div>
     );

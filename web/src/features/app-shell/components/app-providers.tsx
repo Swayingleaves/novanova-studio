@@ -22,6 +22,7 @@ import { useTeamSwitcherStore } from "@/features/team/stores/use-team-switcher-s
 import { useSpaceBrand } from "@/features/team/use-space-brand";
 import { synchronizeDocumentBrand } from "@/features/team/space-brand";
 import { ClientRootInit } from "@/features/app-shell/components/client-root-init";
+import { PwaProvider } from "@/features/pwa/components/pwa-provider";
 import { getAntThemeConfig } from "@/shared/lib/app-theme";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { trackNavigationHistory } from "@/shared/lib/navigation-history-guard";
@@ -103,6 +104,8 @@ export function AppProviders({
                 <ProConfigProvider intl={locale === "en" ? enUSIntl : zhCNIntl} dark={isDarkResolvedTheme(effectiveResolvedTheme)}>
                     <App>
                         <QueryClientProvider client={queryClient}>
+                            {/* PWA 运行时：安装控制器 + SW 生命周期 + 全局引导/更新弹窗 */}
+                            <PwaProvider />
                             {teamSwitcherOpen ? <TeamSwitcherModal /> : null}
                             <TeamBoundary><ClientRootInit>{children}</ClientRootInit></TeamBoundary>
                         </QueryClientProvider>

@@ -1,7 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { cookies, headers } from "next/headers";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
 import { AppProviders } from "@/features/app-shell/components/app-providers";
+import { PWA_BASE_PATH } from "@/features/pwa/pwa-constants";
+import { PWA_THEME_COLORS } from "@/features/pwa/pwa-theme-colors";
 import { ThemeScript } from "@/features/theme/components/theme-script";
 import { getInitialResolvedTheme, isDarkResolvedTheme, readThemePreferenceFromCookieStore } from "@/shared/lib/theme-preference";
 import "antd/dist/reset.css";
@@ -19,6 +21,9 @@ export async function generateMetadata(): Promise<Metadata> {
     return {
         title: editionsPage ? websiteMessages[locale].editions.compareEditionsNovanovaStudio : platformBrand.name,
         description: editionsPage ? websiteMessages[locale].editions.compareEnterpriseFeaturesAcrossNovanovaStudioEditions : websiteMessages[locale].website.description,
+        // PWA：仅生产构建注入 manifest（产物由 pnpm build 末尾的 generate-pwa.mjs 生成）
+        ...(process.env.NODE_ENV === "production" ? { manifest: `${PWA_BASE_PATH}manifest.webmanifest` } : {}),
+        applicationName: platformBrand.name,
         icons: {
             icon: platformBrand.iconUrl,
             shortcut: platformBrand.iconUrl,
@@ -26,6 +31,14 @@ export async function generateMetadata(): Promise<Metadata> {
         },
     };
 }
+
+/** PWA meta theme-color（与 globals.css 的 --studio-bg 一致，generate-pwa.mjs 构建期校验） */
+export const viewport: Viewport = {
+    themeColor: [
+        { media: "(prefers-color-scheme: light)", color: PWA_THEME_COLORS.light },
+        { media: "(prefers-color-scheme: dark)", color: PWA_THEME_COLORS.dark },
+    ],
+};
 
 export default async function RootLayout({
     children,

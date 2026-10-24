@@ -10,6 +10,7 @@ import { usePathname } from "@/shared/lib/team-navigation";
 import { Popover, Tooltip } from "antd";
 
 import { LanguageMenu } from "@/features/locale/components/language-menu";
+import { SidebarInstallEntry } from "@/features/pwa/components/sidebar-install-entry";
 import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
 import { navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
 import { canManageCurrentSpace } from "@/features/team/stores/use-team-store";
@@ -138,6 +139,7 @@ export function AppSidebar() {
                             </button>
                         )}
                     </Tooltip>
+                    <SidebarInstallEntry />
                     <LanguageMenu />
                     {showTeamSwitcher ? (
                         <Tooltip title="切换团队" placement="right">
