@@ -36,3 +36,4 @@ volume/
 /server/logs/
 .test-out*.txt
 .diff-*.txt
+/artifacts/

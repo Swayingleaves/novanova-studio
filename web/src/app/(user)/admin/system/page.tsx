@@ -70,6 +70,7 @@ import { ResetAccountPasswordModal } from "./components/reset-account-password-m
 import { StorageBillingManagement } from "./components/storage-billing-management";
 import { CreditCardManagement } from "./components/credit-card-management";
 import { ApiLogsManagement } from "./components/api-logs-management";
+import { EmailCampaignManagement } from "./components/email-campaign-management";
 import { StoryBiblePricingManagement } from "./components/story-bible-pricing-management";
 import { EpisodeBodiesPricingManagement } from "./components/episode-bodies-pricing-management";
 import { GenerationStyleCover } from "@/features/generation/components/generation-style-picker";
@@ -121,6 +122,7 @@ export default function AdminSystemPage() {
                         ...(!team ? [{ key: "users", label: translate("administration.userManagement"), children: <UserManagement /> }] : []),
                         ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), children: <CreditConsumptionManagement /> }] : []),
                         ...(!team ? [{ key: "creditCards", label: translate("administration.redemptionCodes"), children: <CreditCardManagement /> }] : []),
+                        ...(!team ? [{ key: "emailCampaigns", label: "邮件群发", children: <EmailCampaignManagement /> }] : []),
                         { key: "notifications", label: translate("administration.messageManagement"), children: <TeamContentScope moduleName="notifications"><NotificationManagement /></TeamContentScope> },
                         { key: "prompts", label: translate("administration.promptLibrary"), children: <TeamContentScope moduleName="prompts"><PromptManagement /></TeamContentScope> },
                         { key: "styles", label: translate("administration.styleManagement"), children: <TeamContentScope moduleName="styles"><GenerationStyleManagement /></TeamContentScope> },

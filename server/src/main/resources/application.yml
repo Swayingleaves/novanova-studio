@@ -199,6 +199,12 @@ novanova:
   email:
     # 发件人显示地址
     from: ${EMAIL_SMTP_FROM:}
+  email-campaign:
+    # 群发使用独立队列，所有服务实例共同遵守发送间隔与滚动窗口额度
+    minimum-interval-seconds: ${EMAIL_CAMPAIGN_MINIMUM_INTERVAL_SECONDS:3}
+    maximum-per-minute: ${EMAIL_CAMPAIGN_MAXIMUM_PER_MINUTE:20}
+    maximum-per-hour: ${EMAIL_CAMPAIGN_MAXIMUM_PER_HOUR:200}
+    maximum-active-campaigns: ${EMAIL_CAMPAIGN_MAXIMUM_ACTIVE_CAMPAIGNS:20}
 
   # ----------------------------------------------------------
   # 对象存储配置
