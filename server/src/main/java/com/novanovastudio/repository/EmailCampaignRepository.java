@@ -41,6 +41,8 @@ public class EmailCampaignRepository {
             FROM users WHERE email IS NOT NULL AND btrim(email) <> ''
             AND (email ILIKE :keyword OR nickname ILIKE :keyword OR username ILIKE :keyword)
             """;
+    /** 与用户域名表达式索引保持一致，搜索时只匹配@后的完整域名。 */
+    private static final String EMAIL_DOMAIN_FILTER = " AND lower(split_part(btrim(email), '@', 2)) IN (:emailDomains)";
     /** 响应式数据库客户端。 */
     private final DatabaseClient databaseClient;
 
@@ -147,21 +149,39 @@ public class EmailCampaignRepository {
      * @param keyword 已标准化的搜索词
      * @param offset 分页偏移
      * @param pageSize 分页大小
+     * @param emailDomains 已标准化的邮箱域名，空列表不限制
      * @return 用户列表
      */
-    public Flux<EmailCampaignDtos.RecipientUser> listUsers(String keyword, int offset, int pageSize) {
-        return databaseClient.sql("SELECT id, COALESCE(nickname, '') AS nickname, email " + USER_FILTER + " ORDER BY id LIMIT :limit OFFSET :offset")
-                .bind("keyword", "%" + keyword + "%").bind("limit", pageSize).bind("offset", offset)
-                .map((row, metadata) -> new EmailCampaignDtos.RecipientUser(row.get("id", Long.class), row.get("nickname", String.class), row.get("email", String.class))).all();
+    public Flux<EmailCampaignDtos.RecipientUser> listUsers(String keyword, int offset, int pageSize, List<String> emailDomains) {
+        var query = databaseClient.sql("SELECT id, COALESCE(nickname, '') AS nickname, email " + USER_FILTER
+                + (emailDomains.isEmpty() ? "" : EMAIL_DOMAIN_FILTER) + " ORDER BY id LIMIT :limit OFFSET :offset")
+                .bind("keyword", "%" + keyword + "%").bind("limit", pageSize).bind("offset", offset);
+        if (!emailDomains.isEmpty()) query = query.bind("emailDomains", emailDomains);
+        return query.map((row, metadata) -> new EmailCampaignDtos.RecipientUser(row.get("id", Long.class), row.get("nickname", String.class), row.get("email", String.class))).all();
     }
 
     /**
      * @param keyword 搜索词
+     * @param emailDomains 已标准化的邮箱域名，空列表不限制
      * @return 可收件用户总数
      */
-    public Mono<Long> countUsers(String keyword) {
-        return databaseClient.sql("SELECT COUNT(*) " + USER_FILTER).bind("keyword", "%" + keyword + "%")
-                .map((row, metadata) -> row.get(0, Long.class)).one();
+    public Mono<Long> countUsers(String keyword, List<String> emailDomains) {
+        var query = databaseClient.sql("SELECT COUNT(*) " + USER_FILTER + (emailDomains.isEmpty() ? "" : EMAIL_DOMAIN_FILTER))
+                .bind("keyword", "%" + keyword + "%");
+        if (!emailDomains.isEmpty()) query = query.bind("emailDomains", emailDomains);
+        return query.map((row, metadata) -> row.get(0, Long.class)).one();
+    }
+
+    /**
+     * 统计有邮箱用户实际使用的邮箱域名，供收件人搜索筛选展示。
+     * @return 邮箱域名与人数，人数相同时按域名排序
+     */
+    public Flux<EmailCampaignDtos.EmailDomain> listEmailDomains() {
+        return databaseClient.sql("""
+                SELECT lower(split_part(btrim(email), '@', 2)) AS domain, COUNT(*) AS user_count
+                FROM users WHERE email IS NOT NULL AND btrim(email) <> '' AND position('@' IN email) > 1
+                GROUP BY lower(split_part(btrim(email), '@', 2)) ORDER BY user_count DESC, domain
+                """).map((row, metadata) -> new EmailCampaignDtos.EmailDomain(row.get("domain", String.class), row.get("user_count", Long.class))).all();
     }
 
     /**

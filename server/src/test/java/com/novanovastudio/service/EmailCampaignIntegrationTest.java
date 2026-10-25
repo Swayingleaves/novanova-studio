@@ -88,7 +88,7 @@ class EmailCampaignIntegrationTest {
      */
     @BeforeEach
     void initialize() throws Exception {
-        execute("TRUNCATE email_campaigns CASCADE; UPDATE email_dispatch_control SET next_send_at = CURRENT_TIMESTAMP - INTERVAL '1 hour' WHERE id = 1;"
+        execute("TRUNCATE email_campaigns CASCADE; DELETE FROM users WHERE id IN (80005,80006); UPDATE email_dispatch_control SET next_send_at = CURRENT_TIMESTAMP - INTERVAL '1 hour' WHERE id = 1;"
                 + "INSERT INTO users(id, username, email, nickname, role, status, invitation_code) VALUES "
                 + "(80001,'mail-admin','admin@example.com','管理员','admin',1,'MAILADMIN'),"
                 + "(80002,'mail-user','user@example.com','普通用户','user',1,'MAILUSER'),"
@@ -115,7 +115,7 @@ class EmailCampaignIntegrationTest {
     void snapshotsAllEmailUsersAndKeepsTheOriginalAddresses() throws Exception {
         var campaign = run(service.createCampaign(request("all", List.of(), "<p>系统更新通知</p>")));
         assertEquals(3, campaign.recipientCount());
-        assertEquals(3, run(service.listUsers(1, 20, "")).total());
+        assertEquals(3, run(service.listUsers(1, 20, "", List.of())).total());
         var deliveries = run(service.listDeliveries(campaign.id(), 1, 20, null));
         assertEquals(3, deliveries.total());
         assertTrue(deliveries.deliveries().stream().anyMatch(delivery -> "disabled@example.com".equals(delivery.email())));
@@ -123,6 +123,66 @@ class EmailCampaignIntegrationTest {
         execute("UPDATE users SET email = 'changed@example.com' WHERE id = 80002");
         assertTrue(run(service.listDeliveries(campaign.id(), 1, 20, null)).deliveries().stream()
                 .anyMatch(delivery -> delivery.userId() == 80002 && "user@example.com".equals(delivery.email())));
+    }
+
+    /**
+     * 收件人搜索按完整域名筛选，列表与人数保持一致，不误匹配子域名及相似后缀。
+     * @throws Exception 测试用户初始化失败时抛出
+     */
+    @Test
+    void filtersRecipientSearchByExactEmailDomains() throws Exception {
+        execute("UPDATE users SET email = CASE id WHEN 80001 THEN ' ADMIN@QQ.COM ' WHEN 80002 THEN 'user@gmail.com' WHEN 80003 THEN 'disabled@qq.com' END WHERE id IN (80001,80002,80003);"
+                + "INSERT INTO users(id,username,email,nickname,role,status,invitation_code) VALUES "
+                + "(80005,'mail-similar','similar@qq.com.evil','相似后缀','user',1,'MAILSIMILAR'),"
+                + "(80006,'mail-subdomain','sub@sub.qq.com','子域名','user',1,'MAILSUBDOMAIN');");
+        var domains = run(service.listEmailDomains());
+        assertEquals(2, domains.stream().filter(item -> item.domain().equals("qq.com")).findFirst().orElseThrow().userCount());
+        assertEquals(1, domains.stream().filter(item -> item.domain().equals("gmail.com")).findFirst().orElseThrow().userCount());
+        var singleDomain = run(service.listUsers(1, 20, "", List.of(" @QQ.COM ")));
+        assertEquals(2, singleDomain.total());
+        assertEquals(List.of(80001L,80003L), singleDomain.users().stream().map(EmailCampaignDtos.RecipientUser::id).toList());
+        var firstPage = run(service.listUsers(1, 1, "", List.of("qq.com", "gmail.com")));
+        var secondPage = run(service.listUsers(2, 1, "", List.of("qq.com", "gmail.com")));
+        assertEquals(3, firstPage.total());
+        assertNotEquals(firstPage.users().getFirst().id(), secondPage.users().getFirst().id());
+        assertEquals(1, run(service.listUsers(1, 20, "禁用", List.of("qq.com"))).total());
+        assertEquals(3, run(service.listUsers(1, 20, "", List.of("@QQ.COM", "gmail.com", "qq.com"))).total());
+    }
+
+    /**
+     * 搜索后缀只影响候选列表，跨筛选勾选的用户完整发送，全部用户模式仍包含所有有邮箱用户。
+     * @throws Exception 测试邮箱调整失败时抛出
+     */
+    @Test
+    void sendsSelectedRecipientsAcrossSearchFiltersAndKeepsAllUsersModeUnfiltered() throws Exception {
+        execute("UPDATE users SET email = 'user@gmail.com' WHERE id = 80002; UPDATE users SET email = 'disabled@qq.com' WHERE id = 80003");
+        var gmailUsers = run(service.listUsers(1, 20, "", List.of("gmail.com"))).users();
+        var qqUsers = run(service.listUsers(1, 20, "", List.of("qq.com"))).users();
+        var selectedUserIds = java.util.stream.Stream.concat(gmailUsers.stream(), qqUsers.stream())
+                .map(EmailCampaignDtos.RecipientUser::id).toList();
+        assertEquals(List.of(80002L, 80003L), selectedUserIds);
+        var campaign = run(service.createCampaign(request("selected", selectedUserIds, "<p>跨后缀选择</p>")));
+        assertEquals(2, campaign.recipientCount());
+        assertEquals(List.of("user@gmail.com", "disabled@qq.com"), run(service.listDeliveries(campaign.id(), 1, 20, null))
+                .deliveries().stream().map(EmailCampaignDtos.Delivery::email).toList());
+        assertEquals(3, run(service.createCampaign(request("all", List.of(), "<p>全部用户</p>"))).recipientCount());
+        execute("UPDATE users SET email = 'changed@other.com' WHERE id = 80003");
+        assertEquals("disabled@qq.com", run(service.listDeliveries(campaign.id(), 1, 20, null)).deliveries().get(1).email());
+    }
+
+    /** 搜索未限制时返回全部候选，无匹配时返回空列表，非法后缀与越权查询被拒绝。 */
+    @Test
+    void handlesEmptyMissingAndInvalidEmailDomainFiltersExplicitly() {
+        assertEquals(3, run(service.listUsers(1, 20, "", List.of())).total());
+        assertEquals(3, run(service.listUsers(1, 20, "", null)).total());
+        assertEquals(0, run(service.listUsers(1, 20, "", List.of("missing.example"))).total());
+        for (String domain : List.of("", "*.qq.com", "%qq.com", "qq.com%", "user@qq.com", "qq.com' OR true --", "-qq.com")) {
+            StepVerifier.create(scoped(service.listUsers(1, 20, "", List.of(domain)), 0, "admin")).expectError(BusinessException.class).verify();
+        }
+        assertEquals(0, run(repository.countCampaigns()));
+        StepVerifier.create(scoped(service.listEmailDomains(), 0, "user")).expectError(BusinessException.class).verify();
+        StepVerifier.create(scoped(service.listEmailDomains(), 9, "admin")).expectError(BusinessException.class).verify();
+        verify(sender, never()).send(any(MimeMessage.class));
     }
 
     /** 并发重试同一请求时只产生一个任务与一份收件快照。 */

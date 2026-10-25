@@ -10,6 +10,7 @@ export type EmailCampaignSettings = {
 };
 
 export type EmailRecipientUser = { id: number; nickname: string; email: string };
+export type EmailDomain = { domain: string; userCount: number };
 export type EmailDeliveryStatus = "queued" | "sending" | "sent" | "failed" | "unknown" | "cancelled";
 export type EmailCampaign = {
     id: number;
@@ -54,10 +55,14 @@ export const getEmailCampaignSettings = () => serverGet<EmailCampaignSettings>("
 export const previewEmailCampaignContent = (bodyHtml: string) => serverPost<{ documentHtml: string }>("/admin/email/previewContent", { bodyHtml });
 
 /** 搜索有邮箱的收件用户。 */
-export function listEmailRecipientUsers(page: number, keyword: string) {
+export function listEmailRecipientUsers(page: number, keyword: string, emailDomains: string[] = []) {
     const query = new URLSearchParams({ page: String(page), pageSize: "20", keyword });
+    emailDomains.forEach(domain => query.append("emailDomains", domain));
     return serverGet<{ users: EmailRecipientUser[]; total: number }>(`/admin/email/listRecipientUsers?${query}`);
 }
+
+/** 读取用户实际使用的邮箱后缀及人数。 */
+export const listEmailDomains = () => serverGet<EmailDomain[]>("/admin/email/listEmailDomains");
 
 /** 创建持久化群发任务，重复的请求标识不会创建第二个任务。 */
 export const createEmailCampaign = (request: CreateEmailCampaign) => serverPost<EmailCampaign>("/admin/email/createCampaign", request);

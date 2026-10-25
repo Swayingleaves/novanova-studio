@@ -5,6 +5,7 @@ import com.novanovastudio.dto.EmailCampaignDtos;
 import com.novanovastudio.security.RequireRole;
 import com.novanovastudio.service.EmailCampaignService;
 import jakarta.validation.Valid;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -45,12 +46,20 @@ public class AdminEmailCampaignController {
      * @param page 页码
      * @param pageSize 分页大小
      * @param keyword 搜索词
+     * @param emailDomains 可选邮箱后缀，可重复传入选择多个域名
      * @return 有邮箱用户分页
      */
     @GetMapping("/listRecipientUsers")
     public Mono<ApiResponse<EmailCampaignDtos.UserPage>> listRecipientUsers(@RequestParam(defaultValue = "1") int page,
-            @RequestParam(defaultValue = "20") int pageSize, @RequestParam(required = false) String keyword) {
-        return service.listUsers(page, pageSize, keyword).map(ApiResponse::ok);
+            @RequestParam(defaultValue = "20") int pageSize, @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) List<String> emailDomains) {
+        return service.listUsers(page, pageSize, keyword, emailDomains).map(ApiResponse::ok);
+    }
+
+    /** @return 当前有邮箱用户使用的域名及人数 */
+    @GetMapping("/listEmailDomains")
+    public Mono<ApiResponse<List<EmailCampaignDtos.EmailDomain>>> listEmailDomains() {
+        return service.listEmailDomains().map(ApiResponse::ok);
     }
 
     /**

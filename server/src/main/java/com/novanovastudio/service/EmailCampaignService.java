@@ -87,16 +87,26 @@ public class EmailCampaignService {
      * @param page 页码
      * @param pageSize 分页大小
      * @param keyword 用户昵称、用户名或邮箱关键字
+     * @param emailDomains 可选邮箱后缀，空列表或未传表示不限制
      * @return 可选择的收件人
      */
-    public Mono<EmailCampaignDtos.UserPage> listUsers(int page, int pageSize, String keyword) {
+    public Mono<EmailCampaignDtos.UserPage> listUsers(int page, int pageSize, String keyword, List<String> emailDomains) {
         return requirePlatformAdministrator().then(Mono.defer(() -> {
             validatePage(page, pageSize);
             String search = keyword == null ? "" : keyword.trim();
             if (search.length() > 200) throw invalid("搜索内容不能超过200个字符");
-            return Mono.zip(repository.listUsers(search, (page - 1) * pageSize, pageSize).collectList(), repository.countUsers(search))
+            List<String> domains = normalizeEmailDomains(emailDomains);
+            return Mono.zip(repository.listUsers(search, (page - 1) * pageSize, pageSize, domains).collectList(), repository.countUsers(search, domains))
                     .map(result -> new EmailCampaignDtos.UserPage(result.getT1(), result.getT2()));
         }));
+    }
+
+    /**
+     * 读取当前实际使用的邮箱域名及人数，仅平台管理员可访问。
+     * @return 邮箱后缀筛选选项
+     */
+    public Mono<List<EmailCampaignDtos.EmailDomain>> listEmailDomains() {
+        return requirePlatformAdministrator().then(repository.listEmailDomains().collectList());
     }
 
     /**
@@ -224,6 +234,26 @@ public class EmailCampaignService {
         boolean allUsers = "all".equals(request.recipientMode());
         if (allUsers ? !request.userIds().isEmpty() : request.userIds().isEmpty()) throw invalid("请明确选择全部用户或至少一名指定用户");
         if (request.userIds().size() != request.userIds().stream().distinct().count()) throw invalid("收件用户不能重复");
+    }
+
+    /**
+     * 统一收件人搜索的邮箱后缀格式并拒绝通配符，按完整域名精确匹配。
+     * @param emailDomains 可选邮箱域名，支持前导@，忽略大小写及两侧空白
+     * @return 去重排序后的完整域名；未指定或空列表表示不限制
+     * @throws BusinessException 后缀数量或域名格式不合法时抛出
+     */
+    private List<String> normalizeEmailDomains(List<String> emailDomains) {
+        if (emailDomains == null) return List.of();
+        if (emailDomains.size() > 50) throw invalid("单次最多选择50种邮箱后缀");
+        return emailDomains.stream().map(value -> {
+            if (value == null) throw invalid("邮箱后缀不能为空");
+            String domain = value.trim().toLowerCase(Locale.ROOT);
+            if (domain.startsWith("@")) domain = domain.substring(1);
+            if (domain.length() > 253 || !domain.matches("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+")) {
+                throw invalid("邮箱后缀格式不正确，请使用qq.com或gmail.com等完整域名");
+            }
+            return domain;
+        }).distinct().sorted().toList();
     }
 
     /**

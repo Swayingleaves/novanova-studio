@@ -63,6 +63,12 @@ public final class EmailCampaignDtos {
     public record UserPage(List<RecipientUser> users, long total) { }
 
     /**
+     * @param domain 邮箱在@后的完整域名，统一小写
+     * @param userCount 使用该域名的有邮箱用户数，包含禁用用户
+     */
+    public record EmailDomain(String domain, long userCount) { }
+
+    /**
      * @param id 用户主键
      * @param nickname 用户昵称
      * @param email 邮箱

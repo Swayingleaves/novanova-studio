@@ -9,7 +9,7 @@ import { useCopyRichText } from "@/shared/hooks/use-copy-rich-text";
 import { uploadImage } from "@/features/storage/services/image-storage";
 import {
     cancelEmailCampaign, createEmailCampaign, getEmailCampaign, getEmailCampaignDetail, getEmailCampaignSettings,
-    listEmailCampaigns, listEmailDeliveries, listEmailRecipientUsers, previewEmailCampaignContent,
+    listEmailCampaigns, listEmailDeliveries, listEmailRecipientUsers, listEmailDomains, previewEmailCampaignContent,
     type CreateEmailCampaign, type EmailCampaign, type EmailDelivery, type EmailDeliveryStatus, type EmailRecipientUser,
 } from "@/services/api/email-campaigns";
 
@@ -49,6 +49,7 @@ export function EmailCampaignManagement() {
     const [recipientPage, setRecipientPage] = useState(1);
     const [keywordInput, setKeywordInput] = useState("");
     const [keyword, setKeyword] = useState("");
+    const [emailDomains, setEmailDomains] = useState<string[]>([]);
     const [selectedUsers, setSelectedUsers] = useState<EmailRecipientUser[]>([]);
     const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null);
     const [deliveryPage, setDeliveryPage] = useState(1);
@@ -69,11 +70,12 @@ export function EmailCampaignManagement() {
         refetchInterval: query => query.state.data?.campaigns.some(hasPendingMail) ? 5000 : false,
     });
     const recipientsQuery = useQuery({
-        queryKey: ["email-recipients", recipientPage, keyword], queryFn: () => listEmailRecipientUsers(recipientPage, keyword), enabled: composeOpen,
+        queryKey: ["email-recipients", recipientPage, keyword, emailDomains], queryFn: () => listEmailRecipientUsers(recipientPage, keyword, emailDomains), enabled: composeOpen,
     });
     const allRecipientsQuery = useQuery({
         queryKey: ["email-recipient-total"], queryFn: () => listEmailRecipientUsers(1, ""), enabled: composeOpen,
     });
+    const emailDomainsQuery = useQuery({ queryKey: ["email-recipient-domains"], queryFn: listEmailDomains, enabled: composeOpen });
     const detailQuery = useQuery({
         queryKey: ["email-campaign-detail", selectedCampaignId], queryFn: () => getEmailCampaignDetail(selectedCampaignId!), enabled: selectedCampaignId !== null,
     });
@@ -116,6 +118,8 @@ export function EmailCampaignManagement() {
         setSelectedUsers([]);
         setRecipientPage(1);
         setKeywordInput("");
+        setKeyword("");
+        setEmailDomains([]);
         requestIdentity.current = null;
         setContentTab("edit");
         setComposeOpen(true);
@@ -220,7 +224,7 @@ export function EmailCampaignManagement() {
 
             <Modal title="新建群发邮件" open={composeOpen} width={960} onCancel={() => { if (!sending && !uploading) setComposeOpen(false); }}
                 mask={{ closable: false }} keyboard={!sending && !uploading} closable={!sending && !uploading} footer={null} styles={{ body: { maxHeight: "75vh", overflowY: "auto", paddingRight: 8 } }}>
-                <Form<ComposeValues> form={form} layout="vertical" onFinish={submit} disabled={sending} initialValues={{ recipientMode: "selected" }}>
+                <Form<ComposeValues> form={form} layout="vertical" onFinish={submit} disabled={sending || uploading} initialValues={{ recipientMode: "selected" }}>
                     <Form.Item name="subject" label="邮件主题" rules={[{ required: true, whitespace: true, message: "请输入邮件主题" }, { pattern: /^[^\r\n]+$/, message: "主题不能包含换行" }]}>
                         <Input placeholder="输入邮件主题" maxLength={200} showCount />
                     </Form.Item>
@@ -228,11 +232,21 @@ export function EmailCampaignManagement() {
                         <Radio.Group options={[{ value: "selected", label: `指定用户（已选${selectedUsers.length}人）` }, { value: "all", label: `全部有邮箱用户（${allRecipientsQuery.data?.total ?? "加载中"}人）` }]} />
                     </Form.Item>
                     {recipientMode === "selected" && <div className="mb-5 space-y-3">
-                        <div className="flex flex-wrap items-center gap-3"><Input.Search className="max-w-sm" placeholder="搜索昵称、用户名或邮箱" value={keywordInput} onChange={event => setKeywordInput(event.target.value)} allowClear aria-label="搜索收件用户" /><span className="text-sm text-[var(--studio-muted)]">已选择 {selectedUsers.length} 人</span><Button type="link" disabled={!selectedUsers.length || sending} onClick={() => setSelectedUsers([])}>清空选择</Button></div>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                            <div><label htmlFor="email-recipient-search" className="mb-1 block text-sm">搜索用户</label><Input.Search id="email-recipient-search" placeholder="搜索昵称、用户名或邮箱" value={keywordInput} onChange={event => setKeywordInput(event.target.value)} allowClear /></div>
+                            <div><label htmlFor="email-recipient-domain-filter" className="mb-1 block text-sm">邮箱后缀</label>
+                                <Select id="email-recipient-domain-filter" className="w-full" mode="multiple" allowClear placeholder="全部邮箱后缀" showSearch={{ optionFilterProp: "label" }}
+                                    value={emailDomains} loading={emailDomainsQuery.isFetching} disabled={sending || uploading || emailDomainsQuery.isPending || emailDomainsQuery.isError} maxCount={50}
+                                    options={emailDomainsQuery.data?.map(item => ({ value: item.domain, label: `@${item.domain}（${item.userCount}人）` }))}
+                                    onChange={domains => { setEmailDomains(domains); setRecipientPage(1); }} />
+                            </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-[var(--studio-muted)]">已选择 {selectedUsers.length} 人</span><Button type="link" disabled={!selectedUsers.length || sending || uploading} onClick={() => setSelectedUsers([])}>清空选择</Button><span className="text-xs text-[var(--studio-muted)]">邮箱后缀仅筛选搜索结果，切换筛选保留已选用户。</span></div>
+                        {emailDomainsQuery.isError && <Alert type="error" title="邮箱后缀加载失败" action={<Button onClick={() => void emailDomainsQuery.refetch()}>重试</Button>} />}
                         {recipientsQuery.isError && <Alert type="error" title="收件用户加载失败" action={<Button onClick={() => void recipientsQuery.refetch()}>重试</Button>} />}
                         <Table<EmailRecipientUser> size="small" rowKey="id" dataSource={recipientsQuery.data?.users || []} loading={recipientsQuery.isFetching} scroll={{ y: 220 }}
                             tableLayout="fixed" columns={[{ title: "用户", dataIndex: "nickname", render: (nickname, user) => <span className="break-all">{nickname || `用户 ${user.id}`}</span> }, { title: "邮箱", dataIndex: "email", render: email => <span className="break-all">{email}</span> }]}
-                            rowSelection={{ preserveSelectedRowKeys: true, selectedRowKeys: selectedUsers.map(user => user.id), onChange: (_, users) => setSelectedUsers(users), getCheckboxProps: () => ({ disabled: sending }) }}
+                            rowSelection={{ preserveSelectedRowKeys: true, selectedRowKeys: selectedUsers.map(user => user.id), onChange: (_, users) => setSelectedUsers(users), getCheckboxProps: () => ({ disabled: sending || uploading }) }}
                             pagination={{ current: recipientPage, pageSize: 20, total: recipientsQuery.data?.total || 0, showSizeChanger: false, onChange: setRecipientPage }} />
                     </div>}
                     {recipientMode === "all" && allRecipientsQuery.isError && <Alert type="error" title="收件人数加载失败" action={<Button onClick={() => void allRecipientsQuery.refetch()}>重试</Button>} />}
