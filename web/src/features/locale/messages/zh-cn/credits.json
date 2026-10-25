@@ -76,5 +76,9 @@
     "onlyThisAccountSCodeRedemptionsAreShown": "仅展示当前账号的卡密兑换流水",
     "fullCodeOrLast4Characters": "完整卡密或末四位",
     "failedToLoadRedemptions": "兑换记录加载失败",
-    "noRedemptionsInThisPeriod": "所选范围暂无兑换记录"
+    "noRedemptionsInThisPeriod": "所选范围暂无兑换记录",
+    "insufficientTitle": "积分不足",
+    "insufficientForOperation": "本次操作需要 {required} 积分，当前可用 {available} 积分。",
+    "insufficientPurchaseSuggestion": "当前积分不足，请购买积分后重试。",
+    "purchaseLater": "暂不购买"
 }

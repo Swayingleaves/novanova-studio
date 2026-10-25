@@ -1,5 +1,6 @@
 package com.novanovastudio.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -32,15 +33,25 @@ public final class EmailCampaignDtos {
      * @param subject 邮件主题，禁止换行
      * @param bodyHtml 图文正文，图片须带已上传的媒体存储键
      * @param recipientMode all全部有邮箱用户，selected指定用户
-     * @param userIds 指定收件用户主键，全部用户模式必须为空
+     * @param userIds 指定收件用户主键，全部用户或全选筛选结果时必须为空
      * @param intervalSeconds 逐封发送间隔秒数
+     * @param recipientFilter 全选搜索结果时的筛选条件，手动指定用户和全部用户时不传
      */
     public record CreateRequest(@NotNull(message = "请求标识不能为空") UUID requestId,
             @NotBlank(message = "邮件主题不能为空") @Size(max = 200, message = "邮件主题不能超过200个字符") @Pattern(regexp = "[^\\r\\n]+", message = "邮件主题不能包含换行") String subject,
             @NotBlank(message = "邮件正文不能为空") @Size(max = 200000, message = "邮件正文过长，请缩短后重试") String bodyHtml,
             @NotNull(message = "请选择收件范围") @Pattern(regexp = "all|selected", message = "收件范围不合法") String recipientMode,
             @NotNull(message = "收件用户列表不能为空") @Size(max = 10000, message = "单次指定用户最多10000人") List<@NotNull(message = "用户标识不能为空") @Positive(message = "用户标识必须大于零") Long> userIds,
-            @Min(value = 1, message = "发送间隔不能小于1秒") @Max(value = 3600, message = "发送间隔不能超过3600秒") int intervalSeconds) { }
+            @Min(value = 1, message = "发送间隔不能小于1秒") @Max(value = 3600, message = "发送间隔不能超过3600秒") int intervalSeconds,
+            @Valid RecipientFilter recipientFilter) { }
+
+    /**
+     * @param keyword 收件人搜索词，空字符串不限制
+     * @param emailDomains 完整邮箱域名，空列表不限制，多个域名取并集
+     */
+    public record RecipientFilter(@NotNull(message = "搜索内容不能为null") @Size(max = 200, message = "搜索内容不能超过200个字符") String keyword,
+            @NotNull(message = "邮箱后缀列表不能为空") @Size(max = 50, message = "单次最多选择50种邮箱后缀")
+            List<@NotBlank(message = "邮箱后缀不能为空") @Size(max = 254, message = "邮箱后缀过长") String> emailDomains) { }
 
     /** @param campaignId 群发任务主键 */
     public record CampaignRequest(@NotNull @Positive Long campaignId) { }

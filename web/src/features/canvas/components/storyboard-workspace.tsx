@@ -1,4 +1,6 @@
 "use client";
+import { useInsufficientCreditsPrompt } from "@/features/credits/use-insufficient-credits-prompt";
+import { showInsufficientCredits } from "@/features/credits/insufficient-credits";
 import { modelCreditBalance } from "@/features/team/credit-balance";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { creditAmount } from "@/shared/lib/credit-amounts";
@@ -248,6 +250,8 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
     const promptModelCostConfigured = effectiveConfig.modelCosts.some((item) => item.taskType === "text" && item.model === promptModel);
     const promptModelReady = Boolean(promptModel && effectiveConfig.textModels.includes(promptModel) && promptModelCostConfigured && isAiConfigReady(effectiveConfig, promptModel));
     const promptBalanceInsufficient = promptCreditBalance !== null && promptCreditBalance !== undefined && creditAmount(promptTotalCredits).greaterThan(promptCreditBalance);
+    useInsufficientCreditsPrompt({ enabled: open && assetGenerationOpen && assetModelReady && !!selectedAssets.length, requiredCredits: assetTotalCredits, availableCredits: creditBalance, contextKey: node?.id });
+    useInsufficientCreditsPrompt({ enabled: open && promptGenerationOpen && promptModelReady && !!selectedPromptShots.length, requiredCredits: promptTotalCredits, availableCredits: promptCreditBalance, contextKey: node?.id });
     const allPromptShotsSelected = Boolean(shots.length) && selectedPromptShotIds.length === shots.length;
     const somePromptShotsSelected = selectedPromptShotIds.length > 0 && !allPromptShotsSelected;
     const generatedAssetCount = storyboardAssets.filter((asset) => Boolean(asset.image?.source?.trim())).length;
@@ -270,7 +274,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
             return;
         }
         if (promptBalanceInsufficient) {
-            message.error(translate("canvas.insufficientCreditsShotsNeedAvailable", { value0: selectedPromptShots.length, value1: promptTotalCredits, value2: promptCreditBalance }));
+            showInsufficientCredits(translate("canvas.insufficientCreditsShotsNeedAvailable", { value0: selectedPromptShots.length, value1: promptTotalCredits, value2: promptCreditBalance }));
             return;
         }
         modal.confirm({
@@ -312,7 +316,7 @@ export function StoryboardWorkspace({ open, node, composing, composingShotId, on
             return;
         }
         if (assetBalanceInsufficient) {
-            message.error(translate("canvas.insufficientCreditsAssetsNeedAvailable", { value0: selectedAssets.length, value1: assetTotalCredits, value2: creditBalance }));
+            showInsufficientCredits(translate("canvas.insufficientCreditsAssetsNeedAvailable", { value0: selectedAssets.length, value1: assetTotalCredits, value2: creditBalance }));
             return;
         }
         onGenerateAssets(

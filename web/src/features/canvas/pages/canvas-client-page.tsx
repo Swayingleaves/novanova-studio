@@ -1,4 +1,5 @@
 "use client";
+import { isInsufficientCreditsError, showInsufficientCredits } from "@/features/credits/insufficient-credits";
 import { modelCreditBalance } from "@/features/team/credit-balance";
 import { getWalletBalances } from "@/services/api/team";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
@@ -2532,7 +2533,7 @@ function CanvasWorkspacePage() {
             const totalCredits = readStoryboardAssetImageCost(effectiveConfig.modelCosts, normalizedModel, selectedAssets.length, normalizedSettings.imageResolution);
             const creditBalance = modelCreditBalance(normalizedModel);
             if (creditBalance !== null && creditBalance !== undefined && creditAmount(totalCredits).greaterThan(creditBalance)) {
-                message.error(translate("canvas.insufficientCreditsAssetsNeedAvailable", { value0: selectedAssets.length, value1: totalCredits, value2: creditBalance }));
+                showInsufficientCredits(translate("canvas.insufficientCreditsAssetsNeedAvailable", { value0: selectedAssets.length, value1: totalCredits, value2: creditBalance }));
                 return;
             }
 
@@ -2662,7 +2663,7 @@ function CanvasWorkspacePage() {
             }
             const creditBalance = modelCreditBalance(normalizedModel);
             if (creditBalance !== null && creditBalance !== undefined && creditAmount(videoQuote.credits).greaterThan(creditBalance)) {
-                message.error(translate("canvas.insufficientCreditsVideosNeedAvailable", { value0: selectedShots.length, value1: videoQuote.credits, value2: creditBalance }));
+                showInsufficientCredits(translate("canvas.insufficientCreditsVideosNeedAvailable", { value0: selectedShots.length, value1: videoQuote.credits, value2: creditBalance }));
                 return;
             }
 
@@ -2811,7 +2812,7 @@ function CanvasWorkspacePage() {
             if (!request) return;
             const creditBalance = modelCreditBalance(request.model);
             if (creditBalance !== null && creditBalance !== undefined && creditAmount(request.modelCost).greaterThan(creditBalance)) {
-                message.error(translate("canvas.insufficientCreditsInitialGenerationNeedsAvailable", { value0: request.modelCost, value1: creditBalance }));
+                showInsufficientCredits(translate("canvas.insufficientCreditsInitialGenerationNeedsAvailable", { value0: request.modelCost, value1: creditBalance }));
                 return;
             }
 
@@ -2836,7 +2837,7 @@ function CanvasWorkspacePage() {
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : translate("canvas.storyboardGenerationFailed");
                 setNodes((prev) => prev.map((item) => (item.id === currentNode.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage, completedAt: new Date().toISOString() }) : item)));
-                message.error(errorMessage);
+                if (!isInsufficientCreditsError(error)) message.error(errorMessage);
             }
         },
         [creditBalance, message, resolveStoryboardRequest, setCreditBalance],
@@ -2868,7 +2869,7 @@ function CanvasWorkspacePage() {
             }
             const totalCredits = creditText(creditAmount(request.modelCost).times(selectedShots.length));
             if (creditBalance !== null && creditBalance !== undefined && creditAmount(totalCredits).greaterThan(creditBalance)) {
-                message.error(translate("canvas.insufficientCreditsShotsNeedAvailable", { value0: selectedShots.length, value1: totalCredits, value2: creditBalance }));
+                showInsufficientCredits(translate("canvas.insufficientCreditsShotsNeedAvailable", { value0: selectedShots.length, value1: totalCredits, value2: creditBalance }));
                 return;
             }
 
@@ -2903,7 +2904,7 @@ function CanvasWorkspacePage() {
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : translate("canvas.failedToComposePrompt");
                 setNodes((prev) => prev.map((item) => (item.id === currentNode.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage, completedAt: new Date().toISOString() }) : item)));
-                message.error(errorMessage);
+                if (!isInsufficientCreditsError(error)) message.error(errorMessage);
             } finally {
                 setComposingStoryboardNodeId((current) => (current === nodeId ? null : current));
             }
@@ -2931,7 +2932,7 @@ function CanvasWorkspacePage() {
                 return;
             }
             if (creditBalance !== null && creditBalance !== undefined && creditAmount(request.modelCost).greaterThan(creditBalance)) {
-                message.error(translate("canvas.insufficientCreditsShotNeedsAvailable", { value0: shot.shotNumber, value1: request.modelCost, value2: creditBalance }));
+                showInsufficientCredits(translate("canvas.insufficientCreditsShotNeedsAvailable", { value0: shot.shotNumber, value1: request.modelCost, value2: creditBalance }));
                 return;
             }
 
@@ -2959,7 +2960,7 @@ function CanvasWorkspacePage() {
                 applyStoryboardCreditCharge(result.chargedCredits, setCreditBalance);
                 message.success(translate("canvas.finalPromptForShotGeneratedCreditsUsed", { value0: shot.shotNumber, value1: result.chargedCredits }));
             } catch (error) {
-                message.error(error instanceof Error ? error.message : translate("canvas.failedToGenerateShotPrompt"));
+                if (!isInsufficientCreditsError(error)) message.error(error instanceof Error ? error.message : translate("canvas.failedToGenerateShotPrompt"));
             } finally {
                 setComposingStoryboardShot((current) => (current?.nodeId === nodeId && current.shotId === shotId ? null : current));
             }
@@ -3850,7 +3851,7 @@ function CanvasWorkspacePage() {
                     }
                     const successfulNodeIds = outcomes.filter((outcome) => !outcome.error && !outcome.canceled).map((outcome) => outcome.nodeId);
                     const failures = outcomes.filter((outcome): outcome is CanvasNodeGenerationFailure => Boolean(outcome.error));
-                    if (failures.length) message.error(successfulNodeIds.length ? translate("canvas.someImagesFailed") : translate("canvas.allImagesFailed"));
+                    if (failures.some((failure) => !isInsufficientCreditsError(failure.error))) message.error(successfulNodeIds.length ? translate("canvas.someImagesFailed") : translate("canvas.allImagesFailed"));
                     return canvasGenerationResult(successfulNodeIds, failures, actualToolArguments);
                 }
 
@@ -3980,7 +3981,7 @@ function CanvasWorkspacePage() {
                     if (runController.signal.aborted) return canceledCanvasGenerationResult();
                     const successfulNodeIds = outcomes.filter((outcome) => !outcome.error && !outcome.canceled).map((outcome) => outcome.nodeId);
                     const failures = outcomes.filter((outcome): outcome is CanvasNodeGenerationFailure => Boolean(outcome.error));
-                    if (failures.length) message.error(successfulNodeIds.length ? translate("canvas.someVideosFailed") : translate("canvas.allVideosFailed"));
+                    if (failures.some((failure) => !isInsufficientCreditsError(failure.error))) message.error(successfulNodeIds.length ? translate("canvas.someVideosFailed") : translate("canvas.allVideosFailed"));
                     return canvasGenerationResult(successfulNodeIds, failures, actualToolArguments);
                 }
 
@@ -4072,7 +4073,7 @@ function CanvasWorkspacePage() {
                     return canceledCanvasGenerationResult();
                 }
                 const structuredError = readAiTaskError(error);
-                message.error(structuredError.message);
+                if (!isInsufficientCreditsError(error)) message.error(structuredError.message);
                 setNodes((prev) =>
                     prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : updateCanvasNodeExecution(node, { phase: "failed", errorMessage: structuredError.message })) : node)),
                 );
@@ -4338,7 +4339,7 @@ function CanvasWorkspacePage() {
                     return canceledCanvasGenerationResult();
                 }
                 const structuredError = readAiTaskError(error);
-                message.error(structuredError.message);
+                if (!isInsufficientCreditsError(error)) message.error(structuredError.message);
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage: structuredError.message }) : item)));
                 return failedCanvasGenerationResult(node.id, structuredError, actualToolArguments);
             } finally {

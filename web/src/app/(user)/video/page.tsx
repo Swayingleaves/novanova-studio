@@ -1,4 +1,6 @@
 "use client";
+import { useInsufficientCreditsPrompt } from "@/features/credits/use-insufficient-credits-prompt";
+import { showInsufficientCredits } from "@/features/credits/insufficient-credits";
 
 import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 
@@ -18,7 +20,7 @@ import { bindPendingVideoSize, renderPendingVideoToolCall, VideoGeneratingCard }
 import { renderPendingImageToolCall } from "@/app/(user)/image/components/pending-image-tool-call";
 import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
-import { useModelCreditBalance } from "@/features/team/credit-balance";
+import { modelCreditRequirement, useModelCreditBalance } from "@/features/team/credit-balance";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import type { AgentAttachment } from "@/features/canvas/api/agent";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
@@ -725,7 +727,11 @@ export default function VideoPage() {
         size: config.size, seconds: config.videoSeconds, imageCount: references.length, videoCount: videoReferences.length })
         || videoGenerationReferenceIssue(config.videoGenerationMode, references.length, videoReferences.length);
     const creditCost = activeQuote === null ? undefined : activeQuote.available ? (activeQuote.credits ?? null) : null;
-    const workflowBalanceInsufficient = Boolean(selectedSkill?.workflowType) && activeQuote !== null && activeQuote.available && creditBalance !== null && creditBalance !== undefined && creditAmount((activeQuote.credits ?? 0)).greaterThan(creditBalance);
+    const creditRequirement = selectedSkill?.workflowType
+        ? modelCreditRequirement(activeQuote?.available ? (workflowImageConfirmNext ? workflowVideoStageQuote ? [workflowVideoStageQuote] : [] : serverWorkflowQuote?.stages ?? []) : [])
+        : { requiredCredits: creditCost, availableCredits: creditBalance };
+    const balanceInsufficient = useInsufficientCreditsPrompt({ requiredCredits: creditRequirement.requiredCredits, availableCredits: creditRequirement.availableCredits });
+    const workflowBalanceInsufficient = Boolean(selectedSkill?.workflowType) && balanceInsufficient;
     const draftSettingsSummary = videoDraftSettingsModified ? buildVideoSettingsSummary(config, effectiveConfig, model) : "";
     const historySettingsSummary = !videoDraftSettingsModified && activeId && latestRound?.config ? buildVideoSettingsSummary(latestRound.config, effectiveConfig, latestRound.config.videoModel || latestRound.config.model || "") : "";
     const settingsSummary = draftSettingsSummary || historySettingsSummary;
@@ -733,7 +739,7 @@ export default function VideoPage() {
     // 声明视频工作流的技能，其首轮及后续引导消息属于免费对话，不应被视频报价阻断；
     // 工作流进入确认生成阶段后，activeQuote 与积分余额仍会继续控制提交状态。
     const workflowSkillConversation = Boolean(selectedSkill?.workflowType) && !workflowChargingNext && !workflowImageConfirmNext;
-    const quoteReady = workflowSkillConversation || activeQuote === null || (activeQuote.available && !workflowBalanceInsufficient);
+    const quoteReady = workflowSkillConversation || activeQuote === null || (activeQuote.available && !balanceInsufficient);
     // 工作流会自行生成阶段素材，不要求页面先上传普通视频参考素材。
     const referenceReady = Boolean(selectedSkill?.workflowType) || !referenceIssue;
     const canGenerate = Boolean(prompt.trim()) && quoteReady && referenceReady && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
@@ -962,7 +968,7 @@ export default function VideoPage() {
                     return;
                 }
                 if (videoQuote.credits !== null && videoQuote.credits !== undefined && creditBalance !== null && creditBalance !== undefined && creditAmount(videoQuote.credits).greaterThan(creditBalance)) {
-                    message.error(translate("video.insufficientCreditsVideoNeedsAvailable", { value0: videoQuote.credits, value1: creditBalance }));
+                    showInsufficientCredits(translate("video.insufficientCreditsVideoNeedsAvailable", { value0: videoQuote.credits, value1: creditBalance }));
                     return;
                 }
             } else {
@@ -975,8 +981,8 @@ export default function VideoPage() {
                     message.error(selectedQuote.reason);
                     return;
                 }
-                if (selectedSkill?.workflowType && creditCost !== null && creditCost !== undefined && creditBalance !== null && creditBalance !== undefined && creditAmount(creditCost).greaterThan(creditBalance)) {
-                    message.error(translate("video.insufficientCreditsWorkflowNeedsAvailable", { value0: creditCost, value1: creditBalance }));
+                if (selectedSkill?.workflowType && balanceInsufficient) {
+                    showInsufficientCredits();
                     return;
                 }
             }
@@ -1025,8 +1031,8 @@ export default function VideoPage() {
                 message.error(serverWorkflowQuote.reason);
                 return;
             }
-            if (creditCost !== null && creditCost !== undefined && creditBalance !== null && creditBalance !== undefined && creditAmount(creditCost).greaterThan(creditBalance)) {
-                message.error(translate("video.insufficientCreditsWorkflowNeedsAvailable", { value0: creditCost, value1: creditBalance }));
+            if (balanceInsufficient) {
+                showInsufficientCredits();
                 return;
             }
         }
@@ -1047,7 +1053,7 @@ export default function VideoPage() {
             }
             const videoCost = videoQuote.credits;
             if (videoCost !== null && videoCost !== undefined && creditBalance !== null && creditBalance !== undefined && creditAmount(videoCost).greaterThan(creditBalance)) {
-                message.error(translate("video.insufficientCreditsVideoNeedsAvailable", { value0: videoCost, value1: creditBalance }));
+                showInsufficientCredits(translate("video.insufficientCreditsVideoNeedsAvailable", { value0: videoCost, value1: creditBalance }));
                 return;
             }
         }
@@ -1804,7 +1810,7 @@ export default function VideoPage() {
                             {activeQuote !== null && (!activeQuote.available || (!selectedSkill?.workflowType && referenceIssue) || workflowBalanceInsufficient) ? (
                                 <div className="flex items-start gap-1.5 text-xs leading-relaxed" style={{ color: theme.node.muted }}>
                                     <HelpCircle className="mt-px size-3.5 shrink-0" />
-                                    <span>{workflowBalanceInsufficient && creditCost !== null && creditCost !== undefined && creditBalance !== null && creditBalance !== undefined ? translate("video.insufficientCreditsWorkflowNeedsAvailable", { value0: creditCost, value1: creditBalance }) : activeQuote.available ? referenceIssue : activeQuote.reason}</span>
+                                    <span>{workflowBalanceInsufficient && creditCost !== null && creditCost !== undefined && creditBalance !== null && creditBalance !== undefined ? translate("video.insufficientCreditsWorkflowNeedsAvailable", { value0: creditRequirement.requiredCredits ?? 0, value1: creditRequirement.availableCredits ?? 0 }) : activeQuote.available ? referenceIssue : activeQuote.reason}</span>
                                 </div>
                             ) : null}
                             {workflowChargingNext && serverWorkflowQuote?.available ? (

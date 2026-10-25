@@ -1,4 +1,6 @@
 "use client";
+import { useInsufficientCreditsPrompt } from "@/features/credits/use-insufficient-credits-prompt";
+import { showInsufficientCredits } from "@/features/credits/insufficient-credits";
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { translateMessage as translate } from "@/features/locale/translate";
@@ -14,6 +16,7 @@ import { listSkills, type SkillOption } from "@/services/api/server";
 import { defaultConfig, normalizeModelOptionValue, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 import { normalizeImageGenerationCount } from "@/features/generation/components/image-settings-panel";
 import { normalizeVideoGenerationCount } from "@/features/generation/components/video-settings-panel";
+import { modelCreditBalance } from "@/features/team/credit-balance";
 import { CreditCostDisplay, requestCreditCost } from "@/features/generation/constants/credits";
 import { availableVideoModelsForMode, quoteVideoGeneration } from "@/features/generation/lib/video-billing";
 import { readVideoGenerationConstraintIssue, readVideoModelConfiguration } from "@/features/generation/lib/video-generation-constraints";
@@ -194,6 +197,11 @@ export function CanvasNodePromptPanel({
                   resolution: mode === "image" ? config.imageResolution : undefined,
               });
 
+    const balanceInsufficient = useInsufficientCreditsPrompt({
+        enabled: !isRunning && config.modelCosts.some((item) => item.model === config.model && item.taskType === mode),
+        requiredCredits: creditCost, availableCredits: modelCreditBalance(config.model), contextKey: node.id,
+    });
+
     useEffect(() => {
         setSelectedStyles((persistedSnapshots || []).map((style) => ({ id: style.id, name: style.name, generationType: style.generationType, coverUrl: "", category: "" })));
         setStyleMenuOpen(false);
@@ -306,6 +314,7 @@ export function CanvasNodePromptPanel({
             message.error(videoQuote?.reason || translate("canvas.videoQuoteUnavailable"));
             return;
         }
+        if (balanceInsufficient) { showInsufficientCredits(); return; }
         const styleIds = selectedStyles.map((style) => style.id);
         const styleSnapshots = persistedSnapshots?.filter((snapshot) => styleIds.includes(snapshot.id)) || [];
         const usesHistoricalSnapshots = styleSnapshots.length === styleIds.length;
@@ -675,7 +684,7 @@ export function CanvasNodePromptPanel({
                         type="primary"
                         className="!h-10 !min-w-[88px] shrink-0 !justify-center !rounded-full !px-3"
                         danger={isRunning}
-                        disabled={isPromptGenerating || uploadingReference || (!isRunning && (!canSubmit || (mode === "video" && !videoQuote?.available)))}
+                        disabled={isPromptGenerating || uploadingReference || (!isRunning && (!canSubmit || balanceInsufficient || (mode === "video" && !videoQuote?.available)))}
                         onClick={() => (isRunning ? onStop(node.id) : submit())}
                         aria-label={isRunning ? translate("canvas.stopGeneration") : creditCost === null ? translate("canvas.videoQuoteUnavailable") : translate("canvas.generateCostsCredits", { value0: creditCost.toLocaleString(currentLanguageTag()) })}
                     >

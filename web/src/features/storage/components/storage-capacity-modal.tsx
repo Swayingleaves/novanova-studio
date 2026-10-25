@@ -1,4 +1,5 @@
 "use client";
+import { useInsufficientCreditsPrompt } from "@/features/credits/use-insufficient-credits-prompt";
 
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -33,6 +34,7 @@ export function StorageCapacityModal({ open, onClose }: { open: boolean; onClose
     const selected = packages.data?.packages.find((item) => item.id === selectedId);
     const walletTeamId = packages.data?.walletTeamId;
     const balance = walletTeamId === 0 ? (wallets?.platformBalance ?? platformBalance) : wallets?.teamBalance;
+    useInsufficientCreditsPrompt({ enabled: open && walletTeamId !== undefined, requiredCredits: packages.isFetching ? undefined : selected?.credits, availableCredits: balance, message: translate("storage.insufficientCapacityCredits") });
     const insufficient = !!selected && balance !== undefined && creditAmount(balance).lessThan(selected.credits);
 
     useEffect(() => {

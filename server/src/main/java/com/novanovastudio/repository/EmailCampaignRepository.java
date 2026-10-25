@@ -97,16 +97,23 @@ public class EmailCampaignRepository {
      * @param campaignId 任务主键
      * @param allUsers 是否全部有邮箱用户
      * @param userIds 指定用户主键
+     * @param recipientFilter 全选搜索结果的标准化条件，未全选时为空
      * @return 实际收件人数
      */
-    public Mono<Long> snapshotRecipients(long campaignId, boolean allUsers, List<Long> userIds) {
+    public Mono<Long> snapshotRecipients(long campaignId, boolean allUsers, List<Long> userIds, EmailCampaignDtos.RecipientFilter recipientFilter) {
+        String recipients = recipientFilter == null
+                ? " FROM users WHERE email IS NOT NULL AND btrim(email) <> ''" + (allUsers ? "" : " AND id IN (:userIds)")
+                : USER_FILTER + (recipientFilter.emailDomains().isEmpty() ? "" : EMAIL_DOMAIN_FILTER);
         var query = databaseClient.sql("""
                 INSERT INTO email_deliveries(campaign_id, user_id, email, nickname)
-                SELECT :campaignId, id, lower(btrim(email)), COALESCE(nickname, '') FROM users
-                WHERE email IS NOT NULL AND btrim(email) <> ''
-                """ + (allUsers ? "" : " AND id IN (:userIds)"))
+                SELECT :campaignId, id, lower(btrim(email)), COALESCE(nickname, '')
+                """ + recipients)
                 .bind("campaignId", campaignId);
-        if (!allUsers) query = query.bind("userIds", userIds);
+        // 全选直接插入全部匹配用户，不受界面分页或手动用户标识数量限制。
+        if (recipientFilter != null) {
+            query = query.bind("keyword", "%" + recipientFilter.keyword() + "%");
+            if (!recipientFilter.emailDomains().isEmpty()) query = query.bind("emailDomains", recipientFilter.emailDomains());
+        } else if (!allUsers) query = query.bind("userIds", userIds);
         return query.fetch().rowsUpdated();
     }
 

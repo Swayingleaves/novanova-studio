@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createEmailCampaign, listEmailDomains, listEmailRecipientUsers } from "./email-campaigns";
 
-test("邮箱后缀仅用于收件人搜索，清空筛选和群发提交不附加后缀条件", async () => {
+test("搜索支持多后缀，手动勾选不提交筛选条件，全选提交完整筛选而无需逐页传用户", async () => {
     const requests: Array<{ url: URL; body: unknown }> = [];
     const previousFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
@@ -24,6 +24,10 @@ test("邮箱后缀仅用于收件人搜索，清空筛选和群发提交不附�
         assert.equal(requests[3].url.pathname, "/api/v1/admin/email/createCampaign");
         assert.deepEqual(requests[3].body, payload);
         assert.equal(Object.hasOwn(requests[3].body as object, "emailDomains"), false);
+        const selectAllPayload = { ...payload, userIds: [], recipientFilter: { keyword: "用户+名称", emailDomains: ["qq.com", "gmail.com"] } };
+        await createEmailCampaign(selectAllPayload);
+        assert.deepEqual(requests[4].body, selectAllPayload);
+        assert.equal(requests[4].url.pathname, "/api/v1/admin/email/createCampaign");
     } finally {
         globalThis.fetch = previousFetch;
     }

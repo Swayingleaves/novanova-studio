@@ -88,7 +88,7 @@ class EmailCampaignIntegrationTest {
      */
     @BeforeEach
     void initialize() throws Exception {
-        execute("TRUNCATE email_campaigns CASCADE; DELETE FROM users WHERE id IN (80005,80006); UPDATE email_dispatch_control SET next_send_at = CURRENT_TIMESTAMP - INTERVAL '1 hour' WHERE id = 1;"
+        execute("TRUNCATE email_campaigns CASCADE; DELETE FROM users WHERE id IN (80005,80006) OR id BETWEEN 81000 AND 91024; UPDATE email_dispatch_control SET next_send_at = CURRENT_TIMESTAMP - INTERVAL '1 hour' WHERE id = 1;"
                 + "INSERT INTO users(id, username, email, nickname, role, status, invitation_code) VALUES "
                 + "(80001,'mail-admin','admin@example.com','管理员','admin',1,'MAILADMIN'),"
                 + "(80002,'mail-user','user@example.com','普通用户','user',1,'MAILUSER'),"
@@ -170,6 +170,75 @@ class EmailCampaignIntegrationTest {
         assertEquals("disabled@qq.com", run(service.listDeliveries(campaign.id(), 1, 20, null)).deliveries().get(1).email());
     }
 
+    /**
+     * 全选筛选结果覆盖所有分页并支持超过一万名收件人，提交后名单保持固定，重复提交不新增任务。
+     * @throws Exception 批量测试用户初始化失败时抛出
+     */
+    @Test
+    void snapshotsAllMatchingRecipientsBeyondPaginationAndManualSelectionLimits() throws Exception {
+        execute("INSERT INTO users(id,username,email,nickname,role,status,invitation_code) "
+                + "SELECT value, 'mail-bulk-' || value, 'bulk' || value || '@gmail.com', '批量用户', 'user', 1, 'MAILBULK' || value "
+                + "FROM generate_series(81000,91024) AS value; "
+                + "INSERT INTO users(id,username,email,nickname,role,status,invitation_code) VALUES "
+                + "(80005,'mail-similar','bulk@gmail.com.evil','相似后缀','user',1,'MAILSIMILAR'),"
+                + "(80006,'mail-subdomain','bulk@sub.gmail.com','子域名','user',1,'MAILSUBDOMAIN');");
+        var search = run(service.listUsers(1, 20, "bulk", List.of("gmail.com")));
+        assertEquals(20, search.users().size());
+        assertEquals(10025, search.total());
+        var request = new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "筛选全选", "<p>正文</p>", "selected", List.of(), 3,
+                new EmailCampaignDtos.RecipientFilter(" bulk ", List.of(" @GMAIL.COM ", "gmail.com")));
+        var campaign = run(service.createCampaign(request));
+        assertEquals(search.total(), campaign.recipientCount());
+        assertEquals(search.total(), run(repository.countDeliveries(campaign.id(), "")));
+        execute("UPDATE users SET email = 'changed@qq.com' WHERE id = 81000; UPDATE users SET email = 'new@gmail.com' WHERE id = 80005");
+        var deliveries = run(service.listDeliveries(campaign.id(), 1, 20, null));
+        assertEquals(10025, deliveries.total());
+        assertTrue(deliveries.deliveries().stream().anyMatch(delivery -> delivery.userId() == 81000 && delivery.email().equals("bulk81000@gmail.com")));
+        assertEquals(campaign.id(), run(service.createCampaign(request)).id());
+        assertEquals(1, run(repository.countCampaigns()));
+        assertEquals(10025, run(repository.countDeliveries(campaign.id(), "")));
+    }
+
+    /**
+     * 多后缀全选取并集并应用搜索词，收件快照与搜索结果完全一致。
+     * @throws Exception 测试邮箱初始化失败时抛出
+     */
+    @Test
+    void snapshotsMultipleEmailDomainsWithTheSameKeywordAsSearch() throws Exception {
+        execute("UPDATE users SET email = CASE id WHEN 80001 THEN 'admin@gmail.com' WHEN 80002 THEN 'user@gmail.com' WHEN 80003 THEN 'user@qq.com' END WHERE id IN (80001,80002,80003)");
+        var filter = new EmailCampaignDtos.RecipientFilter("user@", List.of("gmail.com", "qq.com"));
+        var search = run(service.listUsers(1, 20, filter.keyword(), filter.emailDomains()));
+        var request = new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "多后缀全选", "<p>正文</p>", "selected", List.of(), 3, filter);
+        var campaign = run(service.createCampaign(request));
+        assertEquals(2, campaign.recipientCount());
+        assertEquals(search.users().stream().map(EmailCampaignDtos.RecipientUser::id).toList(),
+                run(service.listDeliveries(campaign.id(), 1, 20, null)).deliveries().stream().map(EmailCampaignDtos.Delivery::userId).toList());
+        var keywordOnly = new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "关键字全选", "<p>正文</p>", "selected", List.of(), 3,
+                new EmailCampaignDtos.RecipientFilter("admin@", List.of()));
+        assertEquals(1, run(service.createCampaign(keywordOnly)).recipientCount());
+    }
+
+    /** 全选的空结果、非法条件、与手动名单及全部用户模式混用都必须拒绝，不能扩大收件范围。 */
+    @Test
+    void rejectsEmptyInvalidAndAmbiguousRecipientFilters() {
+        for (var filter : List.of(new EmailCampaignDtos.RecipientFilter("", List.of("missing.example")),
+                new EmailCampaignDtos.RecipientFilter("", List.of("*.example.com")),
+                new EmailCampaignDtos.RecipientFilter("x".repeat(201), List.of()),
+                new EmailCampaignDtos.RecipientFilter(null, List.of()),
+                new EmailCampaignDtos.RecipientFilter("", null))) {
+            var request = new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "非法筛选", "<p>正文</p>", "selected", List.of(), 3, filter);
+            StepVerifier.create(scoped(service.createCampaign(request), 0, "admin")).expectError(BusinessException.class).verify();
+        }
+        var filter = new EmailCampaignDtos.RecipientFilter("", List.of("example.com"));
+        for (var request : List.of(
+                new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "混合范围", "<p>正文</p>", "all", List.of(), 3, filter),
+                new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "混合范围", "<p>正文</p>", "selected", List.of(80002L), 3, filter))) {
+            StepVerifier.create(scoped(service.createCampaign(request), 0, "admin")).expectError(BusinessException.class).verify();
+        }
+        assertEquals(0, run(repository.countCampaigns()));
+        verify(sender, never()).send(any(MimeMessage.class));
+    }
+
     /** 搜索未限制时返回全部候选，无匹配时返回空列表，非法后缀与越权查询被拒绝。 */
     @Test
     void handlesEmptyMissingAndInvalidEmailDomainFiltersExplicitly() {
@@ -244,12 +313,79 @@ class EmailCampaignIntegrationTest {
     void rollingHourLimitCountsFailedAttempts() throws Exception {
         limits.setMaximumPerHour(1);
         run(service.createCampaign(request("all", List.of(), "<p>小时限制</p>")));
-        doThrow(new MailAuthenticationException("模拟认证失败")).when(sender).send(any(MimeMessage.class));
+        doThrow(new org.springframework.mail.MailParseException("模拟内容无效")).when(sender).send(any(MimeMessage.class));
         run(dispatcher.dispatch());
         execute("UPDATE email_deliveries SET started_at = CURRENT_TIMESTAMP - INTERVAL '2 minutes' WHERE id = (SELECT MIN(id) FROM email_deliveries);");
         allowNextInterval();
         run(dispatcher.dispatch());
         verify(sender, times(1)).send(any(MimeMessage.class));
+    }
+
+    /**
+     * 发件认证失败时只尝试当前一封，终止任务并取消后续收件人，保留已发送记录。
+     * @throws Exception 调整模拟发送间隔失败时抛出
+     */
+    @Test
+    void authenticationFailureCancelsRemainingRecipientsAndPreservesSentMail() throws Exception {
+        var campaign = run(service.createCampaign(request("all", List.of(), "<p>认证失败停止整批</p>")));
+        run(dispatcher.dispatch());
+        doThrow(new MailAuthenticationException("认证被拒绝", new jakarta.mail.AuthenticationFailedException("535 Login fail")))
+                .when(sender).send(any(MimeMessage.class));
+        allowNextInterval();
+        run(dispatcher.dispatch());
+        assertEquals("cancelled", run(repository.getCampaign(campaign.id())).status());
+        assertEquals(1, run(repository.countDeliveries(campaign.id(), "sent")));
+        assertEquals(1, run(repository.countDeliveries(campaign.id(), "failed")));
+        assertEquals(1, run(repository.countDeliveries(campaign.id(), "cancelled")));
+        assertEquals(0, run(repository.countDeliveries(campaign.id(), "queued")));
+        assertEquals(0, run(repository.countDeliveries(campaign.id(), "sending")));
+        assertTrue(run(service.listDeliveries(campaign.id(), 1, 20, "failed")).deliveries().getFirst().errorMessage().contains("认证失败"));
+        allowNextInterval();
+        run(dispatcher.dispatch());
+        var restartedDispatcher = new EmailCampaignDispatcher(repository, limits, sender, transactions);
+        run(restartedDispatcher.dispatch());
+        verify(sender, times(2)).send(any(MimeMessage.class));
+    }
+
+    /**
+     * 原始邮件认证异常被包装后仍应停止整批，其他任务及普通内容错误沿用独立处理逻辑。
+     * @throws Exception 调整模拟发送间隔失败时抛出
+     */
+    @Test
+    void wrappedAuthenticationFailureCancelsOnlyTheAffectedCampaign() throws Exception {
+        var campaign = run(service.createCampaign(request("selected", List.of(80001L, 80002L), "<p>包装认证失败</p>")));
+        var anotherCampaign = run(service.createCampaign(request("selected", List.of(80003L), "<p>其他任务</p>")));
+        doThrow(new MailSendException("发送连接失败", new jakarta.mail.AuthenticationFailedException("535 Login fail")))
+                .when(sender).send(any(MimeMessage.class));
+        run(dispatcher.dispatch());
+        assertEquals("cancelled", run(repository.getCampaign(campaign.id())).status());
+        assertEquals(1, run(repository.countDeliveries(campaign.id(), "failed")));
+        assertEquals(1, run(repository.countDeliveries(campaign.id(), "cancelled")));
+        assertEquals(1, run(repository.countDeliveries(anotherCampaign.id(), "queued")));
+        doNothing().when(sender).send(any(MimeMessage.class));
+        allowNextInterval();
+        run(dispatcher.dispatch());
+        assertEquals(1, run(repository.countDeliveries(anotherCampaign.id(), "sent")));
+        verify(sender, times(2)).send(any(MimeMessage.class));
+    }
+
+    /**
+     * 普通内容错误只失败当前邮件，不能误终止整批收件任务。
+     * @throws Exception 调整模拟发送间隔失败时抛出
+     */
+    @Test
+    void messageContentFailureDoesNotCancelRemainingRecipients() throws Exception {
+        var campaign = run(service.createCampaign(request("selected", List.of(80002L, 80003L), "<p>内容错误继续下一封</p>")));
+        doThrow(new org.springframework.mail.MailParseException("模拟内容错误")).when(sender).send(any(MimeMessage.class));
+        run(dispatcher.dispatch());
+        assertEquals("running", run(repository.getCampaign(campaign.id())).status());
+        assertEquals(1, run(repository.countDeliveries(campaign.id(), "failed")));
+        assertEquals(1, run(repository.countDeliveries(campaign.id(), "queued")));
+        doNothing().when(sender).send(any(MimeMessage.class));
+        allowNextInterval();
+        run(dispatcher.dispatch());
+        assertEquals("completed", run(repository.getCampaign(campaign.id())).status());
+        assertEquals(1, run(repository.countDeliveries(campaign.id(), "sent")));
     }
 
     /** 服务中断的在途邮件标记为不确定，剩余队列继续，原邮件不重发。 */
@@ -494,8 +630,12 @@ class EmailCampaignIntegrationTest {
     void rejectsSubjectHeaderInjectionAndInvalidRecipientMode() {
         try (var validators = jakarta.validation.Validation.buildDefaultValidatorFactory()) {
             var validator = validators.getValidator();
-            assertFalse(validator.validate(new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "通知\r\nBcc: other@example.com", "<p>正文</p>", "selected", List.of(80002L), 3)).isEmpty());
-            assertFalse(validator.validate(new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "通知", "<p>正文</p>", "invalid", List.of(80002L), 3)).isEmpty());
+            assertFalse(validator.validate(new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "通知\r\nBcc: other@example.com", "<p>正文</p>", "selected", List.of(80002L), 3, null)).isEmpty());
+            assertFalse(validator.validate(new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "通知", "<p>正文</p>", "invalid", List.of(80002L), 3, null)).isEmpty());
+            assertFalse(validator.validate(new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "通知", "<p>正文</p>", "selected", List.of(), 3,
+                    new EmailCampaignDtos.RecipientFilter(null, List.of()))).isEmpty());
+            assertTrue(validator.validate(new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "通知", "<p>正文</p>", "selected", List.of(), 3,
+                    new EmailCampaignDtos.RecipientFilter("", List.of("gmail.com")))).isEmpty());
         }
     }
 
@@ -517,7 +657,7 @@ class EmailCampaignIntegrationTest {
      * @return 独立请求
      */
     private EmailCampaignDtos.CreateRequest request(String mode, List<Long> userIds, String html) {
-        return new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "测试中文邮件", html, mode, userIds, 3);
+        return new EmailCampaignDtos.CreateRequest(UUID.randomUUID(), "测试中文邮件", html, mode, userIds, 3, null);
     }
 
     /**

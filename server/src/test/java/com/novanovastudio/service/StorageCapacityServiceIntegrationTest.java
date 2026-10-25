@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import com.alibaba.fastjson2.JSONObject;
+import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.config.TeamDatabaseConfiguration;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.dto.StorageCapacityDtos;
@@ -201,7 +202,8 @@ class StorageCapacityServiceIntegrationTest {
     void insufficientCreditsRollBackGrantsAndCapacity() throws Exception {
         String id = createPackage("10");
         execute("UPDATE user_credit_accounts SET credit_balance=1 WHERE user_id=" + userId + "; INSERT INTO user_credit_grants(user_id,source_type,granted_amount,remaining_amount,expires_at) VALUES(" + userId + ",'daily_check_in',1,1,CURRENT_TIMESTAMP+INTERVAL '1 day')");
-        assertThrows(RuntimeException.class, () -> run(service.purchase(request(id))));
+        BusinessException failure = assertThrows(BusinessException.class, () -> run(service.purchase(request(id))));
+        assertEquals("business.insufficientCreditsForStorageCapacity", failure.getSystemMessage().key());
         assertEquals("1.000000", query("SELECT credit_balance FROM user_credit_accounts WHERE user_id=" + userId));
         assertEquals("1.000000", query("SELECT remaining_amount FROM user_credit_grants WHERE user_id=" + userId));
         assertEquals("0", query("SELECT COUNT(*) FROM storage_capacity_purchases WHERE user_id=" + userId));

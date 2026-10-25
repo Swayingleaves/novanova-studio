@@ -11,6 +11,7 @@ export type EmailCampaignSettings = {
 
 export type EmailRecipientUser = { id: number; nickname: string; email: string };
 export type EmailDomain = { domain: string; userCount: number };
+export type EmailRecipientFilter = { keyword: string; emailDomains: string[] };
 export type EmailDeliveryStatus = "queued" | "sending" | "sent" | "failed" | "unknown" | "cancelled";
 export type EmailCampaign = {
     id: number;
@@ -46,6 +47,7 @@ export type CreateEmailCampaign = {
     recipientMode: "all" | "selected";
     userIds: number[];
     intervalSeconds: number;
+    recipientFilter?: EmailRecipientFilter;
 };
 
 /** 读取群发限制与邮件配置状态。 */

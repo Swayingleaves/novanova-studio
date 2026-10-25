@@ -16,6 +16,7 @@ import { websiteMessages } from "@/features/locale/messages";
 import { useLanguageStore } from "@/features/locale/language-store";
 import { isWebsiteLocale, languageTag, type WebsiteLocale } from "@/features/locale/locale";
 
+import { InsufficientCreditsModal } from "@/features/credits/insufficient-credits-modal";
 import { TeamBoundary } from "@/features/team/components/team-boundary";
 import { TeamSwitcherModal } from "@/features/team/components/team-switcher-modal";
 import { useTeamSwitcherStore } from "@/features/team/stores/use-team-switcher-store";
@@ -106,6 +107,7 @@ export function AppProviders({
                         <QueryClientProvider client={queryClient}>
                             {/* PWA 运行时：安装控制器 + SW 生命周期 + 全局引导/更新弹窗 */}
                             <PwaProvider />
+                            <InsufficientCreditsModal />
                             {teamSwitcherOpen ? <TeamSwitcherModal /> : null}
                             <TeamBoundary><ClientRootInit>{children}</ClientRootInit></TeamBoundary>
                         </QueryClientProvider>

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, App, Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Radio, Select, Skeleton, Table, Tabs, Tag, type TableProps } from "antd";
+import { Alert, App, Button, Checkbox, Descriptions, Drawer, Form, Input, InputNumber, Modal, Radio, Select, Skeleton, Table, Tabs, Tag, type TableProps } from "antd";
 import { Copy, MailPlus, RefreshCw, Send } from "lucide-react";
 import { useCopyRichText } from "@/shared/hooks/use-copy-rich-text";
 import { uploadImage } from "@/features/storage/services/image-storage";
@@ -21,7 +21,7 @@ const deliveryLabels: Record<EmailDeliveryStatus, string> = {
     queued: "待发送", sending: "发送中", sent: "已提交邮件服务器", failed: "发送失败", unknown: "结果不确定", cancelled: "已取消",
 };
 const campaignLabels: Record<EmailCampaign["status"], string> = { queued: "排队中", running: "发送中", completed: "处理完成", cancelled: "已取消" };
-type ComposeValues = Omit<CreateEmailCampaign, "requestId" | "userIds">;
+type ComposeValues = Omit<CreateEmailCampaign, "requestId" | "userIds" | "recipientFilter">;
 
 /** 格式化发送记录时间。 */
 function formatTime(value: string | null) { return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—"; }
@@ -51,6 +51,8 @@ export function EmailCampaignManagement() {
     const [keyword, setKeyword] = useState("");
     const [emailDomains, setEmailDomains] = useState<string[]>([]);
     const [selectedUsers, setSelectedUsers] = useState<EmailRecipientUser[]>([]);
+    const [allMatchingCount, setAllMatchingCount] = useState<number | null>(null);
+    const allMatchingSelected = allMatchingCount !== null;
     const [selectedCampaignId, setSelectedCampaignId] = useState<number | null>(null);
     const [deliveryPage, setDeliveryPage] = useState(1);
     const [deliveryStatus, setDeliveryStatus] = useState<EmailDeliveryStatus>();
@@ -76,6 +78,8 @@ export function EmailCampaignManagement() {
         queryKey: ["email-recipient-total"], queryFn: () => listEmailRecipientUsers(1, ""), enabled: composeOpen,
     });
     const emailDomainsQuery = useQuery({ queryKey: ["email-recipient-domains"], queryFn: listEmailDomains, enabled: composeOpen });
+    const recipientSearchReady = keywordInput.trim() === keyword && !recipientsQuery.isFetching && !recipientsQuery.isError && !!recipientsQuery.data;
+    const selectedRecipientCount = allMatchingCount === null ? selectedUsers.length : recipientsQuery.data?.total ?? allMatchingCount;
     const detailQuery = useQuery({
         queryKey: ["email-campaign-detail", selectedCampaignId], queryFn: () => getEmailCampaignDetail(selectedCampaignId!), enabled: selectedCampaignId !== null,
     });
@@ -116,6 +120,7 @@ export function EmailCampaignManagement() {
         form.resetFields();
         form.setFieldsValue({ subject: "", bodyHtml: "", recipientMode: "selected", intervalSeconds: settings!.minimumIntervalSeconds });
         setSelectedUsers([]);
+        setAllMatchingCount(null);
         setRecipientPage(1);
         setKeywordInput("");
         setKeyword("");
@@ -133,10 +138,12 @@ export function EmailCampaignManagement() {
             form.setFields([{ name: "bodyHtml", errors: ["请输入邮件正文"] }]);
             return;
         }
-        const userIds = values.recipientMode === "all" ? [] : selectedUsers.map(user => user.id).sort((left, right) => left - right);
-        if (values.recipientMode === "selected" && !userIds.length) { message.warning("请至少选择一名收件用户"); return; }
+        const recipientFilter = values.recipientMode === "selected" && allMatchingSelected ? { keyword, emailDomains: [...emailDomains] } : undefined;
+        const userIds = values.recipientMode === "all" || recipientFilter ? [] : selectedUsers.map(user => user.id).sort((left, right) => left - right);
+        if (recipientFilter && !recipientSearchReady) { message.warning("请等待筛选结果成功加载后再发送"); return; }
+        if (values.recipientMode === "selected" && !recipientFilter && !userIds.length) { message.warning("请至少选择一名收件用户"); return; }
         if (values.recipientMode === "all" && (!allRecipientsQuery.data || allRecipientsQuery.isError)) { message.error("请先成功加载收件人数"); return; }
-        const count = values.recipientMode === "all" ? allRecipientsQuery.data!.total : userIds.length;
+        const count = values.recipientMode === "all" ? allRecipientsQuery.data!.total : selectedRecipientCount;
         if (!count) { message.warning("当前没有可发送邮件的用户"); return; }
         const images = Array.from(document.querySelectorAll("img"));
         if (images.length > 10) { message.error("单封邮件最多插入10张图片"); return; }
@@ -159,13 +166,15 @@ export function EmailCampaignManagement() {
                 return;
             } finally { setUploading(false); }
         }
-        const payload = { ...values, bodyHtml: document.body.innerHTML, subject: values.subject.trim(), userIds };
+        const payload = { ...values, bodyHtml: document.body.innerHTML, subject: values.subject.trim(), userIds, ...(recipientFilter ? { recipientFilter } : {}) };
         const signature = JSON.stringify(payload);
         if (requestIdentity.current?.signature !== signature) requestIdentity.current = { signature, requestId: crypto.randomUUID() };
         const request = { ...payload, requestId: requestIdentity.current.requestId };
         modal.confirm({
-            title: `确认向${values.recipientMode === "all" ? "全部有邮箱的用户" : "所选用户"}发送邮件？`,
-            content: <div className="space-y-2"><p>主题：{payload.subject}</p><p>当前收件人数：{count} 人。全部用户以提交时的实际名单为准。</p><p>提交后进入发送队列，每人单独一封；已发出的邮件无法撤回。</p></div>,
+            title: `确认向${values.recipientMode === "all" ? "全部有邮箱的用户" : recipientFilter ? "全部筛选结果" : "所选用户"}发送邮件？`,
+            content: <div className="space-y-2"><p>主题：{payload.subject}</p>
+                {recipientFilter && <><p>邮箱后缀：{recipientFilter.emailDomains.length ? recipientFilter.emailDomains.map(domain => `@${domain}`).join("、") : "全部后缀"}</p><p>搜索关键字：{recipientFilter.keyword || "不限"}</p></>}
+                <p>当前收件人数：{count} 人。{recipientFilter ? "包含所有分页，按提交时符合上述条件的名单发送。" : "全部用户以提交时的实际名单为准。"}</p><p>提交后进入发送队列，每人单独一封；已发出的邮件无法撤回。</p></div>,
             okText: "确认发送", cancelText: "继续编辑", mask: { closable: false },
             onOk: async () => {
                 setSending(true);
@@ -229,24 +238,33 @@ export function EmailCampaignManagement() {
                         <Input placeholder="输入邮件主题" maxLength={200} showCount />
                     </Form.Item>
                     <Form.Item name="recipientMode" label="收件范围" rules={[{ required: true }]}>
-                        <Radio.Group options={[{ value: "selected", label: `指定用户（已选${selectedUsers.length}人）` }, { value: "all", label: `全部有邮箱用户（${allRecipientsQuery.data?.total ?? "加载中"}人）` }]} />
+                        <Radio.Group onChange={() => setAllMatchingCount(null)} options={[{ value: "selected", label: `指定用户（已选${selectedRecipientCount}人）` }, { value: "all", label: `全部有邮箱用户（${allRecipientsQuery.data?.total ?? "加载中"}人）` }]} />
                     </Form.Item>
                     {recipientMode === "selected" && <div className="mb-5 space-y-3">
                         <div className="grid gap-3 sm:grid-cols-2">
-                            <div><label htmlFor="email-recipient-search" className="mb-1 block text-sm">搜索用户</label><Input.Search id="email-recipient-search" placeholder="搜索昵称、用户名或邮箱" value={keywordInput} onChange={event => setKeywordInput(event.target.value)} allowClear /></div>
+                            <div><label htmlFor="email-recipient-search" className="mb-1 block text-sm">搜索用户</label><Input.Search id="email-recipient-search" placeholder="搜索昵称、用户名或邮箱" value={keywordInput} onChange={event => { setKeywordInput(event.target.value); setAllMatchingCount(null); }} allowClear /></div>
                             <div><label htmlFor="email-recipient-domain-filter" className="mb-1 block text-sm">邮箱后缀</label>
                                 <Select id="email-recipient-domain-filter" className="w-full" mode="multiple" allowClear placeholder="全部邮箱后缀" showSearch={{ optionFilterProp: "label" }}
                                     value={emailDomains} loading={emailDomainsQuery.isFetching} disabled={sending || uploading || emailDomainsQuery.isPending || emailDomainsQuery.isError} maxCount={50}
                                     options={emailDomainsQuery.data?.map(item => ({ value: item.domain, label: `@${item.domain}（${item.userCount}人）` }))}
-                                    onChange={domains => { setEmailDomains(domains); setRecipientPage(1); }} />
+                                    onChange={domains => { setEmailDomains(domains); setRecipientPage(1); setAllMatchingCount(null); }} />
                             </div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-3"><span className="text-sm text-[var(--studio-muted)]">已选择 {selectedUsers.length} 人</span><Button type="link" disabled={!selectedUsers.length || sending || uploading} onClick={() => setSelectedUsers([])}>清空选择</Button><span className="text-xs text-[var(--studio-muted)]">邮箱后缀仅筛选搜索结果，切换筛选保留已选用户。</span></div>
+                        <div className="flex flex-wrap items-center gap-3">
+                            <Checkbox checked={allMatchingSelected} disabled={sending || uploading || !recipientSearchReady || !recipientsQuery.data?.total}
+                                onChange={event => { setAllMatchingCount(event.target.checked ? recipientsQuery.data!.total : null); setSelectedUsers([]); }}>
+                                选择全部筛选结果（{recipientSearchReady ? recipientsQuery.data!.total : "加载中"}人，含所有分页）
+                            </Checkbox>
+                            <span role="status" className="text-sm text-[var(--studio-muted)]">已选择 {selectedRecipientCount} 人</span>
+                            <Button type="link" disabled={(!selectedUsers.length && !allMatchingSelected) || sending || uploading} onClick={() => { setSelectedUsers([]); setAllMatchingCount(null); }}>清空选择</Button>
+                        </div>
+                        <p className="text-xs text-[var(--studio-muted)]">{allMatchingSelected ? "将向当前筛选结果中的全部用户发送；修改搜索词或邮箱后缀会取消全选。" : "可跨页手动勾选，或全选当前筛选结果；手动勾选的用户在切换筛选后保留。"}</p>
                         {emailDomainsQuery.isError && <Alert type="error" title="邮箱后缀加载失败" action={<Button onClick={() => void emailDomainsQuery.refetch()}>重试</Button>} />}
                         {recipientsQuery.isError && <Alert type="error" title="收件用户加载失败" action={<Button onClick={() => void recipientsQuery.refetch()}>重试</Button>} />}
                         <Table<EmailRecipientUser> size="small" rowKey="id" dataSource={recipientsQuery.data?.users || []} loading={recipientsQuery.isFetching} scroll={{ y: 220 }}
                             tableLayout="fixed" columns={[{ title: "用户", dataIndex: "nickname", render: (nickname, user) => <span className="break-all">{nickname || `用户 ${user.id}`}</span> }, { title: "邮箱", dataIndex: "email", render: email => <span className="break-all">{email}</span> }]}
-                            rowSelection={{ preserveSelectedRowKeys: true, selectedRowKeys: selectedUsers.map(user => user.id), onChange: (_, users) => setSelectedUsers(users), getCheckboxProps: () => ({ disabled: sending || uploading }) }}
+                            rowSelection={{ preserveSelectedRowKeys: true, selectedRowKeys: (allMatchingSelected ? recipientsQuery.data?.users ?? [] : selectedUsers).map(user => user.id),
+                                onChange: (_, users) => setSelectedUsers(users), getCheckboxProps: () => ({ disabled: sending || uploading || allMatchingSelected }) }}
                             pagination={{ current: recipientPage, pageSize: 20, total: recipientsQuery.data?.total || 0, showSizeChanger: false, onChange: setRecipientPage }} />
                     </div>}
                     {recipientMode === "all" && allRecipientsQuery.isError && <Alert type="error" title="收件人数加载失败" action={<Button onClick={() => void allRecipientsQuery.refetch()}>重试</Button>} />}

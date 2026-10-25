@@ -1,4 +1,6 @@
 "use client";
+import { useInsufficientCreditsPrompt } from "@/features/credits/use-insufficient-credits-prompt";
+import { showInsufficientCredits } from "@/features/credits/insufficient-credits";
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { translateMessage as translate } from "@/features/locale/translate";
@@ -20,6 +22,7 @@ import { CreationWorkspace } from "@/features/generation/components/creation-wor
 import { RecentReferenceImagePicker } from "@/features/generation/components/recent-reference-image-picker";
 import { ImageSettingsPanel, imageQualityLabel, imageResolutionLabel, imageSizeLabel } from "@/features/generation/components/image-settings-panel";
 import { MEDIA_FALLBACK_IMAGE, MediaPreview, useMediaFallback } from "@/features/generation/components/media-fallback";
+import { useModelCreditBalance } from "@/features/team/credit-balance";
 import { requestCreditCost } from "@/features/generation/constants/credits";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
@@ -430,6 +433,8 @@ export default function ImagePage() {
     });
 
     const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "image", count: 1, resolution: config.imageResolution });
+    const creditBalance = useModelCreditBalance("image");
+    const balanceInsufficient = useInsufficientCreditsPrompt({ enabled: effectiveConfig.modelCosts.some((item) => item.model === model && item.taskType === "image"), requiredCredits: creditCost, availableCredits: creditBalance });
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
     const latestRound = activeConversation?.rounds.at(-1);
     const historyModel = !imageDraftSettingsModified && activeId && latestRound?.config ? latestRound.config.imageModel || latestRound.config.model || "" : "";
@@ -437,7 +442,7 @@ export default function ImagePage() {
     const historySettingsSummary = !imageDraftSettingsModified && activeId && latestRound?.config ? buildImageSettingsSummary(latestRound.config, effectiveConfig, historyModel) : "";
     const settingsSummary = draftSettingsSummary || historySettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingImageConversation(activeConversation) : false;
-    const canGenerate = Boolean(prompt.trim()) && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
+    const canGenerate = Boolean(prompt.trim()) && !balanceInsufficient && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
 
     useEffect(() => {
@@ -531,6 +536,7 @@ export default function ImagePage() {
             return;
         }
         if (!ensureModelConfiguration("image", model) || !ensureModelConfiguration("text")) return;
+        if (balanceInsufficient) { showInsufficientCredits(); return; }
 
         resetThinkings();
 

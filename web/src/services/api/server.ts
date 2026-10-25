@@ -5,6 +5,7 @@ import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import type { ImageSizeMappings } from "@/features/generation/lib/image-size-mappings";
 import { useTeamStore } from "@/features/team/stores/use-team-store";
+import { notifyInsufficientCredits, useInsufficientCreditsStore } from "@/features/credits/insufficient-credits";
 import { notifyStorageCapacityChanged } from "@/features/storage/capacity-events";
 import { translateMessage as translate } from "@/features/locale/translate";
 
@@ -104,6 +105,7 @@ export type ServerAiTask = {
 };
 
 export type AiTaskErrorDetails = {
+    messageKey?: string;
     source: string;
     category: string;
     stage: string;
@@ -1250,6 +1252,7 @@ export function setDefaultObjectStorage(storageId: string) {
 }
 
 export async function waitAiTask(taskId: string, options: { signal?: AbortSignal; onProgress?: (task: ServerAiTask) => void } = {}) {
+    const creditPromptScope = useInsufficientCreditsStore.getState().scope;
     if (options.signal?.aborted) {
         void cancelAiTask(taskId).catch(() => {});
         throw new DOMException("Aborted", "AbortError");
@@ -1259,7 +1262,7 @@ export async function waitAiTask(taskId: string, options: { signal?: AbortSignal
         void cancelAiTask(taskId).catch(() => {});
         throw new DOMException("Aborted", "AbortError");
     }
-    if (isFinalAiTaskStatus(initial.status)) return completedAiTask(initial);
+    if (isFinalAiTaskStatus(initial.status)) return completedAiTask(initial, creditPromptScope);
     const pollingIntervalMilliseconds = await getAiTaskPollingIntervalMilliseconds();
     return new Promise<ServerAiTask>((resolve, reject) => {
         let settled = false;
@@ -1278,7 +1281,7 @@ export async function waitAiTask(taskId: string, options: { signal?: AbortSignal
             }
             finish(() => {
                 try {
-                    resolve(completedAiTask(task));
+                    resolve(completedAiTask(task, creditPromptScope));
                 } catch (error) {
                     reject(error);
                 }
@@ -1312,6 +1315,7 @@ export function readAiTaskError(error: unknown): AiTaskErrorDetails {
         return { source: "canvas", category: "canceled", stage: "frontend_tool", message: translate("common.generationStopped"), requestAccepted: true, safeToRetry: false };
     }
     return {
+        messageKey: error instanceof ServerApiError ? error.messageKey ?? undefined : undefined,
         source: "canvas",
         category: "unknown",
         stage: "frontend_tool",
@@ -1321,12 +1325,14 @@ export function readAiTaskError(error: unknown): AiTaskErrorDetails {
     };
 }
 
-function completedAiTask(task: ServerAiTask): ServerAiTask {
+function completedAiTask(task: ServerAiTask, creditPromptScope: string): ServerAiTask {
     if (task.status === "success") return task;
+    notifyInsufficientCredits(task.systemMessage?.key, task.errorMessage, `task:${task.id}`, creditPromptScope);
     const rawResult = task.resultData && typeof task.resultData === "object" ? (task.resultData as Record<string, unknown>) : undefined;
     const rawError = rawResult?.error && typeof rawResult.error === "object" ? (rawResult.error as Record<string, unknown>) : undefined;
     const message = task.errorMessage || readOptionalText(rawError?.message) || (task.status === "canceled" ? translate("common.taskCanceled") : translate("common.generationFailed"));
     throw new AiTaskFailureError(message, {
+        messageKey: task.systemMessage?.key,
         source: readOptionalText(rawError?.source) || "task",
         category: readOptionalText(rawError?.category) || (task.status === "canceled" ? "canceled" : "unknown"),
         stage: readOptionalText(rawError?.stage) || "execution",
@@ -1365,10 +1371,14 @@ export function serverUpload<T = string>(path: string, formData: FormData) {
 }
 
 async function serverFetch<T>(path: string, init: RequestInit, options: { auth?: boolean; allowEmpty?: boolean } = {}) {
+    const creditPromptScope = useInsufficientCreditsStore.getState().scope;
     const response = await requestServer(path, init, options);
     const payload = (await response.json().catch(() => null)) as ApiResponse<T> | null;
     // 允许空响应体的查询接口（例如“项目最近一次任务”没有任务时）返回 undefined，而不是抛错。
     if (!payload && options.allowEmpty && response.ok) return undefined as T;
+    if (!response.ok || (payload && payload.code !== 0)) {
+        notifyInsufficientCredits(response.headers.get("X-System-Message-Key"), payload?.msg, undefined, creditPromptScope);
+    }
     if (!response.ok || !payload) {
         throw new ServerApiError(payload?.msg || translate("common.serverRequestFailed", { value0: response.status }), response.status, payload?.code ?? -1, response.headers.get("X-System-Message-Key"));
     }
@@ -1452,11 +1462,13 @@ function ensureAiTaskEventSource() {
     const token = getAuthToken();
     if (!token) return;
     const source = new EventSource(`${serverBaseUrl()}/ai/task/subscribe?token=${encodeURIComponent(token)}&locale=${currentWebsiteLocale()}&teamId=${useTeamStore.getState().team?.id || 0}`);
+    const creditPromptScope = useInsufficientCreditsStore.getState().scope;
     aiTaskEventSource = source;
     source.addEventListener("wallet-change", () => { void import("./team").then((module) => module.getWalletBalances()).then((wallets) => useTeamStore.getState().setWallets(wallets)).catch((error) => console.error("刷新积分钱包失败", error)); });
     source.addEventListener("task", (event) => {
         const payload = parseAiTaskEventData((event as MessageEvent).data);
         if (!payload.task) return;
+        if (payload.task.status === "failed") notifyInsufficientCredits(payload.task.systemMessage?.key, payload.task.errorMessage, `task:${payload.task.id}`, creditPromptScope);
         aiTaskListeners.forEach((listener) => listener(payload.task as ServerAiTask));
     });
     source.addEventListener("text-delta", (event) => {

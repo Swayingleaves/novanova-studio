@@ -4,6 +4,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.CreditAmounts;
 import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.common.SystemMessage;
 import com.novanovastudio.dto.PersistenceDtos;
 import com.novanovastudio.dto.StorageCapacityDtos;
 import com.novanovastudio.dto.StorageFileDtos;
@@ -197,7 +198,7 @@ public class StorageCapacityService {
                                 String id = UUID.randomUUID().toString();
                                 long bytes = item.getLongValue("capacityGigabytes") * GIGABYTE_BYTES;
                                 return creditGrantService.consumeCredits(userId, item.getBigDecimal("credits"))
-                                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "对应钱包积分不足，请补足余额后重试")))
+                                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.insufficientCreditsForStorageCapacity"))))
                                         .flatMap(balance -> repository.recordPurchase(id, userId, request, item, bytes)
                                                 .then(repository.recordTransaction(id, userId, item, balance)))
                                         .then(purchaseResult(userId, id, owner))

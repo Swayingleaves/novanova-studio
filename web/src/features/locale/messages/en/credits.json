@@ -76,5 +76,9 @@
     "onlyThisAccountSCodeRedemptionsAreShown": "Only this account''s code redemptions are shown",
     "fullCodeOrLast4Characters": "Full code or last 4 characters",
     "failedToLoadRedemptions": "Failed to load redemptions",
-    "noRedemptionsInThisPeriod": "No redemptions in this period"
+    "noRedemptionsInThisPeriod": "No redemptions in this period",
+    "insufficientTitle": "Insufficient credits",
+    "insufficientForOperation": "This operation requires {required} credits; {available} credits are available.",
+    "insufficientPurchaseSuggestion": "You have insufficient credits. Purchase credits and try again.",
+    "purchaseLater": "Not now"
 }

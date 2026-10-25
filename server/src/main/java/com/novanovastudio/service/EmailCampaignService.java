@@ -93,8 +93,7 @@ public class EmailCampaignService {
     public Mono<EmailCampaignDtos.UserPage> listUsers(int page, int pageSize, String keyword, List<String> emailDomains) {
         return requirePlatformAdministrator().then(Mono.defer(() -> {
             validatePage(page, pageSize);
-            String search = keyword == null ? "" : keyword.trim();
-            if (search.length() > 200) throw invalid("搜索内容不能超过200个字符");
+            String search = normalizeSearchKeyword(keyword);
             List<String> domains = normalizeEmailDomains(emailDomains);
             return Mono.zip(repository.listUsers(search, (page - 1) * pageSize, pageSize, domains).collectList(), repository.countUsers(search, domains))
                     .map(result -> new EmailCampaignDtos.UserPage(result.getT1(), result.getT2()));
@@ -119,13 +118,14 @@ public class EmailCampaignService {
         return requirePlatformAdministrator().flatMap(user -> repository.findByRequestId(request.requestId(), user.id())
                 .switchIfEmpty(Mono.defer(() -> {
                     validateRequest(request);
+                    EmailCampaignDtos.RecipientFilter recipientFilter = normalizeRecipientFilter(request.recipientFilter());
                     PreparedContent prepared = prepareContent(request.bodyHtml());
                     // 对象存储网络访问在数据库事务外完成，避免持锁下载图片。
                     return snapshotImages(prepared).flatMap(images -> repository.lockControl(false)
                             .then(repository.findByRequestId(request.requestId(), user.id())
                                     .switchIfEmpty(Mono.defer(() -> repository.countActive().flatMap(active -> {
                                         if (active >= campaignProperties.getMaximumActiveCampaigns()) return Mono.error(invalid("群发队列已满，请等待已有任务完成"));
-                                        return saveCampaign(request, prepared.bodyHtml(), images, user.id());
+                                        return saveCampaign(request, recipientFilter, prepared.bodyHtml(), images, user.id());
                                     }))))
                             .as(transactionalOperator::transactional));
                 })))
@@ -232,8 +232,38 @@ public class EmailCampaignService {
         if (!configured()) throw invalid("请先配置邮件服务器与发件人地址");
         if (request.intervalSeconds() < campaignProperties.getMinimumIntervalSeconds()) throw invalid("发送间隔不能小于全局最小间隔");
         boolean allUsers = "all".equals(request.recipientMode());
-        if (allUsers ? !request.userIds().isEmpty() : request.userIds().isEmpty()) throw invalid("请明确选择全部用户或至少一名指定用户");
+        if (!allUsers && !"selected".equals(request.recipientMode())) throw invalid("收件范围不合法");
+        if (request.recipientFilter() != null) {
+            // 筛选结果全选必须独立表达，避免与手动名单或全部用户模式混用而扩大收件范围。
+            if (allUsers || !request.userIds().isEmpty()) throw invalid("全选筛选结果不能同时选择全部用户或指定用户名单");
+        } else if (allUsers ? !request.userIds().isEmpty() : request.userIds().isEmpty()) {
+            throw invalid("请选择全部用户、指定用户或全部筛选结果");
+        }
         if (request.userIds().size() != request.userIds().stream().distinct().count()) throw invalid("收件用户不能重复");
+    }
+
+    /**
+     * 标准化搜索词，搜索列表和全选结果快照使用相同规则。
+     * @param keyword 可选搜索词
+     * @return 去除两侧空白的搜索词，未传时为空字符串
+     * @throws BusinessException 搜索词超过限制时抛出
+     */
+    private String normalizeSearchKeyword(String keyword) {
+        String search = keyword == null ? "" : keyword.trim();
+        if (search.length() > 200) throw invalid("搜索内容不能超过200个字符");
+        return search;
+    }
+
+    /**
+     * 校验并标准化全选搜索结果的筛选条件。
+     * @param recipientFilter 全选条件，未全选时为空
+     * @return 标准化的搜索条件，未全选时为空
+     * @throws BusinessException 筛选条件缺失或格式不合法时抛出
+     */
+    private EmailCampaignDtos.RecipientFilter normalizeRecipientFilter(EmailCampaignDtos.RecipientFilter recipientFilter) {
+        if (recipientFilter == null) return null;
+        if (recipientFilter.keyword() == null || recipientFilter.emailDomains() == null) throw invalid("请完整提供收件人搜索条件");
+        return new EmailCampaignDtos.RecipientFilter(normalizeSearchKeyword(recipientFilter.keyword()), normalizeEmailDomains(recipientFilter.emailDomains()));
     }
 
     /**
@@ -321,16 +351,18 @@ public class EmailCampaignService {
     /**
      * 在同一个事务中保存任务、收件人及图片。
      * @param request 创建请求
+     * @param recipientFilter 标准化的全选搜索条件，手动指定或全部用户时为空
      * @param bodyHtml 清理后的正文
      * @param images 图片快照
      * @param userId 创建管理员
      * @return 任务主键
      */
-    private Mono<Long> saveCampaign(EmailCampaignDtos.CreateRequest request, String bodyHtml, List<EmailCampaignRecords.Image> images, long userId) {
+    private Mono<Long> saveCampaign(EmailCampaignDtos.CreateRequest request, EmailCampaignDtos.RecipientFilter recipientFilter,
+            String bodyHtml, List<EmailCampaignRecords.Image> images, long userId) {
         return repository.insertCampaign(request, bodyHtml, properties.getEmail().getFrom(), userId).flatMap(id ->
-                repository.snapshotRecipients(id, "all".equals(request.recipientMode()), request.userIds()).flatMap(count -> {
+                repository.snapshotRecipients(id, "all".equals(request.recipientMode()), request.userIds(), recipientFilter).flatMap(count -> {
                     if (count == 0) return Mono.error(invalid("当前没有可发送邮件的用户"));
-                    if ("selected".equals(request.recipientMode()) && count != request.userIds().size()) return Mono.error(invalid("部分所选用户已不存在或没有邮箱，请刷新后重新选择"));
+                    if ("selected".equals(request.recipientMode()) && recipientFilter == null && count != request.userIds().size()) return Mono.error(invalid("部分所选用户已不存在或没有邮箱，请刷新后重新选择"));
                     return repository.updateRecipientCount(id, Math.toIntExact(count))
                             .thenMany(Flux.fromIterable(images).concatMap(image -> repository.insertImage(id, image))).then(Mono.just(id));
                 })).switchIfEmpty(repository.findByRequestId(request.requestId(), userId));
