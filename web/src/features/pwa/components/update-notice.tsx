@@ -39,7 +39,7 @@ export function PwaUpdateNotice() {
             okButtonProps={{ loading: updating }}
             cancelButtonProps={{ disabled: updating }}
             closable={!updating}
-            maskClosable={false}
+            mask={{ closable: false }}
             onOk={() => pwaApplyUpdate()}
             onCancel={() => setUpdateReady(false)}
             data-testid="pwa-update-notice"

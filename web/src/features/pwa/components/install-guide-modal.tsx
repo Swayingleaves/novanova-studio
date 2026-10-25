@@ -30,7 +30,7 @@ export function InstallGuideModal() {
         "safari-dock": [
             translate("pwa.guideSafariStep1"),
             translate("pwa.guideSafariStep2"),
-            translate("pwa.guideSafariStep3"),
+            translate("pwa.guideSafariStep3", { value0: platformBrand.name }),
         ],
     };
     const stepList = guideKind ? steps[guideKind] : [];
