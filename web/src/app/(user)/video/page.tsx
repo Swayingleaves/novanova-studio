@@ -24,7 +24,7 @@ import { modelCreditRequirement, useModelCreditBalance } from "@/features/team/c
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import type { AgentAttachment } from "@/features/canvas/api/agent";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
-import { RecentReferenceImagePicker } from "@/features/generation/components/recent-reference-image-picker";
+import { RecentReferenceAssetPicker } from "@/features/generation/components/recent-reference-asset-picker";
 import { ImageSettingsPanel } from "@/features/generation/components/image-settings-panel";
 import { MEDIA_FALLBACK_IMAGE, MediaPreview, useMediaFallback } from "@/features/generation/components/media-fallback";
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/features/generation/components/video-settings-panel";
@@ -69,7 +69,8 @@ import { getGenerationConversationStatus, hasRunningGeneration, type GenerationL
 import { selectGenerationAttachments } from "@/features/generation/lib/generation-retry";
 import { imageReferenceAttachments, referenceMediaType, referenceMediaUrl, videoReferenceAttachments } from "@/features/generation/lib/reference-attachments";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
-import { useRecentReferenceImages } from "@/features/generation/hooks/use-recent-reference-images";
+import { useRecentReferenceAssets } from "@/features/generation/hooks/use-recent-reference-assets";
+import type { RecentReferenceAsset } from "@/features/generation/lib/recent-reference-assets";
 import { reconcileImageMentions, type PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
@@ -224,7 +225,7 @@ export default function VideoPage() {
     const theme = canvasThemes[resolvedTheme];
     const { optimizingOperationId, optimizePrompt } = usePromptOptimization();
     const ensureModelConfiguration = useModelConfigurationGuard();
-    const { recentReferenceImageUrls, recordRecentReferenceImage } = useRecentReferenceImages(userId);
+    const { recentReferenceAssets, recordRecentReferenceAsset } = useRecentReferenceAssets(userId);
     const isPromptOptimizing = optimizingOperationId === "video-page";
 
     const [activeId, setActiveId] = useState<string | null>(null);
@@ -863,7 +864,7 @@ export default function VideoPage() {
                     const file = imageFiles[index];
                     try {
                         const image = await uploadImage(file);
-                        recordRecentReferenceImage(image.objectStorage?.url);
+                        recordRecentReferenceAsset({ kind: "image", url: image.objectStorage?.url || image.url, name: file.name });
                         const uploadedReference: ReferenceImage = {
                             ...placeholder,
                             type: image.mimeType,
@@ -885,6 +886,7 @@ export default function VideoPage() {
                     const file = videoFiles[index];
                     try {
                         const video = await uploadMediaFile(file, "video-reference");
+                        recordRecentReferenceAsset({ kind: "video", url: video.objectStorage?.url || video.url, name: file.name, durationMs: video.durationMs });
                         const uploadedReference: ReferenceVideo = {
                             ...placeholder,
                             type: video.mimeType,
@@ -1495,11 +1497,21 @@ export default function VideoPage() {
                 };
             }),
     ];
-    const addRecentReference = (url: string) => {
-        if (references.some((reference) => reference.dataUrl === url) || !canAddReferences(1, 0)) return;
+    // 「最近上传」按素材类型回填到对应的参考列表，视频回填时带上时长，保持 2-15 秒校验有效。
+    const addRecentReference = (asset: RecentReferenceAsset) => {
+        if (asset.kind === "video") {
+            if (videoReferences.some((reference) => reference.url === asset.url) || !canAddReferences(0, 1)) return;
+            setVideoReferences((current) => {
+                if (current.some((reference) => reference.url === asset.url)) return current;
+                return [...current, { id: nanoid(), name: asset.name || translate("generation.referenceVideo_6ae00d"), type: "video/*", url: asset.url, durationMs: asset.durationMs }];
+            });
+            autoSwitchModeForReferences(0, 1);
+            return;
+        }
+        if (references.some((reference) => reference.dataUrl === asset.url) || !canAddReferences(1, 0)) return;
         setReferences((current) => {
-            if (current.some((reference) => reference.dataUrl === url)) return current;
-            return [...current, { id: nanoid(), name: translate("video.recentReferenceImages"), type: "image/*", dataUrl: url }];
+            if (current.some((reference) => reference.dataUrl === asset.url)) return current;
+            return [...current, { id: nanoid(), name: asset.name || translate("video.recentReferenceImages"), type: "image/*", dataUrl: asset.url }];
         });
         autoSwitchModeForReferences(1, 0);
     };
@@ -1508,7 +1520,13 @@ export default function VideoPage() {
             key: "upload",
             label: translate("video.assets"),
             icon: <Upload className="size-3.5" />,
-            popoverContent: <RecentReferenceImagePicker urls={recentReferenceImageUrls} selectedUrls={references.map((reference) => reference.dataUrl)} onSelect={addRecentReference} />,
+            popoverContent: (
+                <RecentReferenceAssetPicker
+                    assets={recentReferenceAssets}
+                    selectedUrls={[...references.map((reference) => reference.dataUrl), ...videoReferences.map((reference) => reference.url)]}
+                    onSelect={addRecentReference}
+                />
+            ),
             onClick: () => fileInputRef.current?.click(),
         },
         {
@@ -1640,6 +1658,7 @@ export default function VideoPage() {
             const imageNodes = renderLiveWorkflowImages(data, call);
             if (imageNodes) return imageNodes;
             return renderResultVideos(data, {
+                uploadingObjectStorageId,
                 onDownload: downloadVideo,
                 onSaveAsset: saveResultToAssets,
                 onUploadObjectStorage: uploadResultToObjectStorage,
@@ -2001,6 +2020,7 @@ function FrameImagePreview({ url, role }: { url: string; role?: string }) {
 function renderResultVideos(
     data: Record<string, unknown>,
     callbacks: {
+        uploadingObjectStorageId: string;
         onDownload: (video: GeneratedVideo) => void;
         onSaveAsset: (video: GeneratedVideo) => void;
         onUploadObjectStorage: (video: GeneratedVideo) => Promise<void>;
@@ -2017,8 +2037,10 @@ function renderResultVideos(
             .map((item, i) => {
                 const url = typeof item.url === "string" ? item.url : "";
                 if (!url) return null;
+                // 标识必须跨渲染稳定，否则上传中的 loading 永远匹配不上；缺失时按 storageKey、url 兜底。
+                const id = (typeof item.id === "string" ? item.id : "") || readVideoStorageKey(item) || url;
                 const video: GeneratedVideo = {
-                    id: (typeof item.id === "string" ? item.id : "") || nanoid(),
+                    id,
                     url,
                     storageKey: readVideoStorageKey(item),
                     durationMs: typeof item.durationMs === "number" ? item.durationMs : 0,
@@ -2030,7 +2052,7 @@ function renderResultVideos(
                 return React.createElement(ResultCard, {
                     key: i,
                     video,
-                    uploadingObjectStorage: false,
+                    uploadingObjectStorage: callbacks.uploadingObjectStorageId === video.id,
                     onDownload: callbacks.onDownload,
                     onSaveAsset: callbacks.onSaveAsset,
                     onUploadObjectStorage: callbacks.onUploadObjectStorage,

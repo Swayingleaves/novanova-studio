@@ -19,7 +19,7 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/com
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
-import { RecentReferenceImagePicker } from "@/features/generation/components/recent-reference-image-picker";
+import { RecentReferenceAssetPicker } from "@/features/generation/components/recent-reference-asset-picker";
 import { ImageSettingsPanel, imageQualityLabel, imageResolutionLabel, imageSizeLabel } from "@/features/generation/components/image-settings-panel";
 import { MEDIA_FALLBACK_IMAGE, MediaPreview, useMediaFallback } from "@/features/generation/components/media-fallback";
 import { useModelCreditBalance } from "@/features/team/credit-balance";
@@ -38,7 +38,8 @@ import { getGenerationConversationStatus, hasRunningGeneration, type GenerationL
 import { selectGenerationAttachments } from "@/features/generation/lib/generation-retry";
 import { imageReferenceAttachments, referenceMediaType, referenceMediaUrl } from "@/features/generation/lib/reference-attachments";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
-import { useRecentReferenceImages } from "@/features/generation/hooks/use-recent-reference-images";
+import { useRecentReferenceAssets } from "@/features/generation/hooks/use-recent-reference-assets";
+import type { RecentReferenceAsset } from "@/features/generation/lib/recent-reference-assets";
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
 import { formatImageGenerationSettingsSummary } from "@/features/generation/lib/generation-settings-summary";
 import { loadImageLastUsedSettings, saveImageLastUsedSettings, type ImageLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
@@ -125,7 +126,7 @@ export default function ImagePage() {
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
     const theme = canvasThemes[resolvedTheme];
     const { optimizingOperationId, optimizePrompt } = usePromptOptimization();
-    const { recentReferenceImageUrls, recordRecentReferenceImage } = useRecentReferenceImages(userId);
+    const { recentReferenceAssets, recordRecentReferenceAsset } = useRecentReferenceAssets(userId);
     const isPromptOptimizing = optimizingOperationId === "image-page";
 
     const [activeId, setActiveId] = useState<string | null>(null);
@@ -503,7 +504,7 @@ export default function ImagePage() {
                 try {
                     const file = imageFiles[index];
                     const image = await uploadImage(file);
-                    recordRecentReferenceImage(image.objectStorage?.url);
+                    recordRecentReferenceAsset({ kind: "image", url: image.objectStorage?.url || image.url, name: file.name });
                     const uploadedReference: ReferenceImage = {
                         ...placeholder,
                         name: file.name,
@@ -892,10 +893,11 @@ export default function ImagePage() {
             onRemove: () => setReferences((current) => current.filter((item) => item.id !== reference.id)),
         };
     });
-    const addRecentReference = (url: string) => {
+    // 图片生成页只回填图片素材，视频素材留在视频页使用。
+    const addRecentReference = (asset: RecentReferenceAsset) => {
         setReferences((current) => {
-            if (current.some((reference) => reference.dataUrl === url)) return current;
-            return [...current, { id: nanoid(), name: translate("image.recentReferenceImages"), type: "image/*", dataUrl: url }];
+            if (current.some((reference) => reference.dataUrl === asset.url)) return current;
+            return [...current, { id: nanoid(), name: asset.name || translate("image.recentReferenceImages"), type: "image/*", dataUrl: asset.url }];
         });
     };
     const composerActions: CreationComposerAction[] = [
@@ -903,7 +905,13 @@ export default function ImagePage() {
             key: "upload",
             label: translate("image.referenceImage"),
             icon: <Upload className="size-3.5" />,
-            popoverContent: <RecentReferenceImagePicker urls={recentReferenceImageUrls} selectedUrls={references.map((reference) => reference.dataUrl)} onSelect={addRecentReference} />,
+            popoverContent: (
+                <RecentReferenceAssetPicker
+                    assets={recentReferenceAssets.filter((asset) => asset.kind === "image")}
+                    selectedUrls={references.map((reference) => reference.dataUrl)}
+                    onSelect={addRecentReference}
+                />
+            ),
             onClick: () => fileInputRef.current?.click(),
         },
         {
