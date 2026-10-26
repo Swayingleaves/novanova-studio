@@ -534,6 +534,8 @@
     "assetVersionCount": "Asset version {value0}",
     "assetVersionCountHasNoGeneratedImageYet": "Asset version {value0} has no generated image yet",
     "finalVideoPrompt": "Final video prompt:",
+    "finalVideoPromptSavedAsVersion": "Final video prompt saved as v{value0}",
+    "finalVideoPromptIsSavedAsANewAdoptedVersionOnChange": "Changes are saved as a new adopted version; video generation reads exactly this text.",
     "regenerate": "Regenerate",
     "generateWithAi": "Generate with AI",
     "viewFinalVideoPromptForShotCount": "View final video prompt for shot #{value0}",

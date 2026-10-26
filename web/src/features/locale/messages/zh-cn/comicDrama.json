@@ -534,6 +534,8 @@
     "assetVersionCount": "资产版本 {value0}",
     "assetVersionCountHasNoGeneratedImageYet": "资产版本 {value0} 尚未生成图片",
     "finalVideoPrompt": "最终视频提示词：",
+    "finalVideoPromptSavedAsVersion": "最终视频提示词已保存为 v{value0}",
+    "finalVideoPromptIsSavedAsANewAdoptedVersionOnChange": "改动会在保存时另存为新的采用版本，视频生成直接读取这里的内容。",
     "regenerate": "重新生成",
     "generateWithAi": "AI 生成",
     "viewFinalVideoPromptForShotCount": "查看镜头 #{value0} 的最终视频提示词详情",
