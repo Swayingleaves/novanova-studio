@@ -20,6 +20,7 @@ import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.ScriptDtos;
 import com.novanovastudio.repository.NovelAdaptationRepository;
 import com.novanovastudio.repository.ScriptRepository;
+import com.novanovastudio.repository.ScriptSourceRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import jakarta.validation.Validation;
 import java.time.OffsetDateTime;
@@ -52,6 +53,8 @@ class ScriptAdaptationDraftBatchTest {
     @Mock private ScriptRepository repository;
     /** 改编来源仓储。 */
     @Mock private NovelAdaptationRepository novelAdaptationRepository;
+    /** 原文导入仓储，项目详情需要它回传原文类型。 */
+    @Mock private ScriptSourceRepository scriptSourceRepository;
     /** 当前用户提供器。 */
     @Mock private CurrentUserProvider currentUserProvider;
     /** 下游影响服务。 */
@@ -75,7 +78,9 @@ class ScriptAdaptationDraftBatchTest {
     @BeforeEach
     void setUp() {
         service = new ScriptService(repository, currentUserProvider, TransactionalOperator.create(transactionManager),
-                Validation.buildDefaultValidatorFactory().getValidator(), comicDramaImpactService, novelAdaptationRepository);
+                Validation.buildDefaultValidatorFactory().getValidator(), comicDramaImpactService, novelAdaptationRepository,
+                scriptSourceRepository);
+        lenient().when(scriptSourceRepository.findSourceTypeByProject(anyLong(), anyString())).thenReturn(Mono.just(""));
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
         when(transactionManager.getReactiveTransaction(any())).thenReturn(Mono.just(transaction));
         lenient().when(transactionManager.commit(transaction)).thenReturn(Mono.empty());

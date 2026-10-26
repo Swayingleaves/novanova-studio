@@ -691,6 +691,8 @@
     "couldNotGetAQuote": "报价失败",
     "canceledRefundedCountCreditsCompletedContentIsRetained": "已取消，已退还 {value0} 积分，已完成内容保留",
     "thisProjectHasNoImportedSourceStoryBibleAnalysisRequires": "该项目还没有导入原文，故事知识库需要基于导入的小说或剧本分析",
+    "returnToTheScriptLibraryAndUseUploadScriptNovelStoryBible": "回到剧本项目库，用“上传剧本 / 小说”创建带原文的项目后，可以在这里生成故事知识库。",
+    "returnToTheScriptLibraryAndUseUploadScriptNovelAdaptation": "回到剧本项目库，用“上传剧本 / 小说”创建带原文的项目后，可以在这里把小说改编成分集剧本。",
     "reviewAndConfirmChaptersAndScenesInSourceBeforeStarting": "请先在“原文”中核对并确认当前章节与场次结构，确认后才能分析",
     "analysisScopeEntireBookSelectChaptersOrScenesToReanalyze": "分析范围：全书（可选择章节或场次局部重分析）",
     "getQuoteAndAnalyze": "报价并分析",

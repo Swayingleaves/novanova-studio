@@ -168,7 +168,7 @@ class ScriptAgentServiceTest {
     void shouldRejectBlankTemplateOutlineBeforeCharacterGeneration() {
         ScriptDtos.ProjectSnapshot base = snapshot("创意", "简介");
         ScriptDtos.ProjectDetail project = base.project();
-        ScriptDtos.ProjectDetail withBlankOutline = new ScriptDtos.ProjectDetail(project.id(), project.overview(),
+        ScriptDtos.ProjectDetail withBlankOutline = new ScriptDtos.ProjectDetail(project.id(), project.sourceType(), project.overview(),
                 List.of(new ScriptDtos.OutlineSection("outline-a", "act", "开端", "", 0)), project.storyEvents(),
                 project.characters(), project.characterRelations(), project.worldSetting(), project.worldItems(),
                 project.locations(), project.episodes(), project.stage(), project.completionRate(), project.productionStarted(),
@@ -293,7 +293,7 @@ class ScriptAgentServiceTest {
                         "mainEvents", "地点事件".repeat(1000)).toJavaObject(ScriptDtos.Location.class)).toList();
         ScriptDtos.EpisodeSummary episode = new ScriptDtos.EpisodeSummary("episode-a", 1, "第一集", "剧情摘要",
                 "", "", "", "", 60, "planning", 0);
-        ScriptDtos.ProjectDetail project = new ScriptDtos.ProjectDetail(base.id(), base.overview(), base.outlineSections(),
+        ScriptDtos.ProjectDetail project = new ScriptDtos.ProjectDetail(base.id(), base.sourceType(), base.overview(), base.outlineSections(),
                 base.storyEvents(), characters, List.of(), base.worldSetting(), base.worldItems(), locations,
                 List.of(episode), base.stage(), base.completionRate(), false, base.revision(), null, null);
         return new ScriptDtos.ProjectSnapshot(project, List.of(new ScriptDtos.EpisodeDetail(episode, List.of())));
@@ -319,7 +319,7 @@ class ScriptAgentServiceTest {
     private ScriptDtos.ProjectSnapshot snapshot(String logline, String synopsis) {
         ScriptDtos.ProjectOverview overview = new ScriptDtos.ProjectOverview("剧本", "comicDrama", "", logline, synopsis,
                 0, 1, "", "", "", "", "");
-        ScriptDtos.ProjectDetail project = new ScriptDtos.ProjectDetail("project-a", overview, List.of(), List.of(), List.of(),
+        ScriptDtos.ProjectDetail project = new ScriptDtos.ProjectDetail("project-a", "", overview, List.of(), List.of(), List.of(),
                 List.of(), new ScriptDtos.WorldSetting("", "", "", ""), List.of(), List.of(), List.of(),
                 "idea", 0, false, 0L, null, null);
         return new ScriptDtos.ProjectSnapshot(project, List.of());

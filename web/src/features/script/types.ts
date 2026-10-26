@@ -143,6 +143,8 @@ export type EpisodeDetail = { episode: EpisodeSummary; scenes: ScriptScene[] };
 
 export type ScriptProjectDetail = {
     id: string;
+    /** 原文类型；空串表示该项目不是由导入原文创建的。 */
+    sourceType: ScriptSourceType | "";
     overview: ScriptOverview;
     outlineSections: OutlineSection[];
     storyEvents: StoryEvent[];

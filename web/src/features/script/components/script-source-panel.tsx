@@ -26,6 +26,7 @@ import type {
     ScriptSourceSectionDetail,
     ScriptSourceTree,
 } from "@/features/script/types";
+import { SourceRequiredHint } from "./source-required-hint";
 
 /** 运行中按固定间隔查询导入进度。 */
 const POLL_INTERVAL_MILLISECONDS = 2500;
@@ -56,6 +57,8 @@ const getStageLabels = (translate = translateMessage): Record<string, string> =>
 export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null }) {
     const translate = useTranslation();
     const projectId = useScriptStore((state) => state.project?.id || "");
+    /* 项目详情已带回原文类型：空值说明这个项目不是从原文导入创建的，无需再请求原文接口。 */
+    const hasSource = useScriptStore((state) => Boolean(state.project?.sourceType));
     const { message, modal } = App.useApp();
     const [status, setStatus] = useState<ScriptSourceImportStatus | null>(null);
     const [tree, setTree] = useState<ScriptSourceTree | null>(null);
@@ -91,7 +94,7 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
 
     /* 运行中按固定间隔查询，完成或失败后停止查询。 */
     useEffect(() => {
-        if (!projectId) return;
+        if (!projectId || !hasSource) return;
         void loadStatus();
         const timer = window.setInterval(() => {
             if (stopPollingRef.current) return;
@@ -100,7 +103,7 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
             void loadStatus();
         }, POLL_INTERVAL_MILLISECONDS);
         return () => window.clearInterval(timer);
-    }, [loadStatus, projectId]);
+    }, [hasSource, loadStatus, projectId]);
 
     const loadTree = useCallback(async () => {
         if (!projectId) return;
@@ -256,15 +259,18 @@ export function ScriptSourcePanel({ focus }: { focus?: ScriptSourceFocus | null 
 
     if (!projectId) return null;
 
+    if (!hasSource) return <SourceRequiredHint hint={translate("script.returnToTheScriptLibraryAndUseUploadScriptNovel")} />;
+
     if (!status) {
         if (!loadError) {
             return <section className="flex min-h-0 flex-1 items-center justify-center p-6"><Spin /></section>;
         }
-        const missing = loadError.includes("没有可校对的导入原文");
+        /* 兜底：详情里的原文类型与实际记录不一致时仍按「没有原文」处理。 */
+        if (loadError.includes("没有可校对的导入原文")) return <SourceRequiredHint hint={translate("script.returnToTheScriptLibraryAndUseUploadScriptNovel")} />;
         return (
             <section className="flex min-h-0 flex-1 items-center justify-center p-6">
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={missing ? translate("script.thisProjectHasNoImportedSource") : loadError}>
-                    {missing ? <p className="max-w-sm text-xs text-[var(--studio-muted)]">{translate("script.returnToTheScriptLibraryAndUseUploadScriptNovel")}</p> : <Button onClick={() => void loadStatus()}>{translate("script.retry")}</Button>}
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loadError}>
+                    <Button onClick={() => void loadStatus()}>{translate("script.retry")}</Button>
                 </Empty>
             </section>
         );

@@ -23,6 +23,7 @@ import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.ScriptDtos;
 import com.novanovastudio.repository.ScriptRepository;
 import com.novanovastudio.repository.NovelAdaptationRepository;
+import com.novanovastudio.repository.ScriptSourceRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -58,6 +59,8 @@ class ScriptServiceTest {
     @Mock private ComicDramaImpactService comicDramaImpactService;
     /** 小说改编来源仓储。 */
     @Mock private NovelAdaptationRepository novelAdaptationRepository;
+    /** 原文导入仓储，项目详情需要它回传原文类型。 */
+    @Mock private ScriptSourceRepository scriptSourceRepository;
     /** 结构校验器。 */
     private Validator validator;
     /** 被测剧本服务。 */
@@ -71,8 +74,10 @@ class ScriptServiceTest {
         validator = Validation.buildDefaultValidatorFactory().getValidator();
         lenient().when(comicDramaImpactService.markUpstreamChanges(anyString(), anyString(), any(), anyString()))
                 .thenReturn(Mono.just(0L));
+        // 概览保存会读项目详情，详情里包含原文类型：这些用例不关心原文，统一当作未导入。
+        lenient().when(scriptSourceRepository.findSourceTypeByProject(anyLong(), anyString())).thenReturn(Mono.just(""));
         service = new ScriptService(repository, currentUserProvider, transactionalOperator, validator,
-                comicDramaImpactService, novelAdaptationRepository);
+                comicDramaImpactService, novelAdaptationRepository, scriptSourceRepository);
     }
 
     /**

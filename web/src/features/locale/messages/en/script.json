@@ -691,6 +691,8 @@
     "couldNotGetAQuote": "Could not get a quote",
     "canceledRefundedCountCreditsCompletedContentIsRetained": "Canceled. Refunded {value0} credits; completed content is retained.",
     "thisProjectHasNoImportedSourceStoryBibleAnalysisRequires": "This project has no imported source. Story bible analysis requires an imported novel or script.",
+    "returnToTheScriptLibraryAndUseUploadScriptNovelStoryBible": "Go back to the script library and create a project with an imported source using “Upload Script / Novel”; you can then build the story bible here.",
+    "returnToTheScriptLibraryAndUseUploadScriptNovelAdaptation": "Go back to the script library and create a project with an imported source using “Upload Script / Novel”; you can then adapt the novel into episode scripts here.",
     "reviewAndConfirmChaptersAndScenesInSourceBeforeStarting": "Review and confirm chapters and scenes in Source before starting analysis",
     "analysisScopeEntireBookSelectChaptersOrScenesToReanalyze": "Analysis scope: entire book (select chapters or scenes to reanalyze part of it)",
     "getQuoteAndAnalyze": "Get quote and analyze",

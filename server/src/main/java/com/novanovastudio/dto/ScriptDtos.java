@@ -163,8 +163,8 @@ public final class ScriptDtos {
                                 @NotNull @Size(max = 500) List<@Valid Scene> scenes) {
     }
 
-    /** 项目基础详情，不包含分集正文。 */
-    public record ProjectDetail(String id, ProjectOverview overview, List<OutlineSection> outlineSections,
+    /** 项目基础详情，不包含分集正文。sourceType 为空表示该项目不是由导入原文创建的。 */
+    public record ProjectDetail(String id, String sourceType, ProjectOverview overview, List<OutlineSection> outlineSections,
                                 List<StoryEvent> storyEvents, List<Character> characters,
                                 List<CharacterRelation> characterRelations, WorldSetting worldSetting,
                                 List<WorldItem> worldItems, List<Location> locations,

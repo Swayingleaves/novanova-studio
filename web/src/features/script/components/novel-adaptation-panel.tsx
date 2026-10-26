@@ -14,6 +14,7 @@ import { advanceWholeBookAdaptation, cancelWholeBookAdaptation, confirmWholeBook
 import { useScriptStore } from "../stores/use-script-store";
 import type { EpisodeBodiesJob, WholeBookAdaptationJob, WholeBookAdaptationOptions } from "../types";
 import { EpisodeBodiesPanel } from "./episode-bodies-panel";
+import { SourceRequiredHint } from "./source-required-hint";
 
 const getStages = (translate = translateMessage) => ([
     { value: "overview", label: translate("script.storyOverview") },
@@ -90,6 +91,8 @@ export function NovelAdaptationPanel() {
     const [loadError, setLoadError] = useState("");
     const [jobLoadKey, setJobLoadKey] = useState(0);
     const projectId = project?.id || "";
+    /* 项目详情已带回原文类型：空值说明这个项目不是从原文导入创建的，无需再请求改编任务接口。 */
+    const hasSource = Boolean(project?.sourceType);
     const creditCost = config.modelCosts.find((item) => item.taskType === "text" && item.model === model)?.credits;
     const [job, setJob] = useState<WholeBookAdaptationJob | null>(null);
     const [jobBusy, setJobBusy] = useState(false);
@@ -103,7 +106,7 @@ export function NovelAdaptationPanel() {
     useEffect(() => { if (project) setSettings((current) => ({ ...current, format: project.overview.contentType, episodeDurationSeconds: project.overview.targetDurationSeconds || 180 })); }, [project?.id]);
     // 页面刷新后恢复进行中或最近失败的任务，避免用户失去续跑入口；失败时可手动重试。
     useEffect(() => {
-        if (!projectId) return;
+        if (!projectId || !hasSource) return;
         let active = true;
         setJob(null);
         setLoadError("");
@@ -111,7 +114,7 @@ export function NovelAdaptationPanel() {
             .then((jobs) => { if (active) setJob(jobs[0] || null); })
             .catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : translate("script.couldNotLoadAdaptationTasks")); });
         return () => { active = false; };
-    }, [jobLoadKey, projectId]);
+    }, [hasSource, jobLoadKey, projectId]);
 
     const jobId = job?.jobId || "";
     const jobRunning = job != null && (job.status === "queued" || job.status === "running");
@@ -124,6 +127,8 @@ export function NovelAdaptationPanel() {
     }, [jobId, jobRunning, projectId]);
 
     if (!project) return null;
+
+    if (!hasSource) return <SourceRequiredHint hint={translate("script.returnToTheScriptLibraryAndUseUploadScriptNovelAdaptation")} />;
 
     /** 全书改编：先用全部已确认事实报价素材与策略阶段，确认后交给后台异步执行。 */
     const runWholeBook = async () => {

@@ -10,6 +10,7 @@ import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.ScriptDtos;
 import com.novanovastudio.repository.ScriptRepository;
 import com.novanovastudio.repository.NovelAdaptationRepository;
+import com.novanovastudio.repository.ScriptSourceRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
@@ -60,6 +61,9 @@ public class ScriptService {
 
     /** 小说改编正式产物的来源关联。 */
     private final NovelAdaptationRepository novelAdaptationRepository;
+
+    /** 原文导入记录，用于在项目详情中回传原文类型。 */
+    private final ScriptSourceRepository scriptSourceRepository;
 
     /** 概览与世界观基调这类单对象追溯目标使用的固定标识，与前端停点界面的勾选项一致。 */
     private static final String OVERVIEW_TARGET_ID = "overview";
@@ -1614,12 +1618,14 @@ public class ScriptService {
         Mono<List<ScriptDtos.WorldItem>> worldItems = repository.listWorldItems(projectId).collectList();
         Mono<List<ScriptDtos.Location>> locations = repository.listLocations(projectId).collectList();
         Mono<List<ScriptDtos.EpisodeSummary>> episodes = repository.listEpisodes(projectId).collectList();
-        return Mono.zip(project, Mono.zip(outlines, events, characters, relations), Mono.zip(world, worldItems, locations, episodes))
+        // 空串表示该项目不是由导入原文创建的，前端据此直接显示空状态而不再请求原文接口。
+        Mono<String> sourceType = scriptSourceRepository.findSourceTypeByProject(userId, projectId).defaultIfEmpty("");
+        return Mono.zip(project, Mono.zip(outlines, events, characters, relations), Mono.zip(world, worldItems, locations, episodes), sourceType)
                 .map(tuple -> {
                     ScriptRepository.ProjectRecord record = tuple.getT1();
                     var story = tuple.getT2();
                     var setting = tuple.getT3();
-                    return new ScriptDtos.ProjectDetail(record.id(), record.overview(), story.getT1(), story.getT2(),
+                    return new ScriptDtos.ProjectDetail(record.id(), tuple.getT4(), record.overview(), story.getT1(), story.getT2(),
                             story.getT3(), story.getT4(), setting.getT1(), setting.getT2(), setting.getT3(), setting.getT4(),
                             record.stage(), record.completionRate(), record.productionStartedAt() != null, record.revision(),
                             record.createdAt(), record.updatedAt());

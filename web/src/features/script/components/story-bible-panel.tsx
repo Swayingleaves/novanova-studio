@@ -30,6 +30,7 @@ import {
 import { useScriptStore } from "../stores/use-script-store";
 import type { ScriptSourceTree, StoryBibleItem, StoryBibleItemPage, StoryBibleItemStatus, StoryBibleItemType, StoryBibleJob } from "../types";
 import { getItemStatusLabels, getItemTypeLabels, StoryBibleItemDrawer } from "./story-bible-item-drawer";
+import { SourceRequiredHint } from "./source-required-hint";
 
 /** 分析进行中的状态查询间隔。 */
 const POLL_INTERVAL_MILLISECONDS = 2500;
@@ -53,7 +54,11 @@ const getStageLabels = (translate = translateMessage): Record<string, string> =>
 export function StoryBiblePanel({ onOpenSource }: { onOpenSource: (start: number, end: number) => void }) {
     const translate = useTranslation();
     const projectId = useScriptStore((state) => state.project?.id || "");
+    /* 项目详情已带回原文类型：空值说明这个项目不是从原文导入创建的，无需再请求原文接口。 */
+    const hasSource = useScriptStore((state) => Boolean(state.project?.sourceType));
     const { message, modal } = App.useApp();
+    const [tree, setTree] = useState<ScriptSourceTree | null>(null);
+    const [treeError, setTreeError] = useState("");
     const [tab, setTab] = useState<StoryBibleItemType | "timeline">("character");
     const [timelineOrder, setTimelineOrder] = useState<"narrative" | "story">("narrative");
     const [status, setStatus] = useState<StoryBibleItemStatus | "">("");
@@ -70,7 +75,7 @@ export function StoryBiblePanel({ onOpenSource }: { onOpenSource: (start: number
     const listRequestSequence = useRef(0);
 
     const load = useCallback(async () => {
-        if (!projectId) return;
+        if (!projectId || !hasSource) return;
         const requestSequence = ++listRequestSequence.current;
         setLoading(true);
         setData(null);
@@ -84,10 +89,23 @@ export function StoryBiblePanel({ onOpenSource }: { onOpenSource: (start: number
         } finally {
             if (requestSequence === listRequestSequence.current) setLoading(false);
         }
-    }, [keyword, page, pageSize, projectId, status, tab, timelineOrder]);
+    }, [hasSource, keyword, page, pageSize, projectId, status, tab, timelineOrder]);
 
     useEffect(() => { void load(); }, [load, refreshKey]);
     const refresh = useCallback(() => setRefreshKey((value) => value + 1), []);
+
+    /** 原文目录用来取分析范围；没有原文的项目不会走到这里。 */
+    const loadTree = useCallback(async () => {
+        if (!projectId || !hasSource) return;
+        try {
+            setTree(await getScriptSourceTree(projectId));
+            setTreeError("");
+        } catch (error) {
+            setTreeError(error instanceof Error ? error.message : translate("script.couldNotLoadTheSourceDirectory"));
+        }
+    }, [hasSource, projectId, translate]);
+    useEffect(() => { setTree(null); setTreeError(""); void loadTree(); }, [loadTree]);
+
     const maximumEvidenceCount = Math.max(0, ...(data?.items.map((item) => item.evidenceCount) || []));
     const pendingItems = !loading && !listError ? data?.items.filter((item) => item.status === "pending") || [] : [];
     const selectedPendingIds = selectedItemIds.filter((id) => pendingItems.some((item) => item.id === id));
@@ -149,9 +167,11 @@ export function StoryBiblePanel({ onOpenSource }: { onOpenSource: (start: number
 
     if (!projectId) return null;
 
+    if (!hasSource) return <SourceRequiredHint hint={translate("script.returnToTheScriptLibraryAndUseUploadScriptNovelStoryBible")} />;
+
     return (
         <section className="flex min-h-0 flex-col">
-            <AnalysisBar key={projectId} projectId={projectId} onCompleted={refresh} />
+            <AnalysisBar key={projectId} projectId={projectId} tree={tree} treeError={treeError} onCompleted={refresh} />
             <div className="flex flex-wrap items-center gap-2 border-b border-[var(--studio-line)] px-4 py-3 sm:px-6">
                 <Segmented value={tab} options={getTypeTabs(translate)} onChange={(value) => { setTab(value as typeof tab); setPage(1); }} />
                 {tab === "timeline" ? <Segmented value={timelineOrder} options={[{ value: "narrative", label: translate("script.narrativeOrder") }, { value: "story", label: translate("script.storyTime") }]} onChange={(value) => { setTimelineOrder(value as typeof timelineOrder); setPage(1); }} /> : null}
@@ -252,7 +272,7 @@ function ItemRow({ item, index, selected, onToggle, onOpen, onEvidence }: { item
 }
 
 /** 分析报价、启动、进度、续跑与取消。 */
-function AnalysisBar({ projectId, onCompleted }: { projectId: string; onCompleted: () => void }) {
+function AnalysisBar({ projectId, tree, treeError, onCompleted }: { projectId: string; tree: ScriptSourceTree | null; treeError: string; onCompleted: () => void }) {
     const translate = useTranslation();
     const { message, modal } = App.useApp();
     const config = useEffectiveConfig();
@@ -260,8 +280,6 @@ function AnalysisBar({ projectId, onCompleted }: { projectId: string; onComplete
     const setCreditBalance = useUserStore((state) => state.setCreditBalance);
     const [model, setModel] = useState("");
     const [sectionIds, setSectionIds] = useState<string[]>([]);
-    const [tree, setTree] = useState<ScriptSourceTree | null>(null);
-    const [treeError, setTreeError] = useState("");
     const [job, setJob] = useState<StoryBibleJob | null>(null);
     const [jobLoaded, setJobLoaded] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -280,15 +298,6 @@ function AnalysisBar({ projectId, onCompleted }: { projectId: string; onComplete
             return job?.model && options.includes(job.model) ? job.model : config.textModel;
         });
     }, [config, job?.model, jobLoaded]);
-
-    const loadTree = useCallback(async () => {
-        try {
-            setTree(await getScriptSourceTree(projectId));
-            setTreeError("");
-        } catch (error) {
-            setTreeError(error instanceof Error ? error.message : translate("script.couldNotLoadTheSourceDirectory"));
-        }
-    }, [projectId]);
 
     const loadJob = useCallback(async () => {
         if (jobMutationInProgressRef.current) return;
@@ -309,14 +318,13 @@ function AnalysisBar({ projectId, onCompleted }: { projectId: string; onComplete
     }, [onCompleted, projectId]);
 
     useEffect(() => {
-        void loadTree();
         void loadJob();
         const timer = window.setInterval(() => {
             const current = jobRef.current;
             if (current && (current.status === "queued" || current.status === "running")) void loadJob();
         }, POLL_INTERVAL_MILLISECONDS);
         return () => window.clearInterval(timer);
-    }, [loadJob, loadTree]);
+    }, [loadJob]);
 
     const applyJob = (next: StoryBibleJob) => {
         jobUpdateVersionRef.current += 1;
@@ -393,7 +401,8 @@ function AnalysisBar({ projectId, onCompleted }: { projectId: string; onComplete
 
     return (
         <div className="border-b border-[var(--studio-line)] px-4 py-3 sm:px-6">
-            {treeError ? <Alert type="info" showIcon className="mb-2" title={treeError.includes("没有") ? translate("script.thisProjectHasNoImportedSourceStoryBibleAnalysisRequires") : treeError} /> : null}
+            {/* 没有原文的项目已在面板层换成空状态，这里只兜其它读取失败。 */}
+            {treeError ? <Alert type="info" showIcon className="mb-2" title={treeError} /> : null}
             {tree && !confirmed ? <Alert type="warning" showIcon className="mb-2" title={translate("script.reviewAndConfirmChaptersAndScenesInSourceBeforeStarting")} /> : null}
             <div className="flex flex-wrap items-center gap-2">
                 <div className="w-60"><ModelPicker config={config} value={model} onChange={setModel} capability="text" fullWidth /></div>

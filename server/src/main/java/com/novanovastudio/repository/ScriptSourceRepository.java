@@ -48,6 +48,21 @@ public class ScriptSourceRepository {
     }
 
     /**
+     * 读取项目原文的类型，供项目详情直接告知前端该项目是否由原文导入创建。
+     * @param userId long 用户标识
+     * @param projectId String 项目标识
+     * @return Mono<String> 原文类型：novel 小说、script 剧本
+     */
+    public Mono<String> findSourceTypeByProject(long userId, String projectId) {
+        return databaseClient.sql("SELECT source_type FROM script_source_documents WHERE user_id=:userId AND project_id=:projectId")
+                .bind("userId", userId).bind("projectId", projectId)
+                .map((row, metadata) -> {
+                    String sourceType = row.get("source_type", String.class);
+                    return sourceType == null ? "" : sourceType;
+                }).one();
+    }
+
+    /**
      * 按任务标识读取原文。
      * @param taskId String 任务标识
      * @return Mono<Document> 原文记录
