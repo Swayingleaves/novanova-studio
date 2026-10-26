@@ -402,6 +402,110 @@ class CustomProviderAdapterTest {
     }
 
     /**
+     * 开启异步查询的图片能力应提交拿任务ID后轮询查询接口取图。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldPollQueryForAsyncImageTask() {
+        shortenPollingInterval();
+        String sourceUrl = "https://provider.example/out.png";
+        when(aiHttpClient.sendBearerJsonUrlRequest(any(), eq("POST"), eq("https://provider.example/v1/images/generations"), any()))
+                .thenReturn(Mono.just(JSON.parseObject("{\"data\":{\"task_id\":\"img-1\"}}")));
+        when(aiHttpClient.sendBearerJsonUrlRequest(any(), eq("GET"), eq("https://provider.example/v1/images/tasks/img-1"), any()))
+                .thenReturn(Mono.just(JSON.parseObject("{\"data\":{\"status\":\"processing\"}}")))
+                .thenReturn(Mono.just(JSON.parseObject("{\"data\":{\"status\":\"succeeded\",\"url\":\"" + sourceUrl + "\"}}")));
+        when(aiHttpClient.readRemoteMediaHeaders(sourceUrl))
+                .thenReturn(Mono.just(new AiHttpClient.RemoteMediaHeaders(12L, "image/png")));
+        when(persistenceService.registerRemoteMediaForUser(eq(1L), any()))
+                .thenReturn(Mono.just(mediaResponse(sourceUrl, "image/png")));
+
+        JSONObject result = adapter.execute(asyncImageContext(asyncImageGroup("/images/tasks/{{taskId}}", "data.url"))).block();
+
+        Assertions.assertEquals(sourceUrl, result.getJSONObject("item").getString("url"));
+        // 一次提交加两次查询：第一轮仍在处理，第二轮取到地址
+        verify(aiHttpClient, org.mockito.Mockito.times(3)).sendBearerJsonUrlRequest(any(), anyString(), anyString(), any());
+        verifyNoInteractions(modelFactory);
+    }
+
+    /**
+     * 查询接口返回data URL时同样按图片内容转存，不要求http地址。
+     *
+     * @return void 无返回值
+     * @throws IOException 测试图片编码失败时抛出
+     */
+    @Test
+    void shouldStoreDataUrlReturnedByAsyncImageQuery() throws IOException {
+        shortenPollingInterval();
+        byte[] expected = imageBytes("jpeg");
+        when(aiHttpClient.sendBearerJsonUrlRequest(any(), eq("POST"), eq("https://provider.example/v1/images/generations"), any()))
+                .thenReturn(Mono.just(JSON.parseObject("{\"data\":{\"task_id\":\"img-1\"}}")));
+        when(aiHttpClient.sendBearerJsonUrlRequest(any(), eq("GET"), eq("https://provider.example/v1/images/tasks/img-1"), any()))
+                .thenReturn(Mono.just(JSON.parseObject("{\"data\":{\"image\":\"data:image/jpeg;base64,"
+                        + Base64.getEncoder().encodeToString(expected) + "\"}}")));
+        when(persistenceService.storeGeneratedMediaForUser(eq(1L), eq(AiTaskTypes.IMAGE), eq("generated.jpg"), eq("image/jpeg"),
+                eq(expected), eq(null), eq(null), eq(null)))
+                .thenReturn(Mono.just(mediaResponse("https://storage.example/generated.jpg", "image/jpeg")));
+
+        JSONObject result = adapter.execute(asyncImageContext(asyncImageGroup("/images/tasks/{{taskId}}", "data.image"))).block();
+
+        Assertions.assertEquals("image/jpeg", result.getJSONObject("item").getString("mimeType"));
+        verify(persistenceService, never()).registerRemoteMediaForUser(any(), any());
+    }
+
+    /**
+     * 图片保持同步时，残留的查询字段不会触发轮询。
+     *
+     * @return void 无返回值
+     */
+    @Test
+    void shouldNotPollQueryForSyncImageWithQueryFields() {
+        shortenPollingInterval();
+        String sourceUrl = "https://provider.example/generated.png";
+        when(aiHttpClient.sendBearerJsonUrlRequest(any(), eq("POST"), eq("https://provider.example/v1/images/generations"), any()))
+                .thenReturn(Mono.just(JSON.parseObject("{\"data\":{\"url\":\"" + sourceUrl + "\"}}")));
+        when(aiHttpClient.readRemoteMediaHeaders(sourceUrl))
+                .thenReturn(Mono.just(new AiHttpClient.RemoteMediaHeaders(12L, "image/png")));
+        when(persistenceService.registerRemoteMediaForUser(eq(1L), any()))
+                .thenReturn(Mono.just(mediaResponse(sourceUrl, "image/png")));
+        PersistenceDtos.CustomModelGroupConfig group = new PersistenceDtos.CustomModelGroupConfig(
+                "/images/generations", "POST", "image-model", "{}", null, null, "data.url",
+                "/images/tasks/{{taskId}}", "GET", null, null, null, "data.url", null, null);
+
+        JSONObject result = adapter.execute(asyncImageContext(group)).block();
+
+        Assertions.assertEquals(sourceUrl, result.getJSONObject("item").getString("url"));
+        verify(aiHttpClient, org.mockito.Mockito.times(1)).sendBearerJsonUrlRequest(any(), anyString(), anyString(), any());
+        verifyNoInteractions(modelFactory);
+    }
+
+    /** 构造带异步开关的图片分组配置，提交响应按结果路径取出任务ID。 */
+    private PersistenceDtos.CustomModelGroupConfig asyncImageGroup(String queryPath, String queryResultPath) {
+        return new PersistenceDtos.CustomModelGroupConfig("/images/generations", "POST", "image-model", "{}", null, null,
+                "data.task_id", queryPath, "GET", null, null, null, queryResultPath, null, Boolean.TRUE);
+    }
+
+    /** 构造图片异步查询任务的执行上下文。 */
+    private AiTaskExecutionContext asyncImageContext(PersistenceDtos.CustomModelGroupConfig group) {
+        AiGenerationTask task = new AiGenerationTask();
+        task.setId("custom-async-image-task");
+        task.setUserId(1L);
+        task.setTaskType(AiTaskTypes.IMAGE);
+        return new AiTaskExecutionContext(task,
+                new AiTaskDtos.AiChannelConfig("custom-channel", "自定义渠道", "https://provider.example/v1", "key", "custom", List.of()),
+                "image-model", false, "", new JSONObject(),
+                new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.IMAGE, "生成小猫", "image-model", Map.of(), List.of(), List.of(), "imagePage"),
+                () -> Mono.just(false), progress -> Mono.empty(), delta -> Mono.empty(), true,
+                Map.of("text-to-image", group), false, null);
+    }
+
+    /** 把轮询间隔压到1秒，避免测试等待默认的3秒。 */
+    private void shortenPollingInterval() {
+        NovanovaProperties properties = (NovanovaProperties) ReflectionTestUtils.getField(adapter, "properties");
+        properties.getAi().getTask().setPollingIntervalSeconds(1);
+    }
+
+    /**
      * 构造用于自定义图片请求尺寸验证的执行上下文。
      *
      * @param conversion boolean 是否转换为像素

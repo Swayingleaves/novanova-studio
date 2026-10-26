@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { applyCustomConfigAutoFill, applyCustomConfigCopy, countCustomConfigFields, countCustomGroupFields, copyableCustomSourceModels, isCustomGroupBlank, planCustomConfigAutoFill, planCustomConfigCopy } from "./model-config-copy";
+import { applyCustomConfigAutoFill, applyCustomConfigCopy, countCustomConfigFields, countCustomGroupFields, copyableCustomSourceModels, customGroupFilledFields, isCustomGroupBlank, planCustomConfigAutoFill, planCustomConfigCopy } from "./model-config-copy";
 
 const emptyGroup = () => ({
     requestPath: "",
@@ -242,4 +242,28 @@ test("字段总数按模型类型统计，不会串到另一种类型", () => {
     const groups = { "text-to-video": group({ requestPath: "/v" }), "text-to-image": group({ requestPath: "/i", requestTemplate: "{}" }) };
     assert.equal(countCustomConfigFields(config({ modelType: "video", customModelConfig: groups })), 1);
     assert.equal(countCustomConfigFields(config({ modelType: "image", customModelConfig: groups })), 2);
+});
+
+test("异步开关不计入已填字段，仅开开关仍视为空白分组", () => {
+    const asyncOnly = group({ asyncQuery: true });
+    assert.equal(countCustomGroupFields(asyncOnly), 0);
+    assert.equal(isCustomGroupBlank(asyncOnly), true);
+    assert.deepEqual(customGroupFilledFields(asyncOnly), []);
+});
+
+test("复制图片异步配置时保留异步开关", () => {
+    const source = config({
+        modelName: "image-b",
+        modelType: "image",
+        capabilities: ["text-to-image"],
+        customModelConfig: {
+            "text-to-image": group({ requestPath: "/v1/images", requestTemplate: "{}", resultPath: "data.task_id", asyncQuery: true, queryPath: "/v1/tasks/{{taskId}}", queryResultPath: "data.url" }),
+        },
+    });
+    const target = config({ modelType: "image", modelName: "image-a" });
+
+    const { config: next, copiedModes } = applyCustomConfigCopy(target, source, ["text-to-image"]);
+    assert.deepEqual(copiedModes, ["text-to-image"]);
+    assert.equal(next.customModelConfig["text-to-image"].asyncQuery, true);
+    assert.equal(next.customModelConfig["text-to-image"].queryPath, "/v1/tasks/{{taskId}}");
 });

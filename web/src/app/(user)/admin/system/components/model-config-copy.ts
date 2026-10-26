@@ -18,8 +18,8 @@ export const COPYABLE_CUSTOM_MODES: Record<"image" | "video", readonly CustomMod
     video: COPYABLE_VIDEO_MODES,
 };
 
-/** 自定义调用配置里可复制的字段；请求方法单独处理，默认 POST 无法区分是否填写。 */
-export type CustomGroupField = Exclude<keyof CustomModelGroupConfig, "requestMethod" | "queryMethod">;
+/** 自定义调用配置里可复制的字段；请求方法与异步开关的默认值无法区分是否填写，单独处理。 */
+export type CustomGroupField = Exclude<keyof CustomModelGroupConfig, "requestMethod" | "queryMethod" | "asyncQuery">;
 
 export const CUSTOM_GROUP_FIELDS: readonly CustomGroupField[] = [
     "requestPath",

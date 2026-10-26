@@ -65,12 +65,15 @@ public final class PersistenceDtos {
      * @param queryResponseExample String 查询响应示例JSON，展示用
      * @param queryResultPath String 查询响应中媒体地址的点分路径
      * @param videoGenerationConstraints VideoGenerationConstraints 自定义视频模式的必填生成限制
+     * @param asyncQuery Boolean 图片能力是否执行异步查询：true时提交响应按结果路径取出任务ID后轮询查询接口，
+     *                   null或false为同步（残留的查询字段原样保留但不生效）；视频沿用查询字段非空即异步的判断，恒为null
      */
     public record CustomModelGroupConfig(String requestPath, String requestMethod, String requestModelName,
                                          String requestTemplate, String aiRequestPrompt, String responseExample,
                                          String resultPath, String queryPath, String queryMethod,
                                          String queryRequestTemplate, String aiQueryPrompt, String queryResponseExample,
-                                         String queryResultPath, VideoGenerationConstraints videoGenerationConstraints) {
+                                         String queryResultPath, VideoGenerationConstraints videoGenerationConstraints,
+                                         Boolean asyncQuery) {
         /**
          * 构造不包含视频限制的图片调用配置。
          * @param requestPath String 请求路径
@@ -92,7 +95,7 @@ public final class PersistenceDtos {
                 String queryPath, String queryMethod, String queryRequestTemplate, String aiQueryPrompt,
                 String queryResponseExample, String queryResultPath) {
             this(requestPath, requestMethod, requestModelName, requestTemplate, aiRequestPrompt, responseExample,
-                    resultPath, queryPath, queryMethod, queryRequestTemplate, aiQueryPrompt, queryResponseExample, queryResultPath, null);
+                    resultPath, queryPath, queryMethod, queryRequestTemplate, aiQueryPrompt, queryResponseExample, queryResultPath, null, null);
         }
     }
 

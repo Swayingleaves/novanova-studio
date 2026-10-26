@@ -608,7 +608,8 @@ public class PersistenceService {
                     group.getString("aiQueryPrompt"),
                     group.getString("queryResponseExample"),
                     group.getString("queryResultPath"),
-                    group.getObject("videoGenerationConstraints", com.novanovastudio.dto.VideoGenerationConstraints.class)));
+                    group.getObject("videoGenerationConstraints", com.novanovastudio.dto.VideoGenerationConstraints.class),
+                    group.getBoolean("asyncQuery")));
         }
         return Map.copyOf(result);
     }
@@ -640,7 +641,8 @@ public class PersistenceService {
             }
             return Map.of();
         }
-        Set<String> allowedKeys = "video".equals(modelType)
+        boolean videoModel = "video".equals(modelType);
+        Set<String> allowedKeys = videoModel
                 ? Set.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO, VideoGenerationMode.REFERENCE_TO_VIDEO,
                 VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO)
                 : Set.of("text-to-image", "image-to-image");
@@ -668,9 +670,13 @@ public class PersistenceService {
             if (!StringUtils.hasText(group.resultPath())) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.resultPathForIsRequired", key));
             }
-            boolean queryEnabled = StringUtils.hasText(group.queryPath())
-                    || StringUtils.hasText(group.queryRequestTemplate()) || StringUtils.hasText(group.aiQueryPrompt());
-            if (queryEnabled) {
+            // 视频沿用"配置了查询字段即异步"的隐式判定，保证已有视频配置不受影响；
+            // 图片只看能力级开关，切回同步后残留的查询字段原样保存但不触发必填校验。
+            boolean asyncEnabled = videoModel
+                    ? StringUtils.hasText(group.queryPath())
+                    || StringUtils.hasText(group.queryRequestTemplate()) || StringUtils.hasText(group.aiQueryPrompt())
+                    : Boolean.TRUE.equals(group.asyncQuery());
+            if (asyncEnabled) {
                 if (!StringUtils.hasText(group.queryPath())) {
                     throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.asyncRequiresAQueryPath", key));
                 }
@@ -679,7 +685,7 @@ public class PersistenceService {
                 }
             }
             String queryMethod = normalizeCustomRequestMethod(group.queryMethod());
-            if (queryEnabled && !"GET".equals(queryMethod) && !StringUtils.hasText(group.queryRequestTemplate())
+            if (asyncEnabled && !"GET".equals(queryMethod) && !StringUtils.hasText(group.queryRequestTemplate())
                     && !StringUtils.hasText(group.aiQueryPrompt())) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.pOSTQueryRequiresAnExampleOrAIPrompt", key));
             }
@@ -688,10 +694,12 @@ public class PersistenceService {
                     group.responseExample(), group.resultPath(),
                     group.queryPath() == null ? null : group.queryPath().trim(), queryMethod,
                     group.queryRequestTemplate(), group.aiQueryPrompt(),
-                    group.queryResponseExample(), group.queryResultPath(), "video".equals(modelType) ? group.videoGenerationConstraints() : null));
+                    group.queryResponseExample(), group.queryResultPath(), videoModel ? group.videoGenerationConstraints() : null,
+                    // 同步态不落键，避免前端草稿与服务端回包在 null/false 之间反复判定为脏配置
+                    !videoModel && asyncEnabled ? Boolean.TRUE : null));
         }
         // 启用的每个视频模式都必须配置，不能只遍历已提交的分组而遗漏整组缺失。
-        if ("video".equals(modelType)) {
+        if (videoModel) {
             for (String mode : capabilities) {
                 if (!VideoGenerationMode.isSupported(mode)) continue;
                 PersistenceDtos.CustomModelGroupConfig group = normalized.get(mode);

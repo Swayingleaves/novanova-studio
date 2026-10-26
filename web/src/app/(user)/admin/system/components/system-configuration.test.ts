@@ -32,3 +32,12 @@ test("视频模型音频输入能力由管理员配置且仅受全能参考约�
     assert.match(source, /\{ label: "\{\{audioReferences\}\}", value: "\{\{audioReferences\}\}" \}/);
     assert.match(source, /mode !== "audio-input" && supportedCapabilities\.has\(mode\)/);
 });
+
+test("图片自定义能力支持同步异步切换，异步时复用视频的查询配置区", () => {
+    assert.match(source, /<Segmented/);
+    assert.match(source, /const imageAsync = !isVideo && current\.asyncQuery === true;/);
+    // 同步态写 undefined，避免服务端不落键后被判定为有改动
+    assert.match(source, /asyncQuery: value === "async" \? true : undefined/);
+    assert.match(source, /\{isVideo \|\| imageAsync \? \(/);
+    assert.match(source, /translate\(imageAsync \? "appShell\.resultPathTaskId" : "appShell\.resultPath"\)/);
+});

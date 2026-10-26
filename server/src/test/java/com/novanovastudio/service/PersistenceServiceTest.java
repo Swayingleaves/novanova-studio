@@ -850,7 +850,7 @@ class PersistenceServiceTest {
             var constraints = new VideoGenerationConstraints(2, 10, minimum, maximum, List.of("16:9", "auto"),
                     mode.equals("reference-to-video") ? 2 : null, mode.equals("reference-to-video") ? 0 : null);
             groups.put(mode, new PersistenceDtos.CustomModelGroupConfig("/video", "POST", "video", "{}", null, null, "url",
-                    null, "POST", null, null, null, null, constraints));
+                    null, "POST", null, null, null, null, constraints, null));
             prices.put(mode, java.util.Map.of("720p", java.math.BigDecimal.ONE));
         }
         JSONObject data = JSONObject.of("channelId", "channel-1", "modelName", "video-model", "modelType", "video",
@@ -884,6 +884,75 @@ class PersistenceServiceTest {
                 "videoBillingConfiguration", new VideoBillingConfiguration("generation", 3, java.util.Map.of("text-to-video", java.util.Map.of("720p", java.math.BigDecimal.ONE))));
         Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(data.to(PersistenceDtos.CreateModelConfigRequest.class)).block());
         verify(repository, org.mockito.Mockito.never()).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
+    }
+
+    /** 图片能力保持同步时，残留的查询字段不再触发异步必填校验。 */
+    @Test
+    void shouldAcceptResidualQueryFieldsForSyncImage() {
+        PersistenceDtos.CustomModelGroupConfig group = new PersistenceDtos.CustomModelGroupConfig(
+                "/images/generations", "POST", "image-model", "{}", null, null, "data.url",
+                "/images/tasks/{{taskId}}", "GET", null, null, null, null, null, null);
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+
+        PersistenceDtos.ModelConfig created = service.createModelConfig(imageCustomModelRequest(group)
+                .to(PersistenceDtos.CreateModelConfigRequest.class)).block();
+
+        Assertions.assertNotNull(created);
+        PersistenceDtos.CustomModelGroupConfig saved = created.customModelConfig().get("text-to-image");
+        Assertions.assertNull(saved.asyncQuery());
+        Assertions.assertEquals("/images/tasks/{{taskId}}", saved.queryPath());
+    }
+
+    /** 图片能力开启异步后必须配置查询路径。 */
+    @Test
+    void shouldRejectAsyncImageWithoutQueryPath() {
+        PersistenceDtos.CustomModelGroupConfig group = asyncImageGroup(null, "data.url");
+        JSONObject data = imageCustomModelRequest(group);
+        Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(data.to(PersistenceDtos.CreateModelConfigRequest.class)).block());
+        verify(repository, org.mockito.Mockito.never()).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
+    }
+
+    /** 图片能力开启异步后必须配置查询结果路径。 */
+    @Test
+    void shouldRejectAsyncImageWithoutQueryResultPath() {
+        PersistenceDtos.CustomModelGroupConfig group = asyncImageGroup("/images/tasks/{{taskId}}", null);
+        JSONObject data = imageCustomModelRequest(group);
+        Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(data.to(PersistenceDtos.CreateModelConfigRequest.class)).block());
+        verify(repository, org.mockito.Mockito.never()).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
+    }
+
+    /** 图片能力的异步开关保存到JSONB后能原样读回。 */
+    @Test
+    void shouldRoundTripAsyncQueryForImageGroup() {
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+        JSONObject data = imageCustomModelRequest(asyncImageGroup("/images/tasks/{{taskId}}", "data.url"));
+
+        PersistenceDtos.ModelConfig created = service.createModelConfig(data.to(PersistenceDtos.CreateModelConfigRequest.class)).block();
+
+        Assertions.assertNotNull(created);
+        Assertions.assertEquals(Boolean.TRUE, created.customModelConfig().get("text-to-image").asyncQuery());
+        var captor = ArgumentCaptor.forClass(PersistenceRecords.UserAiModelConfigRecord.class);
+        verify(repository).createPlatformAiModelConfig(captor.capture());
+        Assertions.assertTrue(JSON.parseObject(captor.getValue().getCustomModelConfig())
+                .getJSONObject("text-to-image").getBooleanValue("asyncQuery"));
+        when(repository.listPlatformAiModelConfigs()).thenReturn(Flux.just(captor.getValue()));
+        Assertions.assertEquals(Boolean.TRUE, service.listModelConfigs().block().getFirst().customModelConfig().get("text-to-image").asyncQuery());
+    }
+
+    /** 构造带异步查询配置的图片分组，参数留空用于验证必填校验。 */
+    private PersistenceDtos.CustomModelGroupConfig asyncImageGroup(String queryPath, String queryResultPath) {
+        return new PersistenceDtos.CustomModelGroupConfig("/images/generations", "POST", "image-model", "{}", null, null, "data.task_id",
+                queryPath, "GET", null, null, null, queryResultPath, null, Boolean.TRUE);
+    }
+
+    /** 构造图片自定义模型创建请求，渠道里必须已存在该模型。 */
+    private JSONObject imageCustomModelRequest(PersistenceDtos.CustomModelGroupConfig group) {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"image-model\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        return JSONObject.of("channelId", "channel-1", "modelName", "image-model", "modelType", "image",
+                "capabilities", List.of("text-to-image"), "isCustomModel", true, "creditCost", 0,
+                "customModelConfig", java.util.Map.of("text-to-image", group));
     }
 
     /** 音频输入能力应通过已有能力列表保存，且不能成为分档计费模式。 */

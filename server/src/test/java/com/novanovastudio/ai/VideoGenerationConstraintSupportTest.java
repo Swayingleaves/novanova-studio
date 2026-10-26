@@ -92,7 +92,7 @@ class VideoGenerationConstraintSupportTest {
     /** @param constraints 模式限制 @return 带限制的自定义调用配置 */
     private PersistenceDtos.CustomModelGroupConfig group(VideoGenerationConstraints constraints) {
         return new PersistenceDtos.CustomModelGroupConfig("/generate", "POST", "video", "{}", null, null, "url",
-                null, null, null, null, null, null, constraints);
+                null, null, null, null, null, null, constraints, null);
     }
 
     /** @param constraints 全能参考限制 @throws BusinessException 限制无效时抛出 */

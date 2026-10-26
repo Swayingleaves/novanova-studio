@@ -484,7 +484,7 @@ class AiTaskServiceTest {
         configureAudioModel("evolink");
         var constraints = new VideoGenerationConstraints(2, 10, 0, 0, List.of("16:9"), 0, 1);
         var group = new PersistenceDtos.CustomModelGroupConfig("/video", "POST", "video", "{}", null, null,
-                "url", null, null, null, null, null, null, constraints);
+                "url", null, null, null, null, null, null, constraints, null);
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(new PersistenceDtos.ModelConfig(
                 "model-config-2", "channel-1", "model-1", AiTaskTypes.VIDEO, List.of("reference-to-video", "audio-input"),
                 true, 0, java.math.BigDecimal.ZERO, false, "high", "generation", 1, new JSONObject(),
@@ -594,8 +594,8 @@ class AiTaskServiceTest {
     private void configureCustomVideoModel(int referenceImages) {
         var text = new VideoGenerationConstraints(2, 10, 0, 0, List.of("16:9", "auto"), null, null);
         var reference = new VideoGenerationConstraints(2, 10, 0, referenceImages, List.of("16:9"), 1, 0);
-        var textGroup = new PersistenceDtos.CustomModelGroupConfig("/video", "POST", "video", "{}", null, null, "url", null, null, null, null, null, null, text);
-        var referenceGroup = new PersistenceDtos.CustomModelGroupConfig("/video", "POST", "video", "{}", null, null, "url", null, null, null, null, null, null, reference);
+        var textGroup = new PersistenceDtos.CustomModelGroupConfig("/video", "POST", "video", "{}", null, null, "url", null, null, null, null, null, null, text, null);
+        var referenceGroup = new PersistenceDtos.CustomModelGroupConfig("/video", "POST", "video", "{}", null, null, "url", null, null, null, null, null, null, reference, null);
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(new PersistenceDtos.ModelConfig(
                 "model-config-2", "channel-1", "model-1", "video", List.of("text-to-video", "reference-to-video"), true, 0, java.math.BigDecimal.ZERO,
                 false, "high", "generation", 1, new JSONObject(), new VideoBillingConfiguration("generation", 3,

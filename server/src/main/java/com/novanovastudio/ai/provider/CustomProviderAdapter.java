@@ -56,7 +56,7 @@ import reactor.util.retry.Retry;
  * @createTime   2026-08-24 00:00
  * <p>
  * 按模型配置的请求示例模板组装请求体（{{prompt}}等占位符替换），POST到渠道baseUrl发起调用，
- * 再按配置的结果路径（如data.image.url、data[0].b64_json）提取媒体地址或图片内容；视频模型支持提交后轮询查询接口，
+ * 再按配置的结果路径（如data.image.url、data[0].b64_json）提取媒体地址或图片内容；视频模型与开启异步的图片能力支持提交后轮询查询接口，
  * 全部提取失败时交给默认文本模型（LLM）从响应原文中提取媒体地址。
  */
 @Component
@@ -168,8 +168,8 @@ public class CustomProviderAdapter implements AiProviderAdapter {
     /**
      * 提交请求并解析最终媒体地址或图片内容。
      * <p>
-     * 提交响应按结果路径提取：图片返回地址或Base64内容，视频返回http(s)地址时直接成功；
-     * 视频配置查询模板时，将提取结果作为任务ID进入轮询；其余情况交给默认文本模型提取地址。
+     * 提交响应按结果路径提取：命中http(s)地址时直接成功；视频配置查询路径、或图片能力开启异步开关时，
+     * 将提取结果作为任务ID进入轮询；图片同步结果可为地址或Base64内容；其余情况交给默认文本模型提取地址。
      *
      * @param context           AiTaskExecutionContext AI任务执行上下文
      * @param group             PersistenceDtos.CustomModelGroupConfig 当前能力或模式配置
@@ -202,14 +202,21 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                         return Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.customModelRequestFailed", errorMessage)));
                     }
                     String extracted = extractByPath(response, group.resultPath());
-                    // 图片结果路径可指向纯Base64或data URL，无需交给文本模型提取HTTP地址。
-                    if (isHttpUrl(extracted) || (AiTaskTypes.IMAGE.equals(taskKind) && StringUtils.hasText(extracted))) {
+                    boolean imageTask = AiTaskTypes.IMAGE.equals(taskKind);
+                    // 提交响应直接给出媒体地址时无需轮询
+                    if (isHttpUrl(extracted)) {
                         return Mono.just(extracted);
                     }
-                    if (AiTaskTypes.VIDEO.equals(taskKind) && StringUtils.hasText(group.queryPath())
-                            && StringUtils.hasText(extracted)) {
-                        log.info("自定义模型提交响应返回任务ID，开始轮询: taskId={}, providerTaskId={}", context.task().getId(), extracted);
-                        return pollQuery(context, group, extracted);
+                    // 视频沿用"配置查询路径即异步"的隐式判定；图片只看能力级异步开关
+                    boolean asyncEnabled = !imageTask || Boolean.TRUE.equals(group.asyncQuery());
+                    if (asyncEnabled && StringUtils.hasText(group.queryPath()) && StringUtils.hasText(extracted)) {
+                        log.info("自定义模型提交响应返回任务ID，开始轮询: taskId={}, taskKind={}, mode={}, providerTaskId={}",
+                                context.task().getId(), taskKind, mode, extracted);
+                        return pollQuery(context, group, extracted, taskKind);
+                    }
+                    // 图片同步结果路径可指向纯Base64或data URL，无需交给文本模型提取HTTP地址。
+                    if (imageTask && StringUtils.hasText(extracted)) {
+                        return Mono.just(extracted);
                     }
                     return extractWithAgent(context, taskKind, response);
                 });
@@ -241,17 +248,19 @@ public class CustomProviderAdapter implements AiProviderAdapter {
     }
 
     /**
-     * 轮询查询接口直到提取到媒体URL或超时。
+     * 轮询查询接口直到提取到媒体地址（图片可为Base64内容）或超时。
      *
-     * @param context AiTaskExecutionContext AI任务执行上下文
-     * @param group   PersistenceDtos.CustomModelGroupConfig 当前能力或模式配置
-     * @param taskId  String 提交响应提取的任务ID
-     * @return Mono<String> 媒体URL
+     * @param context  AiTaskExecutionContext AI任务执行上下文
+     * @param group    PersistenceDtos.CustomModelGroupConfig 当前能力或模式配置
+     * @param taskId   String 提交响应提取的任务ID
+     * @param taskKind String 任务类型
+     * @return Mono<String> 媒体URL或Base64图片内容
      */
     private Mono<String> pollQuery(AiTaskExecutionContext context, PersistenceDtos.CustomModelGroupConfig group,
-                                   String taskId) {
+                                   String taskId, String taskKind) {
         // 轮询间隔统一使用全局AI_TASK_POLLING_INTERVAL_SECONDS配置
         Duration interval = AiTaskPollingSupport.pollingInterval(properties);
+        boolean imageTask = AiTaskTypes.IMAGE.equals(taskKind);
         String method = normalizeMethod(group.queryMethod());
         String queryUrl = AiHttpClient.buildAiUrl(context.channel().baseUrl(), renderUrlPath(group.queryPath(), taskId));
         // 查询请求体只构造一次：AI构造模式避免每轮重复调用LLM，模板模式渲染结果幂等。
@@ -286,9 +295,10 @@ public class CustomProviderAdapter implements AiProviderAdapter {
                                     }));
                         }))
                 .map(response -> extractByPath(response, group.queryResultPath()))
-                .filter(CustomProviderAdapter::isHttpUrl)
+                // 图片查询结果可能是data URL或纯Base64，接受范围与同步分支保持一致；视频仍只认http(s)
+                .filter(value -> isHttpUrl(value) || (imageTask && StringUtils.hasText(value)))
                 .next()
-                .switchIfEmpty(Mono.defer(() -> extractWithAgent(context, AiTaskTypes.VIDEO,
+                .switchIfEmpty(Mono.defer(() -> extractWithAgent(context, taskKind,
                         lastResponse.get() == null ? new JSONObject() : lastResponse.get())));
     }
 

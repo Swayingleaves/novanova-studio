@@ -9,7 +9,7 @@ import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
-import { Alert, App, Button, Checkbox, Form, Grid, Input, InputNumber, Modal, Select, Space, Switch, Tabs } from "antd";
+import { Alert, App, Button, Checkbox, Form, Grid, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Tabs } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { nanoid } from "nanoid";
 import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload, Copy, Image, Info, Monitor, Pencil, Plus, RefreshCw, Sparkles, TextCursorInput, Trash2, Video, Wifi } from "lucide-react";
@@ -2017,6 +2017,8 @@ function CustomModelGroupEditor({
     const update = (patch: Partial<CustomModelGroupConfig>) => onChange({ ...current, ...patch });
     const requestIsPost = current.requestMethod !== "GET";
     const queryIsPost = current.queryMethod !== "GET";
+    // 图片能力按开关决定是否走异步查询；视频一直是「配了查询字段即异步」
+    const imageAsync = !isVideo && current.asyncQuery === true;
     const insertPlaceholder = (placeholder: string, ref: React.RefObject<TextAreaRef | null>, field: "requestTemplate" | "queryRequestTemplate") => {
         const textArea = ref.current?.resizableTextArea?.textArea;
         const latest = textArea?.value ?? current[field];
@@ -2033,8 +2035,24 @@ function CustomModelGroupEditor({
         <div className="mt-3 space-y-3 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-xs font-semibold text-[var(--studio-muted)]">{translate("appShell.customAPIConfiguration")}{label}）</div>
-                {onAutoFill ? <AutoFillButton onClick={onAutoFill} /> : null}
+                <div className="flex flex-wrap items-center gap-2">
+                    {!isVideo ? (
+                        <Segmented
+                            size="small"
+                            value={current.asyncQuery === true ? "async" : "sync"}
+                            aria-label={translate("appShell.callMode")}
+                            options={[
+                                { value: "sync", label: translate("appShell.syncMode") },
+                                { value: "async", label: translate("appShell.asyncMode") },
+                            ]}
+                            // 同步态写 undefined：服务端不落该键，写 false 会让草稿与基线永久判定为有改动
+                            onChange={(value) => update({ asyncQuery: value === "async" ? true : undefined })}
+                        />
+                    ) : null}
+                    {onAutoFill ? <AutoFillButton onClick={onAutoFill} /> : null}
+                </div>
             </div>
+            {imageAsync ? <p className="text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.asyncImageQueryHint")}</p> : null}
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_112px]">
                 <div>
                     <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.requestPath")}</div>
@@ -2051,8 +2069,8 @@ function CustomModelGroupEditor({
                     <Input value={current.requestModelName} placeholder={translate("appShell.modelNameUsedByTheRequestBodyPlaceholder")} onChange={(event) => update({ requestModelName: event.target.value })} />
                 </div>
                 <div>
-                    <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.resultPath")}</div>
-                    <Input value={current.resultPath} placeholder={translate("appShell.eGDataImageUrl")} onChange={(event) => update({ resultPath: event.target.value })} />
+                    <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate(imageAsync ? "appShell.resultPathTaskId" : "appShell.resultPath")}</div>
+                    <Input value={current.resultPath} placeholder={translate(imageAsync ? "appShell.eGDataTaskId" : "appShell.eGDataImageUrl")} onChange={(event) => update({ resultPath: event.target.value })} />
                 </div>
             </div>
             {requestIsPost ? (
@@ -2101,7 +2119,7 @@ function CustomModelGroupEditor({
                     onChange={(event) => update({ responseExample: event.target.value })}
                 />
             </div>
-            {isVideo ? (
+            {isVideo || imageAsync ? (
                 <>
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_112px]">
                         <div>
@@ -2160,7 +2178,7 @@ function CustomModelGroupEditor({
                     </div>
                     <div>
                         <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.queryResultPathRequiredWithQueryPath")}</div>
-                        <Input value={current.queryResultPath} placeholder={translate("appShell.eGDataVideoUrl")} onChange={(event) => update({ queryResultPath: event.target.value })} />
+                        <Input value={current.queryResultPath} placeholder={translate(isVideo ? "appShell.eGDataVideoUrl" : "appShell.eGDataImageUrl")} onChange={(event) => update({ queryResultPath: event.target.value })} />
                     </div>
                 </>
             ) : null}

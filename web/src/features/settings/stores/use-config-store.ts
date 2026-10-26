@@ -57,6 +57,8 @@ export type CustomModelGroupConfig = {
     aiQueryPrompt: string;
     queryResponseExample: string;
     queryResultPath: string;
+    /** 仅图片能力使用：true为异步（提交响应取出任务ID后轮询查询接口），缺省或false为同步；视频沿用查询字段非空即异步的判断。 */
+    asyncQuery?: boolean | null;
     videoGenerationConstraints?: VideoGenerationConstraints | null;
 };
 export type VideoModelBillingConfiguration = {
