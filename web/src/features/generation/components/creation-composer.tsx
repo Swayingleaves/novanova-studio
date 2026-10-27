@@ -208,6 +208,7 @@ export function CreationComposer({
         const button = (
             <Button
                 size="small"
+                data-tour={`composer-${action.key}`}
                 className={["creation-composer-action", action.iconOnly ? "creation-composer-action-icon" : "", action.className].filter(Boolean).join(" ")}
                 icon={action.icon}
                 disabled={action.disabled}
@@ -309,6 +310,7 @@ export function CreationComposer({
                             query={styleQuery}
                             highlightedIndex={highlightedStyleIndex}
                             placement="topLeft"
+                            dataTour="composer-style"
                             onOpenChange={(open) => {
                                 if (open) openStyleMenu();
                                 else closeStyleMenu();
@@ -346,6 +348,7 @@ export function CreationComposer({
                             ) : (
                                 <button
                                     type="button"
+                                    data-tour="creation-submit"
                                     className="creation-composer-submit-trigger creation-composer-submit-trigger-cost"
                                     disabled={!canSubmit || requestActive}
                                     onClick={onSubmit}

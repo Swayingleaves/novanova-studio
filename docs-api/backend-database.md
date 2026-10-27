@@ -821,3 +821,9 @@ V61 按空间、用户、原配置和对象键精确关联已有媒体及原文�
 `users` 新增 `onboarding_version`（`INTEGER NOT NULL DEFAULT 0`）：已完成的产品引导版本，0 表示尚未完成。引导改版时递增前端常量 `ONBOARDING_VERSION`，旧用户下次登录会重新看到新引导。
 
 写入走 `POST /api/v1/auth/completeOnboarding`，SQL 使用 `GREATEST(onboarding_version, :targetVersion)`，重复或乱序请求都不会回退版本。迁移不写 `UPDATE`，存量账号保持 0，因此升级后已登录用户会各看一次引导；移动端不参与引导，也不会写该字段。
+
+## 创作页导览版本（V69）
+
+`users` 新增 `creation_tour_version`（`INTEGER NOT NULL DEFAULT 0`）：已完成创作页导览的版本，0 表示尚未完成。图片创作与视频创作共用同一个字段，因此先进哪一个就由哪一个展示导览，另一个不再重复展示。
+
+写入走 `POST /api/v1/auth/completeCreationTour`，同样使用 `GREATEST(...)` 保证幂等。迁移不写 `UPDATE`，存量账号保持 0。

@@ -6,5 +6,15 @@
     "headerTitle": "Editions and help",
     "headerDescription": "Compare editions, open the documentation, or visit the GitHub repository here.",
     "accountTitle": "My account",
-    "accountDescription": "Your current credits and avatar appear here. Open the menu to see profile, check-in, purchase, redeem, credit history, system administration, and sign out."
+    "accountDescription": "Your current credits and avatar appear here. Open the menu to see profile, check-in, purchase, redeem, credit history, system administration, and sign out.",
+    "creationStyleTitle": "Style library",
+    "creationStyleDescription": "Pick a visual style and the prompt renders in that look. You can stack several.",
+    "creationReferenceTitle": "Reference images",
+    "creationReferenceDescription": "Upload images as references, or pick from recent ones. Video creation also accepts reference videos.",
+    "creationAssetsTitle": "Asset library",
+    "creationAssetsDescription": "Pull material you already uploaded or generated straight from My assets.",
+    "creationSettingsTitle": "More settings",
+    "creationSettingsDescription": "Model, aspect ratio, quality, duration, and count all live here. Image and video show their own parameters, and the button keeps a live summary of your current setup.",
+    "creationSubmitTitle": "Generate when ready",
+    "creationSubmitDescription": "Submit here once everything is set. The button shows the credits this run will cost."
 }

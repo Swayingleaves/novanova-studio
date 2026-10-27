@@ -55,6 +55,8 @@ public final class RowMappers {
         user.setWelcomeReadAt(row.get("welcome_read_at", OffsetDateTime.class));
         Integer onboardingVersion = row.get("onboarding_version", Integer.class);
         user.setOnboardingVersion(onboardingVersion == null ? 0 : onboardingVersion);
+        Integer creationTourVersion = row.get("creation_tour_version", Integer.class);
+        user.setCreationTourVersion(creationTourVersion == null ? 0 : creationTourVersion);
         user.setRegisteredAt(row.get("registered_at", OffsetDateTime.class));
         user.setCreatedAt(row.get("created_at", OffsetDateTime.class));
         user.setUpdatedAt(row.get("updated_at", OffsetDateTime.class));

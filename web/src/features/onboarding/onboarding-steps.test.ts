@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ONBOARDING_STEPS, ONBOARDING_VERSION, hidesSidebar, shouldStartOnboarding } from "./onboarding-steps";
+import {
+    CREATION_TOUR_STEPS,
+    CREATION_TOUR_VERSION,
+    ONBOARDING_STEPS,
+    ONBOARDING_VERSION,
+    hidesSidebar,
+    isCreationTourPath,
+    shouldStartCreationTour,
+    shouldStartOnboarding,
+} from "./onboarding-steps";
 
 const base = {
     user: { welcomeRead: true, onboardingVersion: 0 },
@@ -33,4 +42,45 @@ test("引导锚点固定，且画布详情页与侧栏隐藏规则一致", () =>
     assert.equal(hidesSidebar("/canvas/abc"), true);
     assert.equal(hidesSidebar("/canvas/abc/edit"), true);
     assert.equal(hidesSidebar("/canvas"), false);
+});
+
+test("创作页导览等全局引导完成后才启动，图片与视频共用同一个版本号", () => {
+    const creationBase = {
+        user: { welcomeRead: true, onboardingVersion: ONBOARDING_VERSION, creationTourVersion: 0 },
+        isTeam: false,
+        pathname: "/image",
+        desktop: true,
+    };
+
+    assert.equal(shouldStartCreationTour(creationBase), true);
+    assert.equal(shouldStartCreationTour({ ...creationBase, pathname: "/video" }), true);
+    assert.equal(shouldStartCreationTour({ ...creationBase, pathname: "/canvas" }), false);
+    assert.equal(shouldStartCreationTour({ ...creationBase, pathname: "/assets" }), false);
+
+    // 全局引导没看完时不插队。
+    assert.equal(shouldStartCreationTour({ ...creationBase, user: { welcomeRead: true, onboardingVersion: 0, creationTourVersion: 0 } }), false);
+    // 已经看过一次（无论当时在图片还是视频）就不再重复。
+    assert.equal(shouldStartCreationTour({ ...creationBase, user: { welcomeRead: true, onboardingVersion: ONBOARDING_VERSION, creationTourVersion: CREATION_TOUR_VERSION } }), false);
+    // 老会话缺少 creationTourVersion 时按 0 处理。
+    assert.equal(shouldStartCreationTour({ ...creationBase, user: { welcomeRead: true, onboardingVersion: ONBOARDING_VERSION } }), true);
+    // 团队空间与窄屏（会话栏隐藏）都跳过。
+    assert.equal(shouldStartCreationTour({ ...creationBase, isTeam: true }), false);
+    assert.equal(shouldStartCreationTour({ ...creationBase, desktop: false }), false);
+});
+
+test("创作页五步锚点固定，路径只匹配图片与视频", () => {
+    assert.deepEqual(
+        CREATION_TOUR_STEPS.map((step) => step.target),
+        [
+            '[data-tour="composer-style"]',
+            '[data-tour="composer-upload"]',
+            '[data-tour="composer-assets"]',
+            '[data-tour="composer-settings"]',
+            '[data-tour="creation-submit"]',
+        ],
+    );
+    assert.equal(isCreationTourPath("/image"), true);
+    assert.equal(isCreationTourPath("/video"), true);
+    assert.equal(isCreationTourPath("/images"), false);
+    assert.equal(isCreationTourPath("/video-editor"), false);
 });

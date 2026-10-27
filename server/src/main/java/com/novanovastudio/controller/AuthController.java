@@ -127,6 +127,17 @@ public class AuthController {
     }
 
     /**
+     * 标记当前用户已完成创作页产品导览。
+     *
+     * @param request CompleteCreationTourRequest 已完成的创作页产品导览版本
+     * @return Mono<ApiResponse<String>> 操作响应
+     */
+    @PostMapping("/completeCreationTour")
+    public Mono<ApiResponse<String>> completeCreationTour(@RequestBody UserDtos.CompleteCreationTourRequest request) {
+        return userService.completeCreationTour(request.version()).thenReturn(ApiResponse.ok("ok"));
+    }
+
+    /**
      * 查询当前用户信息
      *
      * @return Mono<ApiResponse<UserProfile>> 当前用户

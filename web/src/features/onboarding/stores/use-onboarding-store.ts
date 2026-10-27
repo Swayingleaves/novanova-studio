@@ -2,25 +2,28 @@
 
 import { create } from "zustand";
 
+/** 引导分两种：全局四步、创作页三步，同一时刻只允许一个在跑。 */
+export type OnboardingTour = "global" | "creation";
+
 type OnboardingStore = {
-    /** 引导是否正在展示。 */
-    active: boolean;
+    /** 当前展示的引导，null 表示没有引导。 */
+    tour: OnboardingTour | null;
     /** 当前步骤下标。 */
     step: number;
-    start: () => void;
+    start: (tour: OnboardingTour) => void;
     setStep: (step: number) => void;
     stop: () => void;
 };
 
 /**
- * 首次登录引导的 UI 状态。
+ * 产品导览的 UI 状态。
  * <p>
  * 两个消费者分处不同子树：引导组件在外壳层、积分不足弹窗在 Provider 层。
  */
 export const useOnboardingStore = create<OnboardingStore>()((set) => ({
-    active: false,
+    tour: null,
     step: 0,
-    start: () => set({ active: true, step: 0 }),
+    start: (tour) => set({ tour, step: 0 }),
     setStep: (step) => set({ step }),
-    stop: () => set({ active: false, step: 0 }),
+    stop: () => set({ tour: null, step: 0 }),
 }));

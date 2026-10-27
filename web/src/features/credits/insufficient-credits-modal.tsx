@@ -17,7 +17,7 @@ export function InsufficientCreditsModal() {
     const teamId = useTeamStore((state) => state.team?.id);
     const prompt = useInsufficientCreditsStore((state) => state.prompt);
     const close = useInsufficientCreditsStore((state) => state.close);
-    const onboardingActive = useOnboardingStore((state) => state.active);
+    const onboardingActive = useOnboardingStore((state) => state.tour !== null);
 
     useLayoutEffect(() => {
         useInsufficientCreditsStore.getState().setScope(`${userId ?? "visitor"}:${teamId ?? 0}`);

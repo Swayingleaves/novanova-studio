@@ -437,6 +437,19 @@ public class UserService {
     }
 
     /**
+     * 标记当前用户已完成创作页产品导览。
+     *
+     * @param version int 已完成的创作页产品导览版本
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> completeCreationTour(int version) {
+        int normalized = Math.max(1, Math.min(version, 1000));
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> userRepository.markCreationTourCompleted(userId, normalized)
+                        .doOnSuccess(ignored -> log.info("用户已完成创作页产品导览: userId={}, version={}", userId, normalized)));
+    }
+
+    /**
      * 查询用户列表（支持搜索和筛选）
      *
      * @param page int 页码
@@ -733,6 +746,7 @@ public class UserService {
                 formatTime(user.getLastLoginAt()),
                 user.getWelcomeReadAt() != null,
                 user.getOnboardingVersion() == null ? 0 : user.getOnboardingVersion(),
+                user.getCreationTourVersion() == null ? 0 : user.getCreationTourVersion(),
                 passwordLockedUntil == null ? null : formatTime(passwordLockedUntil),
                 canResetPassword
         );

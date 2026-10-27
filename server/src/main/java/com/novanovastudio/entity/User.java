@@ -68,6 +68,9 @@ public class User {
     /** 已完成的产品引导版本，0 表示尚未完成 */
     private Integer onboardingVersion;
 
+    /** 已完成创作页产品导览的版本，图片与视频创作页共用 */
+    private Integer creationTourVersion;
+
     /** 注册时间 */
     private OffsetDateTime registeredAt;
 

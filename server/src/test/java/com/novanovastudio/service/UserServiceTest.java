@@ -273,6 +273,28 @@ class UserServiceTest {
     }
 
     /**
+     * 验证创作页导览版本随用户资料返回，空值按 0 处理。
+     */
+    @Test
+    @DisplayName("用户资料返回创作页导览版本")
+    void shouldExposeCreationTourVersion() {
+        TestContext context = testContext();
+        User user = normalUser(8L);
+        user.setCreationTourVersion(null);
+        when(context.currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
+        when(context.userRepository.findById(8L)).thenReturn(Mono.just(user));
+
+        StepVerifier.create(context.service.userInfo())
+                .assertNext(profile -> assertEquals(0, profile.creationTourVersion()))
+                .verifyComplete();
+
+        user.setCreationTourVersion(1);
+        StepVerifier.create(context.service.userInfo())
+                .assertNext(profile -> assertEquals(1, profile.creationTourVersion()))
+                .verifyComplete();
+    }
+
+    /**
      * 验证完成引导时把异常版本号规整为下限 1。
      */
     @Test
@@ -286,6 +308,22 @@ class UserServiceTest {
         StepVerifier.create(context.service.completeOnboarding(-5)).verifyComplete();
 
         verify(context.userRepository, times(2)).markOnboardingCompleted(8L, 1);
+    }
+
+    /**
+     * 验证完成创作页导览时同样把异常版本号规整为下限 1。
+     */
+    @Test
+    @DisplayName("完成创作页导览规整版本号")
+    void shouldNormalizeCreationTourVersion() {
+        TestContext context = testContext();
+        when(context.currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
+        when(context.userRepository.markCreationTourCompleted(8L, 1)).thenReturn(Mono.empty());
+
+        StepVerifier.create(context.service.completeCreationTour(0)).verifyComplete();
+        StepVerifier.create(context.service.completeCreationTour(-3)).verifyComplete();
+
+        verify(context.userRepository, times(2)).markCreationTourCompleted(8L, 1);
     }
 
     /**
