@@ -9,6 +9,7 @@ import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.common.StoryboardFontCatalog;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.AiTaskDtos;
 import com.novanovastudio.dto.ComicDramaDtos;
 import com.novanovastudio.dto.ScriptDtos;
@@ -33,6 +34,7 @@ import org.springframework.transaction.reactive.TransactionalOperator;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * 漫剧生产工作台业务服务。
@@ -65,6 +67,9 @@ public class ComicDramaService {
 
     /** 响应式事务操作器。 */
     private final TransactionalOperator transactionalOperator;
+
+    /** 应用配置，用于读取提示词合成并发度。 */
+    private final NovanovaProperties properties;
 
     /**
      * 分页查询当前用户漫剧项目。
@@ -442,6 +447,146 @@ public class ComicDramaService {
                                 return repository.createPromptVersion(request.projectId(), prompt).thenReturn(prompt);
                             }));
                 }));
+    }
+
+    /**
+     * 批量合成镜头最终提示词：并发请求模型，成功结果统一在一个事务里采用为最新版本。
+     *
+     * <p>并发只覆盖模型调用与输入加载，版本号生成和写库保持串行，避免同一项目的修订号互相覆盖。</p>
+     *
+     * @param request 批量合成请求
+     * @return 已采用的提示词版本、失败镜头与实际扣费
+     */
+    public Mono<ComicDramaDtos.ComposePromptsResult> composePrompts(ComicDramaDtos.ComposePromptsRequest request) {
+        if (!request.confirmed()) {
+            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "合成提示词前必须明确确认费用"));
+        }
+        List<String> shotIds = request.shotIds().stream().distinct().toList();
+        if (shotIds.isEmpty()) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, "请至少选择一个镜头"));
+        }
+        int concurrency = Math.max(1, properties.getAi().getStoryboardAgent().getComposeConcurrency());
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> requireProjectRevision(userId, request.projectId(), request.expectedRevision())
+                        .then(Mono.zip(repository.getSettings(request.projectId()),
+                                repository.listShots(request.projectId(), null, null).collectList()))
+                        .flatMap(tuple -> {
+                            Map<String, ComicDramaDtos.Shot> shotById = new LinkedHashMap<>();
+                            tuple.getT2().forEach(shot -> shotById.put(shot.id(), shot));
+                            List<ComicDramaDtos.Shot> targets = shotIds.stream().map(shotById::get).toList();
+                            if (targets.stream().anyMatch(Objects::isNull)) {
+                                return notFound("部分镜头不存在或已删除");
+                            }
+                            log.info("开始批量合成漫剧镜头提示词: projectId={}, shotCount={}, concurrency={}",
+                                    request.projectId(), targets.size(), concurrency);
+                            return Flux.fromIterable(targets)
+                                    .flatMap(shot -> composeShotPrompt(request.projectId(), shot, tuple.getT1(), request.model())
+                                            .subscribeOn(Schedulers.boundedElastic())
+                                            .onErrorResume(error -> {
+                                                log.warn("漫剧镜头提示词合成失败: projectId={}, shotId={}, reason={}",
+                                                        request.projectId(), shot.id(), error.getMessage());
+                                                return Mono.just(ComposedShotPrompt.failed(shot.id(), error.getMessage()));
+                                            }), concurrency)
+                                    .collectList()
+                                    .flatMap(results -> persistComposedPrompts(userId, request.projectId(),
+                                            request.expectedRevision(), request.model(), results));
+                        }));
+    }
+
+    /**
+     * 为单个镜头合成最终提示词，复用既有分镜提示词Agent完成校验与计费。
+     *
+     * @param projectId 项目标识
+     * @param shot 镜头
+     * @param settings 项目生产设置
+     * @param model 提示词模型
+     * @return 单镜头合成产物
+     */
+    private Mono<ComposedShotPrompt> composeShotPrompt(String projectId, ComicDramaDtos.Shot shot,
+                                                       ComicDramaDtos.ProductionSettings settings, String model) {
+        Mono<String> scriptText = StringUtils.hasText(shot.sourceScriptExcerpt())
+                ? Mono.just(shot.sourceScriptExcerpt())
+                : repository.getShotGenerationSource(projectId, shot.sourceEpisodeId(), shot.sourceSceneId())
+                        .map(ComicDramaRepository.ShotGenerationSource::scriptContent).defaultIfEmpty("");
+        return scriptText.flatMap(script -> {
+            if (!StringUtils.hasText(script)) {
+                return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "镜头缺少来源剧本正文"));
+            }
+            return repository.listShotStoryboardAssets(projectId, shot.id()).collectList().flatMap(assets -> {
+                StoryboardDtos.StoryboardShot agentShot = new StoryboardDtos.StoryboardShot(shot.id(), shot.shotNumber(),
+                        Math.max(1, shot.durationSeconds().intValue()), shot.visualDescription(),
+                        StringUtils.hasText(shot.shotSize()) ? shot.shotSize() : "中景", shot.lightingAtmosphere(),
+                        shot.dialogueVoiceover(), shot.soundDescription(), shot.cameraMovement(), "",
+                        assets.stream().map(StoryboardDtos.StoryboardAsset::id).toList());
+                StoryboardDtos.ComposePromptsRequest agentRequest = new StoryboardDtos.ComposePromptsRequest(
+                        script, shot.visualDescription(), settings.visualStyle(), model, List.of(agentShot), assets);
+                return storyboardAgentService.composePrompts(agentRequest)
+                        .map(response -> new ComposedShotPrompt(shot.id(), shot, settings,
+                                response.prompts().getFirst().finalPrompt(),
+                                response.chargedCredits() == null ? BigDecimal.ZERO : response.chargedCredits(), ""));
+            });
+        });
+    }
+
+    /**
+     * 把并发合成成功的镜头统一写成已采用版本，并只推进一次项目修订号。
+     *
+     * @param userId 当前用户ID
+     * @param projectId 项目标识
+     * @param expectedRevision 期望的项目修订号
+     * @param model 提示词模型
+     * @param results 并发合成结果，失败项提示词为空
+     * @return 批量合成结果
+     */
+    private Mono<ComicDramaDtos.ComposePromptsResult> persistComposedPrompts(Long userId, String projectId,
+                                                                            long expectedRevision, String model,
+                                                                            List<ComposedShotPrompt> results) {
+        List<ComposedShotPrompt> composed = results.stream().filter(item -> item.prompt() != null).toList();
+        List<String> failedShotIds = results.stream().filter(item -> item.prompt() == null)
+                .map(ComposedShotPrompt::shotId).toList();
+        String failureMessage = results.stream().map(ComposedShotPrompt::failureReason)
+                .filter(StringUtils::hasText).findFirst().orElse("");
+        BigDecimal credits = composed.stream().map(ComposedShotPrompt::credits)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (composed.isEmpty()) {
+            return Mono.just(new ComicDramaDtos.ComposePromptsResult(List.of(), failedShotIds, failureMessage, credits));
+        }
+        return transactionalOperator.transactional(Flux.fromIterable(composed)
+                .concatMap(item -> repository.nextPromptVersion(projectId, item.shotId()).flatMap(versionNumber -> {
+                    // 快照只保留合成输入的可读字段，剧本正文按来源场次回溯，避免每个版本重复存整段剧本。
+                    JSONObject snapshot = new JSONObject();
+                    snapshot.put("shotId", item.shotId());
+                    snapshot.put("shotNumber", item.shot().shotNumber());
+                    snapshot.put("shotSize", item.shot().shotSize());
+                    snapshot.put("visualDescription", item.shot().visualDescription());
+                    snapshot.put("cameraMovement", item.shot().cameraMovement());
+                    snapshot.put("lightingAtmosphere", item.shot().lightingAtmosphere());
+                    snapshot.put("dialogueVoiceover", item.shot().dialogueVoiceover());
+                    snapshot.put("soundDescription", item.shot().soundDescription());
+                    snapshot.put("sourceEpisodeId", item.shot().sourceEpisodeId());
+                    snapshot.put("sourceSceneId", item.shot().sourceSceneId());
+                    snapshot.put("settings", item.settings());
+                    ComicDramaDtos.PromptVersion prompt = new ComicDramaDtos.PromptVersion(id(), item.shotId(), versionNumber,
+                            "ai", item.prompt(), snapshot, model, item.credits(), "adopted", OffsetDateTime.now());
+                    return repository.createPromptVersion(projectId, prompt).thenReturn(prompt);
+                }))
+                .collectList()
+                .flatMap(prompts -> advance(userId, projectId, expectedRevision)
+                        .then(repository.refreshProjectProductionStatus(projectId))
+                        .thenReturn(prompts))
+        ).map(prompts -> new ComicDramaDtos.ComposePromptsResult(
+                prompts.stream().map(ComicDramaDtos.PromptVersion::shotId).toList(), failedShotIds, failureMessage, credits));
+    }
+
+    /** 单镜头批量合成产物；失败时提示词为空并记录失败原因，版本号统一在写库阶段生成。 */
+    private record ComposedShotPrompt(String shotId, ComicDramaDtos.Shot shot,
+                                      ComicDramaDtos.ProductionSettings settings, String prompt,
+                                      BigDecimal credits, String failureReason) {
+
+        /** 构造失败产物。 */
+        private static ComposedShotPrompt failed(String shotId, String reason) {
+            return new ComposedShotPrompt(shotId, null, null, null, BigDecimal.ZERO, reason);
+        }
     }
 
     /** 保存用户明确编辑的提示词为新采用版本。 */

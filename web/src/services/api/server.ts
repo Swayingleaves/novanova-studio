@@ -282,6 +282,22 @@ export type UserStatisticsResponse = {
     dailyNewUsers: number;
 };
 
+/** 用户增长趋势的单日数据，totalUsers 为截至当日结束的累计用户数。 */
+export type UserTrendPoint = {
+    date: string;
+    newUsers: number;
+    totalUsers: number;
+};
+
+/** 用户增长趋势，points 按日期升序、缺失日期已补零。 */
+export type UserTrendResponse = {
+    startDate: string;
+    endDate: string;
+    totalUsers: number;
+    newUsers: number;
+    points: UserTrendPoint[];
+};
+
 /** 后端渠道配置，对齐 AiChannelConfig record */
 export type ServerChannel = {
     id: string;
@@ -549,6 +565,13 @@ export function listServerUsers(params: { page: number; pageSize: number; filter
 
 export function getServerUserStatistics(filterTeamId?: number) {
     return serverGet<UserStatisticsResponse>(`/admin/user/getUserStatistics${filterTeamId === undefined ? "" : `?filterTeamId=${filterTeamId}`}`);
+}
+
+/** 查询用户数量与每日增量趋势，日期为 yyyy-MM-dd。 */
+export function getServerUserTrend(startDate: string, endDate: string, filterTeamId?: number) {
+    const params = new URLSearchParams({ startDate, endDate });
+    if (filterTeamId !== undefined) params.set("filterTeamId", String(filterTeamId));
+    return serverGet<UserTrendResponse>(`/admin/user/getUserTrend?${params.toString()}`);
 }
 
 export function updateServerUserStatus(userId: number, status: number) {

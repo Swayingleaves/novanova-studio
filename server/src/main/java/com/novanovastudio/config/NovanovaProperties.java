@@ -841,6 +841,9 @@ public class NovanovaProperties {
             /** Agent单次调用超时时间（秒） */
             private int timeoutSeconds = 90;
 
+            /** 批量合成镜头提示词时同时请求模型的镜头数量 */
+            private int composeConcurrency = 4;
+
             /**
              * 获取Agent单次调用超时时间（秒）。
              *
@@ -857,6 +860,24 @@ public class NovanovaProperties {
              */
             public void setTimeoutSeconds(int timeoutSeconds) {
                 this.timeoutSeconds = timeoutSeconds;
+            }
+
+            /**
+             * 获取批量合成提示词的并发镜头数量。
+             *
+             * @return int 并发数量
+             */
+            public int getComposeConcurrency() {
+                return composeConcurrency;
+            }
+
+            /**
+             * 设置批量合成提示词的并发镜头数量。
+             *
+             * @param composeConcurrency int 并发数量
+             */
+            public void setComposeConcurrency(int composeConcurrency) {
+                this.composeConcurrency = composeConcurrency;
             }
         }
 

@@ -104,6 +104,21 @@ function resolveAssetImageUrl(versions: ComicDramaAssetVersion[], media: ComicDr
     return "";
 }
 
+/** 资产图任务是否还在排队或生成中。 */
+function isRunningAssetImage(media: ComicDramaMediaResult): boolean {
+    return media.status === "queued" || media.status === "processing";
+}
+
+/** 某个资产版本是否已有排队或生成中的资产图任务。 */
+function versionHasRunningImage(versionId: string, media: ComicDramaMediaResult[]): boolean {
+    return media.some((item) => item.targetType === "assetVersion" && item.targetId === versionId && isRunningAssetImage(item));
+}
+
+/** 资产下任一版本是否正在生成资产图。 */
+function assetHasRunningImage(versions: ComicDramaAssetVersion[], media: ComicDramaMediaResult[]): boolean {
+    return versions.some((version) => versionHasRunningImage(version.id, media));
+}
+
 /** 视觉资产与多版本管理阶段视图。 */
 export function StageAssets() {
     const translate = useTranslation();
@@ -288,6 +303,11 @@ export function StageAssets() {
 
     // Open AI image generation for an asset version
     const openAssetImageGen = (asset: ComicDramaAsset, version: ComicDramaAssetVersion) => {
+        // 同一版本已有任务在跑时不允许再次提交，避免重复扣费与重复生成
+        if (versionHasRunningImage(version.id, mediaList)) {
+            message.warning(translate("comicDrama.assetImageIsGeneratingWaitForTheCurrentTask"));
+            return;
+        }
         setTargetAsset(asset);
         setTargetVersion(version);
         setGenModel(config.imageModel || "");
@@ -331,6 +351,11 @@ export function StageAssets() {
     // Trigger asset image generation
     const handleGenerateAssetImage = async () => {
         if (!targetVersion) return;
+        // 弹窗打开期间任务可能已经由其他入口发起，提交前再确认一次
+        if (versionHasRunningImage(targetVersion.id, mediaList)) {
+            message.warning(translate("comicDrama.assetImageIsGeneratingWaitForTheCurrentTask"));
+            return;
+        }
         if (!genModel) {
             message.warning(translate("comicDrama.selectAGenerationModelFirst"));
             return;
@@ -385,10 +410,15 @@ export function StageAssets() {
 
     const selectedAssets = assets.filter((asset) => selectedAssetIds.includes(asset.id));
     // 批量生成统一以各资产的最新版本为目标；没有版本的资产会被跳过
-    const batchTargetVersionIds = selectedAssets
-        .map((asset) => versionsByAsset[asset.id]?.[0]?.id)
-        .filter((versionId): versionId is string => Boolean(versionId));
-    const skippedAssetCount = selectedAssets.length - batchTargetVersionIds.length;
+    const latestVersions = selectedAssets
+        .map((asset) => versionsByAsset[asset.id]?.[0])
+        .filter((version): version is ComicDramaAssetVersion => Boolean(version));
+    // 正在生成中的资产不能再提交，否则会重复建任务与重复扣费
+    const batchTargetVersionIds = latestVersions
+        .filter((version) => !versionHasRunningImage(version.id, mediaList))
+        .map((version) => version.id);
+    const busyAssetCount = latestVersions.length - batchTargetVersionIds.length;
+    const skippedAssetCount = selectedAssets.length - latestVersions.length;
 
     const toggleAssetSelection = (assetId: string, checked: boolean) => {
         setSelectedAssetIds((current) => (checked ? [...current, assetId] : current.filter((id) => id !== assetId)));
@@ -404,9 +434,12 @@ export function StageAssets() {
             : current.filter((id) => !filteredIds.includes(id))));
     };
 
-    // 一键选中当前筛选结果里还没有资产图的资产
+    // 一键选中当前筛选结果里还没有资产图的资产；正在生成中的资产不选，避免批量重复建任务
     const selectAssetsMissingImage = () => {
-        const missing = filteredAssets.filter((asset) => !resolveAssetImageUrl(versionsByAsset[asset.id] || [], mediaList));
+        const missing = filteredAssets.filter((asset) => {
+            const versions = versionsByAsset[asset.id] || [];
+            return !resolveAssetImageUrl(versions, mediaList) && !assetHasRunningImage(versions, mediaList);
+        });
         if (missing.length === 0) {
             message.info(filteredAssets.length === 0 ? translate("comicDrama.noResultsMatchTheCurrentFilters") : translate("comicDrama.allFilteredAssetsAlreadyHaveImages"));
             return;
@@ -565,6 +598,8 @@ export function StageAssets() {
                         const typeInfo = getAssetTypeConfig(translate)[asset.assetType] || getAssetTypeConfig(translate).character;
                         const versions = versionsByAsset[asset.id] || [];
                         const assetImageUrl = resolveAssetImageUrl(versions, mediaList);
+                        // 该资产任一版本正在生成时按钮保持 loading，任务结束后才能再次发起
+                        const imageGenerating = assetHasRunningImage(versions, mediaList);
                         // Find how many shots reference this asset's versions
                         const shotCount = workspace.shots.filter((shot) =>
                             shot.assetVersionIds.some((vId) => versions.some((version) => version.id === vId))
@@ -629,6 +664,7 @@ export function StageAssets() {
                                             type="primary"
                                             ghost
                                             icon={<Sparkles className="size-3.5" />}
+                                            loading={imageGenerating}
                                             onClick={() => handleCardImageGen(asset)}
                                         >
                                             {translate("comicDrama.generateAssetImage")}</Button>
@@ -765,6 +801,7 @@ export function StageAssets() {
                             ) : (
                                 activeVersions.map((version) => {
                                     const versionImageUrl = resolveVersionImageUrl(version.id, mediaList);
+                                    const versionGenerating = versionHasRunningImage(version.id, mediaList);
 
                                     return (
                                         <div
@@ -803,6 +840,7 @@ export function StageAssets() {
                                                 size="small"
                                                 type="primary"
                                                 icon={<Sparkles className="size-3.5" />}
+                                                loading={versionGenerating}
                                                 onClick={() => openAssetImageGen(activeAssetForVersions, version)}
                                             >
                                                 {translate("comicDrama.generateAssetImageWithAi")}</Button>
@@ -918,6 +956,7 @@ export function StageAssets() {
                     <div className="rounded-lg bg-[var(--studio-panel-solid)] p-3 text-xs leading-5 text-[var(--studio-muted)]">
                         {translate("comicDrama.batchAssetTargets", { value0: batchTargetVersionIds.length })}
                         {skippedAssetCount > 0 ? <span className="text-amber-500">{translate("comicDrama.batchAssetsSkipped", { value0: skippedAssetCount })}</span> : null}
+                        {busyAssetCount > 0 ? <span className="text-amber-500">{translate("comicDrama.batchAssetsGeneratingSkipped", { value0: busyAssetCount })}</span> : null}
                     </div>
                     <div>
                         <label className="text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.generationModel")}</label>

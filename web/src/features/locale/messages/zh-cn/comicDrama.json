@@ -520,6 +520,7 @@
     "shotsTotalDurationApproximately": "个镜头 · 总时长约",
     "selectWithoutPrompts": "仅选未生成提示词",
     "generatingBatchCountCount": "批量生成中 {value0}/{value1}",
+    "generatingFinalPromptsForCountShots": "正在生成 {value0} 个镜头的最终提示词…",
     "generateFinalPromptsInBatchCount": "批量生成最终提示词{value0}",
     "noShotsMatchTheCurrentFilters": "当前筛选条件下没有镜头",
     "addShotManually": "手动添加镜头",
@@ -953,5 +954,7 @@
     "historyCount_9c7085": "已处理历史 ({value0})",
     "pendingImpactsCount_43a840": "待处理影响 ({value0})",
     "batchAssetTargets": "目标：{value0} 个资产（各取最新版本）",
-    "batchAssetsSkipped": " · 另有{value0} 个资产还没有版本，将被跳过"
+    "batchAssetsSkipped": " · 另有{value0} 个资产还没有版本，将被跳过",
+    "batchAssetsGeneratingSkipped": " · 另有{value0} 个资产正在生成中，已跳过",
+    "assetImageIsGeneratingWaitForTheCurrentTask": "该资产图正在生成中，请等待当前任务完成"
 }

@@ -9,6 +9,7 @@ import {
     bindComicDramaCanvas,
     checkComicDramaContinuity,
     composeComicDramaPrompt,
+    composeComicDramaPrompts,
     confirmComicDramaShotDraft,
     confirmComicDramaUpdate,
     createComicDramaBatchTask,
@@ -30,6 +31,7 @@ import {
     saveComicDramaVoiceTrack,
     updateComicDramaSettings,
     updateComicDramaShotDraft,
+    type ComicDramaComposePromptsResult,
 } from "@/services/api/comic-drama";
 import type {
     ComicDramaAsset,
@@ -107,6 +109,8 @@ type ComicDramaState = {
     savePrompt: (shotId: string, prompt: string, expectedPromptVersion?: number) => Promise<ComicDramaPromptVersion>;
     /** AI 合成并立即采用为后续视频生成所使用的最终提示词。 */
     generateFinalVideoPrompt: (shotId: string, model: string) => Promise<ComicDramaPromptVersion>;
+    /** 一次提交多个镜头，由服务端并发合成并统一采用，完成后只刷新一次工作区。 */
+    composePromptsBatch: (shotIds: string[], model: string) => Promise<ComicDramaComposePromptsResult>;
     createGenerationTask: (input: {
         targetType: string;
         targetIds: string[];
@@ -352,6 +356,21 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
     generateFinalVideoPrompt: async (shotId, model) => {
         const composed = await get().composePrompt(shotId, model);
         return get().savePrompt(shotId, composed.prompt, composed.versionNumber);
+    },
+
+    // 批量合成由服务端并发处理，前端只发一次请求，完成后统一刷新一次工作区。
+    composePromptsBatch: async (shotIds, model) => {
+        const workspace = get().workspace;
+        if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
+        const result = await composeComicDramaPrompts({
+            projectId: workspace.projectId,
+            expectedRevision: workspace.revision,
+            shotIds,
+            model,
+            confirmed: true,
+        });
+        await get().reloadWorkspace();
+        return result;
     },
 
     createGenerationTask: async (input) => {

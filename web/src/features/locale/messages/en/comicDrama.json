@@ -520,6 +520,7 @@
     "shotsTotalDurationApproximately": "shots · Total duration approximately",
     "selectWithoutPrompts": "Select without prompts",
     "generatingBatchCountCount": "Generating batch {value0}/{value1}",
+    "generatingFinalPromptsForCountShots": "Generating final prompts for {value0} shots…",
     "generateFinalPromptsInBatchCount": "Generate final prompts in batch{value0}",
     "noShotsMatchTheCurrentFilters": "No shots match the current filters",
     "addShotManually": "Add shot manually",
@@ -953,5 +954,7 @@
     "historyCount_9c7085": "History ({value0})",
     "pendingImpactsCount_43a840": "Pending impacts ({value0})",
     "batchAssetTargets": "Targets: {value0} assets (latest version of each)",
-    "batchAssetsSkipped": " · {value0} assets without versions will be skipped"
+    "batchAssetsSkipped": " · {value0} assets without versions will be skipped",
+    "batchAssetsGeneratingSkipped": " · {value0} assets are still generating and were skipped",
+    "assetImageIsGeneratingWaitForTheCurrentTask": "This asset image is still generating; wait for the current task to finish"
 }

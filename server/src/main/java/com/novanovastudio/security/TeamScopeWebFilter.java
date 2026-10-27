@@ -53,7 +53,8 @@ public class TeamScopeWebFilter implements WebFilter {
         String filterValue = exchange.getRequest().getQueryParams().getFirst("filterTeamId");
         if (filterValue != null && (teamValue == null || "0".equals(teamValue)) && path.startsWith("/api/v1/admin/")) {
             if (exchange.getRequest().getMethod() != org.springframework.http.HttpMethod.GET || !Set.of(
-                    "/api/v1/admin/user/listUsers", "/api/v1/admin/user/getUserStatistics", "/api/v1/admin/credit/getCreditOverview",
+                    "/api/v1/admin/user/listUsers", "/api/v1/admin/user/getUserStatistics", "/api/v1/admin/user/getUserTrend",
+                    "/api/v1/admin/credit/getCreditOverview",
                     "/api/v1/admin/credit/listCreditTransactions").contains(path)) return reject(exchange, "此接口不支持团队统计筛选");
             long filterTeamId;
             try { filterTeamId = Long.parseLong(filterValue); if (filterTeamId < 0) throw new NumberFormatException(); }

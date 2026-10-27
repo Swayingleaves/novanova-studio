@@ -74,6 +74,21 @@ public class AdminUserController {
     }
 
     /**
+     * 查询搜索时间范围内的用户数量与每日增量趋势。
+     *
+     * @param startDate String 开始日期（yyyy-MM-dd），为空时默认结束日期前 29 天
+     * @param endDate String 结束日期（yyyy-MM-dd），为空时默认今天
+     * @return Mono<ApiResponse<UserTrendResponse>> 用户趋势
+     */
+    @GetMapping("/getUserTrend")
+    public Mono<ApiResponse<UserDtos.UserTrendResponse>> getUserTrend(@RequestParam(required = false) String startDate,
+                                                                      @RequestParam(required = false) String endDate) {
+        return adminGuard.requireAdmin()
+                .then(userService.getUserTrend(startDate, endDate))
+                .map(ApiResponse::ok);
+    }
+
+    /**
      * 新增用户
      *
      * @param request AdminCreateUserRequest 请求

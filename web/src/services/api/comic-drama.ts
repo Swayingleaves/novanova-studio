@@ -115,6 +115,18 @@ export function composeComicDramaPrompt(projectId: string, shotId: string, model
     return serverPost<ComicDramaPromptVersion>(`${COMIC_DRAMA_PATH}/composePrompt`, { projectId, shotId, model, confirmed });
 }
 
+export type ComicDramaComposePromptsResult = {
+    succeededShotIds: string[];
+    failedShotIds: string[];
+    failureMessage: string;
+    chargedCredits: CreditAmount;
+};
+
+/** 批量合成并采用多个镜头的最终提示词，服务端并发请求模型。 */
+export function composeComicDramaPrompts(input: { projectId: string; expectedRevision: number; shotIds: string[]; model: string; confirmed: true }) {
+    return serverPost<ComicDramaComposePromptsResult>(`${COMIC_DRAMA_PATH}/composePrompts`, input);
+}
+
 export function saveComicDramaPrompt(projectId: string, expectedRevision: number, shotId: string, prompt: string, expectedPromptVersion?: number) {
     return serverPost<ComicDramaPromptVersion>(`${COMIC_DRAMA_PATH}/savePrompt`, { projectId, expectedRevision, shotId, prompt, expectedPromptVersion });
 }

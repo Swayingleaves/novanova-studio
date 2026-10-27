@@ -269,6 +269,8 @@ novanova:
     storyboard-agent:
       # 分镜 Agent 单次调用超时时间（秒）
       timeout-seconds: ${AI_STORYBOARD_AGENT_TIMEOUT_SECONDS:90}
+      # 批量合成镜头提示词时同时请求模型的镜头数量
+      compose-concurrency: ${AI_STORYBOARD_COMPOSE_CONCURRENCY:4}
     script-agent:
       # 剧本 Agent 单次调用超时时间（秒）；批量归纳（人物、地点等结构化草稿）输出量大，与故事知识库保持一致
       timeout-seconds: ${AI_SCRIPT_AGENT_TIMEOUT_SECONDS:600}

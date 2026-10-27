@@ -30,11 +30,15 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Locale;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -93,6 +97,12 @@ public class UserService {
 
     /** 用户统计业务时区 */
     private static final ZoneId USER_STATISTICS_TIME_ZONE = ZoneId.of("Asia/Shanghai");
+
+    /** 用户趋势默认统计天数，含结束日期当天 */
+    private static final int DEFAULT_USER_TREND_DAYS = 30;
+
+    /** 用户趋势单次最大统计天数，避免一次查询过大区间 */
+    private static final int MAX_USER_TREND_DAYS = 366;
 
     /** 安全随机数 */
     private static final SecureRandom secureRandom = new SecureRandom();
@@ -453,6 +463,72 @@ public class UserService {
                 .doOnSuccess(statistics -> log.info(
                         "查询用户统计成功: totalUsers={}, monthlyNewUsers={}, dailyNewUsers={}",
                         statistics.totalUsers(), statistics.monthlyNewUsers(), statistics.dailyNewUsers()));
+    }
+
+    /**
+     * 查询用户数量与每日增量趋势。
+     *
+     * @param startDate String 开始日期（yyyy-MM-dd），为空时取结束日期前 29 天
+     * @param endDate String 结束日期（yyyy-MM-dd），为空时取今天
+     * @return Mono<UserTrendResponse> 每日用户数量与增量
+     */
+    public Mono<UserDtos.UserTrendResponse> getUserTrend(String startDate, String endDate) {
+        return Mono.defer(() -> {
+            LocalDate today = LocalDate.now(USER_STATISTICS_TIME_ZONE);
+            LocalDate end = resolveUserTrendDate(endDate, today);
+            LocalDate start = resolveUserTrendDate(startDate, end.minusDays(DEFAULT_USER_TREND_DAYS - 1L));
+            if (start.isAfter(end)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.userTrendStartDateMustNotBeAfterEndDate"));
+            }
+            // 区间过长时只保留结束日期前最近的合法天数，避免单次返回过多数据点
+            LocalDate rangeStart = start.isBefore(end.minusDays(MAX_USER_TREND_DAYS - 1L)) ? end.minusDays(MAX_USER_TREND_DAYS - 1L) : start;
+            OffsetDateTime startTime = rangeStart.atStartOfDay(USER_STATISTICS_TIME_ZONE).toOffsetDateTime();
+            OffsetDateTime endTime = end.plusDays(1).atStartOfDay(USER_STATISTICS_TIME_ZONE).toOffsetDateTime();
+            return Mono.zip(userRepository.countUsersCreatedBefore(startTime), userRepository.listDailyNewUsers(startTime, endTime).collectList())
+                    .map(tuple -> buildUserTrend(rangeStart, end, tuple.getT1(), tuple.getT2()))
+                    .doOnSuccess(trend -> log.info("查询用户趋势成功: startDate={}, endDate={}, totalUsers={}, newUsers={}",
+                            trend.startDate(), trend.endDate(), trend.totalUsers(), trend.newUsers()));
+        });
+    }
+
+    /**
+     * 解析用户趋势日期，空值回退到默认日期。
+     *
+     * @param value String 日期文本
+     * @param fallback LocalDate 默认日期
+     * @return LocalDate 解析后的日期
+     */
+    private LocalDate resolveUserTrendDate(String value, LocalDate fallback) {
+        if (!StringUtils.hasText(value)) return fallback;
+        try {
+            return LocalDate.parse(value.trim());
+        } catch (DateTimeParseException error) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.userTrendDateMustBeISODate"));
+        }
+    }
+
+    /**
+     * 按区间逐日展开用户数量与增量，缺失日期补零。
+     *
+     * @param start LocalDate 统计开始日期
+     * @param end LocalDate 统计结束日期
+     * @param baseline long 统计开始前的用户总数
+     * @param daily List<DailyNewUsers> 每日新增用户数
+     * @return UserTrendResponse 趋势数据
+     */
+    private UserDtos.UserTrendResponse buildUserTrend(LocalDate start, LocalDate end, long baseline, List<UserRepository.DailyNewUsers> daily) {
+        Map<String, Long> newUsersByDate = daily.stream()
+                .collect(Collectors.toMap(UserRepository.DailyNewUsers::date, UserRepository.DailyNewUsers::newUsers, Long::sum));
+        List<UserDtos.UserTrendPoint> points = new ArrayList<>();
+        long cumulative = baseline;
+        long newUsers = 0;
+        for (LocalDate cursor = start; !cursor.isAfter(end); cursor = cursor.plusDays(1)) {
+            long dailyNewUsers = newUsersByDate.getOrDefault(cursor.toString(), 0L);
+            cumulative += dailyNewUsers;
+            newUsers += dailyNewUsers;
+            points.add(new UserDtos.UserTrendPoint(cursor.toString(), dailyNewUsers, cumulative));
+        }
+        return new UserDtos.UserTrendResponse(start.toString(), end.toString(), cumulative, newUsers, points);
     }
 
     /**

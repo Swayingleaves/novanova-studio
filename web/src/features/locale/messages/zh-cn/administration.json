@@ -371,5 +371,11 @@
   "teamMemberRoleLabel": "{name} 的团队身份",
   "changeTeamMemberRole": "修改团队成员身份",
   "grantTeamAdministratorNotice": "将 {name} 设为团队管理员后，该成员可以管理本团队的成员、配置及积分。该授权仅在当前团队生效，仍占用子账号名额。",
-  "revokeTeamAdministratorNotice": "将 {name} 设为普通成员后，该成员将失去本团队后台管理权限，其他团队及平台身份不受影响。"
+  "revokeTeamAdministratorNotice": "将 {name} 设为普通成员后，该成员将失去本团队后台管理权限，其他团队及平台身份不受影响。",
+  "userGrowthTrend": "用户增长趋势",
+  "userCount": "用户数量",
+  "dailyUserIncrement": "每日用户增量",
+  "userTrendChart": "用户数量与每日用户增量折线图",
+  "noUserTrendData": "该时间范围内暂无用户数据",
+  "failedToLoadUserTrend": "用户趋势加载失败"
 }

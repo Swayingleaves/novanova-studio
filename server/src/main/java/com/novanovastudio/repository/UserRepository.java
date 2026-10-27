@@ -7,7 +7,11 @@ import org.springframework.dao.DuplicateKeyException;
 import com.novanovastudio.entity.EmailVerificationCode;
 import com.novanovastudio.entity.PasswordResetToken;
 import com.novanovastudio.entity.User;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Repository;
@@ -24,6 +28,9 @@ import reactor.core.publisher.Mono;
 @Repository
 @RequiredArgsConstructor
 public class UserRepository {
+
+    /** 管理端时间筛选的兜底时区，与用户统计保持一致 */
+    private static final ZoneId FILTER_TIME_ZONE = ZoneId.of("Asia/Shanghai");
 
     /** 数据库客户端 */
     private final DatabaseClient databaseClient;
@@ -353,8 +360,8 @@ public class UserRepository {
         if (userId != null) spec = spec.bind("userId", userId);
         if (StringUtils.hasText(role)) spec = spec.bind("role", role.trim());
         if (status != null) spec = spec.bind("status", status);
-        if (StringUtils.hasText(createdAfter)) spec = spec.bind("createdAfter", java.time.LocalDateTime.parse(createdAfter.trim()));
-        if (StringUtils.hasText(createdBefore)) spec = spec.bind("createdBefore", java.time.LocalDateTime.parse(createdBefore.trim()));
+        if (StringUtils.hasText(createdAfter)) spec = spec.bind("createdAfter", parseFilterTime(createdAfter));
+        if (StringUtils.hasText(createdBefore)) spec = spec.bind("createdBefore", parseFilterTime(createdBefore));
         return spec.map((row, metadata) -> RowMappers.user(row)).all();
     }
 
@@ -382,9 +389,38 @@ public class UserRepository {
         if (userId != null) spec = spec.bind("userId", userId);
         if (StringUtils.hasText(role)) spec = spec.bind("role", role.trim());
         if (status != null) spec = spec.bind("status", status);
-        if (StringUtils.hasText(createdAfter)) spec = spec.bind("createdAfter", java.time.LocalDateTime.parse(createdAfter.trim()));
-        if (StringUtils.hasText(createdBefore)) spec = spec.bind("createdBefore", java.time.LocalDateTime.parse(createdBefore.trim()));
+        if (StringUtils.hasText(createdAfter)) spec = spec.bind("createdAfter", parseFilterTime(createdAfter));
+        if (StringUtils.hasText(createdBefore)) spec = spec.bind("createdBefore", parseFilterTime(createdBefore));
         return spec.map((row, metadata) -> row.get("total", Long.class)).one().defaultIfEmpty(0L);
+    }
+
+    /**
+     * 解析管理端时间筛选值，兼容带时区偏移的 ISO-8601、本地日期时间与纯日期。
+     * <p>
+     * 前端日期选择器传入的是 {@code 2026-09-30T16:00:00.000Z} 这类带Z的字符串，
+     * 不能直接交给 {@link LocalDateTime#parse}；纯日期按统计时区的当天零点处理。
+     * 包内可见，便于直接单测三种输入格式。
+     *
+     * @param value String 时间筛选值
+     * @return OffsetDateTime 解析后的时间点
+     */
+    static OffsetDateTime parseFilterTime(String value) {
+        String text = value.trim();
+        try {
+            return OffsetDateTime.parse(text);
+        } catch (DateTimeParseException ignored) {
+            // 继续尝试不带偏移的本地时间
+        }
+        try {
+            return LocalDateTime.parse(text).atZone(FILTER_TIME_ZONE).toOffsetDateTime();
+        } catch (DateTimeParseException ignored) {
+            // 继续尝试纯日期
+        }
+        try {
+            return LocalDate.parse(text).atStartOfDay(FILTER_TIME_ZONE).toOffsetDateTime();
+        } catch (DateTimeParseException error) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidCreatedTimeFilter"));
+        }
     }
 
     /**
@@ -413,6 +449,47 @@ public class UserRepository {
     }
 
     /**
+     * 查询区间内每日新增用户数，按统计时区归入自然日。
+     *
+     * @param start OffsetDateTime 区间开始时间（含）
+     * @param endExclusive OffsetDateTime 区间结束时间（不含）
+     * @return Flux<DailyNewUsers> 有新增用户的日期及数量
+     */
+    public Flux<DailyNewUsers> listDailyNewUsers(OffsetDateTime start, OffsetDateTime endExclusive) {
+        return databaseClient.sql("""
+                SELECT TO_CHAR(DATE_TRUNC('day', created_at AT TIME ZONE 'Asia/Shanghai'), 'YYYY-MM-DD') AS period,
+                       COUNT(*) AS new_users
+                FROM users WHERE (current_admin_team_filter() < 1 OR EXISTS(SELECT 1 FROM team_members members WHERE members.user_id=users.id AND members.team_id=current_admin_team_filter() AND members.member_status <> 'removed'))
+                  AND created_at >= :start AND created_at < :endExclusive
+                GROUP BY period ORDER BY period ASC
+                """)
+                .bind("start", start)
+                .bind("endExclusive", endExclusive)
+                .map((row, metadata) -> new DailyNewUsers(
+                        row.get("period", String.class),
+                        row.get("new_users", Long.class)))
+                .all();
+    }
+
+    /**
+     * 统计指定时间之前创建的用户总数，作为用户数量曲线的起点。
+     *
+     * @param before OffsetDateTime 统计起点时间（不含）
+     * @return Mono<Long> 起点前的用户总数
+     */
+    public Mono<Long> countUsersCreatedBefore(OffsetDateTime before) {
+        return databaseClient.sql("""
+                SELECT COUNT(*) AS total_users FROM users
+                WHERE (current_admin_team_filter() < 1 OR EXISTS(SELECT 1 FROM team_members members WHERE members.user_id=users.id AND members.team_id=current_admin_team_filter() AND members.member_status <> 'removed'))
+                  AND created_at < :before
+                """)
+                .bind("before", before)
+                .map((row, metadata) -> row.get("total_users", Long.class))
+                .one()
+                .defaultIfEmpty(0L);
+    }
+
+    /**
      * 更新用户状态
      *
      * @param userId Long 用户ID
@@ -437,6 +514,15 @@ public class UserRepository {
      * @param dailyNewUsers long 今日新增用户数
      */
     public record UserStatistics(long totalUsers, long monthlyNewUsers, long dailyNewUsers) {
+    }
+
+    /**
+     * 用户每日新增数。
+     *
+     * @param date String 日期（yyyy-MM-dd，按统计时区）
+     * @param newUsers long 当日新增用户数
+     */
+    public record DailyNewUsers(String date, long newUsers) {
     }
 
     /**

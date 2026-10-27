@@ -371,5 +371,11 @@
   "teamMemberRoleLabel": "Team role for {name}",
   "changeTeamMemberRole": "Change team member role",
   "grantTeamAdministratorNotice": "Making {name} a team administrator grants access to this team's members, settings, and credits. The role applies only to this team and still counts toward its member limit.",
-  "revokeTeamAdministratorNotice": "Making {name} a member removes their access to this team's administration. Their roles in other teams and the platform remain unchanged."
+  "revokeTeamAdministratorNotice": "Making {name} a member removes their access to this team's administration. Their roles in other teams and the platform remain unchanged.",
+  "userGrowthTrend": "User growth trend",
+  "userCount": "Total users",
+  "dailyUserIncrement": "New users per day",
+  "userTrendChart": "Line chart of total users and new users per day",
+  "noUserTrendData": "No user data in this period",
+  "failedToLoadUserTrend": "Failed to load user trend"
 }

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.ComicDramaDtos;
 import com.novanovastudio.repository.ComicDramaRepository;
 import com.novanovastudio.security.CurrentUserProvider;
@@ -51,7 +52,7 @@ class ComicDramaTimelineServiceTest {
         transactionalOperator = mock(TransactionalOperator.class);
         service = new ComicDramaService(currentUserProvider, repository, mock(ScriptService.class),
                 mock(StoryboardAgentService.class), mock(AiTaskService.class), mock(PersistenceService.class),
-                transactionalOperator);
+                transactionalOperator, new NovanovaProperties());
     }
 
     /**

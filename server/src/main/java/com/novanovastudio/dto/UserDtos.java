@@ -148,6 +148,28 @@ public final class UserDtos {
     }
 
     /**
+     * 用户增长趋势单日数据
+     *
+     * @param date String 日期（yyyy-MM-dd，按统计时区）
+     * @param newUsers long 当日新增用户数
+     * @param totalUsers long 截至当日结束的累计用户数
+     */
+    public record UserTrendPoint(String date, long newUsers, long totalUsers) {
+    }
+
+    /**
+     * 用户增长趋势响应
+     *
+     * @param startDate String 统计开始日期
+     * @param endDate String 统计结束日期
+     * @param totalUsers long 截至结束日期的累计用户数
+     * @param newUsers long 统计区间内新增用户数
+     * @param points List<UserTrendPoint> 每日用户数量与增量
+     */
+    public record UserTrendResponse(String startDate, String endDate, long totalUsers, long newUsers, List<UserTrendPoint> points) {
+    }
+
+    /**
      * 更新用户状态请求
      *
      * @param userId Long 用户ID

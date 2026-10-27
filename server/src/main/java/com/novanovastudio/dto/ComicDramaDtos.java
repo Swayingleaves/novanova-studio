@@ -294,6 +294,19 @@ public final class ComicDramaDtos {
                                        @AssertTrue(message = "合成提示词前必须明确确认费用") boolean confirmed) {
     }
 
+    /** 批量合成镜头提示词请求，一次提交多个镜头由服务端并发处理。 */
+    public record ComposePromptsRequest(@NotBlank @Size(max = 64) String projectId,
+                                        @Min(0) long expectedRevision,
+                                        @NotEmpty @Size(max = 100, message = "单次批量合成最多支持100个镜头") List<@NotBlank @Size(max = 64) String> shotIds,
+                                        @NotBlank @Size(max = 256) String model,
+                                        @AssertTrue(message = "合成提示词前必须明确确认费用") boolean confirmed) {
+    }
+
+    /** 批量合成结果：成功与失败的镜头标识、失败原因与实际扣费。 */
+    public record ComposePromptsResult(List<String> succeededShotIds, List<String> failedShotIds, String failureMessage,
+                                       @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal chargedCredits) {
+    }
+
     /** 手动保存提示词请求。 */
     public record SavePromptRequest(@NotBlank @Size(max = 64) String projectId, @Min(0) long expectedRevision,
                                     @NotBlank @Size(max = 64) String shotId,

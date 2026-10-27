@@ -234,6 +234,13 @@ public class ComicDramaController {
         return execute("合成漫剧镜头提示词", httpRequest, request, service.composePrompt(request));
     }
 
+    /** 批量合成镜头最终提示词，服务端并发请求模型后统一采用。 */
+    @PostMapping("/composePrompts")
+    public Mono<ApiResponse<ComicDramaDtos.ComposePromptsResult>> composePrompts(
+            @Valid @RequestBody ComicDramaDtos.ComposePromptsRequest request, ServerHttpRequest httpRequest) {
+        return execute("批量合成漫剧镜头提示词", httpRequest, request, service.composePrompts(request));
+    }
+
     /** 保存用户编辑后的提示词版本。 */
     @PostMapping("/savePrompt")
     public Mono<ApiResponse<ComicDramaDtos.PromptVersion>> savePrompt(

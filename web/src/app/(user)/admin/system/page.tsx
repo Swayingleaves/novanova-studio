@@ -21,6 +21,7 @@ import { Edit, Image as ImageIcon, Plus, Power, Search, Send, Sparkles, Trash2, 
 import {
     adjustServerUserCredits,
     getServerUserStatistics,
+    getServerUserTrend,
     unlockServerUserPassword,
     listServerUsers,
     updateServerUserRole,
@@ -80,6 +81,12 @@ import { CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactio
 const PAGE_SIZE = 20;
 
 const CreditChart = dynamic(() => import("@/app/(user)/credits/components/credit-chart").then((module) => module.CreditChart), {
+    ssr: false,
+    loading: () => <Skeleton active className="px-5 py-6" paragraph={{ rows: 7 }} />,
+});
+
+/** 用户增长趋势图依赖浏览器 API，按需加载避免影响首屏。 */
+const UserTrendChart = dynamic(() => import("./components/user-trend-chart").then((module) => module.UserTrendChart), {
     ssr: false,
     loading: () => <Skeleton active className="px-5 py-6" paragraph={{ rows: 7 }} />,
 });
@@ -328,13 +335,13 @@ function CreditConsumptionManagement() {
                     </div>
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
-                    <CreditChartPanel title={translate("administration.imageVsVideoUsage")} loading={overviewQuery.isLoading} empty={!generationDistribution.length}>
+                    <AdminChartPanel title={translate("administration.imageVsVideoUsage")} loading={overviewQuery.isLoading} empty={!generationDistribution.length}>
                         <CreditChart type="pie" data={generationDistribution} ariaLabel={translate("administration.adminImageAndVideoUsageChart")} />
-                    </CreditChartPanel>
-                    <CreditChartPanel title={translate("administration.usageByModel")} loading={overviewQuery.isLoading} empty={!modelDistribution.length}>
+                    </AdminChartPanel>
+                    <AdminChartPanel title={translate("administration.usageByModel")} loading={overviewQuery.isLoading} empty={!modelDistribution.length}>
                         <CreditChart type="pie" data={modelDistribution} ariaLabel={translate("administration.adminCreditUsageByModel")} />
-                    </CreditChartPanel>
-                    <CreditChartPanel
+                    </AdminChartPanel>
+                    <AdminChartPanel
                         className="lg:col-span-2"
                         title={translate("administration.creditUsageTrend")}
                         loading={overviewQuery.isLoading}
@@ -352,7 +359,7 @@ function CreditConsumptionManagement() {
                         }
                     >
                         <CreditChart type="bar" data={trend} ariaLabel={translate("administration.adminCreditUsageBarChart")} />
-                    </CreditChartPanel>
+                    </AdminChartPanel>
                 </div>
             </section>
 
@@ -385,12 +392,12 @@ function CreditConsumptionManagement() {
 }
 
 /**
- * 渲染管理员积分图表面板。
+ * 渲染管理员图表面板。
  *
- * @param props 标题、加载、空状态和图表内容
+ * @param props 标题、加载、空状态、空状态文案和图表内容
  * @return 图表面板
  */
-function CreditChartPanel({ title, loading, empty, extra, className, children }: { title: string; loading: boolean; empty: boolean; extra?: ReactNode; className?: string; children: ReactNode }) {
+function AdminChartPanel({ title, loading, empty, emptyText, extra, className, children }: { title: string; loading: boolean; empty: boolean; emptyText?: string; extra?: ReactNode; className?: string; children: ReactNode }) {
     const translate = useTranslation();
     return (
         <section className={`min-w-0 border border-[var(--studio-line)] bg-[var(--studio-surface)] p-4 md:p-5 ${className || ""}`}>
@@ -400,7 +407,7 @@ function CreditChartPanel({ title, loading, empty, extra, className, children }:
             </div>
             <div className="mt-2">
                 {loading ? <Skeleton active className="py-5" paragraph={{ rows: 6 }} /> : null}
-                {!loading && empty ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("administration.noUsageDataInThisPeriod")} className="py-9" /> : null}
+                {!loading && empty ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText || translate("administration.noUsageDataInThisPeriod")} className="py-9" /> : null}
                 {!loading && !empty ? children : null}
             </div>
         </section>
@@ -435,6 +442,16 @@ function UserManagement() {
     const statisticsQuery = useQuery({
         queryKey: ["admin-user-statistics", filterTeamId],
         queryFn: () => getServerUserStatistics(filterTeamId),
+    });
+    // 趋势图跟随搜索区的时间范围；没选范围时默认最近 30 天（含今天）
+    const trendRange = useMemo(() => {
+        const end = filterCreatedBefore ? dayjs(filterCreatedBefore) : dayjs();
+        const start = filterCreatedAfter ? dayjs(filterCreatedAfter) : end.subtract(29, "day");
+        return { startDate: start.format("YYYY-MM-DD"), endDate: end.format("YYYY-MM-DD") };
+    }, [filterCreatedAfter, filterCreatedBefore]);
+    const trendQuery = useQuery({
+        queryKey: ["admin-user-trend", trendRange.startDate, trendRange.endDate, filterTeamId],
+        queryFn: () => getServerUserTrend(trendRange.startDate, trendRange.endDate, filterTeamId),
     });
 
     const loadUsers = useCallback(
@@ -491,7 +508,7 @@ function UserManagement() {
             setNewUserNickname("");
             setNewUserRole("user");
             setPage(1);
-            await Promise.all([loadUsers(1), statisticsQuery.refetch()]);
+            await Promise.all([loadUsers(1), statisticsQuery.refetch(), trendQuery.refetch()]);
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("administration.failedToCreateUser"));
         }
@@ -667,6 +684,28 @@ function UserManagement() {
                     }
                 />
             ) : null}
+            {trendQuery.isError ? (
+                <Alert
+                    className="mb-4"
+                    type="error"
+                    showIcon
+                    title={translate("administration.failedToLoadUserTrend")}
+                    action={
+                        <Button size="small" onClick={() => void trendQuery.refetch()}>
+                            {translate("administration.reload")}</Button>
+                    }
+                />
+            ) : null}
+            <AdminChartPanel
+                className="mb-5"
+                title={translate("administration.userGrowthTrend")}
+                loading={trendQuery.isLoading}
+                empty={!trendQuery.data?.points?.length}
+                emptyText={translate("administration.noUserTrendData")}
+                extra={<span className="text-xs tabular-nums text-[var(--studio-muted)]">{trendQuery.data?.startDate || trendRange.startDate} ~ {trendQuery.data?.endDate || trendRange.endDate}</span>}
+            >
+                <UserTrendChart points={trendQuery.data?.points || []} ariaLabel={translate("administration.userTrendChart")} />
+            </AdminChartPanel>
             <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                     <Select className="w-48" allowClear placeholder="全部团队用户" value={filterTeamId} options={(teamsQuery.data || []).map((team) => ({ value: team.id, label: team.name }))} onChange={(value) => { setFilterTeamId(value); setPage(1); }} />
@@ -731,8 +770,9 @@ function UserManagement() {
                     />
                     <DatePicker.RangePicker
                         onChange={(dates) => {
-                            setFilterCreatedAfter(dates?.[0]?.toISOString());
-                            setFilterCreatedBefore(dates?.[1]?.toISOString());
+                            // 起止都取本地自然日边界：只到当天零点会把结束日整天排除掉
+                            setFilterCreatedAfter(dates?.[0]?.startOf("day").toISOString());
+                            setFilterCreatedBefore(dates?.[1]?.endOf("day").toISOString());
                             setPage(1);
                             void loadUsers(1);
                         }}

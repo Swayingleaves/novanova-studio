@@ -87,6 +87,7 @@ export function StageShots() {
     const reorderShots = useComicDramaStore((state) => state.reorderShots);
     const generateShotDraft = useComicDramaStore((state) => state.generateShotDraft);
     const generateFinalVideoPrompt = useComicDramaStore((state) => state.generateFinalVideoPrompt);
+    const composePromptsBatch = useComicDramaStore((state) => state.composePromptsBatch);
     const savePrompt = useComicDramaStore((state) => state.savePrompt);
 
     // Filters
@@ -117,7 +118,7 @@ export function StageShots() {
     const [splitting, setSplitting] = useState(false);
     const [promptModel, setPromptModel] = useState<string>("");
     const [composingPromptShotId, setComposingPromptShotId] = useState<string | null>(null);
-    const [batchComposeProgress, setBatchComposeProgress] = useState<{ done: number; total: number } | null>(null);
+    const [batchComposeProgress, setBatchComposeProgress] = useState<{ total: number } | null>(null);
     const [selectedShotIds, setSelectedShotIds] = useState<string[]>([]);
 
     // Edit shot form
@@ -184,7 +185,7 @@ export function StageShots() {
 
     const composingPrompts = Boolean(composingPromptShotId) || Boolean(batchComposeProgress);
 
-    // 选中集合跨筛选保留，批量生成按镜头顺序串行处理。
+    // 选中集合跨筛选保留，批量生成时按镜头顺序一次性提交给服务端并发处理。
     const selectedShots = useMemo(
         () => shots.filter((shot) => selectedShotIds.includes(shot.id)).sort((a, b) => a.sortOrder - b.sortOrder),
         [shots, selectedShotIds],
@@ -402,26 +403,27 @@ export function StageShots() {
         }
     };
 
-    // 对勾选的镜头逐个生成并采用；已有提示词的镜头会生成新版本覆盖，串行处理避免并发 reloadWorkspace 互相覆盖。
+    // 一次提交勾选的镜头，由服务端并发请求模型并统一采用，失败镜头单独返回。
     const handleBatchGenerateFinalVideoPrompts = async () => {
         if (composingPrompts || selectedShots.length === 0) return;
         if (!promptModel) {
             message.warning(translate("comicDrama.selectAPromptModel"));
             return;
         }
-        let failed = 0;
-        for (let index = 0; index < selectedShots.length; index += 1) {
-            setBatchComposeProgress({ done: index, total: selectedShots.length });
-            try {
-                await generateFinalVideoPrompt(selectedShots[index].id, promptModel);
-            } catch {
-                failed += 1;
-            }
+        const total = selectedShots.length;
+        setBatchComposeProgress({ total });
+        try {
+            const result = await composePromptsBatch(selectedShots.map((shot) => shot.id), promptModel);
+            const succeeded = result.succeededShotIds.length;
+            if (result.failedShotIds.length > 0) {
+                const summary = translate("comicDrama.generatedAndAdoptedFinalPromptsForCountShotsCountFailed", { value0: succeeded, value1: result.failedShotIds.length });
+                message.warning(result.failureMessage ? `${summary}：${result.failureMessage}` : summary);
+            } else message.success(translate("comicDrama.generatedAndAdoptedFinalPromptsForCountShots", { value0: succeeded }));
+        } catch (error) {
+            if (error instanceof Error) message.error(error.message);
+        } finally {
+            setBatchComposeProgress(null);
         }
-        setBatchComposeProgress(null);
-        const succeeded = selectedShots.length - failed;
-        if (failed > 0) message.warning(translate("comicDrama.generatedAndAdoptedFinalPromptsForCountShotsCountFailed", { value0: succeeded, value1: failed }));
-        else message.success(translate("comicDrama.generatedAndAdoptedFinalPromptsForCountShots", { value0: succeeded }));
     };
 
     return (
@@ -535,7 +537,7 @@ export function StageShots() {
                             onClick={() => void handleBatchGenerateFinalVideoPrompts()}
                         >
                             {batchComposeProgress
-                                ? translate("comicDrama.generatingBatchCountCount", { value0: batchComposeProgress.done, value1: batchComposeProgress.total })
+                                ? translate("comicDrama.generatingFinalPromptsForCountShots", { value0: batchComposeProgress.total })
                                 : translate("comicDrama.generateFinalPromptsInBatchCount", { value0: selectedShots.length > 0 ? `（${selectedShots.length}）` : "" })}
                         </Button>
                     </div>
