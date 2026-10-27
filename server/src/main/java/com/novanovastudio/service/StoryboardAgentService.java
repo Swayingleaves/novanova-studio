@@ -35,6 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
 
 /**
  * 分镜脚本Agent编排、结构化校验与独立积分计费服务。
@@ -302,9 +303,24 @@ public class StoryboardAgentService {
                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedNoStructuredResult"))))
                             .doFinally(signal -> agent.close());
                 })
+                // 模型偶发不提交结构化结果时重跑一次；重试复用同一 operationId，不会重复扣费。
+                .retryWhen(Retry.max(1).filter(StoryboardAgentService::isMissingStructuredOutput)
+                        .doBeforeRetry(signal -> log.warn("分镜Agent未提交结构化结果，重试一次: operationId={}, reason={}",
+                                operationId, errorMessage(signal.failure()))))
                 .onErrorMap(exception -> exception instanceof BusinessException
                         ? exception
                         : new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentFailed", errorMessage(exception))));
+    }
+
+    /**
+     * 判断失败是否由模型未提交结构化结果导致，这类失败重试通常可以恢复。
+     *
+     * @param exception Throwable 失败原因
+     * @return boolean 是否缺少结构化输出
+     */
+    private static boolean isMissingStructuredOutput(Throwable exception) {
+        String message = exception.getMessage();
+        return message != null && message.contains("_structured_output");
     }
 
     /**

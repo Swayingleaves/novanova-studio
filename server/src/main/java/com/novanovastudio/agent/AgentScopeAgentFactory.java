@@ -91,7 +91,7 @@ public class AgentScopeAgentFactory {
      */
     public ReActAgent storyboardAgent(Model model) {
         return build("storyboard-agent", promptService.get(PromptTemplateType.AGENT_STORYBOARD), model,
-                "只能返回当前请求对应的分镜结构化结果，不得调用工具、解释或输出额外文本。", false);
+                "只能通过框架要求的结构化输出提交当前请求对应的分镜结果；除该机制外不得调用业务工具、不得解释或输出额外文本。", false);
     }
 
     /**

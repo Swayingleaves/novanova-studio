@@ -18,6 +18,7 @@ import { useEffectiveConfig, type VideoGenerationMode } from "@/features/setting
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { estimateComicDramaGeneration, readComicDramaMediaUrl } from "@/services/api/comic-drama";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
+import { loadShotGenerationLastUsedSettings, readShotGenerationLastUsedSettingsCache, saveShotGenerationLastUsedSettings, type ShotGenerationLastUsedSettings } from "../lib/shot-generation-last-used-settings";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaPromptVersion, ComicDramaShot } from "../types";
 
@@ -127,14 +128,22 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
         [size, vquality, videoSeconds, isBatch, videoGenerationMode]
     );
 
-    // 每次打开都回到项目画幅与默认模型配置并默认全选镜头；单镜头沿用其分镜时长，批量时各镜头时长不一致，回落到默认视频时长。
+    // 页面加载时预热上次配置，打开弹窗即可同步恢复，避免面板先显示默认值再跳变。
+    useEffect(() => {
+        void loadShotGenerationLastUsedSettings().catch((error) => console.error("读取上次镜头生成配置失败", error));
+    }, []);
+
+    // 每次打开默认全选镜头；模型、比例、清晰度优先沿用上次选择，没有记录时回到项目画幅与默认模型配置。
+    // 单镜头沿用其分镜时长，批量时各镜头时长不一致，回落到默认视频时长。
     useEffect(() => {
         if (!open || shots.length === 0) return;
+        const lastUsed = readShotGenerationLastUsedSettingsCache();
         setSelectedIds(shots.map((shot) => shot.id));
-        setModel(config.videoModel || "");
+        // 上次使用的模型可能已被删除或停用，不可用时整组回落到默认配置。
+        setModel(lastUsed.model && config.videoModels.includes(lastUsed.model) ? lastUsed.model : config.videoModel || "");
         // 跟随项目生产设置的画面方向（9:16 等），并按当前模型换算成它接受的 size 取值
-        setSize(sizeFromAspectRatio(config, workspace?.settings.aspectRatio));
-        setVquality(config.vquality || "720p");
+        setSize(lastUsed.size || sizeFromAspectRatio(config, workspace?.settings.aspectRatio));
+        setVquality(lastUsed.vquality || config.vquality || "720p");
         setVideoSeconds(isBatch ? config.videoSeconds || "5" : String(activeShot?.durationSeconds || config.videoSeconds || "5"));
         setEstimatedCredits(null);
         // 只在打开的那一帧重置一次，避免配置变化打断正在调整的参数
@@ -200,10 +209,20 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
         }
     };
 
+    /** 记住本次选择，供下一次打开（含切换到下一个镜头）沿用。 */
+    const rememberShotGenerationSettings = (patch: Partial<ShotGenerationLastUsedSettings>) => {
+        void saveShotGenerationLastUsedSettings({ model, size, vquality, ...patch })
+            .catch((error) => console.error("保存上次镜头生成配置失败", error));
+    };
+
     const handleSettingChange = (key: VideoConfigKey, value: string) => {
-        if (key === "size") setSize(value);
-        else if (key === "vquality") setVquality(value);
-        else if (key === "videoSeconds") setVideoSeconds(value);
+        if (key === "size") {
+            setSize(value);
+            rememberShotGenerationSettings({ size: value });
+        } else if (key === "vquality") {
+            setVquality(value);
+            rememberShotGenerationSettings({ vquality: value });
+        } else if (key === "videoSeconds") setVideoSeconds(value);
     };
 
     return (
@@ -309,6 +328,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                                 onChange={(value) => {
                                     setModel(value);
                                     setEstimatedCredits(null);
+                                    rememberShotGenerationSettings({ model: value });
                                 }}
                                 fullWidth
                             />
