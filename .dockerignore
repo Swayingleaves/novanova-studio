@@ -14,3 +14,13 @@ web/out
 *.log
 .env*
 !.env.example
+artifacts
+volume
+logs
+.codegraph
+.workbuddy
+.agents
+.trae
+.maven-repository
+server/target
+**/node_modules
