@@ -22,6 +22,7 @@ export type ServerUserProfile = {
     createdAt: string;
     lastLoginAt: string;
     welcomeRead: boolean;
+    onboardingVersion: number;
     passwordLockedUntil: string | null;
     canResetPassword: boolean;
 };
@@ -36,6 +37,7 @@ export type LocalUser = {
     status: number;
     creditBalance: CreditAmount;
     welcomeRead: boolean;
+    onboardingVersion: number;
 };
 
 export type UserSession = {
@@ -54,6 +56,7 @@ type UserStore = {
     setUser: (user: ServerUserProfile) => void;
     setCreditBalance: (creditBalance: CreditAmount) => void;
     markWelcomeRead: () => void;
+    markOnboardingCompleted: (version: number) => void;
     clearSession: () => void;
     showAuthModal: boolean;
     pendingRedirect: string;
@@ -105,6 +108,13 @@ export const useUserStore = create<UserStore>()((set, get) => ({
         if (current.token) writeStoredSession({ token: current.token, expiresAt: current.expiresAt, user });
         set({ user });
     },
+    markOnboardingCompleted: (version) => {
+        const current = get();
+        if (!current.user || (current.user.onboardingVersion ?? 0) >= version) return;
+        const user = { ...current.user, onboardingVersion: version };
+        if (current.token) writeStoredSession({ token: current.token, expiresAt: current.expiresAt, user });
+        set({ user });
+    },
     clearSession: () => {
         removeStoredSession();
         set({ token: "", expiresAt: "", user: null, hydrated: true, showAuthModal: false, pendingRedirect: "", authenticationRedirect: "" });
@@ -149,6 +159,7 @@ function normalizeUser(user: ServerUserProfile): LocalUser {
         status: user.status,
         creditBalance: user.creditBalance,
         welcomeRead: user.welcomeRead,
+        onboardingVersion: user.onboardingVersion ?? 0,
     };
 }
 

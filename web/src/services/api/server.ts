@@ -535,6 +535,10 @@ export function acknowledgeWelcome() {
     return serverPost("/auth/acknowledgeWelcome", {});
 }
 
+export function completeOnboarding(version: number) {
+    return serverPost("/auth/completeOnboarding", { version });
+}
+
 export function getCurrentUserInfo() {
     return serverGet<ServerUserProfile>("/auth/userInfo");
 }

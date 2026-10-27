@@ -1,0 +1,10 @@
+{
+    "navigationTitle": "创作工具",
+    "navigationDescription": "图片、视频、无限画布、剧本创作、漫剧创作、我的资产和提示词库都在这里，点击即可开始。管理后台仅管理员可见。",
+    "utilitiesTitle": "常用操作",
+    "utilitiesDescription": "通知、安装到桌面、切换语言和切换主题都在这一列。",
+    "headerTitle": "版本与帮助",
+    "headerDescription": "在这里查看版本对比、打开使用文档，或访问 GitHub 仓库。",
+    "accountTitle": "我的信息",
+    "accountDescription": "这里显示当前积分和头像。展开菜单后可以看到个人信息、签到、购买、兑换、积分记录、系统管理和退出登录。"
+}

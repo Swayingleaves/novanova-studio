@@ -53,6 +53,8 @@ public final class RowMappers {
         user.setInvitedByUserId(row.get("invited_by_user_id", Long.class));
         user.setLastLoginAt(row.get("last_login_at", OffsetDateTime.class));
         user.setWelcomeReadAt(row.get("welcome_read_at", OffsetDateTime.class));
+        Integer onboardingVersion = row.get("onboarding_version", Integer.class);
+        user.setOnboardingVersion(onboardingVersion == null ? 0 : onboardingVersion);
         user.setRegisteredAt(row.get("registered_at", OffsetDateTime.class));
         user.setCreatedAt(row.get("created_at", OffsetDateTime.class));
         user.setUpdatedAt(row.get("updated_at", OffsetDateTime.class));

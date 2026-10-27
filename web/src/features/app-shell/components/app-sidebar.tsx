@@ -114,9 +114,9 @@ export function AppSidebar() {
                     </Tooltip>
                 </div>
 
-                <nav className="hide-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto px-2 pb-3">{visibleTools.map(renderNavItem)}</nav>
+                <nav data-tour="sidebar-nav" className="hide-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto px-2 pb-3">{visibleTools.map(renderNavItem)}</nav>
 
-                <div className="flex shrink-0 flex-col items-center gap-2 border-t border-[var(--studio-line)] px-2 py-2">
+                <div data-tour="sidebar-actions" className="flex shrink-0 flex-col items-center gap-2 border-t border-[var(--studio-line)] px-2 py-2">
                     <Tooltip title={translate("appShell.announcements")} placement="right">
                         {user ? (
                             <Popover

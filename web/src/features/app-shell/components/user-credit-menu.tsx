@@ -24,6 +24,8 @@ const creditNumberFormatter = { format: (value: number) => new Intl.NumberFormat
 
 type UserCreditMenuProps = {
     className?: string;
+    /** 供首次登录引导定位的锚点。 */
+    tourAnchor?: string;
 };
 
 /**
@@ -32,7 +34,7 @@ type UserCreditMenuProps = {
  * 未登录时显示「登录」按钮，平台打开弹窗，团队进入对应登录页。
  * 积分实时值直接订阅 useUserStore，SSE 刷新由 client-root-init 驱动，无需额外接入。
  */
-export function UserCreditMenu({ className }: UserCreditMenuProps) {
+export function UserCreditMenu({ className, tourAnchor }: UserCreditMenuProps) {
     const translate = useTranslation();
     const pathname = usePathname();
     const router = useRouter();
@@ -201,6 +203,7 @@ export function UserCreditMenu({ className }: UserCreditMenuProps) {
             >
                 <button
                     type="button"
+                    data-tour={tourAnchor}
                     className={cn(
                         "studio-glass inline-flex h-9 items-center gap-1.5 rounded-lg px-2 transition hover:bg-[var(--studio-surface-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]",
                         className,

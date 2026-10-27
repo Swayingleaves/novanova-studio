@@ -1870,3 +1870,13 @@ html[data-theme="dark"] .creation-composer-submit-trigger:disabled {
         transform: none;
     }
 }
+
+/* 首次登录引导期间隐藏侧栏 Tooltip，避免与引导卡片争抢层级。 */
+body[data-onboarding="active"] .ant-tooltip {
+    display: none;
+}
+
+/* 第四步不展开用户菜单，禁用 hover 避免菜单浮层与引导卡片重叠。 */
+body[data-onboarding="active"] [data-tour="user-menu"] {
+    pointer-events: none;
+}

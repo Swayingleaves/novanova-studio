@@ -1,5 +1,6 @@
 package com.novanovastudio.service;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -7,6 +8,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -246,6 +248,44 @@ class UserServiceTest {
         StepVerifier.create(context.service.userInfo())
                 .assertNext(profile -> assertTrue(profile.welcomeRead()))
                 .verifyComplete();
+    }
+
+    /**
+     * 验证用户资料返回已完成的产品引导版本，空值按 0 处理。
+     */
+    @Test
+    @DisplayName("用户资料返回产品引导版本")
+    void shouldExposeOnboardingVersion() {
+        TestContext context = testContext();
+        User user = normalUser(8L);
+        user.setOnboardingVersion(null);
+        when(context.currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
+        when(context.userRepository.findById(8L)).thenReturn(Mono.just(user));
+
+        StepVerifier.create(context.service.userInfo())
+                .assertNext(profile -> assertEquals(0, profile.onboardingVersion()))
+                .verifyComplete();
+
+        user.setOnboardingVersion(2);
+        StepVerifier.create(context.service.userInfo())
+                .assertNext(profile -> assertEquals(2, profile.onboardingVersion()))
+                .verifyComplete();
+    }
+
+    /**
+     * 验证完成引导时把异常版本号规整为下限 1。
+     */
+    @Test
+    @DisplayName("完成产品引导规整版本号")
+    void shouldNormalizeOnboardingVersion() {
+        TestContext context = testContext();
+        when(context.currentUserProvider.currentUserId()).thenReturn(Mono.just(8L));
+        when(context.userRepository.markOnboardingCompleted(8L, 1)).thenReturn(Mono.empty());
+
+        StepVerifier.create(context.service.completeOnboarding(0)).verifyComplete();
+        StepVerifier.create(context.service.completeOnboarding(-5)).verifyComplete();
+
+        verify(context.userRepository, times(2)).markOnboardingCompleted(8L, 1);
     }
 
     /**

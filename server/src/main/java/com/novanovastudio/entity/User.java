@@ -65,6 +65,9 @@ public class User {
     /** 欢迎引导已读时间 */
     private OffsetDateTime welcomeReadAt;
 
+    /** 已完成的产品引导版本，0 表示尚未完成 */
+    private Integer onboardingVersion;
+
     /** 注册时间 */
     private OffsetDateTime registeredAt;
 

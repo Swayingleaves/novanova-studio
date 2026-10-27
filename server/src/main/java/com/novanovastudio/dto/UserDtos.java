@@ -89,10 +89,11 @@ public final class UserDtos {
      * @param createdAt String 创建时间
      * @param lastLoginAt String 最后登录时间
      * @param welcomeRead boolean 欢迎引导是否已读
+     * @param onboardingVersion int 已完成的产品引导版本
      * @param passwordLockedUntil String 密码锁定截止时间，仅管理端列表使用
      * @param canResetPassword 当前管理入口是否可重置无邮箱账号密码
      */
-    public record UserProfile(Long id, String email, String username, String nickname, String avatar, String role, Integer status, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditBalance, String createdAt, String lastLoginAt, boolean welcomeRead, String passwordLockedUntil, boolean canResetPassword) {
+    public record UserProfile(Long id, String email, String username, String nickname, String avatar, String role, Integer status, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditBalance, String createdAt, String lastLoginAt, boolean welcomeRead, int onboardingVersion, String passwordLockedUntil, boolean canResetPassword) {
     }
 
     /**
@@ -217,5 +218,13 @@ public final class UserDtos {
                                          @NotBlank(message = "business.passwordIsRequired") @Size(min = 8, message = "business.passwordNeedsAtLeast8Characters") String password,
                                          @Size(max = 50, message = "business.displayNameMustNotExceed50Characters") String nickname,
                                          String role) {
+    }
+
+    /**
+     * 完成产品引导请求
+     *
+     * @param version int 已完成的产品引导版本
+     */
+    public record CompleteOnboardingRequest(int version) {
     }
 }

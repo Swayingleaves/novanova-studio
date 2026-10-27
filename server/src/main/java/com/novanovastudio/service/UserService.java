@@ -423,6 +423,20 @@ public class UserService {
     }
 
     /**
+     * 标记当前用户已完成产品引导。
+     *
+     * @param version int 已完成的产品引导版本
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> completeOnboarding(int version) {
+        // 版本号由前端常量驱动，服务端只做下限与上限保护，避免异常值写坏数据。
+        int normalized = Math.max(1, Math.min(version, 1000));
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> userRepository.markOnboardingCompleted(userId, normalized)
+                        .doOnSuccess(ignored -> log.info("用户已完成产品引导: userId={}, version={}", userId, normalized)));
+    }
+
+    /**
      * 查询用户列表（支持搜索和筛选）
      *
      * @param page int 页码
@@ -718,6 +732,7 @@ public class UserService {
                 formatTime(user.getCreatedAt()),
                 formatTime(user.getLastLoginAt()),
                 user.getWelcomeReadAt() != null,
+                user.getOnboardingVersion() == null ? 0 : user.getOnboardingVersion(),
                 passwordLockedUntil == null ? null : formatTime(passwordLockedUntil),
                 canResetPassword
         );

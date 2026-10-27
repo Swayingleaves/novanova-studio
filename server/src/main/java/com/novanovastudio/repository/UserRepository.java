@@ -332,6 +332,28 @@ public class UserRepository {
     }
 
     /**
+     * 标记用户已完成指定版本的产品引导。
+     * <p>
+     * 使用 GREATEST 保证重复或乱序请求不会回退版本。
+     *
+     * @param userId Long 用户ID
+     * @param version int 已完成的产品引导版本
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> markOnboardingCompleted(Long userId, int version) {
+        return databaseClient.sql("""
+                UPDATE users
+                SET onboarding_version = GREATEST(onboarding_version, :targetVersion), updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+                """)
+                .bind("targetVersion", version)
+                .bind("id", userId)
+                .fetch()
+                .rowsUpdated()
+                .then();
+    }
+
+    /**
      * 分页查询用户列表（支持搜索和筛选）
      *
      * @param page int 页码
