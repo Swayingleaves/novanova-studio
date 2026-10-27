@@ -23,11 +23,8 @@ data/
 /.trellis/
 /.workbuddy/
 /.cursor/
-/deploy.sh
 /.agents/
 !/docs-api/backend-database.md
-AGENTS.md
-CLAUDE.md
 skills-lock.json
 volume/
 .agnes/
