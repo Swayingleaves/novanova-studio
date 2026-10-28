@@ -75,6 +75,28 @@ public class CreditController {
     }
 
     /**
+     * 分页查询当前用户的图片与视频生成任务记录。
+     *
+     * @param startDate LocalDate 筛选起始日期
+     * @param endDate LocalDate 筛选结束日期
+     * @param taskType String 任务类型筛选：image/video，可为空
+     * @param keyword String 提示词或模型搜索词，可为空
+     * @param page int 页码
+     * @param pageSize int 每页数量
+     * @return Mono<ApiResponse<TaskRecordListResponse>> 任务记录
+     */
+    @GetMapping("/listTaskRecords")
+    public Mono<ApiResponse<CreditDtos.TaskRecordListResponse>> listTaskRecords(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false) String taskType,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int pageSize) {
+        return creditService.listTaskRecords(startDate, endDate, taskType, keyword, page, pageSize).map(ApiResponse::ok);
+    }
+
+    /**
      * 兑换积分卡密。
      *
      * @param request RedeemCreditsRequest 卡密兑换请求
