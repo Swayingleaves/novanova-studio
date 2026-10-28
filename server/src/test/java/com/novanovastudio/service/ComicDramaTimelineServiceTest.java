@@ -51,7 +51,7 @@ class ComicDramaTimelineServiceTest {
         currentUserProvider = mock(CurrentUserProvider.class);
         transactionalOperator = mock(TransactionalOperator.class);
         service = new ComicDramaService(currentUserProvider, repository, mock(ScriptService.class),
-                mock(StoryboardAgentService.class), mock(AiTaskService.class), mock(PersistenceService.class),
+                mock(StoryboardAgentService.class), mock(ComicDramaFinalPromptPricingService.class), mock(AiTaskService.class), mock(PersistenceService.class),
                 transactionalOperator, new NovanovaProperties());
     }
 

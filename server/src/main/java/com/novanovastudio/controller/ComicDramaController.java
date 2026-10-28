@@ -2,6 +2,8 @@ package com.novanovastudio.controller;
 
 import com.novanovastudio.common.ApiResponse;
 import com.novanovastudio.dto.ComicDramaDtos;
+import com.novanovastudio.dto.ComicDramaFinalPromptPricingDtos;
+import com.novanovastudio.service.ComicDramaFinalPromptPricingService;
 import com.novanovastudio.dto.VideoCompositionDtos;
 import com.novanovastudio.service.ComicDramaService;
 import com.novanovastudio.service.VideoCompositionTaskService;
@@ -47,11 +49,26 @@ public class ComicDramaController {
     /** 漫剧生产业务服务。 */
     private final ComicDramaService service;
 
+    /** 最终提示词独立定价。 */
+    private final ComicDramaFinalPromptPricingService finalPromptPricingService;
+
     /** 视频合成任务服务。 */
     private final VideoCompositionTaskService videoCompositionTaskService;
 
     /** 媒体流服务。 */
     private final PersistenceService persistenceService;
+
+    /**
+     * 查询所选模型每镜头积分与价格修订号。
+     * @param request 所选文本模型
+     * @param httpRequest 当前HTTP请求
+     * @return 当前价格，未配置时单价为空
+     */
+    @PostMapping("/getFinalPromptUnitPrice")
+    public Mono<ApiResponse<ComicDramaFinalPromptPricingDtos.UnitPrice>> getFinalPromptUnitPrice(
+            @Valid @RequestBody ComicDramaFinalPromptPricingDtos.UnitPriceRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧最终提示词单价", httpRequest, request, finalPromptPricingService.getUnitPrice(request.model()));
+    }
 
     /**
      * 创建分镜成片导出任务。

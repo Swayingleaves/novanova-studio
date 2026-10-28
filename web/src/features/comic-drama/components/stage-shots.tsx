@@ -6,6 +6,7 @@ import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { useEffect, useMemo, useState } from "react";
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 import {
     Alert,
     App,
@@ -42,6 +43,8 @@ import {
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { readComicDramaMediaUrl } from "@/services/api/comic-drama";
+import { useFinalPromptPricing } from "../hooks/use-final-prompt-pricing";
+import { useFinalPromptConfirmation } from "../hooks/use-final-prompt-confirmation";
 import { usePendingImpactTargets } from "../hooks/use-pending-impact-targets";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaPromptVersion, ComicDramaShot, ComicDramaShotDraft, ComicDramaShotInput } from "../types";
@@ -123,6 +126,10 @@ export function StageShots() {
     const [composingPromptShotId, setComposingPromptShotId] = useState<string | null>(null);
     const [batchComposeProgress, setBatchComposeProgress] = useState<{ total: number } | null>(null);
     const [selectedShotIds, setSelectedShotIds] = useState<string[]>([]);
+    const confirmFinalPrompt = useFinalPromptConfirmation(workspace?.projectId);
+
+    const pricingQuery = useFinalPromptPricing(promptModel, Boolean(workspace));
+    const { ready: pricingReady, reason: pricingReason } = pricingQuery;
 
     // Edit shot form
     const [editingShot, setEditingShot] = useState<ComicDramaShot | null>(null);
@@ -392,44 +399,65 @@ export function StageShots() {
     };
 
     // 生成后立即采用该版本，保证随后的生视频任务读取到同一份最终提示词。
-    const handleGenerateFinalVideoPrompt = async (shot: ComicDramaShot) => {
-        if (composingPromptShotId) return;
+    const handleGenerateFinalVideoPrompt = (shot: ComicDramaShot) => {
+        if (composingPrompts || !pricingReady) return;
         if (!promptModel) {
             message.warning(translate("comicDrama.selectAPromptModel"));
             return;
         }
-        setComposingPromptShotId(shot.id);
-        try {
-            const prompt = await generateFinalVideoPrompt(shot.id, promptModel);
-            message.success(translate("comicDrama.finalVideoPromptForShotCountGeneratedAndAdoptedV", { value0: shot.shotNumber, value1: prompt.versionNumber }));
-        } catch (error) {
-            if (error instanceof Error) message.error(error.message);
-        } finally {
-            setComposingPromptShotId(null);
-        }
+        const request = {
+            projectId: workspace.projectId,
+            shotId: shot.id,
+            shotNumber: shot.shotNumber,
+            model: promptModel,
+            unitPrice: pricingQuery.data!.unitPrice!,
+            revision: pricingQuery.data!.revision,
+        };
+        confirmFinalPrompt(1, request.unitPrice, async () => {
+                setComposingPromptShotId(request.shotId);
+                try {
+                    const prompt = await generateFinalVideoPrompt(request.projectId, request.shotId, request.model, request.revision);
+                    message.success(translate("comicDrama.finalVideoPromptForShotCountGeneratedAndAdoptedV", { value0: request.shotNumber, value1: prompt.versionNumber }));
+                } catch (error) {
+                    if (error instanceof Error) message.error(error.message);
+                } finally {
+                    setComposingPromptShotId(null);
+                    void pricingQuery.refetch();
+                }
+        });
     };
 
     // 一次提交勾选的镜头，由服务端并发请求模型并统一采用，失败镜头单独返回。
-    const handleBatchGenerateFinalVideoPrompts = async () => {
-        if (composingPrompts || selectedShots.length === 0) return;
+    const handleBatchGenerateFinalVideoPrompts = () => {
+        if (composingPrompts || selectedShots.length === 0 || !pricingReady) return;
         if (!promptModel) {
             message.warning(translate("comicDrama.selectAPromptModel"));
             return;
         }
-        const total = selectedShots.length;
-        setBatchComposeProgress({ total });
-        try {
-            const result = await composePromptsBatch(selectedShots.map((shot) => shot.id), promptModel);
-            const succeeded = result.succeededShotIds.length;
-            if (result.failedShotIds.length > 0) {
-                const summary = translate("comicDrama.generatedAndAdoptedFinalPromptsForCountShotsCountFailed", { value0: succeeded, value1: result.failedShotIds.length });
-                message.warning(result.failureMessage ? `${summary}：${result.failureMessage}` : summary);
-            } else message.success(translate("comicDrama.generatedAndAdoptedFinalPromptsForCountShots", { value0: succeeded }));
-        } catch (error) {
-            if (error instanceof Error) message.error(error.message);
-        } finally {
-            setBatchComposeProgress(null);
-        }
+        const request = {
+            projectId: workspace.projectId,
+            shotIds: selectedShots.map((shot) => shot.id),
+            total: selectedShots.length,
+            model: promptModel,
+            unitPrice: pricingQuery.data!.unitPrice!,
+            revision: pricingQuery.data!.revision,
+        };
+        confirmFinalPrompt(request.total, request.unitPrice, async () => {
+                setBatchComposeProgress({ total: request.total });
+                try {
+                    const result = await composePromptsBatch(request.projectId, request.shotIds, request.model, request.revision);
+                    const succeeded = result.succeededShotIds.length;
+                    if (result.failedShotIds.length > 0) {
+                        const summary = translate("comicDrama.generatedAndAdoptedFinalPromptsForCountShotsCountFailed", { value0: succeeded, value1: result.failedShotIds.length });
+                        message.warning(result.failureMessage ? `${summary}：${result.failureMessage}` : summary);
+                    } else message.success(translate("comicDrama.generatedAndAdoptedFinalPromptsForCountShots", { value0: succeeded }));
+                } catch (error) {
+                    if (error instanceof Error) message.error(error.message);
+                } finally {
+                    setBatchComposeProgress(null);
+                    void pricingQuery.refetch();
+                }
+        });
     };
 
     return (
@@ -519,6 +547,13 @@ export function StageShots() {
                 </div>
             </div>
 
+            <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--studio-muted)]" aria-live="polite">
+                <span>每镜头积分：{pricingReady ? creditText(pricingQuery.data!.unitPrice!) : "—"}</span>
+                <span>所选镜头预计总积分：{pricingReady ? creditText(creditAmount(pricingQuery.data!.unitPrice!).mul(selectedShots.length).toFixed()) : "—"}</span>
+                <Button size="small" loading={pricingQuery.isFetching} disabled={!promptModel || composingPrompts} onClick={() => void pricingQuery.refetch()}>刷新价格</Button>
+            </div>
+            {pricingReason ? <Alert type={pricingQuery.isError ? "error" : "info"} showIcon title={pricingReason} /> : null}
+
             {/* 最终提示词批量生成操作栏 */}
             {filteredShots.length > 0 && (
                 <div className="flex flex-wrap items-center gap-3">
@@ -539,7 +574,7 @@ export function StageShots() {
                         <Button
                             icon={<Sparkles className="size-4 text-purple-500" />}
                             loading={Boolean(batchComposeProgress)}
-                            disabled={composingPrompts || selectedShots.length === 0}
+                            disabled={composingPrompts || selectedShots.length === 0 || !pricingReady}
                             onClick={() => void handleBatchGenerateFinalVideoPrompts()}
                         >
                             {batchComposeProgress
@@ -684,7 +719,7 @@ export function StageShots() {
                                                 type="text"
                                                 icon={<Sparkles className="size-3.5" />}
                                                 loading={composingPromptShotId === shot.id}
-                                                disabled={composingPrompts || !promptModel}
+                                                disabled={composingPrompts || !pricingReady}
                                                 onClick={() => void handleGenerateFinalVideoPrompt(shot)}
                                             >
                                                 {finalVideoPrompt ? translate("comicDrama.regenerate") : translate("comicDrama.generateWithAi")}

@@ -73,6 +73,7 @@ import { CreditCardManagement } from "./components/credit-card-management";
 import { ApiLogsManagement } from "./components/api-logs-management";
 import { EmailCampaignManagement } from "./components/email-campaign-management";
 import { StoryBiblePricingManagement } from "./components/story-bible-pricing-management";
+import { ComicDramaFinalPromptPricingManagement } from "./components/comic-drama-final-prompt-pricing-management";
 import { EpisodeBodiesPricingManagement } from "./components/episode-bodies-pricing-management";
 import { GenerationStyleCover } from "@/features/generation/components/generation-style-picker";
 import { uploadImage } from "@/features/storage/services/image-storage";
@@ -136,10 +137,11 @@ export default function AdminSystemPage() {
                         { key: "skills", label: translate("administration.skillManagement"), children: <TeamContentScope moduleName="skills"><SkillManagement /></TeamContentScope> },
                         { key: "homepage", label: translate("administration.homepageShowcase"), children: <TeamContentScope moduleName="homepage"><HomepageShowcaseManagement /></TeamContentScope> },
                         {
-                            key: "scriptPricing", label: translate("administration.scriptCreationPricing"), children: <Tabs
+                            key: "scriptPricing", label: translate("administration.creationPricing"), children: <Tabs
                                 items={[
-                                    { key: "storyBible", label: translate("administration.storyBiblePricing"), children: <StoryBiblePricingManagement /> },
-                                    { key: "episodeBodies", label: translate("administration.episodeBodies"), children: <EpisodeBodiesPricingManagement /> },
+                                    { key: "storyBible", label: translate("administration.scriptStoryBiblePricing"), children: <StoryBiblePricingManagement /> },
+                                    { key: "episodeBodies", label: translate("administration.scriptEpisodeBodiesPricing"), children: <EpisodeBodiesPricingManagement /> },
+                                    { key: "comicDramaFinalPrompt", label: translate("administration.comicDramaFinalPromptPricing"), children: <ComicDramaFinalPromptPricingManagement /> },
                                 ]}
                             />,
                         },

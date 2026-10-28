@@ -551,7 +551,7 @@ public class EpisodeBodiesService {
             return Mono.zip(modelFactory.resolveTextModel(model), modelConfigId(model))
                     .flatMap(input -> pricingService.findCredits(input.getT2())
                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PARAM_INVALID,
-                                    "该文本模型尚未配置分集正文单价，请在后台「剧本创作定价 · 分集正文」中配置后重试")))
+                                    "该文本模型尚未配置分集正文单价，请在后台「创作定价 · 剧本创作-分集正文」中配置后重试")))
                             .map(unitPrice -> new Prepared(snapshot.project().revision(), input.getT1().modelValue(),
                                     input.getT2(), unitPrice, List.of(), targets, mode,
                                     JSON.parseObject(JSON.toJSONString(adaptation), NovelAdaptationDtos.Settings.class),

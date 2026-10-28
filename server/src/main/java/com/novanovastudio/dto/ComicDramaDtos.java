@@ -291,6 +291,7 @@ public final class ComicDramaDtos {
     public record ComposePromptRequest(@NotBlank @Size(max = 64) String projectId,
                                        @NotBlank @Size(max = 64) String shotId,
                                        @NotBlank @Size(max = 256) String model,
+                                       @NotNull @Positive Long expectedPricingRevision,
                                        @AssertTrue(message = "合成提示词前必须明确确认费用") boolean confirmed) {
     }
 
@@ -299,6 +300,7 @@ public final class ComicDramaDtos {
                                         @Min(0) long expectedRevision,
                                         @NotEmpty @Size(max = 100, message = "单次批量合成最多支持100个镜头") List<@NotBlank @Size(max = 64) String> shotIds,
                                         @NotBlank @Size(max = 256) String model,
+                                        @NotNull @Positive Long expectedPricingRevision,
                                         @AssertTrue(message = "合成提示词前必须明确确认费用") boolean confirmed) {
     }
 

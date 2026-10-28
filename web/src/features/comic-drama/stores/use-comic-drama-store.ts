@@ -104,12 +104,12 @@ type ComicDramaState = {
     saveShot: (shot: ComicDramaShotInput) => Promise<ComicDramaShot>;
     reorderShots: (shotIds: string[]) => Promise<void>;
     deleteShot: (shotId: string, confirm: boolean) => Promise<ComicDramaMutationResult>;
-    composePrompt: (shotId: string, model: string) => Promise<ComicDramaPromptVersion>;
+    composePrompt: (projectId: string, shotId: string, model: string, expectedPricingRevision: number) => Promise<ComicDramaPromptVersion>;
     savePrompt: (shotId: string, prompt: string, expectedPromptVersion?: number, sourcePromptVersionId?: string) => Promise<ComicDramaPromptVersion>;
     /** AI 合成并立即采用为后续视频生成所使用的最终提示词。 */
-    generateFinalVideoPrompt: (shotId: string, model: string) => Promise<ComicDramaPromptVersion>;
+    generateFinalVideoPrompt: (projectId: string, shotId: string, model: string, expectedPricingRevision: number) => Promise<ComicDramaPromptVersion>;
     /** 一次提交多个镜头，由服务端并发合成并统一采用，完成后只刷新一次工作区。 */
-    composePromptsBatch: (shotIds: string[], model: string) => Promise<ComicDramaComposePromptsResult>;
+    composePromptsBatch: (projectId: string, shotIds: string[], model: string, expectedPricingRevision: number) => Promise<ComicDramaComposePromptsResult>;
     createGenerationTask: (input: {
         targetType: string;
         targetIds: string[];
@@ -191,7 +191,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
     timelineSaveError: "",
 
     loadWorkspace: async (projectId: string) => {
-        set({ loading: true, error: "" });
+        set({ loading: true, refreshing: false, error: "" });
         try {
             const workspace = await getComicDramaWorkspace(projectId);
             const projectChanged = get().workspace?.projectId !== workspace.projectId;
@@ -224,8 +224,9 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
         set({ refreshing: true });
         try {
             const workspace = await getComicDramaWorkspace(current.projectId);
-            set({ workspace, refreshing: false });
+            if (get().workspace?.projectId === current.projectId) set({ workspace, refreshing: false });
         } catch (requestError) {
+            if (get().workspace?.projectId !== current.projectId) return;
             set({
                 refreshing: false,
                 error: requestError instanceof Error ? requestError.message : translate("comicDrama.couldNotRefreshTheWorkspace"),
@@ -334,11 +335,12 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
         return result;
     },
 
-    composePrompt: async (shotId, model) => {
+    composePrompt: async (projectId, shotId, model, expectedPricingRevision) => {
         const workspace = get().workspace;
         if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
-        const prompt = await composeComicDramaPrompt(workspace.projectId, shotId, model, true);
-        await get().reloadWorkspace();
+        if (workspace.projectId !== projectId) throw new Error(translate("comicDrama.finalPromptProjectChanged"));
+        const prompt = await composeComicDramaPrompt(projectId, shotId, model, expectedPricingRevision, true);
+        if (get().workspace?.projectId === projectId) await get().reloadWorkspace();
         return prompt;
     },
 
@@ -351,23 +353,29 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
     },
 
     // AI 合成结果先保留原始版本，再采用同一文本，确保视频生成读取到的就是界面展示的最终提示词。
-    generateFinalVideoPrompt: async (shotId, model) => {
-        const composed = await get().composePrompt(shotId, model);
-        return get().savePrompt(shotId, readPromptBody(composed), composed.versionNumber, composed.id);
+    generateFinalVideoPrompt: async (projectId, shotId, model, expectedPricingRevision) => {
+        const composed = await get().composePrompt(projectId, shotId, model, expectedPricingRevision);
+        // 生成期间允许切换项目，但采用操作始终绑定用户确认的原项目。
+        const workspace = await getComicDramaWorkspace(projectId);
+        const saved = await saveComicDramaPrompt(projectId, workspace.revision, shotId, readPromptBody(composed), composed.versionNumber, composed.id);
+        if (get().workspace?.projectId === projectId) await get().reloadWorkspace();
+        return saved;
     },
 
     // 批量合成由服务端并发处理，前端只发一次请求，完成后统一刷新一次工作区。
-    composePromptsBatch: async (shotIds, model) => {
+    composePromptsBatch: async (projectId, shotIds, model, expectedPricingRevision) => {
         const workspace = get().workspace;
         if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
+        if (workspace.projectId !== projectId) throw new Error(translate("comicDrama.finalPromptProjectChanged"));
         const result = await composeComicDramaPrompts({
-            projectId: workspace.projectId,
+            projectId,
             expectedRevision: workspace.revision,
             shotIds,
             model,
+            expectedPricingRevision,
             confirmed: true,
         });
-        await get().reloadWorkspace();
+        if (get().workspace?.projectId === projectId) await get().reloadWorkspace();
         return result;
     },
 

@@ -115,8 +115,8 @@ export function getComicDramaShotDeleteImpact(projectId: string, shotId: string)
     return serverPost<{ shotId: string; affectedMediaCount: number; mediaIds: string[]; requiresConfirmation: boolean }>(`${COMIC_DRAMA_PATH}/getShotDeleteImpact`, { projectId, shotId });
 }
 
-export function composeComicDramaPrompt(projectId: string, shotId: string, model: string, confirmed: true) {
-    return serverPost<ComicDramaPromptVersion>(`${COMIC_DRAMA_PATH}/composePrompt`, { projectId, shotId, model, confirmed });
+export function composeComicDramaPrompt(projectId: string, shotId: string, model: string, expectedPricingRevision: number, confirmed: true) {
+    return serverPost<ComicDramaPromptVersion>(`${COMIC_DRAMA_PATH}/composePrompt`, { projectId, shotId, model, expectedPricingRevision, confirmed });
 }
 
 export type ComicDramaComposePromptsResult = {
@@ -127,8 +127,30 @@ export type ComicDramaComposePromptsResult = {
 };
 
 /** 批量合成并采用多个镜头的最终提示词，服务端并发请求模型。 */
-export function composeComicDramaPrompts(input: { projectId: string; expectedRevision: number; shotIds: string[]; model: string; confirmed: true }) {
+export function composeComicDramaPrompts(input: { projectId: string; expectedRevision: number; shotIds: string[]; model: string; expectedPricingRevision: number; confirmed: true }) {
     return serverPost<ComicDramaComposePromptsResult>(`${COMIC_DRAMA_PATH}/composePrompts`, input);
+}
+
+/** 漫剧最终提示词专项价格，未配置时积分为空。 */
+export type ComicDramaFinalPromptPricing = {
+    modelConfigId: string;
+    model: string;
+    displayName: string;
+    credits?: CreditAmount | null;
+    revision: number;
+    editable: boolean;
+};
+
+export function getComicDramaFinalPromptPricing() {
+    return serverGet<ComicDramaFinalPromptPricing[]>("/admin/comicDramaFinalPrompt/getPricing");
+}
+
+export function saveComicDramaFinalPromptPricing(modelConfigId: string, expectedRevision: number, credits: CreditAmount) {
+    return serverPost<ComicDramaFinalPromptPricing>("/admin/comicDramaFinalPrompt/savePricing", { modelConfigId, expectedRevision, credits });
+}
+
+export function getComicDramaFinalPromptUnitPrice(model: string) {
+    return serverPost<{ unitPrice?: CreditAmount | null; revision: number }>(`${COMIC_DRAMA_PATH}/getFinalPromptUnitPrice`, { model });
 }
 
 export function saveComicDramaPrompt(projectId: string, expectedRevision: number, shotId: string, prompt: string, expectedPromptVersion?: number, sourcePromptVersionId?: string) {

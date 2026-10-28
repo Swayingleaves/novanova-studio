@@ -1,5 +1,22 @@
 # 后端数据库说明（已实现）
 
+## 漫剧最终提示词独立定价（V73）
+
+新增 `comic_drama_final_prompt_pricing`，按文本模型维护每镜头积分。首次部署不填充价格；无记录表示未配置，显式保存 `0` 表示免费。后台入口为「创作定价 · 漫剧创作-生成最终提示词定价」。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `model_config_id` | `VARCHAR(64)` | 主键，关联平台模型配置，删除模型时级联删除 |
+| `credits` | `NUMERIC(24,6)` | 非空、非负的每镜头积分，最多六位小数 |
+| `revision` | `BIGINT` | 正整数修订号，首次保存为 1，修改递增 |
+| `team_id` | `BIGINT` | 所属空间，默认当前空间，关联团队并建立索引 |
+| `created_at` | `TIMESTAMPTZ` | 创建时间 |
+| `updated_at` | `TIMESTAMPTZ` | 最后更新时间 |
+
+启用并强制行级权限：所属空间维护自有模型价格，获授权团队只读可见平台模型价格；归属触发器禁止团队覆盖平台模型价格。保存采用修订号条件更新和原子返回，避免并发覆盖。管理接口为 `/api/v1/admin/comicDramaFinalPrompt/getPricing`、`savePricing`；用户通过 `/api/v1/comicDrama/getFinalPromptUnitPrice` 获取单价及修订号。
+
+漫剧单镜头与批量生成均要求 `expectedPricingRevision`；启动前只读取一次价格，未配置或修订冲突时拒绝模型调用与扣费。同批镜头共用该单价，逐镜头计费、失败退款，提示词版本及响应记录实际积分。钱包沿用模型所属空间，画布保持模型通用价格。
+
 ## 积分商品与支付宝支付（V70）
 
 积分购买只写入平台钱包（`team_id`、`wallet_team_id` 和 `beneficiary_team_id` 均为 `0`），付费积分不创建可过期发放批次。团队空间不能读取商品、创建订单或查询订单，平台请求也不会携带 `X-Team-Id`。

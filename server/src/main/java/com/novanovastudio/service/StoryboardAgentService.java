@@ -112,7 +112,47 @@ public class StoryboardAgentService {
         validateComposeRequest(request);
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> modelFactory.resolveTextModel(request.model())
-                        .flatMap(model -> composeWithModel(userId, model, request)));
+                        .flatMap(model -> composeWithModel(userId, model, request, model.creditCost(), UUID.randomUUID().toString())));
+    }
+
+    /**
+     * 使用业务已确认的模型与独立单价合成提示词，仅供同包业务调用。
+     * @param request 合成请求
+     * @param model 已校验权限的文本模型
+     * @param unitCredits 每镜头积分
+     * @param operationId 稳定操作标识，用于持久化失败时退还原扣费
+     * @return 提示词与实际扣费
+     */
+    Mono<StoryboardDtos.ComposePromptsResponse> composePrompts(StoryboardDtos.ComposePromptsRequest request,
+            AgentScopeModelFactory.TextModelSelection model, BigDecimal unitCredits, String operationId) {
+        validateComposeRequest(request);
+        return currentUserProvider.currentUserId().flatMap(userId -> composeWithModel(userId, model, request, unitCredits, operationId));
+    }
+
+    /**
+     * 使用独立单价合成提示词，并自动创建扣费操作标识。
+     * @param request 合成请求
+     * @param model 已解析模型
+     * @param unitCredits 每镜头积分
+     * @return 合成结果
+     */
+    Mono<StoryboardDtos.ComposePromptsResponse> composePrompts(StoryboardDtos.ComposePromptsRequest request,
+            AgentScopeModelFactory.TextModelSelection model, BigDecimal unitCredits) {
+        return composePrompts(request, model, unitCredits, UUID.randomUUID().toString());
+    }
+
+    /**
+     * 提示词转换或持久化失败后，按原操作标识退回原模型钱包。
+     * @param operationId 原扣费操作标识
+     * @param credits 本次扣费，零积分无需退款
+     * @param ownerTeamId 模型所属钱包
+     * @return 退款完成信号
+     */
+    Mono<Void> refundPromptComposition(String operationId, BigDecimal credits, long ownerTeamId) {
+        if (credits.signum() == 0) return Mono.empty();
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> creditService.refundOperation(userId, operationId, "分镜提示词合成"))
+                .contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.WALLET_KEY, ownerTeamId));
     }
 
     /**
@@ -169,12 +209,14 @@ public class StoryboardAgentService {
      * @param userId Long 当前用户ID
      * @param model TextModelSelection 已解析模型
      * @param request ComposePromptsRequest 合成请求
+     * @param unitCredits BigDecimal 每镜头积分
+     * @param operationId 稳定扣费操作标识
      * @return Mono<ComposePromptsResponse> 合成结果
      */
     private Mono<StoryboardDtos.ComposePromptsResponse> composeWithModel(
-            Long userId, AgentScopeModelFactory.TextModelSelection model, StoryboardDtos.ComposePromptsRequest request) {
-        BigDecimal credits = multiplyCredits(model.creditCost(), request.shots().size());
-        return executeChargedOperation(userId, model.ownerTeamId(), credits, "分镜提示词合成", operationId -> callComposeAgent(userId, operationId, model, request)
+            Long userId, AgentScopeModelFactory.TextModelSelection model, StoryboardDtos.ComposePromptsRequest request, BigDecimal unitCredits, String operationId) {
+        BigDecimal credits = multiplyCredits(unitCredits, request.shots().size());
+        return executeChargedOperation(userId, model.ownerTeamId(), credits, "分镜提示词合成", operationId, identifier -> callComposeAgent(userId, identifier, model, request)
                         .map(result -> validatePromptComposition(request.shots(), request.visualStyle(), result)))
                 .map(prompts -> new StoryboardDtos.ComposePromptsResponse(prompts, credits));
     }
@@ -191,7 +233,22 @@ public class StoryboardAgentService {
      */
     private <T> Mono<T> executeChargedOperation(Long userId, long ownerTeamId, BigDecimal credits, String operationName,
                                                   Function<String, Mono<T>> operation) {
-        String operationId = UUID.randomUUID().toString();
+        return executeChargedOperation(userId, ownerTeamId, credits, operationName, UUID.randomUUID().toString(), operation);
+    }
+
+    /**
+     * 在固定操作标识和模型钱包内扣费执行，失败时按原流水退款。
+     * @param userId 当前用户
+     * @param ownerTeamId 模型所属钱包
+     * @param credits 应扣积分
+     * @param operationName 业务名称
+     * @param operationId 稳定操作标识
+     * @param operation 实际操作
+     * @param <T> 结果类型
+     * @return 操作结果
+     */
+    private <T> Mono<T> executeChargedOperation(Long userId, long ownerTeamId, BigDecimal credits, String operationName,
+                                               String operationId, Function<String, Mono<T>> operation) {
         AtomicBoolean charged = new AtomicBoolean(false);
         return creditService.chargeOperation(userId, operationId, credits, operationName)
                 .then(Mono.defer(() -> {

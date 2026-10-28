@@ -1,10 +1,13 @@
 package com.novanovastudio.service;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.clearInvocations;
 
 import com.alibaba.fastjson2.JSON;
 import com.novanovastudio.agent.AgentScopeAgentFactory;
@@ -321,6 +324,60 @@ class StoryboardAgentServiceTest {
                 .verify();
 
         verify(creditService).refundOperation(eq(8L), anyString(), eq("测试分镜操作"));
+    }
+
+    /** 独立价格、画布原价、免费调用、退款与余额不足均沿用模型所属钱包。 */
+    @Test
+    void shouldUseExplicitPriceAndPreserveCanvasBillingAndWallet() {
+        var currentUser = mock(CurrentUserProvider.class);
+        var modelFactory = mock(AgentScopeModelFactory.class);
+        var agentFactory = mock(AgentScopeAgentFactory.class);
+        var agent = mock(io.agentscope.core.ReActAgent.class);
+        var message = mock(io.agentscope.core.message.Msg.class);
+        var model = new AgentScopeModelFactory.TextModelSelection(null, "channel::model", "模型", "渠道", java.math.BigDecimal.TEN, 801L);
+        var request = new StoryboardDtos.ComposePromptsRequest("剧本文本", "生成镜头", VISUAL_STYLE,
+                "channel::model", List.of(shot("shot-1", 1)), List.of());
+        when(currentUser.currentUserId()).thenReturn(Mono.just(8L));
+        when(modelFactory.resolveTextModel("channel::model")).thenReturn(Mono.just(model));
+        when(agentFactory.storyboardAgent(null)).thenReturn(agent);
+        when(message.getStructuredData(StoryboardDtos.PromptCompositionResult.class)).thenReturn(
+                new StoryboardDtos.PromptCompositionResult(List.of(new StoryboardDtos.StoryboardPrompt("shot-1", formattedPrompt("角色穿过雨夜街道")))));
+        when(agent.call(anyString(), eq(StoryboardDtos.PromptCompositionResult.class), any(io.agentscope.core.agent.RuntimeContext.class)))
+                .thenReturn(Mono.just(message));
+        when(creditService.chargeOperation(eq(8L), anyString(), any(java.math.BigDecimal.class), anyString()))
+                .thenReturn(Mono.deferContextual(context -> {
+                    Assertions.assertEquals(801L, (long) context.get(com.novanovastudio.security.TeamScope.WALLET_KEY));
+                    return Mono.empty();
+                }));
+        when(creditService.refundOperation(eq(8L), anyString(), anyString())).thenReturn(Mono.deferContextual(context -> {
+            Assertions.assertEquals(801L, (long) context.get(com.novanovastudio.security.TeamScope.WALLET_KEY));
+            return Mono.empty();
+        }));
+        var service = new StoryboardAgentService(currentUser, modelFactory, agentFactory,
+                new NovanovaProperties(), creditService, mock(SystemPromptTemplateService.class), mock(AiTaskService.class));
+        var price = new java.math.BigDecimal("1.234567");
+        Assertions.assertEquals(price, service.composePrompts(request, model, price).block().chargedCredits());
+        verify(creditService).chargeOperation(eq(8L), anyString(), eq(price), eq("分镜提示词合成"));
+        Assertions.assertEquals(0, java.math.BigDecimal.TEN.compareTo(service.composePrompts(request).block().chargedCredits()));
+        verify(creditService).chargeOperation(eq(8L), anyString(), eq(com.novanovastudio.common.CreditAmounts.of(10)), eq("分镜提示词合成"));
+        Assertions.assertEquals(0, service.composePrompts(request, model, java.math.BigDecimal.ZERO).block().chargedCredits().signum());
+
+        // 调用失败退款必须复用原扣费操作标识，不能退回其他钱包。
+        clearInvocations(creditService);
+        when(agent.call(anyString(), eq(StoryboardDtos.PromptCompositionResult.class), any(io.agentscope.core.agent.RuntimeContext.class)))
+                .thenReturn(Mono.error(new IllegalStateException("模型调用失败")));
+        Assertions.assertThrows(BusinessException.class, () -> service.composePrompts(request, model, price).block());
+        var chargeId = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(creditService).chargeOperation(eq(8L), chargeId.capture(), eq(price), anyString());
+        verify(creditService).refundOperation(eq(8L), eq(chargeId.getValue()), anyString());
+
+        // 扣费未成功时禁止启动模型和退款。
+        clearInvocations(agentFactory, creditService);
+        when(creditService.chargeOperation(eq(8L), anyString(), eq(price), anyString()))
+                .thenReturn(Mono.error(new BusinessException(com.novanovastudio.common.ErrorCode.BUSINESS_ERROR, "余额不足")));
+        Assertions.assertThrows(BusinessException.class, () -> service.composePrompts(request, model, price).block());
+        verify(agentFactory, never()).storyboardAgent(any());
+        verify(creditService, never()).refundOperation(any(), anyString(), anyString());
     }
 
     /**

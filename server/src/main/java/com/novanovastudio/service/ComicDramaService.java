@@ -1,12 +1,10 @@
 package com.novanovastudio.service;
 
-import java.math.BigDecimal;
-import com.novanovastudio.common.CreditAmounts;
-
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.novanovastudio.ai.AiTaskSources;
 import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.common.CreditAmounts;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.common.StoryboardFontCatalog;
 import com.novanovastudio.config.NovanovaProperties;
@@ -17,7 +15,6 @@ import com.novanovastudio.dto.StoryboardDtos;
 import com.novanovastudio.repository.ComicDramaRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import java.math.BigDecimal;
-import com.novanovastudio.common.CreditAmounts;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -59,6 +56,9 @@ public class ComicDramaService {
 
     /** 既有分镜Agent服务。 */
     private final StoryboardAgentService storyboardAgentService;
+
+    /** 漫剧最终提示词独立定价。 */
+    private final ComicDramaFinalPromptPricingService finalPromptPricingService;
 
     /** 既有AI任务服务。 */
     private final AiTaskService aiTaskService;
@@ -429,12 +429,13 @@ public class ComicDramaService {
         return currentUserProvider.currentUserId().flatMap(userId -> requireProject(userId, request.projectId())
                 .then(repository.getShot(request.projectId(), request.shotId()).switchIfEmpty(notFound("镜头不存在")))
                 .flatMap(shot -> repository.getSettings(request.projectId())
-                        .flatMap(settings -> composeShotPrompt(request.projectId(), shot, settings, request.model())))
-                .flatMap(item -> repository.nextPromptVersion(request.projectId(), item.shotId()).flatMap(versionNumber -> {
+                        .flatMap(settings -> finalPromptPricingService.prepare(request.model(), request.expectedPricingRevision())
+                                .flatMap(pricing -> composeShotPrompt(request.projectId(), shot, settings, pricing))))
+                .flatMap(item -> transactionalOperator.transactional(Mono.defer(() -> repository.nextPromptVersion(request.projectId(), item.shotId()).flatMap(versionNumber -> {
                     ComicDramaDtos.PromptVersion prompt = new ComicDramaDtos.PromptVersion(id(), item.shotId(), versionNumber,
                             "ai", item.prompt(), item.snapshot(), request.model(), item.credits(), "draft", OffsetDateTime.now());
                     return repository.createPromptVersion(request.projectId(), prompt).thenReturn(prompt);
-                })));
+                }))).onErrorResume(error -> refundComposedPrompts(List.of(item), error))));
     }
 
     /**
@@ -467,8 +468,8 @@ public class ComicDramaService {
                             }
                             log.info("开始批量合成漫剧镜头提示词: projectId={}, shotCount={}, concurrency={}",
                                     request.projectId(), targets.size(), concurrency);
-                            return Flux.fromIterable(targets)
-                                    .flatMap(shot -> composeShotPrompt(request.projectId(), shot, tuple.getT1(), request.model())
+                            return finalPromptPricingService.prepare(request.model(), request.expectedPricingRevision()).flatMap(pricing -> Flux.fromIterable(targets)
+                                    .flatMap(shot -> composeShotPrompt(request.projectId(), shot, tuple.getT1(), pricing)
                                             .subscribeOn(Schedulers.boundedElastic())
                                             .onErrorResume(error -> {
                                                 log.warn("漫剧镜头提示词合成失败: projectId={}, shotId={}, reason={}",
@@ -477,7 +478,7 @@ public class ComicDramaService {
                                             }), concurrency)
                                     .collectList()
                                     .flatMap(results -> persistComposedPrompts(userId, request.projectId(),
-                                            request.expectedRevision(), request.model(), results));
+                                            request.expectedRevision(), request.model(), results)));
                         }));
     }
 
@@ -487,11 +488,11 @@ public class ComicDramaService {
      * @param projectId 项目标识
      * @param shot 镜头
      * @param settings 项目生产设置
-     * @param model 提示词模型
+     * @param pricing 本次请求共用的模型与价格快照
      * @return 单镜头合成产物
      */
     private Mono<ComposedShotPrompt> composeShotPrompt(String projectId, ComicDramaDtos.Shot shot,
-                                                       ComicDramaDtos.ProductionSettings settings, String model) {
+                                                       ComicDramaDtos.ProductionSettings settings, ComicDramaFinalPromptPricingService.PreparedPricing pricing) {
         Mono<String> scriptText = StringUtils.hasText(shot.sourceScriptExcerpt())
                 ? Mono.just(shot.sourceScriptExcerpt())
                 : repository.getShotGenerationSource(projectId, shot.sourceEpisodeId(), shot.sourceSceneId())
@@ -509,9 +510,10 @@ public class ComicDramaService {
                         shot.dialogueVoiceover(), shot.soundDescription(), shot.cameraMovement(), "",
                         assets.stream().map(StoryboardDtos.StoryboardAsset::id).toList());
                 StoryboardDtos.ComposePromptsRequest agentRequest = new StoryboardDtos.ComposePromptsRequest(
-                        script, shot.visualDescription(), settings.visualStyle(), model, List.of(agentShot), assets);
-                return storyboardAgentService.composePrompts(agentRequest)
-                        .map(response -> {
+                        script, shot.visualDescription(), settings.visualStyle(), pricing.model().modelValue(), List.of(agentShot), assets);
+                String operationId = id();
+                return storyboardAgentService.composePrompts(agentRequest, pricing.model(), pricing.credits(), operationId)
+                        .flatMap(response -> Mono.fromCallable(() -> {
                             JSONObject source = new JSONObject();
                             source.put("shot", shot);
                             source.put("settings", settings);
@@ -519,8 +521,10 @@ public class ComicDramaService {
                                     response.prompts().getFirst().finalPrompt(), inputs.getT2(), source);
                             return new ComposedShotPrompt(shot.id(), shot, settings,
                                     ComicDramaPromptReferences.fullPrompt(snapshot), snapshot,
-                                    response.chargedCredits() == null ? BigDecimal.ZERO : response.chargedCredits(), "");
-                        });
+                                    pricing.credits(), operationId, pricing.model().ownerTeamId(), "");
+                        }).onErrorResume(error -> refundComposedPrompts(List.of(new ComposedShotPrompt(
+                                shot.id(), shot, settings, null, null, pricing.credits(), operationId,
+                                pricing.model().ownerTeamId(), "")), error)));
             });
         });
     }
@@ -572,17 +576,41 @@ public class ComicDramaService {
                         .then(repository.refreshProjectProductionStatus(projectId))
                         .thenReturn(prompts))
         ).map(prompts -> new ComicDramaDtos.ComposePromptsResult(
-                prompts.stream().map(ComicDramaDtos.PromptVersion::shotId).toList(), failedShotIds, failureMessage, credits));
+                prompts.stream().map(ComicDramaDtos.PromptVersion::shotId).toList(), failedShotIds, failureMessage, credits))
+                // 事务已回滚后再退还原钱包，避免退款随业务事务一起回滚。
+                .onErrorResume(error -> refundComposedPrompts(composed, error));
+    }
+
+    /**
+     * 生成产物转换或写库失败时退还原操作扣费，并保留原始异常。
+     * @param composed 已成功调用模型并扣费的镜头
+     * @param error 原始业务异常
+     * @param <T> 原流程返回类型
+     * @return 完成全部退款后传播原始异常
+     */
+    private <T> Mono<T> refundComposedPrompts(List<ComposedShotPrompt> composed, Throwable error) {
+        log.error("漫剧提示词产物处理失败，退还已扣积分: shotCount={}", composed.size(), error);
+        return Flux.fromIterable(composed)
+                .concatMapDelayError(item -> storyboardAgentService.refundPromptComposition(
+                        item.operationId(), item.credits(), item.ownerTeamId()), true, 1)
+                .then()
+                .onErrorResume(refundError -> {
+                    log.error("漫剧提示词产物处理失败后的退款异常", refundError);
+                    error.addSuppressed(refundError);
+                    return Mono.error(error);
+                })
+                .then(Mono.error(error));
     }
 
     /** 单镜头批量合成产物；失败时提示词为空并记录失败原因，版本号统一在写库阶段生成。 */
     private record ComposedShotPrompt(String shotId, ComicDramaDtos.Shot shot,
                                       ComicDramaDtos.ProductionSettings settings, String prompt,
-                                      JSONObject snapshot, BigDecimal credits, String failureReason) {
+                                      JSONObject snapshot, BigDecimal credits, String operationId,
+                                      long ownerTeamId, String failureReason) {
 
         /** 构造失败产物。 */
         private static ComposedShotPrompt failed(String shotId, String reason) {
-            return new ComposedShotPrompt(shotId, null, null, null, null, BigDecimal.ZERO, reason);
+            return new ComposedShotPrompt(shotId, null, null, null, null, BigDecimal.ZERO, null, 0L, reason);
         }
     }
 

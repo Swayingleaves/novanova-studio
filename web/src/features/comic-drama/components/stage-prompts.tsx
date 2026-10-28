@@ -7,15 +7,17 @@ import { productionParameterLabel } from "../lib/production-labels";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { useEffect, useMemo, useState } from "react";
-import { Alert, App, Button, Card, Empty, Input, Modal, Select, Space, Tag } from "antd";
+import { Alert, App, Button, Empty, Input, Space, Tag } from "antd";
 import { Check, Copy, History, Sparkles } from "lucide-react";
 
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
-import type { ComicDramaPromptVersion, ComicDramaShot } from "../types";
+import type { ComicDramaPromptVersion } from "../types";
 import { fullPromptWithBody, readPromptBody } from "../lib/prompt-references";
 import { PromptReferenceInstructions } from "./prompt-reference-instructions";
+import { useFinalPromptPricing } from "../hooks/use-final-prompt-pricing";
+import { useFinalPromptConfirmation } from "../hooks/use-final-prompt-confirmation";
 
 /** 镜头提示词制作与版本管理阶段视图。 */
 export function StagePrompts() {
@@ -55,6 +57,8 @@ export function StagePrompts() {
     const [composing, setComposing] = useState(false);
     const [saving, setSaving] = useState(false);
     const [aiModel, setAiModel] = useState<string>("");
+    const confirmFinalPrompt = useFinalPromptConfirmation(workspace?.projectId);
+    const pricingQuery = useFinalPromptPricing(aiModel, Boolean(workspace));
 
     // 仅在镜头或最新版本切换时重置，后台刷新不能覆盖未保存正文及已选择的历史来源。
     useEffect(() => {
@@ -79,24 +83,34 @@ export function StagePrompts() {
 
     if (!workspace) return null;
 
-    // AI Compose Prompt
-    const handleCompose = async () => {
-        if (!activeShot) return;
+    // 确认前锁定镜头和报价，只有用户确认后才提交生成请求。
+    const handleCompose = () => {
+        if (!activeShot || composing || !pricingQuery.ready) return;
         if (!aiModel) {
             message.warning(translate("comicDrama.selectAnAiPromptModel"));
             return;
         }
-        setComposing(true);
-        try {
-            const prompt = await composePrompt(activeShot.id, aiModel);
-            setEditorSource(prompt);
-            setEditorText(readPromptBody(prompt));
-            message.success(translate("comicDrama.shotCountPromptGeneratedVCount", { value0: activeShot.shotNumber, value1: prompt.versionNumber }));
-        } catch (error) {
-            if (error instanceof Error) message.error(error.message);
-        } finally {
-            setComposing(false);
-        }
+        const request = {
+            projectId: workspace.projectId,
+            shotId: activeShot.id,
+            shotNumber: activeShot.shotNumber,
+            model: aiModel,
+            unitPrice: pricingQuery.data!.unitPrice!,
+            revision: pricingQuery.data!.revision,
+        };
+        confirmFinalPrompt(1, request.unitPrice, async () => {
+                setComposing(true);
+                try {
+                    const prompt = await composePrompt(request.projectId, request.shotId, request.model, request.revision);
+                    // 工作区刷新后由当前镜头的版本同步编辑器，避免异步结果覆盖已切换的镜头。
+                    message.success(translate("comicDrama.shotCountPromptGeneratedVCount", { value0: request.shotNumber, value1: prompt.versionNumber }));
+                } catch (error) {
+                    if (error instanceof Error) message.error(error.message);
+                } finally {
+                    setComposing(false);
+                    void pricingQuery.refetch();
+                }
+        });
     };
 
     // Save prompt manually as a new version
@@ -177,15 +191,15 @@ export function StagePrompts() {
                             {/* Shot Context Summary */}
                             <div className="rounded-xl border border-[var(--studio-line)] bg-[var(--studio-panel-solid)] p-4">
                                 <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex flex-wrap items-center gap-2">
                                         <span className="rounded bg-[var(--studio-line)] px-2 py-0.5 font-mono text-sm font-bold text-[var(--studio-ink)]">{translate("comicDrama.shotCount_cb9c45", { value0: activeShot.shotNumber })}</span>
                                         <Tag color="cyan">{productionParameterLabel(activeShot.shotSize || "", translate) || translate("comicDrama.shotSizeNotSet")}</Tag>
                                         <Tag color="geekblue">{productionParameterLabel(activeShot.cameraMovement || "", translate) || translate("comicDrama.staticCamera")}</Tag>
                                         <span className="text-xs text-[var(--studio-muted)]">{translate("comicDrama.estimatedCounts_448e10", { value0: activeShot.durationSeconds })}</span>
                                     </div>
 
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-44">
+                                    <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+                                        <div className="min-w-0 flex-1 sm:w-44 sm:flex-none">
                                             <ModelPicker
                                                 config={config}
                                                 capability="text"
@@ -197,12 +211,19 @@ export function StagePrompts() {
                                         <Button
                                             type="primary"
                                             loading={composing}
+                                            disabled={!pricingQuery.ready}
                                             icon={<Sparkles className="size-4" />}
                                             onClick={handleCompose}
                                         >
                                             {translate("comicDrama.generatePromptWithAi")}</Button>
                                     </div>
                                 </div>
+
+                                <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-[var(--studio-muted)]" aria-live="polite">
+                                    <span>每镜头积分：{pricingQuery.ready ? creditText(pricingQuery.data!.unitPrice!) : "—"}</span>
+                                    <Button size="small" loading={pricingQuery.isFetching} disabled={!aiModel || composing} onClick={() => void pricingQuery.refetch()}>刷新价格</Button>
+                                </div>
+                                {pricingQuery.reason ? <Alert className="mt-3" type={pricingQuery.isError ? "error" : "info"} showIcon title={pricingQuery.reason} /> : null}
 
                                 <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
                                     <div>

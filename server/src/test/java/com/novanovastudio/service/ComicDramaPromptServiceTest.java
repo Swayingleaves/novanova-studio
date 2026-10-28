@@ -16,6 +16,7 @@ import com.novanovastudio.security.CurrentUserProvider;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -35,6 +36,11 @@ class ComicDramaPromptServiceTest {
     private StoryboardAgentService storyboardAgentService;
     /** 计费和底层任务依赖。 */
     private AiTaskService aiTaskService;
+    /** 独立提示词定价。 */
+    private ComicDramaFinalPromptPricingService pricingService;
+    /** 本次固定模型，通用价格与专项价格不同。 */
+    private final com.novanovastudio.agent.AgentScopeModelFactory.TextModelSelection model =
+            new com.novanovastudio.agent.AgentScopeModelFactory.TextModelSelection(null, "model", "模型", "渠道", BigDecimal.TEN, 0L);
     /** 被测业务服务。 */
     private ComicDramaService service;
     /** 角色图片。 */
@@ -47,7 +53,11 @@ class ComicDramaPromptServiceTest {
     void setUp() {
         repository = mock(ComicDramaRepository.class);
         storyboardAgentService = mock(StoryboardAgentService.class);
+        when(storyboardAgentService.refundPromptComposition(anyString(), any(), anyLong())).thenReturn(Mono.empty());
         aiTaskService = mock(AiTaskService.class);
+        pricingService = mock(ComicDramaFinalPromptPricingService.class);
+        when(pricingService.prepare("model", 1L)).thenReturn(Mono.just(
+                new ComicDramaFinalPromptPricingService.PreparedPricing(model, BigDecimal.ONE, 1L)));
         CurrentUserProvider currentUserProvider = mock(CurrentUserProvider.class);
         TransactionalOperator transaction = mock(TransactionalOperator.class);
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(7L));
@@ -59,7 +69,7 @@ class ComicDramaPromptServiceTest {
         when(repository.refreshProjectProductionStatus("project")).thenReturn(Mono.empty());
         when(transaction.transactional(any(Mono.class))).thenAnswer(invocation -> invocation.getArgument(0));
         service = new ComicDramaService(currentUserProvider, repository, mock(ScriptService.class),
-                storyboardAgentService, aiTaskService, mock(PersistenceService.class), transaction, new NovanovaProperties());
+                storyboardAgentService, pricingService, aiTaskService, mock(PersistenceService.class), transaction, new NovanovaProperties());
     }
 
     /** 单条合成和批量合成必须生成完全相同的正文、说明和映射。 */
@@ -74,12 +84,12 @@ class ComicDramaPromptServiceTest {
                 new StoryboardDtos.StoryboardAsset("no-image", "prop", "无图道具", "只保留文字描述")));
         when(repository.listShotReferencesForVideo("project", "shot")).thenReturn(Mono.just(List.of(frame, actor)));
         when(repository.nextPromptVersion("project", "shot")).thenReturn(Mono.just(1));
-        when(storyboardAgentService.composePrompts(any())).thenReturn(Mono.just(new StoryboardDtos.ComposePromptsResponse(
+        when(storyboardAgentService.composePrompts(any(), eq(model), eq(BigDecimal.ONE), anyString())).thenReturn(Mono.just(new StoryboardDtos.ComposePromptsResponse(
                 List.of(new StoryboardDtos.StoryboardPrompt("shot", "八段正文及无图道具描述")), BigDecimal.ONE)));
 
         ComicDramaDtos.PromptVersion single = service.composePrompt(
-                new ComicDramaDtos.ComposePromptRequest("project", "shot", "model", true)).block();
-        service.composePrompts(new ComicDramaDtos.ComposePromptsRequest("project", 3L, List.of("shot"), "model", true)).block();
+                new ComicDramaDtos.ComposePromptRequest("project", "shot", "model", 1L, true)).block();
+        service.composePrompts(new ComicDramaDtos.ComposePromptsRequest("project", 3L, List.of("shot"), "model", 1L, true)).block();
 
         ArgumentCaptor<ComicDramaDtos.PromptVersion> versions = ArgumentCaptor.forClass(ComicDramaDtos.PromptVersion.class);
         verify(repository, times(2)).createPromptVersion(eq("project"), versions.capture());
@@ -90,7 +100,7 @@ class ComicDramaPromptServiceTest {
         assertEquals("adopted", batch.status());
         assertEquals(2, batch.sourceSnapshot().getJSONArray("referenceImages").size());
         ArgumentCaptor<StoryboardDtos.ComposePromptsRequest> agent = ArgumentCaptor.forClass(StoryboardDtos.ComposePromptsRequest.class);
-        verify(storyboardAgentService, times(2)).composePrompts(agent.capture());
+        verify(storyboardAgentService, times(2)).composePrompts(agent.capture(), eq(model), eq(BigDecimal.ONE), anyString());
         assertEquals("无图道具", agent.getValue().assets().getFirst().name());
     }
 
@@ -213,6 +223,153 @@ class ComicDramaPromptServiceTest {
         verify(aiTaskService).quoteTaskCredits(quoted.capture());
         assertEquals("旧版正文", quoted.getValue().prompt());
         assertEquals("text-to-video", quoted.getValue().videoGenerationMode());
+    }
+
+    /** 未确认费用时，单镜头和批量入口均不得查询价格、调用模型或保存版本。 */
+    @Test
+    void shouldRejectUnconfirmedPromptComposition() {
+        clearInvocations(repository, pricingService, storyboardAgentService);
+        assertThrows(BusinessException.class, () -> service.composePrompt(
+                new ComicDramaDtos.ComposePromptRequest("project", "shot", "model", 1L, false)).block());
+        assertThrows(BusinessException.class, () -> service.composePrompts(
+                new ComicDramaDtos.ComposePromptsRequest("project", 3L, List.of("shot"), "model", 1L, false)).block());
+        verifyNoInteractions(repository, pricingService, storyboardAgentService);
+    }
+
+    /** 未定价或修订过期时，单镜头和批量入口均不得调用模型或保存版本。 */
+    @Test
+    void shouldRejectPricingBeforeEveryPromptEntry() {
+        bindPromptComposition();
+        when(pricingService.prepare("model", 1L)).thenReturn(Mono.error(new BusinessException(
+                com.novanovastudio.common.ErrorCode.DATA_CONFLICT, "价格已变化")));
+        assertThrows(BusinessException.class, () -> service.composePrompt(
+                new ComicDramaDtos.ComposePromptRequest("project", "shot", "model", 1L, true)).block());
+        assertThrows(BusinessException.class, () -> service.composePrompts(
+                new ComicDramaDtos.ComposePromptsRequest("project", 3L, List.of("shot", "second"), "model", 1L, true)).block());
+        verifyNoInteractions(storyboardAgentService);
+        verify(repository, never()).createPromptVersion(anyString(), any());
+    }
+
+    /** 同一批次只准备一次价格，成功版本和汇总仅计成功镜头，全部失败为零。 */
+    @Test
+    void shouldShareBatchSnapshotAndSummarizeOnlySuccessfulShots() {
+        bindPromptComposition();
+        AtomicBoolean priceChanged = new AtomicBoolean();
+        when(pricingService.prepare("model", 1L)).thenAnswer(invocation -> priceChanged.get()
+                ? Mono.error(new IllegalStateException("后台已改价"))
+                : Mono.just(new ComicDramaFinalPromptPricingService.PreparedPricing(model, BigDecimal.ONE, 1L)));
+        when(storyboardAgentService.composePrompts(any(), eq(model), eq(BigDecimal.ONE), anyString())).thenAnswer(invocation -> {
+            StoryboardDtos.ComposePromptsRequest request = invocation.getArgument(0);
+            String shotId = request.shots().getFirst().id();
+            // 模拟批量执行期间后台改价，已启动批次继续使用原快照。
+            priceChanged.set(true);
+            return "second".equals(shotId) ? Mono.error(new IllegalStateException("模型失败")) : Mono.just(
+                    new StoryboardDtos.ComposePromptsResponse(List.of(new StoryboardDtos.StoryboardPrompt(shotId, "正文")), BigDecimal.ONE));
+        });
+        var result = service.composePrompts(new ComicDramaDtos.ComposePromptsRequest(
+                "project", 3L, List.of("shot", "second"), "model", 1L, true)).block();
+        assertEquals(List.of("shot"), result.succeededShotIds());
+        assertEquals(List.of("second"), result.failedShotIds());
+        assertEquals(0, BigDecimal.ONE.compareTo(result.chargedCredits()));
+        verify(pricingService).prepare("model", 1L);
+        verify(storyboardAgentService, times(2)).composePrompts(any(), eq(model), eq(BigDecimal.ONE), anyString());
+        ArgumentCaptor<ComicDramaDtos.PromptVersion> version = ArgumentCaptor.forClass(ComicDramaDtos.PromptVersion.class);
+        verify(repository).createPromptVersion(eq("project"), version.capture());
+        assertEquals(BigDecimal.ONE, version.getValue().chargedCredits());
+
+        when(pricingService.prepare("model", 1L)).thenReturn(Mono.just(
+                new ComicDramaFinalPromptPricingService.PreparedPricing(model, BigDecimal.ONE, 1L)));
+        when(storyboardAgentService.composePrompts(any(), eq(model), eq(BigDecimal.ONE), anyString()))
+                .thenReturn(Mono.error(new IllegalStateException("模型失败")));
+        var failed = service.composePrompts(new ComicDramaDtos.ComposePromptsRequest(
+                "project", 3L, List.of("shot", "second"), "model", 1L, true)).block();
+        assertTrue(failed.succeededShotIds().isEmpty());
+        assertEquals(2, failed.failedShotIds().size());
+        assertEquals(0, failed.chargedCredits().signum());
+        verify(repository, times(1)).createPromptVersion(anyString(), any());
+    }
+
+    /** 明确保存的免费价格必须原样传递并记录在生成版本中。 */
+    @Test
+    void shouldAllowFreePromptComposition() {
+        bindPromptComposition();
+        when(pricingService.prepare("model", 1L)).thenReturn(Mono.just(
+                new ComicDramaFinalPromptPricingService.PreparedPricing(model, BigDecimal.ZERO, 1L)));
+        when(storyboardAgentService.composePrompts(any(), eq(model), eq(BigDecimal.ZERO), anyString())).thenReturn(Mono.just(
+                new StoryboardDtos.ComposePromptsResponse(List.of(new StoryboardDtos.StoryboardPrompt("shot", "正文")), BigDecimal.ZERO)));
+        var version = service.composePrompt(new ComicDramaDtos.ComposePromptRequest("project", "shot", "model", 1L, true)).block();
+        assertEquals(0, version.chargedCredits().signum());
+        verify(storyboardAgentService).composePrompts(any(), eq(model), eq(BigDecimal.ZERO), anyString());
+    }
+
+    /** 单镜头写库失败后按原扣费操作退款。 */
+    @Test
+    void shouldRefundSinglePromptWhenPersistenceFails() {
+        bindPromptComposition();
+        stubSuccessfulComposition();
+        when(repository.createPromptVersion(eq("project"), any())).thenReturn(Mono.error(new IllegalStateException("写库失败")));
+        assertThrows(IllegalStateException.class, () -> service.composePrompt(
+                new ComicDramaDtos.ComposePromptRequest("project", "shot", "model", 1L, true)).block());
+        ArgumentCaptor<String> operation = ArgumentCaptor.forClass(String.class);
+        verify(storyboardAgentService).composePrompts(any(), eq(model), eq(BigDecimal.ONE), operation.capture());
+        verify(storyboardAgentService).refundPromptComposition(operation.getValue(), BigDecimal.ONE, model.ownerTeamId());
+    }
+
+    /** 批量写库事务失败时，单次退款异常不能阻止其他已扣费镜头退款。 */
+    @Test
+    void shouldRefundEveryComposedPromptWhenBatchPersistenceFails() {
+        bindPromptComposition();
+        stubSuccessfulComposition();
+        when(repository.advanceRevision(7L, "project", 3L)).thenReturn(Mono.error(new IllegalStateException("版本冲突")));
+        when(storyboardAgentService.refundPromptComposition(anyString(), any(), anyLong()))
+                .thenReturn(Mono.error(new IllegalStateException("退款异常")), Mono.empty());
+        IllegalStateException failure = assertThrows(IllegalStateException.class, () -> service.composePrompts(
+                new ComicDramaDtos.ComposePromptsRequest("project", 3L, List.of("shot", "second"), "model", 1L, true)).block());
+        assertEquals("版本冲突", failure.getMessage());
+        ArgumentCaptor<String> charged = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<String> refunded = ArgumentCaptor.forClass(String.class);
+        verify(storyboardAgentService, times(2)).composePrompts(any(), eq(model), eq(BigDecimal.ONE), charged.capture());
+        verify(storyboardAgentService, times(2)).refundPromptComposition(refunded.capture(), eq(BigDecimal.ONE), eq(model.ownerTeamId()));
+        assertEquals(new java.util.HashSet<>(charged.getAllValues()), new java.util.HashSet<>(refunded.getAllValues()));
+        assertEquals(2, new java.util.HashSet<>(charged.getAllValues()).size());
+    }
+
+    /** 转换失败退原扣费；模型调用失败由底层退款，避免重复补偿。 */
+    @Test
+    void shouldRefundOnlySuccessfulModelCallsWhenConversionFails() {
+        bindPromptComposition();
+        when(storyboardAgentService.composePrompts(any(), eq(model), eq(BigDecimal.ONE), anyString()))
+                .thenReturn(Mono.just(new StoryboardDtos.ComposePromptsResponse(List.of(), BigDecimal.ONE)));
+        assertThrows(java.util.NoSuchElementException.class, () -> service.composePrompt(
+                new ComicDramaDtos.ComposePromptRequest("project", "shot", "model", 1L, true)).block());
+        verify(storyboardAgentService).refundPromptComposition(anyString(), eq(BigDecimal.ONE), eq(model.ownerTeamId()));
+        clearInvocations(storyboardAgentService);
+        when(storyboardAgentService.composePrompts(any(), eq(model), eq(BigDecimal.ONE), anyString()))
+                .thenReturn(Mono.error(new IllegalStateException("模型失败")));
+        assertThrows(IllegalStateException.class, () -> service.composePrompt(
+                new ComicDramaDtos.ComposePromptRequest("project", "shot", "model", 1L, true)).block());
+        verify(storyboardAgentService, never()).refundPromptComposition(anyString(), any(), anyLong());
+    }
+
+    /** 让模型按请求镜头返回成功正文。 */
+    private void stubSuccessfulComposition() {
+        when(storyboardAgentService.composePrompts(any(), eq(model), eq(BigDecimal.ONE), anyString())).thenAnswer(invocation -> {
+            StoryboardDtos.ComposePromptsRequest request = invocation.getArgument(0);
+            return Mono.just(new StoryboardDtos.ComposePromptsResponse(List.of(new StoryboardDtos.StoryboardPrompt(
+                    request.shots().getFirst().id(), "正文")), BigDecimal.ONE));
+        });
+    }
+
+    /** 初始化两个镜头的提示词合成输入与版本持久化。 */
+    private void bindPromptComposition() {
+        when(repository.listShots("project", null, null)).thenReturn(Flux.just(shot("shot", 1), shot("second", 2)));
+        when(repository.getSettings("project")).thenReturn(Mono.just(new ComicDramaDtos.ProductionSettings(
+                "comicDrama", 1, 60, 60, "landscape", "16:9", "国风", "", "", "")));
+        for (String shotId : List.of("shot", "second")) {
+            when(repository.listShotStoryboardAssets("project", shotId)).thenReturn(Flux.empty());
+            when(repository.listShotReferencesForVideo("project", shotId)).thenReturn(Mono.just(List.of()));
+            when(repository.nextPromptVersion("project", shotId)).thenReturn(Mono.just(1));
+        }
     }
 
     /** 设置当前镜头及其采用版本和图片。
