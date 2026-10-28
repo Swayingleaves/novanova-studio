@@ -184,8 +184,25 @@ export function formatCreditChange(changeAmount: CreditAmount | null | undefined
     return (creditAmount(amount).greaterThan(0) ? "+" : "") + formatCredits(amount);
 }
 
+/** 同步业务操作流水的原因格式：业务名称 + 扣费或退款 + 服务端对账用的内部操作标识。 */
+const OPERATION_REASON_PATTERN = /^(.+?)(?:扣费|退款)（操作ID：[^）]*）$/;
+
+/**
+ * 去掉业务操作流水原因里的内部操作标识。
+ *
+ * @param reason 流水原因，可为空
+ * @return 面向用户展示的业务名称，格式不匹配时原样返回
+ */
+function operationReasonLabel(reason: string | null | undefined) {
+    const text = (reason ?? "").trim();
+    const matched = OPERATION_REASON_PATTERN.exec(text);
+    return matched ? matched[1].trim() : text;
+}
+
 /**
  * 组装积分明细详情文案：任务流水显示生成类型与模型，其余显示变动原因。
+ *
+ * <p>漫剧生成最终提示词等同步业务操作没有生成任务记录，类型与模型都为空，只能回退用流水原因说明这笔记账。</p>
  *
  * @param transactionType 积分流水类型
  * @param generationType 生成任务类型，非任务流水为 null
@@ -196,7 +213,8 @@ export function formatCreditChange(changeAmount: CreditAmount | null | undefined
 export function creditTransactionDetail(transactionType: ServerCreditTransactionType, generationType: "image" | "video" | null, model: string | null, reason: string | null | undefined) {
     if (transactionType === "task_charge" || transactionType === "task_refund") {
         const typeLabel = generationType ? generationTypeLabel(generationType) : "";
-        return model ? `${typeLabel} · ${model}` : typeLabel;
+        const detail = model ? `${typeLabel} · ${model}` : typeLabel;
+        return detail || operationReasonLabel(reason);
     }
     return reason ?? "";
 }

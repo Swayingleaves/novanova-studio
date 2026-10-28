@@ -64,3 +64,11 @@ test("非任务流水详情显示变动原因", () => {
     assert.equal(creditTransactionDetail("admin_adjustment", null, null, "活动补偿"), "活动补偿");
     assert.equal(creditTransactionDetail("invitation_reward", null, null, "邀请新用户注册奖励"), "邀请新用户注册奖励");
 });
+
+test("没有生成任务的业务操作流水用原因说明来源并隐藏内部操作标识", () => {
+    assert.equal(creditTransactionDetail("task_charge", null, null, "生成最终提示词扣费（操作ID：9f1c7d2e）"), "生成最终提示词");
+    assert.equal(creditTransactionDetail("task_refund", null, null, "生成最终提示词退款（操作ID：9f1c7d2e）"), "生成最终提示词");
+    assert.equal(creditTransactionDetail("task_charge", null, null, "分镜首次生成扣费（操作ID：abc）"), "分镜首次生成");
+    assert.equal(creditTransactionDetail("task_charge", null, null, "无格式说明"), "无格式说明");
+    assert.equal(creditTransactionDetail("task_charge", null, null, null), "");
+});

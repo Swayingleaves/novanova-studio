@@ -68,6 +68,9 @@ public class StoryboardAgentService {
     /** 资产图片提示词模板的占位符，形如“{{name}}”。 */
     private static final Pattern ASSET_PROMPT_PLACEHOLDER = Pattern.compile("\\{\\{\\s*(\\w+)\\s*\\}\\}");
 
+    /** 生成最终提示词的积分流水名称，扣费与退款必须完全一致，否则按原因匹配不到原扣费。 */
+    private static final String COMPOSE_OPERATION_NAME = "生成最终提示词";
+
     /** 当前用户提供器。 */
     private final CurrentUserProvider currentUserProvider;
 
@@ -151,7 +154,7 @@ public class StoryboardAgentService {
     Mono<Void> refundPromptComposition(String operationId, BigDecimal credits, long ownerTeamId) {
         if (credits.signum() == 0) return Mono.empty();
         return currentUserProvider.currentUserId()
-                .flatMap(userId -> creditService.refundOperation(userId, operationId, "分镜提示词合成"))
+                .flatMap(userId -> creditService.refundOperation(userId, operationId, COMPOSE_OPERATION_NAME))
                 .contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.WALLET_KEY, ownerTeamId));
     }
 
@@ -216,7 +219,7 @@ public class StoryboardAgentService {
     private Mono<StoryboardDtos.ComposePromptsResponse> composeWithModel(
             Long userId, AgentScopeModelFactory.TextModelSelection model, StoryboardDtos.ComposePromptsRequest request, BigDecimal unitCredits, String operationId) {
         BigDecimal credits = multiplyCredits(unitCredits, request.shots().size());
-        return executeChargedOperation(userId, model.ownerTeamId(), credits, "分镜提示词合成", operationId, identifier -> callComposeAgent(userId, identifier, model, request)
+        return executeChargedOperation(userId, model.ownerTeamId(), credits, COMPOSE_OPERATION_NAME, operationId, identifier -> callComposeAgent(userId, identifier, model, request)
                         .map(result -> validatePromptComposition(request.shots(), request.visualStyle(), result)))
                 .map(prompts -> new StoryboardDtos.ComposePromptsResponse(prompts, credits));
     }

@@ -357,9 +357,9 @@ class StoryboardAgentServiceTest {
                 new NovanovaProperties(), creditService, mock(SystemPromptTemplateService.class), mock(AiTaskService.class));
         var price = new java.math.BigDecimal("1.234567");
         Assertions.assertEquals(price, service.composePrompts(request, model, price).block().chargedCredits());
-        verify(creditService).chargeOperation(eq(8L), anyString(), eq(price), eq("分镜提示词合成"));
+        verify(creditService).chargeOperation(eq(8L), anyString(), eq(price), eq("生成最终提示词"));
         Assertions.assertEquals(0, java.math.BigDecimal.TEN.compareTo(service.composePrompts(request).block().chargedCredits()));
-        verify(creditService).chargeOperation(eq(8L), anyString(), eq(com.novanovastudio.common.CreditAmounts.of(10)), eq("分镜提示词合成"));
+        verify(creditService).chargeOperation(eq(8L), anyString(), eq(com.novanovastudio.common.CreditAmounts.of(10)), eq("生成最终提示词"));
         Assertions.assertEquals(0, service.composePrompts(request, model, java.math.BigDecimal.ZERO).block().chargedCredits().signum());
 
         // 调用失败退款必须复用原扣费操作标识，不能退回其他钱包。
