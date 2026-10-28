@@ -3,6 +3,7 @@
 import { translateMessage as translate } from "@/features/locale/translate";
 
 import { create } from "zustand";
+import { readPromptBody } from "../lib/prompt-references";
 
 import {
     adoptComicDramaMedia,
@@ -106,7 +107,7 @@ type ComicDramaState = {
     reorderShots: (shotIds: string[]) => Promise<void>;
     deleteShot: (shotId: string, confirm: boolean) => Promise<ComicDramaMutationResult>;
     composePrompt: (shotId: string, model: string) => Promise<ComicDramaPromptVersion>;
-    savePrompt: (shotId: string, prompt: string, expectedPromptVersion?: number) => Promise<ComicDramaPromptVersion>;
+    savePrompt: (shotId: string, prompt: string, expectedPromptVersion?: number, sourcePromptVersionId?: string) => Promise<ComicDramaPromptVersion>;
     /** AI 合成并立即采用为后续视频生成所使用的最终提示词。 */
     generateFinalVideoPrompt: (shotId: string, model: string) => Promise<ComicDramaPromptVersion>;
     /** 一次提交多个镜头，由服务端并发合成并统一采用，完成后只刷新一次工作区。 */
@@ -344,10 +345,10 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
         return prompt;
     },
 
-    savePrompt: async (shotId, prompt, expectedPromptVersion) => {
+    savePrompt: async (shotId, prompt, expectedPromptVersion, sourcePromptVersionId) => {
         const workspace = get().workspace;
         if (!workspace) throw new Error(translate("comicDrama.workspaceNotInitialized"));
-        const saved = await saveComicDramaPrompt(workspace.projectId, workspace.revision, shotId, prompt, expectedPromptVersion);
+        const saved = await saveComicDramaPrompt(workspace.projectId, workspace.revision, shotId, prompt, expectedPromptVersion, sourcePromptVersionId);
         await get().reloadWorkspace();
         return saved;
     },
@@ -355,7 +356,7 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
     // AI 合成结果先保留原始版本，再采用同一文本，确保视频生成读取到的就是界面展示的最终提示词。
     generateFinalVideoPrompt: async (shotId, model) => {
         const composed = await get().composePrompt(shotId, model);
-        return get().savePrompt(shotId, composed.prompt, composed.versionNumber);
+        return get().savePrompt(shotId, readPromptBody(composed), composed.versionNumber, composed.id);
     },
 
     // 批量合成由服务端并发处理，前端只发一次请求，完成后统一刷新一次工作区。

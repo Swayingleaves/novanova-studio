@@ -48,6 +48,8 @@ public class TeamScopeWebFilter implements WebFilter {
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getPath().value();
         String teamValue = exchange.getRequest().getHeaders().getFirst("X-Team-Id");
+        if (teamValue != null && !teamValue.isBlank() && !"0".equals(teamValue) && isPlatformOnlyPath(path))
+            return reject(exchange, "团队空间不能访问平台积分购买和商品管理接口");
         // 管理接口的 teamId 是操作目标，不能被误判为当前团队并触发入团校验。
         if (teamValue == null && EVENT_STREAM_PATHS.contains(path)) teamValue = exchange.getRequest().getQueryParams().getFirst("teamId");
         String filterValue = exchange.getRequest().getQueryParams().getFirst("filterTeamId");
@@ -99,7 +101,18 @@ public class TeamScopeWebFilter implements WebFilter {
      */
     private boolean isPlatformPath(String path) {
         return path.startsWith("/api/v1/auth/") || Set.of("/api/v1/team/getPublicTeam", "/api/v1/team/listMyTeams",
-                "/api/v1/team/listMyInvitations", "/api/v1/team/acceptInvitation", "/api/v1/config/getRuntimeConfig").contains(path);
+                "/api/v1/team/listMyInvitations", "/api/v1/team/acceptInvitation", "/api/v1/config/getRuntimeConfig").contains(path)
+                || isPlatformOnlyPath(path);
+    }
+
+    /**
+     * 判断必须在平台空间执行的支付和商品管理接口。
+     *
+     * @param path 请求路径
+     * @return boolean 是否为平台专属接口
+     */
+    private boolean isPlatformOnlyPath(String path) {
+        return path.startsWith("/api/v1/payment/") || path.startsWith("/api/v1/config/creditProduct/");
     }
 
     /**

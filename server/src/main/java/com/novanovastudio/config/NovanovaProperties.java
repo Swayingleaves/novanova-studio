@@ -37,6 +37,9 @@ public class NovanovaProperties {
     @Valid
     private ObjectStorage objectStorage = new ObjectStorage();
 
+    /** 支付宝电脑网站支付配置 */
+    private Alipay alipay = new Alipay();
+
     /**
      * 获取应用配置
      *
@@ -161,6 +164,147 @@ public class NovanovaProperties {
      */
     public void setObjectStorage(ObjectStorage objectStorage) {
         this.objectStorage = objectStorage;
+    }
+
+    /**
+     * 获取支付宝支付配置。
+     *
+     * @return Alipay 支付宝配置
+     */
+    public Alipay getAlipay() {
+        return alipay;
+    }
+
+    /**
+     * 设置支付宝支付配置。
+     *
+     * @param alipay Alipay 支付宝配置
+     */
+    public void setAlipay(Alipay alipay) {
+        this.alipay = alipay;
+    }
+
+    /** 支付宝电脑网站支付配置。 */
+    public static class Alipay {
+
+        /** 是否启用支付宝支付 */
+        private boolean enabled;
+
+        /** 支付宝应用标识 */
+        private String appId = "";
+
+        /** 应用私钥 */
+        private String privateKey = "";
+
+        /** 支付宝公钥 */
+        private String publicKey = "";
+
+        /** 支付宝网关地址 */
+        private String gatewayUrl = "https://openapi.alipay.com/gateway.do";
+
+        /** 异步通知地址 */
+        private String notifyUrl = "";
+
+        /** 同步跳转地址 */
+        private String returnUrl = "";
+
+        /**
+         * @return boolean 是否启用支付宝支付
+         */
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        /**
+         * @param enabled boolean 是否启用支付宝支付
+         */
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        /**
+         * @return String 支付宝应用标识
+         */
+        public String getAppId() {
+            return appId;
+        }
+
+        /**
+         * @param appId String 支付宝应用标识
+         */
+        public void setAppId(String appId) {
+            this.appId = appId;
+        }
+
+        /**
+         * @return String 应用私钥
+         */
+        public String getPrivateKey() {
+            return privateKey;
+        }
+
+        /**
+         * @param privateKey String 应用私钥
+         */
+        public void setPrivateKey(String privateKey) {
+            this.privateKey = privateKey;
+        }
+
+        /**
+         * @return String 支付宝公钥
+         */
+        public String getPublicKey() {
+            return publicKey;
+        }
+
+        /**
+         * @param publicKey String 支付宝公钥
+         */
+        public void setPublicKey(String publicKey) {
+            this.publicKey = publicKey;
+        }
+
+        /**
+         * @return String 支付宝网关地址
+         */
+        public String getGatewayUrl() {
+            return gatewayUrl;
+        }
+
+        /**
+         * @param gatewayUrl String 支付宝网关地址
+         */
+        public void setGatewayUrl(String gatewayUrl) {
+            this.gatewayUrl = gatewayUrl;
+        }
+
+        /**
+         * @return String 异步通知地址
+         */
+        public String getNotifyUrl() {
+            return notifyUrl;
+        }
+
+        /**
+         * @param notifyUrl String 异步通知地址
+         */
+        public void setNotifyUrl(String notifyUrl) {
+            this.notifyUrl = notifyUrl;
+        }
+
+        /**
+         * @return String 同步跳转地址
+         */
+        public String getReturnUrl() {
+            return returnUrl;
+        }
+
+        /**
+         * @param returnUrl String 同步跳转地址
+         */
+        public void setReturnUrl(String returnUrl) {
+            this.returnUrl = returnUrl;
+        }
     }
 
     /**

@@ -35,7 +35,8 @@ export function resolveSpaceBrand(team: TeamSummary | null): SpaceBrand {
 export function synchronizeDocumentBrand(brand: SpaceBrand, pathname: string, platformMetadata: { description: string; editionsTitle: string; editionsDescription: string }) {
     const docsPage = /^\/docs(?:\/|$)/.test(pathname);
     const editionsPage = pathname === "/editions";
-    const documentBrand = docsPage || editionsPage || pathname === "/credits/purchase" ? platformBrand : brand;
+    const platformPage = pathname === "/credits/purchase" || pathname === "/credits/orders";
+    const documentBrand = docsPage || editionsPage || platformPage ? platformBrand : brand;
     if (!docsPage) {
         document.title = editionsPage ? platformMetadata.editionsTitle : documentBrand.name;
         document.querySelector('meta[name="description"]')?.setAttribute("content", editionsPage ? platformMetadata.editionsDescription : documentBrand.introduction || platformMetadata.description);

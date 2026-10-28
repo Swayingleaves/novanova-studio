@@ -147,7 +147,8 @@ public class GlobalExceptionHandler {
             return null;
         }
         // 未预期异常写日志，并向前端返回系统错误。
-        log.error("服务端异常", exception);
+        log.error("服务端异常: {} {} contentType={}", exchange.getRequest().getMethod(), exchange.getRequest().getPath(),
+                exchange.getRequest().getHeaders().getContentType(), exception);
         return ResponseEntity.internalServerError().body(ApiResponse.fail(ErrorCode.SYSTEM_ERROR, SystemMessage.of("system.internalError").render(WebsiteLanguage.resolve(exchange))));
     }
 

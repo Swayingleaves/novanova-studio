@@ -25,6 +25,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -198,6 +199,12 @@ public class ComicDramaService {
      */
     public Mono<List<ComicDramaDtos.AssetVersion>> listAssetVersions(ComicDramaDtos.ListAssetVersionsRequest request) {
         return withProject(request.projectId(), () -> repository.listAssetVersions(request.projectId(), request.assetId()).collectList());
+    }
+
+    /** 按版本标识批量查询当前项目内的资产版本。 */
+    public Mono<List<ComicDramaDtos.AssetVersion>> listAssetVersionsByIds(ComicDramaDtos.ListAssetVersionsByIdsRequest request) {
+        List<String> versionIds = request.versionIds().stream().distinct().toList();
+        return withProject(request.projectId(), () -> repository.listAssetVersionsByIds(request.projectId(), versionIds).collectList());
     }
 
     /**
@@ -422,31 +429,13 @@ public class ComicDramaService {
         }
         return currentUserProvider.currentUserId().flatMap(userId -> requireProject(userId, request.projectId())
                 .then(repository.getShot(request.projectId(), request.shotId()).switchIfEmpty(notFound("镜头不存在")))
-                .flatMap(shot -> Mono.zip(Mono.just(shot), repository.getSettings(request.projectId()),
-                        repository.getShotGenerationSource(request.projectId(), shot.sourceEpisodeId(), shot.sourceSceneId()),
-                        repository.listShotStoryboardAssets(request.projectId(), shot.id()).collectList()))
-                .flatMap(tuple -> {
-                    ComicDramaDtos.Shot shot = tuple.getT1();
-                    List<StoryboardDtos.StoryboardAsset> assets = tuple.getT4();
-                    StoryboardDtos.StoryboardShot agentShot = new StoryboardDtos.StoryboardShot(shot.id(), shot.shotNumber(),
-                            Math.max(1, shot.durationSeconds().intValue()), shot.visualDescription(),
-                            StringUtils.hasText(shot.shotSize()) ? shot.shotSize() : "中景", shot.lightingAtmosphere(),
-                            shot.dialogueVoiceover(), shot.soundDescription(), shot.cameraMovement(), "",
-                            assets.stream().map(StoryboardDtos.StoryboardAsset::id).toList());
-                    StoryboardDtos.ComposePromptsRequest agentRequest = new StoryboardDtos.ComposePromptsRequest(
-                            StringUtils.hasText(shot.sourceScriptExcerpt()) ? shot.sourceScriptExcerpt() : tuple.getT3().scriptContent(),
-                            shot.visualDescription(), tuple.getT2().visualStyle(), request.model(), List.of(agentShot), assets);
-                    return storyboardAgentService.composePrompts(agentRequest).flatMap(response ->
-                            repository.nextPromptVersion(request.projectId(), shot.id()).flatMap(versionNumber -> {
-                                JSONObject snapshot = new JSONObject();
-                                snapshot.put("shot", shot);
-                                snapshot.put("settings", tuple.getT2());
-                                ComicDramaDtos.PromptVersion prompt = new ComicDramaDtos.PromptVersion(id(), shot.id(), versionNumber,
-                                        "ai", response.prompts().getFirst().finalPrompt(), snapshot, request.model(),
-                                        response.chargedCredits(), "draft", OffsetDateTime.now());
-                                return repository.createPromptVersion(request.projectId(), prompt).thenReturn(prompt);
-                            }));
-                }));
+                .flatMap(shot -> repository.getSettings(request.projectId())
+                        .flatMap(settings -> composeShotPrompt(request.projectId(), shot, settings, request.model())))
+                .flatMap(item -> repository.nextPromptVersion(request.projectId(), item.shotId()).flatMap(versionNumber -> {
+                    ComicDramaDtos.PromptVersion prompt = new ComicDramaDtos.PromptVersion(id(), item.shotId(), versionNumber,
+                            "ai", item.prompt(), item.snapshot(), request.model(), item.credits(), "draft", OffsetDateTime.now());
+                    return repository.createPromptVersion(request.projectId(), prompt).thenReturn(prompt);
+                })));
     }
 
     /**
@@ -512,7 +501,9 @@ public class ComicDramaService {
             if (!StringUtils.hasText(script)) {
                 return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "镜头缺少来源剧本正文"));
             }
-            return repository.listShotStoryboardAssets(projectId, shot.id()).collectList().flatMap(assets -> {
+            return Mono.zip(repository.listShotStoryboardAssets(projectId, shot.id()).collectList(),
+                    repository.listShotReferencesForVideo(projectId, shot.id())).flatMap(inputs -> {
+                List<StoryboardDtos.StoryboardAsset> assets = inputs.getT1();
                 StoryboardDtos.StoryboardShot agentShot = new StoryboardDtos.StoryboardShot(shot.id(), shot.shotNumber(),
                         Math.max(1, shot.durationSeconds().intValue()), shot.visualDescription(),
                         StringUtils.hasText(shot.shotSize()) ? shot.shotSize() : "中景", shot.lightingAtmosphere(),
@@ -521,9 +512,16 @@ public class ComicDramaService {
                 StoryboardDtos.ComposePromptsRequest agentRequest = new StoryboardDtos.ComposePromptsRequest(
                         script, shot.visualDescription(), settings.visualStyle(), model, List.of(agentShot), assets);
                 return storyboardAgentService.composePrompts(agentRequest)
-                        .map(response -> new ComposedShotPrompt(shot.id(), shot, settings,
-                                response.prompts().getFirst().finalPrompt(),
-                                response.chargedCredits() == null ? BigDecimal.ZERO : response.chargedCredits(), ""));
+                        .map(response -> {
+                            JSONObject source = new JSONObject();
+                            source.put("shot", shot);
+                            source.put("settings", settings);
+                            JSONObject snapshot = ComicDramaPromptReferences.snapshot(
+                                    response.prompts().getFirst().finalPrompt(), inputs.getT2(), source);
+                            return new ComposedShotPrompt(shot.id(), shot, settings,
+                                    ComicDramaPromptReferences.fullPrompt(snapshot), snapshot,
+                                    response.chargedCredits() == null ? BigDecimal.ZERO : response.chargedCredits(), "");
+                        });
             });
         });
     }
@@ -554,7 +552,7 @@ public class ComicDramaService {
         return transactionalOperator.transactional(Flux.fromIterable(composed)
                 .concatMap(item -> repository.nextPromptVersion(projectId, item.shotId()).flatMap(versionNumber -> {
                     // 快照只保留合成输入的可读字段，剧本正文按来源场次回溯，避免每个版本重复存整段剧本。
-                    JSONObject snapshot = new JSONObject();
+                    JSONObject snapshot = new JSONObject(item.snapshot());
                     snapshot.put("shotId", item.shotId());
                     snapshot.put("shotNumber", item.shot().shotNumber());
                     snapshot.put("shotSize", item.shot().shotSize());
@@ -581,11 +579,11 @@ public class ComicDramaService {
     /** 单镜头批量合成产物；失败时提示词为空并记录失败原因，版本号统一在写库阶段生成。 */
     private record ComposedShotPrompt(String shotId, ComicDramaDtos.Shot shot,
                                       ComicDramaDtos.ProductionSettings settings, String prompt,
-                                      BigDecimal credits, String failureReason) {
+                                      JSONObject snapshot, BigDecimal credits, String failureReason) {
 
         /** 构造失败产物。 */
         private static ComposedShotPrompt failed(String shotId, String reason) {
-            return new ComposedShotPrompt(shotId, null, null, null, BigDecimal.ZERO, reason);
+            return new ComposedShotPrompt(shotId, null, null, null, null, BigDecimal.ZERO, reason);
         }
     }
 
@@ -597,11 +595,37 @@ public class ComicDramaService {
                     if (request.expectedPromptVersion() != null && request.expectedPromptVersion() != version - 1) {
                         return conflict();
                     }
-                    ComicDramaDtos.PromptVersion prompt = new ComicDramaDtos.PromptVersion(id(), request.shotId(), version,
-                            "manual", request.prompt().trim(), new JSONObject(), "", BigDecimal.ZERO, "adopted", OffsetDateTime.now());
-                    return transactionalOperator.transactional(repository.createPromptVersion(request.projectId(), prompt)
-                            .then(advance(userId, request.projectId(), request.expectedRevision())).thenReturn(prompt));
+                    return savedPromptSnapshot(request).flatMap(snapshot -> {
+                        ComicDramaDtos.PromptVersion prompt = new ComicDramaDtos.PromptVersion(id(), request.shotId(), version,
+                                "manual", ComicDramaPromptReferences.fullPrompt(snapshot), snapshot, "", BigDecimal.ZERO, "adopted", OffsetDateTime.now());
+                        return transactionalOperator.transactional(repository.createPromptVersion(request.projectId(), prompt)
+                                .then(advance(userId, request.projectId(), request.expectedRevision())).thenReturn(prompt));
+                    });
                 }));
+    }
+
+    /**
+     * 继承明确来源的图片快照，只有首次手动创建才读取当前图片。
+     * @param request 正文及来源版本
+     * @return 保留原始图片有效性的快照
+     * @throws BusinessException 来源版本不属于当前镜头
+     */
+    private Mono<JSONObject> savedPromptSnapshot(ComicDramaDtos.SavePromptRequest request) {
+        Mono<ComicDramaDtos.PromptVersion> source = StringUtils.hasText(request.sourcePromptVersionId())
+                ? repository.listPromptVersions(request.projectId(), request.shotId())
+                        .filter(version -> request.sourcePromptVersionId().equals(version.id())).next()
+                        .switchIfEmpty(notFound("提示词来源版本不存在或不属于当前镜头"))
+                : repository.listPromptVersions(request.projectId(), request.shotId()).next();
+        return source.map(Optional::of).defaultIfEmpty(Optional.empty()).flatMap(version -> {
+            if (version.isPresent()) {
+                JSONObject snapshot = version.get().sourceSnapshot() == null
+                        ? new JSONObject() : new JSONObject(version.get().sourceSnapshot());
+                snapshot.put("promptBody", request.prompt().trim());
+                return Mono.just(snapshot);
+            }
+            return repository.listShotReferencesForVideo(request.projectId(), request.shotId())
+                    .map(references -> ComicDramaPromptReferences.snapshot(request.prompt(), references, new JSONObject()));
+        });
     }
 
     /**
@@ -1024,29 +1048,51 @@ public class ComicDramaService {
     /** 在发生计费前校验生成目标并构建可追踪的媒体计划。 */
     private Mono<GenerationPlan> prepareSingleGeneration(ComicDramaDtos.CreateGenerationTaskRequest request,
                                                           String targetId, String mediaType) {
-        Mono<String> promptMono;
-        Mono<List<AiTaskDtos.AiTaskMediaReference>> referencesMono;
         if ("shot".equals(request.targetType())) {
-            promptMono = repository.getLatestPrompt(request.projectId(), targetId).switchIfEmpty(notFound("镜头尚无已采用的提示词版本"))
-                    .map(ComicDramaDtos.PromptVersion::prompt);
-            if ("video".equals(mediaType)) {
-                referencesMono = repository.listShotReferencesForVideo(request.projectId(), targetId);
-            } else if ("image".equals(mediaType)) {
-                referencesMono = repository.listShotAssetReferenceImages(request.projectId(), targetId).collectList();
-            } else {
-                referencesMono = Mono.just(List.of());
-            }
+            Mono<List<ComicDramaRepository.ShotReferenceImage>> references = "video".equals(mediaType)
+                    ? repository.listShotReferencesForVideo(request.projectId(), targetId)
+                    : repository.listShotAssetReferenceImages(request.projectId(), targetId).collectList();
+            return Mono.zip(repository.getLatestPrompt(request.projectId(), targetId)
+                            .switchIfEmpty(notFound("镜头尚无已采用的提示词版本")), references,
+                    repository.getShot(request.projectId(), targetId).switchIfEmpty(notFound("镜头不存在")))
+                    .map(tuple -> {
+                        ComicDramaDtos.PromptVersion version = tuple.getT1();
+                        List<ComicDramaRepository.ShotReferenceImage> images = tuple.getT2();
+                        if ("video".equals(mediaType)) {
+                            ComicDramaPromptReferences.validate(version, images, tuple.getT3().shotNumber());
+                        }
+                        // 图片任务只使用资产图片，重新编号，不能携带视频专用的分镜图说明。
+                        JSONObject promptSnapshot = ComicDramaPromptReferences.snapshot(
+                                ComicDramaPromptReferences.body(version), images, new JSONObject());
+                        promptSnapshot.put("promptVersionId", version.id());
+                        String prompt = "video".equals(mediaType) ? version.prompt()
+                                : ComicDramaPromptReferences.fullPrompt(promptSnapshot);
+                        return generationPlan(request, targetId, mediaType, prompt,
+                                images.stream().map(ComicDramaRepository.ShotReferenceImage::reference).toList(), promptSnapshot);
+                    });
         } else if ("assetVersion".equals(request.targetType())) {
-            promptMono = repository.getAssetVersion(request.projectId(), targetId).switchIfEmpty(notFound("资产版本不存在"))
-                    .map(version -> version.versionName() + "\n" + text(version.appearanceDescription()));
-            referencesMono = Mono.just(List.of());
+            return repository.getAssetVersion(request.projectId(), targetId).switchIfEmpty(notFound("资产版本不存在"))
+                    .map(version -> generationPlan(request, targetId, mediaType,
+                            version.versionName() + "\n" + text(version.appearanceDescription()), List.of(), new JSONObject()));
         } else {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成目标仅支持shot或assetVersion"));
         }
-        return Mono.zip(promptMono, referencesMono).map(tuple -> {
-            String prompt = tuple.getT1();
-            List<AiTaskDtos.AiTaskMediaReference> references = tuple.getT2();
+    }
+
+    /**
+     * 保存实际提交的提示词、引用映射和媒体计划。
+     * @param request 生成参数
+     * @param targetId 生成目标
+     * @param mediaType 媒体类型
+     * @param prompt 完整提示词
+     * @param references 实际提交的有序图片
+     * @param promptSnapshot 正文和系统说明快照
+     * @return 可报价和提交的生成计划
+     */
+    private GenerationPlan generationPlan(ComicDramaDtos.CreateGenerationTaskRequest request, String targetId,
+            String mediaType, String prompt, List<AiTaskDtos.AiTaskMediaReference> references, JSONObject promptSnapshot) {
             JSONObject snapshot = new JSONObject(request.settings());
+            snapshot.putAll(promptSnapshot);
             snapshot.put("prompt", prompt);
             snapshot.put("model", request.model());
             snapshot.put("targetType", request.targetType());
@@ -1057,7 +1103,6 @@ public class ComicDramaService {
                     mediaType, null, snapshot, new JSONObject(), "queued", false, "",
                     OffsetDateTime.now(), OffsetDateTime.now());
             return new GenerationPlan(media, prompt, references);
-        });
     }
 
     /**

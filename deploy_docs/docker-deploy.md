@@ -47,6 +47,11 @@ openssl rand -base64 48
 | `TZ` | 容器和 Java 日志时区，默认是 `Asia/Shanghai`。 |
 | `TRUSTED_PROXY_ADDRESSES` | 可选，Nginx 反代场景**建议配置**。本 Compose 中 Nginx 为 `network_mode: host`、经宿主机映射端口访问后端，**进入容器的连接源地址会被 Docker NAT 成 bridge 网关**（通常 `172.18.0.1`，用 `docker network inspect <网络名>` 查看 Gateway），因此应设为网关 IP 或网段 CIDR（如 `172.18.0.1` 或 `172.18.0.0/16`）。配置后"接口记录"与登录限流可解析出真实客户端 IP；不配置时记录到的是网关/代理地址。注意：不要把 `127.0.0.1` 配在这里，容器内看到的对端地址不会是它。 |
 | `NEXT_PUBLIC_CREDIT_STORE_URL` | 可选，发卡网站地址；未配置时购买积分页面显示“没有配置发卡网站”。 |
+| `ALIPAY_ENABLED` | 可选，设为 `true` 才启用支付宝电脑网站支付；启用时必须同时配置下列支付宝字段。 |
+| `ALIPAY_APP_ID` / `ALIPAY_PRIVATE_KEY` / `ALIPAY_PUBLIC_KEY` | 支付宝开放平台应用标识、应用私钥和支付宝公钥；私钥只通过部署环境注入，不要写入镜像或仓库。 |
+| `ALIPAY_GATEWAY_URL` | 支付宝网关地址；沙箱联调使用支付宝开放平台提供的沙箱网关。 |
+| `ALIPAY_NOTIFY_URL` | 必填，形如 `https://域名/api/v1/payment/alipay/notify`，必须能被支付宝服务器公网访问。 |
+| `ALIPAY_RETURN_URL` | 必填，形如 `https://域名/api/v1/payment/alipay/return`，用于同步回到前端购买页。 |
 | `AI_TASK_POLLING_INTERVAL_SECONDS` | 所有 AI 异步任务状态轮询间隔（服务端渠道、内部等待、视频合成恢复和前端状态查询），单位为秒，必须大于 0，默认 `3`。 |
 
 ### Nginx 路径配置
@@ -91,6 +96,10 @@ curl http://127.0.0.1:18080/api/v1/health
 3. 打开 **配置与用户偏好** → "我的渠道"，添加 AI 渠道并填写 API 地址、密钥和可用模型。
 4. 在"我的模型"中配置文本、图像、视频模型的能力与默认项。
 5. 需要上传素材或持久化生成媒体时，在"对象存储"中配置并设为默认对象存储。
+
+### 支付宝沙箱联调
+
+在支付宝开放平台创建电脑网站支付沙箱应用，将沙箱应用的 `app_id`、应用私钥、公钥和沙箱网关写入 `.env`。`ALIPAY_NOTIFY_URL` 必须使用已配置公网域名，不能填写 `localhost`、`127.0.0.1` 或容器内地址；若本地联调需要通知回调，请使用受信任的公网隧道。同步跳转只用于返回购买页，订单到账仍由异步通知或支付宝交易查询确认。生产环境禁止把应用私钥提交到 Git、Docker 镜像或日志。
 
 ## 6. 常用管理命令
 

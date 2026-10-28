@@ -3,14 +3,21 @@
 set -Eeuo pipefail
 
 if [[ $# -ne 1 ]]; then
-    printf '使用方式：%s <镜像版本标签>\n' "$0" >&2
+    printf '使用方式：%s <镜像版本标签|onlyRestart>\n' "$0" >&2
     exit 1
 fi
 
-image_tag="$1"
-if [[ ! "$image_tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-    printf '镜像版本标签不符合 Docker 标签规范：%s\n' "$image_tag" >&2
-    exit 1
+operation="$1"
+only_restart=false
+image_tag=''
+if [[ "$operation" == 'onlyRestart' ]]; then
+    only_restart=true
+else
+    image_tag="$operation"
+    if [[ ! "$image_tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+        printf '镜像版本标签不符合 Docker 标签规范：%s\n' "$image_tag" >&2
+        exit 1
+    fi
 fi
 
 remote_host='ubuntu@110.40.137.187'
@@ -18,8 +25,8 @@ remote_directory='/data/novanova-studio'
 # 沿用线上已有的 Compose 项目标识，确保更新现有容器。
 remote_compose_project='novanova-studio'
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-local_archive_path="$(mktemp "${TMPDIR:-/tmp}/novanova-studio-pro.XXXXXX.tar.gz")"
-remote_archive_path="/tmp/novanova-studio-pro.$(date +%s).$$.tar.gz"
+local_archive_path=''
+remote_archive_path=''
 archive_uploaded=false
 
 check_command() {
@@ -36,7 +43,9 @@ run_remote_command() {
 }
 
 cleanup() {
-    rm -f "$local_archive_path"
+    if [[ -n "$local_archive_path" ]]; then
+        rm -f "$local_archive_path"
+    fi
 
     if [[ "$archive_uploaded" == true ]] && ! run_remote_command "rm -f '$remote_archive_path'"; then
         printf '警告：远端临时源码包清理失败。\n' >&2
@@ -45,13 +54,32 @@ cleanup() {
 
 trap cleanup EXIT
 
-for command_name in ssh scp tar; do
+check_command ssh
+
+if [[ "$only_restart" == true ]]; then
+    printf '仅重启远端全部服务，不上传源码或构建镜像...\n'
+else
+    printf '本次发布镜像标签：%s\n' "$image_tag"
+fi
+
+printf '检查远端 Docker Compose 环境...\n'
+run_remote_command 'sudo -n docker compose version'
+
+if [[ "$only_restart" == true ]]; then
+    run_remote_command "cd '$remote_directory' && current_tag=\$(sudo -n docker inspect --format '{{.Config.Image}}' novanovastudio-pro-server 2>/dev/null | awk -F: '{print \$NF}') && sudo -n env IMAGE_TAG=\"\${current_tag:-latest}\" docker compose -p '$remote_compose_project' -f docker-compose.yml -f docker-compose-production.yml up -d"
+
+    printf '检查服务状态...\n'
+    run_remote_command "cd '$remote_directory' && sudo -n docker compose -p '$remote_compose_project' -f docker-compose.yml -f docker-compose-production.yml ps"
+    printf '远端服务重启完成。\n'
+    exit 0
+fi
+
+for command_name in scp tar; do
     check_command "$command_name"
 done
 
-printf '本次发布镜像标签：%s\n' "$image_tag"
-printf '检查远端 Docker Compose 环境...\n'
-run_remote_command 'sudo -n docker compose version'
+local_archive_path="$(mktemp "${TMPDIR:-/tmp}/novanova-studio-pro.XXXXXX.tar.gz")"
+remote_archive_path="/tmp/novanova-studio-pro.$(date +%s).$$.tar.gz"
 
 printf '打包源码...\n'
 tar_metadata_options=(--no-xattrs)

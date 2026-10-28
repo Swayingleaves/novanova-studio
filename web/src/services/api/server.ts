@@ -9,7 +9,6 @@ import { notifyInsufficientCredits, useInsufficientCreditsStore } from "@/featur
 import { notifyStorageCapacityChanged } from "@/features/storage/capacity-events";
 import { translateMessage as translate } from "@/features/locale/translate";
 
-
 import { currentWebsiteLocale, currentLanguageTag } from "@/features/locale/translate";
 import { useLanguageStore } from "@/features/locale/language-store";
 import type { ObjectStorageConfig, ObjectStorageFile } from "@/shared/types/object-storage";
@@ -326,7 +325,7 @@ export type ServerModelConfig = {
     defaultModel: boolean;
     sortOrder: number;
     creditCost: CreditAmount;
-        ownerTeamId?: number;
+    ownerTeamId?: number;
     creditUnit: ModelCreditUnit;
     thinkingEnabled: boolean;
     reasoningEffort: "high" | "max";
@@ -367,11 +366,56 @@ export type ServerCreditOverview = {
     trend: ServerCreditTrendItem[];
 };
 
-export type ServerCreditTransactionType = "task_charge" | "task_refund" | "admin_adjustment" | "card_redeem" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired" | "storage_purchase" | "storage_charge";
+export type ServerCreditTransactionType = "task_charge" | "task_refund" | "admin_adjustment" | "card_redeem" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired" | "storage_purchase" | "storage_charge" | "credit_purchase";
 
 export type ServerCreditDirection = "add" | "spend";
 
-export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redeem" | "admin_adjustment" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired" | "storage_purchase" | "storage_charge";
+export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redeem" | "admin_adjustment" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired" | "storage_purchase" | "storage_charge" | "credit_purchase";
+
+export type ServerCreditProduct = {
+    id: number;
+    credits: CreditAmount;
+    priceAmount: string;
+    sortOrder: number;
+    enabled: boolean;
+};
+
+export type ServerCreditProductList = {
+    products: ServerCreditProduct[];
+};
+
+export type ServerCreateCreditOrderResponse = {
+    orderNo: string;
+    paymentMethod: string;
+    status: "pending" | "processing" | "paid" | "closed" | string;
+    paymentUrl: string;
+    priceAmount: string;
+    expiresAt: string;
+};
+
+export type ServerCreditOrderStatus = {
+    orderNo: string;
+    credits: CreditAmount;
+    priceAmount: string;
+    paymentMethod: string;
+    status: "pending" | "processing" | "paid" | "closed" | string;
+    paidAt: string | null;
+};
+
+export type ServerCreditOrderItem = {
+    orderNo: string;
+    credits: CreditAmount;
+    priceAmount: string;
+    paymentMethod: string;
+    status: "pending" | "processing" | "paid" | "closed" | string;
+    createdAt: string;
+    expiresAt: string;
+    paidAt: string | null;
+};
+
+export type ServerCreditOrderList = {
+    orders: ServerCreditOrderItem[];
+};
 
 export type ServerUserCreditTransaction = {
     id: number;
@@ -543,8 +587,8 @@ export function completeCreationTour(version: number) {
     return serverPost("/auth/completeCreationTour", { version });
 }
 
-export function getCurrentUserInfo() {
-    return serverGet<ServerUserProfile>("/auth/userInfo");
+export function getCurrentUserInfo(options?: ServerRequestOptions) {
+    return serverGet<ServerUserProfile>("/auth/userInfo", options);
 }
 
 export function getInvitationInfo() {
@@ -1148,7 +1192,29 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "convertImageSizeToPixels" | "imageSizeMappings" | "customBodyParameters" | "videoBillingConfiguration" | "imageBillingConfiguration" | "displayName" | "modelIcon" | "isCustomModel" | "customModelConfig">) {
+export function updateModelConfig(
+    config: Pick<
+        ServerModelConfig,
+        | "id"
+        | "modelType"
+        | "capabilities"
+        | "sortOrder"
+        | "creditCost"
+        | "creditUnit"
+        | "thinkingEnabled"
+        | "reasoningEffort"
+        | "requestConcurrency"
+        | "convertImageSizeToPixels"
+        | "imageSizeMappings"
+        | "customBodyParameters"
+        | "videoBillingConfiguration"
+        | "imageBillingConfiguration"
+        | "displayName"
+        | "modelIcon"
+        | "isCustomModel"
+        | "customModelConfig"
+    >,
+) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 
@@ -1158,6 +1224,49 @@ export function getCreditSettings() {
 
 export function updateCreditSettings(initialCredits: CreditAmount) {
     return serverPost<CreditSettings>("/config/credit/updateCreditSettings", { initialCredits });
+}
+
+export function listCreditProducts() {
+    return serverGet<ServerCreditProductList>("/payment/credit/listProducts", { scope: "platform" });
+}
+
+export function createCreditPurchaseOrder(input: { productId: number; paymentMethod: string }) {
+    return serverPost<ServerCreateCreditOrderResponse>("/payment/credit/createOrder", input, { scope: "platform" });
+}
+
+export function getCreditPurchaseOrderStatus(orderNo: string, signal?: AbortSignal) {
+    const query = new URLSearchParams({ orderNo });
+    return serverGet<ServerCreditOrderStatus>(`/payment/credit/getOrderStatus?${query}`, { scope: "platform", signal });
+}
+
+export function getCreditPurchasePayment(orderNo: string, signal?: AbortSignal) {
+    const query = new URLSearchParams({ orderNo });
+    return serverGet<ServerCreateCreditOrderResponse>(`/payment/credit/getOrderPayment?${query}`, { scope: "platform", signal });
+}
+
+export function listCreditOrders(limit = 30, signal?: AbortSignal) {
+    const query = new URLSearchParams({ limit: String(limit) });
+    return serverGet<ServerCreditOrderList>(`/payment/credit/listOrders?${query}`, { scope: "platform", signal });
+}
+
+export function cancelCreditOrder(orderNo: string) {
+    return serverPost<ServerCreditOrderStatus>("/payment/credit/cancelOrder", { orderNo }, { scope: "platform" });
+}
+
+export function listAdminCreditProducts() {
+    return serverGet<ServerCreditProduct[]>("/config/creditProduct/listCreditProducts", { scope: "platform" });
+}
+
+export function createAdminCreditProduct(input: { credits: CreditAmount; priceAmount: string; sortOrder: number; enabled: boolean }) {
+    return serverPost<ServerCreditProduct>("/config/creditProduct/createCreditProduct", input, { scope: "platform" });
+}
+
+export function updateAdminCreditProduct(input: { id: number; credits: CreditAmount; priceAmount: string; sortOrder: number; enabled: boolean }) {
+    return serverPost<ServerCreditProduct>("/config/creditProduct/updateCreditProduct", input, { scope: "platform" });
+}
+
+export function updateAdminCreditProductStatus(id: number, enabled: boolean) {
+    return serverPost<ServerCreditProduct>("/config/creditProduct/updateCreditProductStatus", { id, enabled }, { scope: "platform" });
 }
 
 export function getInvitationRewardSettings() {
@@ -1346,7 +1455,7 @@ export function readAiTaskError(error: unknown): AiTaskErrorDetails {
         return { source: "canvas", category: "canceled", stage: "frontend_tool", message: translate("common.generationStopped"), requestAccepted: true, safeToRetry: false };
     }
     return {
-        messageKey: error instanceof ServerApiError ? error.messageKey ?? undefined : undefined,
+        messageKey: error instanceof ServerApiError ? (error.messageKey ?? undefined) : undefined,
         source: "canvas",
         category: "unknown",
         stage: "frontend_tool",
@@ -1381,11 +1490,13 @@ function readOptionalText(value: unknown): string | undefined {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-export async function serverGet<T>(path: string, options?: { auth?: boolean; signal?: AbortSignal }) {
+type ServerRequestOptions = { auth?: boolean; signal?: AbortSignal; scope?: "platform" };
+
+export async function serverGet<T>(path: string, options?: ServerRequestOptions) {
     return serverFetch<T>(path, { method: "GET", signal: options?.signal }, options);
 }
 
-export async function serverPost<T = string>(path: string, body: unknown, options?: { auth?: boolean; allowEmpty?: boolean }) {
+export async function serverPost<T = string>(path: string, body: unknown, options?: ServerRequestOptions & { allowEmpty?: boolean }) {
     return serverFetch<T>(
         path,
         {
@@ -1401,7 +1512,7 @@ export function serverUpload<T = string>(path: string, formData: FormData) {
     return serverFetch<T>(path, { method: "POST", body: formData });
 }
 
-async function serverFetch<T>(path: string, init: RequestInit, options: { auth?: boolean; allowEmpty?: boolean } = {}) {
+async function serverFetch<T>(path: string, init: RequestInit, options: ServerRequestOptions & { allowEmpty?: boolean } = {}) {
     const creditPromptScope = useInsufficientCreditsStore.getState().scope;
     const response = await requestServer(path, init, options);
     const payload = (await response.json().catch(() => null)) as ApiResponse<T> | null;
@@ -1420,11 +1531,11 @@ async function serverFetch<T>(path: string, init: RequestInit, options: { auth?:
     return payload.data;
 }
 
-async function requestServer(path: string, init: RequestInit, options: { auth?: boolean } = {}) {
+async function requestServer(path: string, init: RequestInit, options: ServerRequestOptions = {}) {
     const headers = new Headers(init.headers);
     headers.set("Accept-Language", currentLanguageTag());
     const teamId = useTeamStore.getState().team?.id;
-    if (teamId) headers.set("X-Team-Id", String(teamId));
+    if (teamId && options.scope !== "platform") headers.set("X-Team-Id", String(teamId));
     if (options.auth !== false) {
         const token = getAuthToken();
         if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -1495,7 +1606,12 @@ function ensureAiTaskEventSource() {
     const source = new EventSource(`${serverBaseUrl()}/ai/task/subscribe?token=${encodeURIComponent(token)}&locale=${currentWebsiteLocale()}&teamId=${useTeamStore.getState().team?.id || 0}`);
     const creditPromptScope = useInsufficientCreditsStore.getState().scope;
     aiTaskEventSource = source;
-    source.addEventListener("wallet-change", () => { void import("./team").then((module) => module.getWalletBalances()).then((wallets) => useTeamStore.getState().setWallets(wallets)).catch((error) => console.error("刷新积分钱包失败", error)); });
+    source.addEventListener("wallet-change", () => {
+        void import("./team")
+            .then((module) => module.getWalletBalances())
+            .then((wallets) => useTeamStore.getState().setWallets(wallets))
+            .catch((error) => console.error("刷新积分钱包失败", error));
+    });
     source.addEventListener("task", (event) => {
         const payload = parseAiTaskEventData((event as MessageEvent).data);
         if (!payload.task) return;

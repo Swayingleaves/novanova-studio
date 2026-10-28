@@ -346,13 +346,23 @@ public class ScriptAgentService {
     private Mono<ScriptDtos.GeneratedDraft> callDraftAgent(Long userId, String operationId,
                                                             AgentScopeModelFactory.TextModelSelection model,
                                                             ScriptDtos.GenerateDraftRequest request, Object context) {
+        ScriptDraftReferences references = Set.of("episode", "scene", "block").contains(request.targetType())
+                ? new ScriptDraftReferences(context) : null;
         Map<String, Object> input = new LinkedHashMap<>();
         input.put("requestType", "draft");
         input.put("actionType", request.actionType());
         input.put("targetType", request.targetType());
         input.put("targetId", request.targetId());
         input.put("instruction", request.instruction());
-        input.put("context", context);
+        input.put("context", references == null ? context : references.context());
+        if (references != null) {
+            input.put("referenceRules", "正式人物和地点列表位于context.project.characters/locations，"
+                    + "小说改编时位于context.characters/locations。列表id是本次调用的短序号，"
+                    + "人物为character1起，地点为location1起。所有characterIds、对白characterId和locationId"
+                    + "必须原样使用对应列表中的id，不得使用名称、故事事实id或自行编造标识。"
+                    + "新增场次也只能引用正式地点；没有对应地点时locationId填空字符串，不得新增地点引用。"
+                    + "非对白块characterId留空。人物关系与现有正文中的引用使用同一套短序号。");
+        }
         if ("storyDirections".equals(request.actionType())) {
             // 候选方向使用强类型返回，让AgentScope把内部必填字段写入结构化输出模式。
             return callAgent(userId, operationId, model, input, ScriptDtos.GeneratedStoryDirectionDraft.class)
@@ -360,7 +370,7 @@ public class ScriptAgentService {
                             JSON.parseObject(JSON.toJSONString(generated.draftData()))));
         }
         // 草稿目标可能包含对象或对象数组，统一使用目标对应的强类型契约，避免兼容模型将嵌套对象输出成字符串。
-        return switch (request.targetType()) {
+        Mono<ScriptDtos.GeneratedDraft> generatedDraft = switch (request.targetType()) {
             case "overview" -> callAgent(userId, operationId, model, input, ScriptDtos.GeneratedOverviewDraft.class)
                     .map(generated -> generatedDraft(generated.draftData()));
             case "outline" -> callAgent(userId, operationId, model, input, ScriptDtos.GeneratedOutlineDraft.class)
@@ -379,6 +389,7 @@ public class ScriptAgentService {
                     .map(generated -> generatedDraft(generated.draftData()));
             default -> Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "不支持的剧本草稿目标类型"));
         };
+        return references == null ? generatedDraft : generatedDraft.map(references::restore);
     }
 
     /**
@@ -406,7 +417,12 @@ public class ScriptAgentService {
                                   Map<String, Object> input, Class<T> resultType) {
         return Mono.defer(() -> {
                     ReActAgent agent = agentFactory.scriptAgent(model.agentModel());
-                    return agent.call(JSON.toJSONString(input), resultType, RuntimeContext.builder()
+                    // 记录最终输入与实际系统提示词，便于按操作标识还原各类剧本AI调用的上下文。
+                    String requestBody = JSON.toJSONString(input);
+                    log.info("剧本Agent请求AI: operationId={}, userId={}, model={}, resultType={}, systemPrompt={}, requestBody={}",
+                            operationId, userId, model.modelValue(), resultType.getSimpleName(),
+                            JSON.toJSONString(agent.getSysPrompt()), requestBody);
+                    return agent.call(requestBody, resultType, RuntimeContext.builder()
                                     .sessionId("script:" + operationId).userId(String.valueOf(userId)).build())
                             .timeout(Duration.ofSeconds(properties.getAi().getScriptAgent().getTimeoutSeconds()))
                             .map(message -> message.getStructuredData(resultType))
@@ -739,7 +755,8 @@ public class ScriptAgentService {
     private void validateSceneReferences(ScriptDtos.Scene scene, ScriptDtos.ProjectSnapshot snapshot) {
         Set<String> characterIds = snapshot.project().characters().stream().map(ScriptDtos.Character::id).collect(java.util.stream.Collectors.toSet());
         Set<String> locationIds = snapshot.project().locations().stream().map(ScriptDtos.Location::id).collect(java.util.stream.Collectors.toSet());
-        requireAgentResult(!StringUtils.hasText(scene.locationId()) || locationIds.contains(scene.locationId()), "剧本Agent返回了无效的地点引用");
+        requireAgentResult(!StringUtils.hasText(scene.locationId()) || locationIds.contains(scene.locationId()),
+                "剧本Agent返回了无效的地点引用：场次=" + scene.id() + "，地点标识=" + scene.locationId());
         List<String> unknownCharacterIds = scene.characterIds().stream().filter(id -> !characterIds.contains(id)).toList();
         requireAgentResult(unknownCharacterIds.isEmpty(), "剧本Agent返回了无效的出场人物引用：场次=" + scene.id()
                 + "，人物标识=" + unknownCharacterIds);

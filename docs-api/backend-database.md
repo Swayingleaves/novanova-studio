@@ -1,5 +1,21 @@
 # 后端数据库说明（已实现）
 
+## 积分商品与支付宝支付（V70）
+
+积分购买只写入平台钱包（`team_id`、`wallet_team_id` 和 `beneficiary_team_id` 均为 `0`），付费积分不创建可过期发放批次。团队空间不能读取商品、创建订单或查询订单，平台请求也不会携带 `X-Team-Id`。
+
+| 表 | 作用 | 关键字段、约束与索引 |
+| --- | --- | --- |
+| `credit_products` | 平台可售积分商品配置 | `credits` 为积分数量，`price_amount` 为人民币金额；`enabled` 控制启停，`sort_order` 控制展示顺序；启用状态、排序和标识联合索引；仅平台作用域可读写 |
+| `credit_purchase_orders` | 用户购买积分的订单和渠道快照 | `order_no` 唯一；保存商品、积分和金额快照，客户端不能覆盖金额；`payment_method` 当前为 `alipay`，预留 `wechat`；状态为 `pending`、`processing`、`paid`、`closed` 或 `cancelled`；`wallet_team_id` 固定为 `0`；用户+创建时间、待支付过期时间、钱包+状态索引；渠道交易号按支付方式唯一 |
+| `user_credit_transactions` | 积分余额变更流水 | 新增 `credit_purchase` 类型；`billing_reference` 使用平台订单号并建立唯一约束，支付宝重复通知不会重复入账 |
+
+首次迁移创建 `10/20/50/100` 积分商品，默认价格分别为 `1/2/5/10` 元。管理员可在系统管理的“积分商品”配置中新增、编辑、排序和停用商品；已创建订单继续使用订单快照，不受商品后续修改影响。
+
+订单创建接口为 `GET /api/v1/payment/credit/listProducts`、`POST /api/v1/payment/credit/createOrder` 和 `GET /api/v1/payment/credit/getOrderStatus`。支付宝回调接口为 `POST /api/v1/payment/alipay/notify` 和 `GET /api/v1/payment/alipay/return`。同步回跳只重定向到前端购买页，到账必须以验签后的异步通知或支付宝交易查询为准；服务端核对 `app_id`、商户订单号、金额和 `TRADE_SUCCESS`/`TRADE_FINISHED` 状态后，在事务内更新订单、余额和 `credit_purchase` 流水，并发布积分余额事件。
+
+商品管理接口位于 `/api/v1/config/creditProduct/`，仅平台管理员可用。支付宝密钥和网关配置只通过部署环境注入，异步通知地址必须可以被支付宝公网访问。
+
 ## 邮件群发（V65、V66、V67）
 
 | 表 | 作用 | 关键约束与索引 |

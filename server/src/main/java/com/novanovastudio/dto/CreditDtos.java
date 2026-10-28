@@ -127,7 +127,7 @@ public final class CreditDtos {
      * @param username String 用户名
      * @param nickname String 用户昵称，可为空
      * @param email String 用户邮箱
-     * @param transactionType String 流水类型：task_charge/task_refund/admin_adjustment/card_redeem/initial_grant/invitation_reward/daily_check_in/credit_expired
+     * @param transactionType String 流水类型：task_charge/task_refund/admin_adjustment/card_redeem/initial_grant/invitation_reward/daily_check_in/credit_expired/storage_purchase/storage_charge/credit_purchase
      * @param direction String 变动方向：add 增加 / spend 消耗，服务端按 change_amount 符号派生
      * @param generationType String 生成任务类型：image/video，非任务流水为 null
      * @param model String 生成任务实际使用模型，非任务流水为 null
@@ -168,7 +168,7 @@ public final class CreditDtos {
      * 用户统一积分流水明细项（含增加与消耗）。
      *
      * @param id Long 流水ID
-     * @param transactionType String 流水类型：task_charge/task_refund/admin_adjustment/card_redeem/initial_grant/invitation_reward
+     * @param transactionType String 流水类型：task_charge/task_refund/admin_adjustment/card_redeem/initial_grant/invitation_reward/daily_check_in/credit_expired/storage_purchase/storage_charge/credit_purchase
      * @param direction String 变动方向：add 增加 / spend 消耗，服务端按 change_amount 符号派生
      * @param generationType String 生成任务类型：image/video，非任务流水为 null
      * @param model String 生成任务模型展示名，非任务流水为 null

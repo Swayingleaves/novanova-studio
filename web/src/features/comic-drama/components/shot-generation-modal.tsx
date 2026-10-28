@@ -16,11 +16,12 @@ import { readVideoGenerationConstraintIssue } from "@/features/generation/lib/vi
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig, type VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
-import { estimateComicDramaGeneration, readComicDramaMediaUrl } from "@/services/api/comic-drama";
+import { estimateComicDramaGeneration, listComicDramaAssetVersionsByIds } from "@/services/api/comic-drama";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { loadShotGenerationLastUsedSettings, readShotGenerationLastUsedSettingsCache, saveShotGenerationLastUsedSettings, type ShotGenerationLastUsedSettings } from "../lib/shot-generation-last-used-settings";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
-import type { ComicDramaPromptVersion, ComicDramaShot } from "../types";
+import type { ComicDramaAssetVersion, ComicDramaPromptVersion, ComicDramaShot } from "../types";
+import { countShotReferenceImages } from "../lib/shot-reference-images";
 
 type VideoConfigKey = "videoGenerationMode" | "vquality" | "size" | "videoSeconds" | "videoWatermark";
 
@@ -57,6 +58,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
     const [estimateError, setEstimateError] = useState("");
     const [estimating, setEstimating] = useState(false);
     const [generating, setGenerating] = useState(false);
+    const [referenceState, setReferenceState] = useState<{ key: string; versions: ComicDramaAssetVersion[]; error: string } | null>(null);
 
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
     const settingsTheme = canvasThemes[resolvedTheme];
@@ -68,7 +70,29 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
     const isBatch = shotIds.length > 1;
     const activeShot = shots[0];
     const projectId = workspace?.projectId;
-    const mediaList = workspace?.media || [];
+    const assetVersionIdsKey = JSON.stringify([...new Set(shots.flatMap((shot) => shot.assetVersionIds || []))]);
+    const referenceKey = `${projectId || ""}:${assetVersionIdsKey}`;
+    const referencesLoading = open && Boolean(projectId) && referenceState?.key !== referenceKey;
+    const referenceError = referencesLoading ? "" : referenceState?.error || "";
+
+    // 上传参考图保存在资产版本中，加载成功后才允许报价和提交，避免漏算成文生视频。
+    useEffect(() => {
+        if (!open || !projectId) {
+            if (!open) setReferenceState(null);
+            return;
+        }
+        let cancelled = false;
+        setReferenceState(null);
+        const versionIds = JSON.parse(assetVersionIdsKey) as string[];
+        listComicDramaAssetVersionsByIds(projectId, versionIds)
+            .then((versions) => {
+                if (!cancelled) setReferenceState({ key: referenceKey, versions, error: "" });
+            })
+            .catch((error) => {
+                if (!cancelled) setReferenceState({ key: referenceKey, versions: [], error: error instanceof Error ? error.message : "加载参考图片失败，请重新打开生成窗口" });
+            });
+        return () => { cancelled = true; };
+    }, [open, projectId, assetVersionIdsKey, referenceKey]);
 
     // 每个镜头各自使用其已采用的最终提示词，口径与镜头清单一致。
     const adoptedPrompts = useMemo(() => {
@@ -84,23 +108,14 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
     }, [workspace]);
     const finalVideoPrompt = activeShot ? adoptedPrompts.get(activeShot.id) || null : null;
 
-    // 参考图数量：优先已采用的分镜图，其次该镜头绑定的资产图。有参考图按图生视频计，否则文生视频
+    // 分镜图、已采用资产图和上传参考图均按服务端的实际选择规则计数。
     const referenceCountByShot = useMemo(() => {
         const counts = new Map<string, number>();
         for (const shot of shots) {
-            let count = 0;
-            const storyboardImage =
-                mediaList.find((item) => item.targetType === "shot" && item.targetId === shot.id && item.mediaType === "image" && (item.status === "completed" || item.status === "needsUpdate") && item.adopted) ||
-                mediaList.find((item) => item.targetType === "shot" && item.targetId === shot.id && item.mediaType === "image" && (item.status === "completed" || item.status === "needsUpdate"));
-            if (storyboardImage && readComicDramaMediaUrl(storyboardImage.resultData)) count += 1;
-            for (const versionId of shot.assetVersionIds || []) {
-                const assetImage = mediaList.find((item) => item.targetType === "assetVersion" && item.targetId === versionId && item.mediaType === "image" && (item.status === "completed" || item.status === "needsUpdate"));
-                if (assetImage && readComicDramaMediaUrl(assetImage.resultData)) count += 1;
-            }
-            counts.set(shot.id, count);
+            counts.set(shot.id, countShotReferenceImages(shot, workspace?.media || [], referenceState?.versions || []));
         }
         return counts;
-    }, [mediaList, shots]);
+    }, [workspace, referenceState, shots]);
     const referenceCount = activeShot ? referenceCountByShot.get(activeShot.id) || 0 : 0;
 
     // 批量只提交勾选的镜头，单镜头模式固定为当前镜头
@@ -110,7 +125,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
     const shotsWithReferenceCount = targetShots.filter((shot) => (referenceCountByShot.get(shot.id) || 0) > 0).length;
     const allSelected = shots.length > 0 && targetShots.length === shots.length;
     const videoGenerationMode: VideoGenerationMode = (isBatch ? shotsWithReferenceCount > 0 : referenceCount > 0) ? "image-to-video" : "text-to-video";
-    const constraintIssue = targetShots.map((shot) => {
+    const constraintIssue = referencesLoading || referenceError ? "" : targetShots.map((shot) => {
         const imageCount = referenceCountByShot.get(shot.id) || 0;
         const issue = readVideoGenerationConstraintIssue({ config, model, mode: imageCount ? "image-to-video" : "text-to-video", size, seconds: videoSeconds, imageCount });
         return issue ? `${shot.shotNumber}：${issue}` : "";
@@ -154,7 +169,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
     const targetIdsKey = targetIds.join(",");
     useEffect(() => {
         setEstimateError("");
-        if (!open || !projectId || !model || targetIds.length === 0 || constraintIssue) {
+        if (!open || !projectId || !model || targetIds.length === 0 || constraintIssue || referencesLoading || referenceError) {
             setEstimatedCredits(null);
             setEstimating(false);
             return;
@@ -182,9 +197,14 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
             clearTimeout(timer);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open, projectId, model, targetIdsKey, taskSettings, constraintIssue]);
+    }, [open, projectId, model, targetIdsKey, taskSettings, constraintIssue, referencesLoading, referenceError, referenceState]);
 
     const handleCreate = async () => {
+        if (referencesLoading) return;
+        if (referenceError) {
+            message.warning(referenceError);
+            return;
+        }
         if (constraintIssue || estimateError) {
             message.warning(constraintIssue || estimateError);
             return;
@@ -357,7 +377,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                     </div>
 
                     <p className="text-xs text-[var(--studio-muted)]">
-                        {isBatch
+                        {referencesLoading ? "正在核对参考图片…" : referenceError ? "参考图片尚未核对成功" : isBatch
                             ? translate("comicDrama.countShotsSelectedCountWithReferenceImagesForImageTo", { value0: targetShots.length, value1: shotsWithReferenceCount, value2: targetShots.length - shotsWithReferenceCount })
                             : referenceCount > 0
                                 ? translate("comicDrama.useCountGeneratedImagesAsReferencesImageToVideo", { value0: referenceCount })
@@ -365,7 +385,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                     </p>
 
                     <div className="mt-auto flex flex-col gap-3 border-t border-[var(--studio-line)] pt-3">
-                        {constraintIssue || estimateError ? <p role="alert" className="text-xs text-[var(--studio-danger)]">{constraintIssue || estimateError}</p> : null}
+                        {constraintIssue || estimateError || referenceError ? <p role="alert" className="text-xs text-[var(--studio-danger)]">{constraintIssue || estimateError || referenceError}</p> : null}
                         {/* 价格放在确认按钮正上方，用色块与大号数字提高可读性 */}
                         <div className="flex min-h-[52px] items-center justify-between gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2">
                             <span className="flex items-center gap-1.5 text-xs font-medium text-[var(--studio-muted)]">
@@ -393,7 +413,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                                 <Button
                                     type="primary"
                                     loading={generating}
-                                    disabled={targetIds.length === 0 || Boolean(constraintIssue || estimateError) || estimating}
+                                    disabled={targetIds.length === 0 || Boolean(constraintIssue || estimateError || referenceError) || estimating || referencesLoading || estimatedCredits === null}
                                     icon={<Sparkles className="size-4" />}
                                     onClick={handleCreate}
                                 >

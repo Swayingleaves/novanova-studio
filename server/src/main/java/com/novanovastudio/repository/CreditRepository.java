@@ -353,6 +353,34 @@ public class CreditRepository {
     }
 
     /**
+     * 写入积分购买流水并使用订单号抢占幂等键。
+     *
+     * @param userId Long 购买用户标识
+     * @param orderNo String 平台订单号
+     * @param changeAmount BigDecimal 本次到账积分
+     * @param balanceAfter BigDecimal 入账后的平台钱包余额
+     * @param reason String 流水原因
+     * @return Mono<Long> 新流水标识，订单已入账时为空
+     */
+    public Mono<Long> createCreditPurchaseTransaction(Long userId, String orderNo, BigDecimal changeAmount,
+                                                      BigDecimal balanceAfter, String reason) {
+        return databaseClient.sql("""
+                INSERT INTO user_credit_transactions(team_id, wallet_team_id, beneficiary_team_id, user_id,
+                    transaction_type, change_amount, balance_after, reason, billing_reference)
+                VALUES (0, 0, 0, :userId, 'credit_purchase', :changeAmount, :balanceAfter, :reason, :orderNo)
+                ON CONFLICT (billing_reference) WHERE billing_reference IS NOT NULL DO NOTHING
+                RETURNING id
+                """)
+                .bind("userId", userId)
+                .bind("changeAmount", changeAmount)
+                .bind("balanceAfter", balanceAfter)
+                .bind("reason", reason)
+                .bind("orderNo", orderNo)
+                .map((row, metadata) -> row.get("id", Long.class))
+                .one();
+    }
+
+    /**
      * 创建邀请奖励流水并抢占被邀请用户幂等键。
      *
      * @param inviterUserId 邀请人用户ID

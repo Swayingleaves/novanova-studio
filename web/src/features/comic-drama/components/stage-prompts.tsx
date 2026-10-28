@@ -14,6 +14,8 @@ import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaPromptVersion, ComicDramaShot } from "../types";
+import { fullPromptWithBody, readPromptBody } from "../lib/prompt-references";
+import { PromptReferenceInstructions } from "./prompt-reference-instructions";
 
 /** 镜头提示词制作与版本管理阶段视图。 */
 export function StagePrompts() {
@@ -49,14 +51,16 @@ export function StagePrompts() {
 
     // Local editor prompt text
     const [editorText, setEditorText] = useState<string>("");
+    const [editorSource, setEditorSource] = useState<ComicDramaPromptVersion | null>(null);
     const [composing, setComposing] = useState(false);
     const [saving, setSaving] = useState(false);
     const [aiModel, setAiModel] = useState<string>("");
 
-    // Sync editor text with latest version or shot description
+    // 仅在镜头或最新版本切换时重置，后台刷新不能覆盖未保存正文及已选择的历史来源。
     useEffect(() => {
+        setEditorSource(latestVersion);
         if (latestVersion) {
-            setEditorText(latestVersion.prompt);
+            setEditorText(readPromptBody(latestVersion));
         } else if (activeShot) {
             setEditorText(
                 `${activeShot.visualDescription || ""}，${activeShot.shotSize || translate("comicDrama.mediumShot")}，${activeShot.cameraMovement || translate("comicDrama.staticCamera")}。${workspace?.settings.visualStyle || ""}`
@@ -64,7 +68,8 @@ export function StagePrompts() {
         } else {
             setEditorText("");
         }
-    }, [latestVersion, activeShot, workspace?.settings.visualStyle]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [latestVersion?.id, activeShot?.id]);
 
     useEffect(() => {
         if (!aiModel && config.textModel) {
@@ -84,7 +89,8 @@ export function StagePrompts() {
         setComposing(true);
         try {
             const prompt = await composePrompt(activeShot.id, aiModel);
-            setEditorText(prompt.prompt);
+            setEditorSource(prompt);
+            setEditorText(readPromptBody(prompt));
             message.success(translate("comicDrama.shotCountPromptGeneratedVCount", { value0: activeShot.shotNumber, value1: prompt.versionNumber }));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
@@ -102,7 +108,7 @@ export function StagePrompts() {
         }
         setSaving(true);
         try {
-            const prompt = await savePrompt(activeShot.id, editorText.trim());
+            const prompt = await savePrompt(activeShot.id, editorText.trim(), latestVersion?.versionNumber, editorSource?.id);
             message.success(translate("comicDrama.savedAsNewVersionVCount", { value0: prompt.versionNumber }));
         } catch (error) {
             if (error instanceof Error) message.error(error.message);
@@ -113,7 +119,7 @@ export function StagePrompts() {
 
     const copyPrompt = () => {
         if (!editorText) return;
-        navigator.clipboard.writeText(editorText);
+        navigator.clipboard.writeText(fullPromptWithBody(editorText, editorSource));
         message.success(translate("comicDrama.promptCopiedToClipboard"));
     };
 
@@ -239,6 +245,7 @@ export function StagePrompts() {
                                     onChange={(e) => setEditorText(e.target.value)}
                                     placeholder={translate("comicDrama.editTheStructuredPromptForImageOrVideoGeneration")}
                                 />
+                                <PromptReferenceInstructions version={editorSource} />
 
                                 <div className="mt-2 text-xs text-[var(--studio-muted)]">
                                     {translate("comicDrama.regenerationAndManualEditsCreateImmutableVersionsAutomaticallyPreservingPrevious")}</div>
@@ -276,7 +283,7 @@ export function StagePrompts() {
 
                                                 <Button
                                                     size="small"
-                                                    onClick={() => setEditorText(v.prompt)}
+                                                    onClick={() => { setEditorSource(v); setEditorText(readPromptBody(v)); }}
                                                 >
                                                     {translate("comicDrama.loadIntoEditor")}</Button>
                                             </div>

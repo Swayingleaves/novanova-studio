@@ -7,7 +7,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { useEffect, useState } from "react";
 import type { MenuProps } from "antd";
-import { CalendarCheck, Cloud, History, LogOut, ShoppingCart, Ticket, UserCircle, Users, Zap } from "lucide-react";
+import { CalendarCheck, Cloud, History, LogOut, ReceiptText, ShoppingCart, Ticket, UserCircle, Users, Zap } from "lucide-react";
 import Link from "@/shared/lib/team-navigation";
 import { usePathname, useRouter } from "@/shared/lib/team-navigation";
 import { App, Dropdown } from "antd";
@@ -157,6 +157,15 @@ export function UserCreditMenu({ className, tourAnchor }: UserCreditMenuProps) {
             ),
         },
         {
+            key: "orders",
+            icon: <ReceiptText className="size-4" />,
+            label: (
+                <Link href="/credits/orders" onClick={closeMenu} className={cn("text-sm", pathname === "/credits/orders" && "text-[var(--studio-ink)]")}>
+                    {translate("appShell.orders")}
+                </Link>
+            ),
+        },
+        {
             key: "transactions",
             icon: <History className="size-4" />,
             label: (
@@ -199,7 +208,7 @@ export function UserCreditMenu({ className, tourAnchor }: UserCreditMenuProps) {
                 trigger={["hover", "click"]}
                 placement="bottomRight"
                 mouseEnterDelay={0}
-                menu={{ items: team ? items.filter((item) => !item || !("key" in item) || !["checkIn", "purchase", "redeem", "invitation"].includes(String(item.key))) : items }}
+                menu={{ items: team ? items.filter((item) => !item || !("key" in item) || !["checkIn", "purchase", "redeem", "orders", "invitation"].includes(String(item.key))) : items }}
             >
                 <button
                     type="button"

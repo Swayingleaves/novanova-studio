@@ -149,6 +149,13 @@ public class ComicDramaController {
         return execute("查询漫剧资产版本", httpRequest, request, service.listAssetVersions(request));
     }
 
+    /** 按资产版本标识批量查询视觉资产版本。 */
+    @PostMapping("/listAssetVersionsByIds")
+    public Mono<ApiResponse<List<ComicDramaDtos.AssetVersion>>> listAssetVersionsByIds(
+            @Valid @RequestBody ComicDramaDtos.ListAssetVersionsByIdsRequest request, ServerHttpRequest httpRequest) {
+        return execute("批量查询漫剧资产版本", httpRequest, request, service.listAssetVersionsByIds(request));
+    }
+
     /** 保存视觉资产版本。 */
     @PostMapping("/saveAssetVersion")
     public Mono<ApiResponse<ComicDramaDtos.AssetVersion>> saveAssetVersion(

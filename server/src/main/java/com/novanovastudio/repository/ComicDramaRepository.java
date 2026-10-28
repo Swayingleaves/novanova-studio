@@ -279,6 +279,18 @@ public class ComicDramaRepository {
                 .map((row, metadata) -> mapAssetVersion(row)).all();
     }
 
+    /** 按版本标识批量查询当前项目内的资产版本。 */
+    public Flux<ComicDramaDtos.AssetVersion> listAssetVersionsByIds(String projectId, List<String> versionIds) {
+        if (versionIds == null || versionIds.isEmpty()) {
+            return Flux.empty();
+        }
+        return databaseClient.sql("""
+                SELECT v.* FROM comic_drama_asset_versions v JOIN comic_drama_assets a ON a.id=v.asset_id
+                WHERE a.script_project_id=:projectId AND v.id IN (:versionIds) ORDER BY v.id
+                """).bind("projectId", projectId).bind("versionIds", versionIds)
+                .map((row, metadata) -> mapAssetVersion(row)).all();
+    }
+
     /** 查询单个资产版本。 */
     public Mono<ComicDramaDtos.AssetVersion> getAssetVersion(String projectId, String versionId) {
         return databaseClient.sql("""
@@ -612,12 +624,13 @@ public class ComicDramaRepository {
     }
 
     /** 查询镜头引用的各资产版本的最新已完成参考图（按引用顺序排列）。 */
-    public Flux<AiTaskDtos.AiTaskMediaReference> listShotAssetReferenceImages(String projectId, String shotId) {
+    public Flux<ShotReferenceImage> listShotAssetReferenceImages(String projectId, String shotId) {
         return databaseClient.sql("""
                 WITH shot_assets AS (
                     SELECT v.id AS version_id,
                            v.version_name,
                            a.name AS asset_name,
+                           a.asset_type,
                            v.reference_media,
                            sav.sort_order,
                            sav.reference_role
@@ -627,20 +640,21 @@ public class ComicDramaRepository {
                     WHERE sav.shot_id = :shotId AND a.script_project_id = :projectId
                 )
                 SELECT sa.version_id,
+                       sa.asset_type,
                        sa.asset_name || '-' || sa.version_name AS name,
                        sa.reference_role,
                        sa.reference_media,
-                       m.result_data
+                       m.result_data, m.id AS media_id
                 FROM shot_assets sa
                 LEFT JOIN LATERAL (
-                    SELECT mr.result_data
+                    SELECT mr.id, mr.result_data
                     FROM comic_drama_media_results mr
                     WHERE mr.script_project_id = :projectId
                       AND mr.target_type = 'assetVersion'
                       AND mr.target_id = sa.version_id
                       AND mr.media_type = 'image'
                       AND mr.status IN ('completed','needsUpdate')
-                    ORDER BY mr.adopted DESC, mr.created_at DESC
+                    ORDER BY mr.adopted DESC, mr.created_at DESC, mr.id
                     LIMIT 1
                 ) m ON TRUE
                 ORDER BY sa.sort_order, sa.version_id
@@ -652,38 +666,49 @@ public class ComicDramaRepository {
                     String role = row.get("reference_role", String.class);
                     JSONObject resultData = object(row, "result_data");
                     JSONArray refMediaArray = array(row, "reference_media");
-                    return Optional.ofNullable(extractMediaReference(versionId, name, role, resultData, refMediaArray));
+                    AiTaskDtos.AiTaskMediaReference reference = extractMediaReference(versionId, name, role, resultData, refMediaArray);
+                    boolean generated = extractMediaReference(versionId, name, role, resultData, null) != null;
+                    return Optional.ofNullable(reference == null ? null : new ShotReferenceImage(
+                            "assetVersion", versionId, row.get("asset_type", String.class),
+                            generated ? row.get("media_id", String.class) : reference.id(), reference));
                 })
                 .all().filter(Optional::isPresent).map(Optional::get);
     }
 
     /** 查询镜头自身已完成的分镜画面图片（若有）。 */
-    public Mono<AiTaskDtos.AiTaskMediaReference> getShotStoryboardImage(String projectId, String shotId) {
+    public Mono<ShotReferenceImage> getShotStoryboardImage(String projectId, String shotId) {
         return databaseClient.sql("""
                 SELECT id, result_data FROM comic_drama_media_results
                 WHERE script_project_id = :projectId AND target_type = 'shot' AND target_id = :shotId
                   AND media_type = 'image' AND status IN ('completed','needsUpdate')
-                ORDER BY adopted DESC, created_at DESC LIMIT 1
+                ORDER BY adopted DESC, created_at DESC, id LIMIT 1
                 """).bind("projectId", projectId).bind("shotId", shotId)
                 .map((row, metadata) -> {
                     String mediaId = row.get("id", String.class);
                     JSONObject resultData = object(row, "result_data");
-                    return Optional.ofNullable(extractMediaReference(mediaId, "分镜画面", "first_frame", resultData, null));
+                    AiTaskDtos.AiTaskMediaReference reference = extractMediaReference(mediaId, "分镜画面", "first_frame", resultData, null);
+                    return Optional.ofNullable(reference == null ? null : new ShotReferenceImage(
+                            "shot", shotId, "storyboard", mediaId, reference));
                 })
                 .all().filter(Optional::isPresent).map(Optional::get).next();
     }
 
     /** 查询镜头视频生成所需的全部参考图（分镜图优先置首，后接关联资产图）。 */
-    public Mono<List<AiTaskDtos.AiTaskMediaReference>> listShotReferencesForVideo(String projectId, String shotId) {
+    public Mono<List<ShotReferenceImage>> listShotReferencesForVideo(String projectId, String shotId) {
         return Mono.zip(
                 getShotStoryboardImage(projectId, shotId).map(Optional::of).defaultIfEmpty(Optional.empty()),
                 listShotAssetReferenceImages(projectId, shotId).collectList()
         ).map(tuple -> {
-            List<AiTaskDtos.AiTaskMediaReference> result = new ArrayList<>();
+            List<ShotReferenceImage> result = new ArrayList<>();
             tuple.getT1().ifPresent(result::add);
             result.addAll(tuple.getT2());
             return result;
         });
+    }
+
+    /** 漫剧参考图片及其业务来源，媒体角色继续沿用渠道协议。 */
+    public record ShotReferenceImage(String sourceType, String sourceId, String assetType, String mediaId,
+                                     AiTaskDtos.AiTaskMediaReference reference) {
     }
 
     /** 从媒体结果或参考媒体数组中解析出首个有效媒体引用。 */
@@ -716,7 +741,7 @@ public class ComicDramaRepository {
                     String storageKey = ref.getString("storageKey");
                     String mimeType = ref.getString("mimeType");
                     if (StringUtils.hasText(url) || StringUtils.hasText(storageKey)) {
-                        return new AiTaskDtos.AiTaskMediaReference(id, name,
+                        return new AiTaskDtos.AiTaskMediaReference(StringUtils.hasText(ref.getString("id")) ? ref.getString("id") : id, name,
                                 StringUtils.hasText(mimeType) ? mimeType : "image/png",
                                 storageKey, url, StringUtils.hasText(role) ? role : "subject");
                     }

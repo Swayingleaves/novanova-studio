@@ -47,6 +47,8 @@ import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaPromptVersion, ComicDramaShot, ComicDramaShotDraft, ComicDramaShotInput } from "../types";
 import { ShotDeleteImpactModal } from "./shot-delete-impact-modal";
 import { ShotDraftModal } from "./shot-draft-modal";
+import { readPromptBody } from "../lib/prompt-references";
+import { PromptReferenceInstructions } from "./prompt-reference-instructions";
 
 const getShotSizes = (translate = translateMessage) => ([
     { value: "远景", label: translate("comicDrama.extremeLongShotOverallEnvironment") },
@@ -105,6 +107,7 @@ export function StageShots() {
     const [savingPromptDetail, setSavingPromptDetail] = useState(false);
     /* 镜头编辑抽屉里的最终提示词草稿：提示词是独立版本记录，不参与镜头表单校验。 */
     const [promptDraft, setPromptDraft] = useState("");
+    const [promptDraftSource, setPromptDraftSource] = useState<ComicDramaPromptVersion | null>(null);
 
     // AI Split form state
     const [splitEpisodeId, setSplitEpisodeId] = useState<string>("");
@@ -272,6 +275,7 @@ export function StageShots() {
             revision: 0,
         });
         setPromptDraft("");
+        setPromptDraftSource(null);
         setShotDrawerOpen(true);
     };
 
@@ -299,7 +303,9 @@ export function StageShots() {
             assetVersionIds: shot.assetVersionIds,
             revision: shot.revision,
         });
-        setPromptDraft(finalVideoPrompts.get(shot.id)?.prompt || "");
+        const prompt = finalVideoPrompts.get(shot.id) || null;
+        setPromptDraftSource(prompt);
+        setPromptDraft(readPromptBody(prompt));
         setShotDrawerOpen(true);
     };
 
@@ -307,7 +313,7 @@ export function StageShots() {
     const handleSaveShot = async () => {
         try {
             const values = await shotForm.validateFields();
-            const currentPrompt = editingShot ? finalVideoPrompts.get(editingShot.id) : undefined;
+            const currentPrompt = editingShot ? promptDraftSource : null;
             const nextPrompt = promptDraft.trim();
             if (!nextPrompt && currentPrompt) {
                 message.warning(translate("comicDrama.promptCannotBeEmpty"));
@@ -316,9 +322,9 @@ export function StageShots() {
             setSavingShot(true);
             const saved = await saveShot(values);
             const shotId = saved.id || values.id || "";
-            if (shotId && nextPrompt && nextPrompt !== (currentPrompt?.prompt || "")) {
+            if (shotId && nextPrompt && nextPrompt !== readPromptBody(currentPrompt)) {
                 // 不传期望版本号：清单展示的是「已采用」版本，可能落后于表内更大版本的草稿，传了会误判冲突。
-                const version = await savePrompt(shotId, nextPrompt);
+                const version = await savePrompt(shotId, nextPrompt, undefined, currentPrompt?.id);
                 message.success(translate("comicDrama.finalVideoPromptSavedAsVersion", { value0: version.versionNumber }));
             }
             message.success(editingShot ? translate("comicDrama.shotUpdated") : translate("comicDrama.newShotCreated"));
@@ -358,7 +364,7 @@ export function StageShots() {
     // 打开最终提示词编辑弹层，草稿单独维护，取消时不改动已采用版本。
     const openPromptDetail = (shot: ComicDramaShot, prompt: ComicDramaPromptVersion) => {
         setPromptDetail({ shotId: shot.id, shotNumber: shot.shotNumber, prompt });
-        setPromptDetailDraft(prompt.prompt);
+        setPromptDetailDraft(readPromptBody(prompt));
     };
 
     // 手动改提示词同样另存为新采用版本，保证视频生成与界面展示一致。
@@ -369,13 +375,13 @@ export function StageShots() {
             message.warning(translate("comicDrama.promptCannotBeEmpty"));
             return;
         }
-        if (nextPrompt === promptDetail.prompt.prompt) {
+        if (nextPrompt === readPromptBody(promptDetail.prompt)) {
             setPromptDetail(null);
             return;
         }
         setSavingPromptDetail(true);
         try {
-            const saved = await savePrompt(promptDetail.shotId, nextPrompt);
+            const saved = await savePrompt(promptDetail.shotId, nextPrompt, undefined, promptDetail.prompt.id);
             message.success(translate("comicDrama.finalVideoPromptSavedAsVersion", { value0: saved.versionNumber }));
             setPromptDetail(null);
         } catch (error) {
@@ -845,6 +851,7 @@ export function StageShots() {
                     autoSize={{ minRows: 10, maxRows: 22 }}
                     placeholder={translate("comicDrama.editTheStructuredPromptForImageOrVideoGeneration")}
                 />
+                <PromptReferenceInstructions version={promptDetail?.prompt} />
             </Modal>
 
             {/* Shot Edit / Create Drawer */}
@@ -947,6 +954,7 @@ export function StageShots() {
                             onChange={(event) => setPromptDraft(event.target.value)}
                             placeholder={translate("comicDrama.editTheStructuredPromptForImageOrVideoGeneration")}
                         />
+                        <PromptReferenceInstructions version={promptDraftSource} />
                     </Form.Item>
                 </Form>
             </Drawer>

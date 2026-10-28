@@ -67,6 +67,11 @@ export function listComicDramaAssetVersions(projectId: string, assetId: string) 
     return serverPost<ComicDramaAssetVersion[]>(`${COMIC_DRAMA_PATH}/listAssetVersions`, { projectId, assetId });
 }
 
+export function listComicDramaAssetVersionsByIds(projectId: string, versionIds: string[]) {
+    if (versionIds.length === 0) return Promise.resolve([] as ComicDramaAssetVersion[]);
+    return serverPost<ComicDramaAssetVersion[]>(`${COMIC_DRAMA_PATH}/listAssetVersionsByIds`, { projectId, versionIds });
+}
+
 export function saveComicDramaAssetVersion(projectId: string, expectedRevision: number, version: ComicDramaAssetVersionInput) {
     return serverPost<ComicDramaAssetVersion>(`${COMIC_DRAMA_PATH}/saveAssetVersion`, { projectId, expectedRevision, version });
 }
@@ -127,8 +132,8 @@ export function composeComicDramaPrompts(input: { projectId: string; expectedRev
     return serverPost<ComicDramaComposePromptsResult>(`${COMIC_DRAMA_PATH}/composePrompts`, input);
 }
 
-export function saveComicDramaPrompt(projectId: string, expectedRevision: number, shotId: string, prompt: string, expectedPromptVersion?: number) {
-    return serverPost<ComicDramaPromptVersion>(`${COMIC_DRAMA_PATH}/savePrompt`, { projectId, expectedRevision, shotId, prompt, expectedPromptVersion });
+export function saveComicDramaPrompt(projectId: string, expectedRevision: number, shotId: string, prompt: string, expectedPromptVersion?: number, sourcePromptVersionId?: string) {
+    return serverPost<ComicDramaPromptVersion>(`${COMIC_DRAMA_PATH}/savePrompt`, { projectId, expectedRevision, shotId, prompt, expectedPromptVersion, sourcePromptVersionId });
 }
 
 export type ComicDramaGenerationEstimate = { targetType: string; taskCount: number; estimatedCredits: CreditAmount; model: string; settings: Record<string, unknown> };

@@ -3,7 +3,7 @@ import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { translateMessage as translate } from "@/features/locale/translate";
-import { CalendarCheck, Coins, Gift, Image as ImageIcon, RotateCcw, TimerOff, UserCog, UserPlus, Video } from "lucide-react";
+import { CalendarCheck, Coins, Gift, Image as ImageIcon, RotateCcw, ShoppingCart, TimerOff, UserCog, UserPlus, Video } from "lucide-react";
 
 import type { ServerCreditDirection, ServerCreditDistributionItem, ServerCreditSource, ServerCreditTransactionType, ServerGenerationSource, ServerUserCreditTransaction } from "@/services/api/server";
 
@@ -11,30 +11,111 @@ export const CREDIT_TRANSACTION_PAGE_SIZE = 20;
 
 /** 积分明细方向筛选选项。 */
 /** 按调用方语言生成显示文案，业务值保持不变。 */
-export const createCreditDirectionOptions = (translator: typeof translate = translate): { label: string; value: "all" | ServerCreditDirection }[] => ([
-    { get label() { return translator("credits.all"); }, value: "all" },
-    { get label() { return translator("credits.add"); }, value: "add" },
-    { get label() { return translator("credits.usage"); }, value: "spend" },
-]);
+export const createCreditDirectionOptions = (translator: typeof translate = translate): { label: string; value: "all" | ServerCreditDirection }[] => [
+    {
+        get label() {
+            return translator("credits.all");
+        },
+        value: "all",
+    },
+    {
+        get label() {
+            return translator("credits.add");
+        },
+        value: "add",
+    },
+    {
+        get label() {
+            return translator("credits.usage");
+        },
+        value: "spend",
+    },
+];
 
 export const CREDIT_DIRECTION_OPTIONS = createCreditDirectionOptions();
 
 /** 积分明细来源筛选选项。 */
 /** 按调用方语言生成显示文案，业务值保持不变。 */
-export const createCreditSourceOptions = (translator: typeof translate = translate): { label: string; value: "all" | ServerCreditSource }[] => ([
-    { get label() { return translator("credits.allSources"); }, value: "all" },
-    { get label() { return translator("storage.permanentExpansion"); }, value: "storage_purchase" },
-    { get label() { return translator("storage.historicalMonthlyStorage"); }, value: "storage_charge" },
-    { get label() { return translator("credits.imageGeneration"); }, value: "image" },
-    { get label() { return translator("credits.videoGeneration"); }, value: "video" },
-    { get label() { return translator("credits.redeemCode"); }, value: "card_redeem" },
-    { get label() { return translator("credits.adminAdjustment"); }, value: "admin_adjustment" },
-    { get label() { return translator("credits.taskRefund"); }, value: "task_refund" },
-    { get label() { return translator("credits.initialGrant"); }, value: "initial_grant" },
-    { get label() { return translator("credits.referralReward"); }, value: "invitation_reward" },
-    { get label() { return translator("credits.dailyCheckIn"); }, value: "daily_check_in" },
-    { get label() { return translator("credits.creditExpiration"); }, value: "credit_expired" },
-]);
+export const createCreditSourceOptions = (translator: typeof translate = translate): { label: string; value: "all" | ServerCreditSource }[] => [
+    {
+        get label() {
+            return translator("credits.allSources");
+        },
+        value: "all",
+    },
+    {
+        get label() {
+            return translator("storage.permanentExpansion");
+        },
+        value: "storage_purchase",
+    },
+    {
+        get label() {
+            return translator("storage.historicalMonthlyStorage");
+        },
+        value: "storage_charge",
+    },
+    {
+        get label() {
+            return translator("credits.imageGeneration");
+        },
+        value: "image",
+    },
+    {
+        get label() {
+            return translator("credits.videoGeneration");
+        },
+        value: "video",
+    },
+    {
+        get label() {
+            return translator("credits.redeemCode");
+        },
+        value: "card_redeem",
+    },
+    {
+        get label() {
+            return translator("credits.adminAdjustment");
+        },
+        value: "admin_adjustment",
+    },
+    {
+        get label() {
+            return translator("credits.taskRefund");
+        },
+        value: "task_refund",
+    },
+    {
+        get label() {
+            return translator("credits.initialGrant");
+        },
+        value: "initial_grant",
+    },
+    {
+        get label() {
+            return translator("credits.referralReward");
+        },
+        value: "invitation_reward",
+    },
+    {
+        get label() {
+            return translator("credits.dailyCheckIn");
+        },
+        value: "daily_check_in",
+    },
+    {
+        get label() {
+            return translator("credits.creditExpiration");
+        },
+        value: "credit_expired",
+    },
+    {
+        get label() {
+            return translator("credits.creditPurchase");
+        },
+        value: "credit_purchase",
+    },
+];
 
 export const CREDIT_SOURCE_OPTIONS = createCreditSourceOptions();
 
@@ -67,6 +148,7 @@ export function creditTransactionIcon(transaction: Pick<ServerUserCreditTransact
     if (transaction.transactionType === "invitation_reward") return UserPlus;
     if (transaction.transactionType === "daily_check_in") return CalendarCheck;
     if (transaction.transactionType === "credit_expired") return TimerOff;
+    if (transaction.transactionType === "credit_purchase") return ShoppingCart;
     return Gift;
 }
 
@@ -87,6 +169,7 @@ export function creditTransactionTypeLabel(transactionType: ServerCreditTransact
     if (transactionType === "invitation_reward") return translate("credits.referralReward");
     if (transactionType === "daily_check_in") return translate("credits.dailyCheckIn");
     if (transactionType === "credit_expired") return translate("credits.creditExpiration");
+    if (transactionType === "credit_purchase") return translate("credits.creditPurchase");
     return translate("credits.unknownType");
 }
 

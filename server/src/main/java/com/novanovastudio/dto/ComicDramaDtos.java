@@ -224,6 +224,11 @@ public final class ComicDramaDtos {
                                            @NotBlank @Size(max = 64) String assetId) {
     }
 
+    /** 按资产版本标识批量查询请求。 */
+    public record ListAssetVersionsByIdsRequest(@NotBlank @Size(max = 64) String projectId,
+                                                @NotEmpty @Size(max = 1000) List<@NotBlank @Size(max = 64) String> versionIds) {
+    }
+
     /** 保存资产版本请求。 */
     public record SaveAssetVersionRequest(@NotBlank @Size(max = 64) String projectId, @Min(0) long expectedRevision,
                                           @NotNull @Valid AssetVersion version) {
@@ -311,7 +316,7 @@ public final class ComicDramaDtos {
     public record SavePromptRequest(@NotBlank @Size(max = 64) String projectId, @Min(0) long expectedRevision,
                                     @NotBlank @Size(max = 64) String shotId,
                                     @NotBlank @Size(max = 16000) String prompt,
-                                    Integer expectedPromptVersion) {
+                                    Integer expectedPromptVersion, @Size(max = 64) String sourcePromptVersionId) {
     }
 
     /** 生成报价请求。 */

@@ -5,7 +5,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 
 import com.alibaba.fastjson2.JSONObject;
 import com.alibaba.fastjson2.JSON;
@@ -17,6 +22,9 @@ import com.novanovastudio.dto.ScriptDtos;
 import com.novanovastudio.dto.NovelAdaptationDtos;
 import com.novanovastudio.repository.NovelAdaptationRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import io.agentscope.core.ReActAgent;
+import io.agentscope.core.agent.RuntimeContext;
+import io.agentscope.core.message.Msg;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import java.util.List;
@@ -27,7 +35,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Mono;
@@ -277,6 +288,94 @@ class ScriptAgentServiceTest {
 
         assertTrue(exception.getMessage().contains("scene-a"));
         assertTrue(exception.getMessage().contains("fact-character"));
+    }
+
+    /**
+     * 验证非法地点引用包含场次和具体地点标识，能够直接定位模型错误。
+     */
+    @Test
+    void shouldReportInvalidLocationWithSceneAndIdentifier() {
+        ScriptDtos.Scene scene = new ScriptDtos.Scene("scene-invalid", "invented-location", 1, "开场", "interior", "白天",
+                "", "", "", "", "", 0, List.of(), List.of());
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> ReflectionTestUtils.invokeMethod(service, "validateSceneReferences", scene, adaptationSnapshot()));
+
+        assertTrue(exception.getMessage().contains("scene-invalid"));
+        assertTrue(exception.getMessage().contains("invented-location"));
+    }
+
+    /**
+     * 验证整集、单场与正文块生成在模型输入中使用短序号，并在结构校验前还原正式引用。
+     *
+     * @param targetType String 本次生成的局部目标类型
+     * @param adaptation boolean 是否使用小说改编上下文
+     */
+    @ParameterizedTest
+    @CsvSource({"episode,false", "scene,false", "block,false", "episode,true"})
+    void shouldRestoreFormalReferencesAfterDraftAgentCall(String targetType, boolean adaptation) {
+        ReActAgent agent = mock(ReActAgent.class);
+        Msg message = mock(Msg.class);
+        ScriptDtos.ScriptBlock block = new ScriptDtos.ScriptBlock("block-a", "dialogue", "character1", "你好", "original", 0);
+        ScriptDtos.Scene scene = new ScriptDtos.Scene("scene-a", "location1", 1, "开场", "interior", "白天",
+                "", "", "", "", "", 0, List.of("character1"), List.of(block));
+        ScriptDtos.ProjectSnapshot snapshot = adaptationSnapshot();
+        Class<?> resultType = switch (targetType) {
+            case "episode" -> ScriptDtos.GeneratedEpisodeDetailDraft.class;
+            case "scene" -> ScriptDtos.GeneratedSceneDraft.class;
+            default -> ScriptDtos.GeneratedScriptBlockDraft.class;
+        };
+        Object structured = switch (targetType) {
+            case "episode" -> new ScriptDtos.GeneratedEpisodeDetailDraft(
+                    new ScriptDtos.EpisodeDetail(snapshot.project().episodes().getFirst(), List.of(scene)));
+            case "scene" -> new ScriptDtos.GeneratedSceneDraft(scene);
+            default -> new ScriptDtos.GeneratedScriptBlockDraft(block);
+        };
+        String targetId = targetType + "-a";
+        // 使用实际调用入口验证转换接线，模型由测试替身返回固定结构，不访问外部服务。
+        when(agentFactory.scriptAgent(null)).thenReturn(agent);
+        when(agent.call(anyString(), eq(resultType), any(RuntimeContext.class))).thenReturn(Mono.just(message));
+        when(message.getStructuredData(any())).thenReturn(structured);
+        Map<String, Object> context = Map.of("project", snapshot.project());
+        if (adaptation) {
+            NovelAdaptationDtos.GenerateRequest request = new NovelAdaptationDtos.GenerateRequest("project-a", 0,
+                    "episode", targetId, new NovelAdaptationDtos.Settings("comicDrama", 1, 60, "balanced", "faithful"),
+                    List.of("fact-character"), "text-model");
+            context = ReflectionTestUtils.invokeMethod(service, "adaptationContext", request, snapshot,
+                    List.of(new NovelAdaptationDtos.Fact("fact-character", 1, "character", "人物0", "事实设定", "", List.of())));
+        }
+        AgentScopeModelFactory.TextModelSelection model = new AgentScopeModelFactory.TextModelSelection(
+                null, "text-model", "测试模型", "openai", java.math.BigDecimal.ZERO, 0L);
+        Mono<ScriptDtos.GeneratedDraft> result = ReflectionTestUtils.invokeMethod(service, "callDraftAgent", 8L,
+                "operation-a", model, new ScriptDtos.GenerateDraftRequest("project-a", 0, "polish", targetType,
+                        targetId, "润色正文", "text-model"), context);
+        ScriptDtos.GeneratedDraft generated = result.block();
+        Mono<JSONObject> validated = ReflectionTestUtils.invokeMethod(service, "validateGeneratedDraft", generated,
+                "polish", targetType, targetId, snapshot);
+        assertDoesNotThrow(() -> {
+            validated.block();
+        });
+
+        ArgumentCaptor<String> input = ArgumentCaptor.forClass(String.class);
+        verify(agent).call(input.capture(), eq(resultType), any(RuntimeContext.class));
+        JSONObject modelInput = JSON.parseObject(input.getValue());
+        JSONObject modelContext = modelInput.getJSONObject("context");
+        JSONObject project = adaptation ? modelContext : modelContext.getJSONObject("project");
+        assertEquals("character1", project.getJSONArray("characters").getJSONObject(0).getString("id"));
+        assertEquals("location1", project.getJSONArray("locations").getJSONObject(0).getString("id"));
+        if (adaptation) {
+            assertEquals("fact-character", modelContext.getJSONArray("confirmedFacts").getJSONObject(0).getString("id"));
+        }
+        assertTrue(modelInput.getString("referenceRules").contains("没有对应地点"));
+        JSONObject restoredScene = "episode".equals(targetType)
+                ? generated.draftData().getJSONArray("scenes").getJSONObject(0) : generated.draftData();
+        if ("block".equals(targetType)) {
+            assertEquals("character-0", restoredScene.getString("characterId"));
+        } else {
+            assertEquals("location-0", restoredScene.getString("locationId"));
+            assertEquals("character-0", restoredScene.getJSONArray("blocks").getJSONObject(0).getString("characterId"));
+        }
+        verify(agent).close();
     }
 
     /**

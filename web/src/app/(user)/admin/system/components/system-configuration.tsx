@@ -8,7 +8,6 @@ import { currentLanguageTag } from "@/features/locale/translate";
 import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
-
 import { Alert, App, Button, Checkbox, Form, Grid, Input, InputNumber, Modal, Segmented, Select, Space, Switch, Tabs } from "antd";
 import type { TextAreaRef } from "antd/es/input/TextArea";
 import { nanoid } from "nanoid";
@@ -16,8 +15,10 @@ import { Braces, CheckCircle2, ChevronDown, ChevronUp, Clapperboard, CloudUpload
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
-import { ModelIcon } from "@/features/settings/components/model-picker";import { MODEL_ICON_OPTIONS } from "@/features/settings/components/model-icon";
-import { createModelCapabilityOptions,
+import { ModelIcon } from "@/features/settings/components/model-picker";
+import { MODEL_ICON_OPTIONS } from "@/features/settings/components/model-icon";
+import {
+    createModelCapabilityOptions,
     configFromModelConfigs,
     createModelChannel,
     createObjectStorageConfig,
@@ -72,8 +73,9 @@ import type { CustomGroupField, CustomModelMode } from "./model-config-copy";
 import { ModelConfigAutoFillModal } from "./model-config-auto-fill-modal";
 import { VideoGenerationConstraintsEditor } from "./video-generation-constraints-editor";
 import { videoConstraintConfigurationIssues } from "@/features/generation/lib/video-generation-constraints";
+import { CreditProductManagement } from "./credit-product-management";
 
-type ConfigurationTabKey = "channels" | "models" | "credits" | "invitationReward" | "checkIn" | "objectStorage";
+type ConfigurationTabKey = "channels" | "models" | "credits" | "creditProducts" | "invitationReward" | "checkIn" | "objectStorage";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -83,17 +85,65 @@ type ModelGroup = {
     optionsLabel: string;
 };
 
-const createModelGroups = (translator: typeof translate = translate): ModelGroup[] => ([
-    { capability: "image", modelKey: "imageModel", modelsKey: "imageModels", get defaultLabel() { return translator("appShell.defaultImageModel"); }, get optionsLabel() { return translator("appShell.availableImageModels"); } },
-    { capability: "video", modelKey: "videoModel", modelsKey: "videoModels", get defaultLabel() { return translator("appShell.defaultVideoModel"); }, get optionsLabel() { return translator("appShell.availableVideoModels"); } },
-    { capability: "text", modelKey: "textModel", modelsKey: "textModels", get defaultLabel() { return translator("appShell.defaultTextModel"); }, get optionsLabel() { return translator("appShell.availableTextModels"); } },
-]);
+const createModelGroups = (translator: typeof translate = translate): ModelGroup[] => [
+    {
+        capability: "image",
+        modelKey: "imageModel",
+        modelsKey: "imageModels",
+        get defaultLabel() {
+            return translator("appShell.defaultImageModel");
+        },
+        get optionsLabel() {
+            return translator("appShell.availableImageModels");
+        },
+    },
+    {
+        capability: "video",
+        modelKey: "videoModel",
+        modelsKey: "videoModels",
+        get defaultLabel() {
+            return translator("appShell.defaultVideoModel");
+        },
+        get optionsLabel() {
+            return translator("appShell.availableVideoModels");
+        },
+    },
+    {
+        capability: "text",
+        modelKey: "textModel",
+        modelsKey: "textModels",
+        get defaultLabel() {
+            return translator("appShell.defaultTextModel");
+        },
+        get optionsLabel() {
+            return translator("appShell.availableTextModels");
+        },
+    },
+];
 
-const createCapabilityGroups = (translator: typeof translate = translate): Array<{ capability: ModelCapability; modelsKey: "textModels" | "imageModels" | "videoModels"; label: string }> => ([
-    { capability: "text", modelsKey: "textModels", get label() { return translator("appShell.textModel"); } },
-    { capability: "image", modelsKey: "imageModels", get label() { return translator("appShell.imageModel"); } },
-    { capability: "video", modelsKey: "videoModels", get label() { return translator("appShell.videoModel"); } },
-]);
+const createCapabilityGroups = (translator: typeof translate = translate): Array<{ capability: ModelCapability; modelsKey: "textModels" | "imageModels" | "videoModels"; label: string }> => [
+    {
+        capability: "text",
+        modelsKey: "textModels",
+        get label() {
+            return translator("appShell.textModel");
+        },
+    },
+    {
+        capability: "image",
+        modelsKey: "imageModels",
+        get label() {
+            return translator("appShell.imageModel");
+        },
+    },
+    {
+        capability: "video",
+        modelsKey: "videoModels",
+        get label() {
+            return translator("appShell.videoModel");
+        },
+    },
+];
 
 const modelIconSelectOptions = MODEL_ICON_OPTIONS.map((option) => ({
     value: option.value,
@@ -105,7 +155,7 @@ const modelIconSelectOptions = MODEL_ICON_OPTIONS.map((option) => ({
     ),
 }));
 
-const createApiFormatOptions = (translator: typeof translate = translate): Array<{ label: string; value: ApiCallFormat }> => ([
+const createApiFormatOptions = (translator: typeof translate = translate): Array<{ label: string; value: ApiCallFormat }> => [
     { label: "OpenAI", value: "openai" },
     { label: "New API", value: "newapi" },
     { label: "Evolink", value: "evolink" },
@@ -114,48 +164,112 @@ const createApiFormatOptions = (translator: typeof translate = translate): Array
     { label: "Anthropic", value: "anthropic" },
     { label: "Seedance", value: "seedance" },
     { label: "MiniMax", value: "minimax" },
-    { get label() { return translator("appShell.custom"); }, value: "custom" },
-]);
+    {
+        get label() {
+            return translator("appShell.custom");
+        },
+        value: "custom",
+    },
+];
 
-const createObjectStorageProviderOptions = (translator: typeof translate = translate): Array<{ label: string; value: ObjectStorageProvider }> => ([
-    { get label() { return translator("appShell.tencentCloudCOS"); }, value: "tencentCos" },
-    { get label() { return translator("appShell.alibabaCloudOSS"); }, value: "aliyunOss" },
-    { get label() { return translator("appShell.qiniuCloudKodo"); }, value: "qiniuKodo" },
-]);
+const createObjectStorageProviderOptions = (translator: typeof translate = translate): Array<{ label: string; value: ObjectStorageProvider }> => [
+    {
+        get label() {
+            return translator("appShell.tencentCloudCOS");
+        },
+        value: "tencentCos",
+    },
+    {
+        get label() {
+            return translator("appShell.alibabaCloudOSS");
+        },
+        value: "aliyunOss",
+    },
+    {
+        get label() {
+            return translator("appShell.qiniuCloudKodo");
+        },
+        value: "qiniuKodo",
+    },
+];
 
-const createQiniuRegionOptions = (translator: typeof translate = translate) => ([
-    { get label() { return translator("appShell.eastChinaZhejiangZ0"); }, value: "z0" },
-    { get label() { return translator("appShell.eastChinaZhejiang2CnEast2"); }, value: "cn-east-2" },
-    { get label() { return translator("appShell.northChinaHebeiZ1"); }, value: "z1" },
-    { get label() { return translator("appShell.southChinaGuangdongZ2"); }, value: "z2" },
-    { get label() { return translator("appShell.northAmericaLosAngelesNa0"); }, value: "na0" },
-    { get label() { return translator("appShell.asiaPacificSingaporeAs0"); }, value: "as0" },
-]);
+const createQiniuRegionOptions = (translator: typeof translate = translate) => [
+    {
+        get label() {
+            return translator("appShell.eastChinaZhejiangZ0");
+        },
+        value: "z0",
+    },
+    {
+        get label() {
+            return translator("appShell.eastChinaZhejiang2CnEast2");
+        },
+        value: "cn-east-2",
+    },
+    {
+        get label() {
+            return translator("appShell.northChinaHebeiZ1");
+        },
+        value: "z1",
+    },
+    {
+        get label() {
+            return translator("appShell.southChinaGuangdongZ2");
+        },
+        value: "z2",
+    },
+    {
+        get label() {
+            return translator("appShell.northAmericaLosAngelesNa0");
+        },
+        value: "na0",
+    },
+    {
+        get label() {
+            return translator("appShell.asiaPacificSingaporeAs0");
+        },
+        value: "as0",
+    },
+];
 
-const createObjectStorageProviderFields = (translator: typeof translate = translate): Record<ObjectStorageProvider, { accessKeyLabel: string; secretKeyLabel: string; bucketPlaceholder: string; regionLabel: string; regionPlaceholder: string; publicBaseUrlExtra: string }> => ({
+const createObjectStorageProviderFields = (
+    translator: typeof translate = translate,
+): Record<ObjectStorageProvider, { accessKeyLabel: string; secretKeyLabel: string; bucketPlaceholder: string; regionLabel: string; regionPlaceholder: string; publicBaseUrlExtra: string }> => ({
     tencentCos: {
         accessKeyLabel: "SecretId",
         secretKeyLabel: "SecretKey",
         bucketPlaceholder: "example-1250000000",
         regionLabel: "Region",
         regionPlaceholder: "ap-guangzhou",
-        get publicBaseUrlExtra() { return translator("appShell.defaultsToHttpsCosMyqcloudCom"); },
+        get publicBaseUrlExtra() {
+            return translator("appShell.defaultsToHttpsCosMyqcloudCom");
+        },
     },
     aliyunOss: {
         accessKeyLabel: "AccessKey ID",
         secretKeyLabel: "AccessKey Secret",
         bucketPlaceholder: "example-bucket",
-        get regionLabel() { return translator("appShell.regionID"); },
+        get regionLabel() {
+            return translator("appShell.regionID");
+        },
         regionPlaceholder: "cn-hangzhou",
-        get publicBaseUrlExtra() { return translator("appShell.leaveBlankToGenerateTheURLFromBucketAnd"); },
+        get publicBaseUrlExtra() {
+            return translator("appShell.leaveBlankToGenerateTheURLFromBucketAnd");
+        },
     },
     qiniuKodo: {
         accessKeyLabel: "AccessKey",
         secretKeyLabel: "SecretKey",
         bucketPlaceholder: "example-bucket",
-        get regionLabel() { return translator("appShell.region"); },
-        get regionPlaceholder() { return translator("appShell.selectARegion"); },
-        get publicBaseUrlExtra() { return translator("appShell.enterACDNOrCustomDomainBoundToThis"); },
+        get regionLabel() {
+            return translator("appShell.region");
+        },
+        get regionPlaceholder() {
+            return translator("appShell.selectARegion");
+        },
+        get publicBaseUrlExtra() {
+            return translator("appShell.enterACDNOrCustomDomainBoundToThis");
+        },
     },
 });
 
@@ -237,7 +351,13 @@ export function SystemConfiguration() {
         setDraftsReady(false);
         setLoadError("");
         let active = true;
-        void Promise.all([refreshModelConfiguration(), refreshObjectStorages(), useTeamStore.getState().team ? Promise.resolve({ initialCredits: "0" }) : getCreditSettings(), useTeamStore.getState().team ? Promise.resolve({ invitationRewardCredits: "0" }) : getInvitationRewardSettings(), useTeamStore.getState().team ? Promise.resolve({ checkInCredits: "0" }) : getCheckInRewardSettings()])
+        void Promise.all([
+            refreshModelConfiguration(),
+            refreshObjectStorages(),
+            useTeamStore.getState().team ? Promise.resolve({ initialCredits: "0" }) : getCreditSettings(),
+            useTeamStore.getState().team ? Promise.resolve({ invitationRewardCredits: "0" }) : getInvitationRewardSettings(),
+            useTeamStore.getState().team ? Promise.resolve({ checkInCredits: "0" }) : getCheckInRewardSettings(),
+        ])
             .then(([, , creditSettings, invitationRewardSettings, checkInSettings]) => {
                 if (!active) return;
                 resetAllDrafts();
@@ -267,10 +387,7 @@ export function SystemConfiguration() {
     const dependencyIssues = useMemo(() => modelConfigDependencyIssues(channelBaseline, draftModelConfigs), [channelBaseline, draftModelConfigs, translate.locale]);
     // 「我的模型」的模型选择走弹窗：左侧渠道、右侧该渠道的模型。
     const modelGroups = useMemo(() => createChannelModelGroups(draftConfig, uniqueModels([...draftConfig.models, ...draftModelConfigs.map(modelConfigValue)]), translate), [draftConfig, draftModelConfigs, translate.locale]);
-    const capabilityModelGroups = useMemo(
-        () => new Map(createModelGroups(translate).map((group) => [group.capability, createChannelModelGroups(draftConfig, draftConfig[group.modelsKey], translate)])),
-        [draftConfig, translate.locale],
-    );
+    const capabilityModelGroups = useMemo(() => new Map(createModelGroups(translate).map((group) => [group.capability, createChannelModelGroups(draftConfig, draftConfig[group.modelsKey], translate)])), [draftConfig, translate.locale]);
     const modelPickerGroup = modelPicker ? createModelGroups(translate).find((group) => group.capability === modelPicker.capability) : undefined;
     const modelPickerGroups: ChannelModelGroup[] = !modelPicker || !modelPickerGroup ? [] : modelPicker.mode === "options" ? modelGroups : capabilityModelGroups.get(modelPicker.capability) || [];
     const modelPickerValues = !modelPicker || !modelPickerGroup ? [] : modelPicker.mode === "options" ? draftConfig[modelPickerGroup.modelsKey] : draftConfig[modelPickerGroup.modelKey] ? [draftConfig[modelPickerGroup.modelKey]] : [];
@@ -469,7 +586,8 @@ export function SystemConfiguration() {
         setModelConfigCopyTarget(null);
     };
 
-    const formatEditingCustomBodyParameters = () => {        try {
+    const formatEditingCustomBodyParameters = () => {
+        try {
             const parsed = JSON.parse(editingCustomBodyParameters.trim() || "{}");
             if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(translate("appShell.customModelJSONMustBeAnObject"));
             setEditingCustomBodyParameters(JSON.stringify(parsed, null, 2));
@@ -521,35 +639,40 @@ export function SystemConfiguration() {
         let nextDrafts = draftModelConfigs;
         setSavingTab("models");
         try {
-            nextDrafts = await createDraftModelConfigs(draftModelConfigs, modelConfigBaseline, async (configItem) => {
-                const normalizedConfig = normalizeModelConfigForSave(configItem);
-                return createModelConfig({
-                    channelId: normalizedConfig.channelId,
-                    modelName: normalizedConfig.modelName,
-                    modelType: normalizedConfig.modelType,
-                    capabilities: normalizedConfig.capabilities,
-                    sortOrder: normalizedConfig.sortOrder,
-                    creditCost: normalizedConfig.creditCost,
-                    creditUnit: normalizedConfig.creditUnit,
-                    thinkingEnabled: normalizedConfig.thinkingEnabled,
-                    reasoningEffort: normalizedConfig.reasoningEffort,
-                    requestConcurrency: normalizedConfig.requestConcurrency,
-                    convertImageSizeToPixels: normalizedConfig.convertImageSizeToPixels,
-                    imageSizeMappings: normalizedConfig.imageSizeMappings,
-                    customBodyParameters: normalizedConfig.customBodyParameters,
-                    videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
-                    imageBillingConfiguration: normalizedConfig.imageBillingConfiguration,
-                    displayName: normalizedConfig.displayName,
-                    modelIcon: normalizedConfig.modelIcon,
-                    isCustomModel: normalizedConfig.isCustomModel,
-                    customModelConfig: normalizedConfig.customModelConfig,
-                });
-            }, (configurations, saved) => {
-                nextDrafts = configurations;
-                baselineById.set(saved.id, saved);
-                setDraftModelConfigs(nextDrafts);
-                setModelConfigBaseline([...baselineById.values()]);
-            });
+            nextDrafts = await createDraftModelConfigs(
+                draftModelConfigs,
+                modelConfigBaseline,
+                async (configItem) => {
+                    const normalizedConfig = normalizeModelConfigForSave(configItem);
+                    return createModelConfig({
+                        channelId: normalizedConfig.channelId,
+                        modelName: normalizedConfig.modelName,
+                        modelType: normalizedConfig.modelType,
+                        capabilities: normalizedConfig.capabilities,
+                        sortOrder: normalizedConfig.sortOrder,
+                        creditCost: normalizedConfig.creditCost,
+                        creditUnit: normalizedConfig.creditUnit,
+                        thinkingEnabled: normalizedConfig.thinkingEnabled,
+                        reasoningEffort: normalizedConfig.reasoningEffort,
+                        requestConcurrency: normalizedConfig.requestConcurrency,
+                        convertImageSizeToPixels: normalizedConfig.convertImageSizeToPixels,
+                        imageSizeMappings: normalizedConfig.imageSizeMappings,
+                        customBodyParameters: normalizedConfig.customBodyParameters,
+                        videoBillingConfiguration: normalizedConfig.videoBillingConfiguration,
+                        imageBillingConfiguration: normalizedConfig.imageBillingConfiguration,
+                        displayName: normalizedConfig.displayName,
+                        modelIcon: normalizedConfig.modelIcon,
+                        isCustomModel: normalizedConfig.isCustomModel,
+                        customModelConfig: normalizedConfig.customModelConfig,
+                    });
+                },
+                (configurations, saved) => {
+                    nextDrafts = configurations;
+                    baselineById.set(saved.id, saved);
+                    setDraftModelConfigs(nextDrafts);
+                    setModelConfigBaseline([...baselineById.values()]);
+                },
+            );
             for (const configItem of nextDrafts) {
                 const baseline = baselineById.get(configItem.id);
                 if (baseline && !sameModelConfigForUpdate(configItem, baseline)) {
@@ -810,7 +933,9 @@ export function SystemConfiguration() {
 
     return (
         <div className="min-w-0">
-            {loadError ? <Alert type="error" showIcon title={loadError} action={<Button onClick={() => setLoadAttempt((attempt) => attempt + 1)}>{translate("appShell.retryConfiguration")}</Button>} /> : !draftsReady ? (
+            {loadError ? (
+                <Alert type="error" showIcon title={loadError} action={<Button onClick={() => setLoadAttempt((attempt) => attempt + 1)}>{translate("appShell.retryConfiguration")}</Button>} />
+            ) : !draftsReady ? (
                 <div className="flex h-40 items-center justify-center text-sm text-[var(--studio-muted)]">{translate("appShell.loadingConfiguration")}</div>
             ) : (
                 <Tabs
@@ -830,9 +955,11 @@ export function SystemConfiguration() {
                                         </div>
                                         <div className="flex shrink-0 gap-2">
                                             <Button type="primary" disabled={!channelsDirty || isSaving} loading={savingTab === "channels"} onClick={() => void saveChannels()}>
-                                                {translate("appShell.save")}</Button>
+                                                {translate("appShell.save")}
+                                            </Button>
                                             <Button icon={<Plus className="size-4" />} disabled={isSaving} onClick={addChannel}>
-                                                {translate("appShell.addChannel")}</Button>
+                                                {translate("appShell.addChannel")}
+                                            </Button>
                                         </div>
                                     </div>
                                     <div className="space-y-3">
@@ -844,7 +971,9 @@ export function SystemConfiguration() {
                                                         <div className="min-w-0">
                                                             <div className="truncate text-sm font-semibold">{channel.name || translate("appShell.unnamedChannel")}</div>
                                                             <div className="mt-1 text-xs text-[var(--studio-muted)]">
-                                                                {apiFormatLabel(channel.apiFormat)} {translate("appShell.configured")}{channel.models.length} {translate("appShell.models")}</div>
+                                                                {apiFormatLabel(channel.apiFormat)} {translate("appShell.configured")}
+                                                                {channel.models.length} {translate("appShell.models")}
+                                                            </div>
                                                         </div>
                                                         <div className="flex shrink-0 gap-2">
                                                             <Button size="small" icon={collapsed ? <ChevronDown className="size-3.5" /> : <ChevronUp className="size-3.5" />} onClick={() => toggleChannelCollapsed(channel.id)}>
@@ -854,10 +983,17 @@ export function SystemConfiguration() {
                                                                 size="small"
                                                                 disabled={isSaving || channel.apiFormat === "minimax" || channel.apiFormat === "custom"}
                                                                 loading={loadingChannelId === channel.id}
-                                                                title={channel.apiFormat === "minimax" ? translate("appShell.configureMiniMaxH3ManuallyForMiniMax") : channel.apiFormat === "custom" ? translate("appShell.configureModelListManuallyForCustomFormats") : undefined}
+                                                                title={
+                                                                    channel.apiFormat === "minimax"
+                                                                        ? translate("appShell.configureMiniMaxH3ManuallyForMiniMax")
+                                                                        : channel.apiFormat === "custom"
+                                                                          ? translate("appShell.configureModelListManuallyForCustomFormats")
+                                                                          : undefined
+                                                                }
                                                                 onClick={() => void refreshChannelModels(channel)}
                                                             >
-                                                                {translate("appShell.fetchModels")}</Button>
+                                                                {translate("appShell.fetchModels")}
+                                                            </Button>
                                                             <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={isSaving} onClick={() => removeChannel(channel.id)} />
                                                         </div>
                                                     </div>
@@ -881,7 +1017,13 @@ export function SystemConfiguration() {
                                                                     showSearch
                                                                     allowClear
                                                                     maxTagCount="responsive"
-                                                                    placeholder={channel.apiFormat === "minimax" ? translate("appShell.enterMiniMaxH3") : channel.apiFormat === "custom" ? translate("appShell.enterModelNameCustomFormatsCannotFetchModels") : translate("appShell.enterModelNameOrFetchModels")}
+                                                                    placeholder={
+                                                                        channel.apiFormat === "minimax"
+                                                                            ? translate("appShell.enterMiniMaxH3")
+                                                                            : channel.apiFormat === "custom"
+                                                                              ? translate("appShell.enterModelNameCustomFormatsCannotFetchModels")
+                                                                              : translate("appShell.enterModelNameOrFetchModels")
+                                                                    }
                                                                     value={channel.models}
                                                                     disabled={isSaving}
                                                                     onChange={(models) => updateDraftChannel(channel.id, { models })}
@@ -907,17 +1049,27 @@ export function SystemConfiguration() {
                                             type="warning"
                                             showIcon
                                             title={translate("appShell.someModelsDifferFromSavedChannelLists")}
-                                            description={(
+                                            description={
                                                 <div className="space-y-2">
                                                     <div>{translate("appShell.unchangedInvalidSettingsDoNotBlockOtherModelsSave")}</div>
                                                     {dependencyIssues.map(({ configuration, channelName, reason }) => (
                                                         <div key={configuration.id} className="flex flex-wrap items-center justify-between gap-2">
-                                                            <span className="break-all">{channelName} / {configuration.modelName}（{reason}）</span>
-                                                            <Button size="small" danger disabled={isSaving} aria-label={translate("appShell.removeConfiguration", { value0: channelName, value1: configuration.modelName })} onClick={() => setDraftModelConfigs((configurations) => configurations.filter((item) => item.id !== configuration.id))}>{translate("appShell.remove")}</Button>
+                                                            <span className="break-all">
+                                                                {channelName} / {configuration.modelName}（{reason}）
+                                                            </span>
+                                                            <Button
+                                                                size="small"
+                                                                danger
+                                                                disabled={isSaving}
+                                                                aria-label={translate("appShell.removeConfiguration", { value0: channelName, value1: configuration.modelName })}
+                                                                onClick={() => setDraftModelConfigs((configurations) => configurations.filter((item) => item.id !== configuration.id))}
+                                                            >
+                                                                {translate("appShell.remove")}
+                                                            </Button>
                                                         </div>
                                                     ))}
                                                 </div>
-                                            )}
+                                            }
                                         />
                                     ) : null}
                                     <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3">
@@ -926,7 +1078,8 @@ export function SystemConfiguration() {
                                             <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.optionsControlModelDropdownsDisplayOrChannelNamesDistinguish")}</div>
                                         </div>
                                         <Button type="primary" disabled={!modelConfigsDirty || isSaving} loading={savingTab === "models"} onClick={() => void saveModelConfigs()}>
-                                            {translate("appShell.save")}</Button>
+                                            {translate("appShell.save")}
+                                        </Button>
                                     </div>
                                     <div className="grid gap-4 md:grid-cols-2">
                                         {createModelGroups(translate).map((group) => (
@@ -984,7 +1137,8 @@ export function SystemConfiguration() {
                                                                             <div className="flex shrink-0 items-center gap-2">
                                                                                 {modelConfig.defaultModel ? <span className="text-xs text-[var(--studio-muted)]">{translate("appShell.default")}</span> : null}
                                                                                 <Button size="small" icon={<Pencil className="size-3.5" />} disabled={isSaving} onClick={() => openModelConfigEditor(modelConfig)}>
-                                                                                    {translate("appShell.edit")}</Button>
+                                                                                    {translate("appShell.edit")}
+                                                                                </Button>
                                                                             </div>
                                                                         </div>
                                                                     );
@@ -1012,11 +1166,17 @@ export function SystemConfiguration() {
                                                 <InputNumber<string> stringMode min="0" precision={6} value={String(draftInitialCredits)} disabled={isSaving} className="w-40" onChange={(value) => setDraftInitialCredits(creditText(value || "0"))} />
                                             </Form.Item>
                                             <Button type="primary" disabled={!creditsDirty || isSaving} loading={savingTab === "credits"} onClick={() => void saveCreditSettings()}>
-                                                {translate("appShell.save")}</Button>
+                                                {translate("appShell.save")}
+                                            </Button>
                                         </div>
                                     </div>
                                 </Form>
                             ),
+                        },
+                        {
+                            key: "creditProducts",
+                            label: translate("credits.creditProducts"),
+                            children: <CreditProductManagement />,
                         },
                         {
                             key: "invitationReward",
@@ -1025,11 +1185,11 @@ export function SystemConfiguration() {
                                 <Form layout="vertical" requiredMark={false} className="max-w-xl">
                                     <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
                                         <div className="text-sm font-semibold">{translate("appShell.referralRegistrationCredits")}</div>
-                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">
-                                            {translate("appShell.referralRewardsGoToTheInviterAfterEmailRegistration")}</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.referralRewardsGoToTheInviterAfterEmailRegistration")}</div>
                                         <div className="mt-5 flex flex-wrap items-end gap-3">
                                             <Form.Item label={translate("appShell.creditsPerNewUser")} className="mb-0">
-                                                <InputNumber<string> stringMode
+                                                <InputNumber<string>
+                                                    stringMode
                                                     min="0"
                                                     precision={6}
                                                     value={String(draftInvitationRewardCredits)}
@@ -1038,13 +1198,9 @@ export function SystemConfiguration() {
                                                     onChange={(value) => setDraftInvitationRewardCredits(creditText(value || "0"))}
                                                 />
                                             </Form.Item>
-                                            <Button
-                                                type="primary"
-                                                disabled={!invitationRewardDirty || isSaving}
-                                                loading={savingTab === "invitationReward"}
-                                                onClick={() => void saveInvitationRewardSettings()}
-                                            >
-                                                {translate("appShell.save")}</Button>
+                                            <Button type="primary" disabled={!invitationRewardDirty || isSaving} loading={savingTab === "invitationReward"} onClick={() => void saveInvitationRewardSettings()}>
+                                                {translate("appShell.save")}
+                                            </Button>
                                         </div>
                                     </div>
                                 </Form>
@@ -1057,26 +1213,14 @@ export function SystemConfiguration() {
                                 <Form layout="vertical" requiredMark={false} className="max-w-xl">
                                     <div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
                                         <div className="text-sm font-semibold">{translate("appShell.dailyCheckInCredits")}</div>
-                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">
-                                            {translate("appShell.dailyCheckInGrantsTheseCreditsValidFor24")}</div>
+                                        <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.dailyCheckInGrantsTheseCreditsValidFor24")}</div>
                                         <div className="mt-5 flex flex-wrap items-end gap-3">
                                             <Form.Item label={translate("appShell.dailyCheckInCredits")} className="mb-0">
-                                                <InputNumber<string> stringMode
-                                                    min="0"
-                                                    precision={6}
-                                                    value={String(draftCheckInCredits)}
-                                                    disabled={isSaving}
-                                                    className="w-40"
-                                                    onChange={(value) => setDraftCheckInCredits(creditText(value || "0"))}
-                                                />
+                                                <InputNumber<string> stringMode min="0" precision={6} value={String(draftCheckInCredits)} disabled={isSaving} className="w-40" onChange={(value) => setDraftCheckInCredits(creditText(value || "0"))} />
                                             </Form.Item>
-                                            <Button
-                                                type="primary"
-                                                disabled={!checkInDirty || isSaving}
-                                                loading={savingTab === "checkIn"}
-                                                onClick={() => void saveCheckInRewardSettings()}
-                                            >
-                                                {translate("appShell.save")}</Button>
+                                            <Button type="primary" disabled={!checkInDirty || isSaving} loading={savingTab === "checkIn"} onClick={() => void saveCheckInRewardSettings()}>
+                                                {translate("appShell.save")}
+                                            </Button>
                                         </div>
                                     </div>
                                 </Form>
@@ -1091,16 +1235,20 @@ export function SystemConfiguration() {
                                         <div className="min-w-0 flex-1">
                                             <div className="flex items-center gap-2 text-sm font-semibold">
                                                 <CloudUpload className="size-4" />
-                                                {translate("appShell.cloudStorage")}</div>
+                                                {translate("appShell.cloudStorage")}
+                                            </div>
                                             <div className="mt-1 text-xs leading-5 text-[var(--studio-muted)]">{translate("appShell.keysAreEncryptedOnTheServerDefaultStorageIs")}</div>
                                         </div>
                                         <div className="flex shrink-0 gap-2">
                                             <Button icon={<RefreshCw className="size-4" />} disabled={isSaving} loading={refreshingObjectStorages} onClick={handleRefreshObjectStorages}>
-                                                {translate("appShell.refresh")}</Button>
+                                                {translate("appShell.refresh")}
+                                            </Button>
                                             <Button type="primary" disabled={!objectStoragesDirty || isSaving} loading={savingTab === "objectStorage"} onClick={() => void saveObjectStorages()}>
-                                                {translate("appShell.save")}</Button>
+                                                {translate("appShell.save")}
+                                            </Button>
                                             <Button icon={<Plus className="size-4" />} disabled={isSaving} onClick={addObjectStorage}>
-                                                {translate("appShell.add")}</Button>
+                                                {translate("appShell.add")}
+                                            </Button>
                                         </div>
                                     </div>
                                     <div className="space-y-3">
@@ -1122,7 +1270,8 @@ export function SystemConfiguration() {
                                                                 {collapsed ? translate("appShell.expand") : translate("appShell.collapse")}
                                                             </Button>
                                                             <Button size="small" disabled={storage.defaultStorage || isSaving} onClick={() => setDraftDefaultObjectStorage(storage.id)}>
-                                                                {translate("appShell.setAsDefault")}</Button>
+                                                                {translate("appShell.setAsDefault")}
+                                                            </Button>
                                                             <Button size="small" danger icon={<Trash2 className="size-3.5" />} disabled={isSaving} onClick={() => removeObjectStorage(storage.id)} />
                                                         </div>
                                                     </div>
@@ -1202,10 +1351,12 @@ export function SystemConfiguration() {
                                                     )}
                                                     <div className="mt-4 flex flex-wrap items-center gap-2">
                                                         <Button icon={<Wifi className="size-4" />} disabled={!isObjectStorageReady(storage) || isSaving} loading={testingObjectStorageId === storage.id} onClick={() => void testObjectStorage(storage.id)}>
-                                                            {translate("appShell.testUpload")}</Button>
+                                                            {translate("appShell.testUpload")}
+                                                        </Button>
                                                         {objectStorageTestUrl && testedObjectStorageId === storage.id ? (
                                                             <Button type="link" className="h-auto p-0 text-xs" href={objectStorageTestUrl} target="_blank" rel="noreferrer">
-                                                                {translate("appShell.openTestFile")}</Button>
+                                                                {translate("appShell.openTestFile")}
+                                                            </Button>
                                                         ) : null}
                                                     </div>
                                                 </section>
@@ -1215,7 +1366,7 @@ export function SystemConfiguration() {
                                 </Form>
                             ),
                         },
-                    ].filter((item) => !team || !["credits", "invitationReward", "checkIn"].includes(item.key))}
+                    ].filter((item) => !team || !["credits", "creditProducts", "invitationReward", "checkIn"].includes(item.key))}
                 />
             )}
             {modelPicker && modelPickerGroup ? (
@@ -1241,7 +1392,9 @@ export function SystemConfiguration() {
                                 </span>
                             ) : null}
                             <div>
-                                <div className="text-lg font-semibold">{modelOptionLabelWithRealName(draftConfig, modelConfigValue(editingModelConfig))} {translate("appShell.configure")}</div>
+                                <div className="text-lg font-semibold">
+                                    {modelOptionLabelWithRealName(draftConfig, modelConfigValue(editingModelConfig))} {translate("appShell.configure")}
+                                </div>
                                 {editingModelConfig.modelType === "video" ? <div className="mt-0.5 text-xs font-normal text-[var(--studio-muted)]">{translate("appShell.configureBillingResolutionPricesAndCapabilities")}</div> : null}
                             </div>
                         </div>
@@ -1266,7 +1419,8 @@ export function SystemConfiguration() {
                             <div className="flex items-center justify-between gap-3">
                                 <div>
                                     <div className="flex items-center gap-1.5 text-sm font-semibold">
-                                        {translate("appShell.customModel")}<Info className="size-4 text-[var(--studio-muted)]" />
+                                        {translate("appShell.customModel")}
+                                        <Info className="size-4 text-[var(--studio-muted)]" />
                                     </div>
                                     <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.useRequestAndResponseExamplesForEachModeTo")}</p>
                                 </div>
@@ -1276,7 +1430,8 @@ export function SystemConfiguration() {
 
                         <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
                             <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                {translate("appShell.displayName")}<Info className="size-4 text-[var(--studio-muted)]" />
+                                {translate("appShell.displayName")}
+                                <Info className="size-4 text-[var(--studio-muted)]" />
                             </div>
                             <Input
                                 maxLength={255}
@@ -1289,21 +1444,18 @@ export function SystemConfiguration() {
 
                         <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
                             <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                {translate("appShell.displayIcon")}<Info className="size-4 text-[var(--studio-muted)]" />
+                                {translate("appShell.displayIcon")}
+                                <Info className="size-4 text-[var(--studio-muted)]" />
                             </div>
-                            <Select
-                                value={editingModelConfig.modelIcon || ""}
-                                options={modelIconSelectOptions}
-                                className="w-full"
-                                onChange={(modelIcon: string) => updateEditingModelConfig({ modelIcon: modelIcon || null })}
-                            />
+                            <Select value={editingModelConfig.modelIcon || ""} options={modelIconSelectOptions} className="w-full" onChange={(modelIcon: string) => updateEditingModelConfig({ modelIcon: modelIcon || null })} />
                             <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("appShell.displayIconAutoMatchDetectsItFromModelOr")}</p>
                         </section>
 
                         <section className="grid gap-4 rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4 md:grid-cols-2">
                             <div>
                                 <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                    {translate("appShell.billingMethod")}<Info className="size-4 text-[var(--studio-muted)]" />
+                                    {translate("appShell.billingMethod")}
+                                    <Info className="size-4 text-[var(--studio-muted)]" />
                                 </div>
                                 <Select
                                     value={editingModelConfig.videoBillingConfiguration?.billingUnit || "generation"}
@@ -1342,7 +1494,9 @@ export function SystemConfiguration() {
                                             })
                                         }
                                     />
-                                    <Button disabled className="pointer-events-none">{translate("appShell.s")}</Button>
+                                    <Button disabled className="pointer-events-none">
+                                        {translate("appShell.s")}
+                                    </Button>
                                 </Space.Compact>
                             </div>
                         </section>
@@ -1351,7 +1505,8 @@ export function SystemConfiguration() {
                             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                                 <div>
                                     <div className="flex items-center gap-1.5 text-base font-semibold">
-                                        {translate("appShell.capabilitiesAndResolutionPricing")}<Info className="size-4 text-[var(--studio-muted)]" />
+                                        {translate("appShell.capabilitiesAndResolutionPricing")}
+                                        <Info className="size-4 text-[var(--studio-muted)]" />
                                     </div>
                                     <p className="mt-1 text-xs text-[var(--studio-muted)]">{translate("appShell.configureCapabilitiesAndCreditPricesByResolution")}</p>
                                 </div>
@@ -1362,21 +1517,37 @@ export function SystemConfiguration() {
                                         </Button>
                                     ) : null}
                                     <span className="rounded-md border border-[var(--studio-line)] px-2.5 py-1 text-xs text-[var(--studio-muted)]">
-                                        {translate("appShell.pricing")}{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.creditsS") : translate("appShell.creditsRun")}
+                                        {translate("appShell.pricing")}
+                                        {editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.creditsS") : translate("appShell.creditsRun")}
                                     </span>
                                 </div>
                             </div>
                             <div className="space-y-4">
                                 <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--studio-line)] p-4">
-                                    <div><div className="font-medium">{translate("appShell.audioInputSupported")}</div><p className="text-xs text-[var(--studio-muted)]">{translate("appShell.allowAudioReferencesForThisVideoModelUniversalReference")}</p></div>
-                                    <Switch aria-label={translate("appShell.audioInputSupported")} checked={editingModelConfig.capabilities.includes("audio-input")} disabled={isSaving || !editingModelConfig.capabilities.includes("audio-input") && !editingModelConfig.capabilities.includes("reference-to-video")} onChange={(checked) => {
-                                        const group = editingModelConfig.customModelConfig?.["reference-to-video"];
-                                        setEditingModelConfig({
-                                            ...editingModelConfig,
-                                            capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, "audio-input"]) : editingModelConfig.capabilities.filter((value) => value !== "audio-input"),
-                                            ...(editingModelConfig.isCustomModel && group ? { customModelConfig: { ...editingModelConfig.customModelConfig, "reference-to-video": { ...group, videoGenerationConstraints: { ...group.videoGenerationConstraints, maximumAudioCount: checked ? undefined : 0 } } } } : {}),
-                                        });
-                                    }} />
+                                    <div>
+                                        <div className="font-medium">{translate("appShell.audioInputSupported")}</div>
+                                        <p className="text-xs text-[var(--studio-muted)]">{translate("appShell.allowAudioReferencesForThisVideoModelUniversalReference")}</p>
+                                    </div>
+                                    <Switch
+                                        aria-label={translate("appShell.audioInputSupported")}
+                                        checked={editingModelConfig.capabilities.includes("audio-input")}
+                                        disabled={isSaving || (!editingModelConfig.capabilities.includes("audio-input") && !editingModelConfig.capabilities.includes("reference-to-video"))}
+                                        onChange={(checked) => {
+                                            const group = editingModelConfig.customModelConfig?.["reference-to-video"];
+                                            setEditingModelConfig({
+                                                ...editingModelConfig,
+                                                capabilities: checked ? uniqueModels([...editingModelConfig.capabilities, "audio-input"]) : editingModelConfig.capabilities.filter((value) => value !== "audio-input"),
+                                                ...(editingModelConfig.isCustomModel && group
+                                                    ? {
+                                                          customModelConfig: {
+                                                              ...editingModelConfig.customModelConfig,
+                                                              "reference-to-video": { ...group, videoGenerationConstraints: { ...group.videoGenerationConstraints, maximumAudioCount: checked ? undefined : 0 } },
+                                                          },
+                                                      }
+                                                    : {}),
+                                            });
+                                        }}
+                                    />
                                 </div>
                                 {createVideoGenerationCapabilityOptions(translate).map((mode, index) => {
                                     const prices = editingModelConfig.videoBillingConfiguration?.modePrices?.[mode.value] || {};
@@ -1424,50 +1595,65 @@ export function SystemConfiguration() {
                                                     />
                                                 </div>
                                             </div>
-                                            {modeCollapsed ? null : <div className="pt-3">
-                                                <div className="mb-2 text-xs font-medium text-[var(--studio-muted)]">{translate("appShell.resolutionPricing")}{editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.creditsS") : translate("appShell.creditsRun")}）</div>
-                                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                                                    {VIDEO_RESOLUTION_OPTIONS.filter((resolution) => resolution.value !== "auto").map((resolution) => (
-                                                        <label key={resolution.value} className="flex min-w-0 items-center gap-2 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2.5 py-2">
-                                                            <span
-                                                                className={`flex size-7 shrink-0 items-center justify-center rounded text-[10px] font-semibold ${resolution.value === "480p" ? "bg-violet-500/15 text-violet-500" : resolution.value === "720p" ? "bg-blue-500/15 text-blue-500" : resolution.value === "1080p" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : resolution.value === "2k" ? "bg-rose-500/15 text-rose-500" : resolution.value === "4k" ? "bg-purple-500/15 text-purple-500" : "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400"}`}
-                                                            >
-                                                                <Monitor className="size-3.5" />
-                                                            </span>
-                                                            <span className="min-w-0 flex-1">
-                                                                <span className="block text-xs font-medium">{resolution.label}</span>
-                                                                <InputNumber<string> stringMode
-                                                                    min="0"
-                                                                    precision={6}
-                                                                    placeholder={translate("appShell.notConfigured")}
-                                                                    value={prices[resolution.value] === undefined ? undefined : String(prices[resolution.value])}
-                                                                    className="mt-0.5 w-full"
-                                                                    disabled={!modeEnabled}
-                                                                    controls={false}
-                                                                    onChange={(value) =>
-                                                                        updateEditingModelConfig({
-                                                                            videoBillingConfiguration: updateVideoResolutionPrice(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value, resolution.value, value),
-                                                                        })
-                                                                    }
-                                                                />
-                                                            </span>
-                                                        </label>
-                                                    ))}
+                                            {modeCollapsed ? null : (
+                                                <div className="pt-3">
+                                                    <div className="mb-2 text-xs font-medium text-[var(--studio-muted)]">
+                                                        {translate("appShell.resolutionPricing")}
+                                                        {editingModelConfig.videoBillingConfiguration?.billingUnit === "second" ? translate("appShell.creditsS") : translate("appShell.creditsRun")}）
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                                                        {VIDEO_RESOLUTION_OPTIONS.filter((resolution) => resolution.value !== "auto").map((resolution) => (
+                                                            <label key={resolution.value} className="flex min-w-0 items-center gap-2 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2.5 py-2">
+                                                                <span
+                                                                    className={`flex size-7 shrink-0 items-center justify-center rounded text-[10px] font-semibold ${resolution.value === "480p" ? "bg-violet-500/15 text-violet-500" : resolution.value === "720p" ? "bg-blue-500/15 text-blue-500" : resolution.value === "1080p" ? "bg-amber-500/15 text-amber-600 dark:text-amber-400" : resolution.value === "2k" ? "bg-rose-500/15 text-rose-500" : resolution.value === "4k" ? "bg-purple-500/15 text-purple-500" : "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400"}`}
+                                                                >
+                                                                    <Monitor className="size-3.5" />
+                                                                </span>
+                                                                <span className="min-w-0 flex-1">
+                                                                    <span className="block text-xs font-medium">{resolution.label}</span>
+                                                                    <InputNumber<string>
+                                                                        stringMode
+                                                                        min="0"
+                                                                        precision={6}
+                                                                        placeholder={translate("appShell.notConfigured")}
+                                                                        value={prices[resolution.value] === undefined ? undefined : String(prices[resolution.value])}
+                                                                        className="mt-0.5 w-full"
+                                                                        disabled={!modeEnabled}
+                                                                        controls={false}
+                                                                        onChange={(value) =>
+                                                                            updateEditingModelConfig({
+                                                                                videoBillingConfiguration: updateVideoResolutionPrice(editingModelConfig.videoBillingConfiguration || createVideoBillingConfiguration(), mode.value, resolution.value, value),
+                                                                            })
+                                                                        }
+                                                                    />
+                                                                </span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
                                                 </div>
-                                            </div>}
-                                            {modeCollapsed || !modeEnabled || !editingModelConfig.isCustomModel ? null : <div>
-                                                <div className="mt-3 flex items-center justify-between gap-3">
-                                                    <span className="text-sm font-semibold">{translate("appShell.videoConstraintSection")}</span>
-                                                    <AutoFillButton onClick={() => setAutoFillConfigMode(mode.value)} />
+                                            )}
+                                            {modeCollapsed || !modeEnabled || !editingModelConfig.isCustomModel ? null : (
+                                                <div>
+                                                    <div className="mt-3 flex items-center justify-between gap-3">
+                                                        <span className="text-sm font-semibold">{translate("appShell.videoConstraintSection")}</span>
+                                                        <AutoFillButton onClick={() => setAutoFillConfigMode(mode.value)} />
+                                                    </div>
+                                                    <VideoGenerationConstraintsEditor
+                                                        mode={mode.value}
+                                                        constraints={editingModelConfig.customModelConfig?.[mode.value]?.videoGenerationConstraints}
+                                                        audioEnabled={editingModelConfig.capabilities.includes("audio-input")}
+                                                        billingMinimum={editingModelConfig.videoBillingConfiguration?.minimumDurationSeconds || 1}
+                                                        onChange={(videoGenerationConstraints) =>
+                                                            updateEditingModelConfig({
+                                                                customModelConfig: {
+                                                                    ...editingModelConfig.customModelConfig,
+                                                                    [mode.value]: { ...emptyCustomModelGroup(), ...editingModelConfig.customModelConfig?.[mode.value], videoGenerationConstraints },
+                                                                },
+                                                            })
+                                                        }
+                                                    />
                                                 </div>
-                                                <VideoGenerationConstraintsEditor
-                                                    mode={mode.value}
-                                                    constraints={editingModelConfig.customModelConfig?.[mode.value]?.videoGenerationConstraints}
-                                                    audioEnabled={editingModelConfig.capabilities.includes("audio-input")}
-                                                    billingMinimum={editingModelConfig.videoBillingConfiguration?.minimumDurationSeconds || 1}
-                                                    onChange={(videoGenerationConstraints) => updateEditingModelConfig({ customModelConfig: { ...editingModelConfig.customModelConfig, [mode.value]: { ...emptyCustomModelGroup(), ...editingModelConfig.customModelConfig?.[mode.value], videoGenerationConstraints } } })}
-                                                />
-                                            </div>}
+                                            )}
                                             {modeCollapsed ? null : editingModelConfig.isCustomModel ? (
                                                 <CustomModelGroupEditor
                                                     label={mode.label}
@@ -1490,7 +1676,8 @@ export function SystemConfiguration() {
                         <div className="grid gap-5 md:grid-cols-[minmax(0,280px)_minmax(0,1fr)]">
                             <section>
                                 <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">
-                                    {translate("appShell.concurrency")}<Info className="size-4 text-[var(--studio-muted)]" />
+                                    {translate("appShell.concurrency")}
+                                    <Info className="size-4 text-[var(--studio-muted)]" />
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <InputNumber min={1} precision={0} value={editingModelConfig.requestConcurrency} className="w-52" onChange={(value) => updateEditingModelConfig({ requestConcurrency: Math.max(1, Math.floor(Number(value) || 1)) })} />
@@ -1500,12 +1687,14 @@ export function SystemConfiguration() {
                             <section>
                                 <div className="mb-2 flex items-center gap-1.5 text-sm font-semibold">{translate("appShell.capabilities")}</div>
                                 <div className="flex flex-wrap gap-2">
-                                    {createModelCapabilityOptions(translate).video.filter((option) => editingModelConfig.capabilities.includes(option.value)).map((option) => (
-                                        <span key={option.value} className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
-                                            <CheckCircle2 className="size-3.5" />
-                                            {option.label}
-                                        </span>
-                                    ))}
+                                    {createModelCapabilityOptions(translate)
+                                        .video.filter((option) => editingModelConfig.capabilities.includes(option.value))
+                                        .map((option) => (
+                                            <span key={option.value} className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-600 dark:text-emerald-400">
+                                                <CheckCircle2 className="size-3.5" />
+                                                {option.label}
+                                            </span>
+                                        ))}
                                     {!editingModelConfig.capabilities.length ? <span className="text-xs text-[var(--studio-muted)]">{translate("appShell.videoGenerationIsDisabled")}</span> : null}
                                 </div>
                             </section>
@@ -1514,10 +1703,12 @@ export function SystemConfiguration() {
                         <section className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-4">
                             <div className="mb-2 flex flex-wrap items-center justify-between gap-3">
                                 <div className="flex items-center gap-1.5 text-sm font-semibold">
-                                    {translate("appShell.customJSONOptional")}<Info className="size-4 text-[var(--studio-muted)]" />
+                                    {translate("appShell.customJSONOptional")}
+                                    <Info className="size-4 text-[var(--studio-muted)]" />
                                 </div>
                                 <Button size="small" icon={<Braces className="size-3.5" />} onClick={formatEditingCustomBodyParameters}>
-                                    {translate("appShell.format")}</Button>
+                                    {translate("appShell.format")}
+                                </Button>
                             </div>
                             <Input.TextArea value={editingCustomBodyParameters} autoSize={{ minRows: 5, maxRows: 12 }} spellCheck={false} className="font-mono text-xs" onChange={(event) => setEditingCustomBodyParameters(event.target.value)} />
                             <p className="mt-2 text-xs text-[var(--studio-muted)]">{translate("appShell.mergedOnlyIntoJSONPOSTBodiesDuplicateFieldsOverride")}</p>
@@ -1539,12 +1730,7 @@ export function SystemConfiguration() {
                             />
                         </Form.Item>
                         <Form.Item label={translate("appShell.displayIcon")} extra={translate("appShell.displayIconAutoMatchDetectsItFromModelOr")}>
-                            <Select
-                                value={editingModelConfig.modelIcon || ""}
-                                options={modelIconSelectOptions}
-                                className="w-full"
-                                onChange={(modelIcon: string) => updateEditingModelConfig({ modelIcon: modelIcon || null })}
-                            />
+                            <Select value={editingModelConfig.modelIcon || ""} options={modelIconSelectOptions} className="w-full" onChange={(modelIcon: string) => updateEditingModelConfig({ modelIcon: modelIcon || null })} />
                         </Form.Item>
                         {editingModelConfig.modelType !== "video" ? (
                             <Form.Item label={translate("appShell.creditsPerRun")}>
@@ -1573,8 +1759,7 @@ export function SystemConfiguration() {
                         ) : null}
                         {editingModelConfig.modelType === "image" && editingModelConfig.convertImageSizeToPixels ? (
                             <Form.Item>
-                                <ImageSizeMappingsEditor value={editingModelConfig.imageSizeMappings ?? cloneImageSizeMappings()}
-                                    onChange={(imageSizeMappings) => updateEditingModelConfig({ imageSizeMappings })} />
+                                <ImageSizeMappingsEditor value={editingModelConfig.imageSizeMappings ?? cloneImageSizeMappings()} onChange={(imageSizeMappings) => updateEditingModelConfig({ imageSizeMappings })} />
                             </Form.Item>
                         ) : null}
                         <Form.Item label={translate("appShell.capabilities")}>
@@ -1603,7 +1788,10 @@ export function SystemConfiguration() {
                                                     size="small"
                                                     aria-label={`${option.label}${collapsedEditingCapabilities.includes(`image:${option.value}`) ? translate("appShell.expand") : translate("appShell.collapse")}`}
                                                     aria-expanded={!collapsedEditingCapabilities.includes(`image:${option.value}`)}
-                                                    title={translate("appShell.configuration", { value0: collapsedEditingCapabilities.includes(`image:${option.value}`) ? translate("appShell.expand") : translate("appShell.collapse"), value1: option.label })}
+                                                    title={translate("appShell.configuration", {
+                                                        value0: collapsedEditingCapabilities.includes(`image:${option.value}`) ? translate("appShell.expand") : translate("appShell.collapse"),
+                                                        value1: option.label,
+                                                    })}
                                                     icon={collapsedEditingCapabilities.includes(`image:${option.value}`) ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
                                                     onClick={() => toggleEditingCapabilityCollapsed(`image:${option.value}`)}
                                                 />
@@ -1664,7 +1852,8 @@ export function SystemConfiguration() {
                                     {IMAGE_RESOLUTIONS.map((resolution) => (
                                         <label key={resolution} className="block">
                                             <span className="mb-1 block text-xs text-[var(--studio-muted)]">{resolution}</span>
-                                            <InputNumber<string> stringMode
+                                            <InputNumber<string>
+                                                stringMode
                                                 min="0"
                                                 precision={6}
                                                 className="w-full!"
@@ -1683,23 +1872,8 @@ export function SystemConfiguration() {
                     </Form>
                 ) : null}
             </Modal>
-            {modelConfigCopyTarget ? (
-                <ModelConfigCopyModal
-                    target={modelConfigCopyTarget}
-                    configs={draftModelConfigs}
-                    config={draftConfig}
-                    onCancel={() => setModelConfigCopyTarget(null)}
-                    onCopy={copyCustomConfigFromModel}
-                />
-            ) : null}
-            {autoFillConfigMode && editingModelConfig ? (
-                <ModelConfigAutoFillModal
-                    config={editingModelConfig}
-                    mode={autoFillConfigMode}
-                    onCancel={() => setAutoFillConfigMode(null)}
-                    onFill={autoFillCustomConfig}
-                />
-            ) : null}
+            {modelConfigCopyTarget ? <ModelConfigCopyModal target={modelConfigCopyTarget} configs={draftModelConfigs} config={draftConfig} onCancel={() => setModelConfigCopyTarget(null)} onCopy={copyCustomConfigFromModel} /> : null}
+            {autoFillConfigMode && editingModelConfig ? <ModelConfigAutoFillModal config={editingModelConfig} mode={autoFillConfigMode} onCancel={() => setAutoFillConfigMode(null)} onFill={autoFillCustomConfig} /> : null}
         </div>
     );
 }
@@ -1720,9 +1894,7 @@ function cloneModelConfig(config: ServerModelConfig): ServerModelConfig {
         customModelConfig: cloneCustomModelConfig(config.customModelConfig),
         imageSizeMappings: config.modelType === "image" ? cloneImageSizeMappings(config.imageSizeMappings) : null,
         videoBillingConfiguration: config.modelType === "video" ? cloneVideoBillingConfiguration(config.videoBillingConfiguration || createVideoBillingConfiguration()) : null,
-        imageBillingConfiguration: config.modelType === "image" && config.imageBillingConfiguration
-            ? { resolutionPrices: { ...(config.imageBillingConfiguration.resolutionPrices || {}) } }
-            : null,
+        imageBillingConfiguration: config.modelType === "image" && config.imageBillingConfiguration ? { resolutionPrices: { ...(config.imageBillingConfiguration.resolutionPrices || {}) } } : null,
     };
 }
 
@@ -1735,8 +1907,7 @@ function customVideoConfigurationIssue(config: ServerModelConfig) {
     if (!config.isCustomModel || config.modelType !== "video") return null;
     for (const { value: mode } of VIDEO_GENERATION_CAPABILITY_OPTIONS) {
         if (!config.capabilities.includes(mode)) continue;
-        const issue = videoConstraintConfigurationIssues(mode, config.customModelConfig?.[mode]?.videoGenerationConstraints,
-            config.capabilities.includes("audio-input"), config.videoBillingConfiguration?.minimumDurationSeconds || 1)[0];
+        const issue = videoConstraintConfigurationIssues(mode, config.customModelConfig?.[mode]?.videoGenerationConstraints, config.capabilities.includes("audio-input"), config.videoBillingConfiguration?.minimumDurationSeconds || 1)[0];
         if (issue) return { mode, ...issue };
     }
     return null;
@@ -1757,18 +1928,17 @@ function defaultCollapsedEditingCapabilities(config: ServerModelConfig) {
 function normalizeModelConfigForSave(config: ServerModelConfig): ServerModelConfig {
     const supportedCapabilities = new Set(MODEL_CAPABILITY_OPTIONS[config.modelType].map((option) => option.value));
     const capabilities = config.capabilities.filter((capability) => supportedCapabilities.has(capability));
-    const videoBillingConfiguration = config.modelType === "video" && config.videoBillingConfiguration
-        ? {
-              ...config.videoBillingConfiguration,
-              modePrices: Object.fromEntries(
-                  Object.entries(config.videoBillingConfiguration.modePrices || {}).filter(([mode]) => mode !== "audio-input" && supportedCapabilities.has(mode) && capabilities.includes(mode)),
-              ) as VideoBillingConfiguration["modePrices"],
-          }
-        : config.videoBillingConfiguration;
+    const videoBillingConfiguration =
+        config.modelType === "video" && config.videoBillingConfiguration
+            ? {
+                  ...config.videoBillingConfiguration,
+                  modePrices: Object.fromEntries(
+                      Object.entries(config.videoBillingConfiguration.modePrices || {}).filter(([mode]) => mode !== "audio-input" && supportedCapabilities.has(mode) && capabilities.includes(mode)),
+                  ) as VideoBillingConfiguration["modePrices"],
+              }
+            : config.videoBillingConfiguration;
     // 自定义模型配置只保留已勾选能力的键，避免残留未启用能力的模板。
-    const customModelConfig = config.isCustomModel
-        ? Object.fromEntries(Object.entries(config.customModelConfig || {}).filter(([mode]) => mode !== "audio-input" && supportedCapabilities.has(mode) && capabilities.includes(mode)))
-        : {};
+    const customModelConfig = config.isCustomModel ? Object.fromEntries(Object.entries(config.customModelConfig || {}).filter(([mode]) => mode !== "audio-input" && supportedCapabilities.has(mode) && capabilities.includes(mode))) : {};
     return {
         ...config,
         capabilities,
@@ -1788,10 +1958,7 @@ function formatImageResolutionPrice(price: CreditAmount | null | undefined) {
 
 /** 图片分辨率价目表只保留1K、2K、4K的已填写价格，全空表示沿用模型单价。 */
 function normalizeImageBillingConfiguration(configuration: ServerModelConfig["imageBillingConfiguration"]): ServerModelConfig["imageBillingConfiguration"] {
-    const prices = Object.fromEntries(
-        IMAGE_RESOLUTIONS.map((resolution) => [resolution, configuration?.resolutionPrices?.[resolution]])
-            .filter(([, price]) => String(price ?? "").trim() !== ""),
-    ) as Record<string, CreditAmount>;
+    const prices = Object.fromEntries(IMAGE_RESOLUTIONS.map((resolution) => [resolution, configuration?.resolutionPrices?.[resolution]]).filter(([, price]) => String(price ?? "").trim() !== "")) as Record<string, CreditAmount>;
     return Object.keys(prices).length ? { resolutionPrices: prices } : null;
 }
 
@@ -1902,15 +2069,7 @@ function createChannelModelGroups(config: AiConfig, models: string[], translator
 }
 
 /** 模型选择弹窗的触发器：展示已选模型，点击按钮打开弹窗。 */
-function ModelFieldTrigger({ config, models, multiple = false, placeholder, actionLabel, disabled, onOpen }: {
-    config: AiConfig;
-    models: string[];
-    multiple?: boolean;
-    placeholder: string;
-    actionLabel: string;
-    disabled: boolean;
-    onOpen: () => void;
-}) {
+function ModelFieldTrigger({ config, models, multiple = false, placeholder, actionLabel, disabled, onOpen }: { config: AiConfig; models: string[]; multiple?: boolean; placeholder: string; actionLabel: string; disabled: boolean; onOpen: () => void }) {
     return (
         <div className="flex min-h-8 items-center gap-2 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] px-2 py-1">
             <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
@@ -1919,7 +2078,9 @@ function ModelFieldTrigger({ config, models, multiple = false, placeholder, acti
                 ) : multiple ? (
                     <>
                         {models.slice(0, 2).map((model) => (
-                            <span key={model} className="max-w-[8.5rem] shrink-0 truncate rounded bg-[var(--studio-surface-hover)] px-1.5 py-0.5 text-xs text-[var(--studio-text)]">{modelOptionLabelWithRealName(config, model)}</span>
+                            <span key={model} className="max-w-[8.5rem] shrink-0 truncate rounded bg-[var(--studio-surface-hover)] px-1.5 py-0.5 text-xs text-[var(--studio-text)]">
+                                {modelOptionLabelWithRealName(config, model)}
+                            </span>
                         ))}
                         {models.length > 2 ? <span className="shrink-0 text-xs text-[var(--studio-muted)]">+{models.length - 2}</span> : null}
                     </>
@@ -1927,7 +2088,9 @@ function ModelFieldTrigger({ config, models, multiple = false, placeholder, acti
                     <ModelOptionLabel config={config} model={models[0]} showChannel />
                 )}
             </div>
-            <Button size="small" disabled={disabled} onClick={onOpen}>{actionLabel}</Button>
+            <Button size="small" disabled={disabled} onClick={onOpen}>
+                {actionLabel}
+            </Button>
         </div>
     );
 }
@@ -1997,19 +2160,7 @@ function AutoFillButton({ onClick }: { onClick: () => void }) {
 }
 
 /** 自定义模型单个能力/模式分组的调用配置编辑器。 */
-function CustomModelGroupEditor({
-    label,
-    group,
-    isVideo,
-    onAutoFill,
-    onChange,
-}: {
-    label: string;
-    group: CustomModelGroupConfig | undefined;
-    isVideo: boolean;
-    onAutoFill?: () => void;
-    onChange: (group: CustomModelGroupConfig) => void;
-}) {
+function CustomModelGroupEditor({ label, group, isVideo, onAutoFill, onChange }: { label: string; group: CustomModelGroupConfig | undefined; isVideo: boolean; onAutoFill?: () => void; onChange: (group: CustomModelGroupConfig) => void }) {
     const translate = useTranslation();
     const requestTemplateRef = useRef<TextAreaRef | null>(null);
     const queryRequestTemplateRef = useRef<TextAreaRef | null>(null);
@@ -2034,7 +2185,10 @@ function CustomModelGroupEditor({
     return (
         <div className="mt-3 space-y-3 rounded-md border border-[var(--studio-line)] bg-[var(--studio-panel)] p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs font-semibold text-[var(--studio-muted)]">{translate("appShell.customAPIConfiguration")}{label}）</div>
+                <div className="text-xs font-semibold text-[var(--studio-muted)]">
+                    {translate("appShell.customAPIConfiguration")}
+                    {label}）
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                     {!isVideo ? (
                         <Segmented
@@ -2095,7 +2249,11 @@ function CustomModelGroupEditor({
                                 </Button>
                             ))}
                         </div>
-                        <p className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.referenceActualParametersWithPlaceholdersEG")}{"{{prompt}}"}{translate("appShell.fieldsWithoutPlaceholdersAreSentAsEnteredAndMay")}</p>
+                        <p className="mb-1 text-xs text-[var(--studio-muted)]">
+                            {translate("appShell.referenceActualParametersWithPlaceholdersEG")}
+                            {"{{prompt}}"}
+                            {translate("appShell.fieldsWithoutPlaceholdersAreSentAsEnteredAndMay")}
+                        </p>
                         <Input.TextArea
                             ref={requestTemplateRef}
                             value={current.requestTemplate}
@@ -2123,7 +2281,11 @@ function CustomModelGroupEditor({
                 <>
                     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_112px]">
                         <div>
-                            <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.queryPathAsyncPollingSupports")}{"{{taskId}}"}{translate("appShell.placeholders")}</div>
+                            <div className="mb-1 text-xs text-[var(--studio-muted)]">
+                                {translate("appShell.queryPathAsyncPollingSupports")}
+                                {"{{taskId}}"}
+                                {translate("appShell.placeholders")}
+                            </div>
                             <Input value={current.queryPath} placeholder="/api/v1/.../result/{{taskId}}" onChange={(event) => update({ queryPath: event.target.value })} />
                         </div>
                         <div>
@@ -2153,7 +2315,11 @@ function CustomModelGroupEditor({
                                         </Button>
                                     ))}
                                 </div>
-                                <p className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.use")}{"{{taskId}}"}{translate("appShell.referenceThePollingTaskIDFieldsWithoutPlaceholdersAre")}</p>
+                                <p className="mb-1 text-xs text-[var(--studio-muted)]">
+                                    {translate("appShell.use")}
+                                    {"{{taskId}}"}
+                                    {translate("appShell.referenceThePollingTaskIDFieldsWithoutPlaceholdersAre")}
+                                </p>
                                 <Input.TextArea
                                     ref={queryRequestTemplateRef}
                                     value={current.queryRequestTemplate}
@@ -2168,13 +2334,7 @@ function CustomModelGroupEditor({
                     ) : null}
                     <div>
                         <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.queryResponseExampleJSON")}</div>
-                        <Input.TextArea
-                            value={current.queryResponseExample}
-                            autoSize={{ minRows: 2, maxRows: 6 }}
-                            spellCheck={false}
-                            className="font-mono text-xs"
-                            onChange={(event) => update({ queryResponseExample: event.target.value })}
-                        />
+                        <Input.TextArea value={current.queryResponseExample} autoSize={{ minRows: 2, maxRows: 6 }} spellCheck={false} className="font-mono text-xs" onChange={(event) => update({ queryResponseExample: event.target.value })} />
                     </div>
                     <div>
                         <div className="mb-1 text-xs text-[var(--studio-muted)]">{translate("appShell.queryResultPathRequiredWithQueryPath")}</div>
