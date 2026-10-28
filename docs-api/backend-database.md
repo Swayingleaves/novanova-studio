@@ -6,8 +6,8 @@
 
 | 表 | 作用 | 关键字段、约束与索引 |
 | --- | --- | --- |
-| `credit_products` | 平台可售积分商品配置 | `credits` 为积分数量，`price_amount` 为人民币金额；`enabled` 控制启停，`sort_order` 控制展示顺序；启用状态、排序和标识联合索引；仅平台作用域可读写 |
-| `credit_purchase_orders` | 用户购买积分的订单和渠道快照 | `order_no` 唯一；保存商品、积分和金额快照，客户端不能覆盖金额；`payment_method` 当前为 `alipay`，预留 `wechat`；状态为 `pending`、`processing`、`paid`、`closed` 或 `cancelled`；`wallet_team_id` 固定为 `0`；用户+创建时间、待支付过期时间、钱包+状态索引；渠道交易号按支付方式唯一 |
+| `credit_products` | 平台可售积分商品配置 | `credits` 为基础积分数量，`bonus_credits` 为购买时额外赠送的积分数量，`price_amount` 为人民币金额；`enabled` 控制启停，`sort_order` 控制展示顺序；启用状态、排序和标识联合索引；仅平台作用域可读写 |
+| `credit_purchase_orders` | 用户购买积分的订单和渠道快照 | `order_no` 唯一；保存商品、最终到账积分和金额快照，客户端不能覆盖金额；`payment_method` 当前为 `alipay`，预留 `wechat`；状态为 `pending`、`processing`、`paid`、`closed` 或 `cancelled`；`wallet_team_id` 固定为 `0`；用户+创建时间、待支付过期时间、钱包+状态索引；渠道交易号按支付方式唯一 |
 | `user_credit_transactions` | 积分余额变更流水 | 新增 `credit_purchase` 类型；`billing_reference` 使用平台订单号并建立唯一约束，支付宝重复通知不会重复入账 |
 
 首次迁移创建 `10/20/50/100` 积分商品，默认价格分别为 `1/2/5/10` 元。管理员可在系统管理的“积分商品”配置中新增、编辑、排序和停用商品；已创建订单继续使用订单快照，不受商品后续修改影响。

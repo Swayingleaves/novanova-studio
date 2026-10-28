@@ -14,6 +14,7 @@ import { createAdminCreditProduct, listAdminCreditProducts, updateAdminCreditPro
 
 type ProductFormValues = {
     credits: CreditAmount;
+    bonusCredits: CreditAmount;
     priceAmount: string;
     sortOrder: number;
     enabled: boolean;
@@ -36,13 +37,13 @@ export function CreditProductManagement() {
 
     const openCreate = () => {
         setEditing(null);
-        form.setFieldsValue({ credits: "10", priceAmount: "1.00", sortOrder: products.length ? Math.max(...products.map((item) => item.sortOrder)) + 10 : 10, enabled: true });
+        form.setFieldsValue({ credits: "10", bonusCredits: "0", priceAmount: "1.00", sortOrder: products.length ? Math.max(...products.map((item) => item.sortOrder)) + 10 : 10, enabled: true });
         setModalOpen(true);
     };
 
     const openEdit = (product: ServerCreditProduct) => {
         setEditing(product);
-        form.setFieldsValue({ credits: product.credits, priceAmount: product.priceAmount, sortOrder: product.sortOrder, enabled: product.enabled });
+        form.setFieldsValue({ credits: product.credits, bonusCredits: product.bonusCredits, priceAmount: product.priceAmount, sortOrder: product.sortOrder, enabled: product.enabled });
         setModalOpen(true);
     };
 
@@ -87,9 +88,11 @@ export function CreditProductManagement() {
                 loading={productsQuery.isLoading}
                 dataSource={products}
                 locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("credits.noProducts")} /> }}
-                scroll={{ x: 660 }}
+                scroll={{ x: 820 }}
                 columns={[
                     { title: translate("credits.creditsUnit"), dataIndex: "credits", width: 150, render: (value: CreditAmount) => <span className="tabular-nums">{creditText(value)}</span> },
+                    { title: translate("credits.bonusCredits"), dataIndex: "bonusCredits", width: 150, render: (value: CreditAmount) => <span className="tabular-nums">{creditText(value)}</span> },
+                    { title: translate("credits.totalCredits"), dataIndex: "totalCredits", width: 150, render: (value: CreditAmount) => <span className="font-medium tabular-nums">{creditText(value)}</span> },
                     { title: translate("credits.price"), dataIndex: "priceAmount", width: 140, render: (value: string) => <span className="tabular-nums">¥ {value}</span> },
                     { title: translate("credits.sortOrder"), dataIndex: "sortOrder", width: 110 },
                     {
@@ -121,6 +124,9 @@ export function CreditProductManagement() {
                 <Form form={form} layout="vertical" requiredMark={false} className="pt-2">
                     <Form.Item name="credits" label={translate("credits.creditsUnit")} rules={[{ required: true, message: translate("credits.enterCredits") }]}>
                         <InputNumber<string> stringMode min="0.000001" precision={6} suffix={translate("credits.creditsUnit")} className="w-full!" />
+                    </Form.Item>
+                    <Form.Item name="bonusCredits" label={translate("credits.bonusCredits")} rules={[{ required: true, message: translate("credits.enterBonusCredits") }]}>
+                        <InputNumber<string> stringMode min="0" precision={6} suffix={translate("credits.creditsUnit")} className="w-full!" />
                     </Form.Item>
                     <Form.Item name="priceAmount" label={translate("credits.price")} rules={[{ required: true, message: translate("credits.enterPrice") }]}>
                         <InputNumber<string> stringMode min="0.01" precision={2} suffix="元" className="w-full!" />

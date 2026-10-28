@@ -89,20 +89,20 @@ class CreditPurchaseServiceTest {
     @Test
     void shouldRejectInvalidProductValues() {
         assertThrows(BusinessException.class, () -> purchaseService.createProduct(
-                new PaymentDtos.CreateCreditProductRequest(BigDecimal.ZERO, new BigDecimal("1.00"), 10, true)));
+                new PaymentDtos.CreateCreditProductRequest(BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("1.00"), 10, true)));
         assertThrows(BusinessException.class, () -> purchaseService.createProduct(
-                new PaymentDtos.CreateCreditProductRequest(new BigDecimal("10"), new BigDecimal("1.001"), 10, true)));
+                new PaymentDtos.CreateCreditProductRequest(new BigDecimal("10"), BigDecimal.ZERO, new BigDecimal("1.001"), 10, true)));
         assertThrows(BusinessException.class, () -> purchaseService.createProduct(
-                new PaymentDtos.CreateCreditProductRequest(new BigDecimal("10"), new BigDecimal("1.00"), -1, true)));
+                new PaymentDtos.CreateCreditProductRequest(new BigDecimal("10"), BigDecimal.ZERO, new BigDecimal("1.00"), -1, true)));
     }
 
     /** 创建订单必须使用服务端商品快照生成支付金额，不能使用客户端覆盖值。 */
     @Test
     void shouldCreateOrderWithProductSnapshotAmount() {
-        CreditPurchaseRepository.Product product = product(7L, "20", "2.00", true);
-        CreditPurchaseRepository.Order order = order("order-1", "pending", "20", "2.00", null);
+        CreditPurchaseRepository.Product product = product(7L, "20", "5", "2.00", true);
+        CreditPurchaseRepository.Order order = order("order-1", "pending", "25", "2.00", null);
         when(purchaseRepository.findProduct(7L)).thenReturn(Mono.just(product));
-        when(purchaseRepository.createOrder(anyString(), eq(42L), eq(7L), eq(product.credits()), eq(product.priceAmount()),
+        when(purchaseRepository.createOrder(anyString(), eq(42L), eq(7L), eq(product.totalCredits()), eq(product.priceAmount()),
                 eq("alipay"), any(OffsetDateTime.class))).thenReturn(Mono.just(order));
         when(provider.createPayment(any())).thenReturn(Mono.just("https://openapi.alipay.com/gateway.do?sign=1"));
 
@@ -117,10 +117,10 @@ class CreditPurchaseServiceTest {
         ArgumentCaptor<PaymentProvider.PaymentOrder> paymentOrder = ArgumentCaptor.forClass(PaymentProvider.PaymentOrder.class);
         verify(provider).createPayment(paymentOrder.capture());
         assertEquals("order-1", paymentOrder.getValue().orderNo());
-        assertEquals("购买20积分", paymentOrder.getValue().subject());
+        assertEquals("购买25积分", paymentOrder.getValue().subject());
         assertEquals(new BigDecimal("2.00"), paymentOrder.getValue().amount());
         assertEquals(order.expiresAt(), paymentOrder.getValue().expiresAt());
-        verify(purchaseRepository).createOrder(anyString(), eq(42L), eq(7L), eq(new BigDecimal("20")),
+        verify(purchaseRepository).createOrder(anyString(), eq(42L), eq(7L), eq(new BigDecimal("25")),
                 eq(new BigDecimal("2.00")), eq("alipay"), any(OffsetDateTime.class));
     }
 
@@ -240,7 +240,12 @@ class CreditPurchaseServiceTest {
 
     /** 构造测试商品。 */
     private CreditPurchaseRepository.Product product(Long id, String credits, String priceAmount, boolean enabled) {
-        return new CreditPurchaseRepository.Product(id, new BigDecimal(credits), new BigDecimal(priceAmount), 10, enabled);
+        return product(id, credits, "0", priceAmount, enabled);
+    }
+
+    /** 构造带赠送积分的测试商品。 */
+    private CreditPurchaseRepository.Product product(Long id, String credits, String bonusCredits, String priceAmount, boolean enabled) {
+        return new CreditPurchaseRepository.Product(id, new BigDecimal(credits), new BigDecimal(bonusCredits), new BigDecimal(priceAmount), 10, enabled);
     }
 
     /** 构造测试订单。 */

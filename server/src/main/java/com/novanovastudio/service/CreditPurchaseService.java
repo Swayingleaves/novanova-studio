@@ -98,9 +98,9 @@ public class CreditPurchaseService {
      * @return Mono<CreditProductResponse> 创建后的商品
      */
     public Mono<PaymentDtos.CreditProductResponse> createProduct(PaymentDtos.CreateCreditProductRequest request) {
-        validateProduct(request.credits(), request.priceAmount(), request.sortOrder());
+        validateProduct(request.credits(), request.bonusCredits(), request.priceAmount(), request.sortOrder());
         validateEnabled(request.enabled());
-        return requirePlatform().then(Mono.defer(() -> purchaseRepository.createProduct(request.credits(), request.priceAmount(), request.sortOrder(), request.enabled())
+        return requirePlatform().then(Mono.defer(() -> purchaseRepository.createProduct(request.credits(), request.bonusCredits(), request.priceAmount(), request.sortOrder(), request.enabled())
                 .map(this::productResponse)));
     }
 
@@ -111,9 +111,9 @@ public class CreditPurchaseService {
      * @return Mono<CreditProductResponse> 修改后的商品
      */
     public Mono<PaymentDtos.CreditProductResponse> updateProduct(PaymentDtos.UpdateCreditProductRequest request) {
-        validateProduct(request.credits(), request.priceAmount(), request.sortOrder());
+        validateProduct(request.credits(), request.bonusCredits(), request.priceAmount(), request.sortOrder());
         validateEnabled(request.enabled());
-        return requirePlatform().then(Mono.defer(() -> purchaseRepository.updateProduct(request.id(), request.credits(), request.priceAmount(), request.sortOrder(), request.enabled())
+        return requirePlatform().then(Mono.defer(() -> purchaseRepository.updateProduct(request.id(), request.credits(), request.bonusCredits(), request.priceAmount(), request.sortOrder(), request.enabled())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "积分商品不存在")))
                 .map(this::productResponse)));
     }
@@ -149,7 +149,7 @@ public class CreditPurchaseService {
                     if (!product.enabled()) throw new BusinessException(ErrorCode.BUSINESS_ERROR, "积分商品已停用");
                     String orderNo = createOrderNo();
                     OffsetDateTime expiresAt = OffsetDateTime.now().plusMinutes(ORDER_EXPIRATION_MINUTES);
-                    return purchaseRepository.createOrder(orderNo, userId, product.id(), product.credits(), product.priceAmount(), paymentMethod, expiresAt)
+                    return purchaseRepository.createOrder(orderNo, userId, product.id(), product.totalCredits(), product.priceAmount(), paymentMethod, expiresAt)
                             .flatMap(order -> provider.createPayment(new PaymentProvider.PaymentOrder(order.orderNo(),
                                             orderSubject(order.credits()), order.priceAmount(), order.expiresAt()))
                                     .map(paymentUrl -> orderResponse(order, paymentUrl)));
@@ -442,11 +442,13 @@ public class CreditPurchaseService {
      * 校验商品参数。
      *
      * @param credits BigDecimal 积分数量
+     * @param bonusCredits BigDecimal 赠送积分数量
      * @param priceAmount BigDecimal 商品金额
      * @param sortOrder int 展示排序
      */
-    private void validateProduct(BigDecimal credits, BigDecimal priceAmount, int sortOrder) {
+    private void validateProduct(BigDecimal credits, BigDecimal bonusCredits, BigDecimal priceAmount, int sortOrder) {
         if (credits == null || CreditAmounts.of(credits).signum() <= 0) throw new BusinessException(ErrorCode.PARAM_INVALID, "积分数量必须大于零");
+        if (bonusCredits == null || CreditAmounts.of(bonusCredits).signum() < 0) throw new BusinessException(ErrorCode.PARAM_INVALID, "赠送积分不能小于零");
         if (priceAmount == null || priceAmount.signum() <= 0 || priceAmount.scale() > 2) throw new BusinessException(ErrorCode.PARAM_INVALID, "商品金额必须为两位小数以内的正数");
         if (sortOrder < 0) throw new BusinessException(ErrorCode.PARAM_INVALID, "排序不能小于零");
     }
@@ -487,7 +489,7 @@ public class CreditPurchaseService {
      * @return CreditProductResponse 商品响应
      */
     private PaymentDtos.CreditProductResponse productResponse(CreditPurchaseRepository.Product product) {
-        return new PaymentDtos.CreditProductResponse(product.id(), product.credits(), product.priceAmount().setScale(2).toPlainString(), product.sortOrder(), product.enabled());
+        return new PaymentDtos.CreditProductResponse(product.id(), product.credits(), product.bonusCredits(), product.totalCredits(), product.priceAmount().setScale(2).toPlainString(), product.sortOrder(), product.enabled());
     }
 
     /**

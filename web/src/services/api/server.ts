@@ -375,6 +375,8 @@ export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redee
 export type ServerCreditProduct = {
     id: number;
     credits: CreditAmount;
+    bonusCredits: CreditAmount;
+    totalCredits: CreditAmount;
     priceAmount: string;
     sortOrder: number;
     enabled: boolean;
@@ -1257,11 +1259,11 @@ export function listAdminCreditProducts() {
     return serverGet<ServerCreditProduct[]>("/config/creditProduct/listCreditProducts", { scope: "platform" });
 }
 
-export function createAdminCreditProduct(input: { credits: CreditAmount; priceAmount: string; sortOrder: number; enabled: boolean }) {
+export function createAdminCreditProduct(input: { credits: CreditAmount; bonusCredits: CreditAmount; priceAmount: string; sortOrder: number; enabled: boolean }) {
     return serverPost<ServerCreditProduct>("/config/creditProduct/createCreditProduct", input, { scope: "platform" });
 }
 
-export function updateAdminCreditProduct(input: { id: number; credits: CreditAmount; priceAmount: string; sortOrder: number; enabled: boolean }) {
+export function updateAdminCreditProduct(input: { id: number; credits: CreditAmount; bonusCredits: CreditAmount; priceAmount: string; sortOrder: number; enabled: boolean }) {
     return serverPost<ServerCreditProduct>("/config/creditProduct/updateCreditProduct", input, { scope: "platform" });
 }
 

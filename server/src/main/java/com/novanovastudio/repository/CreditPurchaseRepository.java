@@ -35,12 +35,12 @@ public class CreditPurchaseRepository {
      */
     public Mono<List<Product>> listEnabledProducts() {
         return databaseClient.sql("""
-                SELECT id, credits, price_amount, sort_order, enabled
+                SELECT id, credits, bonus_credits, price_amount, sort_order, enabled
                 FROM credit_products
                 WHERE enabled = TRUE
                 ORDER BY sort_order ASC, id ASC
                 """)
-                .map((row, metadata) -> product(row.get("id", Long.class), row.get("credits", BigDecimal.class),
+                .map((row, metadata) -> product(row.get("id", Long.class), row.get("credits", BigDecimal.class), row.get("bonus_credits", BigDecimal.class),
                         row.get("price_amount", BigDecimal.class), row.get("sort_order", Integer.class), row.get("enabled", Boolean.class)))
                 .all().collectList();
     }
@@ -52,11 +52,11 @@ public class CreditPurchaseRepository {
      */
     public Mono<List<Product>> listAllProducts() {
         return databaseClient.sql("""
-                SELECT id, credits, price_amount, sort_order, enabled
+                SELECT id, credits, bonus_credits, price_amount, sort_order, enabled
                 FROM credit_products
                 ORDER BY sort_order ASC, id ASC
                 """)
-                .map((row, metadata) -> product(row.get("id", Long.class), row.get("credits", BigDecimal.class),
+                .map((row, metadata) -> product(row.get("id", Long.class), row.get("credits", BigDecimal.class), row.get("bonus_credits", BigDecimal.class),
                         row.get("price_amount", BigDecimal.class), row.get("sort_order", Integer.class), row.get("enabled", Boolean.class)))
                 .all().collectList();
     }
@@ -69,12 +69,12 @@ public class CreditPurchaseRepository {
      */
     public Mono<Product> findProduct(Long productId) {
         return databaseClient.sql("""
-                SELECT id, credits, price_amount, sort_order, enabled
+                SELECT id, credits, bonus_credits, price_amount, sort_order, enabled
                 FROM credit_products
                 WHERE id = :productId
                 """)
                 .bind("productId", productId)
-                .map((row, metadata) -> product(row.get("id", Long.class), row.get("credits", BigDecimal.class),
+                .map((row, metadata) -> product(row.get("id", Long.class), row.get("credits", BigDecimal.class), row.get("bonus_credits", BigDecimal.class),
                         row.get("price_amount", BigDecimal.class), row.get("sort_order", Integer.class), row.get("enabled", Boolean.class)))
                 .one();
     }
@@ -83,19 +83,20 @@ public class CreditPurchaseRepository {
      * 创建积分商品。
      *
      * @param credits BigDecimal 积分数量
+     * @param bonusCredits BigDecimal 赠送积分数量
      * @param priceAmount BigDecimal 商品金额
      * @param sortOrder int 展示排序
      * @param enabled boolean 是否启用
      * @return Mono<Product> 创建后的商品
      */
-    public Mono<Product> createProduct(BigDecimal credits, BigDecimal priceAmount, int sortOrder, boolean enabled) {
+    public Mono<Product> createProduct(BigDecimal credits, BigDecimal bonusCredits, BigDecimal priceAmount, int sortOrder, boolean enabled) {
         return databaseClient.sql("""
-                INSERT INTO credit_products(credits, price_amount, sort_order, enabled)
-                VALUES (:credits, :priceAmount, :sortOrder, :enabled)
-                RETURNING id, credits, price_amount, sort_order, enabled
+                INSERT INTO credit_products(credits, bonus_credits, price_amount, sort_order, enabled)
+                VALUES (:credits, :bonusCredits, :priceAmount, :sortOrder, :enabled)
+                RETURNING id, credits, bonus_credits, price_amount, sort_order, enabled
                 """)
-                .bind("credits", credits).bind("priceAmount", priceAmount).bind("sortOrder", sortOrder).bind("enabled", enabled)
-                .map((row, metadata) -> product(row.get("id", Long.class), row.get("credits", BigDecimal.class),
+                .bind("credits", credits).bind("bonusCredits", bonusCredits).bind("priceAmount", priceAmount).bind("sortOrder", sortOrder).bind("enabled", enabled)
+                .map((row, metadata) -> product(row.get("id", Long.class), row.get("credits", BigDecimal.class), row.get("bonus_credits", BigDecimal.class),
                         row.get("price_amount", BigDecimal.class), row.get("sort_order", Integer.class), row.get("enabled", Boolean.class)))
                 .one();
     }
@@ -105,21 +106,22 @@ public class CreditPurchaseRepository {
      *
      * @param id Long 商品标识
      * @param credits BigDecimal 积分数量
+     * @param bonusCredits BigDecimal 赠送积分数量
      * @param priceAmount BigDecimal 商品金额
      * @param sortOrder int 展示排序
      * @param enabled boolean 是否启用
      * @return Mono<Product> 修改后的商品
      */
-    public Mono<Product> updateProduct(Long id, BigDecimal credits, BigDecimal priceAmount, int sortOrder, boolean enabled) {
+    public Mono<Product> updateProduct(Long id, BigDecimal credits, BigDecimal bonusCredits, BigDecimal priceAmount, int sortOrder, boolean enabled) {
         return databaseClient.sql("""
                 UPDATE credit_products
-                SET credits = :credits, price_amount = :priceAmount, sort_order = :sortOrder,
+                SET credits = :credits, bonus_credits = :bonusCredits, price_amount = :priceAmount, sort_order = :sortOrder,
                     enabled = :enabled, updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id
-                RETURNING id, credits, price_amount, sort_order, enabled
+                RETURNING id, credits, bonus_credits, price_amount, sort_order, enabled
                 """)
-                .bind("id", id).bind("credits", credits).bind("priceAmount", priceAmount).bind("sortOrder", sortOrder).bind("enabled", enabled)
-                .map((row, metadata) -> product(row.get("id", Long.class), row.get("credits", BigDecimal.class),
+                .bind("id", id).bind("credits", credits).bind("bonusCredits", bonusCredits).bind("priceAmount", priceAmount).bind("sortOrder", sortOrder).bind("enabled", enabled)
+                .map((row, metadata) -> product(row.get("id", Long.class), row.get("credits", BigDecimal.class), row.get("bonus_credits", BigDecimal.class),
                         row.get("price_amount", BigDecimal.class), row.get("sort_order", Integer.class), row.get("enabled", Boolean.class)))
                 .one();
     }
@@ -136,10 +138,10 @@ public class CreditPurchaseRepository {
                 UPDATE credit_products
                 SET enabled = :enabled, updated_at = CURRENT_TIMESTAMP
                 WHERE id = :id
-                RETURNING id, credits, price_amount, sort_order, enabled
+                RETURNING id, credits, bonus_credits, price_amount, sort_order, enabled
                 """)
                 .bind("id", id).bind("enabled", enabled)
-                .map((row, metadata) -> product(row.get("id", Long.class), row.get("credits", BigDecimal.class),
+                .map((row, metadata) -> product(row.get("id", Long.class), row.get("credits", BigDecimal.class), row.get("bonus_credits", BigDecimal.class),
                         row.get("price_amount", BigDecimal.class), row.get("sort_order", Integer.class), row.get("enabled", Boolean.class)))
                 .one();
     }
@@ -318,13 +320,14 @@ public class CreditPurchaseRepository {
      *
      * @param id Long 商品标识
      * @param credits BigDecimal 积分数量
+     * @param bonusCredits BigDecimal 赠送积分数量
      * @param priceAmount BigDecimal 商品金额
      * @param sortOrder Integer 展示排序
      * @param enabled Boolean 是否启用
      * @return Product 商品
      */
-    private Product product(Long id, BigDecimal credits, BigDecimal priceAmount, Integer sortOrder, Boolean enabled) {
-        return new Product(id, credits, priceAmount, sortOrder == null ? 0 : sortOrder, Boolean.TRUE.equals(enabled));
+    private Product product(Long id, BigDecimal credits, BigDecimal bonusCredits, BigDecimal priceAmount, Integer sortOrder, Boolean enabled) {
+        return new Product(id, credits, bonusCredits == null ? BigDecimal.ZERO : bonusCredits, priceAmount, sortOrder == null ? 0 : sortOrder, Boolean.TRUE.equals(enabled));
     }
 
     /**
@@ -341,7 +344,15 @@ public class CreditPurchaseRepository {
     }
 
     /** 积分商品。 */
-    public record Product(Long id, BigDecimal credits, BigDecimal priceAmount, int sortOrder, boolean enabled) {
+    public record Product(Long id, BigDecimal credits, BigDecimal bonusCredits, BigDecimal priceAmount, int sortOrder, boolean enabled) {
+        /**
+         * 计算商品实际到账积分。
+         *
+         * @return BigDecimal 基础积分与赠送积分之和
+         */
+        public BigDecimal totalCredits() {
+            return credits.add(bonusCredits);
+        }
     }
 
     /** 积分购买订单。 */

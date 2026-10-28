@@ -28,12 +28,16 @@ public final class PaymentDtos {
      *
      * @param id Long 商品标识
      * @param credits BigDecimal 商品积分数量
+     * @param bonusCredits BigDecimal 赠送积分数量
+     * @param totalCredits BigDecimal 实际到账积分数量
      * @param priceAmount String 人民币金额文本
      * @param sortOrder int 展示排序
      * @param enabled boolean 是否启用
      */
     public record CreditProductResponse(Long id,
                                         @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits,
+                                        @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal bonusCredits,
+                                        @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal totalCredits,
                                         String priceAmount,
                                         int sortOrder,
                                         boolean enabled) {
@@ -51,6 +55,7 @@ public final class PaymentDtos {
      * 创建积分商品请求。
      *
      * @param credits BigDecimal 积分数量
+     * @param bonusCredits BigDecimal 赠送积分数量
      * @param priceAmount BigDecimal 人民币金额
      * @param sortOrder int 展示排序
      * @param enabled boolean 是否启用
@@ -60,6 +65,10 @@ public final class PaymentDtos {
             @DecimalMin(value = "0.000001", message = "积分数量必须大于零")
             @Digits(integer = 18, fraction = 6, message = "积分数量最多保留六位小数")
             BigDecimal credits,
+            @NotNull(message = "赠送积分不能为空")
+            @DecimalMin(value = "0", message = "赠送积分不能小于零")
+            @Digits(integer = 18, fraction = 6, message = "赠送积分最多保留六位小数")
+            BigDecimal bonusCredits,
             @NotNull(message = "商品金额不能为空")
             @DecimalMin(value = "0.01", message = "商品金额必须大于零")
             @Digits(integer = 10, fraction = 2, message = "商品金额最多保留两位小数")
@@ -73,6 +82,7 @@ public final class PaymentDtos {
      *
      * @param id Long 商品标识
      * @param credits BigDecimal 积分数量
+     * @param bonusCredits BigDecimal 赠送积分数量
      * @param priceAmount BigDecimal 人民币金额
      * @param sortOrder int 展示排序
      * @param enabled boolean 是否启用
@@ -83,6 +93,10 @@ public final class PaymentDtos {
             @DecimalMin(value = "0.000001", message = "积分数量必须大于零")
             @Digits(integer = 18, fraction = 6, message = "积分数量最多保留六位小数")
             BigDecimal credits,
+            @NotNull(message = "赠送积分不能为空")
+            @DecimalMin(value = "0", message = "赠送积分不能小于零")
+            @Digits(integer = 18, fraction = 6, message = "赠送积分最多保留六位小数")
+            BigDecimal bonusCredits,
             @NotNull(message = "商品金额不能为空")
             @DecimalMin(value = "0.01", message = "商品金额必须大于零")
             @Digits(integer = 10, fraction = 2, message = "商品金额最多保留两位小数")

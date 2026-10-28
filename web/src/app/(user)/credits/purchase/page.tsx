@@ -1,11 +1,11 @@
 "use client";
 
-import { creditText } from "@/shared/lib/credit-amounts";
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { Alert, App, Button, Empty, Modal, Skeleton, Tag } from "antd";
-import { ArrowLeft, CheckCircle2, Clock, ExternalLink, LoaderCircle, QrCode, ScanLine, ShoppingCart, Ticket, WalletCards, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Clock, ExternalLink, Gift, LoaderCircle, QrCode, ScanLine, ShoppingCart, Ticket, WalletCards, XCircle } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -251,15 +251,16 @@ export default function CreditPurchasePage() {
                         <span className="text-sm text-[var(--studio-muted)]">{translate("credits.platformWallet")}</span>
                     </div>
                     {productsQuery.isLoading ? (
-                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="grid gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
                             {[1, 2, 3, 4].map((item) => (
                                 <Skeleton key={item} active paragraph={{ rows: 2 }} />
                             ))}
                         </div>
                     ) : products.length ? (
-                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <div className="grid gap-x-4 gap-y-6 sm:grid-cols-2 lg:grid-cols-3">
                             {products.map((product) => {
                                 const selected = product.id === selectedProductId;
+                                const hasBonus = !creditAmount(product.bonusCredits).isZero();
                                 return (
                                     <button
                                         key={product.id}
@@ -267,16 +268,45 @@ export default function CreditPurchasePage() {
                                         aria-pressed={selected}
                                         onClick={() => setSelectedProductId(product.id)}
                                         className={cn(
-                                            "min-h-36 rounded-lg border p-4 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]",
-                                            selected ? "border-[var(--studio-action)] bg-[var(--studio-surface-soft)] shadow-sm" : "border-[var(--studio-line)] bg-[var(--studio-surface)] hover:border-[var(--studio-action)]",
+                                            "group relative flex min-h-[190px] flex-col overflow-visible rounded-[20px] border-2 p-6 pt-8 text-left transition duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]",
+                                            selected
+                                                ? "border-[var(--studio-action)] bg-[var(--studio-surface-soft)] shadow-[0_0_0_1px_var(--studio-action),0_0_28px_color-mix(in_srgb,var(--studio-action)_38%,transparent)]"
+                                                : "border-[var(--studio-line-strong)] bg-[var(--studio-surface)] hover:border-[var(--studio-action)] hover:shadow-[0_0_22px_color-mix(in_srgb,var(--studio-action)_24%,transparent)]",
                                         )}
                                     >
+                                        {hasBonus ? (
+                                            <span className="absolute -top-4 right-4 z-10 inline-flex items-center gap-1.5 rounded-full border border-[var(--studio-action)] bg-[var(--studio-action)] px-4 py-2 text-sm font-semibold text-[var(--studio-action-foreground)] shadow-[0_0_20px_color-mix(in_srgb,var(--studio-action)_55%,transparent)]">
+                                                <Gift className="size-3.5" aria-hidden />
+                                                {translate("credits.bonusCreditsLabel", { value0: creditText(product.bonusCredits) })}
+                                            </span>
+                                        ) : null}
                                         <div className="flex items-start justify-between gap-3">
-                                            <span className="text-2xl font-semibold tabular-nums text-[var(--studio-ink)]">{creditText(product.credits)}</span>
-                                            {selected ? <CheckCircle2 className="size-5 shrink-0 text-[var(--studio-action)]" aria-label={translate("credits.selected")} /> : null}
+                                            <div>
+                                                <div className="flex items-center gap-2 text-4xl font-bold leading-none tracking-tight tabular-nums">
+                                                    {hasBonus ? (
+                                                        <>
+                                                            <span className="text-[var(--studio-muted)] line-through decoration-[var(--studio-muted)]">{creditText(product.credits)}</span>
+                                                            <span className="text-2xl text-[var(--studio-action)]" aria-hidden>
+                                                                →
+                                                            </span>
+                                                            <span className="text-[var(--studio-ink)]">{creditText(product.totalCredits)}</span>
+                                                        </>
+                                                    ) : (
+                                                        <span className="text-[var(--studio-ink)]">{creditText(product.credits)}</span>
+                                                    )}
+                                                </div>
+                                                <div className="mt-2 text-base text-[var(--studio-text)]">{translate("credits.creditsUnit")}</div>
+                                            </div>
+                                            {selected ? <CheckCircle2 className="mt-1 size-5 shrink-0 text-[var(--studio-action)]" aria-label={translate("credits.selected")} /> : null}
                                         </div>
-                                        <div className="mt-1 text-sm text-[var(--studio-muted)]">{translate("credits.creditsUnit")}</div>
-                                        <div className="mt-5 text-lg font-semibold tabular-nums text-[var(--studio-action)]">¥ {product.priceAmount}</div>
+                                        <div className="mt-4 flex items-center gap-2 text-base">
+                                            <span className="text-xl font-bold tabular-nums text-[var(--studio-action)]">¥ {product.priceAmount}</span>
+                                        </div>
+                                        <div className="mt-auto pt-5">
+                                            <span className="inline-flex rounded-full border border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] px-3 py-1.5 text-sm font-semibold text-[var(--studio-action)]">
+                                                {translate("credits.totalCreditsLabel", { value0: creditText(product.totalCredits) })}
+                                            </span>
+                                        </div>
                                     </button>
                                 );
                             })}
@@ -323,7 +353,14 @@ export default function CreditPurchasePage() {
                     </div>
                     <div className="mt-5 flex flex-col gap-3 border-t border-[var(--studio-line)] pt-5 sm:flex-row sm:items-center sm:justify-between">
                         <div className="text-sm text-[var(--studio-muted)]">
-                            {selectedProduct ? translate("credits.selectedProductSummary", { value0: creditText(selectedProduct.credits), value1: selectedProduct.priceAmount }) : translate("credits.selectProductFirst")}
+                            {selectedProduct
+                                ? translate("credits.selectedProductSummary", {
+                                      value0: creditText(selectedProduct.credits),
+                                      value1: creditAmount(selectedProduct.bonusCredits).isZero() ? "" : ` + ${creditText(selectedProduct.bonusCredits)} ${translate("credits.creditsUnit")}`,
+                                      value2: creditText(selectedProduct.totalCredits),
+                                      value3: selectedProduct.priceAmount,
+                                  })
+                                : translate("credits.selectProductFirst")}
                         </div>
                         <Button
                             type="primary"
@@ -380,22 +417,13 @@ export default function CreditPurchasePage() {
                 ) : null}
 
                 {/* 支付宝扫码支付弹窗 */}
-                <Modal
-                    open={isModalOpen}
-                    onCancel={closePaymentModal}
-                    footer={null}
-                    width={380}
-                    centered
-                    mask={{ closable: true }}
-                >
+                <Modal open={isModalOpen} onCancel={closePaymentModal} footer={null} width={380} centered mask={{ closable: true }}>
                     <div className="pt-2 text-center">
                         {orderStatus?.status === "paid" ? (
                             <div className="py-6">
                                 <CheckCircle2 className="mx-auto size-14 text-emerald-500" />
                                 <h3 className="mt-3 text-xl font-bold text-[var(--studio-ink)]">{translate("credits.paymentSuccess")}</h3>
-                                <p className="mt-2 text-sm text-[var(--studio-muted)]">
-                                    {translate("credits.paymentSuccessDescription", { value0: creditText(orderStatus.credits) })}
-                                </p>
+                                <p className="mt-2 text-sm text-[var(--studio-muted)]">{translate("credits.paymentSuccessDescription", { value0: creditText(orderStatus.credits) })}</p>
                                 <Button type="primary" className="mt-6 w-full!" onClick={closePaymentModal}>
                                     {translate("credits.closeModal")}
                                 </Button>
@@ -417,26 +445,13 @@ export default function CreditPurchasePage() {
 
                                 <div className="mt-2 flex items-center justify-center gap-1.5 text-xs text-[var(--studio-muted)]">
                                     <Clock className={cn("size-3.5", remainingSeconds > 60 ? "text-amber-500" : "text-rose-500")} />
-                                    <span>
-                                        {remainingSeconds > 0
-                                            ? translate("credits.payWithinTime", { value0: timeLeftText })
-                                            : translate("credits.orderExpiredHint")}
-                                    </span>
+                                    <span>{remainingSeconds > 0 ? translate("credits.payWithinTime", { value0: timeLeftText }) : translate("credits.orderExpiredHint")}</span>
                                 </div>
 
                                 {/* 支付宝前置模式页面把二维码画在视口左上角，尺寸正好等于 qrcode_width（后端 AlipayPaymentProvider.QRCODE_WIDTH=200），
                                     iframe 必须与二维码等大，多出来的空间会全落到右下角、看起来不居中。 */}
                                 <div className="relative mx-auto mt-4 flex size-[240px] items-center justify-center rounded-xl border border-[var(--studio-line)] bg-white p-4 shadow-xs">
-                                    {paymentUrl ? (
-                                        <iframe
-                                            src={paymentUrl}
-                                            title={translate("credits.alipayScanPay")}
-                                            className="size-[200px] border-0"
-                                            scrolling="no"
-                                        />
-                                    ) : (
-                                        <LoaderCircle className="size-8 animate-spin text-[var(--studio-muted)]" />
-                                    )}
+                                    {paymentUrl ? <iframe src={paymentUrl} title={translate("credits.alipayScanPay")} className="size-[200px] border-0" scrolling="no" /> : <LoaderCircle className="size-8 animate-spin text-[var(--studio-muted)]" />}
                                     {remainingSeconds <= 0 ? (
                                         <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-white/95 p-4 text-center backdrop-blur-xs">
                                             <XCircle className="mb-2 size-8 text-rose-500" />
@@ -446,12 +461,7 @@ export default function CreditPurchasePage() {
                                 </div>
 
                                 {paymentUrl ? (
-                                    <a
-                                        href={paymentUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="mt-2 inline-flex items-center gap-1 text-xs text-[var(--studio-action)] hover:underline"
-                                    >
+                                    <a href={paymentUrl} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs text-[var(--studio-action)] hover:underline">
                                         <ExternalLink className="size-3" />
                                         {translate("credits.openQrInNewTab")}
                                     </a>
