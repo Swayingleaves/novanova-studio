@@ -438,6 +438,27 @@ export type ServerUserCreditTransactionList = {
     total: number;
 };
 
+export type ServerTaskRecord = {
+    taskId: string;
+    taskType: "image" | "video";
+    model: string;
+    status: ServerAiTaskStatus;
+    prompt: string;
+    resolution: string | null;
+    size: string | null;
+    seconds: string | null;
+    consumedCredits: CreditAmount;
+    resultUrls: string[];
+    errorMessage: string | null;
+    createdAt: string;
+    completedAt: string | null;
+};
+
+export type ServerTaskRecordList = {
+    records: ServerTaskRecord[];
+    total: number;
+};
+
 export type ServerAdminCreditTransaction = ServerUserCreditTransaction & {
     userId: number;
     username: string;
@@ -1312,6 +1333,18 @@ export function listCreditTransactions(params: { startDate: string; endDate: str
     if (params.direction) query.set("direction", params.direction);
     if (params.source) query.set("source", params.source);
     return serverGet<ServerUserCreditTransactionList>(`/credit/listCreditTransactions?${query}`);
+}
+
+export function listTaskRecords(params: { startDate: string; endDate: string; taskType?: "image" | "video"; keyword?: string; page: number; pageSize: number }) {
+    const query = new URLSearchParams({
+        startDate: params.startDate,
+        endDate: params.endDate,
+        page: String(params.page),
+        pageSize: String(params.pageSize),
+    });
+    if (params.taskType) query.set("taskType", params.taskType);
+    if (params.keyword) query.set("keyword", params.keyword);
+    return serverGet<ServerTaskRecordList>(`/credit/listTaskRecords?${query}`);
 }
 
 export function redeemCredits(cardCode: string) {

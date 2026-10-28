@@ -11,7 +11,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
 import dayjs, { type Dayjs } from "dayjs";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Button, DatePicker, Empty, Pagination, Segmented, Select, Skeleton, Table, type TableProps } from "antd";
+import { Alert, Button, DatePicker, Empty, Pagination, Segmented, Select, Skeleton, Table, Tabs, type TableProps } from "antd";
 import { Zap } from "lucide-react";
 
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -24,6 +24,7 @@ import {
 } from "@/services/api/server";
 
 import { createCreditDirectionOptions, createCreditSourceOptions, CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactionIcon, creditTransactionTypeLabel, formatCreditChange, formatCredits, formatCreditTime, normalizeGenerationDistribution, normalizeModelDistribution } from "./credit-page-utils";
+import { TaskRecordPanel } from "./components/task-record-panel";
 
 const CreditChart = dynamic(() => import("./components/credit-chart").then((module) => module.CreditChart), {
     ssr: false,
@@ -32,6 +33,7 @@ const CreditChart = dynamic(() => import("./components/credit-chart").then((modu
 
 type GenerationTypeFilter = "all" | "image" | "video";
 type TrendUnit = "day" | "month";
+type CreditDetailTab = "transactions" | "tasks";
 
 const createCreditTransactionColumns = (translator: typeof translate = translate): TableProps<ServerUserCreditTransaction>["columns"] => ([
     {
@@ -85,6 +87,7 @@ export default function CreditsPage() {
     const [detailDateRange, setDetailDateRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")]);
     const [detailDirection, setDetailDirection] = useState<"all" | ServerCreditDirection>("all");
     const [detailSource, setDetailSource] = useState<"all" | ServerCreditSource>("all");
+    const [activeTab, setActiveTab] = useState<CreditDetailTab>("transactions");
     const [page, setPage] = useState(1);
 
     const filters = useMemo(() => ({
@@ -196,79 +199,101 @@ export default function CreditsPage() {
                 </div>
             </section>
 
-            <section className="mt-8 border-t border-[var(--studio-line)] pt-6" aria-labelledby="credit-transactions-title">
-                <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-                    <div>
-                        <h2 id="credit-transactions-title" className="text-base font-semibold text-[var(--studio-ink)]">{translate("credits.creditDetails")}</h2>
-                        <p className="mt-1 text-sm text-[var(--studio-muted)]">{translate("credits.includesCreditGrantsAndUsageFiltersAreIndependentOf")}</p>
-                    </div>
-                    <span className="text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} {translate("credits.records")}</span>
-                </div>
+            <section className="mt-8 border-t border-[var(--studio-line)] pt-6">
+                <Tabs
+                    activeKey={activeTab}
+                    destroyOnHidden
+                    onChange={(key) => setActiveTab(key as CreditDetailTab)}
+                    items={[
+                        {
+                            key: "transactions",
+                            label: translate("credits.creditDetails"),
+                            children: (
+                                <div>
+                                    <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                                        <p className="text-sm text-[var(--studio-muted)]">{translate("credits.includesCreditGrantsAndUsageFiltersAreIndependentOf")}</p>
+                                        <span className="text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} {translate("credits.records")}</span>
+                                    </div>
 
-                <div className="mb-4 flex flex-wrap items-center gap-3">
-                    <DatePicker.RangePicker
-                        value={detailDateRange}
-                        allowClear={false}
-                        disabledDate={(date) => date.isAfter(dayjs(), "day")}
-                        onChange={(nextDateRange) => {
-                            if (!nextDateRange?.[0] || !nextDateRange[1]) return;
-                            setDetailDateRange([nextDateRange[0], nextDateRange[1]]);
-                            setPage(1);
-                        }}
-                    />
-                    <Segmented
-                        value={detailDirection}
-                        options={createCreditDirectionOptions(translate)}
-                        onChange={(value) => {
-                            setDetailDirection(value as "all" | ServerCreditDirection);
-                            setPage(1);
-                        }}
-                    />
-                    <Select
-                        value={detailSource}
-                        options={createCreditSourceOptions(translate)}
-                        className="w-40"
-                        onChange={(value) => {
-                            setDetailSource(value as "all" | ServerCreditSource);
-                            setPage(1);
-                        }}
-                    />
-                </div>
+                                    <div className="mb-4 flex flex-wrap items-center gap-3">
+                                        <DatePicker.RangePicker
+                                            value={detailDateRange}
+                                            allowClear={false}
+                                            disabledDate={(date) => date.isAfter(dayjs(), "day")}
+                                            onChange={(nextDateRange) => {
+                                                if (!nextDateRange?.[0] || !nextDateRange[1]) return;
+                                                setDetailDateRange([nextDateRange[0], nextDateRange[1]]);
+                                                setPage(1);
+                                            }}
+                                        />
+                                        <Segmented
+                                            value={detailDirection}
+                                            options={createCreditDirectionOptions(translate)}
+                                            onChange={(value) => {
+                                                setDetailDirection(value as "all" | ServerCreditDirection);
+                                                setPage(1);
+                                            }}
+                                        />
+                                        <Select
+                                            value={detailSource}
+                                            options={createCreditSourceOptions(translate)}
+                                            className="w-40"
+                                            onChange={(value) => {
+                                                setDetailSource(value as "all" | ServerCreditSource);
+                                                setPage(1);
+                                            }}
+                                        />
+                                    </div>
 
-                <div className="hidden md:block">
-                    <Table<ServerUserCreditTransaction>
-                        rowKey="id"
-                        columns={createCreditTransactionColumns(translate)}
-                        dataSource={transactions?.transactions || []}
-                        loading={transactionsQuery.isLoading}
-                        pagination={false}
-                        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("credits.noTransactionsInThisPeriod")} /> }}
-                    />
-                </div>
-                <div className="md:hidden">
-                    {transactionsQuery.isLoading ? <Skeleton active paragraph={{ rows: 8 }} /> : null}
-                    {!transactionsQuery.isLoading && !transactions?.transactions.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("credits.noTransactionsInThisPeriod")} /> : null}
-                    {transactions?.transactions.map((transaction) => {
-                        const Icon = creditTransactionIcon(transaction);
-                        return (
-                            <article key={transaction.id} className="border-b border-[var(--studio-line)] py-4">
-                                <div className="flex items-start justify-between gap-3">
-                                    <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-[var(--studio-ink)]"><Icon className="size-4 shrink-0 text-[var(--studio-primary)]" />{creditTransactionTypeLabel(transaction.transactionType)}</span>
-                                    <span className={`shrink-0 text-sm font-semibold tabular-nums ${creditAmount(transaction.changeAmount).greaterThan(0) ? "text-[var(--studio-primary)]" : "text-[var(--studio-ink)]"}`}>{formatCreditChange(transaction.changeAmount)}</span>
+                                    <div className="hidden md:block">
+                                        <Table<ServerUserCreditTransaction>
+                                            rowKey="id"
+                                            columns={createCreditTransactionColumns(translate)}
+                                            dataSource={transactions?.transactions || []}
+                                            loading={transactionsQuery.isLoading}
+                                            pagination={false}
+                                            locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("credits.noTransactionsInThisPeriod")} /> }}
+                                        />
+                                    </div>
+                                    <div className="md:hidden">
+                                        {transactionsQuery.isLoading ? <Skeleton active paragraph={{ rows: 8 }} /> : null}
+                                        {!transactionsQuery.isLoading && !transactions?.transactions.length ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("credits.noTransactionsInThisPeriod")} /> : null}
+                                        {transactions?.transactions.map((transaction) => {
+                                            const Icon = creditTransactionIcon(transaction);
+                                            return (
+                                                <article key={transaction.id} className="border-b border-[var(--studio-line)] py-4">
+                                                    <div className="flex items-start justify-between gap-3">
+                                                        <span className="inline-flex min-w-0 items-center gap-2 text-sm font-medium text-[var(--studio-ink)]"><Icon className="size-4 shrink-0 text-[var(--studio-primary)]" />{creditTransactionTypeLabel(transaction.transactionType)}</span>
+                                                        <span className={`shrink-0 text-sm font-semibold tabular-nums ${creditAmount(transaction.changeAmount).greaterThan(0) ? "text-[var(--studio-primary)]" : "text-[var(--studio-ink)]"}`}>{formatCreditChange(transaction.changeAmount)}</span>
+                                                    </div>
+                                                    <div className="mt-2 grid gap-1 text-xs text-[var(--studio-muted)]">
+                                                        <span className="truncate">{creditTransactionDetail(transaction.transactionType, transaction.generationType, transaction.model, transaction.reason)}</span>
+                                                        <span className="tabular-nums">{translate("credits.balance")}{formatCredits(transaction.balanceAfter)} · {formatCreditTime(transaction.createdAt)}</span>
+                                                    </div>
+                                                </article>
+                                            );
+                                        })}
+                                    </div>
+                                    {transactions && transactions.total > CREDIT_TRANSACTION_PAGE_SIZE ? (
+                                        <div className="mt-5 flex justify-end">
+                                            <Pagination current={page} pageSize={CREDIT_TRANSACTION_PAGE_SIZE} total={transactions.total} showSizeChanger={false} onChange={setPage} />
+                                        </div>
+                                    ) : null}
                                 </div>
-                                <div className="mt-2 grid gap-1 text-xs text-[var(--studio-muted)]">
-                                    <span className="truncate">{creditTransactionDetail(transaction.transactionType, transaction.generationType, transaction.model, transaction.reason)}</span>
-                                    <span className="tabular-nums">{translate("credits.balance")}{formatCredits(transaction.balanceAfter)} · {formatCreditTime(transaction.createdAt)}</span>
+                            ),
+                        },
+                        {
+                            key: "tasks",
+                            label: translate("credits.taskRecords"),
+                            children: (
+                                <div className="flex flex-col gap-4">
+                                    <p className="text-sm text-[var(--studio-muted)]">{translate("credits.taskRecordsHint")}</p>
+                                    <TaskRecordPanel />
                                 </div>
-                            </article>
-                        );
-                    })}
-                </div>
-                {transactions && transactions.total > CREDIT_TRANSACTION_PAGE_SIZE ? (
-                    <div className="mt-5 flex justify-end">
-                        <Pagination current={page} pageSize={CREDIT_TRANSACTION_PAGE_SIZE} total={transactions.total} showSizeChanger={false} onChange={setPage} />
-                    </div>
-                ) : null}
+                            ),
+                        },
+                    ]}
+                />
             </section>
         </main>
     );
