@@ -8,7 +8,6 @@ import { readPromptBody } from "../lib/prompt-references";
 import {
     adoptComicDramaMedia,
     bindComicDramaCanvas,
-    checkComicDramaContinuity,
     composeComicDramaPrompt,
     composeComicDramaPrompts,
     confirmComicDramaShotDraft,
@@ -40,7 +39,6 @@ import type {
     ComicDramaAssetVersion,
     ComicDramaAssetVersionInput,
     ComicDramaBatchTask,
-    ComicDramaContinuityIssue,
     ComicDramaMediaResult,
     ComicDramaMutationResult,
     ComicDramaPromptVersion,
@@ -144,7 +142,6 @@ type ComicDramaState = {
         entityId: string;
         nodeId: string;
     }) => Promise<void>;
-    checkContinuity: () => Promise<ComicDramaContinuityIssue[]>;
     syncMedia: () => Promise<void>;
     reset: () => void;
 };
@@ -569,14 +566,6 @@ export const useComicDramaStore = create<ComicDramaState>((set, get) => ({
             ...input,
         });
         await get().reloadWorkspace();
-    },
-
-    checkContinuity: async () => {
-        const workspace = get().workspace;
-        if (!workspace) return [];
-        const issues = await checkComicDramaContinuity(workspace.projectId);
-        set((state) => state.workspace ? { workspace: { ...state.workspace, continuityIssues: issues } } : state);
-        return issues;
     },
 
     syncMedia: async () => {

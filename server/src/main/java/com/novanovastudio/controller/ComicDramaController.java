@@ -404,13 +404,6 @@ public class ComicDramaController {
         return execute("绑定漫剧画布节点", httpRequest, request, service.bindCanvas(request));
     }
 
-    /** 检查相邻镜头视觉资产版本连续性。 */
-    @PostMapping("/checkContinuity")
-    public Mono<ApiResponse<List<ComicDramaDtos.ContinuityIssue>>> checkContinuity(
-            @Valid @RequestBody ComicDramaDtos.ProjectIdRequest request, ServerHttpRequest httpRequest) {
-        return execute("检查漫剧视觉连续性", httpRequest, request, service.checkContinuity(request.projectId()));
-    }
-
     /**
      * 统一记录请求、脱敏请求头、请求内容与响应内容。
      *

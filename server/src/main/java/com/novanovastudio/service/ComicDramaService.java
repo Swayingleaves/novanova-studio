@@ -106,7 +106,7 @@ public class ComicDramaService {
                     syncMediaStatuses(userId, projectId, null, null),
                     repository.listVoiceTracks(projectId, null).collectList(), repository.listTimelineTexts(projectId).collectList(),
                     repository.listBatchTasks(projectId).collectList(),
-                    repository.listCanvasBindings(projectId).collectList(), repository.listContinuityIssues(projectId).collectList()};
+                    repository.listCanvasBindings(projectId).collectList()};
             return Mono.zip(core, Mono.zip(values -> values, extraSources)).map(tuple -> {
                 var values = tuple.getT2();
                 ScriptDtos.ProjectDetail scriptProject = (ScriptDtos.ProjectDetail) values[0];
@@ -118,7 +118,6 @@ public class ComicDramaService {
                 @SuppressWarnings("unchecked") List<ComicDramaDtos.TimelineText> timelineTexts = (List<ComicDramaDtos.TimelineText>) values[6];
                 @SuppressWarnings("unchecked") List<ComicDramaDtos.BatchTask> batches = (List<ComicDramaDtos.BatchTask>) values[7];
                 @SuppressWarnings("unchecked") List<ComicDramaDtos.CanvasBinding> bindings = (List<ComicDramaDtos.CanvasBinding>) values[8];
-                @SuppressWarnings("unchecked") List<ComicDramaDtos.ContinuityIssue> issues = (List<ComicDramaDtos.ContinuityIssue>) values[9];
                 var data = tuple.getT1();
                 int readyAssets = (int) data.getT2().stream().filter(asset -> "active".equals(asset.usageStatus())).count();
                 long completedShots = data.getT3().stream().filter(shot -> media.stream().anyMatch(item ->
@@ -133,7 +132,7 @@ public class ComicDramaService {
                         : (readyAssets + (int) completedShots) * 100 / productionUnits;
                 return new ComicDramaDtos.Workspace(projectId, projectId, scriptProject, data.getT1(), project.revision(),
                         completionRate, progress, readiness, data.getT2(), data.getT3(), drafts, prompts, media,
-                        data.getT4(), voices, timelineTexts, project.textTrackCount(), batches, bindings, issues);
+                        data.getT4(), voices, timelineTexts, project.textTrackCount(), batches, bindings);
             });
         }));
     }
@@ -1038,11 +1037,6 @@ public class ComicDramaService {
                         })
                         .flatMap(saved -> advance(userId, request.projectId(), request.expectedRevision())
                                 .then(repository.refreshProjectProductionStatus(request.projectId())).thenReturn(saved))));
-    }
-
-    /** 查询相邻镜头资产版本连续性问题，不自动替换任何内容。 */
-    public Mono<List<ComicDramaDtos.ContinuityIssue>> checkContinuity(String projectId) {
-        return withProject(projectId, () -> repository.listContinuityIssues(projectId).collectList());
     }
 
     /** 在发生计费前校验生成目标并构建可追踪的媒体计划。 */

@@ -167,7 +167,7 @@ public final class ComicDramaDtos {
                             List<PromptVersion> promptVersions, List<MediaResult> media, List<ChangeImpact> impacts,
                             List<VoiceTrack> voiceTracks, List<TimelineText> timelineTexts, int textTrackCount,
                             List<BatchTask> batchTasks,
-                            List<CanvasBinding> canvasBindings, List<ContinuityIssue> continuityIssues) {
+                            List<CanvasBinding> canvasBindings) {
     }
 
     /** 生产准备度检查项。 */
@@ -189,11 +189,6 @@ public final class ComicDramaDtos {
 
     /** 通用写操作修订结果。 */
     public record MutationResult(String projectId, long revision, OffsetDateTime updatedAt) {
-    }
-
-    /** 连续性问题。 */
-    public record ContinuityIssue(String type, String severity, String previousShotId, String shotId,
-                                  String title, String description, String suggestion) {
     }
 
     /** 通用项目标识请求。 */

@@ -9,7 +9,6 @@ import type {
     ComicDramaBatchTask,
     ComicDramaCanvasBinding,
     ComicDramaChangeImpact,
-    ComicDramaContinuityIssue,
     ComicDramaMediaResult,
     ComicDramaMutationResult,
     ComicDramaProjectList,
@@ -205,10 +204,6 @@ export function listComicDramaCanvasBindings(projectId: string) {
 
 export function bindComicDramaCanvas(input: { projectId: string; expectedRevision: number; canvasProjectId: string; entityType: string; entityId: string; nodeId: string }) {
     return serverPost<ComicDramaCanvasBinding>(`${COMIC_DRAMA_PATH}/bindCanvas`, input);
-}
-
-export function checkComicDramaContinuity(projectId: string) {
-    return serverPost<ComicDramaContinuityIssue[]>(`${COMIC_DRAMA_PATH}/checkContinuity`, { projectId });
 }
 
 /** 读取漫剧媒体结果里的首个媒体地址：图片任务结果为 { items: [{ url }] }，视频任务结果为 { item: { url } }。 */

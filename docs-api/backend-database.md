@@ -575,7 +575,7 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 - 视觉资产：`listAssets`、`saveAsset`、`listAssetVersions`、`saveAssetVersion`。
 - 镜头与提示词：`generateShotDraft`、`confirmShotDraft`、`listShots`、`saveShot`、`reorderShots`、`deleteShot`、`composePrompt`、`savePrompt`。
 - 媒体生产：`estimateGeneration`、`createGenerationTask`、`listMedia`、`adoptMedia`。
-- 联动与P1：`listImpacts`、`confirmUpdate`、`listVoiceTracks`、`saveVoiceTrack`、`listBatchTasks`、`createBatchTask`、`checkContinuity`。
+- 联动与P1：`listImpacts`、`confirmUpdate`、`listVoiceTracks`、`saveVoiceTrack`、`listBatchTasks`、`createBatchTask`。
 - 无限画布：`listCanvasBindings`、`bindCanvas`。
 
 ## 10、V34 镜头草稿双修订基线

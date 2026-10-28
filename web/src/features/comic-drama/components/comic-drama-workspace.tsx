@@ -22,14 +22,12 @@ import {
     RefreshCw,
     SendToBack,
     Settings,
-    ShieldCheck,
     Volume2,
 } from "lucide-react";
 
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaStage } from "../types";
 import { BatchGenerationModal } from "./batch-generation-modal";
-import { ContinuityDrawer } from "./continuity-drawer";
 import { StageAssets } from "./stage-assets";
 import { StageCanvas } from "./stage-canvas";
 import { StageMedia } from "./stage-media";
@@ -96,7 +94,6 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
 
     // Global modals
     const [batchModalOpen, setBatchModalOpen] = useState(false);
-    const [continuityOpen, setContinuityOpen] = useState(false);
     const [routeLeaveAction, setRouteLeaveAction] = useState<(() => void) | null>(null);
     const hasPendingTimelineChanges = Object.keys(pendingTimelineTexts).length > 0 || Object.keys(pendingTimelineVoices).length > 0;
     const leavePromptOpen = Boolean(pendingStage || routeLeaveAction);
@@ -322,9 +319,6 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
                     >
                         {translate("comicDrama.mediaGenerationCenter")}</Button>
 
-                    <Button icon={<ShieldCheck className="size-3.5" />} onClick={() => setContinuityOpen(true)}>
-                        {translate("comicDrama.continuityCheck")}</Button>
-
                     <Button
                         type="primary"
                         icon={<Layers className="size-3.5" />}
@@ -357,7 +351,6 @@ export function ComicDramaWorkspace({ projectId, scriptProjectId }: ComicDramaWo
 
             {/* Global Modals & Drawers */}
             <BatchGenerationModal open={batchModalOpen} onClose={() => setBatchModalOpen(false)} />
-            <ContinuityDrawer open={continuityOpen} onClose={() => setContinuityOpen(false)} />
             <Modal title={translate("comicDrama.unsavedTimelineChanges")} open={leavePromptOpen} onCancel={cancelLeave} closable={!timelineSaving} mask={{ closable: false }} footer={[
                 <Button key="cancel" onClick={cancelLeave} disabled={timelineSaving}>{translate("comicDrama.continueEditing")}</Button>,
                 <Button key="discard" danger onClick={() => finishLeave(true)} disabled={timelineSaving}>{translate("comicDrama.leaveWithoutSaving")}</Button>,

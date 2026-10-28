@@ -1294,29 +1294,6 @@ public class ComicDramaRepository {
                 .map((row, metadata) -> Boolean.TRUE.equals(row.get("present", Boolean.class))).one();
     }
 
-    /** 查询相邻镜头的资产版本连续性问题。 */
-    public Flux<ComicDramaDtos.ContinuityIssue> listContinuityIssues(String projectId) {
-        return databaseClient.sql("""
-                WITH ordered AS (
-                    SELECT id, source_scene_id, sort_order, lag(id) OVER (ORDER BY sort_order,id) previous_id,
-                           lag(source_scene_id) OVER (ORDER BY sort_order,id) previous_scene_id
-                    FROM comic_drama_shots WHERE script_project_id=:projectId
-                ), versions AS (
-                    SELECT sh.id shot_id, a.id asset_id, v.id version_id
-                    FROM comic_drama_shots sh JOIN comic_drama_shot_asset_versions sav ON sav.shot_id=sh.id
-                    JOIN comic_drama_asset_versions v ON v.id=sav.asset_version_id JOIN comic_drama_assets a ON a.id=v.asset_id
-                    WHERE sh.script_project_id=:projectId
-                )
-                SELECT o.previous_id,o.id shot_id,v1.asset_id,v1.version_id previous_version,v2.version_id current_version
-                FROM ordered o JOIN versions v1 ON v1.shot_id=o.previous_id JOIN versions v2 ON v2.shot_id=o.id AND v2.asset_id=v1.asset_id
-                WHERE o.previous_id IS NOT NULL AND o.source_scene_id IS NOT DISTINCT FROM o.previous_scene_id
-                    AND v1.version_id<>v2.version_id
-                """).bind("projectId", projectId).map((row, metadata) -> new ComicDramaDtos.ContinuityIssue(
-                        "assetVersion", "warning", row.get("previous_id", String.class), row.get("shot_id", String.class),
-                        "相邻镜头资产版本发生变化", "同一场次相邻镜头引用了同一资产的不同视觉版本：" + row.get("asset_id", String.class),
-                        "确认变化符合剧情，或统一为同一资产版本。")).all();
-    }
-
     /** 映射视觉资产记录。 */
     private ComicDramaDtos.Asset mapAsset(Row row) {
         return new ComicDramaDtos.Asset(row.get("id", String.class), row.get("asset_type", String.class),
