@@ -13,6 +13,7 @@ import com.novanovastudio.dto.CreditDtos;
 import com.novanovastudio.dto.InvitationDtos;
 import com.novanovastudio.repository.CreditRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.security.TeamScope;
 import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.Assertions;
@@ -40,6 +41,9 @@ class CreditServiceTest {
     /** 当前用户提供器 */
     private CurrentUserProvider currentUserProvider;
 
+    /** 持久化服务 */
+    private PersistenceService persistenceService;
+
     /** 待测试积分服务 */
     private CreditService creditService;
 
@@ -52,12 +56,54 @@ class CreditServiceTest {
         when(creditRepository.originalWallet(anyString(), anyLong(), anyString())).thenReturn(Mono.just(0L));
         creditGrantService = mock(CreditGrantService.class);
         currentUserProvider = mock(CurrentUserProvider.class);
-        PersistenceService persistenceService = mock(PersistenceService.class);
+        persistenceService = mock(PersistenceService.class);
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of()));
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         creditService = new CreditService(creditRepository, creditGrantService, persistenceService, currentUserProvider, transactionalOperator, com.novanovastudio.TeamTestSupport.taskScope());
+    }
+
+    /**
+     * 管理员任务查询应跨团队覆盖所有用户并保留筛选与用户信息。
+     */
+    @Test
+    void shouldListAllUsersTaskRecordsInSystemScope() {
+        LocalDate startDate = LocalDate.of(2026, 7, 1);
+        LocalDate endDate = LocalDate.of(2026, 7, 31);
+        CreditDtos.AdminTaskRecordItem firstTask = new CreditDtos.AdminTaskRecordItem(
+                "task-1", "image", "model-id", "success", "提示词", null, null, null,
+                java.math.BigDecimal.TEN, List.of(), null, "2026-07-02T12:00:00+08:00", null,
+                8L, "creator", "创作者", "creator@example.com");
+        CreditDtos.AdminTaskRecordItem secondTask = new CreditDtos.AdminTaskRecordItem(
+                "task-2", "image", "model-id", "success", "提示词", null, null, null,
+                java.math.BigDecimal.ONE, List.of(), null, "2026-07-03T12:00:00+08:00", null,
+                9L, "another-creator", null, "another@example.com");
+        when(creditRepository.listAdminTaskRecords(org.mockito.ArgumentMatchers.any(CreditRepository.TaskRecordQuery.class), anyInt(), anyInt()))
+                .thenAnswer(invocation -> {
+                    CreditRepository.TaskRecordQuery query = invocation.getArgument(0);
+                    Assertions.assertNull(query.userId());
+                    Assertions.assertEquals(startDate.atStartOfDay(java.time.ZoneId.of("Asia/Shanghai")).toOffsetDateTime(), query.startAt());
+                    Assertions.assertEquals(endDate.plusDays(1).atStartOfDay(java.time.ZoneId.of("Asia/Shanghai")).toOffsetDateTime(), query.endAt());
+                    Assertions.assertEquals("image", query.taskType());
+                    Assertions.assertEquals("提示词", query.keyword());
+                    Assertions.assertEquals(2, (int) invocation.<Integer>getArgument(1));
+                    Assertions.assertEquals(10, (int) invocation.<Integer>getArgument(2));
+                    return Flux.deferContextual(context -> {
+                        Assertions.assertTrue(context.getOrDefault(TeamScope.SYSTEM_KEY, false));
+                        return Flux.just(firstTask, secondTask);
+                    });
+                });
+        when(creditRepository.countTaskRecords(org.mockito.ArgumentMatchers.any(CreditRepository.TaskRecordQuery.class))).thenReturn(Mono.just(2L));
+
+        StepVerifier.create(creditService.listAdminTaskRecords(startDate, endDate, "image", " 提示词 ", 2, 10))
+                .expectNextMatches(response -> response.total() == 2
+                        && response.records().size() == 2
+                        && response.records().getFirst().userId() == 8L
+                        && response.records().getFirst().nickname().equals("创作者")
+                        && response.records().get(1).userId() == 9L
+                        && response.records().get(1).email().equals("another@example.com"))
+                .verifyComplete();
     }
 
     /**

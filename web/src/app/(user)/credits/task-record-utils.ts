@@ -44,3 +44,13 @@ export function formatConsumedCredits(consumedCredits: CreditAmount | null | und
     const amount = creditAmount(consumedCredits ?? 0);
     return amount.greaterThan(0) ? `-${creditText(amount)}` : "0";
 }
+
+/**
+ * 获取任务记录中的用户展示名称。
+ *
+ * @param user 用户昵称、用户名和邮箱
+ * @return 优先昵称，其次用户名和邮箱；均缺失时返回占位符
+ */
+export function taskRecordUserLabel(user: { nickname?: string | null; username?: string | null; email?: string | null }) {
+    return user.nickname || user.username || user.email || "—";
+}

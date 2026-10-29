@@ -78,6 +78,45 @@ class CreditRepositoryTest {
     }
 
     /**
+     * 管理员任务记录查询默认覆盖全部用户并保留任务筛选。
+     */
+    @Test
+    void shouldBuildAllUserTaskRecordQueryWithFilters() {
+        CreditRepository.TaskRecordQuery query = new CreditRepository.TaskRecordQuery(
+                null,
+                OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                OffsetDateTime.of(2026, 8, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                "video",
+                "模型关键词");
+
+        String sql = CreditRepository.taskRecordQuery(query);
+        String adminSql = CreditRepository.adminTaskRecordQuery(query);
+
+        Assertions.assertTrue(adminSql.contains("LEFT JOIN users users ON users.id = tasks.user_id"));
+        Assertions.assertFalse(sql.contains("LEFT JOIN users"));
+        Assertions.assertTrue(sql.contains("tasks.task_type IN ('image', 'video')"));
+        Assertions.assertTrue(sql.contains("tasks.data_purged = FALSE"));
+        Assertions.assertTrue(sql.contains("tasks.task_type = :taskType"));
+        Assertions.assertTrue(sql.contains("tasks.model ILIKE :keyword"));
+        Assertions.assertFalse(sql.contains("tasks.user_id = :userId"));
+    }
+
+    /**
+     * 个人任务记录查询应继续限定当前用户。
+     */
+    @Test
+    void shouldKeepUserConditionForPersonalTaskRecordQuery() {
+        CreditRepository.TaskRecordQuery query = new CreditRepository.TaskRecordQuery(
+                8L,
+                OffsetDateTime.of(2026, 7, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                OffsetDateTime.of(2026, 8, 1, 0, 0, 0, 0, ZoneOffset.ofHours(8)),
+                null,
+                null);
+
+        Assertions.assertTrue(CreditRepository.taskRecordQuery(query).contains("tasks.user_id = :userId"));
+    }
+
+    /**
      * 增加方向筛选应限定正数积分变动。
      */
     @Test
