@@ -503,3 +503,13 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 ## 网站双语任务提示（V33）
 
 `V33__Add_Localized_Task_Messages.sql` 为 `ai_generation_tasks`、`creation_agent_request`、`video_composition_tasks` 同步增加 `error_message_key` 与 `error_message_arguments`。写入终态时原子保存诊断、消息键和JSON参数；查询及事件订阅按当前请求语言格式化。主Agent的运行态、取消、中断和失败路径使用相同约束，不需要按语言增加索引。
+
+## 平台社群配置（V37）
+
+| 表 | 关键字段及约束 |
+| --- | --- |
+| `platform_community_configs` | `name`（最长 60，同一份配置内不区分大小写唯一）、`image_url`（最长 2048，仅 `http/https`）、`sort_order`（按提交顺序从 0 递增）、`created_at`/`updated_at`；索引 `(sort_order, id)` |
+
+社群配置是平台级单份列表，不保存创建人。公开读取走 `GET /api/v1/community/listCommunityConfigs`，只返回 `name`、`imageUrl`、`sortOrder`，按 `sort_order` 升序；管理员整批保存走 `POST /api/v1/admin/community/saveCommunityConfigs`，请求中的数组顺序即展示顺序，服务端重算排序值。
+
+保存时先在事务内用咨询锁 `hashtext('platform-community-configs')` 串行化，再删除旧行并按序重新插入，任何一条校验失败或写入失败都整批回滚，数据库不会留下部分更新。只有全局管理员可以修改；图片地址不做下载校验，上传复用媒体上传接口，删除配置不会删除已上传的媒体文件。

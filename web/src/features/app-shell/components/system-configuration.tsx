@@ -69,8 +69,12 @@ import { ModelConfigAutoFillModal } from "./model-config-auto-fill-modal";
 import { VideoGenerationConstraintsEditor } from "./video-generation-constraints-editor";
 import { videoConstraintConfigurationIssues } from "@/features/generation/lib/video-generation-constraints";
 import { useConfigurationLeaveGuard } from "./use-configuration-leave-guard";
+import { CommunityConfigManagement } from "./community-config-management";
+import { communityDraftIssue, communityDraftSignature, createCommunityDrafts, type CommunityConfigDraft } from "./community-config";
+import { saveCommunityConfigs } from "@/services/api/community";
+import { useCommunityStore } from "@/features/community/stores/use-community-store";
 
-type ConfigurationTabKey = "channels" | "models" | "credits" | "invitationReward" | "checkIn" | "objectStorage";
+type ConfigurationTabKey = "channels" | "models" | "credits" | "invitationReward" | "checkIn" | "objectStorage" | "community";
 
 type ModelGroup = {
     capability: ModelCapability;
@@ -191,6 +195,8 @@ export function SystemConfiguration() {
     const [draftInvitationRewardCredits, setDraftInvitationRewardCredits] = useState(0);
     const [checkInBaseline, setCheckInBaseline] = useState(0);
     const [draftCheckInCredits, setDraftCheckInCredits] = useState(0);
+    const [communityBaseline, setCommunityBaseline] = useState<CommunityConfigDraft[]>([]);
+    const [draftCommunityConfigs, setDraftCommunityConfigs] = useState<CommunityConfigDraft[]>([]);
     const [editingModelConfig, setEditingModelConfig] = useState<ServerModelConfig | null>(null);
     const [modelPicker, setModelPicker] = useState<{ capability: ModelCapability; mode: "options" | "default" } | null>(null);
     const [editingCustomBodyParameters, setEditingCustomBodyParameters] = useState("{}");
@@ -220,20 +226,27 @@ export function SystemConfiguration() {
         setCollapsedObjectStorageIds(storages.map((storage) => storage.id));
     }, []);
 
+    const resetCommunityDraft = useCallback(() => {
+        const drafts = createCommunityDrafts(useCommunityStore.getState().configs);
+        setCommunityBaseline(drafts);
+        setDraftCommunityConfigs(drafts.map((draft) => ({ ...draft })));
+    }, []);
+
     const resetAllDrafts = useCallback(() => {
         resetChannelDraft(true);
         resetModelConfigDraft();
         resetObjectStorageDraft();
+        resetCommunityDraft();
         setTestedObjectStorageId("");
         setObjectStorageTestUrl("");
-    }, [resetChannelDraft, resetModelConfigDraft, resetObjectStorageDraft]);
+    }, [resetChannelDraft, resetModelConfigDraft, resetObjectStorageDraft, resetCommunityDraft]);
 
     useEffect(() => {
         if (user?.role !== "admin") return;
         setDraftsReady(false);
         setLoadError("");
         let active = true;
-        void Promise.all([refreshModelConfiguration(), refreshObjectStorages(), getCreditSettings(), getInvitationRewardSettings(), getCheckInRewardSettings()])
+        void Promise.all([refreshModelConfiguration(), refreshObjectStorages(), getCreditSettings(), getInvitationRewardSettings(), getCheckInRewardSettings(), useCommunityStore.getState().refresh()])
             .then(([, , creditSettings, invitationRewardSettings, checkInSettings]) => {
                 if (!active) return;
                 resetAllDrafts();
@@ -276,9 +289,10 @@ export function SystemConfiguration() {
     const creditsDirty = draftInitialCredits !== creditBaseline;
     const invitationRewardDirty = draftInvitationRewardCredits !== invitationRewardBaseline;
     const checkInDirty = draftCheckInCredits !== checkInBaseline;
+    const communityDirty = communityDraftSignature(draftCommunityConfigs) !== communityDraftSignature(communityBaseline);
     const editingModelBaseline = editingModelConfig && draftModelConfigs.find((item) => item.id === editingModelConfig.id);
     const modelEditorDirty = Boolean(editingModelConfig && (!sameValue(editingModelConfig, editingModelBaseline) || editingCustomBodyParameters !== JSON.stringify(editingModelBaseline?.customBodyParameters || {}, null, 2)));
-    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || modelEditorDirty;
+    const hasUnsavedChanges = channelsDirty || modelConfigsDirty || objectStoragesDirty || creditsDirty || invitationRewardDirty || checkInDirty || communityDirty || modelEditorDirty;
     const isSaving = Boolean(savingTab);
     useConfigurationLeaveGuard(draftsReady && hasUnsavedChanges);
 
@@ -644,6 +658,34 @@ export function SystemConfiguration() {
             message.success(translate("appShell.checkInSettingsSaved"));
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("appShell.failedToSaveCheckInSettings"));
+        } finally {
+            setSavingTab("");
+        }
+    };
+
+    const saveCommunityConfigSettings = async () => {
+        const issue = communityDraftIssue(draftCommunityConfigs);
+        if (issue) {
+            message.error(
+                issue === "name"
+                    ? translate("administration.communityNameRequired")
+                    : issue === "url"
+                      ? translate("administration.communityImageUrlInvalid")
+                      : translate("administration.communityDuplicate"),
+            );
+            return;
+        }
+        setSavingTab("community");
+        try {
+            await saveCommunityConfigs(draftCommunityConfigs.map((item) => ({ name: item.name.trim(), imageUrl: item.imageUrl.trim() })));
+            const saved = draftCommunityConfigs.map((item) => ({ ...item, name: item.name.trim(), imageUrl: item.imageUrl.trim() }));
+            setCommunityBaseline(saved.map((item) => ({ ...item })));
+            setDraftCommunityConfigs(saved);
+            // 保存后立即刷新全局浮层数据，不必等用户重新载入页面。
+            void useCommunityStore.getState().refresh();
+            message.success(translate("administration.communitySaved"));
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("administration.communitySaveFailed"));
         } finally {
             setSavingTab("");
         }
@@ -1210,6 +1252,19 @@ export function SystemConfiguration() {
                                         })}
                                     </div>
                                 </Form>
+                            ),
+                        },
+                        {
+                            key: "community",
+                            label: translate("administration.communityConfig"),
+                            children: (
+                                <CommunityConfigManagement
+                                    items={draftCommunityConfigs}
+                                    dirty={communityDirty}
+                                    saving={savingTab === "community"}
+                                    onChange={setDraftCommunityConfigs}
+                                    onSave={() => void saveCommunityConfigSettings()}
+                                />
                             ),
                         },
                     ]}
