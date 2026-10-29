@@ -18,6 +18,8 @@ import type {
     OutlineSection,
     ProductionReadiness,
     ScriptAiDraft,
+    ScriptAiActionModelPricing,
+    ScriptAiActionPricing,
     ScriptCharacter,
     ScriptContentType,
     ScriptLocation,
@@ -366,4 +368,17 @@ export function getEpisodeBodiesPricing() {
 
 export function saveEpisodeBodiesPricing(modelConfigId: string, expectedRevision: number, credits: CreditAmount) {
     return serverPost<EpisodeBodiesModelPricing>("/admin/episodeBodies/savePricing", { modelConfigId, expectedRevision, credits });
+}
+
+/** 剧本AI助手：查询所选文本模型下各动作的单价，未定价的动作为空。 */
+export function getAiActionPricing(model: string) {
+    return serverGet<ScriptAiActionPricing[]>(`${SCRIPT_PATH}/getAiActionPricing?model=${encodeURIComponent(model)}`);
+}
+
+export function getScriptAiActionPricing() {
+    return serverGet<ScriptAiActionModelPricing[]>("/admin/scriptAiAction/getPricing");
+}
+
+export function saveScriptAiActionPricing(modelConfigId: string, expectedRevision: number, actions: Array<{ actionType: string; credits: CreditAmount }>) {
+    return serverPost<ScriptAiActionModelPricing>("/admin/scriptAiAction/savePricing", { modelConfigId, expectedRevision, actions });
 }

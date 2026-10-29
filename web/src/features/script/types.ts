@@ -383,3 +383,15 @@ export type StoryBibleModelPricing = { modelConfigId: string; model: string; dis
 
 /** 分集正文生成定价：一集一次调用，所以每集一个固定积分。 */
 export type EpisodeBodiesModelPricing = { modelConfigId: string; model: string; displayName: string; credits: CreditAmount; revision: number };
+
+/** 剧本AI助手单个动作的积分价格，未定价时为空。 */
+export type ScriptAiActionPricing = { actionType: string; credits: CreditAmount | null };
+
+/** 剧本AI助手动作定价：按文本模型维护每个动作每次调用的积分。 */
+export type ScriptAiActionModelPricing = {
+    modelConfigId: string;
+    model: string;
+    displayName: string;
+    actions: ScriptAiActionPricing[];
+    revision: number;
+};

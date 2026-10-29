@@ -1,5 +1,23 @@
 # 后端数据库说明（已实现）
 
+## 剧本 AI 助手动作独立定价（V74）
+
+新增 `script_ai_action_pricing`，按「文本模型 × 动作」维护每次调用的积分。此前单价直接取模型自身的 `credit_cost`，「润色一段」与「生成整集」同价，管理员无法分别定价。首次部署不填充价格；无记录表示该动作未定价，显式保存 `0` 表示免费。后台入口为「创作定价 · 剧本创作-AI 助手动作」。
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `model_config_id` | `VARCHAR(64)` | 与 `action_type` 组成主键，关联平台模型配置，删除模型时级联删除 |
+| `action_type` | `VARCHAR(48)` | 助手动作标识，取值受服务端 `ScriptAiActions` 目录约束 |
+| `credits` | `NUMERIC(24,6)` | 非空、非负的该动作单次积分，最多六位小数 |
+| `revision` | `BIGINT` | 正整数修订号；同一模型所有动作共享同一值，保存时整组替换 |
+| `team_id` | `BIGINT` | 所属空间，默认当前空间，关联团队并建立索引 |
+| `created_at` | `TIMESTAMPTZ` | 创建时间 |
+| `updated_at` | `TIMESTAMPTZ` | 最后更新时间 |
+
+启用并强制行级权限：所属空间维护自有模型价格，获授权团队只读可见平台模型价格；归属触发器禁止团队覆盖平台模型价格。保存为「校验修订号 → 删除该模型旧价 → 整组写入」的单事务操作，修订号不一致时拒绝。管理接口为 `/api/v1/admin/scriptAiAction/getPricing`、`savePricing`；用户通过 `/api/v1/script/getAiActionPricing?model=` 读取所选模型的动作单价。
+
+未定价的动作不允许发起：`generateDraft` 扣费前按模型与动作取价，取不到即报错，不再回落模型自身的 `credit_cost`；草稿记录的 `charged_credits` 也写该动作的实际扣费。
+
 ## 漫剧最终提示词独立定价（V73）
 
 新增 `comic_drama_final_prompt_pricing`，按文本模型维护每镜头积分。首次部署不填充价格；无记录表示未配置，显式保存 `0` 表示免费。后台入口为「创作定价 · 漫剧创作-生成最终提示词定价」。

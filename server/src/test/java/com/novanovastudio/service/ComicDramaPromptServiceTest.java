@@ -40,7 +40,7 @@ class ComicDramaPromptServiceTest {
     private ComicDramaFinalPromptPricingService pricingService;
     /** 本次固定模型，通用价格与专项价格不同。 */
     private final com.novanovastudio.agent.AgentScopeModelFactory.TextModelSelection model =
-            new com.novanovastudio.agent.AgentScopeModelFactory.TextModelSelection(null, "model", "模型", "渠道", BigDecimal.TEN, 0L);
+            new com.novanovastudio.agent.AgentScopeModelFactory.TextModelSelection(null, "model-config", "model", "模型", "渠道", BigDecimal.TEN, 0L);
     /** 被测业务服务。 */
     private ComicDramaService service;
     /** 角色图片。 */

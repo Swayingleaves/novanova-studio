@@ -96,6 +96,7 @@
     "couldNotLoadRefreshThePageAndTryAgain": "Could not load. Refresh the page and try again.",
     "loading": "Loading…",
     "notConfiguredSetThePriceUnderScriptPricingEpisodeText": "Not configured. Set the price under Creation Pricing · Script Creation - Episode Bodies in administration.",
+    "thisActionHasNoPriceAskTheAdministratorToSetItUnderCreationPricing": "This action has no price yet. Set it under Creation Pricing · Script Creation - AI Assistant Actions in administration.",
     "countCreditsEpisode": "{value0} credits / episode",
     "oneCallPerEpisodeCreditsAreReservedForTheSelected": "One call per episode. Credits are reserved for the selected episodes. Only successful episodes are charged; unused credits are refunded on cancellation or failure.",
     "storyOverview": "Story overview",

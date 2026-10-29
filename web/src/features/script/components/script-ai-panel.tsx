@@ -10,25 +10,16 @@ import { Check, Sparkles, Trash2 } from "lucide-react";
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useModelConfigurationGuard } from "@/features/settings/hooks/use-model-configuration-guard";
 import { modelOptionLabel, useEffectiveConfig } from "@/features/settings/stores/use-config-store";
-import { applyScriptAiDraft, discardScriptAiDraft, generateScriptDraft } from "@/services/api/script";
+import { applyScriptAiDraft, discardScriptAiDraft, generateScriptDraft, getAiActionPricing } from "@/services/api/script";
 import { isScriptAiDraftStale } from "../lib/script-episode-editing";
+import { SCRIPT_AI_ACTIONS } from "../lib/script-ai-actions";
 import { useScriptStore } from "../stores/use-script-store";
-import type { ScriptAiDraft, ScriptWorkspaceSection } from "../types";
+import type { ScriptAiActionPricing, ScriptAiDraft, ScriptWorkspaceSection } from "../types";
 
-const getActions = (translate = translateMessage) => ([
-    { value: "storyDirections", label: translate("script.generateStoryDirections"), sections: ["overview"] },
-    { value: "outline", label: translate("script.generateStoryOutline"), sections: ["outline"] },
-    { value: "characters", label: translate("script.generateCharactersAndRelationships"), sections: ["characters"] },
-    { value: "world", label: translate("script.generateWorldAndLocations"), sections: ["world"] },
-    { value: "episodePlan", label: translate("script.generateEpisodePlans"), sections: ["episodes"] },
-    { value: "episodeDraft", label: translate("script.generateEpisodeScenesAndText"), sections: ["episodes"] },
-    ...[
-        ["polish", translate("script.polish")], ["expand", translate("script.expand")], ["condense", translate("script.condense")], ["rewrite", translate("script.rewrite")],
-        ["colloquialize", translate("script.makeConversational")], ["dialogue", translate("script.improveDialogue")], ["conflict", translate("script.strengthenConflict")],
-        ["suspense", translate("script.improveSuspense")], ["twist", translate("script.improveTwists")], ["motivation", translate("script.improveMotivation")],
-        ["emotion", translate("script.improveEmotion")], ["climax", translate("script.improveClimax")], ["rhythm", translate("script.improvePacing")], ["style", translate("script.improveStyle")],
-    ].map(([value, label]) => ({ value, label, sections: ["episodes"] })),
-] as Array<{ value: string; label: string; sections: string[] }>);
+/** 动作清单由 `script-ai-actions.ts` 统一维护，后台定价表用的是同一份。 */
+const getActions = (translate = translateMessage) => SCRIPT_AI_ACTIONS.map((item) => ({
+    value: item.value, label: translate(item.labelKey), sections: item.sections,
+})) as Array<{ value: string; label: string; sections: string[] }>;
 
 /**
  * 小说改编流程产出的动作中文名。
@@ -165,22 +156,56 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
     const replaceDrafts = useScriptStore((state) => state.replaceDrafts);
     const reloadProject = useScriptStore((state) => state.reloadProject);
     const [model, setModel] = useState("");
-    const [action, setAction] = useState(cardTarget?.targetType === "episode" ? "episodeDraft" : cardTarget?.targetType === "scene" ? "polish" : "");
+    const [action, setAction] = useState(() => cardTarget?.targetType === "scene" || (!cardTarget && aiTarget?.targetType === "scene") ? "polish"
+        : cardTarget?.targetType === "episode" || (section === "episodes" && selectedEpisodeId) ? "episodeDraft"
+            : "");
     const [instruction, setInstruction] = useState("");
     const [running, setRunning] = useState(false);
     const [discardingId, setDiscardingId] = useState("");
     const [preview, setPreview] = useState<ScriptAiDraft | null>(null);
     const [draftJson, setDraftJson] = useState("");
+    const [pricing, setPricing] = useState<{ model: string; items: ScriptAiActionPricing[] } | null>(null);
     const requestGeneration = useRef(0);
     const discardGeneration = useRef(0);
-    const options = useMemo(() => getActions(translate).filter((item) => item.sections.includes(section) && (!cardTarget || (cardTarget.targetType === "episode" ? item.value === "episodeDraft" : !["episodePlan", "episodeDraft"].includes(item.value)))), [cardTarget, section, translate.locale]);
-    const creditCost = config.modelCosts.find((item) => item.taskType === "text" && item.model === model)?.credits;
+    // 卡片目标由外层每次渲染新建对象，依赖里只取原始值，避免用户选好的动作被父组件重渲染重置。
+    const cardTargetType = cardTarget?.targetType;
+    const cardTargetId = cardTarget?.targetId;
+    // 左侧目录和阅读区点选场次时只更新 store 的 aiTarget，没有卡片目标，所以要单独读它判断当前上下文。
+    const aiTargetType = aiTarget?.targetType;
+    const aiTargetId = aiTarget?.targetId;
+    const options = useMemo(
+        () => getActions(translate).filter((item) => item.sections.includes(section)
+            && (!cardTargetType || (cardTargetType === "episode"
+                ? item.value === "episodeDraft"
+                : !["episodePlan", "episodeDraft"].includes(item.value)))),
+        [cardTargetType, section, translate.locale],
+    );
+    // 动作单价按「文本模型 × 动作」从后台定价读取；取不到就是未定价，不能回落到模型自身的积分。
+    const pricingCurrent = pricing?.model === model;
+    const creditCost = pricingCurrent ? pricing.items.find((item) => item.actionType === action)?.credits ?? undefined : undefined;
     const directionCandidates = useMemo(() => preview?.actionType === "storyDirections" && Array.isArray(preview.draftData.candidates)
         ? preview.draftData.candidates as Array<Record<string, unknown>> : [], [preview]);
     const visibleDrafts = drafts.filter((draft) => draft.status === "pending" && (!cardTarget || (draft.targetType === cardTarget.targetType && draft.targetId === cardTarget.targetId)));
 
     useEffect(() => { if (!model && config.textModel) setModel(config.textModel); }, [config.textModel, model]);
-    useEffect(() => { if (!options.some((item) => item.value === action)) setAction(options[0]?.value || ""); }, [action, options]);
+    useEffect(() => {
+        if (!model) { setPricing(null); return; }
+        let cancelled = false;
+        // 加载失败按「全部未定价」处理：宁可让用户看到不可用，也不要拿旧模型的价冒充新模型的价。
+        getAiActionPricing(model)
+            .then((items) => { if (!cancelled) setPricing({ model, items }); })
+            .catch(() => { if (!cancelled) setPricing({ model, items: [] }); });
+        return () => { cancelled = true; };
+    }, [model]);
+    // 换板块、换集、换场次或换卡片后回到该场景的默认动作：场次上下文默认「润色」，
+    // 集上下文默认「生成单集场次与正文」，都不再回落到排在最前的「生成分集规划」。
+    useEffect(() => {
+        const optimizing = cardTargetType === "scene" || (!cardTargetType && aiTargetType === "scene");
+        const preferred = optimizing ? "polish"
+            : cardTargetType === "episode" || (section === "episodes" && selectedEpisodeId) ? "episodeDraft"
+                : "";
+        setAction(options.some((item) => item.value === preferred) ? preferred : (options[0]?.value || ""));
+    }, [aiTargetId, aiTargetType, cardTargetId, cardTargetType, options, section, selectedEpisodeId]);
     useEffect(() => { if (preview) setDraftJson(JSON.stringify(preview.draftData, null, 2)); }, [preview]);
     useEffect(() => {
         requestGeneration.current += 1;
@@ -227,7 +252,7 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
             return;
         }
         if (creditCost === undefined) {
-            message.warning(translate("script.thisModelHasNoExplicitCreditPriceRefreshTheModel"));
+            message.warning(translate("script.thisActionHasNoPriceAskTheAdministratorToSetItUnderCreationPricing"));
             return;
         }
         const target = resolveTarget();
@@ -325,5 +350,5 @@ export function ScriptAiPanel({ section, selectedEpisodeId, cardTarget }: { sect
         }
     };
 
-    return <aside className="flex h-full min-h-0 flex-col bg-[var(--studio-panel-solid)]"><div className="border-b border-[var(--studio-line)] p-4"><div className="flex items-center gap-2"><Sparkles className="size-5 text-[var(--studio-primary)]" /><h2 className="font-semibold text-[var(--studio-ink)]">{translate("script.aiScriptAssistant")}</h2></div><p className="mt-2 text-xs leading-5 text-[var(--studio-muted)]">{translate("script.theScriptChangesOnlyAfterYouApproveADraft")}</p></div><div className="flex-1 space-y-4 overflow-y-auto p-4"><label className="block text-xs font-medium text-[var(--studio-muted)]">{translate("script.action")}<Select className="mt-1 w-full" value={action} options={options.map(({ value, label }) => ({ value, label }))} onChange={setAction} /></label><label className="block text-xs font-medium text-[var(--studio-muted)]">{translate("script.model_98fd0c")}<div className="mt-1"><ModelPicker config={config} value={model} onChange={setModel} capability="text" fullWidth /></div></label><div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3 text-xs text-[var(--studio-muted)]"><p>{translate("script.currentTargetCount_a7f10b", { value0: cardTarget?.label || aiTarget?.label || (selectedEpisodeId ? translate("script.selectedEpisode") : translate("script.currentSection")) })}</p><p className="mt-1">{translate("script.estimatedCreditsCount_2061fd", { value0: creditCost === undefined ? translate("script.notConfigured") : translate("script.countCredits", { value0: creditCost }) })}</p></div><Input.TextArea rows={4} value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder={translate("script.addRequirementsForStyleLengthPacingOrSettingsToPreserve")} />{isBlocked ? <Alert type="warning" showIcon title={blockedReason} className="text-xs" /> : null}<Button type="primary" block loading={running} disabled={isBlocked} icon={<Sparkles className="size-4" />} onClick={execute}>{translate("script.generateReviewDraft")}</Button>{running ? <p role="status" className="text-center text-xs text-[var(--studio-muted)]">{translate("script.aiIsProcessingPleaseWait")}</p> : null}<div className="border-t border-[var(--studio-line)] pt-4"><h3 className="text-sm font-medium text-[var(--studio-ink)]">{translate("script.pendingDrafts")}</h3><div className="mt-2 space-y-2">{visibleDrafts.map((draft) => <div key={draft.id} className="rounded-lg border border-[var(--studio-line)] p-3"><div className="flex items-center justify-between gap-2"><button type="button" className="truncate text-left text-sm font-medium text-[var(--studio-text)]" onClick={() => setPreview(draft)}>{draftTitle(draft, project.episodes, translate)}</button>{isScriptAiDraftStale(draft, project.revision) ? <Tag color="orange">{translate("script.outdated")}</Tag> : <Tag color="blue">{translate("script.pendingApproval")}</Tag>}</div><div className="mt-2 flex gap-2"><Button size="small" onClick={() => setPreview(draft)}>{translate("script.previewChanges")}</Button><Button size="small" danger icon={<Trash2 className="size-3.5" />} loading={discardingId === draft.id} disabled={Boolean(discardingId) && discardingId !== draft.id} onClick={() => void discard(draft)}>{translate("script.discard")}</Button></div></div>)}{!visibleDrafts.length ? <p className="text-xs text-[var(--studio-faint)]">{translate("script.noPendingDrafts")}</p> : null}</div></div></div><Modal width={920} title={translate("script.aiDraftChanges")} open={Boolean(preview)} onCancel={() => setPreview(null)} footer={<div className="flex justify-end gap-2"><Button onClick={() => setPreview(null)}>{translate("script.reviewLater")}</Button><Button type="primary" icon={<Check className="size-4" />} disabled={Boolean(preview && isScriptAiDraftStale(preview, project.revision)) || !["saved", "idle"].includes(saveStatus)} loading={running} onClick={() => void applyDraft()}>{translate("script.apply")}</Button></div>}>{preview ? <div>{isScriptAiDraftStale(preview, project.revision) ? <Alert type="warning" showIcon title={translate("script.projectContentHasChanged")} description={translate("script.thisDraftIsBasedOnAnOlderRevisionAndCannot")} className="mb-4" /> : null}{directionCandidates.length ? <div className="mb-4 grid gap-2 md:grid-cols-3">{directionCandidates.map((candidate, index) => <button key={index} type="button" className="rounded-lg border border-[var(--studio-line)] p-3 text-left hover:border-[var(--studio-primary-line)]" onClick={() => { const next = { ...preview.draftData, selectedIndex: index }; setDraftJson(JSON.stringify(next, null, 2)); }}><strong className="text-sm text-[var(--studio-ink)]">{String(candidate.name || translate("script.directionCount", { value0: index + 1 }))}</strong><p className="mt-2 text-xs leading-5 text-[var(--studio-muted)]">{String(candidate.logline || "")}</p></button>)}</div> : null}<DraftDiffSummary sourceData={preview.sourceData} draftData={preview.draftData} /><Collapse size="small" className="mt-4" items={[{ key: "json", label: translate("script.advancedEditingRawJson"), children: <div className="grid gap-4 md:grid-cols-2"><label className="text-sm font-medium text-[var(--studio-text)]">{translate("script.before")}<Input.TextArea className="mt-2 font-mono text-xs" rows={22} readOnly value={JSON.stringify(preview.sourceData, null, 2)} /></label><label className="text-sm font-medium text-[var(--studio-text)]">{translate("script.aiDraftEditable")}<Input.TextArea className="mt-2 font-mono text-xs" rows={22} value={draftJson} onChange={(event) => setDraftJson(event.target.value)} /></label></div> }]} /></div> : null}</Modal></aside>;
+    return <aside className="flex h-full min-h-0 flex-col bg-[var(--studio-panel-solid)]"><div className="border-b border-[var(--studio-line)] p-4"><div className="flex items-center gap-2"><Sparkles className="size-5 text-[var(--studio-primary)]" /><h2 className="font-semibold text-[var(--studio-ink)]">{translate("script.aiScriptAssistant")}</h2></div><p className="mt-2 text-xs leading-5 text-[var(--studio-muted)]">{translate("script.theScriptChangesOnlyAfterYouApproveADraft")}</p></div><div className="flex-1 space-y-4 overflow-y-auto p-4"><label className="block text-xs font-medium text-[var(--studio-muted)]">{translate("script.action")}<Select className="mt-1 w-full" value={action} options={options.map(({ value, label }) => ({ value, label }))} onChange={setAction} /></label><label className="block text-xs font-medium text-[var(--studio-muted)]">{translate("script.model_98fd0c")}<div className="mt-1"><ModelPicker config={config} value={model} onChange={setModel} capability="text" fullWidth /></div></label><div className="rounded-lg border border-[var(--studio-line)] bg-[var(--studio-surface-soft)] p-3 text-xs text-[var(--studio-muted)]"><p>{translate("script.currentTargetCount_a7f10b", { value0: cardTarget?.label || aiTarget?.label || (selectedEpisodeId ? translate("script.selectedEpisode") : translate("script.currentSection")) })}</p><p className="mt-1">{translate("script.estimatedCreditsCount_2061fd", { value0: creditCost === undefined ? translate("script.notConfigured") : translate("script.countCredits", { value0: creditCost }) })}</p></div><Input.TextArea rows={4} value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder={translate("script.addRequirementsForStyleLengthPacingOrSettingsToPreserve")} />{isBlocked ? <Alert type="warning" showIcon title={blockedReason} className="text-xs" /> : null}<Button type="primary" block loading={running} disabled={isBlocked || !pricingCurrent} icon={<Sparkles className="size-4" />} onClick={execute}>{translate("script.generateReviewDraft")}</Button>{running ? <p role="status" className="text-center text-xs text-[var(--studio-muted)]">{translate("script.aiIsProcessingPleaseWait")}</p> : null}<div className="border-t border-[var(--studio-line)] pt-4"><h3 className="text-sm font-medium text-[var(--studio-ink)]">{translate("script.pendingDrafts")}</h3><div className="mt-2 space-y-2">{visibleDrafts.map((draft) => <div key={draft.id} className="rounded-lg border border-[var(--studio-line)] p-3"><div className="flex items-center justify-between gap-2"><button type="button" className="truncate text-left text-sm font-medium text-[var(--studio-text)]" onClick={() => setPreview(draft)}>{draftTitle(draft, project.episodes, translate)}</button>{isScriptAiDraftStale(draft, project.revision) ? <Tag color="orange">{translate("script.outdated")}</Tag> : <Tag color="blue">{translate("script.pendingApproval")}</Tag>}</div><div className="mt-2 flex gap-2"><Button size="small" onClick={() => setPreview(draft)}>{translate("script.previewChanges")}</Button><Button size="small" danger icon={<Trash2 className="size-3.5" />} loading={discardingId === draft.id} disabled={Boolean(discardingId) && discardingId !== draft.id} onClick={() => void discard(draft)}>{translate("script.discard")}</Button></div></div>)}{!visibleDrafts.length ? <p className="text-xs text-[var(--studio-faint)]">{translate("script.noPendingDrafts")}</p> : null}</div></div></div><Modal width={920} title={translate("script.aiDraftChanges")} open={Boolean(preview)} onCancel={() => setPreview(null)} footer={<div className="flex justify-end gap-2"><Button onClick={() => setPreview(null)}>{translate("script.reviewLater")}</Button><Button type="primary" icon={<Check className="size-4" />} disabled={Boolean(preview && isScriptAiDraftStale(preview, project.revision)) || !["saved", "idle"].includes(saveStatus)} loading={running} onClick={() => void applyDraft()}>{translate("script.apply")}</Button></div>}>{preview ? <div>{isScriptAiDraftStale(preview, project.revision) ? <Alert type="warning" showIcon title={translate("script.projectContentHasChanged")} description={translate("script.thisDraftIsBasedOnAnOlderRevisionAndCannot")} className="mb-4" /> : null}{directionCandidates.length ? <div className="mb-4 grid gap-2 md:grid-cols-3">{directionCandidates.map((candidate, index) => <button key={index} type="button" className="rounded-lg border border-[var(--studio-line)] p-3 text-left hover:border-[var(--studio-primary-line)]" onClick={() => { const next = { ...preview.draftData, selectedIndex: index }; setDraftJson(JSON.stringify(next, null, 2)); }}><strong className="text-sm text-[var(--studio-ink)]">{String(candidate.name || translate("script.directionCount", { value0: index + 1 }))}</strong><p className="mt-2 text-xs leading-5 text-[var(--studio-muted)]">{String(candidate.logline || "")}</p></button>)}</div> : null}<DraftDiffSummary sourceData={preview.sourceData} draftData={preview.draftData} /><Collapse size="small" className="mt-4" items={[{ key: "json", label: translate("script.advancedEditingRawJson"), children: <div className="grid gap-4 md:grid-cols-2"><label className="text-sm font-medium text-[var(--studio-text)]">{translate("script.before")}<Input.TextArea className="mt-2 font-mono text-xs" rows={22} readOnly value={JSON.stringify(preview.sourceData, null, 2)} /></label><label className="text-sm font-medium text-[var(--studio-text)]">{translate("script.aiDraftEditable")}<Input.TextArea className="mt-2 font-mono text-xs" rows={22} value={draftJson} onChange={(event) => setDraftJson(event.target.value)} /></label></div> }]} /></div> : null}</Modal></aside>;
 }

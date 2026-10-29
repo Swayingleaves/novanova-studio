@@ -75,6 +75,7 @@ import { EmailCampaignManagement } from "./components/email-campaign-management"
 import { StoryBiblePricingManagement } from "./components/story-bible-pricing-management";
 import { ComicDramaFinalPromptPricingManagement } from "./components/comic-drama-final-prompt-pricing-management";
 import { EpisodeBodiesPricingManagement } from "./components/episode-bodies-pricing-management";
+import { ScriptAiActionPricingManagement } from "./components/script-ai-action-pricing-management";
 import { GenerationStyleCover } from "@/features/generation/components/generation-style-picker";
 import { uploadImage } from "@/features/storage/services/image-storage";
 import { CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactionIcon, creditTransactionTypeLabel, formatCreditChange, formatCredits, formatCreditTime, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
@@ -141,6 +142,7 @@ export default function AdminSystemPage() {
                                 items={[
                                     { key: "storyBible", label: translate("administration.scriptStoryBiblePricing"), children: <StoryBiblePricingManagement /> },
                                     { key: "episodeBodies", label: translate("administration.scriptEpisodeBodiesPricing"), children: <EpisodeBodiesPricingManagement /> },
+                                    { key: "aiActions", label: translate("administration.scriptAiActionPricing"), children: <ScriptAiActionPricingManagement /> },
                                     { key: "comicDramaFinalPrompt", label: translate("administration.comicDramaFinalPromptPricing"), children: <ComicDramaFinalPromptPricingManagement /> },
                                 ]}
                             />,

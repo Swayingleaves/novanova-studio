@@ -48,10 +48,8 @@ public class ScriptAgentService {
     /** 整项目AI调用允许的最大上下文字符数。 */
     private static final int MAXIMUM_CONTEXT_CHARACTERS = 120_000;
 
-    /** 文本优化动作集合。 */
-    private static final Set<String> TEXT_ACTIONS = Set.of(
-            "polish", "expand", "condense", "rewrite", "colloquialize", "dialogue", "conflict",
-            "suspense", "twist", "motivation", "emotion", "climax", "rhythm", "style");
+    /** 文本优化动作集合，动作目录由 {@link ScriptAiActions} 统一维护。 */
+    private static final Set<String> TEXT_ACTIONS = Set.copyOf(ScriptAiActions.TEXT_OPTIMIZATIONS);
 
     /** 分析总结中禁止出现的单一百分比评分。 */
     private static final Pattern PERCENTAGE_SCORE = Pattern.compile("(?<!\\d)\\d{1,3}(?:\\.\\d+)?\\s*%");
@@ -73,6 +71,9 @@ public class ScriptAgentService {
 
     /** 剧本领域服务。 */
     private final ScriptService scriptService;
+
+    /** 剧本AI动作定价服务，扣费前按动作取价。 */
+    private final ScriptAiActionPricingService pricingService;
 
     /** Agent结构化返回校验器。 */
     private final Validator validator;
@@ -279,14 +280,16 @@ public class ScriptAgentService {
                     JSONObject sourceData = scriptService.targetSnapshot(snapshot, request.targetType(), request.targetId());
                     Object context = buildContext(snapshot, request.targetType(), request.targetId());
                     validateContextSize(context, request.targetType());
-                    return modelFactory.resolveTextModel(request.model()).flatMap(model -> executeChargedOperation(
-                            userId, model.ownerTeamId(), model.creditCost(), "剧本AI草稿生成", operationId -> callDraftAgent(
-                                    userId, operationId, model, request, context)
-                                    .flatMap(generated -> validateGeneratedDraft(generated, request.actionType(),
-                                            request.targetType(), request.targetId(), snapshot))
-                                    .flatMap(draftData -> scriptService.saveAiDraft(userId, request.projectId(),
-                                            request.expectedRevision(), request.actionType(), request.targetType(), request.targetId(),
-                                            request.instruction(), model.modelValue(), model.creditCost(), sourceData, draftData))));
+                    return modelFactory.resolveTextModel(request.model())
+                            .flatMap(model -> pricingService.requireCredits(model.modelConfigId(), request.actionType())
+                                    .flatMap(credits -> executeChargedOperation(
+                                            userId, model.ownerTeamId(), credits, "剧本AI草稿生成", operationId -> callDraftAgent(
+                                                    userId, operationId, model, request, context)
+                                                    .flatMap(generated -> validateGeneratedDraft(generated, request.actionType(),
+                                                            request.targetType(), request.targetId(), snapshot))
+                                                    .flatMap(draftData -> scriptService.saveAiDraft(userId, request.projectId(),
+                                                            request.expectedRevision(), request.actionType(), request.targetType(), request.targetId(),
+                                                            request.instruction(), model.modelValue(), credits, sourceData, draftData)))));
                 }));
     }
 

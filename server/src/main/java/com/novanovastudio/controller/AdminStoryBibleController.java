@@ -52,11 +52,11 @@ public class AdminStoryBibleController {
      */
     @GetMapping("/getPricing")
     public Mono<ApiResponse<List<StoryBibleDtos.ModelPricing>>> getPricing(ServerHttpRequest httpRequest) {
-        log.info("查询故事知识库价格请求: url={}, headers={}", httpRequest.getURI(), sanitizedHeaders(httpRequest));
+        log.debug("查询故事知识库价格请求: url={}, headers={}", httpRequest.getURI(), sanitizedHeaders(httpRequest));
         return adminGuard.requireAdmin()
                 .then(Mono.defer(pricingService::getPricing))
                 .map(ApiResponse::ok)
-                .doOnNext(response -> log.info("查询故事知识库价格响应: response={}", response));
+                .doOnNext(response -> log.debug("查询故事知识库价格响应: response={}", response));
     }
 
     /**
@@ -69,11 +69,11 @@ public class AdminStoryBibleController {
     @PostMapping("/savePricing")
     public Mono<ApiResponse<StoryBibleDtos.ModelPricing>> savePricing(@RequestBody StoryBibleDtos.SavePricingRequest request,
                                                                      ServerHttpRequest httpRequest) {
-        log.info("保存故事知识库价格请求: url={}, headers={}, request={}", httpRequest.getURI(), sanitizedHeaders(httpRequest), request);
+        log.debug("保存故事知识库价格请求: url={}, headers={}, request={}", httpRequest.getURI(), sanitizedHeaders(httpRequest), request);
         return adminGuard.requireAdmin()
                 .then(Mono.defer(() -> pricingService.savePricing(request)))
                 .map(ApiResponse::ok)
-                .doOnNext(response -> log.info("保存故事知识库价格响应: response={}", response));
+                .doOnNext(response -> log.debug("保存故事知识库价格响应: response={}", response));
     }
 
     /**

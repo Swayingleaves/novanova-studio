@@ -334,7 +334,7 @@ class StoryboardAgentServiceTest {
         var agentFactory = mock(AgentScopeAgentFactory.class);
         var agent = mock(io.agentscope.core.ReActAgent.class);
         var message = mock(io.agentscope.core.message.Msg.class);
-        var model = new AgentScopeModelFactory.TextModelSelection(null, "channel::model", "模型", "渠道", java.math.BigDecimal.TEN, 801L);
+        var model = new AgentScopeModelFactory.TextModelSelection(null, "model-config", "channel::model", "模型", "渠道", java.math.BigDecimal.TEN, 801L);
         var request = new StoryboardDtos.ComposePromptsRequest("剧本文本", "生成镜头", VISUAL_STYLE,
                 "channel::model", List.of(shot("shot-1", 1)), List.of());
         when(currentUser.currentUserId()).thenReturn(Mono.just(8L));

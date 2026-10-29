@@ -74,7 +74,7 @@ class ComicDramaFinalPromptPricingServiceTest {
     /** 免费与六位小数价格都保留精度，每次启动仅读取一次快照。 */
     @Test
     void shouldPrepareFreeAndFractionalPricesWithoutGeneralPriceFallback() {
-        var model = new AgentScopeModelFactory.TextModelSelection(null, "channel::text", "text", "渠道", BigDecimal.TEN, 0);
+        var model = new AgentScopeModelFactory.TextModelSelection(null, "model-id", "channel::text", "text", "渠道", BigDecimal.TEN, 0);
         when(modelFactory.resolveTextModel("channel::text")).thenReturn(Mono.just(model));
         when(repository.findPricing("model-id")).thenReturn(Mono.just(pricing("0", 1)), Mono.just(pricing("1.234567", 2)));
         assertEquals(0, service.prepare("channel::text", 1L).block().credits().signum());

@@ -96,6 +96,7 @@
     "couldNotLoadRefreshThePageAndTryAgain": "读取失败，请刷新页面重试",
     "loading": "读取中…",
     "notConfiguredSetThePriceUnderScriptPricingEpisodeText": "未配置，请到后台「创作定价 · 剧本创作-分集正文」配置",
+    "thisActionHasNoPriceAskTheAdministratorToSetItUnderCreationPricing": "当前动作尚未定价，请到后台「创作定价 · 剧本创作-AI 助手动作」配置",
     "countCreditsEpisode": "{value0} 积分 / 集",
     "oneCallPerEpisodeCreditsAreReservedForTheSelected": "一集一次调用，按所选分集数量预扣；只结算真正生成成功的分集，取消或失败时未完成部分的积分退回。",
     "storyOverview": "故事概览",

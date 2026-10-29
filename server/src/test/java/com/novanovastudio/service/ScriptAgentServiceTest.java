@@ -62,6 +62,8 @@ class ScriptAgentServiceTest {
     @Mock private CreditService creditService;
     /** 剧本领域服务。 */
     @Mock private ScriptService scriptService;
+    /** 剧本AI动作定价服务。 */
+    @Mock private ScriptAiActionPricingService pricingService;
     /** 小说改编来源仓储。 */
     @Mock private NovelAdaptationRepository novelAdaptationRepository;
     /** 草稿来源保存事务。 */
@@ -78,7 +80,7 @@ class ScriptAgentServiceTest {
     void setUp() {
         validator = Validation.buildDefaultValidatorFactory().getValidator();
         service = new ScriptAgentService(currentUserProvider, modelFactory, agentFactory,
-                new NovanovaProperties(), creditService, scriptService, validator,
+                new NovanovaProperties(), creditService, scriptService, pricingService, validator,
                 novelAdaptationRepository, transactionalOperator);
     }
 
@@ -345,7 +347,7 @@ class ScriptAgentServiceTest {
                     List.of(new NovelAdaptationDtos.Fact("fact-character", 1, "character", "人物0", "事实设定", "", List.of())));
         }
         AgentScopeModelFactory.TextModelSelection model = new AgentScopeModelFactory.TextModelSelection(
-                null, "text-model", "测试模型", "openai", java.math.BigDecimal.ZERO, 0L);
+                null, "model-config", "text-model", "测试模型", "openai", java.math.BigDecimal.ZERO, 0L);
         Mono<ScriptDtos.GeneratedDraft> result = ReflectionTestUtils.invokeMethod(service, "callDraftAgent", 8L,
                 "operation-a", model, new ScriptDtos.GenerateDraftRequest("project-a", 0, "polish", targetType,
                         targetId, "润色正文", "text-model"), context);

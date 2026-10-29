@@ -128,6 +128,7 @@ public class AgentScopeModelFactory {
                     return teamRepository.findResource("model", modelConfig.id()).map(resource -> new TextModelSelection(
                             guardModel(createModel(scopedChannel, thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort()),
                                     modelConfig.customBodyParameters()), modelConfig.id(), modelContext),
+                            modelConfig.id(),
                             normalizedModel,
                             modelName,
                             channel.name(),
@@ -290,12 +291,13 @@ public class AgentScopeModelFactory {
      * 已解析的文本模型与积分配置。
      *
      * @param agentModel Model AgentScope模型实例
+     * @param modelConfigId String 模型配置标识，用于查询该模型的专项定价
      * @param modelValue String 渠道模型编码
      * @param modelName String 模型名称
      * @param provider String 渠道名称
      * @param creditCost int 单次积分价格
      */
-    public record TextModelSelection(Model agentModel, String modelValue, String modelName, String provider, BigDecimal creditCost, long ownerTeamId) {
+    public record TextModelSelection(Model agentModel, String modelConfigId, String modelValue, String modelName, String provider, BigDecimal creditCost, long ownerTeamId) {
     }
 
     /**

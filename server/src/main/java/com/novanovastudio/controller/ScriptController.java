@@ -1,8 +1,10 @@
 package com.novanovastudio.controller;
 
 import com.novanovastudio.common.ApiResponse;
+import com.novanovastudio.dto.ScriptAiActionPricingDtos;
 import com.novanovastudio.dto.ScriptDtos;
 import com.novanovastudio.service.ScriptAgentService;
+import com.novanovastudio.service.ScriptAiActionPricingService;
 import com.novanovastudio.service.ScriptService;
 import jakarta.validation.Valid;
 import java.util.LinkedHashMap;
@@ -46,6 +48,9 @@ public class ScriptController {
 
     /** 剧本专用AI服务。 */
     private final ScriptAgentService scriptAgentService;
+
+    /** 剧本AI动作定价服务。 */
+    private final ScriptAiActionPricingService aiActionPricingService;
 
     /**
      * 分页查询当前用户的剧本项目。
@@ -317,6 +322,19 @@ public class ScriptController {
     public Mono<ApiResponse<ScriptDtos.AiDraft>> generateDraft(
             @Valid @RequestBody ScriptDtos.GenerateDraftRequest request, ServerHttpRequest httpRequest) {
         return execute("生成剧本AI草稿", httpRequest, request, scriptAgentService.generateDraft(request));
+    }
+
+    /**
+     * 查询所选文本模型下各AI动作的积分单价，供助手面板在发起前显示与拦截。
+     *
+     * @param model 模型值，形如 channelId::modelName
+     * @param httpRequest 当前HTTP请求
+     * @return 各动作单价，未定价的动作为空
+     */
+    @GetMapping("/getAiActionPricing")
+    public Mono<ApiResponse<List<ScriptAiActionPricingDtos.ActionPricing>>> getAiActionPricing(
+            @RequestParam("model") String model, ServerHttpRequest httpRequest) {
+        return execute("查询剧本AI动作单价", httpRequest, model, aiActionPricingService.findActions(model));
     }
 
     /**

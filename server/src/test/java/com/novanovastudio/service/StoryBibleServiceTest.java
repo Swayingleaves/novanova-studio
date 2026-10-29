@@ -464,7 +464,7 @@ class StoryBibleServiceTest {
     private void stubQuote(List<StoryBibleDtos.PricingTier> tiers) {
         when(sourceRepository.findByProject(USER_ID, PROJECT_ID)).thenReturn(Mono.just(document(3, 3L)));
         when(modelFactory.resolveTextModel(MODEL)).thenReturn(Mono.just(
-                new AgentScopeModelFactory.TextModelSelection(null, MODEL, "gpt", "openai", java.math.BigDecimal.ZERO, 0L)));
+                new AgentScopeModelFactory.TextModelSelection(null, "config-1", MODEL, "gpt", "openai", java.math.BigDecimal.ZERO, 0L)));
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(new PersistenceDtos.ModelConfig(
                 "config-1", "channel-1", "gpt", "text", List.of(), false, 0, java.math.BigDecimal.valueOf(0), false, null))));
         when(sourceRepository.normalizedText("doc-1")).thenReturn(Mono.just(TEXT));
