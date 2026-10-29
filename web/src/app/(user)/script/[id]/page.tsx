@@ -278,8 +278,8 @@ export default function ScriptWorkspacePage() {
 
     return (
         <main className="studio-page flex h-full min-h-0 flex-col overflow-hidden">
-            {/* 右侧预留全局浮动操作区（版本对比/文档/GitHub/个人中心，fixed right-3 约 256px）的宽度，避免两组按钮重叠 */}
-            <header className="flex flex-wrap items-center gap-3 border-b border-[var(--studio-line)] bg-[var(--studio-panel-solid)] py-3 pl-4 pr-[260px]">
+            {/* 右侧预留全局浮动操作区（社群/版本对比/文档/GitHub/个人中心，fixed right-3 约 300px）的宽度，避免两组按钮重叠 */}
+            <header className="flex flex-wrap items-center gap-3 border-b border-[var(--studio-line)] bg-[var(--studio-panel-solid)] py-3 pl-4 pr-[300px]">
                 <Button type="text" aria-label={translate("script.backToProjectLibrary")} icon={<ArrowLeft className="size-4" />} onClick={leaveProjectList} />
                 <div className="min-w-0 flex-1"><h1 className="truncate text-base font-semibold text-[var(--studio-ink)]">{project.overview.title}</h1><div className="mt-1 flex items-center gap-2 text-xs text-[var(--studio-faint)]"><span>{getSaveLabels(translate)[saveStatus]}</span><span>{translate("script.revisionCount_95045f", { value0: project.revision })}</span><span>{project.completionRate}%</span></div></div>
                 <Progress type="circle" size={34} percent={project.completionRate} strokeWidth={10} format={(percent) => `${percent}`} strokeColor="var(--studio-primary)" />

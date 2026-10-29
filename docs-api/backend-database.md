@@ -878,3 +878,13 @@ V61 按空间、用户、原配置和对象键精确关联已有媒体及原文�
 `users` 新增 `creation_tour_version`（`INTEGER NOT NULL DEFAULT 0`）：已完成创作页导览的版本，0 表示尚未完成。图片创作与视频创作共用同一个字段，因此先进哪一个就由哪一个展示导览，另一个不再重复展示。
 
 写入走 `POST /api/v1/auth/completeCreationTour`，同样使用 `GREATEST(...)` 保证幂等。迁移不写 `UPDATE`，存量账号保持 0。
+
+## 平台社群配置（V75）
+
+| 表 | 关键字段及约束 |
+| --- | --- |
+| `platform_community_configs` | `name`（最长 60，同一份配置内不区分大小写唯一）、`image_url`（最长 2048，仅 `http/https`）、`sort_order`（按提交顺序从 0 递增）、`created_at`/`updated_at`；索引 `(sort_order, id)` |
+
+社群配置是平台级单份列表，不归属任何团队，也不保存创建人。公开读取走 `GET /api/v1/community/listCommunityConfigs`，只返回 `name`、`imageUrl`、`sortOrder`，按 `sort_order` 升序；平台管理员整批保存走 `POST /api/v1/admin/community/saveCommunityConfigs`，请求中的数组顺序即展示顺序，服务端重算排序值。
+
+保存时先在事务内用咨询锁 `hashtext('platform-community-configs')` 串行化，再删除旧行并按序重新插入，任何一条校验失败或写入失败都整批回滚，数据库不会留下部分更新。团队作用域一律拒绝写入，只有平台空间的全局管理员可以修改；图片地址不做下载校验，上传复用媒体上传接口，删除配置不会删除已上传的媒体文件。
