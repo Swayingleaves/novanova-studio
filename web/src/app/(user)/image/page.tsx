@@ -6,7 +6,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { BookOpen, CloudUpload, Download, FolderPlus, Link2, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, TriangleAlert, Upload } from "lucide-react";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
 
@@ -34,6 +34,7 @@ import { useGenerationConversations } from "@/features/generation/hooks/use-gene
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { selectGenerationAttachments } from "@/features/generation/lib/generation-retry";
 import { imageReferenceAttachments, referenceMediaType, referenceMediaUrl } from "@/features/generation/lib/reference-attachments";
+import { reconcileImageMentions, type PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { useRecentReferenceImages } from "@/features/generation/hooks/use-recent-reference-images";
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
@@ -47,6 +48,7 @@ import { ModelPicker } from "@/features/settings/components/model-picker";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 import { deleteStoredImages, resolveImageStorageInfo, resolveImageUrl, reuseOrUploadImage, uploadImage } from "@/features/storage/services/image-storage";
 import { downloadMedia } from "@/features/storage/services/media-download";
+import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
 import { uploadRemoteObjectToStorage } from "@/features/storage/services/object-storage";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
@@ -139,6 +141,15 @@ export default function ImagePage() {
     const [skillError, setSkillError] = useState<string | null>(null);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
+    const promptReferences = useMemo<PromptImageReference[]>(() => references.map((reference, index) => ({
+        id: reference.id,
+        name: reference.name,
+        label: imageReferenceLabel(index),
+        previewUrl: reference.dataUrl,
+        kind: "image",
+        disabled: uploadingReferenceIds.includes(reference.id),
+    })), [references, uploadingReferenceIds, translate.locale]);
+    const previousImageReferencesRef = useRef<PromptImageReference[]>([]);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [imageDraftSettingsModified, setImageDraftSettingsModified] = useState(false);
@@ -151,6 +162,14 @@ export default function ImagePage() {
     const [managementMode, setManagementMode] = useState(false);
     const initialPromptAppliedRef = useRef(false);
     const [focusInitialPrompt, setFocusInitialPrompt] = useState(false);
+
+    useEffect(() => {
+        const previous = previousImageReferencesRef.current;
+        previousImageReferencesRef.current = promptReferences;
+        const currentLabels = new Map(promptReferences.map((reference) => [reference.id, reference.label]));
+        if (!previous.some((reference) => currentLabels.get(reference.id) !== reference.label)) return;
+        setPrompt((current) => reconcileImageMentions(current, previous, promptReferences));
+    }, [promptReferences]);
 
     useEffect(() => {
         if (initialPromptAppliedRef.current) return;
@@ -689,9 +708,10 @@ export default function ImagePage() {
         setDeleteConfirmOpen(false);
     };
 
-    const downloadImage = async (image: GeneratedImage, index: number) => {
+    const downloadImage = async (image: GeneratedImage) => {
         try {
-            await downloadMedia(image, `image-${index + 1}.png`);
+            const extension = image.mimeType?.split("/")[1] || image.dataUrl.match(/^data:image\/([^;]+)/)?.[1] || "png";
+            await downloadMedia(image, createMediaDownloadFileName("img", extension));
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("image.failedToDownloadImage"));
         }
@@ -703,7 +723,7 @@ export default function ImagePage() {
             prompt: round.prompt,
             generationPrompt: round.generationPrompt,
             references: round.references,
-            onDownload: () => downloadImage(image, index),
+            onDownload: () => downloadImage(image),
         });
     };
 
@@ -893,7 +913,14 @@ export default function ImagePage() {
             iconOnly: true,
             disabled: !prompt.trim() || isStreaming || isQueued || activeConversationPending || isPromptOptimizing,
             loading: isPromptOptimizing,
-            onClick: () => void optimizePrompt({ operationId: "image-page", generationType: "image", prompt, generationStyleIds: selectedStyles.map((style) => style.id), onSuccess: setPrompt }),
+            onClick: () => void optimizePrompt({
+                operationId: "image-page",
+                generationType: "image",
+                prompt,
+                generationStyleIds: selectedStyles.map((style) => style.id),
+                imageReferences: promptReferences,
+                onSuccess: (optimizedPrompt) => setPrompt(reconcileImageMentions(optimizedPrompt, promptReferences, previousImageReferencesRef.current)),
+            }),
         },
         {
             key: "assets",
@@ -954,7 +981,7 @@ export default function ImagePage() {
                         media: { kind: "image", url: image.dataUrl, ossUrl: image.objectStorage?.url, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
                         prompt: round?.userText || prompt,
                         references: roundReferences.length ? roundReferences : references,
-                        onDownload: () => downloadImage(image, index),
+                        onDownload: () => downloadImage(image),
                     });
                 },
             }),
@@ -1047,6 +1074,7 @@ export default function ImagePage() {
                     value: prompt,
                     placeholder: translate("image.describeSubjectStyleCompositionLightingAndPurpose"),
                     references: referenceChips,
+                    imageReferences: promptReferences,
                     styleOptions,
                     selectedStyles,
                     styleLoading,

@@ -295,6 +295,8 @@ export type ServerModelConfig = {
     modelType: "image" | "video" | "text";
     capabilities: string[];
     defaultModel: boolean;
+    /** 是否开启，关闭后不出现在用户的模型下拉选择中。 */
+    enabled: boolean;
     sortOrder: number;
     creditCost: number;
     creditUnit: ModelCreditUnit;
@@ -1094,7 +1096,7 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "convertImageSizeToPixels" | "imageSizeMappings" | "customBodyParameters" | "videoBillingConfiguration" | "imageBillingConfiguration" | "displayName" | "modelIcon" | "isCustomModel" | "customModelConfig">) {
+export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "enabled" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "convertImageSizeToPixels" | "imageSizeMappings" | "customBodyParameters" | "videoBillingConfiguration" | "imageBillingConfiguration" | "displayName" | "modelIcon" | "isCustomModel" | "customModelConfig">) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 
@@ -1333,7 +1335,7 @@ function readOptionalText(value: unknown): string | undefined {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-async function serverGet<T>(path: string, options?: { auth?: boolean }) {
+export async function serverGet<T>(path: string, options?: { auth?: boolean }) {
     return serverFetch<T>(path, { method: "GET" }, options);
 }
 

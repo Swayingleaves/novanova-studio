@@ -33,6 +33,7 @@ import { ModelPicker } from "@/features/settings/components/model-picker";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 import { deleteStoredMedia, resolveMediaStorageInfo, resolveMediaUrl, uploadMediaFile } from "@/features/storage/services/file-storage";
 import { downloadMedia } from "@/features/storage/services/media-download";
+import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
 import { resolveImageUrl, uploadImage } from "@/features/storage/services/image-storage";
 import { uploadRemoteObjectToStorage } from "@/features/storage/services/object-storage";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
@@ -1288,7 +1289,8 @@ export default function VideoPage() {
         try {
             // 历史生成记录仅保存远程地址时，先登记为服务端媒体，确保下载仍由后端代理。
             const storageKey = video.storageKey || (await uploadMediaFile(video.url, "video", { mimeType: video.mimeType })).storageKey;
-            await downloadMedia({ storageKey }, "video.mp4");
+            const extension = video.mimeType.split("/")[1] || "mp4";
+            await downloadMedia({ storageKey }, createMediaDownloadFileName("video", extension));
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("video.failedToDownloadVideo"));
         }

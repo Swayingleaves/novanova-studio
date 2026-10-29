@@ -198,6 +198,9 @@ public final class PersistenceRecords {
         /** 是否为默认模型 */
         private Boolean defaultModel;
 
+        /** 是否开启，关闭后不出现在用户的模型下拉选择中 */
+        private Boolean enabled;
+
         /** 排序值 */
         private Integer sortOrder;
 

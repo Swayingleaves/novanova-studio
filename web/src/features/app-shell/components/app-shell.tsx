@@ -8,6 +8,7 @@ import Link from "next/link";
 import { BookOpen, Layers3, Menu } from "lucide-react";
 
 import { AppSidebar } from "@/features/app-shell/components/app-sidebar";
+import { CommunityMenu } from "@/features/community/components/community-menu";
 import { GitHubLink } from "@/features/app-shell/components/github-link";
 import { UserCreditMenu } from "@/features/app-shell/components/user-credit-menu";
 import { WelcomeModal } from "@/features/app-shell/components/welcome-modal";
@@ -47,6 +48,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             {!hideSidebar ? (
                 <div className="fixed right-3 top-3 z-40 flex items-center gap-2">
+                    <CommunityMenu className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]" />
                     <Link
                         href="/editions"
                         className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]"

@@ -54,7 +54,8 @@ public class TokenAuthenticationWebFilter implements WebFilter {
             PathPatternParser.defaultInstance.parse("/api/v1/auth/oauth/**"),
             PathPatternParser.defaultInstance.parse("/api/v1/ai/model/listModels"),
             PathPatternParser.defaultInstance.parse("/api/v1/config/getRuntimeConfig"),
-            PathPatternParser.defaultInstance.parse("/api/v1/homepage/listShowcases")
+            PathPatternParser.defaultInstance.parse("/api/v1/homepage/listShowcases"),
+            PathPatternParser.defaultInstance.parse("/api/v1/community/listCommunityConfigs")
     );
 
     /** Token服务 */

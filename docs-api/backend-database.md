@@ -123,6 +123,7 @@ flowchart TB
 | `custom_body_parameters` | `JSONB` | 模型 JSON POST 请求的自定义请求体参数，顶层必须为 JSON 对象，默认 `{}`。 |
 | `video_billing_configuration` | `JSONB` | 视频模型分档计费配置，包含唯一计费方式、最短生成秒数，以及文生视频、图生视频、全能参考三个模式各自的 `Auto/480p/720p/768p/1080p/2k/4k` 单价；空价格表示该模式和分辨率不可用。 |
 | `image_billing_configuration` | `JSONB` | 图片模型的分辨率价目表，形如 `{"resolutionPrices":{"1K":1,"2K":4,"4K":9}}`，接口字段为 `imageBillingConfiguration`。配置后按请求 `parameters.resolution`（缺省或 `auto` 按 `2K`）取价，请求档位未配置时直接报错；整列为空表示沿用模型 `credit_cost` 单价。文本、视频模型不使用。 |
+| `is_enabled` | `BOOLEAN` | 模型是否开启，默认 `true`，接口字段为 `enabled`。关闭后该模型不出现在用户的模型下拉选择中；默认模型不能关闭，必须先切换该类型的默认模型。关闭只影响模型目录，已进入队列的任务仍按原模型执行。 |
 | `display_name` | `VARCHAR(255)` | 模型展示名称，为空或与真实模型名相同时展示真实模型名，仅影响展示不影响调用。 |
 | `model_icon` | `VARCHAR(64)` | 模型展示图标标识，为空时按模型名或渠道自动匹配，仅影响展示不影响调用。 |
 | `is_custom_model` | `BOOLEAN` | 是否启用自定义模型调用，独立于渠道调用格式，仅图片/视频模型支持，默认 `false`。 |
@@ -503,3 +504,13 @@ CREATE INDEX idx_api_logs_status_code ON api_logs (status_code);
 ## 网站双语任务提示（V33）
 
 `V33__Add_Localized_Task_Messages.sql` 为 `ai_generation_tasks`、`creation_agent_request`、`video_composition_tasks` 同步增加 `error_message_key` 与 `error_message_arguments`。写入终态时原子保存诊断、消息键和JSON参数；查询及事件订阅按当前请求语言格式化。主Agent的运行态、取消、中断和失败路径使用相同约束，不需要按语言增加索引。
+
+## 平台社群配置（V37）
+
+| 表 | 关键字段及约束 |
+| --- | --- |
+| `platform_community_configs` | `name`（最长 60，同一份配置内不区分大小写唯一）、`image_url`（最长 2048，仅 `http/https`）、`sort_order`（按提交顺序从 0 递增）、`created_at`/`updated_at`；索引 `(sort_order, id)` |
+
+社群配置是平台级单份列表，不保存创建人。公开读取走 `GET /api/v1/community/listCommunityConfigs`，只返回 `name`、`imageUrl`、`sortOrder`，按 `sort_order` 升序；管理员整批保存走 `POST /api/v1/admin/community/saveCommunityConfigs`，请求中的数组顺序即展示顺序，服务端重算排序值。
+
+保存时先在事务内用咨询锁 `hashtext('platform-community-configs')` 串行化，再删除旧行并按序重新插入，任何一条校验失败或写入失败都整批回滚，数据库不会留下部分更新。只有全局管理员可以修改；图片地址不做下载校验，上传复用媒体上传接口，删除配置不会删除已上传的媒体文件。
