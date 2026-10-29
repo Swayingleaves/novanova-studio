@@ -9,6 +9,7 @@ import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { useTranslation } from "@/features/locale/use-translation";
 import { currentLanguageTag } from "@/features/locale/translate";
 import { formatStorageFileBytes, storageFileCategories } from "@/features/storage/capacity-format";
+import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
 import { deleteStorageFile, getStorageFileAccess, listStorageFiles, type StorageFile, type StorageFileQuery } from "@/services/api/storage";
 
 const fileIcons = { image: FileImage, video: FileVideo, audio: FileAudio, document: FileText, other: File };
@@ -65,7 +66,12 @@ export function CloudFiles() {
             if ((useTeamStore.getState().team?.id || 0) !== teamId || useUserStore.getState().user?.id !== userId) return;
             const anchor = document.createElement("a");
             anchor.href = result.url;
-            anchor.download = file.fileName;
+            if (file.category === "image" || file.category === "video") {
+                const extension = file.fileName.match(/\.([^.]+)$/)?.[1] || file.mimeType.split("/")[1];
+                anchor.download = createMediaDownloadFileName(file.category === "image" ? "img" : "video", extension);
+            } else {
+                anchor.download = file.fileName;
+            }
             anchor.referrerPolicy = "no-referrer";
             document.body.append(anchor);
             anchor.click();

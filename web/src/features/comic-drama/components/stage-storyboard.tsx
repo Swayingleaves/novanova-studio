@@ -49,6 +49,7 @@ import { exportComicDramaVideo, getLatestComicDramaVideoExport, listComicDramaAs
 import { downloadComicDramaExportVideo, getServerMediaInfo } from "@/services/api/server";
 import { cancelCompositionTask, waitVideoCompositionTask, type VideoCompositionTask } from "@/services/api/video-composition";
 import { readAudioMetadata, uploadAudioFile } from "@/features/storage/services/audio-storage";
+import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
 import { nanoid } from "nanoid";
 import { useMediaAutoRefresh } from "../hooks/use-media-auto-refresh";
 import { usePendingImpactTargets } from "../hooks/use-pending-impact-targets";
@@ -388,7 +389,7 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             const url = URL.createObjectURL(blob);
             const anchor = document.createElement("a");
             anchor.href = url;
-            anchor.download = translate("comicDrama.storyboardMp4");
+            anchor.download = createMediaDownloadFileName("video", "mp4");
             document.body.append(anchor);
             anchor.click();
             anchor.remove();

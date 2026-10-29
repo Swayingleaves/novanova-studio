@@ -32,6 +32,7 @@ import { getImageBlob, resolveImageUrl, reuseOrUploadImage, uploadImage, type Up
 import { stopCanvasAudio } from "../services/canvas-audio-playback";
 import { mergeAudioReferences } from "../utils/audio-references";
 import { downloadMedia } from "@/features/storage/services/media-download";
+import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
 import { isAudioFile, uploadAudioFile } from "@/features/storage/services/audio-storage";
 import { getMediaBlob, resolveMediaUrl, uploadMediaFile, type UploadedFile } from "@/features/storage/services/file-storage";
 import { uploadObjectToStorage, uploadRemoteObjectToStorage } from "@/features/storage/services/object-storage";
@@ -2977,7 +2978,9 @@ function CanvasWorkspacePage() {
                 return;
             }
             if ((!isImageNode(node) && !isVideoNode(node)) || !node.content.source) return;
-            saveAs(node.content.source, `canvas-${node.kind}-${node.id}.${isVideoNode(node) ? "mp4" : imageExtension(node.content.source)}`);
+            const isVideo = isVideoNode(node);
+            const extension = isVideo ? node.content.mimeType?.split("/")[1] || "mp4" : node.content.mimeType?.split("/")[1] || imageExtension(node.content.source);
+            saveAs(node.content.source, createMediaDownloadFileName(isVideo ? "video" : "img", extension));
         },
         [message],
     );
