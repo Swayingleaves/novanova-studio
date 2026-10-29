@@ -39,13 +39,21 @@
   </thead>
   <tbody>
     <tr>
-      <td align="left" width="33%">
-        <img src="github_images/sponsor/notoken.png" alt="notoken" width="220" />
+      <td align="center" width="33%">
+        <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/sponsor/notoken.png" alt="notoken" width="220" />
       </td>
       <td align="left" width="33%">
         https://notoken.pro/ <br>
         让每一次调用 都释放创造力 <br>
         seedance渠道超低折扣
+      </td>
+    </tr>
+    <tr>
+      <td align="center" width="33%">
+        <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/sponsor/LL2.png" alt="notoken" width="220" />
+      </td>
+      <td align="left" width="33%">
+        ll2.cn｜自营算力底座 · 官方直签批价。MiniMax-H3 0.05 元/秒（自部署 768P 满血）；deepseek-v4.1-flash 官方 4 折；Seedance 系列 7 折起；超分 0.018 元/秒；Vega系列 6折起 注册链接：https://hub.ll2.cn?p=ua5r
       </td>
     </tr>
   </tbody>
