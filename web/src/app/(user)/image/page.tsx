@@ -8,7 +8,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { BookOpen, CloudUpload, Download, FolderPlus, Link2, PenLine, Cog, LoaderCircle, Palette, RefreshCw, Sparkles, TriangleAlert, Upload } from "lucide-react";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { App, Button, Image, Modal, Tag, Tooltip, Typography } from "antd";
 import { nanoid } from "nanoid";
 
@@ -37,6 +37,7 @@ import { useGenerationConversations } from "@/features/generation/hooks/use-gene
 import { getGenerationConversationStatus, hasRunningGeneration, type GenerationLogStatusFields } from "@/features/generation/lib/generation-log-status";
 import { selectGenerationAttachments } from "@/features/generation/lib/generation-retry";
 import { imageReferenceAttachments, referenceMediaType, referenceMediaUrl } from "@/features/generation/lib/reference-attachments";
+import { reconcileImageMentions, type PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import { useRecentReferenceAssets } from "@/features/generation/hooks/use-recent-reference-assets";
 import type { RecentReferenceAsset } from "@/features/generation/lib/recent-reference-assets";
@@ -146,6 +147,15 @@ export default function ImagePage() {
     const [skillError, setSkillError] = useState<string | null>(null);
     const [references, setReferences] = useState<ReferenceImage[]>([]);
     const [uploadingReferenceIds, setUploadingReferenceIds] = useState<string[]>([]);
+    const promptReferences = useMemo<PromptImageReference[]>(() => references.map((reference, index) => ({
+        id: reference.id,
+        name: reference.name,
+        label: imageReferenceLabel(index),
+        previewUrl: reference.dataUrl,
+        kind: "image",
+        disabled: uploadingReferenceIds.includes(reference.id),
+    })), [references, uploadingReferenceIds, translate.locale]);
+    const previousImageReferencesRef = useRef<PromptImageReference[]>([]);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [imageDraftSettingsModified, setImageDraftSettingsModified] = useState(false);
@@ -158,6 +168,14 @@ export default function ImagePage() {
     const [managementMode, setManagementMode] = useState(false);
     const initialPromptAppliedRef = useRef(false);
     const [focusInitialPrompt, setFocusInitialPrompt] = useState(false);
+
+    useEffect(() => {
+        const previous = previousImageReferencesRef.current;
+        previousImageReferencesRef.current = promptReferences;
+        const currentLabels = new Map(promptReferences.map((reference) => [reference.id, reference.label]));
+        if (!previous.some((reference) => currentLabels.get(reference.id) !== reference.label)) return;
+        setPrompt((current) => reconcileImageMentions(current, previous, promptReferences));
+    }, [promptReferences]);
 
     useEffect(() => {
         if (initialPromptAppliedRef.current) return;
@@ -930,7 +948,14 @@ export default function ImagePage() {
             iconOnly: true,
             disabled: !prompt.trim() || isStreaming || isQueued || activeConversationPending || isPromptOptimizing,
             loading: isPromptOptimizing,
-            onClick: () => void optimizePrompt({ operationId: "image-page", generationType: "image", prompt, generationStyleIds: selectedStyles.map((style) => style.id), onSuccess: setPrompt }),
+            onClick: () => void optimizePrompt({
+                operationId: "image-page",
+                generationType: "image",
+                prompt,
+                generationStyleIds: selectedStyles.map((style) => style.id),
+                imageReferences: promptReferences,
+                onSuccess: (optimizedPrompt) => setPrompt(reconcileImageMentions(optimizedPrompt, promptReferences, previousImageReferencesRef.current)),
+            }),
         },
         {
             key: "assets",
@@ -1098,6 +1123,7 @@ export default function ImagePage() {
                     value: prompt,
                     placeholder: translate("image.describeSubjectStyleCompositionLightingAndPurpose"),
                     references: referenceChips,
+                    imageReferences: promptReferences,
                     styleOptions,
                     selectedStyles,
                     styleLoading,
