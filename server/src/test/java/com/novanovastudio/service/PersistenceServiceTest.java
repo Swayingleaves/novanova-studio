@@ -957,14 +957,17 @@ class PersistenceServiceTest {
 
     /** 音频输入能力应通过已有能力列表保存，且不能成为分档计费模式。 */
     @Test
-    void shouldSaveAudioInputCapabilityWithoutBillingMode() {
+    void shouldSaveAudioInputCapabilityAnd1088p1440pVideoPrices() {
         PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
         channel.setModels("[\"video-model\"]");
         channel.setApiFormat("openai");
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
         VideoBillingConfiguration configuration = new VideoBillingConfiguration("generation", 3,
-                java.util.Map.of(VideoGenerationMode.REFERENCE_TO_VIDEO, java.util.Map.of("720p", java.math.BigDecimal.valueOf(10))));
+                java.util.Map.of(VideoGenerationMode.REFERENCE_TO_VIDEO, java.util.Map.of(
+                        "720p", java.math.BigDecimal.valueOf(10),
+                        "1088p", java.math.BigDecimal.valueOf(20),
+                        "1440p", java.math.BigDecimal.valueOf(30))));
 
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
                 "channel-1", "video-model", "video", List.of(VideoGenerationMode.REFERENCE_TO_VIDEO, AudioInputSupport.CAPABILITY), 0, java.math.BigDecimal.valueOf(0),
@@ -976,7 +979,10 @@ class PersistenceServiceTest {
         java.util.Map<String, java.util.Map<String, java.math.BigDecimal>> modePrices =
                 created.videoBillingConfiguration().modePrices();
         Assertions.assertFalse(modePrices.containsKey(AudioInputSupport.CAPABILITY));
-        Assertions.assertEquals(java.util.Map.of("720p", java.math.BigDecimal.valueOf(10)), modePrices.get(VideoGenerationMode.REFERENCE_TO_VIDEO));
+        Assertions.assertEquals(java.util.Map.of(
+                "720p", java.math.BigDecimal.valueOf(10),
+                "1088p", java.math.BigDecimal.valueOf(20),
+                "1440p", java.math.BigDecimal.valueOf(30)), modePrices.get(VideoGenerationMode.REFERENCE_TO_VIDEO));
         // 未勾选能力的模式只保留空价格表，不写入价格。
         modePrices.forEach((mode, prices) -> Assertions.assertTrue(
                 VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode) == !prices.isEmpty(),
