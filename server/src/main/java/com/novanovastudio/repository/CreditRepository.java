@@ -3,6 +3,7 @@ package com.novanovastudio.repository;
 import com.novanovastudio.dto.CreditDtos;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Repository;
 import reactor.core.publisher.Flux;
@@ -835,5 +836,139 @@ public class CreditRepository {
         return bindUserTransactionQuery(databaseClient.sql(sql), query)
                 .map((row, metadata) -> row.get("total", Long.class))
                 .one();
+    }
+
+    /** 用户生成任务记录查询条件。 */
+    public record TaskRecordQuery(Long userId,
+                                  OffsetDateTime startAt,
+                                  OffsetDateTime endAt,
+                                  String taskType,
+                                  String keyword) {
+    }
+
+    /** 用户生成任务记录基础查询条件，只保留图片与视频任务。 */
+    private static final String TASK_RECORD_QUERY = """
+            FROM ai_generation_tasks tasks
+            WHERE tasks.user_id = :userId
+              AND tasks.task_type IN ('image', 'video')
+              AND tasks.created_at >= :startAt
+              AND tasks.created_at < :endAt
+            """;
+
+    /**
+     * 生成用户生成任务记录查询SQL。
+     *
+     * @param query TaskRecordQuery 查询条件
+     * @return String 固定字段与受控筛选组成的SQL
+     */
+    static String taskRecordQuery(TaskRecordQuery query) {
+        StringBuilder sql = new StringBuilder(TASK_RECORD_QUERY);
+        if (query.taskType() != null) {
+            sql.append(" AND tasks.task_type = :taskType\n");
+        }
+        if (query.keyword() != null) {
+            sql.append(" AND (tasks.request_data ->> 'prompt' ILIKE :keyword OR tasks.model ILIKE :keyword)\n");
+        }
+        return sql.toString();
+    }
+
+    /**
+     * 分页查询用户图片与视频生成任务记录。
+     *
+     * @param query TaskRecordQuery 查询条件
+     * @param page int 页码
+     * @param pageSize int 每页数量
+     * @return Flux<TaskRecordItem> 当前页任务记录
+     */
+    public Flux<CreditDtos.TaskRecordItem> listTaskRecords(TaskRecordQuery query, int page, int pageSize) {
+        String sql = """
+                SELECT tasks.id AS task_id,
+                       tasks.task_type,
+                       tasks.model,
+                       tasks.status,
+                       tasks.error_message,
+                       tasks.request_data ->> 'prompt' AS prompt,
+                       tasks.request_data -> 'parameters' ->> 'resolution' AS resolution,
+                       tasks.request_data -> 'parameters' ->> 'size' AS size,
+                       tasks.request_data -> 'parameters' ->> 'seconds' AS seconds,
+                       COALESCE((SELECT -SUM(task_transactions.change_amount) FROM user_credit_transactions task_transactions
+                                 WHERE task_transactions.task_id = tasks.id
+                                   AND task_transactions.transaction_type IN ('task_charge', 'task_refund')), 0)::bigint AS consumed_credits,
+                       CASE WHEN jsonb_typeof(tasks.result_data -> 'items') = 'array'
+                                 THEN COALESCE(jsonb_path_query_array(tasks.result_data, '$.items[*].url'), '[]'::jsonb)
+                            WHEN jsonb_typeof(tasks.result_data -> 'item') = 'object'
+                                 THEN COALESCE(jsonb_path_query_array(tasks.result_data, '$.item.url'), '[]'::jsonb)
+                            ELSE '[]'::jsonb END::text AS result_urls,
+                       tasks.created_at,
+                       tasks.completed_at
+                """ + taskRecordQuery(query) + """
+                ORDER BY tasks.created_at DESC, tasks.id DESC
+                LIMIT :limit OFFSET :offset
+                """;
+        return bindTaskRecordQuery(databaseClient.sql(sql), query)
+                .bind("limit", pageSize)
+                .bind("offset", (page - 1) * pageSize)
+                .map((row, metadata) -> {
+                    OffsetDateTime completedAt = row.get("completed_at", OffsetDateTime.class);
+                    return new CreditDtos.TaskRecordItem(
+                            row.get("task_id", String.class),
+                            row.get("task_type", String.class),
+                            row.get("model", String.class),
+                            row.get("status", String.class),
+                            row.get("prompt", String.class),
+                            row.get("resolution", String.class),
+                            row.get("size", String.class),
+                            row.get("seconds", String.class),
+                            row.get("consumed_credits", Long.class),
+                            parseStringArray(RowMappers.jsonText(row, "result_urls")),
+                            row.get("error_message", String.class),
+                            row.get("created_at", OffsetDateTime.class).toString(),
+                            completedAt == null ? null : completedAt.toString());
+                })
+                .all();
+    }
+
+    /**
+     * 查询用户图片与视频生成任务记录总数。
+     *
+     * @param query TaskRecordQuery 查询条件
+     * @return Mono<Long> 符合条件的任务总数
+     */
+    public Mono<Long> countTaskRecords(TaskRecordQuery query) {
+        return bindTaskRecordQuery(databaseClient.sql("SELECT COUNT(*) AS total " + taskRecordQuery(query)), query)
+                .map((row, metadata) -> row.get("total", Long.class))
+                .one();
+    }
+
+    /**
+     * 绑定生成任务记录查询参数。
+     *
+     * @param spec DatabaseClient.GenericExecuteSpec 待绑定的SQL执行器
+     * @param query TaskRecordQuery 查询条件
+     * @return DatabaseClient.GenericExecuteSpec 已绑定参数的SQL执行器
+     */
+    private DatabaseClient.GenericExecuteSpec bindTaskRecordQuery(DatabaseClient.GenericExecuteSpec spec, TaskRecordQuery query) {
+        DatabaseClient.GenericExecuteSpec boundSpec = spec
+                .bind("userId", query.userId())
+                .bind("startAt", query.startAt())
+                .bind("endAt", query.endAt());
+        if (query.taskType() != null) {
+            boundSpec = boundSpec.bind("taskType", query.taskType());
+        }
+        return query.keyword() == null ? boundSpec : boundSpec.bind("keyword", "%" + query.keyword() + "%");
+    }
+
+    /**
+     * 解析数据库返回的JSON字符串数组。
+     *
+     * @param json String JSON数组文本
+     * @return List<String> 解析结果，文本为空时返回空列表
+     */
+    private static List<String> parseStringArray(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        List<String> values = com.alibaba.fastjson2.JSON.parseArray(json, String.class);
+        return values == null ? List.of() : values.stream().filter(value -> value != null && !value.isBlank()).toList();
     }
 }

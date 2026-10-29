@@ -334,6 +334,60 @@ public class CreditService {
     }
 
     /**
+     * 分页查询当前用户的图片与视频生成任务记录。
+     *
+     * @param startDate LocalDate 筛选起始日期
+     * @param endDate LocalDate 筛选结束日期
+     * @param taskType String 任务类型筛选：image/video，可为空表示全部
+     * @param keyword String 提示词或模型搜索词，可为空
+     * @param page int 页码
+     * @param pageSize int 每页数量
+     * @return Mono<TaskRecordListResponse> 任务记录
+     */
+    public Mono<CreditDtos.TaskRecordListResponse> listTaskRecords(LocalDate startDate, LocalDate endDate, String taskType, String keyword, int page, int pageSize) {
+        if (page < 1 || pageSize < 1 || pageSize > 100) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidPaginationParameters")));
+        }
+        if (taskType != null && !List.of("image", "video").contains(taskType)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.generationTypeFilterMustBeImageOrVideo")));
+        }
+        String normalizedKeyword = keyword == null || keyword.isBlank() ? null : keyword.trim();
+        return currentUserProvider.currentUserId().flatMap(userId -> {
+            CreditRepository.TaskRecordQuery query = createTaskRecordQuery(userId, startDate, endDate, taskType, normalizedKeyword);
+            return Mono.zip(
+                            persistenceService.getPlatformModelConfigs().map(CreditService::displayNameIndex),
+                            creditRepository.listTaskRecords(query, page, pageSize).collectList(),
+                            creditRepository.countTaskRecords(query))
+                    .map(result -> new CreditDtos.TaskRecordListResponse(result.getT2().stream()
+                            .map(item -> new CreditDtos.TaskRecordItem(item.taskId(), item.taskType(),
+                                    resolveModelDisplayName(result.getT1(), item.taskType(), item.model()), item.status(), item.prompt(),
+                                    item.resolution(), item.size(), item.seconds(), item.consumedCredits(), item.resultUrls(),
+                                    item.errorMessage(), item.createdAt(), item.completedAt()))
+                            .toList(), result.getT3()));
+        });
+    }
+
+    /**
+     * 构建生成任务记录查询条件。
+     *
+     * @param userId Long 用户ID
+     * @param startDate LocalDate 筛选起始日期
+     * @param endDate LocalDate 筛选结束日期
+     * @param taskType String 任务类型
+     * @param keyword String 搜索词
+     * @return TaskRecordQuery 查询条件
+     */
+    private CreditRepository.TaskRecordQuery createTaskRecordQuery(Long userId, LocalDate startDate, LocalDate endDate, String taskType, String keyword) {
+        if (startDate == null || endDate == null || startDate.isAfter(endDate)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidCreditDateFilter"));
+        }
+        return new CreditRepository.TaskRecordQuery(userId,
+                startDate.atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime(),
+                endDate.plusDays(1).atStartOfDay(CREDIT_TIME_ZONE).toOffsetDateTime(),
+                taskType, keyword);
+    }
+
+    /**
      * 分页查询管理员可见的积分明细（含增加与消耗）。
      *
      * @param userId Long 用户ID，可为空表示全部用户

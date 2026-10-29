@@ -338,7 +338,7 @@ public final class RowMappers {
      * @param column String 字段名
      * @return String JSON文本
      */
-    private static String jsonText(Row row, String column) {
+    public static String jsonText(Row row, String column) {
         // R2DBC PostgreSQL的jsonb可能返回Json对象，也可能在显式::text时返回字符串。
         Object value = row.get(column);
         if (value == null) {
