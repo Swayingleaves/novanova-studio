@@ -52,11 +52,11 @@ public class AdminEpisodeBodiesController {
      */
     @GetMapping("/getPricing")
     public Mono<ApiResponse<List<EpisodeBodiesDtos.ModelPricing>>> getPricing(ServerHttpRequest httpRequest) {
-        log.info("查询分集正文价格请求: url={}, headers={}", httpRequest.getURI(), sanitizedHeaders(httpRequest));
+        log.debug("查询分集正文价格请求: url={}, headers={}", httpRequest.getURI(), sanitizedHeaders(httpRequest));
         return adminGuard.requireAdmin()
                 .then(Mono.defer(pricingService::getPricing))
                 .map(ApiResponse::ok)
-                .doOnNext(response -> log.info("查询分集正文价格响应: response={}", response));
+                .doOnNext(response -> log.debug("查询分集正文价格响应: response={}", response));
     }
 
     /**
@@ -69,12 +69,12 @@ public class AdminEpisodeBodiesController {
     @PostMapping("/savePricing")
     public Mono<ApiResponse<EpisodeBodiesDtos.ModelPricing>> savePricing(
             @RequestBody EpisodeBodiesDtos.SavePricingRequest request, ServerHttpRequest httpRequest) {
-        log.info("保存分集正文价格请求: url={}, headers={}, request={}", httpRequest.getURI(),
+        log.debug("保存分集正文价格请求: url={}, headers={}, request={}", httpRequest.getURI(),
                 sanitizedHeaders(httpRequest), request);
         return adminGuard.requireAdmin()
                 .then(Mono.defer(() -> pricingService.savePricing(request)))
                 .map(ApiResponse::ok)
-                .doOnNext(response -> log.info("保存分集正文价格响应: response={}", response));
+                .doOnNext(response -> log.debug("保存分集正文价格响应: response={}", response));
     }
 
     /**
