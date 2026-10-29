@@ -901,6 +901,7 @@
     "instructionsCount_4ef0ac": "指令要求：{value0}",
     "reviewShotBreakdownDraftCountShots_ad2d31": "审核镜头拆分草稿（共{value0} 个镜头）",
     "promptVcount_1b1160": "提示词 v{value0}",
+    "videoAlreadyGeneratedRegeneratingWillOverwriteIt": "已有视频，重新生成将覆盖",
     "generateCountImages_4f0a0a": "确认生成{value0} 张",
     "theServerBuildsPromptsFromAssetAndVersionNames_bcf6cd": "提示词由服务端按资产类别模板渲染：资产名与版本名、版本外观描述、项目视觉风格（{value0}）。 {value1}",
     "existingVersionsCount_7853c4": "已有版本列表 ({value0})",

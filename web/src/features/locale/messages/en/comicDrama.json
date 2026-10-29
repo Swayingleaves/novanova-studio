@@ -901,6 +901,7 @@
     "instructionsCount_4ef0ac": "Instructions: {value0}",
     "reviewShotBreakdownDraftCountShots_ad2d31": "Review shot breakdown draft ({value0} shots)",
     "promptVcount_1b1160": "Prompt v{value0}",
+    "videoAlreadyGeneratedRegeneratingWillOverwriteIt": "Video exists; regenerating overwrites it",
     "generateCountImages_4f0a0a": "Generate {value0} images",
     "theServerBuildsPromptsFromAssetAndVersionNames_bcf6cd": "The server builds prompts from asset and version names, version appearance, and project visual style ({value0}). {value1}",
     "existingVersionsCount_7853c4": "Existing versions ({value0})",

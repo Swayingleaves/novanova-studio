@@ -16,7 +16,7 @@ import { readVideoGenerationConstraintIssue } from "@/features/generation/lib/vi
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig, type VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
-import { estimateComicDramaGeneration, listComicDramaAssetVersionsByIds } from "@/services/api/comic-drama";
+import { estimateComicDramaGeneration, listComicDramaAssetVersionsByIds, readComicDramaMediaUrl } from "@/services/api/comic-drama";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { loadShotGenerationLastUsedSettings, readShotGenerationLastUsedSettingsCache, saveShotGenerationLastUsedSettings, type ShotGenerationLastUsedSettings } from "../lib/shot-generation-last-used-settings";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
@@ -107,6 +107,19 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
         return promptsByShotId;
     }, [workspace]);
     const finalVideoPrompt = activeShot ? adoptedPrompts.get(activeShot.id) || null : null;
+
+    // 已经产出成品的镜头：重新生成会覆盖当前视频，卡片上必须先标出来。
+    // needsUpdate 只是上游有变更，历史结果仍然保留，同样算「已有视频」。
+    const shotsWithVideo = useMemo(() => {
+        const ids = new Set<string>();
+        for (const media of workspace?.media || []) {
+            if (media.targetType !== "shot" || media.mediaType !== "video") continue;
+            if (media.status !== "completed" && media.status !== "needsUpdate") continue;
+            if (!readComicDramaMediaUrl(media.resultData)) continue;
+            ids.add(media.targetId);
+        }
+        return ids;
+    }, [workspace]);
 
     // 分镜图、已采用资产图和上传参考图均按服务端的实际选择规则计数。
     const referenceCountByShot = useMemo(() => {
@@ -317,11 +330,18 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
                                         <span className="font-mono text-xs font-semibold text-[var(--studio-ink)]">#{shot.shotNumber}</span>
                                         <span className="text-[10px] text-[var(--studio-muted)]">{productionParameterLabel(shot.shotSize || "", translate) || translate("comicDrama.shotSizeNotSet")}</span>
                                         <span className="text-[10px] text-[var(--studio-muted)]">{shot.durationSeconds}s</span>
-                                        {shotPrompt ? (
-                                            <span className="ml-auto text-[10px] text-[var(--studio-muted)]">{translate("comicDrama.promptVcount_1b1160", { value0: shotPrompt.versionNumber })}</span>
-                                        ) : (
-                                            <span className="ml-auto text-[10px] text-amber-500">{translate("comicDrama.missingFinalPrompt")}</span>
-                                        )}
+                                        <div className="ml-auto flex items-center gap-1.5">
+                                            {shotsWithVideo.has(shot.id) ? (
+                                                <span className="shrink-0 rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">
+                                                    {translate("comicDrama.videoAlreadyGeneratedRegeneratingWillOverwriteIt")}
+                                                </span>
+                                            ) : null}
+                                            {shotPrompt ? (
+                                                <span className="text-[10px] text-[var(--studio-muted)]">{translate("comicDrama.promptVcount_1b1160", { value0: shotPrompt.versionNumber })}</span>
+                                            ) : (
+                                                <span className="text-[10px] text-amber-500">{translate("comicDrama.missingFinalPrompt")}</span>
+                                            )}
+                                        </div>
                                     </div>
                                     {/* 正文完整展示，过长时卡片内独立滚动；阻止冒泡，避免选中复制提示词时误切换勾选 */}
                                     <div
