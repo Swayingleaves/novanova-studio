@@ -63,6 +63,7 @@ import { SystemConfiguration } from "@/features/app-shell/components/system-conf
 import { GenerationStyleCover } from "@/features/generation/components/generation-style-picker";
 import { uploadImage } from "@/features/storage/services/image-storage";
 import { CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactionIcon, creditTransactionTypeLabel, formatCreditChange, formatCredits, formatCreditTime, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
+import { TaskRecordPanel } from "@/app/(user)/credits/components/task-record-panel";
 
 const PAGE_SIZE = 20;
 
@@ -327,29 +328,48 @@ function CreditConsumptionManagement() {
                 </div>
             </section>
 
-            <section className="mt-8 border-t border-[var(--studio-line)] pt-6" aria-labelledby="admin-credit-transactions-title">
-                <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-                    <div>
-                        <h2 id="admin-credit-transactions-title" className="text-base font-semibold text-[var(--studio-ink)]">
-                            {translate("administration.creditDetails")}</h2>
-                        <p className="mt-1 text-sm text-[var(--studio-muted)]">{selectedUser ? translate("administration.creditRecordsFor", { value0: adminCreditUserLabel(selectedUser) }) : translate("administration.creditRecordsForAllUsers")}{translate("administration.includingUsageRefundsTopUpsAndCheckIns")}</p>
-                    </div>
-                    <span className="text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} {translate("administration.records")}</span>
-                </div>
-                <Table<ServerAdminCreditTransaction>
-                    rowKey="id"
-                    columns={createAdminCreditColumns(translate)}
-                    dataSource={transactions?.transactions || []}
-                    loading={transactionsQuery.isLoading}
-                    pagination={false}
-                    scroll={{ x: 1_100 }}
-                    locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("administration.noTransactionsInThisPeriod")} /> }}
+            <section className="mt-8 border-t border-[var(--studio-line)] pt-6">
+                <Tabs
+                    defaultActiveKey="transactions"
+                    destroyOnHidden
+                    items={[
+                        {
+                            key: "transactions",
+                            label: translate("administration.creditDetails"),
+                            children: (
+                                <div aria-labelledby="admin-credit-transactions-title">
+                                    <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+                                        <div>
+                                            <h2 id="admin-credit-transactions-title" className="text-base font-semibold text-[var(--studio-ink)]">
+                                                {translate("administration.creditDetails")}</h2>
+                                            <p className="mt-1 text-sm text-[var(--studio-muted)]">{selectedUser ? translate("administration.creditRecordsFor", { value0: adminCreditUserLabel(selectedUser) }) : translate("administration.creditRecordsForAllUsers")}{translate("administration.includingUsageRefundsTopUpsAndCheckIns")}</p>
+                                        </div>
+                                        <span className="text-sm tabular-nums text-[var(--studio-muted)]">{transactions?.total || 0} {translate("administration.records")}</span>
+                                    </div>
+                                    <Table<ServerAdminCreditTransaction>
+                                        rowKey="id"
+                                        columns={createAdminCreditColumns(translate)}
+                                        dataSource={transactions?.transactions || []}
+                                        loading={transactionsQuery.isLoading}
+                                        pagination={false}
+                                        scroll={{ x: 1_100 }}
+                                        locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("administration.noTransactionsInThisPeriod")} /> }}
+                                    />
+                                    {transactions && transactions.total > CREDIT_TRANSACTION_PAGE_SIZE ? (
+                                        <div className="mt-5 flex justify-end">
+                                            <Pagination current={page} pageSize={CREDIT_TRANSACTION_PAGE_SIZE} total={transactions.total} showSizeChanger={false} onChange={setPage} />
+                                        </div>
+                                    ) : null}
+                                </div>
+                            ),
+                        },
+                        {
+                            key: "tasks",
+                            label: translate("credits.taskRecords"),
+                            children: <TaskRecordPanel admin />,
+                        },
+                    ]}
                 />
-                {transactions && transactions.total > CREDIT_TRANSACTION_PAGE_SIZE ? (
-                    <div className="mt-5 flex justify-end">
-                        <Pagination current={page} pageSize={CREDIT_TRANSACTION_PAGE_SIZE} total={transactions.total} showSizeChanger={false} onChange={setPage} />
-                    </div>
-                ) : null}
             </section>
         </div>
     );

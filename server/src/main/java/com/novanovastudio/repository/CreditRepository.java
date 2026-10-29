@@ -846,15 +846,6 @@ public class CreditRepository {
                                   String keyword) {
     }
 
-    /** 用户生成任务记录基础查询条件，只保留图片与视频任务。 */
-    private static final String TASK_RECORD_QUERY = """
-            FROM ai_generation_tasks tasks
-            WHERE tasks.user_id = :userId
-              AND tasks.task_type IN ('image', 'video')
-              AND tasks.created_at >= :startAt
-              AND tasks.created_at < :endAt
-            """;
-
     /**
      * 生成用户生成任务记录查询SQL。
      *
@@ -862,7 +853,37 @@ public class CreditRepository {
      * @return String 固定字段与受控筛选组成的SQL
      */
     static String taskRecordQuery(TaskRecordQuery query) {
-        StringBuilder sql = new StringBuilder(TASK_RECORD_QUERY);
+        return taskRecordQuery(query, false);
+    }
+
+    /**
+     * 生成包含用户资料关联的管理员任务记录查询SQL。
+     *
+     * @param query TaskRecordQuery 查询条件
+     * @return String 包含用户资料关联的受控查询SQL
+     */
+    static String adminTaskRecordQuery(TaskRecordQuery query) {
+        return taskRecordQuery(query, true);
+    }
+
+    /**
+     * 生成带可选用户关联及筛选条件的任务记录查询SQL。
+     *
+     * @param query TaskRecordQuery 查询条件
+     * @param includeUsers boolean 是否关联用户资料
+     * @return String 任务记录查询SQL
+     */
+    private static String taskRecordQuery(TaskRecordQuery query, boolean includeUsers) {
+        StringBuilder sql = new StringBuilder("FROM ai_generation_tasks tasks\n");
+        if (includeUsers) {
+            sql.append("LEFT JOIN users users ON users.id = tasks.user_id\n");
+        }
+        sql.append("WHERE tasks.task_type IN ('image', 'video')\n")
+                .append("  AND tasks.created_at >= :startAt\n")
+                .append("  AND tasks.created_at < :endAt\n");
+        if (query.userId() != null) {
+            sql.append(" AND tasks.user_id = :userId\n");
+        }
         if (query.taskType() != null) {
             sql.append(" AND tasks.task_type = :taskType\n");
         }
@@ -929,6 +950,70 @@ public class CreditRepository {
     }
 
     /**
+     * 分页查询全站图片与视频任务记录并返回用户信息。
+     *
+     * @param query TaskRecordQuery 查询条件
+     * @param page int 页码
+     * @param pageSize int 每页数量
+     * @return Flux<AdminTaskRecordItem> 当前页管理员任务记录
+     */
+    public Flux<CreditDtos.AdminTaskRecordItem> listAdminTaskRecords(TaskRecordQuery query, int page, int pageSize) {
+        String sql = """
+                SELECT tasks.id AS task_id,
+                       tasks.task_type,
+                       tasks.model,
+                       tasks.status,
+                       tasks.error_message,
+                       tasks.request_data ->> 'prompt' AS prompt,
+                       tasks.request_data -> 'parameters' ->> 'resolution' AS resolution,
+                       tasks.request_data -> 'parameters' ->> 'size' AS size,
+                       tasks.request_data -> 'parameters' ->> 'seconds' AS seconds,
+                       COALESCE((SELECT -SUM(task_transactions.change_amount) FROM user_credit_transactions task_transactions
+                                 WHERE task_transactions.task_id = tasks.id
+                                   AND task_transactions.transaction_type IN ('task_charge', 'task_refund')), 0)::bigint AS consumed_credits,
+                       CASE WHEN jsonb_typeof(tasks.result_data -> 'items') = 'array'
+                                 THEN COALESCE(jsonb_path_query_array(tasks.result_data, '$.items[*].url'), '[]'::jsonb)
+                            WHEN jsonb_typeof(tasks.result_data -> 'item') = 'object'
+                                 THEN COALESCE(jsonb_path_query_array(tasks.result_data, '$.item.url'), '[]'::jsonb)
+                            ELSE '[]'::jsonb END::text AS result_urls,
+                       tasks.created_at,
+                       tasks.completed_at,
+                       tasks.user_id AS user_id,
+                       users.username,
+                       users.nickname,
+                       users.email
+                """ + adminTaskRecordQuery(query) + """
+                ORDER BY tasks.created_at DESC, tasks.id DESC
+                LIMIT :limit OFFSET :offset
+                """;
+        return bindTaskRecordQuery(databaseClient.sql(sql), query)
+                .bind("limit", pageSize)
+                .bind("offset", (page - 1) * pageSize)
+                .map((row, metadata) -> {
+                    OffsetDateTime completedAt = row.get("completed_at", OffsetDateTime.class);
+                    return new CreditDtos.AdminTaskRecordItem(
+                            row.get("task_id", String.class),
+                            row.get("task_type", String.class),
+                            row.get("model", String.class),
+                            row.get("status", String.class),
+                            row.get("prompt", String.class),
+                            row.get("resolution", String.class),
+                            row.get("size", String.class),
+                            row.get("seconds", String.class),
+                            row.get("consumed_credits", Long.class),
+                            parseStringArray(RowMappers.jsonText(row, "result_urls")),
+                            row.get("error_message", String.class),
+                            row.get("created_at", OffsetDateTime.class).toString(),
+                            completedAt == null ? null : completedAt.toString(),
+                            row.get("user_id", Long.class),
+                            row.get("username", String.class),
+                            row.get("nickname", String.class),
+                            row.get("email", String.class));
+                })
+                .all();
+    }
+
+    /**
      * 查询用户图片与视频生成任务记录总数。
      *
      * @param query TaskRecordQuery 查询条件
@@ -949,9 +1034,11 @@ public class CreditRepository {
      */
     private DatabaseClient.GenericExecuteSpec bindTaskRecordQuery(DatabaseClient.GenericExecuteSpec spec, TaskRecordQuery query) {
         DatabaseClient.GenericExecuteSpec boundSpec = spec
-                .bind("userId", query.userId())
                 .bind("startAt", query.startAt())
                 .bind("endAt", query.endAt());
+        if (query.userId() != null) {
+            boundSpec = boundSpec.bind("userId", query.userId());
+        }
         if (query.taskType() != null) {
             boundSpec = boundSpec.bind("taskType", query.taskType());
         }

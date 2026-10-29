@@ -236,4 +236,53 @@ public final class CreditDtos {
      */
     public record TaskRecordListResponse(List<TaskRecordItem> records, Long total) {
     }
+
+    /**
+     * 管理员可见的图片与视频任务记录项。
+     *
+     * @param taskId String 任务ID
+     * @param taskType String 任务类型：image/video
+     * @param model String 模型展示名
+     * @param status String 任务状态：pending/running/success/failed/canceled
+     * @param prompt String 生成使用的提示词
+     * @param resolution String 选择的分辨率，未记录时为 null
+     * @param size String 选择的画面比例，未记录时为 null
+     * @param seconds String 视频秒数，图片任务为 null
+     * @param consumedCredits Long 任务实际消耗积分，已全额退款时为 0
+     * @param resultUrls List<String> 生成结果媒体地址
+     * @param errorMessage String 失败原因，非失败任务为 null
+     * @param createdAt String 任务创建时间
+     * @param completedAt String 任务完成时间
+     * @param userId Long 用户ID
+     * @param username String 用户名
+     * @param nickname String 用户昵称
+     * @param email String 用户邮箱
+     */
+    public record AdminTaskRecordItem(String taskId,
+                                      String taskType,
+                                      String model,
+                                      String status,
+                                      String prompt,
+                                      String resolution,
+                                      String size,
+                                      String seconds,
+                                      Long consumedCredits,
+                                      List<String> resultUrls,
+                                      String errorMessage,
+                                      String createdAt,
+                                      String completedAt,
+                                      Long userId,
+                                      String username,
+                                      String nickname,
+                                      String email) {
+    }
+
+    /**
+     * 管理员图片与视频生成任务记录列表响应。
+     *
+     * @param records List<AdminTaskRecordItem> 当前页记录
+     * @param total Long 符合筛选条件的总数
+     */
+    public record AdminTaskRecordListResponse(List<AdminTaskRecordItem> records, Long total) {
+    }
 }
