@@ -52,6 +52,9 @@ import { readAudioMetadata, uploadAudioFile } from "@/features/storage/services/
 import { nanoid } from "nanoid";
 import { useMediaAutoRefresh } from "../hooks/use-media-auto-refresh";
 import { usePendingImpactTargets } from "../hooks/use-pending-impact-targets";
+import { useFinalPromptConfirmation } from "../hooks/use-final-prompt-confirmation";
+import { useFinalPromptPricing } from "../hooks/use-final-prompt-pricing";
+import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { useComicDramaStore } from "../stores/use-comic-drama-store";
 import type { ComicDramaAssetVersion, ComicDramaMediaResult, ComicDramaShot, ComicDramaShotInput, ComicDramaTimelineText, ComicDramaTimelineTextInput, ComicDramaVoiceTrack, ComicDramaVoiceTrackInput, StoryboardFontFamily } from "../types";
 import { cameraMovementOptions } from "../lib/production-labels";
@@ -263,6 +266,11 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
     const { message, modal } = App.useApp();
     const pendingImpactTargets = usePendingImpactTargets();
     const workspace = useComicDramaStore((state) => state.workspace);
+    const composePromptsBatch = useComicDramaStore((state) => state.composePromptsBatch);
+    // 重新生成最终提示词沿用「生成并采用」链路：模型取默认文本模型，价格与确认流程和其他提示词入口一致。
+    const modelConfig = useEffectiveConfig();
+    const confirmFinalPrompt = useFinalPromptConfirmation(workspace?.projectId);
+    const promptPricing = useFinalPromptPricing(modelConfig.textModel, Boolean(workspace));
     const setActiveStage = useComicDramaStore((state) => state.setActiveStage);
     const saveShot = useComicDramaStore((state) => state.saveShot);
     const saveTimelineText = useComicDramaStore((state) => state.saveTimelineText);
@@ -469,6 +477,8 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
     const [editForm] = Form.useForm<ComicDramaShotInput>();
     const [savingShot, setSavingShot] = useState<boolean>(false);
     const [copiedPromptType, setCopiedPromptType] = useState<"final" | "snapshot" | null>(null);
+    // 当前镜头的最终提示词正在重新生成，避免重复点击重复扣费。
+    const [regeneratingFinalPrompt, setRegeneratingFinalPrompt] = useState(false);
     // 就地生成镜头视频的目标镜头；非空即表示生成弹窗打开（多于一个即批量生成当前分集镜头）
     const [generationShotIds, setGenerationShotIds] = useState<string[]>([]);
 
@@ -1296,6 +1306,39 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
             .sort((first, second) => second.versionNumber - first.versionNumber)[0] || null;
     }, [activeShot, promptVersions]);
 
+    // 重新生成当前镜头的最终提示词：服务端生成后直接采用，工作区刷新会把新版本带回这张卡片。
+    const regenerateFinalVideoPrompt = () => {
+        const projectId = workspace?.projectId;
+        if (!activeShot || !projectId || regeneratingFinalPrompt) return;
+        if (!modelConfig.textModel) {
+            message.warning(translate("comicDrama.selectAPromptModel"));
+            return;
+        }
+        if (!promptPricing.ready) {
+            message.warning(promptPricing.reason);
+            return;
+        }
+        const shotId = activeShot.id;
+        const unitPrice = promptPricing.data!.unitPrice!;
+        const pricingRevision = promptPricing.data!.revision;
+        confirmFinalPrompt(1, unitPrice, async () => {
+            setRegeneratingFinalPrompt(true);
+            try {
+                const result = await composePromptsBatch(projectId, [shotId], modelConfig.textModel, pricingRevision);
+                if (result.failedShotIds.length > 0) {
+                    message.warning(result.failureMessage || translate("comicDrama.finalPromptRegenerationFailed"));
+                } else {
+                    message.success(translate("comicDrama.finalPromptRegeneratedAndAdopted"));
+                }
+            } catch (error) {
+                if (error instanceof Error) message.error(error.message);
+            } finally {
+                setRegeneratingFinalPrompt(false);
+                void promptPricing.refetch();
+            }
+        });
+    };
+
     // 已生成视频保留本次任务的提示词快照，便于与当前最终提示词核对。
     const previousVideoPromptInfo = useMemo(() => {
         const mediaPrompt = (activeMedia?.inputSnapshot as Record<string, unknown> | undefined)?.prompt;
@@ -1918,6 +1961,15 @@ export function StageStoryboard({ pauseAutoSave = false }: { pauseAutoSave?: boo
                                                             )}
                                                         </div>
                                                         <div className="flex items-center gap-1.5">
+                                                            <Button
+                                                                size="small"
+                                                                icon={<RotateCcw className="size-3.5" />}
+                                                                loading={regeneratingFinalPrompt}
+                                                                disabled={!activeShot}
+                                                                onClick={regenerateFinalVideoPrompt}
+                                                            >
+                                                                {translate("comicDrama.regenerateFinalPrompt")}
+                                                            </Button>
                                                             <Button
                                                                 size="small"
                                                                 icon={copiedPromptType === "final" ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
