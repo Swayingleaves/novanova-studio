@@ -1335,7 +1335,7 @@ function readOptionalText(value: unknown): string | undefined {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-async function serverGet<T>(path: string, options?: { auth?: boolean }) {
+export async function serverGet<T>(path: string, options?: { auth?: boolean }) {
     return serverFetch<T>(path, { method: "GET" }, options);
 }
 
