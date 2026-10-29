@@ -12,6 +12,7 @@ import { nanoid } from "nanoid";
 import { useCanvasTheme } from "../../../../features/canvas/components/canvas-theme-provider";
 import { uploadMediaFile, type UploadedFile } from "../../../../features/storage/services/file-storage";
 import { uploadImage, type UploadedImage } from "../../../../features/storage/services/image-storage";
+import { createMediaDownloadFileName } from "../../../../features/storage/services/media-download-name";
 import type { CanvasDirectorDeskJoint, CanvasDirectorDeskMotionPath, CanvasDirectorDeskPathKind, CanvasDirectorDeskPose, CanvasDirectorDeskActionPreset, CanvasDirectorDeskAsset, CanvasDirectorDeskCamera, CanvasDirectorDeskExportSource, CanvasDirectorDeskKeyframe, CanvasDirectorDeskNode, CanvasDirectorDeskObject, CanvasDirectorDeskObjectKind, CanvasDirectorDeskProject, CanvasDirectorDeskTransform, CanvasDirectorDeskVector3 } from "../../../../features/canvas/types";
 import { evaluateDirectorDeskProject, readDirectorDeskPoseAdjustment, validateDirectorDeskProject } from "./director-desk-evaluator";
 import { createNeutralPose } from "./director-desk-pose";
@@ -475,8 +476,7 @@ export function DirectorDeskWorkspace({ open, projectId, node, onClose, onChange
         try {
             const blob = await sceneRef.current.capturePng(node.director.exportSettings.width, node.director.exportSettings.height);
             const image = await uploadImage(blob);
-            const safeTitle = (node.title || translate("directorDesk.3DDirectorDesk")).replace(/[\\/:*?"<>|]/g, "_");
-            saveAs(blob, `${safeTitle}-${Math.round(timeMilliseconds)}ms.png`);
+            saveAs(blob, createMediaDownloadFileName("img", "png"));
             onImageExported?.(node.id, image, {
                 sourceCanvasDocumentId: projectId,
                 sourceDirectorNodeId: node.id,

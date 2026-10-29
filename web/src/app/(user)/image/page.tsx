@@ -47,6 +47,7 @@ import { ModelPicker } from "@/features/settings/components/model-picker";
 import { modelOptionLabel, useConfigStore, useEffectiveConfig, type AiConfig } from "@/features/settings/stores/use-config-store";
 import { deleteStoredImages, resolveImageStorageInfo, resolveImageUrl, reuseOrUploadImage, uploadImage } from "@/features/storage/services/image-storage";
 import { downloadMedia } from "@/features/storage/services/media-download";
+import { createMediaDownloadFileName } from "@/features/storage/services/media-download-name";
 import { uploadRemoteObjectToStorage } from "@/features/storage/services/object-storage";
 import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
@@ -689,9 +690,10 @@ export default function ImagePage() {
         setDeleteConfirmOpen(false);
     };
 
-    const downloadImage = async (image: GeneratedImage, index: number) => {
+    const downloadImage = async (image: GeneratedImage) => {
         try {
-            await downloadMedia(image, `image-${index + 1}.png`);
+            const extension = image.mimeType?.split("/")[1] || image.dataUrl.match(/^data:image\/([^;]+)/)?.[1] || "png";
+            await downloadMedia(image, createMediaDownloadFileName("img", extension));
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("image.failedToDownloadImage"));
         }
@@ -703,7 +705,7 @@ export default function ImagePage() {
             prompt: round.prompt,
             generationPrompt: round.generationPrompt,
             references: round.references,
-            onDownload: () => downloadImage(image, index),
+            onDownload: () => downloadImage(image),
         });
     };
 
@@ -954,7 +956,7 @@ export default function ImagePage() {
                         media: { kind: "image", url: image.dataUrl, ossUrl: image.objectStorage?.url, width: image.width, height: image.height, bytes: image.bytes, mimeType: image.mimeType },
                         prompt: round?.userText || prompt,
                         references: roundReferences.length ? roundReferences : references,
-                        onDownload: () => downloadImage(image, index),
+                        onDownload: () => downloadImage(image),
                     });
                 },
             }),
