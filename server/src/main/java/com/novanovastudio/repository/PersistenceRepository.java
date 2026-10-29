@@ -402,7 +402,7 @@ public class PersistenceRepository {
     public Flux<PersistenceRecords.UserAiModelConfigRecord> listPlatformAiModelConfigs() {
         return databaseClient.sql("""
                 SELECT id, team_id, NULL::BIGINT AS user_id, model_config_id, channel_id, model_name, model_type,
-                       capabilities::text AS capabilities, is_default, sort_order, credit_cost, credit_unit,
+                       capabilities::text AS capabilities, is_default, is_enabled, sort_order, credit_cost, credit_unit,
                        thinking_enabled, reasoning_effort, request_concurrency, convert_image_size_to_pixels, image_size_mappings::text AS image_size_mappings, custom_body_parameters::text AS custom_body_parameters,
                        video_billing_configuration::text AS video_billing_configuration, image_billing_configuration::text AS image_billing_configuration, display_name, model_icon,
                        is_custom_model, custom_model_config::text AS custom_model_config, created_at, updated_at
@@ -420,7 +420,7 @@ public class PersistenceRepository {
     public Mono<PersistenceRecords.UserAiModelConfigRecord> getPlatformAiModelConfig(String modelConfigId) {
         return databaseClient.sql("""
                 SELECT id, team_id, NULL::BIGINT AS user_id, model_config_id, channel_id, model_name, model_type,
-                       capabilities::text AS capabilities, is_default, sort_order, credit_cost, credit_unit,
+                       capabilities::text AS capabilities, is_default, is_enabled, sort_order, credit_cost, credit_unit,
                        thinking_enabled, reasoning_effort, request_concurrency, convert_image_size_to_pixels, image_size_mappings::text AS image_size_mappings, custom_body_parameters::text AS custom_body_parameters,
                        video_billing_configuration::text AS video_billing_configuration, image_billing_configuration::text AS image_billing_configuration, display_name, model_icon,
                        is_custom_model, custom_model_config::text AS custom_model_config, created_at, updated_at
@@ -450,15 +450,16 @@ public class PersistenceRepository {
      */
     public Mono<Void> createPlatformAiModelConfig(PersistenceRecords.UserAiModelConfigRecord record) {
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                INSERT INTO platform_ai_model_configs(model_config_id, channel_id, model_name, model_type, capabilities, is_default, sort_order,
+                INSERT INTO platform_ai_model_configs(model_config_id, channel_id, model_name, model_type, capabilities, is_default, is_enabled, sort_order,
                                                       credit_cost, credit_unit, thinking_enabled, reasoning_effort, request_concurrency, custom_body_parameters,
                                                       video_billing_configuration, image_billing_configuration, display_name, model_icon, is_custom_model, custom_model_config, convert_image_size_to_pixels, image_size_mappings)
-                VALUES (:modelConfigId, :channelId, :modelName, :modelType, CAST(:capabilities AS jsonb), :isDefault, :sortOrder,
+                VALUES (:modelConfigId, :channelId, :modelName, :modelType, CAST(:capabilities AS jsonb), :isDefault, :isEnabled, :sortOrder,
                         :creditCost, :creditUnit, :thinkingEnabled, :reasoningEffort, :requestConcurrency, CAST(:customBodyParameters AS jsonb),
                         CAST(:videoBillingConfiguration AS jsonb), CAST(:imageBillingConfiguration AS jsonb), :displayName, :modelIcon, :isCustomModel, CAST(:customModelConfig AS jsonb), :convertImageSizeToPixels, CAST(:imageSizeMappings AS jsonb))
                 """).bind("modelConfigId", record.getModelConfigId()).bind("channelId", record.getChannelId())
                 .bind("modelName", record.getModelName()).bind("modelType", record.getModelType())
                 .bind("capabilities", record.getCapabilities()).bind("isDefault", Boolean.TRUE.equals(record.getDefaultModel()))
+                .bind("isEnabled", record.getEnabled() == null || Boolean.TRUE.equals(record.getEnabled()))
                 .bind("sortOrder", record.getSortOrder()).bind("creditCost", record.getCreditCost()).bind("creditUnit", record.getCreditUnit())
                 .bind("thinkingEnabled", record.getThinkingEnabled() == null || Boolean.TRUE.equals(record.getThinkingEnabled()))
                 .bind("reasoningEffort", record.getReasoningEffort() == null ? "high" : record.getReasoningEffort())
@@ -486,7 +487,7 @@ public class PersistenceRepository {
     public Mono<Long> updatePlatformAiModelConfig(PersistenceRecords.UserAiModelConfigRecord record) {
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
                 UPDATE platform_ai_model_configs
-                SET model_type = :modelType, capabilities = CAST(:capabilities AS jsonb), sort_order = :sortOrder, credit_cost = :creditCost,
+                SET model_type = :modelType, capabilities = CAST(:capabilities AS jsonb), is_enabled = :isEnabled, sort_order = :sortOrder, credit_cost = :creditCost,
                     credit_unit = :creditUnit, request_concurrency = :requestConcurrency, custom_body_parameters = CAST(:customBodyParameters AS jsonb),
                     video_billing_configuration = CAST(:videoBillingConfiguration AS jsonb), image_billing_configuration = CAST(:imageBillingConfiguration AS jsonb), display_name = :displayName, model_icon = :modelIcon,
                     thinking_enabled = :thinkingEnabled, reasoning_effort = :reasoningEffort,
@@ -495,6 +496,7 @@ public class PersistenceRepository {
                     updated_at = CURRENT_TIMESTAMP
                 WHERE model_config_id = :modelConfigId
                 """).bind("modelType", record.getModelType()).bind("capabilities", record.getCapabilities())
+                .bind("isEnabled", record.getEnabled() == null || Boolean.TRUE.equals(record.getEnabled()))
                 .bind("sortOrder", record.getSortOrder()).bind("creditCost", record.getCreditCost()).bind("creditUnit", record.getCreditUnit())
                 .bind("requestConcurrency", record.getRequestConcurrency() == null ? 1 : record.getRequestConcurrency())
                 .bind("customBodyParameters", record.getCustomBodyParameters() == null ? "{}" : record.getCustomBodyParameters())

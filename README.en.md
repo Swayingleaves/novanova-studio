@@ -114,7 +114,7 @@ Skills use configurable prompts to guide users through structured interactions, 
 
 ### 🔌 Open model and provider integration
 
-Provider adapters are separated from model capability configuration. The project supports OpenAI-compatible, Gemini, Agnes, Seedance, MiniMax, and Evolink providers, as well as self-hosted image or video APIs through request/response templates. Administrators can configure model display names, icons, capabilities, and billing rules independently.
+Provider adapters are separated from model capability configuration. The project supports OpenAI-compatible, Gemini, Agnes, Seedance, MiniMax, and Evolink providers, as well as self-hosted image or video APIs through request/response templates. Administrators can configure model display names, icons, capabilities, visibility, and billing rules independently; models switched off stay hidden from user dropdowns.
 
 ### ⚡ Reliable execution for long-running tasks
 

@@ -16,6 +16,13 @@ test("模型配置创建和更新请求都携带同时并发数", () => {
     assert.match(source, /first\.requestConcurrency === second\.requestConcurrency/);
 });
 
+test("模型列表的开启开关随创建和更新请求提交，默认模型不可关闭", () => {
+    assert.equal((source.match(/enabled: normalizedConfig\.enabled/g) || []).length, 2);
+    assert.match(source, /first\.enabled === second\.enabled/);
+    assert.match(source, /disabled=\{isSaving \|\| modelConfig\.defaultModel\}/);
+    assert.match(source, /setDraftModelEnabled\(modelConfig\.id, checked\)/);
+});
+
 test("模型配置通过编辑弹窗维护自定义 JSON 参数", () => {
     assert.match(source, /openModelConfigEditor/);
     assert.match(source, /translate\("appShell\.customJSON"\)/);

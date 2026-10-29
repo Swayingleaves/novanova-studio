@@ -621,6 +621,11 @@ export function SystemConfiguration() {
         setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.modelType === modelType ? { ...configItem, defaultModel: modelConfigValue(configItem) === model } : configItem)));
     };
 
+    /** 开关只改草稿，保存时随模型配置一起提交；关闭的模型不会出现在用户下拉中。 */
+    const setDraftModelEnabled = (modelConfigId: string, enabled: boolean) => {
+        setDraftModelConfigs((configs) => configs.map((configItem) => (configItem.id === modelConfigId ? { ...configItem, enabled } : configItem)));
+    };
+
     const confirmModelPicker = (values: string[]) => {
         if (!modelPicker || !modelPickerGroup) return;
         if (modelPicker.mode === "options") {
@@ -666,6 +671,7 @@ export function SystemConfiguration() {
                         modelName: normalizedConfig.modelName,
                         modelType: normalizedConfig.modelType,
                         capabilities: normalizedConfig.capabilities,
+                        enabled: normalizedConfig.enabled,
                         sortOrder: normalizedConfig.sortOrder,
                         creditCost: normalizedConfig.creditCost,
                         creditUnit: normalizedConfig.creditUnit,
@@ -698,6 +704,7 @@ export function SystemConfiguration() {
                         id: normalizedConfig.id,
                         modelType: normalizedConfig.modelType,
                         capabilities: normalizedConfig.capabilities,
+                        enabled: normalizedConfig.enabled,
                         sortOrder: normalizedConfig.sortOrder,
                         creditCost: normalizedConfig.creditCost,
                         creditUnit: normalizedConfig.creditUnit,
@@ -1181,6 +1188,16 @@ export function SystemConfiguration() {
                                                                             <span className="min-w-0 truncate text-sm">{modelOptionLabelWithRealName(draftConfig, model)}</span>
                                                                             <div className="flex shrink-0 items-center gap-2">
                                                                                 {modelConfig.defaultModel ? <span className="text-xs text-[var(--studio-muted)]">{translate("appShell.default")}</span> : null}
+                                                                                <span title={modelConfig.defaultModel ? translate("appShell.defaultModelCannotBeDisabled") : translate("appShell.disabledModelsHiddenFromUserDropdown")}>
+                                                                                    <Switch
+                                                                                        size="small"
+                                                                                        checked={modelConfig.enabled}
+                                                                                        checkedChildren={translate("appShell.modelEnabled")}
+                                                                                        unCheckedChildren={translate("appShell.modelDisabled")}
+                                                                                        disabled={isSaving || modelConfig.defaultModel}
+                                                                                        onChange={(checked) => setDraftModelEnabled(modelConfig.id, checked)}
+                                                                                    />
+                                                                                </span>
                                                                                 <Button size="small" icon={<Pencil className="size-3.5" />} disabled={isSaving} onClick={() => openModelConfigEditor(modelConfig)}>
                                                                                     {translate("appShell.edit")}
                                                                                 </Button>
@@ -2032,6 +2049,7 @@ function createDraftModelConfig(channelId: string, modelName: string, modelType:
         modelType,
         capabilities: [],
         defaultModel: false,
+        enabled: true,
         sortOrder: 0,
         creditCost: 0,
         creditUnit: "generation",
@@ -2057,6 +2075,7 @@ function sameValue(first: unknown, second: unknown) {
 function sameModelConfigForUpdate(first: ServerModelConfig, second: ServerModelConfig) {
     return (
         first.modelType === second.modelType &&
+        first.enabled === second.enabled &&
         first.sortOrder === second.sortOrder &&
         first.creditCost === second.creditCost &&
         first.creditUnit === second.creditUnit &&

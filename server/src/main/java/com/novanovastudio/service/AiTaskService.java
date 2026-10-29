@@ -690,9 +690,13 @@ public class AiTaskService {
                                     .orElse(null))
                             .filter(java.util.Objects::nonNull)
                             .toList();
+                    // 管理端关闭的模型不进入用户可见的模型目录；默认模型判定仍按全量配置，
+                    // 关闭某个默认模型时同类型其它已开启模型仍然可用。
                     List<AiTaskDtos.AiModelOption> availableModels = models.stream()
                             .filter(model -> models.stream().anyMatch(candidate -> model.capability().equals(candidate.capability())
                                     && Boolean.TRUE.equals(candidate.defaultModel())))
+                            .filter(model -> tuple.getT2().stream().noneMatch(config -> Boolean.FALSE.equals(config.enabled())
+                                    && model.value().equals(config.channelId() + CHANNEL_MODEL_SEPARATOR + config.modelName())))
                             .toList();
                     return new AiTaskDtos.AiModelListResponse(availableModels,
                             modelValues(availableModels, TYPE_IMAGE), modelValues(availableModels, TYPE_VIDEO), modelValues(availableModels, TYPE_TEXT));

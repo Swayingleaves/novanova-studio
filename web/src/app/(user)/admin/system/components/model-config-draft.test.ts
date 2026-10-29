@@ -14,6 +14,7 @@ function configuration(id: string, modelName: string, patch: Partial<ServerModel
         modelType: "text",
         capabilities: [],
         defaultModel: false,
+        enabled: true,
         sortOrder: 0,
         creditCost: 0,
         creditUnit: "generation",

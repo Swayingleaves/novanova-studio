@@ -323,6 +323,8 @@ export type ServerModelConfig = {
     modelType: "image" | "video" | "text";
     capabilities: string[];
     defaultModel: boolean;
+    /** 是否开启，关闭后不出现在用户的模型下拉选择中。 */
+    enabled: boolean;
     sortOrder: number;
     creditCost: CreditAmount;
     ownerTeamId?: number;
@@ -1221,6 +1223,7 @@ export function updateModelConfig(
         | "id"
         | "modelType"
         | "capabilities"
+        | "enabled"
         | "sortOrder"
         | "creditCost"
         | "creditUnit"

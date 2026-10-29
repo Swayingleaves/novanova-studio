@@ -265,6 +265,7 @@ public class PersistenceService {
                     record.setCapabilities(JSON.toJSONString(capabilities));
                     AudioInputSupport.validateCapability(request.modelType(), capabilities);
                     record.setDefaultModel(false);
+                    record.setEnabled(request.enabled() == null || request.enabled());
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
                     record.setCreditCost("video".equals(request.modelType()) ? BigDecimal.ZERO : request.creditCost() == null ? BigDecimal.ZERO : request.creditCost());
                     record.setCreditUnit(videoBillingConfiguration == null
@@ -306,6 +307,11 @@ public class PersistenceService {
         return requireResourceOwner("model", request.id()).then(Mono.defer(() -> repository.getPlatformAiModelConfig(request.id())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.modelConfigurationNotFound"))))
                 .flatMap(record -> {
+                    // 默认模型关闭后该类型会从用户下拉中整体消失，必须先切换默认模型。
+                    boolean enabled = request.enabled() == null ? Boolean.TRUE.equals(record.getEnabled()) : request.enabled();
+                    if (!enabled && Boolean.TRUE.equals(record.getDefaultModel())) {
+                        return Mono.<PersistenceDtos.ModelConfig>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.defaultModelCannotBeDisabled")));
+                    }
                     List<String> capabilities = normalizeModelCapabilities(request.modelType(), request.capabilities());
                     VideoBillingConfiguration existingVideoBillingConfiguration = parseVideoBillingConfiguration(record.getVideoBillingConfiguration());
                     // 视频模型省略配置时沿用旧值；切换为非视频模型时清空旧值，但显式传入仍必须拒绝。
@@ -321,6 +327,7 @@ public class PersistenceService {
                     record.setModelType(request.modelType());
                     record.setCapabilities(JSON.toJSONString(capabilities));
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
+                    record.setEnabled(enabled);
                     record.setCreditCost("video".equals(request.modelType()) ? BigDecimal.ZERO : request.creditCost() == null ? BigDecimal.ZERO : request.creditCost());
                     record.setCreditUnit(videoBillingConfiguration == null
                             ? normalizeCreditUnit(request.modelType(), request.creditUnit())
@@ -372,6 +379,10 @@ public class PersistenceService {
                     if (!request.modelType().equals(record.getModelType())) {
                         return Mono.<Void>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.defaultModelTypeDoesNotMatchConfiguration")));
                     }
+                    // 关闭的模型不会被用户看到，不能设为默认模型。
+                    if (Boolean.FALSE.equals(record.getEnabled())) {
+                        return Mono.<Void>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.enableModelBeforeSettingDefault")));
+                    }
                     return repository.setDefaultPlatformAiModel(request.modelType(), request.id());
                 });
         });
@@ -410,7 +421,8 @@ public class PersistenceService {
                 "image".equals(record.getModelType()) ? AiImageSizeSupport.normalizeMappings(
                         record.getImageSizeMappings() == null ? null : JSON.parseObject(record.getImageSizeMappings(),
                                 new TypeReference<Map<String, Map<String, String>>>() {})) : null,
-                parseImageBillingConfiguration(record.getImageBillingConfiguration()));
+                parseImageBillingConfiguration(record.getImageBillingConfiguration()),
+                record.getEnabled() == null || Boolean.TRUE.equals(record.getEnabled()));
     }
 
     /**

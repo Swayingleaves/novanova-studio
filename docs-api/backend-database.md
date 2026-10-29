@@ -222,6 +222,7 @@ flowchart TB
 | `custom_body_parameters` | `JSONB` | 模型 JSON POST 请求的自定义请求体参数，顶层必须为 JSON 对象，默认 `{}`。 |
 | `video_billing_configuration` | `JSONB` | 视频模型分档计费配置，包含唯一计费方式、最短生成秒数，以及文生视频、图生视频、全能参考三个模式各自的 `Auto/480p/720p/768p/1080p/2k/4k` 单价；空价格表示该模式和分辨率不可用。 |
 | `image_billing_configuration` | `JSONB` | 图片模型的分辨率价目表，形如 `{"resolutionPrices":{"1K":1,"2K":4,"4K":9}}`，接口字段为 `imageBillingConfiguration`。配置后按请求 `parameters.resolution`（缺省或 `auto` 按 `2K`）取价，请求档位未配置时直接报错；整列为空表示沿用模型 `credit_cost` 单价。文本、视频模型不使用。 |
+| `is_enabled` | `BOOLEAN` | 模型是否开启，默认 `true`，接口字段为 `enabled`。关闭后该模型不出现在用户的模型下拉选择中；默认模型不能关闭，必须先切换该类型的默认模型。关闭只影响模型目录，已进入队列的任务仍按原模型执行。 |
 | `display_name` | `VARCHAR(255)` | 模型展示名称，为空或与真实模型名相同时展示真实模型名，仅影响展示不影响调用。 |
 | `model_icon` | `VARCHAR(64)` | 模型展示图标标识，为空时按模型名或渠道自动匹配，仅影响展示不影响调用。 |
 | `is_custom_model` | `BOOLEAN` | 是否启用自定义模型调用，独立于渠道调用格式，仅图片/视频模型支持，默认 `false`。 |
