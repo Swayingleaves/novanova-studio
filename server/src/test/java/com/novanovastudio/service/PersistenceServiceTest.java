@@ -920,6 +920,46 @@ class PersistenceServiceTest {
         Assertions.assertFalse(service.listModelConfigs().block().getFirst().convertImageSizeToPixels());
     }
 
+    /** 模型开启开关默认开启，可随创建和更新保存；默认模型不能被关闭。 */
+    @Test
+    void shouldRoundTripModelEnabledAndProtectDefaultModel() {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"text-model\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
+
+        PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "text-model", "text", List.of(), 0, 0, false, "high")).block();
+        Assertions.assertTrue(created.enabled());
+
+        PersistenceDtos.ModelConfig disabled = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
+                "channel-1", "text-model", "text", List.of(), 0, 0, false, "high", "generation", 1,
+                new JSONObject(), null, null, null, false, null, false, null, null, false)).block();
+        Assertions.assertFalse(disabled.enabled());
+
+        PersistenceRecords.UserAiModelConfigRecord record = new PersistenceRecords.UserAiModelConfigRecord();
+        record.setModelConfigId("model-config-1");
+        record.setModelType("text");
+        record.setDefaultModel(true);
+        record.setEnabled(true);
+        when(repository.getPlatformAiModelConfig("model-config-1")).thenReturn(Mono.just(record));
+        when(repository.updatePlatformAiModelConfig(record)).thenReturn(Mono.just(1L));
+
+        BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.updateModelConfig(
+                new PersistenceDtos.UpdateModelConfigRequest("model-config-1", "text", List.of(), 0, 0, true, "high", "generation", 1,
+                        new JSONObject(), null, null, null, false, null, false, null, null, false)).block());
+        Assertions.assertTrue(exception.getMessage().contains("默认模型不能关闭"));
+        Assertions.assertTrue(record.getEnabled());
+
+        // 切走默认标记后即可关闭，开关随更新保存。
+        record.setDefaultModel(false);
+        PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
+                "model-config-1", "text", List.of(), 0, 0, true, "high", "generation", 1,
+                new JSONObject(), null, null, null, false, null, false, null, null, false)).block();
+        Assertions.assertFalse(updated.enabled());
+        Assertions.assertFalse(record.getEnabled());
+    }
+
     /**
      * 文本和视频模型不能开启图片比例转换。
      *

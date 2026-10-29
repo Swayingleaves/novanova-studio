@@ -478,9 +478,11 @@ function normalizeConfig(config: Partial<AiConfig> = {}): AiConfig {
 }
 
 export function configFromModelConfigs(channels: ModelChannel[], modelConfigs: ServerModelConfig[], current: Partial<AiConfig> = {}) {
-    const valuesByType = (type: ModelCapability) => modelConfigs.filter((item) => item.modelType === type).map((item) => `${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`);
+    // 管理端关闭的模型只保留在配置里供重新开启，不进入各能力可选项和默认模型。
+    const selectableConfigs = modelConfigs.filter((item) => item.enabled !== false);
+    const valuesByType = (type: ModelCapability) => selectableConfigs.filter((item) => item.modelType === type).map((item) => `${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`);
     const defaultByType = (type: ModelCapability) => {
-        const item = modelConfigs.find((config) => config.modelType === type && config.defaultModel);
+        const item = selectableConfigs.find((config) => config.modelType === type && config.defaultModel);
         return item ? `${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}` : "";
     };
     return normalizeConfig({
@@ -665,6 +667,8 @@ export function normalizeServerModelConfig(config: ServerModelConfig): ServerMod
         modelIcon: config.modelIcon || null,
         customBodyParameters: isJsonObject(config.customBodyParameters) ? { ...config.customBodyParameters } : {},
         isCustomModel: Boolean(config.isCustomModel),
+        // 未返回该字段的历史响应按开启处理，避免升级后所有模型被隐藏。
+        enabled: config.enabled !== false,
         customModelConfig: config.customModelConfig || {},
         creditUnit: normalizeModelCreditUnit(config.creditUnit, config.modelType),
         requestConcurrency: normalizeModelRequestConcurrency(config.requestConcurrency),

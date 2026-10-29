@@ -154,6 +154,7 @@ public final class RowMappers {
         record.setModelType(row.get("model_type", String.class));
         record.setCapabilities(row.get("capabilities", String.class));
         record.setDefaultModel(row.get("is_default", Boolean.class));
+        record.setEnabled(row.get("is_enabled", Boolean.class));
         record.setSortOrder(row.get("sort_order", Integer.class));
         record.setCreditCost(row.get("credit_cost", Integer.class));
         record.setCreditUnit(row.get("credit_unit", String.class));
