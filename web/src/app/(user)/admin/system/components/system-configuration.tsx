@@ -153,7 +153,7 @@ const modelIconSelectOptions = MODEL_ICON_OPTIONS.map((option) => ({
     value: option.value,
     label: (
         <span className="inline-flex items-center gap-2">
-            {option.path ? <img src={option.path} alt="" className="size-4" /> : option.value === "clapperboard" ? <Clapperboard className="size-4 opacity-70" /> : null}
+            {option.path ? <img src={option.path} alt="" className={option.value === "qwen" ? "model-icon-qwen size-4" : "size-4"} /> : option.value === "clapperboard" ? <Clapperboard className="size-4 opacity-70" /> : null}
             <span>{option.label}</span>
         </span>
     ),

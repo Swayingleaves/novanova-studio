@@ -8,6 +8,7 @@ export function resolveModelIcon(model: string, apiFormat?: ApiCallFormat): stri
     if (apiFormat === "minimax") return "/icons/minimax.svg";
 
     const name = model.toLowerCase();
+    if (name.includes("qwen") || /(?:^|[^a-z0-9])wan(?:x)?(?=$|[^a-z0-9]|\d)/.test(name)) return "/icons/qwen.svg";
     if (name.includes("claude") || name.includes("anthropic")) return "/icons/claude.svg";
     if (name.includes("gemini") || name.includes("google")) return "/icons/gemini.svg";
     if (name.includes("gpt") || name.includes("openai")) return "/icons/openai.svg";
@@ -43,6 +44,7 @@ export const createModelIconOptions = (translator: typeof translate = translate)
     { value: "glm", label: "GLM", path: "/icons/glm.svg" },
     { value: "grok", label: "Grok", path: "/icons/grok.svg" },
     { value: "minimax", label: "MiniMax", path: "/icons/minimax.svg" },
+    { value: "qwen", label: "Qwen", path: "/icons/qwen.svg" },
 ]);
 
 export const MODEL_ICON_OPTIONS = createModelIconOptions();
