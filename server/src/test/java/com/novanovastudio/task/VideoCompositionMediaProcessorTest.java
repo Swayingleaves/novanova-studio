@@ -58,25 +58,6 @@ class VideoCompositionMediaProcessorTest {
     }
 
     /**
-     * 导演台帧序列命令必须固定从第一帧开始，并输出无音轨H.264视频。
-     */
-    @Test
-    void shouldBuildDirectorDeskFrameCommand() {
-        NovanovaProperties properties = new NovanovaProperties();
-        properties.getAi().getVideoComposition().setFfmpegExecutable("ffmpeg-custom");
-        VideoCompositionMediaProcessor processor = new VideoCompositionMediaProcessor(properties);
-
-        List<String> command = processor.buildFrameFfmpegCommand(
-                List.of(Path.of("work", "frame-000001.png"), Path.of("work", "frame-000002.png")),
-                Path.of("work", "result.mp4"), 1280, 720, 30
-        );
-
-        Assertions.assertEquals("ffmpeg-custom", command.getFirst());
-        Assertions.assertTrue(command.containsAll(List.of("-framerate", "30", "-start_number", "1", "-frames:v", "2", "-an", "-pix_fmt", "yuv420p")));
-        Assertions.assertTrue(command.stream().anyMatch(value -> value.endsWith("frame-%06d.png")));
-    }
-
-    /**
      * 源视频总时长超过配置上限时必须失败。
      */
     @Test

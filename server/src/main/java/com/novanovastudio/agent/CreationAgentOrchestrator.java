@@ -217,35 +217,6 @@ public class CreationAgentOrchestrator {
     }
 
     /**
-     * 作废同一画布、同一设定图节点上仍在排队的旧请求。
-     * <p>
-     * 页面刷新后重复点击会为同一次设定图生成堆叠出多个排队请求，最终表现为长时间"排队中"。
-     * 这里让新请求替换旧排队项：只处理 status=queued 的请求，已在执行的请求不做抢占。
-     *
-     * @param userId Long 用户ID
-     * @param request AgentChatRequest 新提交的请求快照
-     * @return Mono<Void> 作废完成信号
-     */
-    private Mono<Void> cancelSupersededQueuedRequests(Long userId, AgentChatRequest request) {
-        String targetNodeId = request.settingGraphNodeId();
-        if (!StringUtils.hasText(targetNodeId)) {
-            return Mono.empty();
-        }
-        return requestRepository.listQueuedSettingGraphRequests(userId, request.entrySource(), targetNodeId)
-                .concatMap(queued -> requestRepository.cancelQueuedIfQueued(userId, queued.getId(),
-                                "同一设定图节点已提交新请求，旧请求不再执行")
-                        .flatMap(canceled -> {
-                            if (!Boolean.TRUE.equals(canceled)) {
-                                return Mono.empty();
-                            }
-                            log.info("作废被新请求替换的排队设定图请求: userId={}, requestId={}, settingGraphNodeId={}",
-                                    userId, queued.getId(), targetNodeId);
-                            return requestQueue.removeQueuedRequest(userId, queued.getEntrySource(), queued.getId());
-                        }))
-                .then();
-    }
-
-    /**
      * 图片/视频入口发起对话时幂等创建对话生成记录，保证刷新后左侧会话列表可见。
      * <p>
      * 仅当会话尚无生成记录时初始化空记录；失败不阻断对话主流程。

@@ -107,45 +107,6 @@ class CreditServiceTest {
     }
 
     /**
-     * 管理员任务查询应覆盖所有用户并保留筛选与用户信息。
-     */
-    @Test
-    void shouldListAllUsersTaskRecordsInSystemScope() {
-        LocalDate startDate = LocalDate.of(2026, 7, 1);
-        LocalDate endDate = LocalDate.of(2026, 7, 31);
-        CreditDtos.AdminTaskRecordItem firstTask = new CreditDtos.AdminTaskRecordItem(
-                "task-1", "image", "model-id", "success", "提示词", null, null, null,
-                10L, List.of(), null, "2026-07-02T12:00:00+08:00", null,
-                8L, "creator", "创作者", "creator@example.com");
-        CreditDtos.AdminTaskRecordItem secondTask = new CreditDtos.AdminTaskRecordItem(
-                "task-2", "image", "model-id", "success", "提示词", null, null, null,
-                1L, List.of(), null, "2026-07-03T12:00:00+08:00", null,
-                9L, "another-creator", null, "another@example.com");
-        when(creditRepository.listAdminTaskRecords(org.mockito.ArgumentMatchers.any(CreditRepository.TaskRecordQuery.class), anyInt(), anyInt()))
-                .thenAnswer(invocation -> {
-                    CreditRepository.TaskRecordQuery query = invocation.getArgument(0);
-                    Assertions.assertNull(query.userId());
-                    Assertions.assertEquals(startDate.atStartOfDay(java.time.ZoneId.of("Asia/Shanghai")).toOffsetDateTime(), query.startAt());
-                    Assertions.assertEquals(endDate.plusDays(1).atStartOfDay(java.time.ZoneId.of("Asia/Shanghai")).toOffsetDateTime(), query.endAt());
-                    Assertions.assertEquals("image", query.taskType());
-                    Assertions.assertEquals("提示词", query.keyword());
-                    Assertions.assertEquals(2, (int) invocation.<Integer>getArgument(1));
-                    Assertions.assertEquals(10, (int) invocation.<Integer>getArgument(2));
-                    return Flux.just(firstTask, secondTask);
-                });
-        when(creditRepository.countTaskRecords(org.mockito.ArgumentMatchers.any(CreditRepository.TaskRecordQuery.class))).thenReturn(Mono.just(2L));
-
-        StepVerifier.create(creditService.listAdminTaskRecords(startDate, endDate, "image", " 提示词 ", 2, 10))
-                .expectNextMatches(response -> response.total() == 2
-                        && response.records().size() == 2
-                        && response.records().getFirst().userId() == 8L
-                        && response.records().getFirst().nickname().equals("创作者")
-                        && response.records().get(1).userId() == 9L
-                        && response.records().get(1).email().equals("another@example.com"))
-                .verifyComplete();
-    }
-
-    /**
      * 积分不足时任务扣费应失败，且不写余额快照。
      */
     @Test

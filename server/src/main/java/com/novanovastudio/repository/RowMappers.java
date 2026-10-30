@@ -329,7 +329,6 @@ public final class RowMappers {
         VideoCompositionTask task = new VideoCompositionTask();
         task.setId(row.get("id", String.class));
         task.setUserId(row.get("user_id", Long.class));
-        task.setTaskType(row.get("task_type", String.class));
         task.setStatus(row.get("status", String.class));
         task.setProgress(row.get("progress", Integer.class));
         task.setSourceStorageKeys(jsonText(row, "source_storage_keys"));

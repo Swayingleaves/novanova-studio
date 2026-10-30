@@ -1,17 +1,10 @@
 import { getAiTaskPollingIntervalMilliseconds, serverPost, type ServerMediaInfo, type ServerSystemMessage } from "./server";
 
 /** 视频合成任务状态。 */
-export type VideoCompositionTaskStatus = "preparing" | "pending" | "running" | "succeeded" | "failed" | "canceled";
+export type VideoCompositionTaskStatus = "pending" | "running" | "succeeded" | "failed" | "canceled";
 
 /** 视频合成结果媒体。 */
-export type VideoCompositionResultData = Partial<ServerMediaInfo> & {
-    sourceCanvasDocumentId?: string;
-    sourceDirectorNodeId?: string;
-    sourceProjectRevision?: number;
-    sourceCameraId?: string;
-    sourceDurationMilliseconds?: number;
-    sourceFrameRate?: number;
-};
+export type VideoCompositionResultData = Partial<ServerMediaInfo>;
 
 /** 服务端视频合成任务。 */
 export type VideoCompositionTask = {
