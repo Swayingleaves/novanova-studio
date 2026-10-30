@@ -37,6 +37,9 @@ public class NovanovaProperties {
     @Valid
     private ObjectStorage objectStorage = new ObjectStorage();
 
+    /** 支付宝电脑网站支付配置 */
+    private Alipay alipay = new Alipay();
+
     /**
      * 获取应用配置
      *
@@ -161,6 +164,147 @@ public class NovanovaProperties {
      */
     public void setObjectStorage(ObjectStorage objectStorage) {
         this.objectStorage = objectStorage;
+    }
+
+    /**
+     * 获取支付宝支付配置。
+     *
+     * @return Alipay 支付宝配置
+     */
+    public Alipay getAlipay() {
+        return alipay;
+    }
+
+    /**
+     * 设置支付宝支付配置。
+     *
+     * @param alipay Alipay 支付宝配置
+     */
+    public void setAlipay(Alipay alipay) {
+        this.alipay = alipay;
+    }
+
+    /** 支付宝电脑网站支付配置。 */
+    public static class Alipay {
+
+        /** 是否启用支付宝支付 */
+        private boolean enabled;
+
+        /** 支付宝应用标识 */
+        private String appId = "";
+
+        /** 应用私钥 */
+        private String privateKey = "";
+
+        /** 支付宝公钥 */
+        private String publicKey = "";
+
+        /** 支付宝网关地址 */
+        private String gatewayUrl = "https://openapi.alipay.com/gateway.do";
+
+        /** 异步通知地址 */
+        private String notifyUrl = "";
+
+        /** 同步跳转地址 */
+        private String returnUrl = "";
+
+        /**
+         * @return boolean 是否启用支付宝支付
+         */
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        /**
+         * @param enabled boolean 是否启用支付宝支付
+         */
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        /**
+         * @return String 支付宝应用标识
+         */
+        public String getAppId() {
+            return appId;
+        }
+
+        /**
+         * @param appId String 支付宝应用标识
+         */
+        public void setAppId(String appId) {
+            this.appId = appId;
+        }
+
+        /**
+         * @return String 应用私钥
+         */
+        public String getPrivateKey() {
+            return privateKey;
+        }
+
+        /**
+         * @param privateKey String 应用私钥
+         */
+        public void setPrivateKey(String privateKey) {
+            this.privateKey = privateKey;
+        }
+
+        /**
+         * @return String 支付宝公钥
+         */
+        public String getPublicKey() {
+            return publicKey;
+        }
+
+        /**
+         * @param publicKey String 支付宝公钥
+         */
+        public void setPublicKey(String publicKey) {
+            this.publicKey = publicKey;
+        }
+
+        /**
+         * @return String 支付宝网关地址
+         */
+        public String getGatewayUrl() {
+            return gatewayUrl;
+        }
+
+        /**
+         * @param gatewayUrl String 支付宝网关地址
+         */
+        public void setGatewayUrl(String gatewayUrl) {
+            this.gatewayUrl = gatewayUrl;
+        }
+
+        /**
+         * @return String 异步通知地址
+         */
+        public String getNotifyUrl() {
+            return notifyUrl;
+        }
+
+        /**
+         * @param notifyUrl String 异步通知地址
+         */
+        public void setNotifyUrl(String notifyUrl) {
+            this.notifyUrl = notifyUrl;
+        }
+
+        /**
+         * @return String 同步跳转地址
+         */
+        public String getReturnUrl() {
+            return returnUrl;
+        }
+
+        /**
+         * @param returnUrl String 同步跳转地址
+         */
+        public void setReturnUrl(String returnUrl) {
+            this.returnUrl = returnUrl;
+        }
     }
 
     /**
@@ -716,6 +860,12 @@ public class NovanovaProperties {
         /** 分镜Agent配置 */
         private StoryboardAgent storyboardAgent = new StoryboardAgent();
 
+        /** 剧本Agent配置 */
+        private ScriptAgent scriptAgent = new ScriptAgent();
+
+        /** 故事知识库分析Agent配置，复用剧本Agent的超时配置结构 */
+        private ScriptAgent storyBibleAgent = new ScriptAgent();
+
         /** AI图片结果配置 */
         private Image image = new Image();
 
@@ -777,6 +927,42 @@ public class NovanovaProperties {
         }
 
         /**
+         * 获取剧本Agent配置。
+         *
+         * @return ScriptAgent 剧本Agent配置
+         */
+        public ScriptAgent getScriptAgent() {
+            return scriptAgent;
+        }
+
+        /**
+         * 设置剧本Agent配置。
+         *
+         * @param scriptAgent ScriptAgent 剧本Agent配置
+         */
+        public void setScriptAgent(ScriptAgent scriptAgent) {
+            this.scriptAgent = scriptAgent;
+        }
+
+        /**
+         * 获取故事知识库分析Agent配置。
+         *
+         * @return ScriptAgent 故事知识库分析Agent配置
+         */
+        public ScriptAgent getStoryBibleAgent() {
+            return storyBibleAgent;
+        }
+
+        /**
+         * 设置故事知识库分析Agent配置。
+         *
+         * @param storyBibleAgent ScriptAgent 故事知识库分析Agent配置
+         */
+        public void setStoryBibleAgent(ScriptAgent storyBibleAgent) {
+            this.storyBibleAgent = storyBibleAgent;
+        }
+
+        /**
          * 获取AI图片结果配置。
          *
          * @return Image AI图片结果配置
@@ -819,6 +1005,54 @@ public class NovanovaProperties {
 
             /** Agent单次调用超时时间（秒） */
             private int timeoutSeconds = 90;
+
+            /** 批量合成镜头提示词时同时请求模型的镜头数量 */
+            private int composeConcurrency = 4;
+
+            /**
+             * 获取Agent单次调用超时时间（秒）。
+             *
+             * @return int 超时时间秒数
+             */
+            public int getTimeoutSeconds() {
+                return timeoutSeconds;
+            }
+
+            /**
+             * 设置Agent单次调用超时时间（秒）。
+             *
+             * @param timeoutSeconds int 超时时间秒数
+             */
+            public void setTimeoutSeconds(int timeoutSeconds) {
+                this.timeoutSeconds = timeoutSeconds;
+            }
+
+            /**
+             * 获取批量合成提示词的并发镜头数量。
+             *
+             * @return int 并发数量
+             */
+            public int getComposeConcurrency() {
+                return composeConcurrency;
+            }
+
+            /**
+             * 设置批量合成提示词的并发镜头数量。
+             *
+             * @param composeConcurrency int 并发数量
+             */
+            public void setComposeConcurrency(int composeConcurrency) {
+                this.composeConcurrency = composeConcurrency;
+            }
+        }
+
+        /**
+         * 剧本Agent配置。
+         */
+        public static class ScriptAgent {
+
+            /** Agent单次调用超时时间（秒） */
+            private int timeoutSeconds = 120;
 
             /**
              * 获取Agent单次调用超时时间（秒）。
@@ -1390,6 +1624,12 @@ public class NovanovaProperties {
             /** 分镜脚本Agent文件路径 */
             private String agentStoryboardFile = "";
 
+            /** 剧本创作Agent文件路径 */
+            private String agentScriptFile = "";
+
+            /** 故事知识库分析Agent文件路径 */
+            private String agentStoryBibleFile = "";
+
             /** 分镜资产图片提示词模板文件路径 */
             private String imageStoryboardAssetFile = "";
 
@@ -1535,6 +1775,42 @@ public class NovanovaProperties {
              */
             public void setAgentStoryboardFile(String agentStoryboardFile) {
                 this.agentStoryboardFile = agentStoryboardFile;
+            }
+
+            /**
+             * 获取剧本创作Agent文件路径。
+             *
+             * @return String 剧本创作Agent文件路径
+             */
+            public String getAgentScriptFile() {
+                return agentScriptFile;
+            }
+
+            /**
+             * 设置剧本创作Agent文件路径。
+             *
+             * @param agentScriptFile String 剧本创作Agent文件路径
+             */
+            public void setAgentScriptFile(String agentScriptFile) {
+                this.agentScriptFile = agentScriptFile;
+            }
+
+            /**
+             * 获取故事知识库分析Agent文件路径。
+             *
+             * @return String 故事知识库分析Agent文件路径
+             */
+            public String getAgentStoryBibleFile() {
+                return agentStoryBibleFile;
+            }
+
+            /**
+             * 设置故事知识库分析Agent文件路径。
+             *
+             * @param agentStoryBibleFile String 故事知识库分析Agent文件路径
+             */
+            public void setAgentStoryBibleFile(String agentStoryBibleFile) {
+                this.agentStoryBibleFile = agentStoryBibleFile;
             }
 
             /**

@@ -23,6 +23,10 @@
         </rollingPolicy>
     </appender>
 
+    <!-- 支付宝 SDK 把 40004（如 ACQ.TRADE_NOT_EXIST）这类业务响应也按 ERROR 打印，
+         它们属于正常业务结果而非系统故障，降级为 WARN 避免刷屏掩盖真正的异常。 -->
+    <logger name="sdk.biz.err" level="WARN"/>
+
     <root level="${LOG_LEVEL}">
         <appender-ref ref="CONSOLE"/>
         <appender-ref ref="FILE"/>

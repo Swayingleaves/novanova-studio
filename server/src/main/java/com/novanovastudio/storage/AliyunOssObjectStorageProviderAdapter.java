@@ -41,6 +41,47 @@ public class AliyunOssObjectStorageProviderAdapter implements ObjectStorageProvi
     }
 
     /**
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @return 阿里云SDK签发的临时GET地址
+     */
+    @Override
+    public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        validate(config);
+        ClientBuilderConfiguration clientConfiguration = new ClientBuilderConfiguration();
+        clientConfiguration.setSignatureVersion(SignVersion.V4);
+        OSS client = OSSClientBuilder.create().credentialsProvider(new DefaultCredentialProvider(config.accessKey(), config.secretKey()))
+                .clientConfiguration(clientConfiguration).region(config.region()).endpoint(config.endpoint()).build();
+        try {
+            var request = new com.aliyun.oss.model.GeneratePresignedUrlRequest(config.bucket(), key, com.aliyun.oss.HttpMethod.GET);
+            request.setExpiration(java.util.Date.from(expiresAt));
+            var headers = new com.aliyun.oss.model.ResponseHeaderOverrides();
+            headers.setContentDisposition(org.springframework.http.ContentDisposition.builder(download ? "attachment" : "inline")
+                    .filename(fileName, java.nio.charset.StandardCharsets.UTF_8).build().toString());
+            headers.setContentType(mimeType);
+            request.setResponseHeaders(headers);
+            return client.generatePresignedUrl(request).toString();
+        } finally { client.shutdown(); }
+    }
+
+    /**
+     * 物理删除对象，缺失对象由云端SDK按幂等删除处理。
+     * @param config 对象存储配置
+     * @param key 对象键
+     */
+    @Override
+    public void deletePrivateObject(PersistenceDtos.ObjectStorageConfig config, String key) {
+        validate(config);
+        OSS client = new OSSClientBuilder().build(config.endpoint(), config.accessKey(), config.secretKey());
+        try { client.deleteObject(config.bucket(), key); }
+        finally { client.shutdown(); }
+    }
+
+    /**
      * 校验阿里云OSS配置。
      *
      * @param config ObjectStorageConfig 对象存储配置

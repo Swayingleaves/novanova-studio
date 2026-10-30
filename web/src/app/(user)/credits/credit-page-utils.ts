@@ -1,7 +1,9 @@
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { translateMessage as translate } from "@/features/locale/translate";
-import { CalendarCheck, Coins, Gift, Image as ImageIcon, RotateCcw, TimerOff, UserCog, UserPlus, Video } from "lucide-react";
+import { CalendarCheck, Coins, Gift, Image as ImageIcon, RotateCcw, ShoppingCart, TimerOff, UserCog, UserPlus, Video } from "lucide-react";
 
 import type { ServerCreditDirection, ServerCreditDistributionItem, ServerCreditSource, ServerCreditTransactionType, ServerGenerationSource, ServerUserCreditTransaction } from "@/services/api/server";
 
@@ -9,28 +11,111 @@ export const CREDIT_TRANSACTION_PAGE_SIZE = 20;
 
 /** 积分明细方向筛选选项。 */
 /** 按调用方语言生成显示文案，业务值保持不变。 */
-export const createCreditDirectionOptions = (translator: typeof translate = translate): { label: string; value: "all" | ServerCreditDirection }[] => ([
-    { get label() { return translator("credits.all"); }, value: "all" },
-    { get label() { return translator("credits.add"); }, value: "add" },
-    { get label() { return translator("credits.usage"); }, value: "spend" },
-]);
+export const createCreditDirectionOptions = (translator: typeof translate = translate): { label: string; value: "all" | ServerCreditDirection }[] => [
+    {
+        get label() {
+            return translator("credits.all");
+        },
+        value: "all",
+    },
+    {
+        get label() {
+            return translator("credits.add");
+        },
+        value: "add",
+    },
+    {
+        get label() {
+            return translator("credits.usage");
+        },
+        value: "spend",
+    },
+];
 
 export const CREDIT_DIRECTION_OPTIONS = createCreditDirectionOptions();
 
 /** 积分明细来源筛选选项。 */
 /** 按调用方语言生成显示文案，业务值保持不变。 */
-export const createCreditSourceOptions = (translator: typeof translate = translate): { label: string; value: "all" | ServerCreditSource }[] => ([
-    { get label() { return translator("credits.allSources"); }, value: "all" },
-    { get label() { return translator("credits.imageGeneration"); }, value: "image" },
-    { get label() { return translator("credits.videoGeneration"); }, value: "video" },
-    { get label() { return translator("credits.redeemCode"); }, value: "card_redeem" },
-    { get label() { return translator("credits.adminAdjustment"); }, value: "admin_adjustment" },
-    { get label() { return translator("credits.taskRefund"); }, value: "task_refund" },
-    { get label() { return translator("credits.initialGrant"); }, value: "initial_grant" },
-    { get label() { return translator("credits.referralReward"); }, value: "invitation_reward" },
-    { get label() { return translator("credits.dailyCheckIn"); }, value: "daily_check_in" },
-    { get label() { return translator("credits.creditExpiration"); }, value: "credit_expired" },
-]);
+export const createCreditSourceOptions = (translator: typeof translate = translate): { label: string; value: "all" | ServerCreditSource }[] => [
+    {
+        get label() {
+            return translator("credits.allSources");
+        },
+        value: "all",
+    },
+    {
+        get label() {
+            return translator("storage.permanentExpansion");
+        },
+        value: "storage_purchase",
+    },
+    {
+        get label() {
+            return translator("storage.historicalMonthlyStorage");
+        },
+        value: "storage_charge",
+    },
+    {
+        get label() {
+            return translator("credits.imageGeneration");
+        },
+        value: "image",
+    },
+    {
+        get label() {
+            return translator("credits.videoGeneration");
+        },
+        value: "video",
+    },
+    {
+        get label() {
+            return translator("credits.redeemCode");
+        },
+        value: "card_redeem",
+    },
+    {
+        get label() {
+            return translator("credits.adminAdjustment");
+        },
+        value: "admin_adjustment",
+    },
+    {
+        get label() {
+            return translator("credits.taskRefund");
+        },
+        value: "task_refund",
+    },
+    {
+        get label() {
+            return translator("credits.initialGrant");
+        },
+        value: "initial_grant",
+    },
+    {
+        get label() {
+            return translator("credits.referralReward");
+        },
+        value: "invitation_reward",
+    },
+    {
+        get label() {
+            return translator("credits.dailyCheckIn");
+        },
+        value: "daily_check_in",
+    },
+    {
+        get label() {
+            return translator("credits.creditExpiration");
+        },
+        value: "credit_expired",
+    },
+    {
+        get label() {
+            return translator("credits.creditPurchase");
+        },
+        value: "credit_purchase",
+    },
+];
 
 export const CREDIT_SOURCE_OPTIONS = createCreditSourceOptions();
 
@@ -63,6 +148,7 @@ export function creditTransactionIcon(transaction: Pick<ServerUserCreditTransact
     if (transaction.transactionType === "invitation_reward") return UserPlus;
     if (transaction.transactionType === "daily_check_in") return CalendarCheck;
     if (transaction.transactionType === "credit_expired") return TimerOff;
+    if (transaction.transactionType === "credit_purchase") return ShoppingCart;
     return Gift;
 }
 
@@ -73,6 +159,8 @@ export function creditTransactionIcon(transaction: Pick<ServerUserCreditTransact
  * @return 中文流水类型文案
  */
 export function creditTransactionTypeLabel(transactionType: ServerCreditTransactionType | null | undefined) {
+    if (transactionType === "storage_purchase") return translate("storage.permanentExpansion");
+    if (transactionType === "storage_charge") return translate("storage.historicalMonthlyStorage");
     if (transactionType === "task_charge") return translate("credits.taskCharge");
     if (transactionType === "task_refund") return translate("credits.taskRefund");
     if (transactionType === "admin_adjustment") return translate("credits.adminAdjustment");
@@ -81,6 +169,7 @@ export function creditTransactionTypeLabel(transactionType: ServerCreditTransact
     if (transactionType === "invitation_reward") return translate("credits.referralReward");
     if (transactionType === "daily_check_in") return translate("credits.dailyCheckIn");
     if (transactionType === "credit_expired") return translate("credits.creditExpiration");
+    if (transactionType === "credit_purchase") return translate("credits.creditPurchase");
     return translate("credits.unknownType");
 }
 
@@ -90,13 +179,30 @@ export function creditTransactionTypeLabel(transactionType: ServerCreditTransact
  * @param changeAmount 有符号积分变动，正数增加、负数消耗，可为空
  * @return 带符号千分位文本，如 +1,000 / -500
  */
-export function formatCreditChange(changeAmount: number | null | undefined) {
+export function formatCreditChange(changeAmount: CreditAmount | null | undefined) {
     const amount = changeAmount ?? 0;
-    return (amount > 0 ? "+" : "") + formatCredits(amount);
+    return (creditAmount(amount).greaterThan(0) ? "+" : "") + formatCredits(amount);
+}
+
+/** 同步业务操作流水的原因格式：业务名称 + 扣费或退款 + 服务端对账用的内部操作标识。 */
+const OPERATION_REASON_PATTERN = /^(.+?)(?:扣费|退款)（操作ID：[^）]*）$/;
+
+/**
+ * 去掉业务操作流水原因里的内部操作标识。
+ *
+ * @param reason 流水原因，可为空
+ * @return 面向用户展示的业务名称，格式不匹配时原样返回
+ */
+function operationReasonLabel(reason: string | null | undefined) {
+    const text = (reason ?? "").trim();
+    const matched = OPERATION_REASON_PATTERN.exec(text);
+    return matched ? matched[1].trim() : text;
 }
 
 /**
  * 组装积分明细详情文案：任务流水显示生成类型与模型，其余显示变动原因。
+ *
+ * <p>漫剧生成最终提示词等同步业务操作没有生成任务记录，类型与模型都为空，只能回退用流水原因说明这笔记账。</p>
  *
  * @param transactionType 积分流水类型
  * @param generationType 生成任务类型，非任务流水为 null
@@ -107,7 +213,8 @@ export function formatCreditChange(changeAmount: number | null | undefined) {
 export function creditTransactionDetail(transactionType: ServerCreditTransactionType, generationType: "image" | "video" | null, model: string | null, reason: string | null | undefined) {
     if (transactionType === "task_charge" || transactionType === "task_refund") {
         const typeLabel = generationType ? generationTypeLabel(generationType) : "";
-        return model ? `${typeLabel} · ${model}` : typeLabel;
+        const detail = model ? `${typeLabel} · ${model}` : typeLabel;
+        return detail || operationReasonLabel(reason);
     }
     return reason ?? "";
 }
@@ -135,9 +242,9 @@ export function generationSourceLabel(generationSource: ServerGenerationSource |
 export function normalizeGenerationDistribution(items: ServerCreditDistributionItem[]): ChartDataItem[] {
     const consumedCreditsByType = new Map(items.map((item) => [item.name, item.consumedCredits]));
     return [
-        { name: translate("credits.imageGeneration"), value: consumedCreditsByType.get("image") || 0 },
-        { name: translate("credits.videoGeneration"), value: consumedCreditsByType.get("video") || 0 },
-    ].filter((item) => item.value > 0);
+        { name: translate("credits.imageGeneration"), value: Number(consumedCreditsByType.get("image") || 0) },
+        { name: translate("credits.videoGeneration"), value: Number(consumedCreditsByType.get("video") || 0) },
+    ].filter((item) => creditAmount(item.value).greaterThan(0));
 }
 
 /**
@@ -147,7 +254,7 @@ export function normalizeGenerationDistribution(items: ServerCreditDistributionI
  * @return 可直接用于图表的数据
  */
 export function normalizeModelDistribution(items: ServerCreditDistributionItem[]): ChartDataItem[] {
-    return items.filter((item) => item.consumedCredits > 0).map((item) => ({ name: item.name, value: item.consumedCredits }));
+    return items.filter((item) => creditAmount(item.consumedCredits).greaterThan(0)).map((item) => ({ name: item.name, value: Number(item.consumedCredits) }));
 }
 
 /**
@@ -156,8 +263,8 @@ export function normalizeModelDistribution(items: ServerCreditDistributionItem[]
  * @param credits 积分数量
  * @return 带千分位的积分文本
  */
-export function formatCredits(credits: number | null | undefined) {
-    return (credits ?? 0).toLocaleString(currentLanguageTag());
+export function formatCredits(credits: CreditAmount | null | undefined) {
+    return creditText(credits ?? 0);
 }
 
 /**

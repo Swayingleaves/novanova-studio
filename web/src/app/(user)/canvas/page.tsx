@@ -4,7 +4,7 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/shared/lib/team-navigation";
 import { App, Button } from "antd";
 import { Download, FileUp, Plus } from "lucide-react";
 
@@ -18,9 +18,6 @@ import { setMediaBlob } from "@/features/storage/services/file-storage";
 import { setImageBlob } from "@/features/storage/services/image-storage";
 import { readZip } from "@/shared/lib/zip";
 import { readInitialPromptFromLocation, storeInitialPromptForNavigation } from "@/shared/lib/initial-prompt";
-
-const NEW_PROJECT_TITLE_PREFIX = "无限画布";
-
 
 export default function CanvasPage() {
     const translate = useTranslation();
@@ -42,17 +39,17 @@ export default function CanvasPage() {
         const initialPrompt = readInitialPromptFromLocation();
         if (!initialPrompt) return;
         initialPromptHandledRef.current = true;
-        const documentId = createDocument(`${NEW_PROJECT_TITLE_PREFIX} ${documents.length + 1}`);
+        const documentId = createDocument(`${translate("canvas.infiniteCanvas")} ${documents.length + 1}`);
         storeInitialPromptForNavigation(initialPrompt);
         router.replace(`/canvas/${documentId}`);
-    }, [createDocument, documents.length, hydrated, router]);
+    }, [createDocument, documents.length, hydrated, router, translate]);
 
     const openProject = (projectId: string) => {
         router.push(`/canvas/${projectId}`);
     };
 
     const createAndOpenProject = () => {
-        const documentId = createDocument(`${NEW_PROJECT_TITLE_PREFIX} ${documents.length + 1}`);
+        const documentId = createDocument(`${translate("canvas.infiniteCanvas")} ${documents.length + 1}`);
         const initialPrompt = readInitialPromptFromLocation();
         if (initialPrompt) storeInitialPromptForNavigation(initialPrompt);
         router.push(`/canvas/${documentId}`);

@@ -1,5 +1,8 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.novanovastudio.common.SystemMessage;
 
 import com.novanovastudio.common.BusinessException;
@@ -123,7 +126,7 @@ public class CreditCardService {
      */
     public Mono<CreditCardDtos.GenerateCreditCardsResponse> generateCreditCards(CreditCardDtos.GenerateCreditCardsRequest request) {
         int quantity = request.quantity() == null ? CreditCardDtos.DEFAULT_QUANTITY : request.quantity();
-        int creditsPerCard = request.creditsPerCard() == null ? 0 : request.creditsPerCard();
+        BigDecimal creditsPerCard = request.creditsPerCard() == null ? BigDecimal.ZERO : request.creditsPerCard();
         validateGeneration(quantity, creditsPerCard);
         List<String> cardCodes = generateUniqueCodes(quantity);
         return currentUserProvider.currentUserId().flatMap(adminUserId -> transactionalOperator.transactional(
@@ -203,7 +206,7 @@ public class CreditCardService {
      * @param credits int 单卡积分
      * @return Mono<Void> 写入结果
      */
-    private Mono<Void> createEncryptedCard(Long batchId, String code, int credits) {
+    private Mono<Void> createEncryptedCard(Long batchId, String code, BigDecimal credits) {
         return Mono.fromCallable(() -> SensitiveDataCrypto.encrypt(code, properties.getApp().getSecretKey()))
                 .flatMap(encrypted -> creditCardRepository.createCard(batchId, SensitiveDataCrypto.sha256Hex(code), encrypted, maskCardCode(code), code.substring(code.length() - 4), credits));
     }
@@ -232,11 +235,11 @@ public class CreditCardService {
      * @param quantity int 生成数量
      * @param creditsPerCard int 单卡积分
      */
-    static void validateGeneration(int quantity, int creditsPerCard) {
+    static void validateGeneration(int quantity, BigDecimal creditsPerCard) {
         if (quantity < 1 || quantity > CreditCardDtos.MAX_QUANTITY) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.quantityMustBeBetween1And1000"));
         }
-        if (creditsPerCard < 1) {
+        if (CreditAmounts.of(creditsPerCard).signum() <= 0) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.creditsPerCardMustBeAPositiveInteger"));
         }
     }

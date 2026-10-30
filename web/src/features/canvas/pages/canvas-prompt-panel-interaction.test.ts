@@ -42,7 +42,7 @@ test("@引用面板定位在光标右上侧", () => {
     assert.ok(promptPanelSource.includes("caretRect"), "提示编辑器未暴露@光标位置");
     assert.ok(promptPanelSource.includes("transform: \"translateY(calc(-100% - 0.5rem))\""), "@引用面板未定位到光标上方");
     assert.ok(!promptPanelSource.includes("top-[8.75rem]"), "@引用面板仍使用固定的节点位置");
-    assert.ok(promptPanelSource.includes('aria-label="搜索画布资产"'), "@引用面板缺少可输入的搜索框");
+    assert.ok(promptPanelSource.includes('aria-label={translate("canvas.searchCanvasAssets")}'), "@引用面板缺少可输入的搜索框");
     assert.ok(promptPanelSource.includes("onQueryChange={(value) =>"), "@引用面板搜索关键词未同步");
 });
 
@@ -60,7 +60,7 @@ test("节点提示面板展示已持久化的生成参考图", () => {
 });
 
 test("节点提示面板将参考内容显示在文本输入框上方", () => {
-    const referenceContentIndex = promptPanelSource.indexOf("参考内容");
+    const referenceContentIndex = promptPanelSource.indexOf('translate("canvas.referenceContent")');
     const promptEditorIndex = promptPanelSource.search(/<PromptEditor\s+ref=/);
 
     assert.ok(referenceContentIndex >= 0, "提示面板缺少参考内容区域");
@@ -78,12 +78,12 @@ test("节点参考内容按顺序显示序号并支持移除连线引用", () =>
 
 test("视频节点参考图和音频支持预览", () => {
     assert.match(promptPanelSource, /const canPreview = !canInsert && \(reference\.kind === "image" \|\| reference\.kind === "audio"\)/, "视频节点未识别可预览的参考图或音频");
-    assert.ok(promptPanelSource.includes("`放大查看${reference.label}`") && promptPanelSource.includes("`播放${reference.label}`"), "参考图或音频缺少预览入口");
+    assert.ok(promptPanelSource.includes('translate("canvas.enlarge", { value0: reference.label })') && promptPanelSource.includes('translate("canvas.play", { value0: reference.label })'), "参考图或音频缺少预览入口");
     assert.ok(promptPanelSource.includes("setReferencePreview(reference)"), "参考图点击后未打开预览");
 });
 
 test("图片和视频节点提供AI提示词优化入口", () => {
-    assert.ok(promptPanelSource.includes('title="AI优化提示词"'), "提示面板缺少AI提示词优化说明");
+    assert.ok(promptPanelSource.includes('title={translate("canvas.optimizePromptWithAI")}'), "提示面板缺少AI提示词优化说明");
     assert.ok(promptPanelSource.includes("<Sparkles"), "提示面板缺少Sparkles图标");
     assert.match(promptPanelSource, /onGeneratePrompt\(\s*node\.id,\s*mode,\s*prompt\.trim\(\),\s*updatePrompt,/, "优化结果未回填当前节点输入框");
 });
@@ -116,7 +116,7 @@ test("设定图节点存在上游资源时允许空输入生成", () => {
 test("设定图请求提交前合并上游内容并拒绝完全空提示词", () => {
     assert.ok(canvasPageSource.includes("resolveNodeGenerationPrompt(nodeId, nodesRef.current, connectionsRef.current, prompt, true)"), "设定图请求未解析节点自身输入和上游内容");
     assert.ok(canvasPageSource.includes("resolveNodeGenerationPrompt(nodeId, nodesRef.current, connectionsRef.current, prompt, true)"), "设定图请求未使用图片引用提示词解析能力");
-    assert.ok(canvasPageSource.includes('message.warning("请输入生成描述或连接有内容的上游节点")'), "完全空的设定图请求缺少明确提示");
+    assert.ok(canvasPageSource.includes('message.warning(translate("canvas.enterAGenerationDescriptionOrConnectAnUpstreamNode"))'), "完全空的设定图请求缺少明确提示");
     assert.match(canvasPageSource, /sendAgentMessage\(\s*effectivePrompt,/, "设定图请求未使用合并后的最终提示词");
 });
 
@@ -138,9 +138,9 @@ test("画布新增和生成节点统一使用避让重叠布局", () => {
 });
 
 test("画布图片设置按画质清晰度比例和限定数量排列", () => {
-    assert.ok(imageSettingsPanelSource.includes('<Field label="画质"'), "图片设置缺少独立画质配置");
-    assert.ok(imageSettingsPanelSource.includes('<Field label="清晰度"'), "图片设置缺少1K、2K、4K清晰度配置");
-    assert.ok(imageSettingsPanelSource.includes('<Field label="比例"'), "图片设置缺少独立比例配置");
+    assert.ok(imageSettingsPanelSource.includes('<Field label={translate("generation.quality")}'), "图片设置缺少独立画质配置");
+    assert.ok(imageSettingsPanelSource.includes('<Field label={translate("generation.resolution")}'), "图片设置缺少1K、2K、4K清晰度配置");
+    assert.ok(imageSettingsPanelSource.includes('<Field label={translate("generation.aspectRatio")}'), "图片设置缺少独立比例配置");
     assert.ok(!imageSettingsPanelSource.includes('<Field label="尺寸"'), "图片设置仍保留像素尺寸配置");
     assert.ok(!imageSettingsPanelSource.includes("explicitSize"), "比例选项仍混合分辨率和宽高比");
     assert.ok(imageSettingsPanelSource.includes("const IMAGE_COUNT_PRESETS = [1, 2, 4]"), "生成数量未严格限制为1、2、4");
@@ -149,9 +149,9 @@ test("画布图片设置按画质清晰度比例和限定数量排列", () => {
 });
 
 test("画布视频设置按比例清晰度时长和限定数量排列", () => {
-    assert.ok(videoSettingsPanelSource.includes('<Field label="比例"'), "视频设置缺少独立比例配置");
-    assert.ok(videoSettingsPanelSource.includes('<Field label="清晰度"'), "视频设置缺少清晰度配置");
-    assert.ok(videoSettingsPanelSource.includes('<Field label="视频时长"'), "视频设置缺少滑块时长配置");
+    assert.ok(videoSettingsPanelSource.includes('<Field label={translate("generation.aspectRatio")}'), "视频设置缺少独立比例配置");
+    assert.ok(videoSettingsPanelSource.includes('<Field label={translate("generation.resolution")}'), "视频设置缺少清晰度配置");
+    assert.ok(videoSettingsPanelSource.includes('<Field label={translate("generation.videoDuration")}'), "视频设置缺少滑块时长配置");
     assert.ok(videoSettingsPanelSource.includes("<Slider"), "视频时长未使用滑块控件");
     assert.ok(videoSettingsPanelSource.includes("max={durationRange.max}"), "视频生成最长时长未使用当前模型支持的最大值");
     assert.ok(videoSettingsPanelSource.includes("onChange={setDurationDraft}"), "拖动视频时长仍会直接更新画布节点");

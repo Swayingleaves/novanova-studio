@@ -1,11 +1,19 @@
 "use client";
+import { isInsufficientCreditsError, showInsufficientCredits } from "@/features/credits/insufficient-credits";
+import { modelCreditBalance } from "@/features/team/credit-balance";
+import { getWalletBalances } from "@/services/api/team";
+import { useTeamStore } from "@/features/team/stores/use-team-store";
+
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent as ReactChangeEvent, DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter } from "@/shared/lib/team-navigation";
 import dynamic from "next/dynamic";
 import { Trash2 } from "lucide-react";
 import { saveAs } from "file-saver";
@@ -2559,8 +2567,9 @@ function CanvasWorkspacePage() {
             }
             const normalizedSettings: CanvasStoryboardAssetGenerationSettings = { ...settings, model: normalizedModel };
             const totalCredits = readStoryboardAssetImageCost(effectiveConfig.modelCosts, normalizedModel, selectedAssets.length, normalizedSettings.imageResolution);
-            if (typeof creditBalance === "number" && totalCredits > creditBalance) {
-                message.error(translate("canvas.insufficientCreditsAssetsNeedAvailable", { value0: selectedAssets.length, value1: totalCredits, value2: creditBalance }));
+            const creditBalance = modelCreditBalance(normalizedModel);
+            if (creditBalance !== null && creditBalance !== undefined && creditAmount(totalCredits).greaterThan(creditBalance)) {
+                showInsufficientCredits(translate("canvas.insufficientCreditsAssetsNeedAvailable", { value0: selectedAssets.length, value1: totalCredits, value2: creditBalance }));
                 return;
             }
 
@@ -2688,8 +2697,9 @@ function CanvasWorkspacePage() {
                 message.error(videoQuote.reason);
                 return;
             }
-            if (typeof creditBalance === "number" && videoQuote.credits > creditBalance) {
-                message.error(translate("canvas.insufficientCreditsVideosNeedAvailable", { value0: selectedShots.length, value1: videoQuote.credits, value2: creditBalance }));
+            const creditBalance = modelCreditBalance(normalizedModel);
+            if (creditBalance !== null && creditBalance !== undefined && creditAmount(videoQuote.credits).greaterThan(creditBalance)) {
+                showInsufficientCredits(translate("canvas.insufficientCreditsVideosNeedAvailable", { value0: selectedShots.length, value1: videoQuote.credits, value2: creditBalance }));
                 return;
             }
 
@@ -2836,8 +2846,9 @@ function CanvasWorkspacePage() {
             if (!currentNode || currentNode.execution.phase === "running") return;
             const request = resolveStoryboardRequest(currentNode);
             if (!request) return;
-            if (typeof creditBalance === "number" && request.modelCost > creditBalance) {
-                message.error(translate("canvas.insufficientCreditsInitialGenerationNeedsAvailable", { value0: request.modelCost, value1: creditBalance }));
+            const creditBalance = modelCreditBalance(request.model);
+            if (creditBalance !== null && creditBalance !== undefined && creditAmount(request.modelCost).greaterThan(creditBalance)) {
+                showInsufficientCredits(translate("canvas.insufficientCreditsInitialGenerationNeedsAvailable", { value0: request.modelCost, value1: creditBalance }));
                 return;
             }
 
@@ -2862,7 +2873,7 @@ function CanvasWorkspacePage() {
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : translate("canvas.storyboardGenerationFailed");
                 setNodes((prev) => prev.map((item) => (item.id === currentNode.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage, completedAt: new Date().toISOString() }) : item)));
-                message.error(errorMessage);
+                if (!isInsufficientCreditsError(error)) message.error(errorMessage);
             }
         },
         [creditBalance, message, resolveStoryboardRequest, setCreditBalance],
@@ -2885,15 +2896,16 @@ function CanvasWorkspacePage() {
             }
             const request = resolveStoryboardRequest(currentNode, selectedModel);
             if (!request) return;
+            const creditBalance = modelCreditBalance(request.model);
             const compositionAssets = collectStoryboardCompositionAssets(selectedShots, currentNode.storyboard.assets);
             const validationError = validateStoryboardComposition(selectedShots, compositionAssets);
             if (validationError) {
                 message.error(validationError);
                 return;
             }
-            const totalCredits = request.modelCost * selectedShots.length;
-            if (typeof creditBalance === "number" && totalCredits > creditBalance) {
-                message.error(translate("canvas.insufficientCreditsShotsNeedAvailable", { value0: selectedShots.length, value1: totalCredits, value2: creditBalance }));
+            const totalCredits = creditText(creditAmount(request.modelCost).times(selectedShots.length));
+            if (creditBalance !== null && creditBalance !== undefined && creditAmount(totalCredits).greaterThan(creditBalance)) {
+                showInsufficientCredits(translate("canvas.insufficientCreditsShotsNeedAvailable", { value0: selectedShots.length, value1: totalCredits, value2: creditBalance }));
                 return;
             }
 
@@ -2928,7 +2940,7 @@ function CanvasWorkspacePage() {
             } catch (error) {
                 const errorMessage = error instanceof Error ? error.message : translate("canvas.failedToComposePrompt");
                 setNodes((prev) => prev.map((item) => (item.id === currentNode.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage, completedAt: new Date().toISOString() }) : item)));
-                message.error(errorMessage);
+                if (!isInsufficientCreditsError(error)) message.error(errorMessage);
             } finally {
                 setComposingStoryboardNodeId((current) => (current === nodeId ? null : current));
             }
@@ -2948,14 +2960,15 @@ function CanvasWorkspacePage() {
             }
             const request = resolveStoryboardRequest(currentNode);
             if (!request) return;
+            const creditBalance = modelCreditBalance(request.model);
             const compositionAssets = collectStoryboardCompositionAssets([shot], currentNode.storyboard.assets);
             const validationError = validateStoryboardComposition([shot], compositionAssets);
             if (validationError) {
                 message.error(validationError);
                 return;
             }
-            if (typeof creditBalance === "number" && request.modelCost > creditBalance) {
-                message.error(translate("canvas.insufficientCreditsShotNeedsAvailable", { value0: shot.shotNumber, value1: request.modelCost, value2: creditBalance }));
+            if (creditBalance !== null && creditBalance !== undefined && creditAmount(request.modelCost).greaterThan(creditBalance)) {
+                showInsufficientCredits(translate("canvas.insufficientCreditsShotNeedsAvailable", { value0: shot.shotNumber, value1: request.modelCost, value2: creditBalance }));
                 return;
             }
 
@@ -2983,7 +2996,7 @@ function CanvasWorkspacePage() {
                 applyStoryboardCreditCharge(result.chargedCredits, setCreditBalance);
                 message.success(translate("canvas.finalPromptForShotGeneratedCreditsUsed", { value0: shot.shotNumber, value1: result.chargedCredits }));
             } catch (error) {
-                message.error(error instanceof Error ? error.message : translate("canvas.failedToGenerateShotPrompt"));
+                if (!isInsufficientCreditsError(error)) message.error(error instanceof Error ? error.message : translate("canvas.failedToGenerateShotPrompt"));
             } finally {
                 setComposingStoryboardShot((current) => (current?.nodeId === nodeId && current.shotId === shotId ? null : current));
             }
@@ -3137,7 +3150,7 @@ function CanvasWorkspacePage() {
                         const image = await uploadImage(piece.dataUrl);
                         const id = nanoid();
                         return updateCanvasNodeFrame(
-                            { ...createCanvasNode("image", { x: 0, y: 0 }, { ...imageAttributes(image), prompt: node.generation.prompt }), id, title: `${node.title || "图片"} ${piece.row + 1}-${piece.column + 1}` },
+                            { ...createCanvasNode("image", { x: 0, y: 0 }, { ...imageAttributes(image), prompt: node.generation.prompt }), id, title: `${node.title || translate("canvas.image")} ${piece.row + 1}-${piece.column + 1}` },
                             { position: { x: startX + piece.column * (cellWidth + gap), y: startY + piece.row * (cellHeight + gap) }, width: cellWidth, height: cellHeight },
                         );
                     }),
@@ -3883,7 +3896,7 @@ function CanvasWorkspacePage() {
                     }
                     const successfulNodeIds = outcomes.filter((outcome) => !outcome.error && !outcome.canceled).map((outcome) => outcome.nodeId);
                     const failures = outcomes.filter((outcome): outcome is CanvasNodeGenerationFailure => Boolean(outcome.error));
-                    if (failures.length) message.error(successfulNodeIds.length ? translate("canvas.someImagesFailed") : translate("canvas.allImagesFailed"));
+                    if (failures.some((failure) => !isInsufficientCreditsError(failure.error))) message.error(successfulNodeIds.length ? translate("canvas.someImagesFailed") : translate("canvas.allImagesFailed"));
                     return canvasGenerationResult(successfulNodeIds, failures, actualToolArguments);
                 }
 
@@ -4013,7 +4026,7 @@ function CanvasWorkspacePage() {
                     if (runController.signal.aborted) return canceledCanvasGenerationResult();
                     const successfulNodeIds = outcomes.filter((outcome) => !outcome.error && !outcome.canceled).map((outcome) => outcome.nodeId);
                     const failures = outcomes.filter((outcome): outcome is CanvasNodeGenerationFailure => Boolean(outcome.error));
-                    if (failures.length) message.error(successfulNodeIds.length ? translate("canvas.someVideosFailed") : translate("canvas.allVideosFailed"));
+                    if (failures.some((failure) => !isInsufficientCreditsError(failure.error))) message.error(successfulNodeIds.length ? translate("canvas.someVideosFailed") : translate("canvas.allVideosFailed"));
                     return canvasGenerationResult(successfulNodeIds, failures, actualToolArguments);
                 }
 
@@ -4105,7 +4118,7 @@ function CanvasWorkspacePage() {
                     return canceledCanvasGenerationResult();
                 }
                 const structuredError = readAiTaskError(error);
-                message.error(structuredError.message);
+                if (!isInsufficientCreditsError(error)) message.error(structuredError.message);
                 setNodes((prev) =>
                     prev.map((node) => (node.id === nodeId || pendingChildIds.includes(node.id) ? (node.id === nodeId && !markSourceStatus ? node : updateCanvasNodeExecution(node, { phase: "failed", errorMessage: structuredError.message })) : node)),
                 );
@@ -4371,7 +4384,7 @@ function CanvasWorkspacePage() {
                     return canceledCanvasGenerationResult();
                 }
                 const structuredError = readAiTaskError(error);
-                message.error(structuredError.message);
+                if (!isInsufficientCreditsError(error)) message.error(structuredError.message);
                 setNodes((prev) => prev.map((item) => (item.id === node.id ? updateCanvasNodeExecution(item, { phase: "failed", errorMessage: structuredError.message }) : item)));
                 return failedCanvasGenerationResult(node.id, structuredError, actualToolArguments);
             } finally {
@@ -5742,10 +5755,9 @@ function readCanvasGenerationMode(value: unknown): CanvasGenerationMode | null {
     return value === "text" || value === "image" || value === "video" ? value : null;
 }
 
-function applyStoryboardCreditCharge(credits: number, setCreditBalance: (creditBalance: number) => void): void {
-    if (!Number.isInteger(credits) || credits <= 0) return;
-    const currentBalance = useUserStore.getState().user?.creditBalance;
-    if (typeof currentBalance === "number") setCreditBalance(Math.max(0, currentBalance - credits));
+function applyStoryboardCreditCharge(credits: CreditAmount, setCreditBalance: (creditBalance: CreditAmount) => void): void {
+    if (!creditAmount(credits).isFinite() || creditAmount(credits).lessThanOrEqualTo(0)) return;
+    void getWalletBalances().then((wallets) => { useTeamStore.getState().setWallets(wallets); setCreditBalance(wallets.platformBalance); }).catch((error) => console.error("刷新积分钱包失败", error));
 }
 
 /** 写入新一轮分镜结果，并清理上一轮资产批量生图状态，避免新资产显示旧任务。 */

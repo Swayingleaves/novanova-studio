@@ -8,8 +8,7 @@ import { type CSSProperties, useEffect, useState } from "react";
 import type { MenuProps } from "antd";
 import { Bell, Keyboard, LogOut, UserCircle, Users } from "lucide-react";
 import { App, Badge, Dropdown, Popover } from "antd";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Link from "@/shared/lib/team-navigation";
 
 import { GitHubLink } from "@/features/app-shell/components/github-link";
 import { canvasThemes } from "@/shared/lib/canvas-theme";
@@ -17,6 +16,8 @@ import { useThemeStore } from "@/features/theme/stores/use-theme-store";
 import { logoutCurrentUser } from "@/services/api/server";
 import { useNotificationStore } from "@/features/notification/stores/use-notification-store";
 import { NotificationDetailModal } from "@/features/notification/components/notification-detail-modal";
+import { InvitationNotificationItem } from "@/features/notification/components/invitation-notification-item";
+import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { confirmPageNavigation } from "@/shared/lib/navigation-history-guard";
 
@@ -27,11 +28,10 @@ type UserStatusActionsProps = {
 
 export function UserStatusActions({ variant = "default", onOpenShortcuts }: UserStatusActionsProps) {
     const translate = useTranslation();
-    const router = useRouter();
     const { message } = App.useApp();
     const user = useUserStore((state) => state.user);
     const clearSession = useUserStore((state) => state.clearSession);
-    const { notifications, unreadCount, loadNotifications } = useNotificationStore();
+    const { notifications, invitations, unreadCount, loadNotifications } = useNotificationStore();
     const [detailNotification, setDetailNotification] = useState<typeof notifications[number] | null>(null);
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
     const canvasTheme = canvasThemes[resolvedTheme];
@@ -54,7 +54,6 @@ export function UserStatusActions({ variant = "default", onOpenShortcuts }: User
         }
         clearSession();
         message.success(translate("appShell.signedOut"));
-        router.replace("/auth");
     };
     const userMenuItems: MenuProps["items"] = user
         ? [
@@ -68,7 +67,7 @@ export function UserStatusActions({ variant = "default", onOpenShortcuts }: User
                       </div>
                   ),
               },
-              ...(user.role === "admin"
+              ...(canManageCurrentSpace()
                   ? [
                         {
                             key: "adminSystem",
@@ -92,24 +91,29 @@ export function UserStatusActions({ variant = "default", onOpenShortcuts }: User
                 {translate("appShell.announcements")}{unreadCount > 0 ? <span className="ml-2 text-xs font-normal text-[var(--studio-primary)]">{unreadCount} {translate("appShell.unread")}</span> : null}
             </div>
             <div className="max-h-80 overflow-y-auto">
-                {notifications.length === 0 ? (
+                {invitations.length === 0 && notifications.length === 0 ? (
                     <div className="studio-caption px-4 py-8 text-center text-xs">{translate("appShell.noAnnouncements")}</div>
                 ) : (
-                    notifications.map((n) => (
-                        <button
-                            key={n.id}
-                            type="button"
-                            className={`block w-full border-b border-[var(--studio-line)] px-4 py-3 text-left transition hover:bg-[var(--studio-surface-hover)] ${!n.read ? "bg-[var(--studio-primary-soft)]" : ""}`}
-                            onClick={() => setDetailNotification(n)}
-                        >
-                            <div className="flex items-start justify-between gap-2">
-                                <span className="studio-title text-sm font-medium">{n.title}</span>
-                                {!n.read ? <span className="mt-0.5 size-2 shrink-0 rounded-full bg-[var(--studio-primary)]" /> : null}
-                            </div>
-                            {n.content ? <div className="studio-subtitle mt-1 text-xs leading-5 line-clamp-2">{n.content}</div> : null}
-                            <div className="studio-caption mt-1 text-[10px]">{n.publishedAt ? new Date(n.publishedAt).toLocaleString(currentLanguageTag()) : n.createdAt ? new Date(n.createdAt).toLocaleString(currentLanguageTag()) : ""}</div>
-                        </button>
-                    ))
+                    <>
+                        {invitations.map((invitation) => (
+                            <InvitationNotificationItem key={invitation.id} invitation={invitation} />
+                        ))}
+                        {notifications.map((n) => (
+                            <button
+                                key={n.id}
+                                type="button"
+                                className={`block w-full border-b border-[var(--studio-line)] px-4 py-3 text-left transition hover:bg-[var(--studio-surface-hover)] ${!n.read ? "bg-[var(--studio-primary-soft)]" : ""}`}
+                                onClick={() => setDetailNotification(n)}
+                            >
+                                <div className="flex items-start justify-between gap-2">
+                                    <span className="studio-title text-sm font-medium">{n.title}</span>
+                                    {!n.read ? <span className="mt-0.5 size-2 shrink-0 rounded-full bg-[var(--studio-primary)]" /> : null}
+                                </div>
+                                {n.content ? <div className="studio-subtitle mt-1 text-xs leading-5 line-clamp-2">{n.content}</div> : null}
+                                <div className="studio-caption mt-1 text-[10px]">{n.publishedAt ? new Date(n.publishedAt).toLocaleString(currentLanguageTag()) : n.createdAt ? new Date(n.createdAt).toLocaleString(currentLanguageTag()) : ""}</div>
+                            </button>
+                        ))}
+                    </>
                 )}
             </div>
         </div>

@@ -1,3 +1,4 @@
+import { teamStorageKey } from "@/features/team/stores/use-team-store";
 import type { CanvasNodeAttributes } from "../domain/canvas-node";
 import type { CanvasNodeKind } from "../types";
 
@@ -60,7 +61,7 @@ export function saveCanvasLastUsedGenerationSettings(kind: CanvasNodeKind, attri
 function readSettings(): CanvasLastUsedGenerationSettings {
     if (typeof window === "undefined") return { version: 1 };
     try {
-        const value = window.localStorage.getItem(storageKey);
+        const value = window.localStorage.getItem(teamStorageKey(storageKey));
         if (!value) return { version: 1 };
         const settings = JSON.parse(value) as CanvasLastUsedGenerationSettings;
         return settings && typeof settings === "object" && settings.version === 1 ? settings : { version: 1 };
@@ -71,7 +72,7 @@ function readSettings(): CanvasLastUsedGenerationSettings {
 
 function writeSettings(settings: CanvasLastUsedGenerationSettings) {
     try {
-        window.localStorage.setItem(storageKey, JSON.stringify(settings));
+        window.localStorage.setItem(teamStorageKey(storageKey), JSON.stringify(settings));
     } catch (error) {
         console.error("保存画布生成设置失败", error);
     }

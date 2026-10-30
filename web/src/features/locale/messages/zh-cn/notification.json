@@ -1,7 +1,7 @@
 {
-    "failedToMarkAnnouncementReadTryLater": "标记公告已读失败，请稍后重试",
-    "failedToMarkAllAnnouncementsRead": "标记全部公告已读失败，请稍后重试",
-    "announcementDetails": "公告详情",
+    "failedToMarkAnnouncementReadTryLater": "标记通知已读失败，请稍后重试",
+    "failedToMarkAllAnnouncementsRead": "标记全部通知已读失败，请稍后重试",
+    "announcementDetails": "通知详情",
     "iHaveRead": "我已阅读",
     "markAllRead": "全部已读",
     "noContent": "暂无内容",

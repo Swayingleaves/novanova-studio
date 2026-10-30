@@ -1,3 +1,4 @@
+import { teamStorageKey } from "@/features/team/stores/use-team-store";
 const PENDING_INITIAL_PROMPT_KEY = "novanova:pending-initial-prompt";
 
 /**
@@ -7,8 +8,8 @@ export function readInitialPromptFromLocation() {
     if (typeof window === "undefined") return "";
     const url = new URL(window.location.href);
     const queryPrompt = url.searchParams.get("initialPrompt")?.trim() || "";
-    const isCanvasPath = url.pathname === "/canvas" || url.pathname.startsWith("/canvas/");
-    return queryPrompt || (isCanvasPath ? window.sessionStorage.getItem(PENDING_INITIAL_PROMPT_KEY)?.trim() || "" : "");
+    const isCanvasPath = /^(?:\/team\/[^/]+)?\/canvas(?:\/|$)/.test(url.pathname);
+    return queryPrompt || (isCanvasPath ? window.sessionStorage.getItem(teamStorageKey(PENDING_INITIAL_PROMPT_KEY))?.trim() || "" : "");
 }
 
 /**
@@ -20,9 +21,9 @@ export function storeInitialPromptForNavigation(prompt: string) {
     if (typeof window === "undefined") return;
     const value = prompt.trim();
     if (value) {
-        window.sessionStorage.setItem(PENDING_INITIAL_PROMPT_KEY, value);
+        window.sessionStorage.setItem(teamStorageKey(PENDING_INITIAL_PROMPT_KEY), value);
     } else {
-        window.sessionStorage.removeItem(PENDING_INITIAL_PROMPT_KEY);
+        window.sessionStorage.removeItem(teamStorageKey(PENDING_INITIAL_PROMPT_KEY));
     }
 }
 
@@ -31,7 +32,7 @@ export function storeInitialPromptForNavigation(prompt: string) {
  */
 export function clearInitialPromptFromLocation() {
     if (typeof window === "undefined") return;
-    window.sessionStorage.removeItem(PENDING_INITIAL_PROMPT_KEY);
+    window.sessionStorage.removeItem(teamStorageKey(PENDING_INITIAL_PROMPT_KEY));
     const url = new URL(window.location.href);
     if (!url.searchParams.has("initialPrompt")) return;
     url.searchParams.delete("initialPrompt");

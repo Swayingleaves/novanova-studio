@@ -102,7 +102,7 @@ class AdminCreditControllerTest {
     void shouldRejectCardGenerationBeforeCallingCardServiceWhenPermissionDenied() {
         when(adminGuard.requireAdmin()).thenReturn(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, "权限不足")));
 
-        StepVerifier.create(adminCreditController.generateCreditCards(new CreditCardDtos.GenerateCreditCardsRequest(100, 10)))
+        StepVerifier.create(adminCreditController.generateCreditCards(new CreditCardDtos.GenerateCreditCardsRequest(100, java.math.BigDecimal.valueOf(10))))
                 .expectError(BusinessException.class)
                 .verify();
 

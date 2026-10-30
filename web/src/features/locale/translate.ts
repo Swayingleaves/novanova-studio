@@ -8,11 +8,12 @@ export function currentWebsiteLocale(): WebsiteLocale {
     return isWebsiteLocale(locale) ? locale : "zh-cn";
 }
 
-/** 为非组件的客户端业务动作创建翻译器，不缓存翻译后的业务数据。 */
-const translators = {
-    "zh-cn": createTranslator({ locale: "zh-CN", messages: websiteMessages["zh-cn"] as AbstractIntlMessages }),
-    en: createTranslator({ locale: "en", messages: websiteMessages.en as AbstractIntlMessages }),
-};
+/** 为两种语言创建相同类型的翻译入口，不缓存翻译后的业务数据。 */
+function createWebsiteTranslator(locale: WebsiteLocale) {
+    return createTranslator({ locale: languageTag(locale), messages: websiteMessages[locale] as AbstractIntlMessages });
+}
+
+const translators = { "zh-cn": createWebsiteTranslator("zh-cn"), en: createWebsiteTranslator("en") };
 
 /** 按当前语言翻译固定系统文案。 */
 export function translateMessage(key: string, values?: TranslationValues, locale = currentWebsiteLocale()): string {

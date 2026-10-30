@@ -1,0 +1,452 @@
+package com.novanovastudio.controller;
+
+import com.novanovastudio.common.ApiResponse;
+import com.novanovastudio.dto.ComicDramaDtos;
+import com.novanovastudio.dto.ComicDramaFinalPromptPricingDtos;
+import com.novanovastudio.service.ComicDramaFinalPromptPricingService;
+import com.novanovastudio.dto.VideoCompositionDtos;
+import com.novanovastudio.service.ComicDramaService;
+import com.novanovastudio.service.VideoCompositionTaskService;
+import com.novanovastudio.service.PersistenceService;
+import jakarta.validation.Valid;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.buffer.DataBuffer;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.http.server.reactive.ServerHttpRequest;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+
+/**
+ * 漫剧生产项目、视觉资产、镜头、媒体、声音与画布接口。
+ *
+ * @author   zhenglin.cn.cq@gmail.com
+ * @date     2026-09-21 13:00
+ */
+@Slf4j
+@RestController
+@RequestMapping("/api/v1/comicDrama")
+@RequiredArgsConstructor
+public class ComicDramaController {
+
+    /** 日志中需要脱敏的请求头。 */
+    private static final Set<String> SENSITIVE_HEADERS = Set.of("authorization", "cookie", "set-cookie", "x-api-key",
+            "api-key", "x-auth-token", "x-access-token", "x-refresh-token");
+
+    /** 漫剧生产业务服务。 */
+    private final ComicDramaService service;
+
+    /** 最终提示词独立定价。 */
+    private final ComicDramaFinalPromptPricingService finalPromptPricingService;
+
+    /** 视频合成任务服务。 */
+    private final VideoCompositionTaskService videoCompositionTaskService;
+
+    /** 媒体流服务。 */
+    private final PersistenceService persistenceService;
+
+    /**
+     * 查询所选模型每镜头积分与价格修订号。
+     * @param request 所选文本模型
+     * @param httpRequest 当前HTTP请求
+     * @return 当前价格，未配置时单价为空
+     */
+    @PostMapping("/getFinalPromptUnitPrice")
+    public Mono<ApiResponse<ComicDramaFinalPromptPricingDtos.UnitPrice>> getFinalPromptUnitPrice(
+            @Valid @RequestBody ComicDramaFinalPromptPricingDtos.UnitPriceRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧最终提示词单价", httpRequest, request, finalPromptPricingService.getUnitPrice(request.model()));
+    }
+
+    /**
+     * 创建分镜成片导出任务。
+     * @param request 项目与分集选择
+     * @param httpRequest 当前HTTP请求
+     * @return 已创建的任务
+     */
+    @PostMapping("/exportVideo")
+    public Mono<ApiResponse<VideoCompositionDtos.VideoCompositionTaskResponse>> exportVideo(
+            @Valid @RequestBody VideoCompositionDtos.ExportStoryboardVideoRequest request, ServerHttpRequest httpRequest) {
+        return execute("导出分镜视频", httpRequest, request, videoCompositionTaskService.exportStoryboardVideo(request));
+    }
+
+    /**
+     * 查询项目最近一次成片导出任务。
+     * @param request 项目标识
+     * @param httpRequest 当前HTTP请求
+     * @return 最近的导出任务
+     */
+    @PostMapping("/getLatestExportVideoTask")
+    public Mono<ApiResponse<VideoCompositionDtos.LatestStoryboardExportResponse>> getLatestExportVideoTask(
+            @Valid @RequestBody VideoCompositionDtos.LatestStoryboardExportRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询最近分镜导出任务", httpRequest, request,
+                videoCompositionTaskService.getLatestStoryboardExport(request.projectId())
+                        .map(VideoCompositionDtos.LatestStoryboardExportResponse::new)
+                        .defaultIfEmpty(new VideoCompositionDtos.LatestStoryboardExportResponse(null)));
+    }
+
+    /**
+     * 流式下载已完成的分镜成片。
+     * @param request 导出任务标识
+     * @param httpRequest 当前HTTP请求
+     * @return MP4数据流响应
+     */
+    @PostMapping("/downloadExportVideo")
+    public Mono<ResponseEntity<Flux<DataBuffer>>> downloadExportVideo(
+            @Valid @RequestBody VideoCompositionDtos.VideoCompositionTaskIdRequest request, ServerHttpRequest httpRequest) {
+        log.info("下载分镜导出视频: url=/api/v1/comicDrama/downloadExportVideo, headers={}, request={}",
+                sanitizedHeaders(httpRequest), request);
+        return videoCompositionTaskService.getStoryboardExportStorageKey(request.taskId()).flatMap(storageKey ->
+            persistenceService.streamVideoMediaForCurrentUser(storageKey)
+                    .map(body -> ResponseEntity.ok().contentType(MediaType.valueOf("video/mp4"))
+                            .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=storyboard-export.mp4")
+                            .body(body.subscribeOn(Schedulers.boundedElastic()))));
+    }
+
+    /** 分页查询当前用户漫剧项目。 */
+    @GetMapping("/listProjects")
+    public Mono<ApiResponse<ComicDramaDtos.ProjectListResponse>> listProjects(
+            @RequestParam(defaultValue = "1") int page, @RequestParam(defaultValue = "20") int pageSize,
+            @RequestParam(defaultValue = "") String keyword, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧项目", httpRequest, Map.of("page", page, "pageSize", pageSize, "keyword", keyword),
+                service.listProjects(page, pageSize, keyword));
+    }
+
+    /** 查询项目生产工作区。 */
+    @PostMapping("/getWorkspace")
+    public Mono<ApiResponse<ComicDramaDtos.Workspace>> getWorkspace(
+            @Valid @RequestBody ComicDramaDtos.ProjectIdRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧工作区", httpRequest, request, service.getWorkspace(request.projectId()));
+    }
+
+    /** 初始化共享剧本的一对一漫剧项目。 */
+    @PostMapping("/initializeProject")
+    public Mono<ApiResponse<ComicDramaDtos.Workspace>> initializeProject(
+            @Valid @RequestBody ComicDramaDtos.InitializeProjectRequest request, ServerHttpRequest httpRequest) {
+        return execute("初始化漫剧项目", httpRequest, request, service.initializeProject(request));
+    }
+
+    /** 更新项目生产设置。 */
+    @PostMapping("/updateSettings")
+    public Mono<ApiResponse<ComicDramaDtos.MutationResult>> updateSettings(
+            @Valid @RequestBody ComicDramaDtos.UpdateSettingsRequest request, ServerHttpRequest httpRequest) {
+        return execute("更新漫剧生产设置", httpRequest, request, service.updateSettings(request));
+    }
+
+    /** 查询视觉资产。 */
+    @PostMapping("/listAssets")
+    public Mono<ApiResponse<List<ComicDramaDtos.Asset>>> listAssets(
+            @Valid @RequestBody ComicDramaDtos.ListAssetsRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧视觉资产", httpRequest, request, service.listAssets(request));
+    }
+
+    /** 保存视觉资产。 */
+    @PostMapping("/saveAsset")
+    public Mono<ApiResponse<ComicDramaDtos.Asset>> saveAsset(
+            @Valid @RequestBody ComicDramaDtos.SaveAssetRequest request, ServerHttpRequest httpRequest) {
+        return execute("保存漫剧视觉资产", httpRequest, request, service.saveAsset(request));
+    }
+
+    /** 查询视觉资产版本。 */
+    @PostMapping("/listAssetVersions")
+    public Mono<ApiResponse<List<ComicDramaDtos.AssetVersion>>> listAssetVersions(
+            @Valid @RequestBody ComicDramaDtos.ListAssetVersionsRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧资产版本", httpRequest, request, service.listAssetVersions(request));
+    }
+
+    /** 按资产版本标识批量查询视觉资产版本。 */
+    @PostMapping("/listAssetVersionsByIds")
+    public Mono<ApiResponse<List<ComicDramaDtos.AssetVersion>>> listAssetVersionsByIds(
+            @Valid @RequestBody ComicDramaDtos.ListAssetVersionsByIdsRequest request, ServerHttpRequest httpRequest) {
+        return execute("批量查询漫剧资产版本", httpRequest, request, service.listAssetVersionsByIds(request));
+    }
+
+    /** 保存视觉资产版本。 */
+    @PostMapping("/saveAssetVersion")
+    public Mono<ApiResponse<ComicDramaDtos.AssetVersion>> saveAssetVersion(
+            @Valid @RequestBody ComicDramaDtos.SaveAssetVersionRequest request, ServerHttpRequest httpRequest) {
+        return execute("保存漫剧资产版本", httpRequest, request, service.saveAssetVersion(request));
+    }
+
+    /** 查询共享剧本生产准备度。 */
+    @PostMapping("/getReadiness")
+    public Mono<ApiResponse<ComicDramaDtos.Readiness>> getReadiness(
+            @Valid @RequestBody ComicDramaDtos.ProjectIdRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧生产准备度", httpRequest, request, service.getReadiness(request.projectId()));
+    }
+
+    /** 生成待确认镜头草稿。 */
+    @PostMapping("/generateShotDraft")
+    public Mono<ApiResponse<ComicDramaDtos.ShotDraft>> generateShotDraft(
+            @Valid @RequestBody ComicDramaDtos.GenerateShotDraftRequest request, ServerHttpRequest httpRequest) {
+        return execute("生成漫剧镜头草稿", httpRequest, request, service.generateShotDraft(request));
+    }
+
+    /** 确认镜头草稿并追加正式镜头。 */
+    @PostMapping("/confirmShotDraft")
+    public Mono<ApiResponse<ComicDramaDtos.MutationResult>> confirmShotDraft(
+            @Valid @RequestBody ComicDramaDtos.ConfirmShotDraftRequest request, ServerHttpRequest httpRequest) {
+        return execute("确认漫剧镜头草稿", httpRequest, request, service.confirmShotDraft(request));
+    }
+
+    /** 保存编辑后的镜头草稿。 */
+    @PostMapping("/updateShotDraft")
+    public Mono<ApiResponse<ComicDramaDtos.ShotDraft>> updateShotDraft(
+            @Valid @RequestBody ComicDramaDtos.UpdateShotDraftRequest request, ServerHttpRequest httpRequest) {
+        return execute("保存漫剧镜头草稿", httpRequest, request, service.updateShotDraft(request));
+    }
+
+    /** 放弃待确认镜头草稿。 */
+    @PostMapping("/discardShotDraft")
+    public Mono<ApiResponse<ComicDramaDtos.MutationResult>> discardShotDraft(
+            @Valid @RequestBody ComicDramaDtos.DiscardShotDraftRequest request, ServerHttpRequest httpRequest) {
+        return execute("放弃漫剧镜头草稿", httpRequest, request, service.discardShotDraft(request));
+    }
+
+    /** 查询镜头清单。 */
+    @PostMapping("/listShots")
+    public Mono<ApiResponse<List<ComicDramaDtos.Shot>>> listShots(
+            @Valid @RequestBody ComicDramaDtos.ListShotsRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧镜头", httpRequest, request, service.listShots(request));
+    }
+
+    /** 保存正式镜头。 */
+    @PostMapping("/saveShot")
+    public Mono<ApiResponse<ComicDramaDtos.Shot>> saveShot(
+            @Valid @RequestBody ComicDramaDtos.SaveShotRequest request, ServerHttpRequest httpRequest) {
+        return execute("保存漫剧镜头", httpRequest, request, service.saveShot(request));
+    }
+
+    /** 调整全部镜头顺序。 */
+    @PostMapping("/reorderShots")
+    public Mono<ApiResponse<ComicDramaDtos.MutationResult>> reorderShots(
+            @Valid @RequestBody ComicDramaDtos.ReorderShotsRequest request, ServerHttpRequest httpRequest) {
+        return execute("调整漫剧镜头顺序", httpRequest, request, service.reorderShots(request));
+    }
+
+    /** 删除用户已确认的镜头。 */
+    @PostMapping("/deleteShot")
+    public Mono<ApiResponse<ComicDramaDtos.MutationResult>> deleteShot(
+            @Valid @RequestBody ComicDramaDtos.DeleteShotRequest request, ServerHttpRequest httpRequest) {
+        return execute("删除漫剧镜头", httpRequest, request, service.deleteShot(request));
+    }
+
+    /** 查询删除镜头将影响的媒体结果，供用户二次确认。 */
+    @PostMapping("/getShotDeleteImpact")
+    public Mono<ApiResponse<ComicDramaDtos.ShotDeleteImpact>> getShotDeleteImpact(
+            @Valid @RequestBody ComicDramaDtos.ShotDeleteImpactRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询镜头删除影响", httpRequest, request,
+                service.getShotDeleteImpact(request.projectId(), request.shotId()));
+    }
+
+    /** 合成待确认镜头提示词。 */
+    @PostMapping("/composePrompt")
+    public Mono<ApiResponse<ComicDramaDtos.PromptVersion>> composePrompt(
+            @Valid @RequestBody ComicDramaDtos.ComposePromptRequest request, ServerHttpRequest httpRequest) {
+        return execute("合成漫剧镜头提示词", httpRequest, request, service.composePrompt(request));
+    }
+
+    /** 批量合成镜头最终提示词，服务端并发请求模型后统一采用。 */
+    @PostMapping("/composePrompts")
+    public Mono<ApiResponse<ComicDramaDtos.ComposePromptsResult>> composePrompts(
+            @Valid @RequestBody ComicDramaDtos.ComposePromptsRequest request, ServerHttpRequest httpRequest) {
+        return execute("批量合成漫剧镜头提示词", httpRequest, request, service.composePrompts(request));
+    }
+
+    /** 保存用户编辑后的提示词版本。 */
+    @PostMapping("/savePrompt")
+    public Mono<ApiResponse<ComicDramaDtos.PromptVersion>> savePrompt(
+            @Valid @RequestBody ComicDramaDtos.SavePromptRequest request, ServerHttpRequest httpRequest) {
+        return execute("保存漫剧镜头提示词", httpRequest, request, service.savePrompt(request));
+    }
+
+    /** 估算生成任务数量和积分。 */
+    @PostMapping("/estimateGeneration")
+    public Mono<ApiResponse<ComicDramaDtos.GenerationEstimate>> estimateGeneration(
+            @Valid @RequestBody ComicDramaDtos.EstimateGenerationRequest request, ServerHttpRequest httpRequest) {
+        return execute("估算漫剧生成费用", httpRequest, request, service.estimateGeneration(request));
+    }
+
+    /** 创建用户已确认的图片或视频生成任务。 */
+    @PostMapping("/createGenerationTask")
+    public Mono<ApiResponse<ComicDramaDtos.GenerationTaskResult>> createGenerationTask(
+            @Valid @RequestBody ComicDramaDtos.CreateGenerationTaskRequest request, ServerHttpRequest httpRequest) {
+        return execute("创建漫剧媒体任务", httpRequest, request, service.createGenerationTask(request));
+    }
+
+    /** 查询媒体任务和生成结果。 */
+    @PostMapping("/listMedia")
+    public Mono<ApiResponse<List<ComicDramaDtos.MediaResult>>> listMedia(
+            @Valid @RequestBody ComicDramaDtos.ListMediaRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧媒体结果", httpRequest, request, service.listMedia(request));
+    }
+
+    /** 采用一个媒体生成版本。 */
+    @PostMapping("/adoptMedia")
+    public Mono<ApiResponse<ComicDramaDtos.MutationResult>> adoptMedia(
+            @Valid @RequestBody ComicDramaDtos.AdoptMediaRequest request, ServerHttpRequest httpRequest) {
+        return execute("采用漫剧媒体结果", httpRequest, request, service.adoptMedia(request));
+    }
+
+    /** 查询上游变化影响。 */
+    @GetMapping("/listImpacts")
+    public Mono<ApiResponse<List<ComicDramaDtos.ChangeImpact>>> listImpacts(
+            @RequestParam String projectId, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧变化影响", httpRequest, projectId, service.listImpacts(projectId));
+    }
+
+    /** 确认用户选择的影响更新范围。 */
+    @PostMapping("/confirmUpdate")
+    public Mono<ApiResponse<ComicDramaDtos.MutationResult>> confirmUpdate(
+            @Valid @RequestBody ComicDramaDtos.ConfirmUpdateRequest request, ServerHttpRequest httpRequest) {
+        return execute("确认漫剧更新范围", httpRequest, request, service.confirmUpdate(request));
+    }
+
+    /** 查询P1结构化声音轨。 */
+    @PostMapping("/listVoiceTracks")
+    public Mono<ApiResponse<List<ComicDramaDtos.VoiceTrack>>> listVoiceTracks(
+            @Valid @RequestBody ComicDramaDtos.ListVoiceTracksRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧声音轨", httpRequest, request, service.listVoiceTracks(request));
+    }
+
+    /** 保存P1结构化声音轨。 */
+    @PostMapping("/saveVoiceTrack")
+    public Mono<ApiResponse<ComicDramaDtos.VoiceTrack>> saveVoiceTrack(
+            @Valid @RequestBody ComicDramaDtos.SaveVoiceTrackRequest request, ServerHttpRequest httpRequest) {
+        return execute("保存漫剧声音轨", httpRequest, request, service.saveVoiceTrack(request));
+    }
+
+    /**
+     * 查询分镜时间轴文字片段。
+     *
+     * @param request 项目标识
+     * @param httpRequest 当前HTTP请求
+     * @return 项目的文字片段列表
+     */
+    @PostMapping("/listTimelineTexts")
+    public Mono<ApiResponse<List<ComicDramaDtos.TimelineText>>> listTimelineTexts(
+            @Valid @RequestBody ComicDramaDtos.ListTimelineTextsRequest request, ServerHttpRequest httpRequest) {
+        return execute("查询分镜时间轴文字", httpRequest, request, service.listTimelineTexts(request));
+    }
+
+    /**
+     * 保存分镜时间轴文字片段。
+     *
+     * @param request 项目修订号和文字片段
+     * @param httpRequest 当前HTTP请求
+     * @return 保存后的文字片段
+     */
+    @PostMapping("/saveTimelineText")
+    public Mono<ApiResponse<ComicDramaDtos.TimelineText>> saveTimelineText(
+            @Valid @RequestBody ComicDramaDtos.SaveTimelineTextRequest request, ServerHttpRequest httpRequest) {
+        return execute("保存分镜时间轴文字", httpRequest, request, service.saveTimelineText(request));
+    }
+
+    /**
+     * 原子保存文字轨道片段换位。
+     *
+     * @param request 项目修订号和受影响文字片段
+     * @param httpRequest 当前HTTP请求
+     * @return 保存后的文字片段列表
+     */
+    @PostMapping("/reorderTimelineTexts")
+    public Mono<ApiResponse<List<ComicDramaDtos.TimelineText>>> reorderTimelineTexts(
+            @Valid @RequestBody ComicDramaDtos.ReorderTimelineTextsRequest request, ServerHttpRequest httpRequest) {
+        return execute("重排分镜时间轴文字", httpRequest, request, service.reorderTimelineTexts(request));
+    }
+
+    /**
+     * 删除分镜时间轴文字片段。
+     *
+     * @param request 项目修订号和文字片段标识
+     * @param httpRequest 当前HTTP请求
+     * @return 更新后的项目修订信息
+     */
+    @PostMapping("/deleteTimelineText")
+    public Mono<ApiResponse<ComicDramaDtos.MutationResult>> deleteTimelineText(
+            @Valid @RequestBody ComicDramaDtos.DeleteTimelineTextRequest request, ServerHttpRequest httpRequest) {
+        return execute("删除分镜时间轴文字", httpRequest, request, service.deleteTimelineText(request));
+    }
+
+    /**
+     * 删除新增的文字轨道及其片段。
+     *
+     * @param request 项目修订号与轨道编号
+     * @param httpRequest 当前HTTP请求
+     * @return 更新后的项目修订信息
+     */
+    @PostMapping("/deleteTextTrack")
+    public Mono<ApiResponse<ComicDramaDtos.MutationResult>> deleteTextTrack(
+            @Valid @RequestBody ComicDramaDtos.DeleteTextTrackRequest request, ServerHttpRequest httpRequest) {
+        return execute("删除分镜文字轨道", httpRequest, request, service.deleteTextTrack(request));
+    }
+
+    /** 查询P1批量生产任务。 */
+    @GetMapping("/listBatchTasks")
+    public Mono<ApiResponse<List<ComicDramaDtos.BatchTask>>> listBatchTasks(
+            @RequestParam String projectId, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧批量任务", httpRequest, projectId, service.listBatchTasks(projectId));
+    }
+
+    /** 创建用户已确认的P1批量生产计划。 */
+    @PostMapping("/createBatchTask")
+    public Mono<ApiResponse<ComicDramaDtos.BatchTask>> createBatchTask(
+            @Valid @RequestBody ComicDramaDtos.CreateBatchTaskRequest request, ServerHttpRequest httpRequest) {
+        return execute("创建漫剧批量任务", httpRequest, request, service.createBatchTask(request));
+    }
+
+    /** 查询无限画布绑定。 */
+    @GetMapping("/listCanvasBindings")
+    public Mono<ApiResponse<List<ComicDramaDtos.CanvasBinding>>> listCanvasBindings(
+            @RequestParam String projectId, ServerHttpRequest httpRequest) {
+        return execute("查询漫剧画布绑定", httpRequest, projectId, service.listCanvasBindings(projectId));
+    }
+
+    /** 创建或更新无限画布节点绑定。 */
+    @PostMapping("/bindCanvas")
+    public Mono<ApiResponse<ComicDramaDtos.CanvasBinding>> bindCanvas(
+            @Valid @RequestBody ComicDramaDtos.BindCanvasRequest request, ServerHttpRequest httpRequest) {
+        return execute("绑定漫剧画布节点", httpRequest, request, service.bindCanvas(request));
+    }
+
+    /**
+     * 统一记录请求、脱敏请求头、请求内容与响应内容。
+     *
+     * @param action 接口动作名称
+     * @param request 当前HTTP请求
+     * @param body 请求内容
+     * @param operation 业务操作
+     * @return 统一成功响应
+     */
+    private <T> Mono<ApiResponse<T>> execute(String action, ServerHttpRequest request, Object body, Mono<T> operation) {
+        log.debug("{}请求: url={}, headers={}, request={}", action, request.getURI(), sanitizedHeaders(request), body);
+        return operation.map(ApiResponse::ok)
+                .doOnNext(response -> log.debug("{}响应: response={}", action, response))
+                .doOnError(error -> log.error("{}失败: url={}, message={}", action, request.getURI(), error.getMessage(), error));
+    }
+
+    /**
+     * 对敏感请求头脱敏后用于日志。
+     *
+     * @param request 当前HTTP请求
+     * @return 可安全记录的请求头映射
+     */
+    private Map<String, List<String>> sanitizedHeaders(ServerHttpRequest request) {
+        Map<String, List<String>> result = new java.util.LinkedHashMap<>();
+        request.getHeaders().forEach((name, values) -> result.put(name,
+                SENSITIVE_HEADERS.contains(name.toLowerCase(Locale.ROOT)) ? List.of("[已脱敏]") : values));
+        return result;
+    }
+}

@@ -20,6 +20,7 @@
     <properties>
         <java.version>21</java.version>
         <agentscope.version>2.0.3</agentscope.version>
+        <alipay.sdk.version>4.40.272.ALL</alipay.sdk.version>
         <!-- 2.0.61 存在大文本解析越界回归（fastjson2 issue #3989 / #4034，JSONReaderUTF16.readString 缓冲区未扩容），
              会导致 AI 长响应解析失败，必须使用已修复版本 -->
         <fastjson2.version>2.0.65</fastjson2.version>
@@ -44,6 +45,11 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.22.1</version>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -74,7 +80,6 @@
             <artifactId>agentscope-harness</artifactId>
             <version>${agentscope.version}</version>
         </dependency>
-        <!-- AgentScope 2.0.3 起各厂商模型从 core 拆分到独立扩展模块，需显式引入 -->
         <dependency>
             <groupId>io.agentscope</groupId>
             <artifactId>agentscope-extensions-model-openai</artifactId>
@@ -95,6 +100,12 @@
             <artifactId>fastjson2-extension-spring6</artifactId>
             <version>${fastjson2.version}</version>
         </dependency>
+        <!-- 支付宝电脑网站支付官方SDK -->
+        <dependency>
+            <groupId>com.alipay.sdk</groupId>
+            <artifactId>alipay-sdk-java</artifactId>
+            <version>${alipay.sdk.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
@@ -109,6 +120,16 @@
             <groupId>org.postgresql</groupId>
             <artifactId>r2dbc-postgresql</artifactId>
             <version>${r2dbc-postgresql.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.4.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-scratchpad</artifactId>
+            <version>5.4.1</version>
         </dependency>
         <dependency>
             <groupId>org.springdoc</groupId>

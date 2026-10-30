@@ -5,11 +5,12 @@ import { useTranslation } from "@/features/locale/use-translation";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { LoaderCircle } from "lucide-react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter } from "@/shared/lib/team-navigation";
 
 import { AppShell } from "@/features/app-shell/components/app-shell";
 import { safeAuthRedirect } from "@/features/auth/lib/oauth2-login";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
+import { useTeamStore } from "@/features/team/stores/use-team-store";
 
 export default function UserLayout({ children }: { children: ReactNode }) {
     const router = useRouter();
@@ -17,6 +18,7 @@ export default function UserLayout({ children }: { children: ReactNode }) {
     const hydrated = useUserStore((state) => state.hydrated);
     const hydrateSession = useUserStore((state) => state.hydrateSession);
     const user = useUserStore((state) => state.user);
+    const team = useTeamStore((state) => state.team);
     const openAuthModal = useUserStore((state) => state.openAuthModal);
     const publicPath = pathname === "/" || pathname === "/editions";
 
@@ -28,8 +30,9 @@ export default function UserLayout({ children }: { children: ReactNode }) {
     useEffect(() => {
         if (!hydrated || user || publicPath) return;
         const target = typeof window === "undefined" ? pathname : `${window.location.pathname}${window.location.search}`;
+        if (team) { openAuthModal(target); return; }
         router.replace(`/?redirect=${encodeURIComponent(target)}`);
-    }, [hydrated, pathname, publicPath, router, user]);
+    }, [hydrated, openAuthModal, pathname, publicPath, router, team, user]);
 
     /* 首页检测 ?redirect= 参数 → 弹登录窗 */
     useEffect(() => {

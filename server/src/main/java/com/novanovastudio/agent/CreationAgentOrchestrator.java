@@ -55,6 +55,8 @@ import reactor.core.publisher.Sinks;
 @RequiredArgsConstructor
 @Slf4j
 public class CreationAgentOrchestrator {
+    /** 主请求恢复创建时的团队作用域。 */
+    private final com.novanovastudio.service.TeamTaskScopeService teamTaskScopeService;
 
     /** Agent会话服务 */
     private final AgentSessionService sessionService;
@@ -158,7 +160,7 @@ public class CreationAgentOrchestrator {
      */
     public Mono<CreationAgentChatResponse> startChat(Long userId, AgentChatRequest request) {
         validateRequest(request);
-        return sessionService.getOrCreateSession(userId, request.sessionId(), request.entrySource())
+        return com.novanovastudio.security.TeamScope.current().flatMap(scope -> sessionService.getOrCreateSession(userId, request.sessionId(), request.entrySource())
                 .flatMap(session -> {
                     if (!request.entrySource().equals(session.profile())) {
                         return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.conversationEntryDoesNotMatchThisPage")));
@@ -167,6 +169,7 @@ public class CreationAgentOrchestrator {
                     CreationAgentRequest queuedRequest = new CreationAgentRequest();
                     queuedRequest.setId(UUID.randomUUID().toString());
                     queuedRequest.setUserId(userId);
+                    queuedRequest.setTeamId(scope.teamId());
                     queuedRequest.setSessionId(session.id());
                     queuedRequest.setEntrySource(snapshot.entrySource());
                     queuedRequest.setRequestData(JSON.toJSONString(snapshot));
@@ -181,7 +184,36 @@ public class CreationAgentOrchestrator {
                             .then(requestRepository.findStatusById(queuedRequest.getId())
                                     .defaultIfEmpty("queued")
                                     .map(status -> new CreationAgentChatResponse(session.id(), queuedRequest.getId(), status)));
-                });
+                }));
+    }
+
+    /**
+     * 作废同一画布、同一设定图节点上仍在排队的旧请求。
+     * <p>
+     * 页面刷新后重复点击会为同一次设定图生成堆叠出多个排队请求，最终表现为长时间"排队中"。
+     * 这里让新请求替换旧排队项：只处理 status=queued 的请求，已在执行的请求不做抢占。
+     *
+     * @param userId Long 用户ID
+     * @param request AgentChatRequest 新提交的请求快照
+     * @return Mono<Void> 作废完成信号
+     */
+    private Mono<Void> cancelSupersededQueuedRequests(Long userId, AgentChatRequest request) {
+        String targetNodeId = request.settingGraphNodeId();
+        if (!StringUtils.hasText(targetNodeId)) {
+            return Mono.empty();
+        }
+        return requestRepository.listQueuedSettingGraphRequests(userId, request.entrySource(), targetNodeId)
+                .concatMap(queued -> requestRepository.cancelQueuedIfQueued(userId, queued.getId(),
+                                "同一设定图节点已提交新请求，旧请求不再执行")
+                        .flatMap(canceled -> {
+                            if (!Boolean.TRUE.equals(canceled)) {
+                                return Mono.empty();
+                            }
+                            log.info("作废被新请求替换的排队设定图请求: userId={}, requestId={}, settingGraphNodeId={}",
+                                    userId, queued.getId(), targetNodeId);
+                            return requestQueue.removeQueuedRequest(userId, queued.getQueueSource(), queued.getId());
+                        }))
+                .then();
     }
 
     /**
@@ -388,6 +420,15 @@ public class CreationAgentOrchestrator {
      * @return Mono<Void> 请求执行完成信号
      */
     public Mono<Void> executeClaimedRequest(String requestId) {
+        return teamTaskScopeService.execute("creation_agent_request", requestId, () -> executeClaimedInTeam(requestId));
+    }
+
+    /**
+     * 在恢复后的团队空间执行已领取请求。
+     * @param requestId 请求标识
+     * @return 执行完成信号
+     */
+    private Mono<Void> executeClaimedInTeam(String requestId) {
         AtomicBoolean cleaned = new AtomicBoolean();
         Sinks.Empty<Void> stopSignal = Sinks.empty();
         Runnable cleanup = () -> {
@@ -1870,13 +1911,13 @@ public class CreationAgentOrchestrator {
         return requestRepository.cancelQueuedIfQueued(userId, request.getId(), "已停止生成")
                 .flatMap(canceled -> {
                     if (Boolean.TRUE.equals(canceled)) {
-                        return requestQueue.removeQueuedRequest(userId, request.getEntrySource(), request.getId())
+                        return requestQueue.removeQueuedRequest(userId, request.getQueueSource(), request.getId())
                                 // Redis 已领取但数据库尚未切为 running 时，取消会先成功写入数据库。
                                 // 此时释放该租约，后续请求无需等待领取线程回收。
-                                .then(requestQueue.releaseActiveRequest(userId, request.getEntrySource(), request.getId()))
+                                .then(requestQueue.releaseActiveRequest(userId, request.getQueueSource(), request.getId()))
                                 .then(Mono.fromRunnable(() -> eventEmitter.emit(userId, AgentEvent.canceled(request.getSessionId(),
                                         "已停止排队").withRequestId(request.getId()))))
-                                .then(requestDispatcher.dispatchAvailable(userId, request.getEntrySource()));
+                                .then(requestDispatcher.dispatchAvailable(userId, request.getQueueSource()));
                     }
                     return requestRepository.findByIdForUser(userId, request.getId())
                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.agentRequestNotFound"))))

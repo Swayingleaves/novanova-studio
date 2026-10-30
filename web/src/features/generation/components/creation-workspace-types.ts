@@ -1,3 +1,4 @@
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import type { ReactNode } from "react";
 
 import type { AgentAction } from "@/features/canvas/api/agent";
@@ -118,7 +119,7 @@ export type CreationComposerProps = {
     queued?: boolean;
     canSubmit: boolean;
     /** 下一句将消耗的积分；null 表示无法报价，undefined 表示本次提交不涉及扣费、不展示价格。 */
-    creditCost?: number | null;
+    creditCost?: CreditAmount | null;
     /** 输入框上方展示的通用提示内容（如工作流参数选择卡片）。 */
     notice?: ReactNode;
     compact?: boolean;

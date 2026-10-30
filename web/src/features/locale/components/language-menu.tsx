@@ -3,7 +3,7 @@
 import { Dropdown } from "antd";
 import { Check, Languages } from "lucide-react";
 import { useLocale } from "next-intl";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter } from "@/shared/lib/team-navigation";
 import { useLanguageStore } from "../language-store";
 import { isWebsiteLocale, websiteLocales } from "../locale";
 import { cn } from "@/shared/lib/utils";

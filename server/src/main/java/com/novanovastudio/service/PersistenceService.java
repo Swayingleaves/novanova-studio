@@ -1,5 +1,6 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
 import com.novanovastudio.common.SystemMessage;
 
 import com.alibaba.fastjson2.JSON;
@@ -25,6 +26,8 @@ import com.novanovastudio.dto.VideoBillingConfiguration;
 import com.novanovastudio.entity.PersistenceRecords;
 import com.novanovastudio.repository.AiTaskRepository;
 import com.novanovastudio.repository.PersistenceRepository;
+import com.novanovastudio.repository.TeamRepository;
+import com.novanovastudio.security.TeamScope;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.storage.ObjectStorageService;
 import com.novanovastudio.task.ModelTaskExecutionDispatcher;
@@ -33,7 +36,6 @@ import java.net.URLConnection;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -50,6 +52,7 @@ import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.buffer.DataBufferUtils;
+import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.http.codec.multipart.FilePart;
 import org.springframework.stereotype.Service;
@@ -109,6 +112,12 @@ public class PersistenceService {
     /** 业务仓储 */
     private final PersistenceRepository repository;
 
+    /** 团队资源归属与偏好。 */
+    private final TeamRepository teamRepository;
+
+    /** 实际存储对象计量和欠费控制。 */
+    private final StorageBillingService storageBillingService;
+
     /** AI任务仓储 */
     private final AiTaskRepository aiTaskRepository;
 
@@ -131,13 +140,22 @@ public class PersistenceService {
     private final ModelTaskExecutionDispatcher modelTaskExecutionDispatcher;
 
     /**
+     * 创建或派发会产生文件的任务前统一检查欠费和存储选择。
+     * @param userId 任务用户
+     * @return 检查完成信号
+     */
+    public Mono<Void> requireStorageWritable(Long userId) {
+        return storageBillingService.requireWritable(userId).then(getPlatformObjectStorageConfig()).then();
+    }
+
+    /**
      * 查询全站AI渠道列表
      *
      * @return Mono<List<AiChannelConfig>> AI渠道列表
      */
     public Mono<List<AiTaskDtos.AiChannelConfig>> listChannels() {
         // 渠道由所有管理员共同维护，不再绑定当前管理员账号。
-        return getPlatformAiChannels().doOnSuccess(channels -> log.info("读取全站AI渠道列表成功: channels={}", channels.size()));
+        return TeamScope.current().flatMap(scope -> repository.listPlatformAiChannels().filter(record -> record.getTeamId() == scope.teamId()).concatMap(record -> decryptSecret(record.getApiKeyEncrypted()).map(key -> channelDto(record, key))).collectList()).doOnSuccess(channels -> log.info("读取全站AI渠道列表成功: channels={}", channels.size()));
     }
 
     /** 创建全站渠道。 */
@@ -151,13 +169,13 @@ public class PersistenceService {
     /** 修改全站渠道。 */
     public Mono<AiTaskDtos.AiChannelConfig> updateChannel(PersistenceDtos.ChannelMutationRequest request) {
         if (!StringUtils.hasText(request.id())) return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.channelIDIsRequired")));
-        return repository.getPlatformAiChannel(request.id())
+        return requireResourceOwner("channel", request.id()).then(Mono.defer(() -> repository.getPlatformAiChannel(request.id())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.channelNotFound"))))
                 .flatMap(existing -> (StringUtils.hasText(request.apiKey()) ? encryptSecret(request.apiKey()) : Mono.just(existing.getApiKeyEncrypted()))
                         .flatMap(encrypted -> {
                             PersistenceRecords.UserAiChannelRecord record = channelRecord(request.id(), request, encrypted);
                             return repository.updatePlatformAiChannel(record).then(decryptSecret(encrypted)).map(apiKey -> channelDto(record, apiKey));
-                        }));
+                        }))));
     }
 
     /**
@@ -175,26 +193,60 @@ public class PersistenceService {
 
     /** 删除全站渠道。 */
     public Mono<Void> deleteChannel(String channelId) {
-        return repository.existsPlatformModelConfigByChannel(channelId)
+        return requireResourceOwner("channel", channelId).then(Mono.defer(() -> repository.existsPlatformModelConfigByChannel(channelId)
                 .flatMap(referenced -> referenced
                         ? Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.channelIsReferencedBySiteModelsDeleteLinkedModelsFirst")))
-                        : repository.deletePlatformAiChannel(channelId).then());
+                        : repository.deletePlatformAiChannel(channelId).then())));
     }
 
-    /** 查询全站模型配置。 */
+    /**
+     * 管理操作只能处理当前空间自有资源，必须在解密或变更前完成校验。
+     * @param type 资源类型
+     * @param resourceId 资源标识
+     * @return 所有权验证完成信号
+     */
+    private Mono<Void> requireResourceOwner(String type, String resourceId) {
+        return TeamScope.current().flatMap(scope -> scope.teamId() == 0 ? Mono.empty()
+                : teamRepository.findResource(type, resourceId).filter(resource -> resource.getLongValue("teamId") == scope.teamId())
+                    .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, "平台授权资源为只读，只能修改团队自有配置"))).then());
+    }
+
+    /**
+     * 查询当前空间自有模型配置，并按团队保存的偏好回填默认模型。
+     * @return 当前空间的模型配置列表
+     */
     public Mono<List<PersistenceDtos.ModelConfig>> listModelConfigs() {
-        return getPlatformModelConfigs();
+        return TeamScope.current().flatMap(scope -> {
+            // 团队默认模型保存在资源偏好中，平台仍使用模型表中的默认标记。
+            Mono<List<String>> defaultModelIds = scope.teamId() == 0 ? Mono.just(List.of())
+                    : teamRepository.listPreferences(scope.teamId())
+                        .filter(item -> "model".equals(item.getString("resourceType")) && item.getBooleanValue("isDefault"))
+                        .map(item -> item.getString("resourceId")).collectList();
+            return defaultModelIds.flatMap(defaults -> repository.listPlatformAiModelConfigs()
+                    .filter(record -> scope.teamId() == 0 || java.util.Objects.equals(record.getTeamId(), scope.teamId()))
+                    .map(record -> {
+                        if (scope.teamId() > 0) record.setDefaultModel(defaults.contains(record.getModelConfigId()));
+                        return modelConfigDto(record);
+                    }).collectList());
+        });
     }
 
     /** 查询全站模型配置，供任务执行和模型目录复用。 */
     public Mono<List<PersistenceDtos.ModelConfig>> getPlatformModelConfigs() {
-        return repository.listPlatformAiModelConfigs().map(this::modelConfigDto).collectList();
+        return TeamScope.current().flatMap(scope -> teamRepository.listPreferences(scope.teamId()).collectList().flatMap(preferences ->
+                repository.listPlatformAiModelConfigs().filter(record -> scope.teamId() == 0 || preferences.stream().anyMatch(item ->
+                        "model".equals(item.getString("resourceType")) && record.getModelConfigId().equals(item.getString("resourceId")) && item.getBooleanValue("enabled")))
+                .map(record -> {
+                    if (scope.teamId() > 0) record.setDefaultModel(preferences.stream().anyMatch(item ->
+                            "model".equals(item.getString("resourceType")) && record.getModelConfigId().equals(item.getString("resourceId")) && item.getBooleanValue("isDefault")));
+                    return modelConfigDto(record);
+                }).collectList()));
     }
 
     /** 创建全站模型配置。 */
     public Mono<PersistenceDtos.ModelConfig> createModelConfig(PersistenceDtos.CreateModelConfigRequest request) {
         validateModelType(request.modelType());
-        return repository.getPlatformAiChannel(request.channelId())
+        return requireResourceOwner("channel", request.channelId()).then(Mono.defer(() -> repository.getPlatformAiChannel(request.channelId())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.parentChannelNotFound"))))
                 .flatMap(channel -> {
                     if (!parseStringList(channel.getModels()).contains(request.modelName())) {
@@ -215,7 +267,7 @@ public class PersistenceService {
                     record.setDefaultModel(false);
                     record.setEnabled(request.enabled() == null || request.enabled());
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
-                    record.setCreditCost("video".equals(request.modelType()) ? 0 : request.creditCost() == null ? 0 : request.creditCost());
+                    record.setCreditCost("video".equals(request.modelType()) ? BigDecimal.ZERO : request.creditCost() == null ? BigDecimal.ZERO : request.creditCost());
                     record.setCreditUnit(videoBillingConfiguration == null
                             ? normalizeCreditUnit(request.modelType(), request.creditUnit())
                             : videoBillingConfiguration.billingUnit());
@@ -246,13 +298,13 @@ public class PersistenceService {
                                 return new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.modelOfChannelAlreadyExistsReloadAndEditIt", channel.getName(), request.modelName(), request.modelType()));
                             })
                             .thenReturn(modelConfigDto(record));
-                });
+                })));
     }
 
     /** 修改全站模型配置。 */
     public Mono<PersistenceDtos.ModelConfig> updateModelConfig(PersistenceDtos.UpdateModelConfigRequest request) {
         validateModelType(request.modelType());
-        return repository.getPlatformAiModelConfig(request.id())
+        return requireResourceOwner("model", request.id()).then(Mono.defer(() -> repository.getPlatformAiModelConfig(request.id())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.modelConfigurationNotFound"))))
                 .flatMap(record -> {
                     // 默认模型关闭后该类型会从用户下拉中整体消失，必须先切换默认模型。
@@ -276,7 +328,7 @@ public class PersistenceService {
                     record.setCapabilities(JSON.toJSONString(capabilities));
                     record.setSortOrder(request.sortOrder() == null ? 0 : request.sortOrder());
                     record.setEnabled(enabled);
-                    record.setCreditCost("video".equals(request.modelType()) ? 0 : request.creditCost() == null ? 0 : request.creditCost());
+                    record.setCreditCost("video".equals(request.modelType()) ? BigDecimal.ZERO : request.creditCost() == null ? BigDecimal.ZERO : request.creditCost());
                     record.setCreditUnit(videoBillingConfiguration == null
                             ? normalizeCreditUnit(request.modelType(), request.creditUnit())
                             : videoBillingConfiguration.billingUnit());
@@ -304,20 +356,22 @@ public class PersistenceService {
                                     ? modelTaskExecutionDispatcher.refresh(record.getModelConfigId())
                                     : Mono.empty())
                             .thenReturn(modelConfig);
-                });
+                })));
     }
 
     /** 删除全站模型配置。 */
     public Mono<Void> deleteModelConfig(String id) {
-        return aiTaskRepository.existsExecutableTasksByModelConfig(id)
+        return requireResourceOwner("model", id).then(Mono.defer(() -> aiTaskRepository.existsExecutableTasksByModelConfig(id)
                 .flatMap(hasExecutableTasks -> Boolean.TRUE.equals(hasExecutableTasks)
                         ? Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.modelHasQueuedOrRunningTasksCannotDelete")))
-                        : repository.deletePlatformAiModelConfig(id).then());
+                        : repository.deletePlatformAiModelConfig(id).then())));
     }
 
     /** 设置全站类型默认模型。 */
     @Transactional
     public Mono<Void> setDefaultModel(PersistenceDtos.SetDefaultModelRequest request) {
+        return TeamScope.current().flatMap(scope -> {
+            if (scope.teamId() > 0) return teamRepository.findResource("model", request.id()).switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "模型未获授权"))).flatMap(resource -> teamRepository.savePreference(scope.teamId(), new com.novanovastudio.dto.TeamDtos.ResourcePreferenceRequest("model", request.id(), true, true), resource.getString("modelType")));
         validateModelType(request.modelType());
         return repository.getPlatformAiModelConfig(request.id())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.modelConfigurationNotFound"))))
@@ -331,6 +385,7 @@ public class PersistenceService {
                     }
                     return repository.setDefaultPlatformAiModel(request.modelType(), request.id());
                 });
+        });
     }
 
     /** 构建渠道记录。 */
@@ -361,7 +416,7 @@ public class PersistenceService {
                 record.getDisplayName(),
                 record.getModelIcon(),
                 Boolean.TRUE.equals(record.getIsCustomModel()),
-                parseCustomModelConfig(record.getCustomModelConfig()),
+                parseCustomModelConfig(record.getCustomModelConfig()), record.getTeamId(),
                 "image".equals(record.getModelType()) && Boolean.TRUE.equals(record.getConvertImageSizeToPixels()),
                 "image".equals(record.getModelType()) ? AiImageSizeSupport.normalizeMappings(
                         record.getImageSizeMappings() == null ? null : JSON.parseObject(record.getImageSizeMappings(),
@@ -426,24 +481,24 @@ public class PersistenceService {
         if (minimumDurationSeconds == null || minimumDurationSeconds < 1) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.minimumVideoDurationMustBePositiveIntegerSeconds"));
         }
-        Map<String, Map<String, Integer>> inputPrices = configuration.modePrices() == null ? Map.of() : configuration.modePrices();
+        Map<String, Map<String, BigDecimal>> inputPrices = configuration.modePrices() == null ? Map.of() : configuration.modePrices();
         if (inputPrices.keySet().stream().anyMatch(mode -> !VideoGenerationMode.isSupported(mode))) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoPriceTableContainsAnUnsupportedMode"));
         }
-        Map<String, Map<String, Integer>> normalizedPrices = new LinkedHashMap<>();
+        Map<String, Map<String, BigDecimal>> normalizedPrices = new LinkedHashMap<>();
         for (String mode : List.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO,
                 VideoGenerationMode.REFERENCE_TO_VIDEO, VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO)) {
-            Map<String, Integer> prices = inputPrices.get(mode);
-            Map<String, Integer> normalizedModePrices = new LinkedHashMap<>();
+            Map<String, BigDecimal> prices = inputPrices.get(mode);
+            Map<String, BigDecimal> normalizedModePrices = new LinkedHashMap<>();
             if (prices != null) {
                 if (!prices.isEmpty() && !capabilities.contains(mode)) {
                     throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.onlySelectedModesMayHavePrices"));
                 }
-                for (Map.Entry<String, Integer> entry : prices.entrySet()) {
+                for (Map.Entry<String, BigDecimal> entry : prices.entrySet()) {
                     if (!VideoResolution.isSupported(entry.getKey())) {
                         throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoPriceTableContainsAnUnsupportedResolution"));
                     }
-                    if (entry.getValue() == null || entry.getValue() < 0) {
+                    if (entry.getValue() == null || entry.getValue().signum() < 0) {
                         throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoResolutionPriceMustBeANonnegativeInteger"));
                     }
                     normalizedModePrices.put(entry.getKey(), entry.getValue());
@@ -508,13 +563,13 @@ public class PersistenceService {
         if (configuration == null || configuration.resolutionPrices() == null || configuration.resolutionPrices().isEmpty()) {
             return null;
         }
-        Map<String, Integer> prices = new LinkedHashMap<>();
-        for (Map.Entry<String, Integer> entry : configuration.resolutionPrices().entrySet()) {
+        Map<String, BigDecimal> prices = new LinkedHashMap<>();
+        for (Map.Entry<String, BigDecimal> entry : configuration.resolutionPrices().entrySet()) {
             String resolution = entry.getKey() == null ? "" : entry.getKey().trim().toUpperCase(Locale.ROOT);
             if (!AiImageSizeSupport.RESOLUTIONS.contains(resolution)) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imagePriceTableContainsAnUnsupportedResolution"));
             }
-            if (entry.getValue() == null || entry.getValue() < 0) {
+            if (entry.getValue() == null || entry.getValue().signum() < 0) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.imageResolutionPriceMustBeANonnegativeNumber"));
             }
             prices.put(resolution, entry.getValue());
@@ -565,7 +620,8 @@ public class PersistenceService {
                     group.getString("aiQueryPrompt"),
                     group.getString("queryResponseExample"),
                     group.getString("queryResultPath"),
-                    group.getObject("videoGenerationConstraints", com.novanovastudio.dto.VideoGenerationConstraints.class)));
+                    group.getObject("videoGenerationConstraints", com.novanovastudio.dto.VideoGenerationConstraints.class),
+                    group.getBoolean("asyncQuery")));
         }
         return Map.copyOf(result);
     }
@@ -597,7 +653,8 @@ public class PersistenceService {
             }
             return Map.of();
         }
-        Set<String> allowedKeys = "video".equals(modelType)
+        boolean videoModel = "video".equals(modelType);
+        Set<String> allowedKeys = videoModel
                 ? Set.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO, VideoGenerationMode.REFERENCE_TO_VIDEO,
                 VideoGenerationMode.FIRST_LAST_FRAME_TO_VIDEO)
                 : Set.of("text-to-image", "image-to-image");
@@ -625,9 +682,13 @@ public class PersistenceService {
             if (!StringUtils.hasText(group.resultPath())) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.resultPathForIsRequired", key));
             }
-            boolean queryEnabled = StringUtils.hasText(group.queryPath())
-                    || StringUtils.hasText(group.queryRequestTemplate()) || StringUtils.hasText(group.aiQueryPrompt());
-            if (queryEnabled) {
+            // 视频沿用"配置了查询字段即异步"的隐式判定，保证已有视频配置不受影响；
+            // 图片只看能力级开关，切回同步后残留的查询字段原样保存但不触发必填校验。
+            boolean asyncEnabled = videoModel
+                    ? StringUtils.hasText(group.queryPath())
+                    || StringUtils.hasText(group.queryRequestTemplate()) || StringUtils.hasText(group.aiQueryPrompt())
+                    : Boolean.TRUE.equals(group.asyncQuery());
+            if (asyncEnabled) {
                 if (!StringUtils.hasText(group.queryPath())) {
                     throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.asyncRequiresAQueryPath", key));
                 }
@@ -636,7 +697,7 @@ public class PersistenceService {
                 }
             }
             String queryMethod = normalizeCustomRequestMethod(group.queryMethod());
-            if (queryEnabled && !"GET".equals(queryMethod) && !StringUtils.hasText(group.queryRequestTemplate())
+            if (asyncEnabled && !"GET".equals(queryMethod) && !StringUtils.hasText(group.queryRequestTemplate())
                     && !StringUtils.hasText(group.aiQueryPrompt())) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.pOSTQueryRequiresAnExampleOrAIPrompt", key));
             }
@@ -645,10 +706,12 @@ public class PersistenceService {
                     group.responseExample(), group.resultPath(),
                     group.queryPath() == null ? null : group.queryPath().trim(), queryMethod,
                     group.queryRequestTemplate(), group.aiQueryPrompt(),
-                    group.queryResponseExample(), group.queryResultPath(), "video".equals(modelType) ? group.videoGenerationConstraints() : null));
+                    group.queryResponseExample(), group.queryResultPath(), videoModel ? group.videoGenerationConstraints() : null,
+                    // 同步态不落键，避免前端草稿与服务端回包在 null/false 之间反复判定为脏配置
+                    !videoModel && asyncEnabled ? Boolean.TRUE : null));
         }
         // 启用的每个视频模式都必须配置，不能只遍历已提交的分组而遗漏整组缺失。
-        if ("video".equals(modelType)) {
+        if (videoModel) {
             for (String mode : capabilities) {
                 if (!VideoGenerationMode.isSupported(mode)) continue;
                 PersistenceDtos.CustomModelGroupConfig group = normalized.get(mode);
@@ -767,7 +830,7 @@ public class PersistenceService {
      */
     public Mono<List<JSONObject>> listObjectStorages() {
         // 对象存储由所有管理员共同维护，不再绑定当前管理员账号。
-        return getPlatformObjectStorages().doOnSuccess(storages -> log.info("读取全站对象存储列表成功: objectStorages={}", storages.size()));
+        return TeamScope.current().flatMap(scope -> getPlatformObjectStorages().map(items -> items.stream().filter(item -> scope.teamId() == 0 || item.getLongValue("ownerTeamId") == scope.teamId()).toList())).doOnSuccess(storages -> log.info("读取全站对象存储列表成功: objectStorages={}", storages.size()));
     }
 
     /**
@@ -794,28 +857,31 @@ public class PersistenceService {
     public Mono<JSONObject> updateObjectStorage(PersistenceDtos.ObjectStorageConfig config) {
         if (!StringUtils.hasText(config.id())) return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.objectStorageIDIsRequired")));
         objectStorageService.validate(config);
-        return repository.getPlatformObjectStorage(config.id())
+        return requireResourceOwner("objectStorage", config.id()).then(Mono.defer(() -> repository.getPlatformObjectStorage(config.id())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.objectStorageNotFound"))))
                 .flatMap(existing -> buildObjectStorageRecord(config, existing))
                 .flatMap(record -> repository.updatePlatformObjectStorage(record).then(decryptObjectStorage(record)))
-                .map(value -> JSON.parseObject(JSON.toJSONString(value)));
+                .map(value -> JSON.parseObject(JSON.toJSONString(value)))));
     }
 
     /** 删除全站对象存储。 */
     public Mono<Void> deleteObjectStorage(String storageId) {
-        return repository.getPlatformObjectStorage(storageId)
+        return requireResourceOwner("objectStorage", storageId).then(Mono.defer(() -> repository.getPlatformObjectStorage(storageId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.objectStorageNotFound"))))
                 .flatMap(record -> Boolean.TRUE.equals(record.getDefaultStorage())
                         ? Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.chooseAnotherDefaultBeforeDeletingThisStorage")))
-                        : repository.deletePlatformObjectStorage(storageId).then());
+                        : repository.deletePlatformObjectStorage(storageId).then())));
     }
 
     /** 设置全站默认对象存储。 */
     @Transactional
     public Mono<Void> setDefaultObjectStorage(String storageId) {
+        return TeamScope.current().flatMap(scope -> {
+            if (scope.teamId() > 0) return teamRepository.findResource("objectStorage", storageId).switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "对象存储未获授权"))).flatMap(resource -> teamRepository.savePreference(scope.teamId(), new com.novanovastudio.dto.TeamDtos.ResourcePreferenceRequest("objectStorage", storageId, true, true), ""));
         return repository.getPlatformObjectStorage(storageId)
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.objectStorageNotFound"))))
                 .then(repository.setDefaultPlatformObjectStorage(storageId));
+        });
     }
 
     /** 构建对象存储记录。 */
@@ -1314,7 +1380,6 @@ public class PersistenceService {
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> readFilePart(file)
                         .flatMap(fileBytes -> {
-                            validateUploadMetadata(fileBytes, input.metadata());
                             String kind = normalizeMediaKind(input.kind());
                             if ("avatar".equals(kind) && fileBytes.length > AVATAR_MAX_FILE_SIZE_BYTES) {
                                 return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.avatarMustNotExceed2MB")));
@@ -1335,50 +1400,16 @@ public class PersistenceService {
                                     String storedMimeType = "audio".equals(kind) ? probeResult.mimeType() : mimeType;
                                     String objectKey = buildObjectKey(objectStorageConfig, kind, file.filename(), storedMimeType);
                                     Integer actualDuration = probeResult.durationMs();
-                                    return putObject(objectStorageConfig, objectKey, fileBytes, storedMimeType)
+                                    return putObject(objectStorageConfig, objectKey, fileBytes, storedMimeType,
+                                                    StorageFileService.describe(file.filename(), kind, storedMimeType, "upload"))
                                             .flatMap(publicUrl -> {
                                                 Integer storedDuration = actualDuration < 0 ? null : actualDuration;
                                                 PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, kind, null, publicUrl, objectKey, objectStorageConfig, storedMimeType, (long) fileBytes.length, input.width(), input.height(), storedDuration, input.metadata());
-                                                return repository.saveMedia(record).thenReturn(mediaResponse(record));
+                                                return saveUploadedMedia(record);
                                             });
                                 });
                             });
                         }));
-    }
-
-    /**
-     * 校验上传方要求的文件大小和SHA-256摘要。
-     *
-     * @param fileBytes byte[] 已读取的文件内容
-     * @param metadata JSONObject 上传扩展元数据
-     */
-    private void validateUploadMetadata(byte[] fileBytes, JSONObject metadata) {
-        if (metadata == null) {
-            return;
-        }
-        if (metadata.containsKey("maximumBytes")) {
-            long maximumBytes = metadata.getLongValue("maximumBytes");
-            if (maximumBytes < 1 || fileBytes.length > maximumBytes) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.uploadExceedsSizeLimit"));
-            }
-        }
-        String expectedSha256 = metadata.getString("sha256");
-        if (!StringUtils.hasText(expectedSha256)) {
-            return;
-        }
-        if (!expectedSha256.matches("[0-9a-fA-F]{64}")) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidUploadDigest"));
-        }
-        try {
-            String actualSha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(fileBytes));
-            if (!expectedSha256.equalsIgnoreCase(actualSha256)) {
-                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.uploadDigestVerificationFailed"));
-            }
-        } catch (BusinessException exception) {
-            throw exception;
-        } catch (Exception exception) {
-            throw new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.failedToCalculateUploadDigest"));
-        }
     }
 
     /**
@@ -1394,7 +1425,12 @@ public class PersistenceService {
         OffsetDateTime testedAt = OffsetDateTime.now(ZoneOffset.UTC);
         byte[] data = ("Novanova Studio 对象存储测试 " + testedAt).getBytes(StandardCharsets.UTF_8);
         String key = buildObjectKey(config, "file", "object-storage-test.txt", mimeType);
-        return putObject(config, key, data, mimeType)
+        return Mono.fromCallable(() -> {
+                    String url = objectStorageService.putObject(config, key, new java.io.ByteArrayInputStream(data), data.length, mimeType);
+                    // 连通性测试对象随即删除，避免未保存的配置留下无人计量的测试文件。
+                    objectStorageService.deletePrivateObject(config, key);
+                    return url;
+                }).subscribeOn(Schedulers.boundedElastic())
                 .map(url -> {
                     log.info("对象存储测试上传成功: provider={}, bucket={}, region={}, key={}", config.provider(), config.bucket(), config.region(), key);
                     return new PersistenceDtos.ObjectStorageFile(config.provider(), url, key, config.bucket(), config.region(), (long) data.length, mimeType, formatTime(testedAt));
@@ -1492,10 +1528,11 @@ public class PersistenceService {
             String normalizedKind = normalizeMediaKind(kind);
             String storageKey = normalizedKind + ":" + newId();
             String objectKey = buildObjectKey(objectStorageConfig, normalizedKind, fileName, mimeType);
-            return putObject(objectStorageConfig, objectKey, data, firstNonEmpty(mimeType, "application/octet-stream"))
+            return putObject(objectStorageConfig, objectKey, data, firstNonEmpty(mimeType, "application/octet-stream"),
+                            StorageFileService.describe(firstNonEmpty(fileName, objectKey), normalizedKind, mimeType, "generated"))
                     .flatMap(publicUrl -> {
                         PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, null, publicUrl, objectKey, objectStorageConfig, mimeType, (long) data.length, width, height, durationMs, null);
-                        return repository.saveMedia(record).thenReturn(mediaResponse(record));
+                        return saveUploadedMedia(record);
                     });
         });
     }
@@ -1523,11 +1560,12 @@ public class PersistenceService {
                     String normalizedKind = normalizeMediaKind(kind);
                     String storageKey = normalizedKind + ":" + newId();
                     String objectKey = buildObjectKey(objectStorageConfig, normalizedKind, fileName, mimeType);
-                    return putObject(objectStorageConfig, objectKey, file, firstNonEmpty(mimeType, "application/octet-stream"))
+                    return putObject(objectStorageConfig, objectKey, file, firstNonEmpty(mimeType, "application/octet-stream"),
+                                    StorageFileService.describe(firstNonEmpty(fileName, objectKey), normalizedKind, mimeType, "generated"))
                             .flatMap(publicUrl -> {
                                 PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, null, publicUrl, objectKey,
                                         objectStorageConfig, mimeType, bytes, width, height, durationMs, null);
-                                return repository.saveMedia(record).thenReturn(mediaResponse(record));
+                                return saveUploadedMedia(record);
                             });
                 }));
     }
@@ -1552,13 +1590,13 @@ public class PersistenceService {
                     String objectKey = buildObjectKey(objectStorageConfig, normalizedKind, fileName, mimeType);
                     log.info("保存派生媒体到对象存储: userId={}, storageKey={}, objectKey={}, bytes={}, mimeType={}",
                             userId, storageKey, objectKey, bytes, mimeType);
-                    return putObject(objectStorageConfig, objectKey, file, firstNonEmpty(mimeType, "application/octet-stream"))
+                    return putObject(objectStorageConfig, objectKey, file, firstNonEmpty(mimeType, "application/octet-stream"),
+                                    StorageFileService.describe(firstNonEmpty(fileName, objectKey), normalizedKind, mimeType, "generated"))
                             .flatMap(publicUrl -> {
                                 PersistenceRecords.MediaFileRecord record = buildMediaRecord(userId, storageKey, normalizedKind, null, publicUrl, objectKey,
                                         objectStorageConfig, mimeType, bytes, null, null, durationMs, null);
-                                return repository.saveMedia(record)
-                                        .doOnSuccess(ignored -> log.info("派生媒体记录保存成功: userId={}, storageKey={}, objectKey={}", userId, storageKey, objectKey))
-                                        .thenReturn(mediaResponse(record));
+                                return saveUploadedMedia(record)
+                                        .doOnSuccess(ignored -> log.info("派生媒体记录保存成功: userId={}, storageKey={}, objectKey={}", userId, storageKey, objectKey));
                             });
                 }));
     }
@@ -1620,30 +1658,26 @@ public class PersistenceService {
     }
 
     /**
-     * 将当前用户的临时媒体流式下载到本地文件。
-     *
-     * @param userId Long 媒体归属用户ID
-     * @param storageKey String 媒体存储键
-     * @param target Path 本地目标文件
-     * @return Mono<DownloadedMediaFile> 已下载媒体信息
+     * 将用户音频流式下载到分镜导出的临时文件。
+     * @param userId 媒体所属用户
+     * @param storageKey 音频媒体键
+     * @param target 临时文件
+     * @return 已下载的媒体文件
      */
-    public Mono<DownloadedMediaFile> downloadMediaToFileForUser(Long userId, String storageKey, Path target) {
-        String normalizedStorageKey = firstNonEmpty(storageKey);
-        if (!StringUtils.hasText(normalizedStorageKey)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.mediaStorageKeyIsRequired")));
-        }
-        return repository.getMedia(userId, normalizedStorageKey)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.mediaNotFound"))))
+    public Mono<DownloadedMediaFile> downloadAudioMediaToFileForUser(Long userId, String storageKey, Path target) {
+        return repository.getMedia(userId, storageKey)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.audioMediaNotFound"))))
                 .flatMap(record -> {
+                    if (!"audio".equals(normalizeMediaKind(record.getKind()))) {
+                        return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "分镜音轨必须使用音频媒体"));
+                    }
                     String sourceUrl = firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl());
                     if (!StringUtils.hasText(sourceUrl)) {
-                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.mediaHasNoDownloadURL")));
+                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.audioMediaHasNoDownloadURL")));
                     }
-                    String mimeType = firstNonEmpty(record.getMimeType(), "application/octet-stream");
-                    long maximumBytes = Math.max(1L, properties.getAi().getVideoComposition().getMaximumInputBytes());
-                    log.info("下载导演台临时媒体: userId={}, storageKey={}", userId, normalizedStorageKey);
-                    return aiHttpClient.downloadRemoteMediaToFile(sourceUrl, mimeType, target, maximumBytes)
-                            .map(downloaded -> new DownloadedMediaFile(normalizedStorageKey, target, downloaded.mimeType(), downloaded.bytes()));
+                    return aiHttpClient.downloadRemoteMediaToFile(sourceUrl, firstNonEmpty(record.getMimeType(), "audio/mpeg"),
+                                    target, Math.max(1L, properties.getAi().getVideoComposition().getMaximumInputBytes()))
+                            .map(downloaded -> new DownloadedMediaFile(storageKey, target, downloaded.mimeType(), downloaded.bytes()));
                 });
     }
 
@@ -1706,6 +1740,26 @@ public class PersistenceService {
     }
 
     /**
+     * 验证当前用户的成片归属并返回流式下载内容。
+     * @param storageKey 成片媒体键
+     * @return 媒体数据流
+     */
+    public Mono<Flux<DataBuffer>> streamVideoMediaForCurrentUser(String storageKey) {
+        return currentUserProvider.currentUserId().flatMap(userId -> repository.getMedia(userId, storageKey)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "导出视频媒体不存在")))
+                .map(record -> {
+                    if (!"video".equals(normalizeMediaKind(record.getKind()))) {
+                        throw new BusinessException(ErrorCode.PARAM_INVALID, "导出媒体不是视频");
+                    }
+                    String sourceUrl = firstNonEmpty(record.getObjectStorageUrl(), record.getSourceUrl());
+                    if (!StringUtils.hasText(sourceUrl)) {
+                        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "导出视频媒体没有可下载地址");
+                    }
+                    return aiHttpClient.streamRemoteMedia(sourceUrl);
+                }));
+    }
+
+    /**
      * 将当前用户登记的远程媒体下载并转存到默认对象存储。
      *
      * @param storageKey String 当前用户的媒体存储键
@@ -1733,18 +1787,19 @@ public class PersistenceService {
                                 String normalizedKind = normalizeMediaKind(record.getKind());
                                 String fileName = "generated-" + normalizedKind + mediaFileExtension(mimeType);
                                 String objectKey = buildObjectKey(objectStorageConfig, normalizedKind, fileName, mimeType);
-                                return putObject(objectStorageConfig, objectKey, binary.data(), mimeType)
+                                return putObject(objectStorageConfig, objectKey, binary.data(), mimeType,
+                                                StorageFileService.describe(firstNonEmpty(fileName, objectKey), normalizedKind, mimeType, "remoteImport"))
                                         .flatMap(publicUrl -> {
                                             record.setObjectStorageProvider(objectStorageConfig.provider());
+                                            record.setObjectStorageConfigId(objectStorageConfig.id());
                                             record.setObjectStorageUrl(publicUrl);
                                             record.setObjectStorageKey(objectKey);
                                             record.setBucket(objectStorageConfig.bucket());
                                             record.setRegion(objectStorageConfig.region());
                                             record.setMimeType(mimeType);
                                             record.setBytes((long) binary.data().length);
-                                            return repository.saveMedia(record)
-                                                    .doOnSuccess(ignored -> log.info("远程媒体转存完成: userId={}, storageKey={}", userId, normalizedStorageKey))
-                                                    .thenReturn(mediaResponse(record));
+                                            return saveUploadedMedia(record)
+                                                    .doOnSuccess(ignored -> log.info("远程媒体转存完成: userId={}, storageKey={}", userId, normalizedStorageKey));
                                         });
                             }));
                 }));
@@ -1780,7 +1835,7 @@ public class PersistenceService {
      */
     public Mono<Void> deleteMedia(List<String> storageKeys) {
         // 删除媒体只移除当前用户的媒体记录。
-        return currentUserProvider.currentUserId().flatMap(userId -> repository.deleteMedia(userId, storageKeys));
+        return currentUserProvider.currentUserId().flatMap(userId -> storageBillingService.requestMediaDeletion(userId, storageKeys).then(repository.deleteMedia(userId, storageKeys)));
     }
 
     /**
@@ -1793,7 +1848,7 @@ public class PersistenceService {
      * @return Mono<Void> 删除结果
      */
     public Mono<Void> deleteMediaForUser(Long userId, List<String> storageKeys) {
-        return repository.deleteMedia(userId, storageKeys);
+        return storageBillingService.requestMediaDeletion(userId, storageKeys).then(repository.deleteMedia(userId, storageKeys));
     }
 
     /**
@@ -1801,9 +1856,15 @@ public class PersistenceService {
      *
      * @return Mono<ObjectStorageConfig> 全站对象存储配置
      */
-    private Mono<PersistenceDtos.ObjectStorageConfig> getPlatformObjectStorageConfig() {
+    public Mono<PersistenceDtos.ObjectStorageConfig> getPlatformObjectStorageConfig() {
         // 仅在服务端解密密钥，普通用户永远无法读取对象存储密钥。
-        return repository.getDefaultPlatformObjectStorage()
+        return Mono.deferContextual(context -> context.hasKey(TeamScope.STORAGE_KEY)
+                ? (context.<String>get(TeamScope.STORAGE_KEY).isBlank()
+                    ? Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, "任务创建时未选择对象存储"))
+                    : context.getOrDefault(TeamScope.IN_FLIGHT_KEY, false)
+                        ? repository.getObjectStorageForCleanup(context.get(TeamScope.STORAGE_KEY)).contextWrite(active -> active.put(TeamScope.SYSTEM_KEY, true))
+                        : repository.getPlatformObjectStorage(context.get(TeamScope.STORAGE_KEY)))
+                : repository.getDefaultPlatformObjectStorage())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.askTheAdministratorToConfigureDefaultObjectStorage"))))
                 .flatMap(record -> decryptObjectStorage(record).map(config -> {
             try {
@@ -1814,6 +1875,28 @@ public class PersistenceService {
             }
             return config;
         }));
+    }
+
+    /**
+     * 按已保存的配置标识读取原文使用的对象存储配置。
+     * @param storageId String 存储配置标识
+     * @return Mono<ObjectStorageConfig> 解密后的服务端配置
+     */
+    public Mono<PersistenceDtos.ObjectStorageConfig> getPlatformObjectStorageConfig(String storageId) {
+        return repository.getPlatformObjectStorage(storageId)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "原文对象存储配置已不存在")))
+                .flatMap(this::decryptObjectStorage);
+    }
+
+    /**
+     * 为待删除实际对象读取原存储，停用的配置也必须完成清理。
+     * @param storageId 原配置标识
+     * @return 服务端解密后的原存储
+     */
+    public Mono<PersistenceDtos.ObjectStorageConfig> getObjectStorageForCleanup(String storageId) {
+        return repository.getObjectStorageForCleanup(storageId)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "待清理对象的原存储配置不存在")))
+                .flatMap(this::decryptObjectStorage);
     }
 
     /**
@@ -1836,20 +1919,34 @@ public class PersistenceService {
     }
 
     /**
+     * 保存新上传对象的业务记录，失败或取消时持久化删除请求，避免文件不可见却持续占用容量。
+     * @param record 新上传对象对应的媒体记录
+     * @return 保存后的媒体响应
+     */
+    private Mono<PersistenceDtos.UploadedMediaResponse> saveUploadedMedia(PersistenceRecords.MediaFileRecord record) {
+        return Mono.usingWhen(Mono.just(record), value -> repository.saveMedia(value).thenReturn(mediaResponse(value)),
+                value -> Mono.empty(),
+                (value, error) -> storageBillingService.requestObjectDeletion(value.getObjectStorageConfigId(), value.getObjectStorageKey()),
+                value -> storageBillingService.requestObjectDeletion(value.getObjectStorageConfigId(), value.getObjectStorageKey()));
+    }
+
+    /**
      * 上传对象到对象存储
      *
      * @param config ObjectStorageConfig 对象存储配置
      * @param key String 对象Key
      * @param data byte[] 文件字节
      * @param mimeType String MIME类型
+     * @param metadata 已确认的文件元数据
      * @return Mono<String> 公开访问URL
      */
-    private Mono<String> putObject(PersistenceDtos.ObjectStorageConfig config, String key, byte[] data, String mimeType) {
+    private Mono<String> putObject(PersistenceDtos.ObjectStorageConfig config, String key, byte[] data, String mimeType, com.novanovastudio.dto.StorageFileDtos.Metadata metadata) {
         // COS上传使用阻塞HttpClient，放入boundedElastic执行。
-        return Mono.fromCallable(() -> objectStorageService.putObject(config, key, new java.io.ByteArrayInputStream(data), data.length, mimeType))
-                .subscribeOn(Schedulers.boundedElastic())
-                .switchIfEmpty(Mono.defer(() -> uploadedObjectUrlMissing(key)))
-                .flatMap(url -> requireUploadedObjectUrl(url, key));
+        return storageBillingService.storeObject(config, key, data.length, metadata, () -> {
+            String url = objectStorageService.putObject(config, key, new java.io.ByteArrayInputStream(data), data.length, mimeType);
+            if (!StringUtils.hasText(url)) throw new BusinessException(ErrorCode.BUSINESS_ERROR, "对象存储上传未返回公开访问地址");
+            return url;
+        }).flatMap(url -> requireUploadedObjectUrl(url, key));
     }
 
     /**
@@ -1859,17 +1956,18 @@ public class PersistenceService {
      * @param key String 对象Key
      * @param file Path 本地文件
      * @param mimeType String MIME类型
+     * @param metadata 已确认的文件元数据
      * @return Mono<String> 公开访问URL
      */
-    private Mono<String> putObject(PersistenceDtos.ObjectStorageConfig config, String key, Path file, String mimeType) {
-        return Mono.fromCallable(() -> {
-            long bytes = Files.size(file);
-            try (InputStream inputStream = Files.newInputStream(file)) {
-                return objectStorageService.putObject(config, key, inputStream, bytes, mimeType);
-            }
-        }).subscribeOn(Schedulers.boundedElastic())
-                .switchIfEmpty(Mono.defer(() -> uploadedObjectUrlMissing(key)))
-                .flatMap(url -> requireUploadedObjectUrl(url, key));
+    private Mono<String> putObject(PersistenceDtos.ObjectStorageConfig config, String key, Path file, String mimeType, com.novanovastudio.dto.StorageFileDtos.Metadata metadata) {
+        return Mono.fromCallable(() -> Files.size(file)).subscribeOn(Schedulers.boundedElastic()).flatMap(bytes ->
+                storageBillingService.storeObject(config, key, bytes, metadata, () -> {
+                    try (InputStream inputStream = Files.newInputStream(file)) {
+                        String url = objectStorageService.putObject(config, key, inputStream, bytes, mimeType);
+                        if (!StringUtils.hasText(url)) throw new BusinessException(ErrorCode.BUSINESS_ERROR, "对象存储上传未返回公开访问地址");
+                        return url;
+                    }
+                })).flatMap(url -> requireUploadedObjectUrl(url, key));
     }
 
     /** 创建对象存储空地址错误，避免上传适配器返回null时静默结束响应式链路。 */
@@ -1925,6 +2023,7 @@ public class PersistenceService {
         record.setKind(kind);
         record.setSourceUrl(sourceUrl);
         record.setObjectStorageProvider(objectStorageConfig == null ? "" : objectStorageConfig.provider());
+        record.setObjectStorageConfigId(objectStorageConfig == null ? null : objectStorageConfig.id());
         record.setObjectStorageUrl(objectStorageUrl);
         record.setObjectStorageKey(objectStorageKey);
         record.setBucket(objectStorageConfig == null ? null : objectStorageConfig.bucket());
@@ -2162,10 +2261,15 @@ public class PersistenceService {
      */
     public Mono<List<JSONObject>> getPlatformObjectStorages() {
         // 管理员配置接口需要完整对象存储信息，密钥只在管理员鉴权后返回。
-        return repository.listPlatformObjectStorages()
-                .concatMap(this::decryptObjectStorage)
-                .map(config -> JSON.parseObject(JSON.toJSONString(config)))
-                .collectList();
+        return TeamScope.current().flatMap(scope -> repository.listPlatformObjectStorages().concatMap(record -> {
+            if (scope.teamId() == 0 || java.util.Objects.equals(record.getTeamId(), scope.teamId())) return decryptObjectStorage(record).map(config -> {
+                JSONObject item = JSON.parseObject(JSON.toJSONString(config)); item.put("ownerTeamId", record.getTeamId()); return item;
+            });
+            JSONObject item = new JSONObject();
+            item.put("id", record.getStorageId()); item.put("name", record.getName()); item.put("provider", record.getProvider());
+            item.put("ownerTeamId", record.getTeamId()); item.put("readOnly", true);
+            return Mono.just(item);
+        }).collectList());
     }
 
     /**

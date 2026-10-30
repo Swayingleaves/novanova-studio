@@ -1,7 +1,7 @@
 {
-    "failedToMarkAnnouncementReadTryLater": "Failed to mark announcement read; try later",
-    "failedToMarkAllAnnouncementsRead": "Failed to mark all announcements read",
-    "announcementDetails": "Announcement details",
+    "failedToMarkAnnouncementReadTryLater": "Failed to mark notification read; try later",
+    "failedToMarkAllAnnouncementsRead": "Failed to mark all notifications read",
+    "announcementDetails": "Notification details",
     "iHaveRead": "I have read",
     "markAllRead": "Mark all read",
     "noContent": "No content",

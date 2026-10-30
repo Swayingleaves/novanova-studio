@@ -1,4 +1,7 @@
 {
+    "loadingConversationHistory": "正在加载历史对话…",
+    "failedToLoadConversationHistory": "历史对话加载失败",
+    "retryLoadingConversationHistory": "重新加载",
     "failedToLoadImageStyles": "图片风格加载失败",
     "failedToLoadSkills": "技能加载失败",
     "generatingImage": "正在生成图片...",

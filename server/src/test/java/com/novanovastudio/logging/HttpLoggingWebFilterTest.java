@@ -19,6 +19,23 @@ import org.springframework.mock.web.server.MockServerWebExchange;
  */
 class HttpLoggingWebFilterTest {
 
+    /** 私有云文件的临时签名不会进入应用日志或接口记录，普通文件地址仍可用于诊断。 */
+    @Test
+    void shouldSanitizeTemporaryStorageAccessInBothLogs() {
+        String body = "{\"data\":{\"url\":\"https://example.com/private?sign=secret-signature\",\"expiresAt\":\"2026-10-20T10:05:00Z\"},\"preview\":{\"url\":\"https://example.com/public.png\"}}";
+        var applicationFilter = new HttpLoggingWebFilter();
+        var accessFilter = new ApiAccessLogWebFilter(org.mockito.Mockito.mock(com.novanovastudio.repository.ApiAccessLogRepository.class),
+                new com.novanovastudio.security.CurrentUserProvider(), org.mockito.Mockito.mock(com.novanovastudio.security.ClientAddressResolver.class));
+        String applicationLog = applicationFilter.sanitizeBody(body, MediaType.APPLICATION_JSON);
+        String accessLog = org.springframework.test.util.ReflectionTestUtils.invokeMethod(accessFilter, "sanitizeBody", body, MediaType.APPLICATION_JSON);
+        for (String sanitized : java.util.List.of(applicationLog, accessLog)) {
+            assertFalse(sanitized.contains("secret-signature"));
+            assertFalse(sanitized.contains("/private"));
+            assertTrue(sanitized.contains("https://example.com/public.png"));
+            assertTrue(sanitized.contains("2026-10-20T10:05:00Z"));
+        }
+    }
+
     /**
      * 验证请求标识会写入响应头和Reactor上下文。
      */

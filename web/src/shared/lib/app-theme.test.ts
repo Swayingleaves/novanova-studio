@@ -11,6 +11,7 @@ test("getAntThemeConfig 返回浅色主题 token", () => {
     assert.equal(config.components?.Modal?.contentBg, "#ffffff");
     assert.equal(config.components?.Modal?.headerBg, "#ffffff");
     assert.equal(config.components?.Modal?.footerBg, "#ffffff");
+    assert.equal(config.token?.colorBgSpotlight, undefined);
 });
 
 test("getAntThemeConfig 返回暗色主题 token", () => {
@@ -22,6 +23,7 @@ test("getAntThemeConfig 返回暗色主题 token", () => {
     assert.equal(config.components?.Modal?.contentBg, "#0c0e0d");
     assert.equal(config.components?.Modal?.headerBg, "#0c0e0d");
     assert.equal(config.components?.Modal?.footerBg, "#0c0e0d");
+    assert.equal(config.token?.colorBgSpotlight, "#dfe4d8");
 });
 
 test("getAntThemeConfig 紫色主题使用深色底与浅色文字", () => {

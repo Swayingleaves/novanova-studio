@@ -8,6 +8,7 @@ import { App, Button, Form, Input } from "antd";
 import { ArrowLeft, Send } from "lucide-react";
 
 import { requestPasswordReset } from "@/services/api/server";
+import { teamPath } from "@/features/team/stores/use-team-store";
 
 type ForgotPasswordForm = {
     email: string;
@@ -44,7 +45,7 @@ export default function ForgotPasswordPage() {
                             <h1 id="forgot-password-title" className="studio-title text-2xl font-semibold">{translate("auth.checkYourInbox")}</h1>
                             <p className="studio-subtitle mt-2 text-sm">{translate("auth.ifRegisteredAResetLinkHasBeenSentValid")}</p>
                         </div>
-                        <Button type="primary" size="large" block href="/auth" icon={<ArrowLeft className="size-4" />}>
+                        <Button type="primary" size="large" block href={teamPath("/auth")} icon={<ArrowLeft className="size-4" />}>
                             {translate("auth.backToSignIn")}</Button>
                     </div>
                 ) : (
@@ -52,6 +53,7 @@ export default function ForgotPasswordPage() {
                         <div className="mb-6">
                             <h1 id="forgot-password-title" className="studio-title text-2xl font-semibold">{translate("auth.recoverPassword")}</h1>
                             <p className="studio-subtitle mt-2 text-sm">{translate("auth.enterYourAccountEmailToReceiveAOneTime")}</p>
+                            <p className="studio-subtitle mt-2 text-sm">{translate("auth.passwordAccountRecovery")}</p>
                         </div>
                         <Form form={form} layout="vertical" requiredMark={false} onFinish={submit}>
                             <Form.Item name="email" label={translate("auth.email")} rules={[{ required: true, message: translate("auth.enterAnEmailAddress") }, { type: "email", message: translate("auth.invalidEmailAddress") }]}>
@@ -60,7 +62,7 @@ export default function ForgotPasswordPage() {
                             <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<Send className="size-4" />} iconPlacement="end">
                                 {translate("auth.sendResetLink")}</Button>
                             <div className="mt-3 flex justify-center">
-                                <Button type="link" className="min-h-11" href="/auth" icon={<ArrowLeft className="size-4" />}>
+                                <Button type="link" className="min-h-11" href={teamPath("/auth")} icon={<ArrowLeft className="size-4" />}>
                                     {translate("auth.backToSignIn")}</Button>
                             </div>
                         </Form>

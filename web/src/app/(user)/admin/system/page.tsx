@@ -1,4 +1,9 @@
 "use client";
+import { listTeams } from "@/services/api/team";
+
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { translateMessage as translate } from "@/features/locale/translate";
@@ -16,6 +21,7 @@ import { Edit, Image as ImageIcon, Plus, Power, Search, Send, Sparkles, Trash2, 
 import {
     adjustServerUserCredits,
     getServerUserStatistics,
+    getServerUserTrend,
     unlockServerUserPassword,
     listServerUsers,
     updateServerUserRole,
@@ -54,12 +60,22 @@ import {
     type ServerSkill,
     type SystemNotification,
 } from "@/services/api/server";
+import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { useUserStore, type ServerUserProfile, type ServerUserRole } from "@/features/auth/stores/use-user-store";
 import { getHomepageTargetPath } from "@/features/homepage/api/homepage-showcases";
 import { adminCreditFilterKey, adminCreditUserLabel } from "./admin-credit-utils";
+import { TeamContentScope } from "./components/team-content-scope";
+import { TeamManagement, CurrentTeamManagement } from "./components/team-management";
+import { SystemConfiguration } from "./components/system-configuration";
+import { ResetAccountPasswordModal } from "./components/reset-account-password-modal";
+import { StorageBillingManagement } from "./components/storage-billing-management";
 import { CreditCardManagement } from "./components/credit-card-management";
 import { ApiLogsManagement } from "./components/api-logs-management";
-import { SystemConfiguration } from "@/features/app-shell/components/system-configuration";
+import { EmailCampaignManagement } from "./components/email-campaign-management";
+import { StoryBiblePricingManagement } from "./components/story-bible-pricing-management";
+import { ComicDramaFinalPromptPricingManagement } from "./components/comic-drama-final-prompt-pricing-management";
+import { EpisodeBodiesPricingManagement } from "./components/episode-bodies-pricing-management";
+import { ScriptAiActionPricingManagement } from "./components/script-ai-action-pricing-management";
 import { GenerationStyleCover } from "@/features/generation/components/generation-style-picker";
 import { uploadImage } from "@/features/storage/services/image-storage";
 import { CREDIT_TRANSACTION_PAGE_SIZE, creditTransactionDetail, creditTransactionIcon, creditTransactionTypeLabel, formatCreditChange, formatCredits, formatCreditTime, normalizeGenerationDistribution, normalizeModelDistribution } from "@/app/(user)/credits/credit-page-utils";
@@ -72,6 +88,12 @@ const CreditChart = dynamic(() => import("@/app/(user)/credits/components/credit
     loading: () => <Skeleton active className="px-5 py-6" paragraph={{ rows: 7 }} />,
 });
 
+/** 用户增长趋势图依赖浏览器 API，按需加载避免影响首屏。 */
+const UserTrendChart = dynamic(() => import("./components/user-trend-chart").then((module) => module.UserTrendChart), {
+    ssr: false,
+    loading: () => <Skeleton active className="px-5 py-6" paragraph={{ rows: 7 }} />,
+});
+
 type GenerationTypeFilter = "all" | "image" | "video";
 type TrendUnit = "day" | "month";
 
@@ -79,7 +101,8 @@ export default function AdminSystemPage() {
     const translate = useTranslation();
     const { message, modal } = App.useApp();
     const currentUser = useUserStore((state) => state.user);
-    const isAdmin = currentUser?.role === "admin";
+    const isAdmin = canManageCurrentSpace();
+    const team = useTeamStore((state) => state.team);
 
     if (!isAdmin) {
         return (
@@ -100,19 +123,33 @@ export default function AdminSystemPage() {
                     <p className="studio-subtitle mt-2 text-sm">{translate("administration.operationsConsoleForUsersAnnouncementsAndPrompts")}</p>
                 </header>
                 <Tabs
-                    defaultActiveKey="users"
+                    key={team?.id ?? 0}
+                    defaultActiveKey="configuration"
                     destroyOnHidden={false}
                     items={[
-                        { key: "users", label: translate("administration.userManagement"), children: <UserManagement /> },
                         { key: "configuration", label: translate("appShell.configurationPreferences"), children: <SystemConfiguration /> },
-                        { key: "credits", label: translate("administration.creditDetails"), children: <CreditConsumptionManagement /> },
-                        { key: "creditCards", label: translate("administration.redemptionCodes"), children: <CreditCardManagement /> },
-                        { key: "notifications", label: translate("administration.messageManagement"), children: <NotificationManagement /> },
-                        { key: "prompts", label: translate("administration.promptLibrary"), children: <PromptManagement /> },
-                        { key: "styles", label: translate("administration.styleManagement"), children: <GenerationStyleManagement /> },
-                        { key: "skills", label: translate("administration.skillManagement"), children: <SkillManagement /> },
-                        { key: "homepage", label: translate("administration.homepageShowcase"), children: <HomepageShowcaseManagement /> },
-                        { key: "apiLogs", label: translate("administration.aPIRecords"), children: <ApiLogsManagement /> },
+                        ...(team ? [{ key: "team", label: "团队管理", children: <CurrentTeamManagement /> }] : [{ key: "teams", label: "团队管理", children: <TeamManagement /> }]),
+                        ...(!team ? [{ key: "users", label: translate("administration.userManagement"), children: <UserManagement /> }] : []),
+                        ...(!team ? [{ key: "credits", label: translate("administration.creditDetails"), children: <CreditConsumptionManagement /> }] : []),
+                        ...(!team ? [{ key: "creditCards", label: translate("administration.redemptionCodes"), children: <CreditCardManagement /> }] : []),
+                        ...(!team ? [{ key: "emailCampaigns", label: "邮件群发", children: <EmailCampaignManagement /> }] : []),
+                        { key: "notifications", label: translate("administration.messageManagement"), children: <TeamContentScope moduleName="notifications"><NotificationManagement /></TeamContentScope> },
+                        { key: "prompts", label: translate("administration.promptLibrary"), children: <TeamContentScope moduleName="prompts"><PromptManagement /></TeamContentScope> },
+                        { key: "styles", label: translate("administration.styleManagement"), children: <TeamContentScope moduleName="styles"><GenerationStyleManagement /></TeamContentScope> },
+                        { key: "skills", label: translate("administration.skillManagement"), children: <TeamContentScope moduleName="skills"><SkillManagement /></TeamContentScope> },
+                        { key: "homepage", label: translate("administration.homepageShowcase"), children: <TeamContentScope moduleName="homepage"><HomepageShowcaseManagement /></TeamContentScope> },
+                        {
+                            key: "scriptPricing", label: translate("administration.creationPricing"), children: <Tabs
+                                items={[
+                                    { key: "storyBible", label: translate("administration.scriptStoryBiblePricing"), children: <StoryBiblePricingManagement /> },
+                                    { key: "episodeBodies", label: translate("administration.scriptEpisodeBodiesPricing"), children: <EpisodeBodiesPricingManagement /> },
+                                    { key: "aiActions", label: translate("administration.scriptAiActionPricing"), children: <ScriptAiActionPricingManagement /> },
+                                    { key: "comicDramaFinalPrompt", label: translate("administration.comicDramaFinalPromptPricing"), children: <ComicDramaFinalPromptPricingManagement /> },
+                                ]}
+                            />,
+                        },
+                        { key: "storageBilling", label: translate("storage.capacityManagement"), children: <StorageBillingManagement /> },
+                        ...(!team ? [{ key: "apiLogs", label: translate("administration.aPIRecords"), children: <ApiLogsManagement /> }] : []),
                     ]}
                 />
             </div>
@@ -151,14 +188,14 @@ const createAdminCreditColumns = (translator: typeof translate = translate): Col
         dataIndex: "changeAmount",
         width: 128,
         align: "right",
-        render: (changeAmount: number) => <span className={`font-medium tabular-nums ${changeAmount > 0 ? "text-[var(--studio-primary)]" : "text-[var(--studio-ink)]"}`}>{formatCreditChange(changeAmount)}</span>,
+        render: (changeAmount: CreditAmount) => <span className={`font-medium tabular-nums ${creditAmount(changeAmount).greaterThan(0) ? "text-[var(--studio-primary)]" : "text-[var(--studio-ink)]"}`}>{formatCreditChange(changeAmount)}</span>,
     },
     {
         get title() { return translator("administration.balanceSnapshot"); },
         dataIndex: "balanceAfter",
         width: 128,
         align: "right",
-        render: (balanceAfter: number) => <span className="tabular-nums text-[var(--studio-muted)]">{formatCredits(balanceAfter)}</span>,
+        render: (balanceAfter: CreditAmount) => <span className="tabular-nums text-[var(--studio-muted)]">{formatCredits(balanceAfter)}</span>,
     },
     {
         get title() { return translator("administration.time"); },
@@ -174,6 +211,8 @@ const createAdminCreditColumns = (translator: typeof translate = translate): Col
  * @return 积分明细管理内容
  */
 function CreditConsumptionManagement() {
+    const [filterTeamId, setFilterTeamId] = useState<number | undefined>();
+    const teamsQuery = useQuery({ queryKey: ["adminTeams"], queryFn: listTeams });
     const translate = useTranslation();
     const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")]);
     const [generationType, setGenerationType] = useState<GenerationTypeFilter>("all");
@@ -192,20 +231,21 @@ function CreditConsumptionManagement() {
     }, [selectedUser, userQuery.data?.users, translate.locale]);
     const filters = useMemo(
         () => ({
+            filterTeamId,
             userId: selectedUser?.id,
             startDate: dateRange[0].format("YYYY-MM-DD"),
             endDate: dateRange[1].format("YYYY-MM-DD"),
             generationType: generationType === "all" ? undefined : generationType,
         }),
-        [dateRange, generationType, selectedUser?.id, translate.locale],
+        [dateRange, generationType, selectedUser?.id, filterTeamId, translate.locale],
     );
     const filterKey = adminCreditFilterKey(filters);
     const overviewQuery = useQuery({
-        queryKey: ["admin-credit-overview", ...filterKey, trendUnit],
+        queryKey: ["admin-credit-overview", filterTeamId, ...filterKey, trendUnit],
         queryFn: () => getAdminCreditOverview({ ...filters, trendUnit }),
     });
     const transactionsQuery = useQuery({
-        queryKey: ["admin-credit-transactions", ...filterKey, page],
+        queryKey: ["admin-credit-transactions", filterTeamId, ...filterKey, page],
         queryFn: () => listAdminCreditTransactions({ ...filters, page, pageSize: CREDIT_TRANSACTION_PAGE_SIZE }),
     });
 
@@ -213,15 +253,15 @@ function CreditConsumptionManagement() {
     const transactions = transactionsQuery.data;
     const generationDistribution = useMemo(() => normalizeGenerationDistribution(overview?.generationTypeDistribution || []), [overview?.generationTypeDistribution, translate.locale]);
     const modelDistribution = useMemo(() => normalizeModelDistribution(overview?.modelDistribution || []), [overview?.modelDistribution, translate.locale]);
-    const trend = useMemo(() => (overview?.trend || []).map((item) => ({ name: item.period, value: item.consumedCredits })), [overview?.trend, translate.locale]);
-    const totalConsumed = trend.reduce((total, item) => total + item.value, 0);
+    const trend = useMemo(() => (overview?.trend || []).map((item) => ({ name: item.period, value: Number(item.consumedCredits) })), [overview?.trend, translate.locale]);
+    const totalConsumed = trend.reduce<CreditAmount>((total, item) => creditAmount(total).plus(item.value).toFixed(), 0);
     const hasError = overviewQuery.isError || transactionsQuery.isError;
 
     const resetPage = () => setPage(1);
 
     return (
         <div>
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3"><Select className="w-48" allowClear placeholder="全部空间" value={filterTeamId} options={[{ value: 0, label: "平台空间" }, ...(teamsQuery.data || []).map((team) => ({ value: team.id, label: team.name }))]} onChange={(value) => { setFilterTeamId(value); setPage(1); }} />
                 <Select
                     className="w-72 max-w-full"
                     value={selectedUser?.id}
@@ -276,7 +316,7 @@ function CreditConsumptionManagement() {
                     className="mt-5"
                     type="error"
                     showIcon
-                    message={translate("administration.failedToLoadCreditData")}
+                    title={translate("administration.failedToLoadCreditData")}
                     action={
                         <Button
                             size="small"
@@ -300,17 +340,17 @@ function CreditConsumptionManagement() {
                     </div>
                 </div>
                 <div className="grid gap-4 lg:grid-cols-2">
-                    <CreditChartPanel title={translate("administration.imageVsVideoUsage")} loading={overviewQuery.isLoading} empty={!generationDistribution.length}>
+                    <AdminChartPanel title={translate("administration.imageVsVideoUsage")} loading={overviewQuery.isLoading} empty={!generationDistribution.length}>
                         <CreditChart type="pie" data={generationDistribution} ariaLabel={translate("administration.adminImageAndVideoUsageChart")} />
-                    </CreditChartPanel>
-                    <CreditChartPanel title={translate("administration.usageByModel")} loading={overviewQuery.isLoading} empty={!modelDistribution.length}>
+                    </AdminChartPanel>
+                    <AdminChartPanel title={translate("administration.usageByModel")} loading={overviewQuery.isLoading} empty={!modelDistribution.length}>
                         <CreditChart type="pie" data={modelDistribution} ariaLabel={translate("administration.adminCreditUsageByModel")} />
-                    </CreditChartPanel>
-                    <CreditChartPanel
+                    </AdminChartPanel>
+                    <AdminChartPanel
                         className="lg:col-span-2"
                         title={translate("administration.creditUsageTrend")}
                         loading={overviewQuery.isLoading}
-                        empty={!trend.some((item) => item.value > 0)}
+                        empty={!trend.some((item) => creditAmount(item.value).greaterThan(0))}
                         extra={
                             <Segmented
                                 value={trendUnit}
@@ -324,7 +364,7 @@ function CreditConsumptionManagement() {
                         }
                     >
                         <CreditChart type="bar" data={trend} ariaLabel={translate("administration.adminCreditUsageBarChart")} />
-                    </CreditChartPanel>
+                    </AdminChartPanel>
                 </div>
             </section>
 
@@ -376,12 +416,12 @@ function CreditConsumptionManagement() {
 }
 
 /**
- * 渲染管理员积分图表面板。
+ * 渲染管理员图表面板。
  *
- * @param props 标题、加载、空状态和图表内容
+ * @param props 标题、加载、空状态、空状态文案和图表内容
  * @return 图表面板
  */
-function CreditChartPanel({ title, loading, empty, extra, className, children }: { title: string; loading: boolean; empty: boolean; extra?: ReactNode; className?: string; children: ReactNode }) {
+function AdminChartPanel({ title, loading, empty, emptyText, extra, className, children }: { title: string; loading: boolean; empty: boolean; emptyText?: string; extra?: ReactNode; className?: string; children: ReactNode }) {
     const translate = useTranslation();
     return (
         <section className={`min-w-0 border border-[var(--studio-line)] bg-[var(--studio-surface)] p-4 md:p-5 ${className || ""}`}>
@@ -391,7 +431,7 @@ function CreditChartPanel({ title, loading, empty, extra, className, children }:
             </div>
             <div className="mt-2">
                 {loading ? <Skeleton active className="py-5" paragraph={{ rows: 6 }} /> : null}
-                {!loading && empty ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("administration.noUsageDataInThisPeriod")} className="py-9" /> : null}
+                {!loading && empty ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText || translate("administration.noUsageDataInThisPeriod")} className="py-9" /> : null}
                 {!loading && !empty ? children : null}
             </div>
         </section>
@@ -399,6 +439,8 @@ function CreditChartPanel({ title, loading, empty, extra, className, children }:
 }
 
 function UserManagement() {
+    const [filterTeamId, setFilterTeamId] = useState<number | undefined>();
+    const teamsQuery = useQuery({ queryKey: ["adminTeams"], queryFn: listTeams });
     const translate = useTranslation();
     const { message, modal } = App.useApp();
     const [users, setUsers] = useState<ServerUserProfile[]>([]);
@@ -412,17 +454,28 @@ function UserManagement() {
     const [filterCreatedAfter, setFilterCreatedAfter] = useState<string | undefined>();
     const [filterCreatedBefore, setFilterCreatedBefore] = useState<string | undefined>();
     const [createUserOpen, setCreateUserOpen] = useState(false);
-    const [newUserEmail, setNewUserEmail] = useState("");
+    const [newUserAccount, setNewUserAccount] = useState("");
+    const [passwordTarget, setPasswordTarget] = useState<ServerUserProfile | null>(null);
     const [newUserPassword, setNewUserPassword] = useState("");
     const [newUserNickname, setNewUserNickname] = useState("");
     const [newUserRole, setNewUserRole] = useState<string>("user");
     const [creditUser, setCreditUser] = useState<ServerUserProfile | null>(null);
-    const [creditChangeAmount, setCreditChangeAmount] = useState<number | null>(null);
+    const [creditChangeAmount, setCreditChangeAmount] = useState<CreditAmount | null>(null);
     const [creditReason, setCreditReason] = useState("");
     const [creditSaving, setCreditSaving] = useState(false);
     const statisticsQuery = useQuery({
-        queryKey: ["admin-user-statistics"],
-        queryFn: getServerUserStatistics,
+        queryKey: ["admin-user-statistics", filterTeamId],
+        queryFn: () => getServerUserStatistics(filterTeamId),
+    });
+    // 趋势图跟随搜索区的时间范围；没选范围时默认最近 30 天（含今天）
+    const trendRange = useMemo(() => {
+        const end = filterCreatedBefore ? dayjs(filterCreatedBefore) : dayjs();
+        const start = filterCreatedAfter ? dayjs(filterCreatedAfter) : end.subtract(29, "day");
+        return { startDate: start.format("YYYY-MM-DD"), endDate: end.format("YYYY-MM-DD") };
+    }, [filterCreatedAfter, filterCreatedBefore]);
+    const trendQuery = useQuery({
+        queryKey: ["admin-user-trend", trendRange.startDate, trendRange.endDate, filterTeamId],
+        queryFn: () => getServerUserTrend(trendRange.startDate, trendRange.endDate, filterTeamId),
     });
 
     const loadUsers = useCallback(
@@ -436,6 +489,7 @@ function UserManagement() {
             try {
                 const result = await listServerUsers({
                     page: nextPage,
+                    filterTeamId,
                     pageSize: PAGE_SIZE,
                     keyword: searchKeyword || undefined,
                     userId: normalizedUserId || undefined,
@@ -452,7 +506,7 @@ function UserManagement() {
                 setLoading(false);
             }
         },
-        [message, page, searchKeyword, userIdKeyword, filterRole, filterStatus, filterCreatedAfter, filterCreatedBefore],
+        [message, page, searchKeyword, userIdKeyword, filterRole, filterStatus, filterCreatedAfter, filterCreatedBefore, filterTeamId],
     );
 
     useEffect(() => {
@@ -465,20 +519,20 @@ function UserManagement() {
     };
 
     const handleCreateUser = async () => {
-        if (!newUserEmail.trim() || !newUserPassword.trim()) {
-            message.warning(translate("administration.enterEmailAndPassword"));
+        if (!newUserAccount.trim() || !newUserPassword) {
+            message.warning(translate("administration.enterAccountAndPassword"));
             return;
         }
         try {
-            await adminCreateUser({ email: newUserEmail.trim(), password: newUserPassword, nickname: newUserNickname.trim() || undefined, role: newUserRole });
+            await adminCreateUser({ account: newUserAccount.trim(), password: newUserPassword, nickname: newUserNickname.trim() || undefined, role: newUserRole });
             message.success(translate("administration.userCreated"));
             setCreateUserOpen(false);
-            setNewUserEmail("");
+            setNewUserAccount("");
             setNewUserPassword("");
             setNewUserNickname("");
             setNewUserRole("user");
             setPage(1);
-            await Promise.all([loadUsers(1), statisticsQuery.refetch()]);
+            await Promise.all([loadUsers(1), statisticsQuery.refetch(), trendQuery.refetch()]);
         } catch (error) {
             message.error(error instanceof Error ? error.message : translate("administration.failedToCreateUser"));
         }
@@ -615,6 +669,7 @@ function UserManagement() {
             render: (_, user) => (
                 <Space size="small">
                     <Button onClick={() => openCreditAdjustment(user)}>{translate("administration.adjustCredits")}</Button>
+                    {user.canResetPassword ? <Button onClick={() => setPasswordTarget(user)}>{translate("administration.resetPassword")}</Button> : null}
                     {user.passwordLockedUntil && new Date(user.passwordLockedUntil).getTime() > Date.now() ? <Button onClick={() => unlockPassword(user)}>{translate("administration.unlock")}</Button> : null}
                     {user.status === 1 ? (
                         <Button danger onClick={() => void updateStatus(user, 0)}>
@@ -646,15 +701,38 @@ function UserManagement() {
                     className="mb-4"
                     type="error"
                     showIcon
-                    message={translate("administration.failedToLoadUserStatistics")}
+                    title={translate("administration.failedToLoadUserStatistics")}
                     action={
                         <Button size="small" onClick={() => void statisticsQuery.refetch()}>
                             {translate("administration.reload")}</Button>
                     }
                 />
             ) : null}
+            {trendQuery.isError ? (
+                <Alert
+                    className="mb-4"
+                    type="error"
+                    showIcon
+                    title={translate("administration.failedToLoadUserTrend")}
+                    action={
+                        <Button size="small" onClick={() => void trendQuery.refetch()}>
+                            {translate("administration.reload")}</Button>
+                    }
+                />
+            ) : null}
+            <AdminChartPanel
+                className="mb-5"
+                title={translate("administration.userGrowthTrend")}
+                loading={trendQuery.isLoading}
+                empty={!trendQuery.data?.points?.length}
+                emptyText={translate("administration.noUserTrendData")}
+                extra={<span className="text-xs tabular-nums text-[var(--studio-muted)]">{trendQuery.data?.startDate || trendRange.startDate} ~ {trendQuery.data?.endDate || trendRange.endDate}</span>}
+            >
+                <UserTrendChart points={trendQuery.data?.points || []} ariaLabel={translate("administration.userTrendChart")} />
+            </AdminChartPanel>
             <div className="mb-4 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
+                    <Select className="w-48" allowClear placeholder="全部团队用户" value={filterTeamId} options={(teamsQuery.data || []).map((team) => ({ value: team.id, label: team.name }))} onChange={(value) => { setFilterTeamId(value); setPage(1); }} />
                     <Input.Search
                         placeholder={translate("administration.searchDisplayNameUsernameOrEmail")}
                         value={searchKeyword}
@@ -716,8 +794,9 @@ function UserManagement() {
                     />
                     <DatePicker.RangePicker
                         onChange={(dates) => {
-                            setFilterCreatedAfter(dates?.[0]?.toISOString());
-                            setFilterCreatedBefore(dates?.[1]?.toISOString());
+                            // 起止都取本地自然日边界：只到当天零点会把结束日整天排除掉
+                            setFilterCreatedAfter(dates?.[0]?.startOf("day").toISOString());
+                            setFilterCreatedBefore(dates?.[1]?.endOf("day").toISOString());
                             setPage(1);
                             void loadUsers(1);
                         }}
@@ -732,9 +811,10 @@ function UserManagement() {
                 <Pagination current={page} pageSize={PAGE_SIZE} total={total} showSizeChanger={false} onChange={setPage} />
             </div>
 
+            <ResetAccountPasswordModal target={passwordTarget ? { userId: passwordTarget.id, username: passwordTarget.username } : null} onClose={() => setPasswordTarget(null)} onReset={() => loadUsers(page)} />
             <Modal title={translate("administration.addUser")} open={createUserOpen} onOk={handleCreateUser} onCancel={() => setCreateUserOpen(false)} okText={translate("administration.create")} cancelText={translate("administration.cancel")}>
                 <div className="flex flex-col gap-4">
-                    <Input value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} placeholder={translate("administration.email")} type="email" />
+                    <label className="block text-sm">{translate("auth.account")}<Input className="mt-2" value={newUserAccount} onChange={(e) => setNewUserAccount(e.target.value)} placeholder={translate("auth.enterAccount")} autoComplete="username" /></label>
                     <Input.Password value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} placeholder={translate("administration.passwordAtLeast8Characters")} />
                     <Input value={newUserNickname} onChange={(e) => setNewUserNickname(e.target.value)} placeholder={translate("administration.displayNameOptional")} />
                     <Select<string>
@@ -761,7 +841,7 @@ function UserManagement() {
                     <div className="text-sm text-[var(--studio-muted)]">
                         {translate("administration.availableCredits_2aa38d")}<span className="font-medium tabular-nums text-[var(--studio-ink)]">{creditUser?.creditBalance.toLocaleString(currentLanguageTag()) ?? 0}</span>
                     </div>
-                    <InputNumber value={creditChangeAmount} precision={0} className="w-full" placeholder={translate("administration.positiveToAddNegativeToDeduct")} onChange={(value) => setCreditChangeAmount(value === null ? null : Number(value))} />
+                    <InputNumber<string> stringMode value={creditChangeAmount === null ? null : String(creditChangeAmount)} precision={6} className="w-full" placeholder={translate("administration.positiveToAddNegativeToDeduct")} onChange={(value) => setCreditChangeAmount(value === null ? null : value)} />
                     <div className="pb-5">
                         <Input.TextArea value={creditReason} maxLength={200} showCount placeholder={translate("administration.reasonForAdjustment")} autoSize={{ minRows: 3, maxRows: 5 }} onChange={(event) => setCreditReason(event.target.value)} />
                     </div>

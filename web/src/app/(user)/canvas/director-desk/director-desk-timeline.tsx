@@ -36,7 +36,7 @@ export function DirectorDeskTimeline({ project, timeMilliseconds, playing, loop,
             {button(translate("directorDesk.backToStart"), <RotateCcw className="size-4" />, () => { onPlayingChange(false); onSeek(0); })}
             {button(translate("directorDesk.loop"), <Repeat2 className="size-4" />, () => onLoopChange(!loop), loop)}
             <span className="tabular-nums text-[var(--studio-muted)]">{(timeMilliseconds / 1000).toFixed(2)} / {(duration / 1000).toFixed(1)} {translate("directorDesk.s_b6beae")}{frame} {translate("directorDesk.frames")}</span>
-            <label className="ml-auto flex items-center gap-2"><span>{translate("directorDesk.durationS")}</span><InputNumber className="!w-16" size="small" min={2} max={15} precision={0} disabled={disabled} value={duration / 1000} onChange={(value) => { if (typeof value === "number") onDurationChange(value); }} /></label>
+            <label className="ml-auto flex items-center gap-2"><span>{translate("directorDesk.durationS")}</span><InputNumber className="w-16!" size="small" min={2} max={15} precision={0} disabled={disabled} value={duration / 1000} onChange={(value) => { if (typeof value === "number") onDurationChange(value); }} /></label>
             <span className="text-[var(--studio-muted)]">{translate("directorDesk.30Fps")}</span>
             <span className="text-[var(--studio-muted)]">{translate("directorDesk.dragClipEdgesToAdjustTimeRightClickTo")}</span>
         </div>

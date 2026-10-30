@@ -131,7 +131,7 @@ export function canvasNavigationAssetTitle(asset: CanvasNavigationAsset): string
  */
 export function canvasNavigationAssetKindLabel(asset: CanvasNavigationAsset): string {
     if (asset.source === "library") return CANVAS_NODE_KIND_LABELS[asset.asset.kind];
-    return `${STORYBOARD_ASSET_KIND_LABELS[asset.asset.kind]} · ${asset.storyboardNodeTitle || "分镜脚本"}`;
+    return `${STORYBOARD_ASSET_KIND_LABELS[asset.asset.kind]} · ${asset.storyboardNodeTitle || translate("canvas.storyboardScript")}`;
 }
 
 /**

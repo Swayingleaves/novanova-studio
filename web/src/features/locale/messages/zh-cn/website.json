@@ -1,5 +1,5 @@
 {
-    "description": "Novanova Studio 是面向 AI 视觉创作的一站式工作台，集图片生成、视频创作、智能 Agent、无限画布与资产管理于一体，帮助创作者高效完成从灵感构思到作品交付。",
+    "description": "一个 Agent 驱动的集 AI图片生成、AI视频生成、无限画布、自定义模型 API、AI漫剧、AI短剧、小说解析剧本、小说转短剧、3D导演台、用户管理、积分管理于一体的全流程开源平台",
     "documentationPageNotFound": "文档页面不存在",
     "theAddressMayBeIncorrectOrThePageMay": "地址可能不正确，或页面已被移动。",
     "backToDocs": "返回文档首页"

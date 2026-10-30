@@ -1,3 +1,5 @@
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 
 import { translateMessage as translate } from "@/features/locale/translate";
 import type { CanvasStoryboardAsset, CanvasStoryboardAssetGenerationSettings, CanvasStoryboardAssetGenerationState, CanvasStoryboardAssetKind, CanvasStoryboardNode, CanvasStoryboardShot, CanvasStoryboardShotSize } from "../types";
@@ -41,27 +43,25 @@ export const createStoryboardAssetKindLabels = (translator: typeof translate = t
 
 export const STORYBOARD_ASSET_KIND_LABELS = createStoryboardAssetKindLabels();
 
-export function readStoryboardModelCost(modelCosts: Array<{ model: string; taskType: string; credits: number }>, model: string): number {
+export function readStoryboardModelCost(modelCosts: Array<{ model: string; taskType: string; credits: CreditAmount }>, model: string): CreditAmount {
     return modelCosts.find((item) => item.taskType === "text" && item.model === model)?.credits ?? 0;
 }
 
 /** 计算当前勾选资产的一次性图片生成预估积分，配置了分辨率价目表时按所选清晰度取价。 */
 export function readStoryboardAssetImageCost(
-    modelCosts: Array<{ model: string; taskType: string; credits: number; resolutionPrices?: Partial<Record<string, number>> }>,
+    modelCosts: Array<{ model: string; taskType: string; credits: CreditAmount; resolutionPrices?: Partial<Record<string, CreditAmount>> }>,
     model: string,
     selectedCount: number,
     resolution?: string,
-): number {
+): CreditAmount {
     const cost = modelCosts.find((item) => item.taskType === "image" && item.model === model);
     const resolutionKey = resolution?.trim().toUpperCase();
-    const resolutionPrice = resolutionKey ? cost?.resolutionPrices?.[resolutionKey] : undefined;
-    // 非数字或空值回退模型单价，与服务端按 2K 缺省计费的规则保持一致。
-    const unitCost = typeof resolutionPrice === "number" && Number.isFinite(resolutionPrice) ? resolutionPrice : cost?.credits ?? 0;
-    return Math.max(0, Math.floor(selectedCount)) * Math.max(0, unitCost);
+    const unitCost = (resolutionKey ? cost?.resolutionPrices?.[resolutionKey] : undefined) ?? cost?.credits ?? 0;
+    return creditText(creditAmount(unitCost).times(Math.max(0, Math.floor(selectedCount))));
 }
 
 /** 分镜批量视频报价结果。 */
-export type StoryboardVideoBatchQuote = { available: true; credits: number } | { available: false; reason: string };
+export type StoryboardVideoBatchQuote = { available: true; credits: CreditAmount } | { available: false; reason: string };
 
 /** 根据镜头实际参考素材自动判定视频生成模式：有视频参考（含与图片混合）判为全能参考，仅有图片判为图生视频，无参考判为文生视频。 */
 export function readStoryboardVideoGenerationMode(shot: CanvasStoryboardShot, assets: CanvasStoryboardAsset[], referenceVideos: ReferenceVideo[] = []): VideoGenerationMode {
@@ -99,12 +99,12 @@ export function quoteStoryboardVideo(config: AiConfig, model: string, videoConfi
 
 /** 计算已选分镜镜头的视频分档报价，任何一个镜头不可报价时整批不可提交。 */
 export function readStoryboardVideoCost(config: AiConfig, model: string, videoConfig: AiConfig, shots: CanvasStoryboardShot[], assets: CanvasStoryboardAsset[], referenceVideos: ReferenceVideo[] = []): StoryboardVideoBatchQuote {
-    let credits = 0;
+    let credits: CreditAmount = "0";
     for (const shot of shots) {
         const quote = quoteStoryboardVideo(config, model, videoConfig, shot, assets, referenceVideos);
         if (!quote.available) return { available: false, reason: translate("canvas.cannotQuoteShot", { value0: shot.shotNumber, value1: quote.reason }) };
-        if (!Number.isSafeInteger(credits + quote.credits)) return { available: false, reason: translate("canvas.storyboardVideoCreditCalculationExceedsRange") };
-        credits += quote.credits;
+        if (!creditAmount(credits).plus(quote.credits).isFinite()) return { available: false, reason: translate("canvas.storyboardVideoCreditCalculationExceedsRange") };
+        credits = creditText(creditAmount(credits).plus(quote.credits));
     }
     return { available: true, credits };
 }
@@ -134,7 +134,7 @@ export function readStoryboardShotReferenceImages(shot: CanvasStoryboardShot, as
         if (!asset || !image?.source.trim()) continue;
         references.push({
             id: asset.id,
-            name: `${STORYBOARD_ASSET_KIND_LABELS[asset.kind]}-${asset.name.trim() || "未命名资产"}`,
+            name: `${STORYBOARD_ASSET_KIND_LABELS[asset.kind]}-${asset.name.trim() || translate("canvas.untitledAsset")}`,
             type: image.mimeType?.trim() || "image/png",
             dataUrl: image.source,
             storageKey: image.storageKey,

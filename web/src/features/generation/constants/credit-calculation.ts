@@ -1,3 +1,5 @@
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import type { ModelCreditUnit } from "@/features/settings/stores/use-config-store";
 import type { ImageResolution } from "@/features/generation/lib/image-size-mappings";
 
@@ -5,10 +7,10 @@ import type { ImageResolution } from "@/features/generation/lib/image-size-mappi
 export interface ModelCreditCost {
     model: string;
     taskType: "image" | "video" | "text";
-    credits: number;
+    credits: CreditAmount;
     unit: ModelCreditUnit;
     /** 图片模型按清晰度配置的单价，未配置的档位回退到 credits。 */
-    resolutionPrices?: Partial<Record<ImageResolution, number>>;
+    resolutionPrices?: Partial<Record<ImageResolution, CreditAmount>>;
 }
 
 /** 请求积分消耗计算入参。 */
@@ -26,13 +28,14 @@ export interface CreditCostOptions {
 }
 
 /** 查询单个模型的积分单价，未配置时为0；图片模型优先按清晰度取价。 */
-function unitCost(modelCosts: ModelCreditCost[], model: string, taskType: ModelCreditCost["taskType"], resolution?: string): number {
+function unitCost(modelCosts: ModelCreditCost[], model: string, taskType: ModelCreditCost["taskType"], resolution?: string): CreditAmount {
     const cost = modelCosts.find((item) => item.model === model && item.taskType === taskType);
     if (!cost) return 0;
     const resolutionKey = taskType === "image" && resolution ? (resolution.trim().toUpperCase() as ImageResolution) : undefined;
     const resolutionPrice = resolutionKey ? cost.resolutionPrices?.[resolutionKey] : undefined;
-    // 非数字或空值回退模型单价，避免展示价与服务端实扣不一致。
-    return typeof resolutionPrice === "number" && Number.isFinite(resolutionPrice) ? resolutionPrice : cost.credits;
+    // 空字符串不是合法金额，直接回退模型单价，避免 Decimal 抛错。
+    const priceText = String(resolutionPrice ?? "").trim();
+    return priceText === "" ? cost.credits : (resolutionPrice as CreditAmount);
 }
 
 /**
@@ -41,9 +44,9 @@ function unitCost(modelCosts: ModelCreditCost[], model: string, taskType: ModelC
  * @param options 计算入参
  * @return number 本次请求应消耗的积分
  */
-export function requestCreditCost(options: CreditCostOptions): number {
+export function requestCreditCost(options: CreditCostOptions): CreditAmount {
     if (options.taskType === "text") return 0;
     const count = Math.max(1, Math.floor(Math.abs(Number(options.count)) || 1));
     const credits = unitCost(options.modelCosts, options.model, options.taskType, options.resolution);
-    return credits * count;
+    return creditText(creditAmount(credits).times(count));
 }

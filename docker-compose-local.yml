@@ -1,15 +1,15 @@
-name: novanova-studio
+name: novanova-studio-pro
 
 services:
   postgres:
     image: postgres:17
-    container_name: novanovastudio-postgres
+    container_name: novanovastudio-pro-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USERNAME:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
       POSTGRES_DB: ${POSTGRES_DATABASE:-novanova_studio}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-15432}:5432"
     entrypoint:
       - /bin/sh
       - -c
@@ -45,7 +45,7 @@ services:
 
   redis:
     image: redis:8.6
-    container_name: novanovastudio-redis
+    container_name: novanovastudio-pro-redis
     entrypoint:
       - /bin/sh
       - -c
@@ -55,7 +55,7 @@ services:
       - --
     command: ["redis-server", "--appendonly", "yes", "--logfile", "/var/log/redis/redis.log"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${REDIS_PORT:-16379}:6379"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./volume/redis_data:/data
@@ -70,9 +70,9 @@ services:
 
   nginx:
     image: nginx:1.27-alpine
-    container_name: novanovastudio-nginx
+    container_name: novanovastudio-pro-nginx
     ports:
-      - "127.0.0.1:${WEB_PORT:-5550}:80"
+      - "127.0.0.1:${WEB_PORT:-15555}:80"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
@@ -83,7 +83,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: novanovastudio-web:${IMAGE_TAG:-latest}
+    image: novanovastudio-pro-web:${IMAGE_TAG:-latest}
     build:
       context: .
       dockerfile: web/Dockerfile
@@ -92,7 +92,7 @@ services:
         NEXT_PUBLIC_CREDIT_STORE_URL: ${NEXT_PUBLIC_CREDIT_STORE_URL:-}
         NEXT_PUBLIC_ICP_RECORD_NUMBER: ${NEXT_PUBLIC_ICP_RECORD_NUMBER:-}
         NEXT_PUBLIC_GITHUB_URL: ${NEXT_PUBLIC_GITHUB_URL:-}
-    container_name: novanovastudio-web
+    container_name: novanovastudio-pro-web
     command: ["sh", "-c", "exec node server.js >> /app/logs/web.log 2>&1"]
     volumes:
       - /etc/localtime:/etc/localtime:ro
@@ -102,11 +102,11 @@ services:
     restart: unless-stopped
 
   server:
-    image: novanovastudio-server:${IMAGE_TAG:-latest}
+    image: novanovastudio-pro-server:${IMAGE_TAG:-latest}
     build:
       context: ./server
       dockerfile: Dockerfile
-    container_name: novanovastudio-server
+    container_name: novanovastudio-pro-server
     environment:
       # 显式设置容器和 Java 的默认时区，避免日志按 UTC 输出。
       TZ: ${TZ:-Asia/Shanghai}
@@ -114,7 +114,7 @@ services:
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:?请在.env中配置FRONTEND_BASE_URL}
       TOKEN_EXPIRE_HOURS: ${TOKEN_EXPIRE_HOURS:-24}
       TRUSTED_PROXY_ADDRESSES: ${TRUSTED_PROXY_ADDRESSES:-}
-      CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-http://localhost:3000,http://127.0.0.1:3000,https://www.novanovastudio.cn}
+      CORS_ALLOWED_ORIGIN_PATTERNS: ${CORS_ALLOWED_ORIGIN_PATTERNS:-http://localhost:15555,http://127.0.0.1:15555,https://www.novanovastudio.cn}
       SERVER_PORT: 8080
       LOG_DIR: /app/logs
       POSTGRES_HOST: postgres
@@ -135,7 +135,10 @@ services:
       EMAIL_SMTP_USERNAME: ${EMAIL_SMTP_USERNAME:-}
       EMAIL_SMTP_PASSWORD: ${EMAIL_SMTP_PASSWORD:-}
       EMAIL_SMTP_FROM: ${EMAIL_SMTP_FROM:-}
-      EMAIL_ALLOWED_SUFFIXES: ${EMAIL_ALLOWED_SUFFIXES:-qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,foxmail.com,icloud.com,sina.com,aliyun.com}
+      EMAIL_CAMPAIGN_MINIMUM_INTERVAL_SECONDS: ${EMAIL_CAMPAIGN_MINIMUM_INTERVAL_SECONDS:-3}
+      EMAIL_CAMPAIGN_MAXIMUM_PER_MINUTE: ${EMAIL_CAMPAIGN_MAXIMUM_PER_MINUTE:-20}
+      EMAIL_CAMPAIGN_MAXIMUM_PER_HOUR: ${EMAIL_CAMPAIGN_MAXIMUM_PER_HOUR:-200}
+      EMAIL_CAMPAIGN_MAXIMUM_ACTIVE_CAMPAIGNS: ${EMAIL_CAMPAIGN_MAXIMUM_ACTIVE_CAMPAIGNS:-20}
       OAUTH2_LINUX_DO_ENABLED: ${OAUTH2_LINUX_DO_ENABLED:-false}
       OAUTH2_LINUX_DO_CLIENT_ID: ${OAUTH2_LINUX_DO_CLIENT_ID:-}
       OAUTH2_LINUX_DO_CLIENT_SECRET: ${OAUTH2_LINUX_DO_CLIENT_SECRET:-}
@@ -151,14 +154,18 @@ services:
       AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE: ${AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE:-file:/app/config/prompts/agent-video.md}
       AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE: ${AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE:-file:/app/config/prompts/agent-canvas.md}
       AI_SYSTEM_PROMPT_AGENT_STORYBOARD_FILE: ${AI_SYSTEM_PROMPT_AGENT_STORYBOARD_FILE:-file:/app/config/prompts/agent-storyboard.md}
+      AI_SYSTEM_PROMPT_AGENT_SCRIPT_FILE: ${AI_SYSTEM_PROMPT_AGENT_SCRIPT_FILE:-file:/app/config/prompts/agent-script.md}
+      AI_SYSTEM_PROMPT_AGENT_STORY_BIBLE_FILE: ${AI_SYSTEM_PROMPT_AGENT_STORY_BIBLE_FILE:-file:/app/config/prompts/agent-story-bible.md}
       AI_SYSTEM_PROMPT_IMAGE_STORYBOARD_ASSET_FILE: ${AI_SYSTEM_PROMPT_IMAGE_STORYBOARD_ASSET_FILE:-file:/app/config/prompts/image-storyboard-asset.md}
       AI_IMAGE_HTTP_RESULT_UPLOAD_TO_OBJECT_STORAGE: ${AI_IMAGE_HTTP_RESULT_UPLOAD_TO_OBJECT_STORAGE:-false}
       AI_STORYBOARD_AGENT_TIMEOUT_SECONDS: ${AI_STORYBOARD_AGENT_TIMEOUT_SECONDS:-90}
+      AI_SCRIPT_AGENT_TIMEOUT_SECONDS: ${AI_SCRIPT_AGENT_TIMEOUT_SECONDS:-120}
+      AI_STORY_BIBLE_AGENT_TIMEOUT_SECONDS: ${AI_STORY_BIBLE_AGENT_TIMEOUT_SECONDS:-600}
       AI_TASK_POLLING_INTERVAL_SECONDS: ${AI_TASK_POLLING_INTERVAL_SECONDS:-3}
       TENCENT_COS_MAX_ERROR_RETRY: ${TENCENT_COS_MAX_ERROR_RETRY:-3}
       TENCENT_COS_SOCKET_TIMEOUT_MILLISECONDS: ${TENCENT_COS_SOCKET_TIMEOUT_MILLISECONDS:-120000}
     ports:
-      - "127.0.0.1:${SERVER_PORT:-8080}:8080"
+      - "127.0.0.1:${SERVER_PORT:-18080}:8080"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./server/config/prompts:/app/config/prompts:ro

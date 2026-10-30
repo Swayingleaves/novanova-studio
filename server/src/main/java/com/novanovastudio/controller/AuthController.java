@@ -57,7 +57,7 @@ public class AuthController {
     }
 
     /**
-     * 邮箱登录
+     * 用户名或邮箱密码登录
      *
      * @param request LoginRequest 登录请求
      * @param httpRequest ServerHttpRequest HTTP请求
@@ -113,6 +113,28 @@ public class AuthController {
     @PostMapping("/acknowledgeWelcome")
     public Mono<ApiResponse<String>> acknowledgeWelcome() {
         return userService.acknowledgeWelcome().thenReturn(ApiResponse.ok("ok"));
+    }
+
+    /**
+     * 标记当前用户已完成产品引导。
+     *
+     * @param request CompleteOnboardingRequest 完成的产品引导版本
+     * @return Mono<ApiResponse<String>> 操作响应
+     */
+    @PostMapping("/completeOnboarding")
+    public Mono<ApiResponse<String>> completeOnboarding(@RequestBody UserDtos.CompleteOnboardingRequest request) {
+        return userService.completeOnboarding(request.version()).thenReturn(ApiResponse.ok("ok"));
+    }
+
+    /**
+     * 标记当前用户已完成创作页产品导览。
+     *
+     * @param request CompleteCreationTourRequest 已完成的创作页产品导览版本
+     * @return Mono<ApiResponse<String>> 操作响应
+     */
+    @PostMapping("/completeCreationTour")
+    public Mono<ApiResponse<String>> completeCreationTour(@RequestBody UserDtos.CompleteCreationTourRequest request) {
+        return userService.completeCreationTour(request.version()).thenReturn(ApiResponse.ok("ok"));
     }
 
     /**

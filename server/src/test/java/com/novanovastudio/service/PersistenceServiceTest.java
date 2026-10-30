@@ -15,12 +15,15 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.ai.AiHttpClient;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.PersistenceDtos;
+import com.novanovastudio.dto.TeamDtos;
 import com.novanovastudio.dto.VideoBillingConfiguration;
 import com.novanovastudio.dto.VideoGenerationConstraints;
 import com.novanovastudio.entity.PersistenceRecords;
 import com.novanovastudio.repository.AiTaskRepository;
 import com.novanovastudio.repository.PersistenceRepository;
+import com.novanovastudio.repository.TeamRepository;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.security.TeamScope;
 import com.novanovastudio.storage.ObjectStorageService;
 import com.novanovastudio.task.ModelTaskExecutionDispatcher;
 import java.time.OffsetDateTime;
@@ -83,6 +86,9 @@ class PersistenceServiceTest {
     /** 待测试服务 */
     private PersistenceService service;
 
+    /** 团队资源偏好仓储 */
+    private TeamRepository teamRepository;
+
     /**
      * 初始化测试对象。
      */
@@ -91,8 +97,136 @@ class PersistenceServiceTest {
         org.mockito.Mockito.lenient().when(agentActivityService.activitiesForRound(
                 org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(JSONObject.class)))
                 .thenReturn(new JSONArray());
-        service = new PersistenceService(repository, aiTaskRepository, agentActivityService, aiHttpClient, currentUserProvider, properties, objectStorageService, modelTaskExecutionDispatcher);
+        teamRepository = com.novanovastudio.TeamTestSupport.teamRepository();
+        service = new PersistenceService(repository, teamRepository, com.novanovastudio.TeamTestSupport.storageBilling(), aiTaskRepository, agentActivityService, aiHttpClient, currentUserProvider, properties, objectStorageService, modelTaskExecutionDispatcher);
         org.mockito.Mockito.lenient().when(modelTaskExecutionDispatcher.refresh(org.mockito.ArgumentMatchers.anyString())).thenReturn(Mono.empty());
+    }
+
+    /**
+     * 团队默认模型保存后重新查询应保留选择，模拟页面切换和再次进入。
+     * @param modelType 图片、视频或文本模型类型
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"image", "video", "text"})
+    void shouldRetainSavedTeamDefaultModelAfterReload(String modelType) {
+        AtomicReference<TeamDtos.ResourcePreferenceRequest> savedPreference = new AtomicReference<>();
+        TeamDtos.ResourcePreferenceRequest preference = new TeamDtos.ResourcePreferenceRequest("model", "model-1", true, true);
+        when(repository.listPlatformAiModelConfigs()).thenAnswer(invocation -> Flux.just(modelConfiguration("model-1", modelType, 101L, false)));
+        when(teamRepository.findResource("model", "model-1"))
+                .thenReturn(Mono.just(JSONObject.of("teamId", 101L, "modelType", modelType)));
+        when(teamRepository.savePreference(101L, preference, modelType))
+                .thenReturn(Mono.fromRunnable(() -> savedPreference.set(preference)));
+        when(teamRepository.listPreferences(101L)).thenAnswer(invocation -> savedPreference.get() == null ? Flux.empty()
+                : Flux.just(JSONObject.of("resourceType", "model", "resourceId", "model-1", "enabled", true, "isDefault", true)));
+
+        Assertions.assertFalse(service.listModelConfigs()
+                .contextWrite(context -> new TeamScope(101, "administrator").apply(context)).block().getFirst().defaultModel());
+        service.setDefaultModel(new PersistenceDtos.SetDefaultModelRequest("model-1", modelType))
+                .contextWrite(context -> new TeamScope(101, "administrator").apply(context)).block();
+
+        for (int reload = 0; reload < 2; reload++) {
+            List<PersistenceDtos.ModelConfig> configurations = service.listModelConfigs()
+                    .contextWrite(context -> new TeamScope(101, "administrator").apply(context)).block();
+            Assertions.assertEquals(1, configurations.size());
+            Assertions.assertTrue(configurations.getFirst().defaultModel());
+        }
+        Assertions.assertEquals(preference, savedPreference.get());
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+                .setDefaultPlatformAiModel(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    /** 团队管理列表只展示自有模型，并用团队偏好覆盖模型表的默认标记。 */
+    @Test
+    void shouldApplyTeamDefaultsOnlyToOwnedModelConfigurations() {
+        when(repository.listPlatformAiModelConfigs()).thenReturn(Flux.just(
+                modelConfiguration("selected-model", "image", 101L, false),
+                modelConfiguration("previous-model", "image", 101L, true),
+                modelConfiguration("platform-model", "image", 0L, true),
+                modelConfiguration("other-team-model", "image", 202L, true)));
+        when(teamRepository.listPreferences(101L)).thenReturn(Flux.just(
+                JSONObject.of("resourceType", "model", "resourceId", "selected-model", "enabled", true, "isDefault", true),
+                JSONObject.of("resourceType", "objectStorage", "resourceId", "previous-model", "enabled", true, "isDefault", true)));
+
+        List<PersistenceDtos.ModelConfig> configurations = service.listModelConfigs()
+                .contextWrite(context -> new TeamScope(101, "administrator").apply(context)).block();
+
+        Assertions.assertEquals(List.of("selected-model", "previous-model"), configurations.stream().map(PersistenceDtos.ModelConfig::id).toList());
+        Assertions.assertTrue(configurations.getFirst().defaultModel());
+        Assertions.assertFalse(configurations.getLast().defaultModel());
+    }
+
+    /** 没有默认偏好的团队不能沿用模型表中的默认标记。 */
+    @Test
+    void shouldLeaveTeamDefaultEmptyWithoutPreference() {
+        when(repository.listPlatformAiModelConfigs()).thenReturn(Flux.just(modelConfiguration("model-1", "text", 101L, true)));
+
+        List<PersistenceDtos.ModelConfig> configurations = service.listModelConfigs()
+                .contextWrite(context -> new TeamScope(101, "administrator").apply(context)).block();
+
+        Assertions.assertFalse(configurations.getFirst().defaultModel());
+    }
+
+    /** 查询不同团队的模型配置时必须分别读取各自的默认偏好。 */
+    @Test
+    void shouldKeepModelDefaultsIsolatedBetweenTeams() {
+        when(repository.listPlatformAiModelConfigs()).thenAnswer(invocation -> Flux.just(
+                modelConfiguration("team-101-model", "text", 101L, false),
+                modelConfiguration("team-202-model", "text", 202L, false)));
+        for (long teamId : List.of(101L, 202L)) {
+            when(teamRepository.listPreferences(teamId)).thenReturn(Flux.just(JSONObject.of(
+                    "resourceType", "model", "resourceId", "team-" + teamId + "-model", "enabled", true, "isDefault", true)));
+
+            List<PersistenceDtos.ModelConfig> configurations = service.listModelConfigs()
+                    .contextWrite(context -> new TeamScope(teamId, "administrator").apply(context)).block();
+
+            Assertions.assertEquals(List.of("team-" + teamId + "-model"), configurations.stream().map(PersistenceDtos.ModelConfig::id).toList());
+            Assertions.assertTrue(configurations.getFirst().defaultModel());
+            verify(teamRepository).listPreferences(teamId);
+        }
+    }
+
+    /** 平台默认模型继续使用模型表中的标记，不读取团队偏好。 */
+    @Test
+    void shouldPreservePlatformDefaultModelConfiguration() {
+        when(repository.listPlatformAiModelConfigs()).thenReturn(Flux.just(
+                modelConfiguration("default-model", "text", 0L, true),
+                modelConfiguration("other-model", "text", 0L, false)));
+
+        List<PersistenceDtos.ModelConfig> configurations = service.listModelConfigs().block();
+
+        Assertions.assertTrue(configurations.getFirst().defaultModel());
+        Assertions.assertFalse(configurations.getLast().defaultModel());
+        verifyNoInteractions(teamRepository);
+    }
+
+    /**
+     * 构造来自指定空间的模型配置记录。
+     * @param id 模型配置标识
+     * @param modelType 模型类型
+     * @param teamId 所属空间，零表示平台
+     * @param defaultModel 模型表中的默认标记
+     * @return 用于查询测试的模型记录
+     */
+    private PersistenceRecords.UserAiModelConfigRecord modelConfiguration(String id, String modelType, long teamId, boolean defaultModel) {
+        PersistenceRecords.UserAiModelConfigRecord record = new PersistenceRecords.UserAiModelConfigRecord();
+        record.setModelConfigId(id);
+        record.setChannelId("channel-1");
+        record.setModelName(id);
+        record.setModelType(modelType);
+        record.setTeamId(teamId);
+        record.setDefaultModel(defaultModel);
+        return record;
+    }
+
+    /** 团队管理员不能通过更新只读渠道触发平台密钥解密。 */
+    @Test
+    void shouldRejectUpdatingGrantedPlatformChannelBeforeReadingSecrets() {
+        var request = new PersistenceDtos.ChannelMutationRequest("platform-channel", "平台渠道", "https://example.com", "", "openai", List.of("model"), 0);
+        reactor.test.StepVerifier.create(service.updateChannel(request)
+                .contextWrite(context -> new com.novanovastudio.security.TeamScope(101, "administrator").apply(context)))
+                .expectErrorMatches(error -> error instanceof BusinessException && error.getMessage().contains("只读"))
+                .verify();
+        verifyNoInteractions(repository);
     }
 
     /**
@@ -579,7 +713,7 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
 
         BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(
-                new com.novanovastudio.dto.PersistenceDtos.CreateModelConfigRequest("channel-1", "unknown-model", "image", java.util.List.of(), 0, 0, true, "high")).block());
+                new com.novanovastudio.dto.PersistenceDtos.CreateModelConfigRequest("channel-1", "unknown-model", "image", java.util.List.of(), 0, java.math.BigDecimal.valueOf(0), true, "high")).block());
 
         Assertions.assertTrue(exception.getMessage().contains("不在所属渠道"));
     }
@@ -595,7 +729,7 @@ class PersistenceServiceTest {
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
 
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "deepseek-reasoner", "text", java.util.List.of(), 0, 0, false, "max")).block();
+                "channel-1", "deepseek-reasoner", "text", java.util.List.of(), 0, java.math.BigDecimal.valueOf(0), false, "max")).block();
 
         Assertions.assertNotNull(created);
         Assertions.assertFalse(created.thinkingEnabled());
@@ -609,7 +743,7 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiModelConfig(created.id())).thenReturn(Mono.just(record));
         when(repository.updatePlatformAiModelConfig(record)).thenReturn(Mono.just(1L));
         PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
-                created.id(), "text", java.util.List.of(), 0, 0, true, "high")).block();
+                created.id(), "text", java.util.List.of(), 0, java.math.BigDecimal.valueOf(0), true, "high")).block();
 
         Assertions.assertNotNull(updated);
         Assertions.assertTrue(updated.thinkingEnabled());
@@ -633,7 +767,7 @@ class PersistenceServiceTest {
                 .thenReturn(Mono.error(new DuplicateKeyException("duplicate key: uk_platform_ai_model_configs_model")));
 
         BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(
-                new PersistenceDtos.CreateModelConfigRequest("channel-1", "known-model", "text", List.of(), 0, 0, true, "high")).block());
+                new PersistenceDtos.CreateModelConfigRequest("channel-1", "known-model", "text", List.of(), 0, java.math.BigDecimal.valueOf(0), true, "high")).block());
 
         Assertions.assertTrue(exception.getMessage().contains("测试渠道"));
         Assertions.assertTrue(exception.getMessage().contains("known-model"));
@@ -652,7 +786,7 @@ class PersistenceServiceTest {
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.error(failure));
 
         DuplicateKeyException exception = Assertions.assertThrows(DuplicateKeyException.class, () -> service.createModelConfig(
-                new PersistenceDtos.CreateModelConfigRequest("channel-1", "known-model", "text", List.of(), 0, 0, true, "high")).block());
+                new PersistenceDtos.CreateModelConfigRequest("channel-1", "known-model", "text", List.of(), 0, java.math.BigDecimal.valueOf(0), true, "high")).block());
 
         Assertions.assertSame(failure, exception);
     }
@@ -668,7 +802,7 @@ class PersistenceServiceTest {
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
 
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "deepseek-chat", "text", java.util.List.of(), 0, 0, null, null)).block();
+                "channel-1", "deepseek-chat", "text", java.util.List.of(), 0, java.math.BigDecimal.valueOf(0), null, null)).block();
 
         Assertions.assertNotNull(created);
         Assertions.assertTrue(created.thinkingEnabled());
@@ -684,7 +818,7 @@ class PersistenceServiceTest {
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
 
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "video-model", "video", List.of(), 0, 3, true, "high", "second")).block();
+                "channel-1", "video-model", "video", List.of(), 0, java.math.BigDecimal.valueOf(3), true, "high", "second")).block();
 
         Assertions.assertNotNull(created);
         Assertions.assertEquals("second", created.creditUnit());
@@ -695,7 +829,7 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiModelConfig(created.id())).thenReturn(Mono.just(captor.getValue()));
         when(repository.updatePlatformAiModelConfig(captor.getValue())).thenReturn(Mono.just(1L));
         PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
-                created.id(), "video", List.of(), 0, 4, true, "high", "second")).block();
+                created.id(), "video", List.of(), 0, java.math.BigDecimal.valueOf(4), true, "high", "second")).block();
 
         Assertions.assertNotNull(updated);
         Assertions.assertEquals("second", updated.creditUnit());
@@ -709,15 +843,15 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
         var groups = new java.util.LinkedHashMap<String, PersistenceDtos.CustomModelGroupConfig>();
-        var prices = new java.util.LinkedHashMap<String, java.util.Map<String, Integer>>();
+        var prices = new java.util.LinkedHashMap<String, java.util.Map<String, java.math.BigDecimal>>();
         for (String mode : List.of("text-to-video", "image-to-video", "reference-to-video", "first-last-frame-to-video")) {
             int minimum = mode.equals("text-to-video") || mode.equals("reference-to-video") ? 0 : mode.equals("image-to-video") ? 1 : 2;
             int maximum = mode.equals("text-to-video") ? 0 : mode.equals("first-last-frame-to-video") ? 2 : 4;
             var constraints = new VideoGenerationConstraints(2, 10, minimum, maximum, List.of("16:9", "auto"),
                     mode.equals("reference-to-video") ? 2 : null, mode.equals("reference-to-video") ? 0 : null);
             groups.put(mode, new PersistenceDtos.CustomModelGroupConfig("/video", "POST", "video", "{}", null, null, "url",
-                    null, "POST", null, null, null, null, constraints));
-            prices.put(mode, java.util.Map.of("720p", 1));
+                    null, "POST", null, null, null, null, constraints, null));
+            prices.put(mode, java.util.Map.of("720p", java.math.BigDecimal.ONE));
         }
         JSONObject data = JSONObject.of("channelId", "channel-1", "modelName", "video-model", "modelType", "video",
                 "capabilities", List.copyOf(groups.keySet()), "isCustomModel", true, "customModelConfig", groups,
@@ -747,14 +881,83 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
         JSONObject data = JSONObject.of("channelId", "channel-1", "modelName", "video-model", "modelType", "video",
                 "capabilities", List.of("text-to-video"), "isCustomModel", true, "creditCost", 0,
-                "videoBillingConfiguration", new VideoBillingConfiguration("generation", 3, java.util.Map.of("text-to-video", java.util.Map.of("720p", 1))));
+                "videoBillingConfiguration", new VideoBillingConfiguration("generation", 3, java.util.Map.of("text-to-video", java.util.Map.of("720p", java.math.BigDecimal.ONE))));
         Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(data.to(PersistenceDtos.CreateModelConfigRequest.class)).block());
         verify(repository, org.mockito.Mockito.never()).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
     }
 
+    /** 图片能力保持同步时，残留的查询字段不再触发异步必填校验。 */
+    @Test
+    void shouldAcceptResidualQueryFieldsForSyncImage() {
+        PersistenceDtos.CustomModelGroupConfig group = new PersistenceDtos.CustomModelGroupConfig(
+                "/images/generations", "POST", "image-model", "{}", null, null, "data.url",
+                "/images/tasks/{{taskId}}", "GET", null, null, null, null, null, null);
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+
+        PersistenceDtos.ModelConfig created = service.createModelConfig(imageCustomModelRequest(group)
+                .to(PersistenceDtos.CreateModelConfigRequest.class)).block();
+
+        Assertions.assertNotNull(created);
+        PersistenceDtos.CustomModelGroupConfig saved = created.customModelConfig().get("text-to-image");
+        Assertions.assertNull(saved.asyncQuery());
+        Assertions.assertEquals("/images/tasks/{{taskId}}", saved.queryPath());
+    }
+
+    /** 图片能力开启异步后必须配置查询路径。 */
+    @Test
+    void shouldRejectAsyncImageWithoutQueryPath() {
+        PersistenceDtos.CustomModelGroupConfig group = asyncImageGroup(null, "data.url");
+        JSONObject data = imageCustomModelRequest(group);
+        Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(data.to(PersistenceDtos.CreateModelConfigRequest.class)).block());
+        verify(repository, org.mockito.Mockito.never()).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
+    }
+
+    /** 图片能力开启异步后必须配置查询结果路径。 */
+    @Test
+    void shouldRejectAsyncImageWithoutQueryResultPath() {
+        PersistenceDtos.CustomModelGroupConfig group = asyncImageGroup("/images/tasks/{{taskId}}", null);
+        JSONObject data = imageCustomModelRequest(group);
+        Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(data.to(PersistenceDtos.CreateModelConfigRequest.class)).block());
+        verify(repository, org.mockito.Mockito.never()).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
+    }
+
+    /** 图片能力的异步开关保存到JSONB后能原样读回。 */
+    @Test
+    void shouldRoundTripAsyncQueryForImageGroup() {
+        when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
+        JSONObject data = imageCustomModelRequest(asyncImageGroup("/images/tasks/{{taskId}}", "data.url"));
+
+        PersistenceDtos.ModelConfig created = service.createModelConfig(data.to(PersistenceDtos.CreateModelConfigRequest.class)).block();
+
+        Assertions.assertNotNull(created);
+        Assertions.assertEquals(Boolean.TRUE, created.customModelConfig().get("text-to-image").asyncQuery());
+        var captor = ArgumentCaptor.forClass(PersistenceRecords.UserAiModelConfigRecord.class);
+        verify(repository).createPlatformAiModelConfig(captor.capture());
+        Assertions.assertTrue(JSON.parseObject(captor.getValue().getCustomModelConfig())
+                .getJSONObject("text-to-image").getBooleanValue("asyncQuery"));
+        when(repository.listPlatformAiModelConfigs()).thenReturn(Flux.just(captor.getValue()));
+        Assertions.assertEquals(Boolean.TRUE, service.listModelConfigs().block().getFirst().customModelConfig().get("text-to-image").asyncQuery());
+    }
+
+    /** 构造带异步查询配置的图片分组，参数留空用于验证必填校验。 */
+    private PersistenceDtos.CustomModelGroupConfig asyncImageGroup(String queryPath, String queryResultPath) {
+        return new PersistenceDtos.CustomModelGroupConfig("/images/generations", "POST", "image-model", "{}", null, null, "data.task_id",
+                queryPath, "GET", null, null, null, queryResultPath, null, Boolean.TRUE);
+    }
+
+    /** 构造图片自定义模型创建请求，渠道里必须已存在该模型。 */
+    private JSONObject imageCustomModelRequest(PersistenceDtos.CustomModelGroupConfig group) {
+        PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
+        channel.setModels("[\"image-model\"]");
+        when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
+        return JSONObject.of("channelId", "channel-1", "modelName", "image-model", "modelType", "image",
+                "capabilities", List.of("text-to-image"), "isCustomModel", true, "creditCost", 0,
+                "customModelConfig", java.util.Map.of("text-to-image", group));
+    }
+
     /** 音频输入能力应通过已有能力列表保存，且不能成为分档计费模式。 */
     @Test
-    void shouldSaveAudioInputCapabilityWithoutBillingMode() {
+    void shouldSaveAudioInputCapabilityAnd1088p1440pVideoPrices() {
         PersistenceRecords.UserAiChannelRecord channel = new PersistenceRecords.UserAiChannelRecord();
         channel.setModels("[\"video-model\"]");
         channel.setApiFormat("openai");
@@ -762,20 +965,28 @@ class PersistenceServiceTest {
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
         VideoBillingConfiguration configuration = new VideoBillingConfiguration("generation", 3,
                 java.util.Map.of(VideoGenerationMode.REFERENCE_TO_VIDEO, java.util.Map.of(
-                        "720p", 10,
-                        "1088p", 20,
-                        "1440p", 30)));
+                        "720p", java.math.BigDecimal.valueOf(10),
+                        "1088p", java.math.BigDecimal.valueOf(20),
+                        "1440p", java.math.BigDecimal.valueOf(30))));
 
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "video-model", "video", List.of(VideoGenerationMode.REFERENCE_TO_VIDEO, AudioInputSupport.CAPABILITY), 0, 0,
+                "channel-1", "video-model", "video", List.of(VideoGenerationMode.REFERENCE_TO_VIDEO, AudioInputSupport.CAPABILITY), 0, java.math.BigDecimal.valueOf(0),
                 true, "high", "generation", 1, new JSONObject(), configuration, null, null, false, null, false, null)).block();
 
         Assertions.assertNotNull(created);
         Assertions.assertEquals(List.of(VideoGenerationMode.REFERENCE_TO_VIDEO, AudioInputSupport.CAPABILITY), created.capabilities());
-        Assertions.assertEquals(java.util.Set.of(VideoGenerationMode.REFERENCE_TO_VIDEO), created.videoBillingConfiguration().modePrices().keySet());
-        // 1088P 和 1440P 分辨率价格应随配置一并保存。
-        Assertions.assertEquals(java.util.Map.of("720p", 10, "1088p", 20, "1440p", 30),
-                created.videoBillingConfiguration().modePrices().get(VideoGenerationMode.REFERENCE_TO_VIDEO));
+        // 计费价格表只按生成模式归一化，音频能力是能力标记，不参与价格表。
+        java.util.Map<String, java.util.Map<String, java.math.BigDecimal>> modePrices =
+                created.videoBillingConfiguration().modePrices();
+        Assertions.assertFalse(modePrices.containsKey(AudioInputSupport.CAPABILITY));
+        Assertions.assertEquals(java.util.Map.of(
+                "720p", java.math.BigDecimal.valueOf(10),
+                "1088p", java.math.BigDecimal.valueOf(20),
+                "1440p", java.math.BigDecimal.valueOf(30)), modePrices.get(VideoGenerationMode.REFERENCE_TO_VIDEO));
+        // 未勾选能力的模式只保留空价格表，不写入价格。
+        modePrices.forEach((mode, prices) -> Assertions.assertTrue(
+                VideoGenerationMode.REFERENCE_TO_VIDEO.equals(mode) == !prices.isEmpty(),
+                mode + " 的价格表应与已勾选能力一致"));
     }
 
     /** 未开启全能参考时，服务端必须拒绝音频能力配置。 */
@@ -787,7 +998,7 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
 
         Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "video-model", "video", List.of(AudioInputSupport.CAPABILITY), 0, 0,
+                "channel-1", "video-model", "video", List.of(AudioInputSupport.CAPABILITY), 0, java.math.BigDecimal.valueOf(0),
                 true, "high", "generation", 1, new JSONObject(), null, null, null, false, null, false, null)).block());
         verify(repository, times(0)).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
     }
@@ -801,9 +1012,9 @@ class PersistenceServiceTest {
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
 
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "video-model", "video", List.of(VideoGenerationMode.TEXT_TO_VIDEO), 0, 0, true, "high",
+                "channel-1", "video-model", "video", List.of(VideoGenerationMode.TEXT_TO_VIDEO), 0, java.math.BigDecimal.valueOf(0), true, "high",
                 "generation", 1, new JSONObject(), new VideoBillingConfiguration("generation", 3,
-                java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", 6))), null, null, false, null, false, null)).block();
+                java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", java.math.BigDecimal.valueOf(6)))), null, null, false, null, false, null)).block();
 
         Assertions.assertNotNull(created);
         ArgumentCaptor<PersistenceRecords.UserAiModelConfigRecord> captor = ArgumentCaptor.forClass(PersistenceRecords.UserAiModelConfigRecord.class);
@@ -813,7 +1024,7 @@ class PersistenceServiceTest {
         when(repository.updatePlatformAiModelConfig(record)).thenReturn(Mono.just(1L));
 
         PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
-                created.id(), "image", List.of(), 0, 4, true, "high", "generation", 1, new JSONObject(), null, null, null, null, null, false, null)).block();
+                created.id(), "image", List.of(), 0, java.math.BigDecimal.valueOf(4), true, "high", "generation", 1, new JSONObject(), null, null, null, null, null, false, null)).block();
 
         Assertions.assertNotNull(updated);
         Assertions.assertNull(updated.videoBillingConfiguration());
@@ -830,10 +1041,10 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiModelConfig("model-1")).thenReturn(Mono.just(record));
 
         VideoBillingConfiguration configuration = new VideoBillingConfiguration("generation", 3,
-                java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", 6)));
+                java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", java.math.BigDecimal.valueOf(6))));
 
         Assertions.assertThrows(BusinessException.class, () -> service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
-                "model-1", "image", List.of(), 0, 0, true, "high", "generation", 1,
+                "model-1", "image", List.of(), 0, java.math.BigDecimal.valueOf(0), true, "high", "generation", 1,
                 new JSONObject(), configuration, null, null, null, null, false, null)).block());
         verify(repository, times(0)).updatePlatformAiModelConfig(record);
     }
@@ -846,10 +1057,10 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
 
         VideoBillingConfiguration configuration = new VideoBillingConfiguration("invalid", 3,
-                java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", 6)));
+                java.util.Map.of(VideoGenerationMode.TEXT_TO_VIDEO, java.util.Map.of("720p", java.math.BigDecimal.valueOf(6))));
 
         Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "video-model", "video", List.of(VideoGenerationMode.TEXT_TO_VIDEO), 0, 0,
+                "channel-1", "video-model", "video", List.of(VideoGenerationMode.TEXT_TO_VIDEO), 0, java.math.BigDecimal.valueOf(0),
                 true, "high", "generation", 1, new JSONObject(), configuration, null, null, false, null, false, null)).block());
         verify(repository, times(0)).createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any());
     }
@@ -863,7 +1074,7 @@ class PersistenceServiceTest {
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
 
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "image-model", "image", List.of(), 0, 0, true, "high", "generation", 1,
+                "channel-1", "image-model", "image", List.of(), 0, java.math.BigDecimal.valueOf(0), true, "high", "generation", 1,
                 JSON.parseObject("{\"like\":true}"))).block();
 
         Assertions.assertNotNull(created);
@@ -876,7 +1087,7 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiModelConfig(created.id())).thenReturn(Mono.just(record));
         when(repository.updatePlatformAiModelConfig(record)).thenReturn(Mono.just(1L));
         PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
-                created.id(), "image", List.of(), 0, 0, true, "high", "generation", 1,
+                created.id(), "image", List.of(), 0, java.math.BigDecimal.valueOf(0), true, "high", "generation", 1,
                 JSON.parseObject("{\"like\":false,\"seed\":1}"))).block();
 
         Assertions.assertNotNull(updated);
@@ -892,14 +1103,14 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
         PersistenceDtos.ModelConfig defaultCreated = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "image-model", "image", List.of(), 0, 0, false, "high")).block();
+                "channel-1", "image-model", "image", List.of(), 0, java.math.BigDecimal.ZERO, false, "high")).block();
         Assertions.assertFalse(defaultCreated.convertImageSizeToPixels());
         Assertions.assertEquals("2880x2880", defaultCreated.imageSizeMappings().get("1:1").get("4K"));
 
         java.util.Map<String, java.util.Map<String, String>> mappings = java.util.Map.of("1:1", java.util.Map.of("4K", "4096x4096"));
 
         PersistenceDtos.CreateModelConfigRequest request = new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "image-model", "image", List.of(), 0, 0, false, "high", "generation", 1,
+                "channel-1", "image-model", "image", List.of(), 0, java.math.BigDecimal.ZERO, false, "high", "generation", 1,
                 new JSONObject(), null, null, null, false, null, true, mappings);
         PersistenceDtos.ModelConfig created = service.createModelConfig(JSON.parseObject(JSON.toJSONString(request), PersistenceDtos.CreateModelConfigRequest.class)).block();
         Assertions.assertTrue(created.convertImageSizeToPixels());
@@ -918,7 +1129,7 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiModelConfig(created.id())).thenReturn(Mono.just(enabled));
         when(repository.updatePlatformAiModelConfig(enabled)).thenReturn(Mono.just(1L));
         PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
-                created.id(), "image", List.of(), 0, 0, false, "high", "generation", 1,
+                created.id(), "image", List.of(), 0, java.math.BigDecimal.ZERO, false, "high", "generation", 1,
                 new JSONObject(), null, null, null, false, null, false, mappings)).block();
         Assertions.assertFalse(updated.convertImageSizeToPixels());
         Assertions.assertEquals(mappings, updated.imageSizeMappings());
@@ -935,11 +1146,11 @@ class PersistenceServiceTest {
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
 
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "text-model", "text", List.of(), 0, 0, false, "high")).block();
+                "channel-1", "text-model", "text", List.of(), 0, java.math.BigDecimal.ZERO, false, "high")).block();
         Assertions.assertTrue(created.enabled());
 
         PersistenceDtos.ModelConfig disabled = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "text-model", "text", List.of(), 0, 0, false, "high", "generation", 1,
+                "channel-1", "text-model", "text", List.of(), 0, java.math.BigDecimal.ZERO, false, "high", "generation", 1,
                 new JSONObject(), null, null, null, false, null, false, null, null, false)).block();
         Assertions.assertFalse(disabled.enabled());
 
@@ -952,7 +1163,7 @@ class PersistenceServiceTest {
         when(repository.updatePlatformAiModelConfig(record)).thenReturn(Mono.just(1L));
 
         BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.updateModelConfig(
-                new PersistenceDtos.UpdateModelConfigRequest("model-config-1", "text", List.of(), 0, 0, true, "high", "generation", 1,
+                new PersistenceDtos.UpdateModelConfigRequest("model-config-1", "text", List.of(), 0, java.math.BigDecimal.ZERO, true, "high", "generation", 1,
                         new JSONObject(), null, null, null, false, null, false, null, null, false)).block());
         Assertions.assertTrue(exception.getMessage().contains("默认模型不能关闭"));
         Assertions.assertTrue(record.getEnabled());
@@ -960,7 +1171,7 @@ class PersistenceServiceTest {
         // 切走默认标记后即可关闭，开关随更新保存。
         record.setDefaultModel(false);
         PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
-                "model-config-1", "text", List.of(), 0, 0, true, "high", "generation", 1,
+                "model-config-1", "text", List.of(), 0, java.math.BigDecimal.ZERO, true, "high", "generation", 1,
                 new JSONObject(), null, null, null, false, null, false, null, null, false)).block();
         Assertions.assertFalse(updated.enabled());
         Assertions.assertFalse(record.getEnabled());
@@ -980,7 +1191,7 @@ class PersistenceServiceTest {
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
 
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "model", modelType, List.of(), 0, 0, false, "high", "generation", 1,
+                "channel-1", "model", modelType, List.of(), 0, java.math.BigDecimal.ZERO, false, "high", "generation", 1,
                 new JSONObject(), null, null, null, false, null, true, null)).block();
 
         Assertions.assertFalse(created.convertImageSizeToPixels());
@@ -995,13 +1206,13 @@ class PersistenceServiceTest {
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
 
         PersistenceDtos.ModelConfig defaultCreated = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "image-model", "image", List.of(), 0, 0, true, "high", "generation", null)).block();
+                "channel-1", "image-model", "image", List.of(), 0, java.math.BigDecimal.valueOf(0), true, "high", "generation", null)).block();
 
         Assertions.assertNotNull(defaultCreated);
         Assertions.assertEquals(1, defaultCreated.requestConcurrency());
 
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
-                "channel-1", "image-model", "image", List.of(), 0, 0, true, "high", "generation", 3)).block();
+                "channel-1", "image-model", "image", List.of(), 0, java.math.BigDecimal.valueOf(0), true, "high", "generation", 3)).block();
 
         Assertions.assertNotNull(created);
         Assertions.assertEquals(3, created.requestConcurrency());
@@ -1013,7 +1224,7 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiModelConfig(created.id())).thenReturn(Mono.just(record));
         when(repository.updatePlatformAiModelConfig(record)).thenReturn(Mono.just(1L));
         PersistenceDtos.ModelConfig updated = service.updateModelConfig(new PersistenceDtos.UpdateModelConfigRequest(
-                created.id(), "image", List.of(), 0, 0, true, "high", "generation", 2)).block();
+                created.id(), "image", List.of(), 0, java.math.BigDecimal.valueOf(0), true, "high", "generation", 2)).block();
 
         Assertions.assertNotNull(updated);
         Assertions.assertEquals(2, updated.requestConcurrency());
@@ -1031,7 +1242,7 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
 
         BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(
-                new PersistenceDtos.CreateModelConfigRequest("channel-1", "image-model", "image", List.of(), 0, 0,
+                new PersistenceDtos.CreateModelConfigRequest("channel-1", "image-model", "image", List.of(), 0, java.math.BigDecimal.valueOf(0),
                         true, "high", "generation", 0)).block());
 
         Assertions.assertTrue(exception.getMessage().contains("同时并发数不能小于1"));
@@ -1057,7 +1268,7 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
 
         BusinessException exception = Assertions.assertThrows(BusinessException.class, () -> service.createModelConfig(
-                new PersistenceDtos.CreateModelConfigRequest("channel-1", "image-model", "image", List.of(), 0, 3, true, "high", "second")).block());
+                new PersistenceDtos.CreateModelConfigRequest("channel-1", "image-model", "image", List.of(), 0, java.math.BigDecimal.valueOf(3), true, "high", "second")).block());
 
         Assertions.assertTrue(exception.getMessage().contains("只有视频模型"));
     }

@@ -1,5 +1,8 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.novanovastudio.common.SystemMessage;
 
 import com.alibaba.fastjson2.JSON;
@@ -32,6 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import reactor.core.publisher.Mono;
+import reactor.util.retry.Retry;
 
 /**
  * 分镜脚本Agent编排、结构化校验与独立积分计费服务。
@@ -63,6 +67,9 @@ public class StoryboardAgentService {
 
     /** 资产图片提示词模板的占位符，形如“{{name}}”。 */
     private static final Pattern ASSET_PROMPT_PLACEHOLDER = Pattern.compile("\\{\\{\\s*(\\w+)\\s*\\}\\}");
+
+    /** 生成最终提示词的积分流水名称，扣费与退款必须完全一致，否则按原因匹配不到原扣费。 */
+    private static final String COMPOSE_OPERATION_NAME = "生成最终提示词";
 
     /** 当前用户提供器。 */
     private final CurrentUserProvider currentUserProvider;
@@ -108,7 +115,47 @@ public class StoryboardAgentService {
         validateComposeRequest(request);
         return currentUserProvider.currentUserId()
                 .flatMap(userId -> modelFactory.resolveTextModel(request.model())
-                        .flatMap(model -> composeWithModel(userId, model, request)));
+                        .flatMap(model -> composeWithModel(userId, model, request, model.creditCost(), UUID.randomUUID().toString())));
+    }
+
+    /**
+     * 使用业务已确认的模型与独立单价合成提示词，仅供同包业务调用。
+     * @param request 合成请求
+     * @param model 已校验权限的文本模型
+     * @param unitCredits 每镜头积分
+     * @param operationId 稳定操作标识，用于持久化失败时退还原扣费
+     * @return 提示词与实际扣费
+     */
+    Mono<StoryboardDtos.ComposePromptsResponse> composePrompts(StoryboardDtos.ComposePromptsRequest request,
+            AgentScopeModelFactory.TextModelSelection model, BigDecimal unitCredits, String operationId) {
+        validateComposeRequest(request);
+        return currentUserProvider.currentUserId().flatMap(userId -> composeWithModel(userId, model, request, unitCredits, operationId));
+    }
+
+    /**
+     * 使用独立单价合成提示词，并自动创建扣费操作标识。
+     * @param request 合成请求
+     * @param model 已解析模型
+     * @param unitCredits 每镜头积分
+     * @return 合成结果
+     */
+    Mono<StoryboardDtos.ComposePromptsResponse> composePrompts(StoryboardDtos.ComposePromptsRequest request,
+            AgentScopeModelFactory.TextModelSelection model, BigDecimal unitCredits) {
+        return composePrompts(request, model, unitCredits, UUID.randomUUID().toString());
+    }
+
+    /**
+     * 提示词转换或持久化失败后，按原操作标识退回原模型钱包。
+     * @param operationId 原扣费操作标识
+     * @param credits 本次扣费，零积分无需退款
+     * @param ownerTeamId 模型所属钱包
+     * @return 退款完成信号
+     */
+    Mono<Void> refundPromptComposition(String operationId, BigDecimal credits, long ownerTeamId) {
+        if (credits.signum() == 0) return Mono.empty();
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> creditService.refundOperation(userId, operationId, COMPOSE_OPERATION_NAME))
+                .contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.WALLET_KEY, ownerTeamId));
     }
 
     /**
@@ -118,6 +165,19 @@ public class StoryboardAgentService {
      * @return Mono<AiGenerationTaskResponse> 已入队的AI任务
      */
     public Mono<AiTaskDtos.AiGenerationTaskResponse> createAssetImageTask(StoryboardDtos.CreateAssetImageTaskRequest request) {
+        return createAssetImageTask(request, response -> Mono.empty());
+    }
+
+    /**
+     * 为分镜资产创建图片任务，并在入队前执行持久化回调。
+     *
+     * @param request 资产图片任务请求
+     * @param beforeEnqueue 入队前持久化回调
+     * @return 已入队的AI任务
+     */
+    public Mono<AiTaskDtos.AiGenerationTaskResponse> createAssetImageTask(
+            StoryboardDtos.CreateAssetImageTaskRequest request,
+            Function<AiTaskDtos.AiGenerationTaskResponse, Mono<Void>> beforeEnqueue) {
         validateAssetImageRequest(request);
         Map<String, Object> parameters = new LinkedHashMap<>();
         parameters.put("count", 1);
@@ -128,7 +188,7 @@ public class StoryboardAgentService {
         parameters.put("storyboardAssetId", request.asset().id().trim());
         AiTaskDtos.CreateAiTaskRequest taskRequest = new AiTaskDtos.CreateAiTaskRequest(
                 AiTaskTypes.IMAGE, renderAssetImagePrompt(request), request.model().trim(), parameters, null, null, AiTaskSources.STORYBOARD);
-        return aiTaskService.createTask(taskRequest);
+        return aiTaskService.createTask(taskRequest, beforeEnqueue);
     }
 
     /**
@@ -141,7 +201,7 @@ public class StoryboardAgentService {
      */
     private Mono<StoryboardDtos.GenerateStoryboardResponse> generateWithModel(
             Long userId, AgentScopeModelFactory.TextModelSelection model, StoryboardDtos.GenerateStoryboardRequest request) {
-        return executeChargedOperation(userId, model.creditCost(), "分镜首次生成", operationId -> callGenerateAgent(userId, operationId, model, request)
+        return executeChargedOperation(userId, model.ownerTeamId(), model.creditCost(), "分镜首次生成", operationId -> callGenerateAgent(userId, operationId, model, request)
                         .map(this::normalizeGeneratedStoryboard))
                 .map(result -> new StoryboardDtos.GenerateStoryboardResponse(result.shots(), result.assets(), model.creditCost()));
     }
@@ -152,12 +212,14 @@ public class StoryboardAgentService {
      * @param userId Long 当前用户ID
      * @param model TextModelSelection 已解析模型
      * @param request ComposePromptsRequest 合成请求
+     * @param unitCredits BigDecimal 每镜头积分
+     * @param operationId 稳定扣费操作标识
      * @return Mono<ComposePromptsResponse> 合成结果
      */
     private Mono<StoryboardDtos.ComposePromptsResponse> composeWithModel(
-            Long userId, AgentScopeModelFactory.TextModelSelection model, StoryboardDtos.ComposePromptsRequest request) {
-        int credits = multiplyCredits(model.creditCost(), request.shots().size());
-        return executeChargedOperation(userId, credits, "分镜提示词合成", operationId -> callComposeAgent(userId, operationId, model, request)
+            Long userId, AgentScopeModelFactory.TextModelSelection model, StoryboardDtos.ComposePromptsRequest request, BigDecimal unitCredits, String operationId) {
+        BigDecimal credits = multiplyCredits(unitCredits, request.shots().size());
+        return executeChargedOperation(userId, model.ownerTeamId(), credits, COMPOSE_OPERATION_NAME, operationId, identifier -> callComposeAgent(userId, identifier, model, request)
                         .map(result -> validatePromptComposition(request.shots(), request.visualStyle(), result)))
                 .map(prompts -> new StoryboardDtos.ComposePromptsResponse(prompts, credits));
     }
@@ -172,13 +234,28 @@ public class StoryboardAgentService {
      * @return Mono<T> 业务结果
      * @param <T> 业务结果类型
      */
-    private <T> Mono<T> executeChargedOperation(Long userId, int credits, String operationName,
+    private <T> Mono<T> executeChargedOperation(Long userId, long ownerTeamId, BigDecimal credits, String operationName,
                                                   Function<String, Mono<T>> operation) {
-        String operationId = UUID.randomUUID().toString();
+        return executeChargedOperation(userId, ownerTeamId, credits, operationName, UUID.randomUUID().toString(), operation);
+    }
+
+    /**
+     * 在固定操作标识和模型钱包内扣费执行，失败时按原流水退款。
+     * @param userId 当前用户
+     * @param ownerTeamId 模型所属钱包
+     * @param credits 应扣积分
+     * @param operationName 业务名称
+     * @param operationId 稳定操作标识
+     * @param operation 实际操作
+     * @param <T> 结果类型
+     * @return 操作结果
+     */
+    private <T> Mono<T> executeChargedOperation(Long userId, long ownerTeamId, BigDecimal credits, String operationName,
+                                               String operationId, Function<String, Mono<T>> operation) {
         AtomicBoolean charged = new AtomicBoolean(false);
         return creditService.chargeOperation(userId, operationId, credits, operationName)
                 .then(Mono.defer(() -> {
-                    charged.set(credits > 0);
+                    charged.set(CreditAmounts.of(credits).compareTo(CreditAmounts.of(0)) > 0);
                     log.info("开始执行分镜Agent操作: operationId={}, userId={}, operationName={}, credits={}", operationId, userId, operationName, credits);
                     return operation.apply(operationId);
                 }))
@@ -191,7 +268,7 @@ public class StoryboardAgentService {
                     return creditService.refundOperation(userId, operationId, operationName)
                             .doOnSuccess(ignored -> log.info("分镜Agent操作退款完成: operationId={}, userId={}, operationName={}", operationId, userId, operationName))
                             .then(Mono.error(exception));
-                });
+                }).contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.WALLET_KEY, ownerTeamId));
     }
 
     /**
@@ -286,9 +363,24 @@ public class StoryboardAgentService {
                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentReturnedNoStructuredResult"))))
                             .doFinally(signal -> agent.close());
                 })
+                // 模型偶发不提交结构化结果时重跑一次；重试复用同一 operationId，不会重复扣费。
+                .retryWhen(Retry.max(1).filter(StoryboardAgentService::isMissingStructuredOutput)
+                        .doBeforeRetry(signal -> log.warn("分镜Agent未提交结构化结果，重试一次: operationId={}, reason={}",
+                                operationId, errorMessage(signal.failure()))))
                 .onErrorMap(exception -> exception instanceof BusinessException
                         ? exception
                         : new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, SystemMessage.of("business.storyboardAgentFailed", errorMessage(exception))));
+    }
+
+    /**
+     * 判断失败是否由模型未提交结构化结果导致，这类失败重试通常可以恢复。
+     *
+     * @param exception Throwable 失败原因
+     * @return boolean 是否缺少结构化输出
+     */
+    private static boolean isMissingStructuredOutput(Throwable exception) {
+        String message = exception.getMessage();
+        return message != null && message.contains("_structured_output");
     }
 
     /**
@@ -627,9 +719,9 @@ public class StoryboardAgentService {
      * @param shotCount int 镜头数量
      * @return int 总积分
      */
-    private int multiplyCredits(int unitCredits, int shotCount) {
+    private BigDecimal multiplyCredits(BigDecimal unitCredits, int shotCount) {
         try {
-            return Math.multiplyExact(unitCredits, shotCount);
+            return CreditAmounts.multiply(unitCredits, shotCount);
         } catch (ArithmeticException exception) {
             throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.storyboardPromptCreditCalculationExceedsRange"));
         }

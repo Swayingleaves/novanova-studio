@@ -1,9 +1,17 @@
 package com.novanovastudio.repository;
 
+import com.novanovastudio.common.BusinessException;
+import com.novanovastudio.common.ErrorCode;
+import com.novanovastudio.common.SystemMessage;
+import org.springframework.dao.DuplicateKeyException;
 import com.novanovastudio.entity.EmailVerificationCode;
 import com.novanovastudio.entity.PasswordResetToken;
 import com.novanovastudio.entity.User;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeParseException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Repository;
@@ -21,6 +29,9 @@ import reactor.core.publisher.Mono;
 @RequiredArgsConstructor
 public class UserRepository {
 
+    /** 管理端时间筛选的兜底时区，与用户统计保持一致 */
+    private static final ZoneId FILTER_TIME_ZONE = ZoneId.of("Asia/Shanghai");
+
     /** 数据库客户端 */
     private final DatabaseClient databaseClient;
 
@@ -32,10 +43,20 @@ public class UserRepository {
      */
     public Mono<User> findById(Long id) {
         // 按主键查询单个用户。
-        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id WHERE users.id = :id")
+        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id AND accounts.team_id = 0 WHERE users.id = :id")
                 .bind("id", id)
                 .map((row, metadata) -> RowMappers.user(row))
                 .one();
+    }
+
+    /**
+     * 锁定账号以串行处理密码重置与资料变更。
+     * @param id 用户标识
+     * @return 已锁定账号
+     */
+    public Mono<User> lockUser(Long id) {
+        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id AND accounts.team_id = 0 WHERE users.id = :id FOR UPDATE OF users")
+                .bind("id", id).map((row, metadata) -> RowMappers.user(row)).one();
     }
 
     /**
@@ -46,7 +67,7 @@ public class UserRepository {
      */
     public Mono<User> findByEmail(String email) {
         // 邮箱字段有唯一索引，适合登录和注册占用校验。
-        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id WHERE users.email = :email")
+        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id AND accounts.team_id = 0 WHERE users.email = :email")
                 .bind("email", email)
                 .map((row, metadata) -> RowMappers.user(row))
                 .one();
@@ -59,8 +80,8 @@ public class UserRepository {
      * @return Mono<User> 用户信息
      */
     public Mono<User> findByUsername(String username) {
-        // 用户名字段有唯一索引，主要用于初始管理员兼容查找。
-        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id WHERE users.username = :username")
+        // 用户名使用全平台唯一索引精确匹配，保留大小写。
+        return databaseClient.sql("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id AND accounts.team_id = 0 WHERE users.username = :username")
                 .bind("username", username)
                 .map((row, metadata) -> RowMappers.user(row))
                 .one();
@@ -75,14 +96,16 @@ public class UserRepository {
     public Mono<Long> createUser(User user) {
         // 插入用户并通过RETURNING直接取回数据库生成的主键ID。
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                INSERT INTO users(username, password, email, nickname, avatar, role, status, invitation_code, invited_by_user_id, registered_at)
-                VALUES (:username, :password, :email, :nickname, :avatar, :role, :status, :invitationCode, :invitedByUserId, :registeredAt)
+                INSERT INTO users(username, password, email, nickname, avatar, role, status, invitation_code, invited_by_user_id, registered_at, created_by_team_id, created_by_user_id)
+                VALUES (:username, :password, :email, :nickname, :avatar, :role, :status, :invitationCode, :invitedByUserId, :registeredAt, :createdByTeamId, :createdByUserId)
                 RETURNING id
                 """)
                 .bind("username", user.getUsername())
                 .bind("password", user.getPassword())
-                .bind("email", user.getEmail())
                 .bind("nickname", user.getNickname());
+        spec = R2dbcBindings.bindNullable(spec, "email", user.getEmail(), String.class);
+        spec = R2dbcBindings.bindNullable(spec, "createdByTeamId", user.getCreatedByTeamId(), Long.class);
+        spec = R2dbcBindings.bindNullable(spec, "createdByUserId", user.getCreatedByUserId(), Long.class);
         spec = R2dbcBindings.bindNullable(spec, "avatar", user.getAvatar(), String.class)
                 .bind("role", user.getRole())
                 .bind("status", user.getStatus())
@@ -91,7 +114,8 @@ public class UserRepository {
                 .bind("registeredAt", user.getRegisteredAt());
         return spec
                 .map((row, metadata) -> row.get("id", Long.class))
-                .one();
+                .one()
+                .onErrorMap(DuplicateKeyException.class, exception -> new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.accountAlreadyExists")));
     }
 
     /**
@@ -308,6 +332,50 @@ public class UserRepository {
     }
 
     /**
+     * 标记用户已完成指定版本的产品引导。
+     * <p>
+     * 使用 GREATEST 保证重复或乱序请求不会回退版本。
+     *
+     * @param userId Long 用户ID
+     * @param version int 已完成的产品引导版本
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> markOnboardingCompleted(Long userId, int version) {
+        return databaseClient.sql("""
+                UPDATE users
+                SET onboarding_version = GREATEST(onboarding_version, :targetVersion), updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+                """)
+                .bind("targetVersion", version)
+                .bind("id", userId)
+                .fetch()
+                .rowsUpdated()
+                .then();
+    }
+
+    /**
+     * 标记用户已完成指定版本的创作页产品导览。
+     * <p>
+     * 图片与视频创作页共用该版本号，使用 GREATEST 保证重复或乱序请求不会回退版本。
+     *
+     * @param userId Long 用户ID
+     * @param version int 已完成的创作页产品导览版本
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> markCreationTourCompleted(Long userId, int version) {
+        return databaseClient.sql("""
+                UPDATE users
+                SET creation_tour_version = GREATEST(creation_tour_version, :targetVersion), updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+                """)
+                .bind("targetVersion", version)
+                .bind("id", userId)
+                .fetch()
+                .rowsUpdated()
+                .then();
+    }
+
+    /**
      * 分页查询用户列表（支持搜索和筛选）
      *
      * @param page int 页码
@@ -321,7 +389,7 @@ public class UserRepository {
      * @return Flux<User> 用户列表
      */
     public Flux<User> listUsers(int page, int pageSize, String keyword, Long userId, String role, Integer status, String createdAfter, String createdBefore) {
-        StringBuilder sql = new StringBuilder("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id WHERE 1=1");
+        StringBuilder sql = new StringBuilder("SELECT users.*, accounts.credit_balance FROM users JOIN user_credit_accounts accounts ON accounts.user_id = users.id AND accounts.team_id = 0 WHERE (current_admin_team_filter() < 1 OR EXISTS(SELECT 1 FROM team_members members WHERE members.user_id=users.id AND members.team_id=current_admin_team_filter() AND members.member_status <> 'removed'))");
         if (StringUtils.hasText(keyword)) sql.append(" AND (users.username ILIKE :keyword OR users.nickname ILIKE :keyword OR users.email ILIKE :keyword)");
         if (userId != null) sql.append(" AND users.id = :userId");
         if (StringUtils.hasText(role)) sql.append(" AND users.role = :role");
@@ -336,8 +404,8 @@ public class UserRepository {
         if (userId != null) spec = spec.bind("userId", userId);
         if (StringUtils.hasText(role)) spec = spec.bind("role", role.trim());
         if (status != null) spec = spec.bind("status", status);
-        if (StringUtils.hasText(createdAfter)) spec = spec.bind("createdAfter", java.time.LocalDateTime.parse(createdAfter.trim()));
-        if (StringUtils.hasText(createdBefore)) spec = spec.bind("createdBefore", java.time.LocalDateTime.parse(createdBefore.trim()));
+        if (StringUtils.hasText(createdAfter)) spec = spec.bind("createdAfter", parseFilterTime(createdAfter));
+        if (StringUtils.hasText(createdBefore)) spec = spec.bind("createdBefore", parseFilterTime(createdBefore));
         return spec.map((row, metadata) -> RowMappers.user(row)).all();
     }
 
@@ -353,7 +421,7 @@ public class UserRepository {
      * @return Mono<Long> 用户总数
      */
     public Mono<Long> countUsers(String keyword, Long userId, String role, Integer status, String createdAfter, String createdBefore) {
-        StringBuilder sql = new StringBuilder("SELECT COUNT(*) AS total FROM users WHERE 1=1");
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*) AS total FROM users WHERE (current_admin_team_filter() < 1 OR EXISTS(SELECT 1 FROM team_members members WHERE members.user_id=users.id AND members.team_id=current_admin_team_filter() AND members.member_status <> 'removed'))");
         if (StringUtils.hasText(keyword)) sql.append(" AND (username ILIKE :keyword OR nickname ILIKE :keyword OR email ILIKE :keyword)");
         if (userId != null) sql.append(" AND id = :userId");
         if (StringUtils.hasText(role)) sql.append(" AND role = :role");
@@ -365,9 +433,38 @@ public class UserRepository {
         if (userId != null) spec = spec.bind("userId", userId);
         if (StringUtils.hasText(role)) spec = spec.bind("role", role.trim());
         if (status != null) spec = spec.bind("status", status);
-        if (StringUtils.hasText(createdAfter)) spec = spec.bind("createdAfter", java.time.LocalDateTime.parse(createdAfter.trim()));
-        if (StringUtils.hasText(createdBefore)) spec = spec.bind("createdBefore", java.time.LocalDateTime.parse(createdBefore.trim()));
+        if (StringUtils.hasText(createdAfter)) spec = spec.bind("createdAfter", parseFilterTime(createdAfter));
+        if (StringUtils.hasText(createdBefore)) spec = spec.bind("createdBefore", parseFilterTime(createdBefore));
         return spec.map((row, metadata) -> row.get("total", Long.class)).one().defaultIfEmpty(0L);
+    }
+
+    /**
+     * 解析管理端时间筛选值，兼容带时区偏移的 ISO-8601、本地日期时间与纯日期。
+     * <p>
+     * 前端日期选择器传入的是 {@code 2026-09-30T16:00:00.000Z} 这类带Z的字符串，
+     * 不能直接交给 {@link LocalDateTime#parse}；纯日期按统计时区的当天零点处理。
+     * 包内可见，便于直接单测三种输入格式。
+     *
+     * @param value String 时间筛选值
+     * @return OffsetDateTime 解析后的时间点
+     */
+    static OffsetDateTime parseFilterTime(String value) {
+        String text = value.trim();
+        try {
+            return OffsetDateTime.parse(text);
+        } catch (DateTimeParseException ignored) {
+            // 继续尝试不带偏移的本地时间
+        }
+        try {
+            return LocalDateTime.parse(text).atZone(FILTER_TIME_ZONE).toOffsetDateTime();
+        } catch (DateTimeParseException ignored) {
+            // 继续尝试纯日期
+        }
+        try {
+            return LocalDate.parse(text).atStartOfDay(FILTER_TIME_ZONE).toOffsetDateTime();
+        } catch (DateTimeParseException error) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidCreatedTimeFilter"));
+        }
     }
 
     /**
@@ -384,7 +481,7 @@ public class UserRepository {
                 SELECT COUNT(*) AS total_users,
                        COUNT(*) FILTER (WHERE created_at >= :monthStart) AS monthly_new_users,
                        COUNT(*) FILTER (WHERE created_at >= :dayStart) AS daily_new_users
-                FROM users
+                FROM users WHERE (current_admin_team_filter() < 1 OR EXISTS(SELECT 1 FROM team_members members WHERE members.user_id=users.id AND members.team_id=current_admin_team_filter() AND members.member_status <> 'removed'))
                 """)
                 .bind("monthStart", monthStart)
                 .bind("dayStart", dayStart)
@@ -393,6 +490,47 @@ public class UserRepository {
                         row.get("monthly_new_users", Long.class),
                         row.get("daily_new_users", Long.class)))
                 .one();
+    }
+
+    /**
+     * 查询区间内每日新增用户数，按统计时区归入自然日。
+     *
+     * @param start OffsetDateTime 区间开始时间（含）
+     * @param endExclusive OffsetDateTime 区间结束时间（不含）
+     * @return Flux<DailyNewUsers> 有新增用户的日期及数量
+     */
+    public Flux<DailyNewUsers> listDailyNewUsers(OffsetDateTime start, OffsetDateTime endExclusive) {
+        return databaseClient.sql("""
+                SELECT TO_CHAR(DATE_TRUNC('day', created_at AT TIME ZONE 'Asia/Shanghai'), 'YYYY-MM-DD') AS period,
+                       COUNT(*) AS new_users
+                FROM users WHERE (current_admin_team_filter() < 1 OR EXISTS(SELECT 1 FROM team_members members WHERE members.user_id=users.id AND members.team_id=current_admin_team_filter() AND members.member_status <> 'removed'))
+                  AND created_at >= :start AND created_at < :endExclusive
+                GROUP BY period ORDER BY period ASC
+                """)
+                .bind("start", start)
+                .bind("endExclusive", endExclusive)
+                .map((row, metadata) -> new DailyNewUsers(
+                        row.get("period", String.class),
+                        row.get("new_users", Long.class)))
+                .all();
+    }
+
+    /**
+     * 统计指定时间之前创建的用户总数，作为用户数量曲线的起点。
+     *
+     * @param before OffsetDateTime 统计起点时间（不含）
+     * @return Mono<Long> 起点前的用户总数
+     */
+    public Mono<Long> countUsersCreatedBefore(OffsetDateTime before) {
+        return databaseClient.sql("""
+                SELECT COUNT(*) AS total_users FROM users
+                WHERE (current_admin_team_filter() < 1 OR EXISTS(SELECT 1 FROM team_members members WHERE members.user_id=users.id AND members.team_id=current_admin_team_filter() AND members.member_status <> 'removed'))
+                  AND created_at < :before
+                """)
+                .bind("before", before)
+                .map((row, metadata) -> row.get("total_users", Long.class))
+                .one()
+                .defaultIfEmpty(0L);
     }
 
     /**
@@ -420,6 +558,15 @@ public class UserRepository {
      * @param dailyNewUsers long 今日新增用户数
      */
     public record UserStatistics(long totalUsers, long monthlyNewUsers, long dailyNewUsers) {
+    }
+
+    /**
+     * 用户每日新增数。
+     *
+     * @param date String 日期（yyyy-MM-dd，按统计时区）
+     * @param newUsers long 当日新增用户数
+     */
+    public record DailyNewUsers(String date, long newUsers) {
     }
 
     /**

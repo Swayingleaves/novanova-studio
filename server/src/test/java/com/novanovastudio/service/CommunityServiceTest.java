@@ -15,6 +15,7 @@ import com.novanovastudio.entity.PlatformCommunityConfigRecords;
 import com.novanovastudio.repository.CommunityConfigRepository;
 import com.novanovastudio.security.CurrentUser;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.security.TeamScope;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -85,7 +86,7 @@ class CommunityServiceTest {
         service.saveConfigs(new CommunityDtos.SaveCommunityConfigsRequest(List.of(
                 new CommunityDtos.CommunityConfigInput(" 官方群 ", "https://cdn.example.com/a.png"),
                 new CommunityDtos.CommunityConfigInput("创作者群", "https://cdn.example.com/b.png"))))
-                .block();
+                .contextWrite(TeamScope.PLATFORM::apply).block();
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<PlatformCommunityConfigRecords.CommunityConfigRecord>> captor = ArgumentCaptor.forClass(List.class);
@@ -100,17 +101,16 @@ class CommunityServiceTest {
     @Test
     void shouldClearAllConfigsWhenSavingEmptyList() {
         service.saveConfigs(new CommunityDtos.SaveCommunityConfigsRequest(List.of()))
-                .block();
+                .contextWrite(TeamScope.PLATFORM::apply).block();
 
         verify(repository).replaceAll(List.of());
     }
 
-    /** 非管理员不能写入平台社群配置。 */
+    /** 团队作用域即使由团队管理员发起也不能写入平台社群配置。 */
     @Test
-    void shouldRejectNonAdminWrite() {
-        when(currentUserProvider.currentUser()).thenReturn(Mono.just(new CurrentUser(42L, "user@example.com", "user", 1)));
+    void shouldRejectTeamScopedWrite() {
         assertThatThrownBy(() -> service.saveConfigs(new CommunityDtos.SaveCommunityConfigsRequest(List.of()))
-                .block())
+                .contextWrite(new TeamScope(9, "administrator")::apply).block())
                 .isInstanceOf(BusinessException.class)
                 .satisfies(error -> assertThat(((BusinessException) error).getCode()).isEqualTo(ErrorCode.PERMISSION_DENIED));
         verify(repository, never()).replaceAll(anyList());
@@ -132,14 +132,14 @@ class CommunityServiceTest {
     @Test
     void shouldRejectMissingConfigsPayload() {
         assertThatThrownBy(() -> service.saveConfigs(new CommunityDtos.SaveCommunityConfigsRequest(null))
-                .block())
+                .contextWrite(TeamScope.PLATFORM::apply).block())
                 .isInstanceOf(BusinessException.class);
         verify(repository, never()).replaceAll(anyList());
     }
 
     private void assertRejected(CommunityDtos.CommunityConfigInput... inputs) {
         assertThatThrownBy(() -> service.saveConfigs(new CommunityDtos.SaveCommunityConfigsRequest(List.of(inputs)))
-                .block())
+                .contextWrite(TeamScope.PLATFORM::apply).block())
                 .isInstanceOf(BusinessException.class)
                 .satisfies(error -> assertThat(((BusinessException) error).getCode()).isEqualTo(ErrorCode.PARAM_INVALID));
     }

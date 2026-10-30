@@ -12,6 +12,9 @@ import lombok.Data;
 @Data
 public class CreationAgentRequest {
 
+    /** 请求创建时所属空间，零为平台。 */
+    private long teamId;
+
     /** 请求ID */
     private String id;
 
@@ -56,4 +59,9 @@ public class CreationAgentRequest {
 
     /** 更新时间 */
     private OffsetDateTime updatedAt;
+    /**
+     * Redis入口分区同时包含空间，避免同一用户的不同团队互相占用和取消。
+     * @return 用户队列的空间入口标识
+     */
+    public String getQueueSource() { return teamId == 0 ? entrySource : teamId + ":" + entrySource; }
 }

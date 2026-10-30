@@ -1,6 +1,10 @@
 "use client";
 
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
+
 import { create } from "zustand";
+import { authenticationPath } from "@/features/auth/lib/authentication-path";
+import { parseSpacePath } from "@/features/team/space-path";
 
 const USER_SESSION_KEY = "novanova:user_session:v1";
 
@@ -14,11 +18,14 @@ export type ServerUserProfile = {
     avatar: string;
     role: ServerUserRole;
     status: number;
-    creditBalance: number;
+    creditBalance: CreditAmount;
     createdAt: string;
     lastLoginAt: string;
     welcomeRead: boolean;
+    onboardingVersion: number;
+    creationTourVersion: number;
     passwordLockedUntil: string | null;
+    canResetPassword: boolean;
 };
 
 export type LocalUser = {
@@ -29,8 +36,10 @@ export type LocalUser = {
     email: string;
     role: ServerUserRole;
     status: number;
-    creditBalance: number;
+    creditBalance: CreditAmount;
     welcomeRead: boolean;
+    onboardingVersion: number;
+    creationTourVersion: number;
 };
 
 export type UserSession = {
@@ -45,13 +54,16 @@ type UserStore = {
     expiresAt: string;
     user: LocalUser | null;
     hydrateSession: () => void;
-    setSession: (session: { token: string; expiresAt: string; user: ServerUserProfile }) => void;
+    setSession: (session: { token: string; expiresAt: string; user: ServerUserProfile }, authenticationRedirect?: string) => void;
     setUser: (user: ServerUserProfile) => void;
-    setCreditBalance: (creditBalance: number) => void;
+    setCreditBalance: (creditBalance: CreditAmount) => void;
     markWelcomeRead: () => void;
+    markOnboardingCompleted: (version: number) => void;
+    markCreationTourCompleted: (version: number) => void;
     clearSession: () => void;
     showAuthModal: boolean;
     pendingRedirect: string;
+    authenticationRedirect: string;
     openAuthModal: (redirect?: string) => void;
     closeAuthModal: () => void;
 };
@@ -63,6 +75,7 @@ export const useUserStore = create<UserStore>()((set, get) => ({
     user: null,
     showAuthModal: false,
     pendingRedirect: "",
+    authenticationRedirect: "",
     hydrateSession: () => {
         if (get().hydrated) return;
         const session = readStoredSession();
@@ -73,10 +86,10 @@ export const useUserStore = create<UserStore>()((set, get) => ({
         }
         set({ hydrated: true, ...session });
     },
-    setSession: (session) => {
+    setSession: (session, authenticationRedirect = "") => {
         const nextSession = { token: session.token, expiresAt: session.expiresAt, user: normalizeUser(session.user) };
         writeStoredSession(nextSession);
-        set(nextSession);
+        set({ ...nextSession, authenticationRedirect });
     },
     setUser: (user) => {
         const current = get();
@@ -98,11 +111,31 @@ export const useUserStore = create<UserStore>()((set, get) => ({
         if (current.token) writeStoredSession({ token: current.token, expiresAt: current.expiresAt, user });
         set({ user });
     },
+    markOnboardingCompleted: (version) => {
+        const current = get();
+        if (!current.user || (current.user.onboardingVersion ?? 0) >= version) return;
+        const user = { ...current.user, onboardingVersion: version };
+        if (current.token) writeStoredSession({ token: current.token, expiresAt: current.expiresAt, user });
+        set({ user });
+    },
+    markCreationTourCompleted: (version) => {
+        const current = get();
+        if (!current.user || (current.user.creationTourVersion ?? 0) >= version) return;
+        const user = { ...current.user, creationTourVersion: version };
+        if (current.token) writeStoredSession({ token: current.token, expiresAt: current.expiresAt, user });
+        set({ user });
+    },
     clearSession: () => {
         removeStoredSession();
-        set({ token: "", expiresAt: "", user: null, hydrated: true });
+        set({ token: "", expiresAt: "", user: null, hydrated: true, showAuthModal: false, pendingRedirect: "", authenticationRedirect: "" });
     },
     openAuthModal: (redirect) => {
+        const teamSlug = typeof window === "undefined" ? null : parseSpacePath(window.location.pathname).teamSlug;
+        if (teamSlug) {
+            set({ showAuthModal: false, pendingRedirect: "" });
+            window.location.assign(authenticationPath(teamSlug, redirect));
+            return;
+        }
         set({ showAuthModal: true, pendingRedirect: redirect || "" });
     },
     closeAuthModal: () => {
@@ -136,6 +169,8 @@ function normalizeUser(user: ServerUserProfile): LocalUser {
         status: user.status,
         creditBalance: user.creditBalance,
         welcomeRead: user.welcomeRead,
+        onboardingVersion: user.onboardingVersion ?? 0,
+        creationTourVersion: user.creationTourVersion ?? 0,
     };
 }
 

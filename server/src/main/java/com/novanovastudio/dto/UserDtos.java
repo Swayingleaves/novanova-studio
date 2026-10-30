@@ -1,5 +1,9 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -44,12 +48,12 @@ public final class UserDtos {
     }
 
     /**
-     * 邮箱登录请求
+     * 用户名或邮箱密码登录请求
      *
-     * @param email String 邮箱
+     * @param account String 用户名或邮箱
      * @param password String 密码
      */
-    public record LoginRequest(@NotBlank(message = "business.emailIsRequired") String email,
+    public record LoginRequest(@NotBlank(message = "business.accountIsRequired") String account,
                                @NotBlank(message = "business.passwordIsRequired") String password) {
     }
 
@@ -85,9 +89,12 @@ public final class UserDtos {
      * @param createdAt String 创建时间
      * @param lastLoginAt String 最后登录时间
      * @param welcomeRead boolean 欢迎引导是否已读
+     * @param onboardingVersion int 已完成的产品引导版本
+     * @param creationTourVersion int 已完成创作页产品导览的版本
      * @param passwordLockedUntil String 密码锁定截止时间，仅管理端列表使用
+     * @param canResetPassword 当前管理入口是否可重置无邮箱账号密码
      */
-    public record UserProfile(Long id, String email, String username, String nickname, String avatar, String role, Integer status, Integer creditBalance, String createdAt, String lastLoginAt, boolean welcomeRead, String passwordLockedUntil) {
+    public record UserProfile(Long id, String email, String username, String nickname, String avatar, String role, Integer status, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditBalance, String createdAt, String lastLoginAt, boolean welcomeRead, int onboardingVersion, int creationTourVersion, String passwordLockedUntil, boolean canResetPassword) {
     }
 
     /**
@@ -143,6 +150,28 @@ public final class UserDtos {
     }
 
     /**
+     * 用户增长趋势单日数据
+     *
+     * @param date String 日期（yyyy-MM-dd，按统计时区）
+     * @param newUsers long 当日新增用户数
+     * @param totalUsers long 截至当日结束的累计用户数
+     */
+    public record UserTrendPoint(String date, long newUsers, long totalUsers) {
+    }
+
+    /**
+     * 用户增长趋势响应
+     *
+     * @param startDate String 统计开始日期
+     * @param endDate String 统计结束日期
+     * @param totalUsers long 截至结束日期的累计用户数
+     * @param newUsers long 统计区间内新增用户数
+     * @param points List<UserTrendPoint> 每日用户数量与增量
+     */
+    public record UserTrendResponse(String startDate, String endDate, long totalUsers, long newUsers, List<UserTrendPoint> points) {
+    }
+
+    /**
      * 更新用户状态请求
      *
      * @param userId Long 用户ID
@@ -171,16 +200,40 @@ public final class UserDtos {
     }
 
     /**
+     * 管理员重置无邮箱账号密码请求。
+     * @param userId 目标账号标识
+     * @param newPassword 新密码，至少八位
+     */
+    public record AdminResetPasswordRequest(@NotNull Long userId,
+                                            @NotBlank @Size(min = 8) String newPassword) { }
+
+    /**
      * 管理员新增用户请求
      *
-     * @param email String 邮箱
+     * @param account String 用户名或邮箱
      * @param password String 密码
      * @param nickname String 昵称
      * @param role String 角色
      */
-    public record AdminCreateUserRequest(@NotBlank(message = "business.emailIsRequired") String email,
+    public record AdminCreateUserRequest(@NotBlank(message = "business.accountIsRequired") String account,
                                          @NotBlank(message = "business.passwordIsRequired") @Size(min = 8, message = "business.passwordNeedsAtLeast8Characters") String password,
-                                         String nickname,
+                                         @Size(max = 50, message = "business.displayNameMustNotExceed50Characters") String nickname,
                                          String role) {
+    }
+
+    /**
+     * 完成产品引导请求
+     *
+     * @param version int 已完成的产品引导版本
+     */
+    public record CompleteOnboardingRequest(int version) {
+    }
+
+    /**
+     * 完成创作页产品导览请求
+     *
+     * @param version int 已完成的创作页产品导览版本
+     */
+    public record CompleteCreationTourRequest(int version) {
     }
 }

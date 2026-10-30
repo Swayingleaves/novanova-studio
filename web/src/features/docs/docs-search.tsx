@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/shared/lib/team-navigation";
 import { Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";

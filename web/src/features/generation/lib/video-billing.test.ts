@@ -61,7 +61,7 @@ test("视频计费支持1088P和1440P分辨率", () => {
 
 test("按秒报价按时长和任务数量累计", () => {
     const quote = quoteVideoGeneration({ config: configFor("second"), model: "video-model", mode: "text-to-video", resolution: "720p", seconds: 4, taskCount: 2 });
-    assert.deepEqual(quote, { available: true, credits: 112, billingUnit: "second", unitPrice: 14, durationSeconds: 4, taskCount: 2 });
+    assert.deepEqual(quote, { available: true, credits: "112", billingUnit: "second", unitPrice: 14, durationSeconds: 4, taskCount: 2 });
 });
 
 test("视频素材规则和最低时长失败时不可报价", () => {
@@ -114,7 +114,7 @@ test("非法计费方式和无效价格均不可用于视频报价", () => {
 
 function assertQuoteCredits(quote: ReturnType<typeof quoteVideoGeneration>, credits: number) {
     assert.equal(quote.available, true);
-    if (quote.available) assert.equal(quote.credits, credits);
+    if (quote.available) assert.equal(quote.credits, String(credits));
 }
 
 

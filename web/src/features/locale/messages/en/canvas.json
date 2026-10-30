@@ -792,5 +792,7 @@
     "youCanUndoThisDeletion": "You can undo this deletion.",
     "theCurrentCanvasIsSavedAutomaticallyReturnToThe": "The current canvas is saved automatically. Return to the canvas list?",
     "images_a4f725": "{value0} images",
-    "items_9479b5": "{value0} items"
+    "items_9479b5": "{value0} items",
+    "notUploaded": "Not uploaded",
+    "confirmBatchVideoGenerationDetails": "Create a video task for each of {value2, plural, one {# shot} other {# shots}} using the selected model, {value0} aspect ratio and {value1} resolution. Estimated cost: {value3} credits. Continue?"
 }

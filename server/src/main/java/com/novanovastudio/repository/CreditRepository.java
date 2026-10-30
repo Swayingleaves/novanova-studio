@@ -1,5 +1,9 @@
 package com.novanovastudio.repository;
 
+import java.math.BigDecimal;
+import com.novanovastudio.security.TeamScope;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.novanovastudio.dto.CreditDtos;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -49,11 +53,11 @@ public class CreditRepository {
     /**
      * 查询新用户初始积分。
      *
-     * @return Mono<Integer> 新用户初始积分
+     * @return Mono<BigDecimal> 新用户初始积分
      */
-    public Mono<Integer> getInitialCredits() {
+    public Mono<BigDecimal> getInitialCredits() {
         return databaseClient.sql("SELECT initial_credits FROM platform_credit_settings WHERE id = 1")
-                .map((row, metadata) -> row.get("initial_credits", Integer.class))
+                .map((row, metadata) -> row.get("initial_credits", BigDecimal.class))
                 .one();
     }
 
@@ -62,9 +66,9 @@ public class CreditRepository {
      *
      * @return 邀请奖励积分
      */
-    public Mono<Integer> getInvitationRewardCredits() {
+    public Mono<BigDecimal> getInvitationRewardCredits() {
         return databaseClient.sql("SELECT invitation_reward_credits FROM platform_credit_settings WHERE id = 1")
-                .map((row, metadata) -> row.get("invitation_reward_credits", Integer.class))
+                .map((row, metadata) -> row.get("invitation_reward_credits", BigDecimal.class))
                 .one();
     }
 
@@ -74,7 +78,7 @@ public class CreditRepository {
      * @param invitationRewardCredits 邀请奖励积分
      * @return 操作完成信号
      */
-    public Mono<Void> updateInvitationRewardCredits(int invitationRewardCredits) {
+    public Mono<Void> updateInvitationRewardCredits(BigDecimal invitationRewardCredits) {
         return databaseClient.sql("UPDATE platform_credit_settings SET invitation_reward_credits = :credits, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
                 .bind("credits", invitationRewardCredits)
                 .fetch().rowsUpdated().then();
@@ -83,11 +87,11 @@ public class CreditRepository {
     /**
      * 查询每日签到积分。
      *
-     * @return Mono<Integer> 每日签到积分
+     * @return Mono<BigDecimal> 每日签到积分
      */
-    public Mono<Integer> getCheckInCredits() {
+    public Mono<BigDecimal> getCheckInCredits() {
         return databaseClient.sql("SELECT check_in_credits FROM platform_credit_settings WHERE id = 1")
-                .map((row, metadata) -> row.get("check_in_credits", Integer.class))
+                .map((row, metadata) -> row.get("check_in_credits", BigDecimal.class))
                 .one();
     }
 
@@ -97,7 +101,7 @@ public class CreditRepository {
      * @param checkInCredits int 每日签到积分
      * @return Mono<Void> 操作完成信号
      */
-    public Mono<Void> updateCheckInCredits(int checkInCredits) {
+    public Mono<Void> updateCheckInCredits(BigDecimal checkInCredits) {
         return databaseClient.sql("UPDATE platform_credit_settings SET check_in_credits = :credits, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
                 .bind("credits", checkInCredits)
                 .fetch().rowsUpdated().then();
@@ -107,13 +111,17 @@ public class CreditRepository {
      * 查询用户可用积分余额。
      *
      * @param userId Long 用户ID
-     * @return Mono<Integer> 可用积分余额，账户不存在时为空
+     * @return Mono<BigDecimal> 可用积分余额，账户不存在时为空
      */
-    public Mono<Integer> getCreditBalance(Long userId) {
-        return databaseClient.sql("SELECT credit_balance FROM user_credit_accounts WHERE user_id = :userId")
+    public Mono<BigDecimal> getCreditBalance(Long userId) {
+        return Mono.deferContextual(context -> {
+            long walletTeamId = context.getOrDefault(TeamScope.WALLET_KEY, 0L);
+        return databaseClient.sql("SELECT credit_balance FROM user_credit_accounts WHERE user_id = :userId AND team_id = :walletTeamId").bind("walletTeamId", walletTeamId)
                 .bind("userId", userId)
-                .map((row, metadata) -> row.get("credit_balance", Integer.class))
+                .map((row, metadata) -> row.get("credit_balance", BigDecimal.class))
                 .one();
+
+        });
     }
 
     /**
@@ -126,7 +134,7 @@ public class CreditRepository {
      * @param expiresAt OffsetDateTime 过期时间
      * @return Mono<Long> 新批次ID
      */
-    public Mono<Long> createExpiringGrant(Long userId, String sourceType, String sourceRef, int grantedAmount, OffsetDateTime expiresAt) {
+    public Mono<Long> createExpiringGrant(Long userId, String sourceType, String sourceRef, BigDecimal grantedAmount, OffsetDateTime expiresAt) {
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
                 INSERT INTO user_credit_grants(user_id, source_type, source_ref, granted_amount, remaining_amount, expires_at)
                 VALUES (:userId, :sourceType, :sourceRef, :grantedAmount, :grantedAmount, :expiresAt)
@@ -150,20 +158,24 @@ public class CreditRepository {
      * @return Flux<ExpiringGrant> 未耗尽的批次，按到期时间升序
      */
     public Flux<ExpiringGrant> listActiveGrantsForUpdate(Long userId) {
+        return Flux.deferContextual(context -> {
+            long walletTeamId = context.getOrDefault(TeamScope.WALLET_KEY, 0L);
         return databaseClient.sql("""
                 SELECT id, remaining_amount, expires_at
                 FROM user_credit_grants
-                WHERE user_id = :userId
+                WHERE user_id = :userId AND team_id = :walletTeamId
                   AND remaining_amount > 0
                 ORDER BY expires_at ASC, id ASC
                 FOR UPDATE
-                """)
+                """).bind("walletTeamId", walletTeamId)
                 .bind("userId", userId)
                 .map((row, metadata) -> new ExpiringGrant(
                         row.get("id", Long.class),
-                        row.get("remaining_amount", Integer.class),
+                        row.get("remaining_amount", BigDecimal.class),
                         row.get("expires_at", OffsetDateTime.class)))
                 .all();
+
+        });
     }
 
     /**
@@ -173,15 +185,19 @@ public class CreditRepository {
      * @param amount int 本次扣减额度
      * @return Mono<Long> 生效行数，额度不足时为0
      */
-    public Mono<Long> consumeGrant(Long grantId, int amount) {
+    public Mono<Long> consumeGrant(Long grantId, BigDecimal amount) {
+        return Mono.deferContextual(context -> {
+            long walletTeamId = context.getOrDefault(TeamScope.WALLET_KEY, 0L);
         return databaseClient.sql("""
                 UPDATE user_credit_grants
                 SET remaining_amount = remaining_amount - :amount, updated_at = CURRENT_TIMESTAMP
-                WHERE id = :grantId AND remaining_amount >= :amount
-                """)
+                WHERE id = :grantId AND team_id = :walletTeamId AND remaining_amount >= :amount
+                """).bind("walletTeamId", walletTeamId)
                 .bind("grantId", grantId)
                 .bind("amount", amount)
                 .fetch().rowsUpdated();
+
+        });
     }
 
     /**
@@ -191,13 +207,17 @@ public class CreditRepository {
      * @return Mono<Long> 生效行数
      */
     public Mono<Long> clearGrant(Long grantId) {
+        return Mono.deferContextual(context -> {
+            long walletTeamId = context.getOrDefault(TeamScope.WALLET_KEY, 0L);
         return databaseClient.sql("""
                 UPDATE user_credit_grants
                 SET remaining_amount = 0, updated_at = CURRENT_TIMESTAMP
-                WHERE id = :grantId AND remaining_amount > 0
-                """)
+                WHERE id = :grantId AND team_id = :walletTeamId AND remaining_amount > 0
+                """).bind("walletTeamId", walletTeamId)
                 .bind("grantId", grantId)
                 .fetch().rowsUpdated();
+
+        });
     }
 
     /**
@@ -231,7 +251,7 @@ public class CreditRepository {
      * @param remainingAmount int 剩余可用额度
      * @param expiresAt OffsetDateTime 过期时间
      */
-    public record ExpiringGrant(Long id, int remainingAmount, OffsetDateTime expiresAt) {
+    public record ExpiringGrant(Long id, BigDecimal remainingAmount, OffsetDateTime expiresAt) {
     }
 
     /**
@@ -240,7 +260,7 @@ public class CreditRepository {
      * @param initialCredits int 新用户初始积分
      * @return Mono<Void> 操作完成信号
      */
-    public Mono<Void> updateInitialCredits(int initialCredits) {
+    public Mono<Void> updateInitialCredits(BigDecimal initialCredits) {
         return databaseClient.sql("UPDATE platform_credit_settings SET initial_credits = :initialCredits, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
                 .bind("initialCredits", initialCredits)
                 .fetch()
@@ -255,13 +275,17 @@ public class CreditRepository {
      * @param creditBalance int 初始余额
      * @return Mono<Void> 操作完成信号
      */
-    public Mono<Void> createAccount(Long userId, int creditBalance) {
-        return databaseClient.sql("INSERT INTO user_credit_accounts(user_id, credit_balance) VALUES (:userId, :creditBalance)")
+    public Mono<Void> createAccount(Long userId, BigDecimal creditBalance) {
+        return Mono.deferContextual(context -> {
+            long walletTeamId = context.getOrDefault(TeamScope.WALLET_KEY, 0L);
+        return databaseClient.sql("INSERT INTO user_credit_accounts(team_id, user_id, credit_balance) VALUES (:walletTeamId, :userId, :creditBalance)").bind("walletTeamId", walletTeamId)
                 .bind("userId", userId)
                 .bind("creditBalance", creditBalance)
                 .fetch()
                 .rowsUpdated()
                 .then();
+
+        });
     }
 
     /**
@@ -269,19 +293,36 @@ public class CreditRepository {
      *
      * @param userId Long 用户ID
      * @param changeAmount int 积分变动值
-     * @return Mono<Integer> 调整后的余额，余额不足或账户不存在时为空
+     * @return Mono<BigDecimal> 调整后的余额，余额不足或账户不存在时为空
      */
-    public Mono<Integer> changeBalance(Long userId, int changeAmount) {
+    public Mono<BigDecimal> changeBalance(Long userId, BigDecimal changeAmount) {
+        return Mono.deferContextual(context -> {
+            long walletTeamId = context.getOrDefault(TeamScope.WALLET_KEY, 0L);
         return databaseClient.sql("""
                 UPDATE user_credit_accounts
                 SET credit_balance = credit_balance + :changeAmount, updated_at = CURRENT_TIMESTAMP
-                WHERE user_id = :userId AND credit_balance + :changeAmount >= 0
+                WHERE user_id = :userId AND team_id = :walletTeamId AND credit_balance + :changeAmount >= 0
+                  AND (NOT frozen OR :changeAmount >= 0 OR :historical)
                 RETURNING credit_balance
-                """)
+                """).bind("walletTeamId", walletTeamId)
                 .bind("userId", userId)
                 .bind("changeAmount", changeAmount)
-                .map((row, metadata) -> row.get("credit_balance", Integer.class))
+                .bind("historical", context.getOrDefault(TeamScope.HISTORICAL_KEY, false))
+                .map((row, metadata) -> row.get("credit_balance", BigDecimal.class))
                 .one();
+
+        });
+    }
+
+    /**
+     * 固定先锁钱包再锁发放批次，保证模型扣费与存储结算锁顺序一致。
+     * @param userId 钱包用户
+     * @return 账户是否存在
+     */
+    public Mono<Boolean> lockWallet(Long userId) {
+        return Mono.deferContextual(context -> databaseClient.sql("SELECT user_id FROM user_credit_accounts WHERE user_id = :user AND team_id = :wallet FOR UPDATE")
+                .bind("user", userId).bind("wallet", context.getOrDefault(TeamScope.WALLET_KEY, 0L))
+                .map((row, metadata) -> true).one().defaultIfEmpty(false));
     }
 
     /**
@@ -295,17 +336,49 @@ public class CreditRepository {
      * @param reason String 变动原因
      * @return Mono<Void> 操作完成信号
      */
-    public Mono<Void> createTransaction(Long userId, String transactionType, Long operatorUserId, int changeAmount, int balanceAfter, String reason) {
+    public Mono<Void> createTransaction(Long userId, String transactionType, Long operatorUserId, BigDecimal changeAmount, BigDecimal balanceAfter, String reason) {
+        return Mono.deferContextual(context -> {
+            long walletTeamId = context.getOrDefault(TeamScope.WALLET_KEY, 0L);
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                INSERT INTO user_credit_transactions(user_id, transaction_type, operator_user_id, change_amount, balance_after, reason)
-                VALUES (:userId, :transactionType, :operatorUserId, :changeAmount, :balanceAfter, :reason)
-                """)
+                INSERT INTO user_credit_transactions(wallet_team_id, beneficiary_team_id, user_id, transaction_type, operator_user_id, change_amount, balance_after, reason)
+                VALUES (:walletTeamId, :walletTeamId, :userId, :transactionType, :operatorUserId, :changeAmount, :balanceAfter, :reason)
+                """).bind("walletTeamId", walletTeamId)
                 .bind("userId", userId)
                 .bind("transactionType", transactionType)
                 .bind("changeAmount", changeAmount)
                 .bind("balanceAfter", balanceAfter)
                 .bind("reason", reason);
         return R2dbcBindings.bindNullable(spec, "operatorUserId", operatorUserId, Long.class).fetch().rowsUpdated().then();
+
+        });
+    }
+
+    /**
+     * 写入积分购买流水并使用订单号抢占幂等键。
+     *
+     * @param userId Long 购买用户标识
+     * @param orderNo String 平台订单号
+     * @param changeAmount BigDecimal 本次到账积分
+     * @param balanceAfter BigDecimal 入账后的平台钱包余额
+     * @param reason String 流水原因
+     * @return Mono<Long> 新流水标识，订单已入账时为空
+     */
+    public Mono<Long> createCreditPurchaseTransaction(Long userId, String orderNo, BigDecimal changeAmount,
+                                                      BigDecimal balanceAfter, String reason) {
+        return databaseClient.sql("""
+                INSERT INTO user_credit_transactions(team_id, wallet_team_id, beneficiary_team_id, user_id,
+                    transaction_type, change_amount, balance_after, reason, billing_reference)
+                VALUES (0, 0, 0, :userId, 'credit_purchase', :changeAmount, :balanceAfter, :reason, :orderNo)
+                ON CONFLICT (billing_reference) WHERE billing_reference IS NOT NULL DO NOTHING
+                RETURNING id
+                """)
+                .bind("userId", userId)
+                .bind("changeAmount", changeAmount)
+                .bind("balanceAfter", balanceAfter)
+                .bind("reason", reason)
+                .bind("orderNo", orderNo)
+                .map((row, metadata) -> row.get("id", Long.class))
+                .one();
     }
 
     /**
@@ -317,7 +390,7 @@ public class CreditRepository {
      * @param reason 奖励原因
      * @return 新流水ID，已经发放时为空
      */
-    public Mono<Long> claimInvitationRewardTransaction(Long inviterUserId, Long invitedUserId, int changeAmount, String reason) {
+    public Mono<Long> claimInvitationRewardTransaction(Long inviterUserId, Long invitedUserId, BigDecimal changeAmount, String reason) {
         return databaseClient.sql("""
                 INSERT INTO user_credit_transactions(user_id, transaction_type, invited_user_id, change_amount, balance_after, reason)
                 VALUES (:inviterUserId, 'invitation_reward', :invitedUserId, :changeAmount, 0, :reason)
@@ -342,7 +415,7 @@ public class CreditRepository {
      * @param reason String 变动原因
      * @return Mono<Long> 新建流水ID
      */
-    public Mono<Long> createCardRedeemTransaction(Long userId, Long cardId, int changeAmount, int balanceAfter, String reason) {
+    public Mono<Long> createCardRedeemTransaction(Long userId, Long cardId, BigDecimal changeAmount, BigDecimal balanceAfter, String reason) {
         return databaseClient.sql("""
                         INSERT INTO user_credit_transactions(user_id, transaction_type, credit_card_id, change_amount, balance_after, reason)
                         VALUES (:userId, 'card_redeem', :cardId, :changeAmount, :balanceAfter, :reason)
@@ -368,13 +441,15 @@ public class CreditRepository {
      * @param generationSource String 生成来源，仅任务扣费时记录
      * @return Mono<Long> 新流水ID，幂等键已存在时为空
      */
-    public Mono<Long> claimTaskTransaction(Long userId, String taskId, String transactionType, int changeAmount, String reason, String generationSource) {
+    public Mono<Long> claimTaskTransaction(Long userId, String taskId, String transactionType, BigDecimal changeAmount, String reason, String generationSource) {
+        return Mono.deferContextual(context -> {
+            long walletTeamId = context.getOrDefault(TeamScope.WALLET_KEY, 0L);
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql("""
-                INSERT INTO user_credit_transactions(user_id, transaction_type, task_id, generation_source, change_amount, balance_after, reason)
-                VALUES (:userId, :transactionType, :taskId, :generationSource, :changeAmount, 0, :reason)
+                INSERT INTO user_credit_transactions(team_id, wallet_team_id, beneficiary_team_id, user_id, transaction_type, task_id, generation_source, change_amount, balance_after, reason, resource_id)
+                VALUES ((SELECT team_id FROM ai_generation_tasks WHERE id = :taskId), :walletTeamId, :walletTeamId, :userId, :transactionType, :taskId, :generationSource, :changeAmount, 0, :reason, (SELECT model_config_id FROM ai_generation_tasks WHERE id = :taskId))
                 ON CONFLICT (task_id, transaction_type) DO NOTHING
                 RETURNING id
-                """)
+                """).bind("walletTeamId", walletTeamId)
                 .bind("userId", userId)
                 .bind("transactionType", transactionType)
                 .bind("taskId", taskId)
@@ -383,6 +458,8 @@ public class CreditRepository {
         return R2dbcBindings.bindNullable(spec, "generationSource", generationSource, String.class)
                 .map((row, metadata) -> row.get("id", Long.class))
                 .one();
+
+        });
     }
 
     /**
@@ -398,15 +475,23 @@ public class CreditRepository {
      * @param reason String 变动原因
      * @return Mono<Long> 新流水ID，幂等键已存在时为空
      */
-    public Mono<Long> claimOperationTransaction(Long userId, String operationId, String transactionType, int changeAmount, String reason) {
+    public Mono<Long> claimOperationTransaction(Long userId, String operationId, String transactionType, BigDecimal changeAmount, String reason) {
+        return Mono.deferContextual(context -> {
+            long walletTeamId = context.getOrDefault(TeamScope.WALLET_KEY, 0L);
         String lockKey = "credit-operation:" + operationId + ":" + transactionType;
         return databaseClient.sql("SELECT pg_advisory_xact_lock(hashtext(:lockKey))")
                 .bind("lockKey", lockKey)
                 .fetch()
                 .all()
                 .then(databaseClient.sql("""
-                        INSERT INTO user_credit_transactions(user_id, transaction_type, change_amount, balance_after, reason)
-                        SELECT :userId, :transactionType, :changeAmount, 0, :reason
+                        INSERT INTO user_credit_transactions(team_id, wallet_team_id, beneficiary_team_id, user_id, transaction_type, change_amount, balance_after, reason, resource_id)
+                        SELECT CASE WHEN :transactionType = 'task_refund' THEN (SELECT team_id FROM user_credit_transactions original
+                            WHERE original.user_id = :userId AND original.transaction_type = 'task_charge'
+                              AND original.reason = replace(:reason, '退款（操作ID：', '扣费（操作ID：')) ELSE current_team_id() END,
+                            :walletTeamId, :walletTeamId, :userId, :transactionType, :changeAmount, 0, :reason,
+                            CASE WHEN :transactionType = 'task_refund' THEN (SELECT resource_id FROM user_credit_transactions original
+                                WHERE original.user_id = :userId AND original.transaction_type = 'task_charge'
+                                  AND original.reason = replace(:reason, '退款（操作ID：', '扣费（操作ID：')) ELSE :resourceId END
                         WHERE NOT EXISTS (
                             SELECT 1
                             FROM user_credit_transactions
@@ -416,13 +501,15 @@ public class CreditRepository {
                               AND reason = :reason
                         )
                         RETURNING id
-                        """)
+                        """).bind("walletTeamId", walletTeamId).bind("resourceId", context.getOrDefault(TeamScope.RESOURCE_KEY, ""))
                         .bind("userId", userId)
                         .bind("transactionType", transactionType)
                         .bind("changeAmount", changeAmount)
                         .bind("reason", reason)
                         .map((row, metadata) -> row.get("id", Long.class))
                         .one());
+
+        });
     }
 
     /**
@@ -432,7 +519,7 @@ public class CreditRepository {
      * @param balanceAfter int 变动后余额
      * @return Mono<Void> 操作完成信号
      */
-    public Mono<Void> updateTransactionBalance(Long transactionId, int balanceAfter) {
+    public Mono<Void> updateTransactionBalance(Long transactionId, BigDecimal balanceAfter) {
         return databaseClient.sql("UPDATE user_credit_transactions SET balance_after = :balanceAfter WHERE id = :transactionId")
                 .bind("transactionId", transactionId)
                 .bind("balanceAfter", balanceAfter)
@@ -442,15 +529,28 @@ public class CreditRepository {
     }
 
     /**
+     * 读取原扣费的钱包，退款不能依据当前空间重新选择。
+     * @param taskId 任务标识，空串表示同步操作
+     * @param userId 用户标识
+     * @param reason 原扣费原因
+     * @return 原钱包团队标识
+     */
+    public Mono<Long> originalWallet(String taskId, Long userId, String reason) {
+        return databaseClient.sql("SELECT wallet_team_id FROM user_credit_transactions WHERE user_id = :userId AND transaction_type = 'task_charge' AND ((:taskId <> '' AND task_id = :taskId) OR (:taskId = '' AND task_id IS NULL AND reason = :reason))")
+                .bind("userId", userId).bind("taskId", taskId).bind("reason", reason)
+                .map((row, metadata) -> row.get("wallet_team_id", Long.class)).one();
+    }
+
+    /**
      * 查询任务原始扣费金额。
      *
      * @param taskId String AI任务ID
-     * @return Mono<Integer> 任务扣除的积分绝对值
+     * @return Mono<BigDecimal> 任务扣除的积分绝对值
      */
-    public Mono<Integer> getTaskChargeAmount(String taskId) {
+    public Mono<BigDecimal> getTaskChargeAmount(String taskId) {
         return databaseClient.sql("SELECT -change_amount AS credit_amount FROM user_credit_transactions WHERE task_id = :taskId AND transaction_type = 'task_charge'")
                 .bind("taskId", taskId)
-                .map((row, metadata) -> row.get("credit_amount", Integer.class))
+                .map((row, metadata) -> row.get("credit_amount", BigDecimal.class))
                 .one();
     }
 
@@ -459,9 +559,9 @@ public class CreditRepository {
      *
      * @param userId Long 用户ID
      * @param chargeReason String 扣费流水原因
-     * @return Mono<Integer> 原始扣费的积分绝对值
+     * @return Mono<BigDecimal> 原始扣费的积分绝对值
      */
-    public Mono<Integer> getOperationChargeAmount(Long userId, String chargeReason) {
+    public Mono<BigDecimal> getOperationChargeAmount(Long userId, String chargeReason) {
         return databaseClient.sql("""
                 SELECT -change_amount AS credit_amount
                 FROM user_credit_transactions
@@ -472,8 +572,25 @@ public class CreditRepository {
                 """)
                 .bind("userId", userId)
                 .bind("chargeReason", chargeReason)
-                .map((row, metadata) -> row.get("credit_amount", Integer.class))
+                .map((row, metadata) -> row.get("credit_amount", BigDecimal.class))
                 .one();
+    }
+
+    /**
+     * 查询业务操作已退积分，未生成退款流水时返回空结果。
+     *
+     * @param userId Long 用户标识
+     * @param refundReason String 退款流水原因
+     * @return Mono&lt;Integer&gt; 已退款的积分
+     */
+    public Mono<BigDecimal> getOperationRefundAmount(Long userId, String refundReason) {
+        return databaseClient.sql("""
+                SELECT change_amount
+                FROM user_credit_transactions
+                WHERE user_id = :userId AND task_id IS NULL
+                  AND transaction_type = 'task_refund' AND reason = :reason
+                """).bind("userId", userId).bind("reason", refundReason)
+                .map((row, metadata) -> row.get("change_amount", BigDecimal.class)).one();
     }
 
     /**
@@ -491,7 +608,7 @@ public class CreditRepository {
                 """;
         return bindConsumptionQuery(databaseClient.sql(sql), query)
                 .map((row, metadata) -> new CreditDtos.CreditDistributionItem(
-                        row.get("name", String.class), row.get("consumed_credits", Long.class)))
+                        row.get("name", String.class), row.get("consumed_credits", BigDecimal.class)))
                 .all();
     }
 
@@ -510,7 +627,7 @@ public class CreditRepository {
                 """;
         return bindConsumptionQuery(databaseClient.sql(sql), query)
                 .map((row, metadata) -> new CreditDtos.CreditDistributionItem(
-                        row.get("name", String.class), row.get("consumed_credits", Long.class)))
+                        row.get("name", String.class), row.get("consumed_credits", BigDecimal.class)))
                 .all();
     }
 
@@ -529,7 +646,7 @@ public class CreditRepository {
                 + consumptionQuery(query) + " GROUP BY " + periodExpression + " ORDER BY period ASC";
         return bindConsumptionQuery(databaseClient.sql(sql), query)
                 .map((row, metadata) -> new CreditDtos.CreditTrendItem(
-                        row.get("period", String.class), row.get("consumed_credits", Long.class)))
+                        row.get("period", String.class), row.get("consumed_credits", BigDecimal.class)))
                 .all();
     }
 
@@ -561,7 +678,7 @@ public class CreditRepository {
                         row.get("generation_type", String.class),
                         row.get("model", String.class),
                         row.get("generation_source", String.class),
-                        row.get("consumed_credits", Long.class),
+                        row.get("consumed_credits", BigDecimal.class),
                         row.get("created_at", OffsetDateTime.class).toString()))
                 .all();
     }
@@ -598,7 +715,7 @@ public class CreditRepository {
                 .bind("limit", pageSize)
                 .bind("offset", (page - 1) * pageSize)
                 .map((row, metadata) -> {
-                    int changeAmount = row.get("change_amount", Integer.class);
+                    BigDecimal changeAmount = row.get("change_amount", BigDecimal.class);
                     return new CreditDtos.AdminCreditTransactionItem(
                             row.get("id", Long.class),
                             row.get("user_id", Long.class),
@@ -606,13 +723,13 @@ public class CreditRepository {
                             row.get("nickname", String.class),
                             row.get("email", String.class),
                             row.get("transaction_type", String.class),
-                            changeAmount > 0 ? "add" : "spend",
+                            CreditAmounts.of(changeAmount).compareTo(CreditAmounts.of(0)) > 0 ? "add" : "spend",
                             row.get("generation_type", String.class),
                             row.get("model", String.class),
                             row.get("generation_source", String.class),
-                            (long) changeAmount,
+                            changeAmount,
                             row.get("reason", String.class),
-                            (long) row.get("balance_after", Integer.class),
+                            row.get("balance_after", BigDecimal.class),
                             row.get("invited_user_id", Long.class),
                             row.get("created_at", OffsetDateTime.class).toString());
                 })
@@ -808,17 +925,17 @@ public class CreditRepository {
                 .bind("limit", pageSize)
                 .bind("offset", (page - 1) * pageSize)
                 .map((row, metadata) -> {
-                    int changeAmount = row.get("change_amount", Integer.class);
+                    BigDecimal changeAmount = row.get("change_amount", BigDecimal.class);
                     return new CreditDtos.UserCreditTransactionItem(
                             row.get("id", Long.class),
                             row.get("transaction_type", String.class),
-                            changeAmount > 0 ? "add" : "spend",
+                            CreditAmounts.of(changeAmount).compareTo(CreditAmounts.of(0)) > 0 ? "add" : "spend",
                             row.get("generation_type", String.class),
                             row.get("model", String.class),
                             row.get("generation_source", String.class),
-                            (long) changeAmount,
+                            changeAmount,
                             row.get("reason", String.class),
-                            (long) row.get("balance_after", Integer.class),
+                            row.get("balance_after", BigDecimal.class),
                             row.get("invited_user_id", Long.class),
                             row.get("created_at", OffsetDateTime.class).toString());
                 })
@@ -879,6 +996,7 @@ public class CreditRepository {
             sql.append("LEFT JOIN users users ON users.id = tasks.user_id\n");
         }
         sql.append("WHERE tasks.task_type IN ('image', 'video')\n")
+                .append("  AND tasks.data_purged = FALSE\n")
                 .append("  AND tasks.created_at >= :startAt\n")
                 .append("  AND tasks.created_at < :endAt\n");
         if (query.userId() != null) {
@@ -914,7 +1032,7 @@ public class CreditRepository {
                        tasks.request_data -> 'parameters' ->> 'seconds' AS seconds,
                        COALESCE((SELECT -SUM(task_transactions.change_amount) FROM user_credit_transactions task_transactions
                                  WHERE task_transactions.task_id = tasks.id
-                                   AND task_transactions.transaction_type IN ('task_charge', 'task_refund')), 0)::bigint AS consumed_credits,
+                                   AND task_transactions.transaction_type IN ('task_charge', 'task_refund')), 0) AS consumed_credits,
                        CASE WHEN jsonb_typeof(tasks.result_data -> 'items') = 'array'
                                  THEN COALESCE(jsonb_path_query_array(tasks.result_data, '$.items[*].url'), '[]'::jsonb)
                             WHEN jsonb_typeof(tasks.result_data -> 'item') = 'object'
@@ -940,7 +1058,7 @@ public class CreditRepository {
                             row.get("resolution", String.class),
                             row.get("size", String.class),
                             row.get("seconds", String.class),
-                            row.get("consumed_credits", Long.class),
+                            row.get("consumed_credits", BigDecimal.class),
                             parseStringArray(RowMappers.jsonText(row, "result_urls")),
                             row.get("error_message", String.class),
                             row.get("created_at", OffsetDateTime.class).toString(),
@@ -970,7 +1088,7 @@ public class CreditRepository {
                        tasks.request_data -> 'parameters' ->> 'seconds' AS seconds,
                        COALESCE((SELECT -SUM(task_transactions.change_amount) FROM user_credit_transactions task_transactions
                                  WHERE task_transactions.task_id = tasks.id
-                                   AND task_transactions.transaction_type IN ('task_charge', 'task_refund')), 0)::bigint AS consumed_credits,
+                                   AND task_transactions.transaction_type IN ('task_charge', 'task_refund')), 0) AS consumed_credits,
                        CASE WHEN jsonb_typeof(tasks.result_data -> 'items') = 'array'
                                  THEN COALESCE(jsonb_path_query_array(tasks.result_data, '$.items[*].url'), '[]'::jsonb)
                             WHEN jsonb_typeof(tasks.result_data -> 'item') = 'object'
@@ -1000,7 +1118,7 @@ public class CreditRepository {
                             row.get("resolution", String.class),
                             row.get("size", String.class),
                             row.get("seconds", String.class),
-                            row.get("consumed_credits", Long.class),
+                            row.get("consumed_credits", BigDecimal.class),
                             parseStringArray(RowMappers.jsonText(row, "result_urls")),
                             row.get("error_message", String.class),
                             row.get("created_at", OffsetDateTime.class).toString(),

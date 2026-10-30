@@ -1,0 +1,21 @@
+{
+    "installApp": "安装 {value0}",
+    "guideTitle": "将 {value0} 安装到桌面",
+    "guideChromeStep1": "点击浏览器工具栏右上角的「⋮」菜单按钮",
+    "guideChromeStep2": "依次选择「投放、保存和分享」→「将页面安装为应用…」（旧版本入口在「更多工具」中）",
+    "guideChromeStep3": "在确认弹窗中点击「安装」",
+    "guideEdgeStep1": "点击浏览器工具栏右上角的「⋯ 设置及更多」菜单按钮",
+    "guideEdgeStep2": "选择「应用」→「将此站点作为应用安装」",
+    "guideEdgeStep3": "在确认弹窗中点击「安装」",
+    "guideSafariStep1": "在屏幕顶部菜单栏点击「文件」",
+    "guideSafariStep2": "选择「添加到 Dock…」，然后在弹窗中点击「添加」",
+    "guideSafariStep3": "点击「添加」后 {value0} 图标将出现在 Dock 中，点击图标即可启动",
+    "updateTitle": "发现新版本",
+    "updateDescription": "{value0} 有新版本可用，更新后将立即重启到最新版本。",
+    "updateNow": "立即更新",
+    "updateLater": "稍后提醒",
+    "updateFailed": "更新失败，请稍后重试",
+    "offlineTitle": "当前离线",
+    "offlineDescription": "网络连接不可用，请检查网络后重试。",
+    "offlineRetry": "重新加载"
+}

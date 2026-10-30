@@ -1,6 +1,7 @@
 package com.novanovastudio.common;
 
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.core.io.buffer.DataBufferLimitException;
 import org.springframework.web.reactive.resource.NoResourceFoundException;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
@@ -40,6 +41,7 @@ public class GlobalExceptionHandler {
             case ErrorCode.TOKEN_INVALID, ErrorCode.TOKEN_EXPIRED, ErrorCode.AUTH_ERROR -> HttpStatus.UNAUTHORIZED;
             case ErrorCode.PERMISSION_DENIED -> HttpStatus.FORBIDDEN;
             case ErrorCode.RESOURCE_NOT_FOUND -> HttpStatus.NOT_FOUND;
+            case ErrorCode.DATA_CONFLICT -> HttpStatus.CONFLICT;
             case ErrorCode.PARAM_ERROR, ErrorCode.PARAM_INVALID, ErrorCode.PARAM_MISSING -> HttpStatus.BAD_REQUEST;
             default -> HttpStatus.INTERNAL_SERVER_ERROR;
         };
@@ -115,6 +117,19 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 处理上传文件超过服务端单文件上限
+     *
+     * @param exception DataBufferLimitException 缓冲区超限异常
+     * @return ResponseEntity<ApiResponse<Void>> 响应
+     */
+    @ExceptionHandler(DataBufferLimitException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataBufferLimitException(DataBufferLimitException exception) {
+        // 多部分上传在超过 max-in-memory-size / max-disk-usage-per-part 时抛出，给出可读提示而非系统错误。
+        log.error("上传文件超过服务端上限: {}", exception.getMessage());
+        return ResponseEntity.badRequest().body(ApiResponse.fail(ErrorCode.PARAM_INVALID, "上传文件超过 50 MB 上限，请压缩后重试"));
+    }
+
+    /**
      * 处理未捕获异常
      *
      * @param exception Exception 异常
@@ -132,7 +147,8 @@ public class GlobalExceptionHandler {
             return null;
         }
         // 未预期异常写日志，并向前端返回系统错误。
-        log.error("服务端异常", exception);
+        log.error("服务端异常: {} {} contentType={}", exchange.getRequest().getMethod(), exchange.getRequest().getPath(),
+                exchange.getRequest().getHeaders().getContentType(), exception);
         return ResponseEntity.internalServerError().body(ApiResponse.fail(ErrorCode.SYSTEM_ERROR, SystemMessage.of("system.internalError").render(WebsiteLanguage.resolve(exchange))));
     }
 

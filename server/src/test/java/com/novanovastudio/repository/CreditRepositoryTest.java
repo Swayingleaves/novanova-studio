@@ -95,6 +95,7 @@ class CreditRepositoryTest {
         Assertions.assertTrue(adminSql.contains("LEFT JOIN users users ON users.id = tasks.user_id"));
         Assertions.assertFalse(sql.contains("LEFT JOIN users"));
         Assertions.assertTrue(sql.contains("tasks.task_type IN ('image', 'video')"));
+        Assertions.assertTrue(sql.contains("tasks.data_purged = FALSE"));
         Assertions.assertTrue(sql.contains("tasks.task_type = :taskType"));
         Assertions.assertTrue(sql.contains("tasks.model ILIKE :keyword"));
         Assertions.assertFalse(sql.contains("tasks.user_id = :userId"));

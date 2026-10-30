@@ -75,112 +75,6 @@ public class VideoCompositionMediaProcessor {
     }
 
     /**
-     * 将固定序号的 PNG 帧编码为无音轨 H.264 MP4。
-     *
-     * @param frameFiles List<Path> 按帧序号排列的 PNG 文件
-     * @param outputFile Path 输出视频文件
-     * @param width int 目标宽度
-     * @param height int 目标高度
-     * @param frameRate int 固定帧率
-     * @param progressConsumer IntConsumer 进度回调
-     * @param cancellationRequested BooleanSupplier 是否已请求取消
-     * @return CompositionResult 输出视频信息
-     */
-    public CompositionResult encodeFrames(List<Path> frameFiles, Path outputFile, int width, int height, int frameRate,
-                                          IntConsumer progressConsumer, BooleanSupplier cancellationRequested) {
-        if (frameFiles == null || frameFiles.isEmpty()) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.directorExportHasNoFrames"));
-        }
-        if (width < 1 || height < 1 || frameRate != 30) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.directorExportDoesNotMatchFixedPresets"));
-        }
-        if (isCancellationRequested(cancellationRequested)) throw new VideoCompositionCanceledException();
-        long durationMilliseconds = Math.max(1L, Math.round(frameFiles.size() * 1000D / frameRate));
-        runFrameFfmpeg(frameFiles, outputFile, width, height, frameRate, durationMilliseconds, progressConsumer, cancellationRequested);
-        if (!Files.isRegularFile(outputFile)) throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.fFmpegProducedNoDirectorVideo"));
-        VideoProbe result = probe(outputFile);
-        validateEncodedFrameResult(result, frameFiles.size(), width, height, frameRate, durationMilliseconds);
-        return new CompositionResult(result.width(), result.height(), result.durationMilliseconds());
-    }
-
-    /** 校验导演台编码输出的真实容器、编码、帧率、帧数和音轨。 */
-    private void validateEncodedFrameResult(VideoProbe result, int expectedFrameCount, int expectedWidth,
-                                            int expectedHeight, int expectedFrameRate, long expectedDurationMilliseconds) {
-        if (!"mov,mp4,m4a,3gp,3g2,mj2".equals(result.formatName()) && !result.formatName().contains("mp4")) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.directorVideoContainerMustBeMP4"));
-        }
-        if (!"h264".equalsIgnoreCase(result.codecName()) || !"yuv420p".equalsIgnoreCase(result.pixelFormat())) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.directorEncodingMustBeH264WithYuv420p"));
-        }
-        if (!frameRateEquals(result.frameRate(), expectedFrameRate) || result.frameCount() != expectedFrameCount) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.directorFrameRateOrCountVerificationFailed"));
-        }
-        if (result.width() != expectedWidth || result.height() != expectedHeight || result.hasAudio()) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.directorDimensionsOrSilentTrackVerificationFailed"));
-        }
-        long durationTolerance = Math.max(1L, Math.round(1000D / expectedFrameRate));
-        if (Math.abs(result.durationMilliseconds() - expectedDurationMilliseconds) > durationTolerance) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.directorDurationVerificationFailed"));
-        }
-    }
-
-    /** 构造固定帧序列编码命令，供定向测试验证参数不可注入。 */
-    List<String> buildFrameFfmpegCommand(List<Path> frameFiles, Path outputFile, int width, int height, int frameRate) {
-        if (frameFiles == null || frameFiles.isEmpty()) throw new IllegalArgumentException("帧文件不能为空");
-        Path first = frameFiles.getFirst().toAbsolutePath();
-        String filePattern = first.getParent().resolve("frame-%06d.png").toString();
-        return List.of(
-                executable(properties.getAi().getVideoComposition().getFfmpegExecutable(), "ffmpeg"),
-                "-y", "-hide_banner", "-nostdin", "-loglevel", "error", "-progress", "pipe:1",
-                "-framerate", String.valueOf(frameRate), "-start_number", "1", "-i", filePattern,
-                "-frames:v", String.valueOf(frameFiles.size()), "-vf", "scale=" + width + ":" + height + ",format=yuv420p",
-                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", "-movflags", "+faststart",
-                outputFile.toAbsolutePath().toString());
-    }
-
-    /** 执行 PNG 帧序列编码进程。 */
-    private void runFrameFfmpeg(List<Path> frameFiles, Path outputFile, int width, int height, int frameRate,
-                                long durationMilliseconds, IntConsumer progressConsumer, BooleanSupplier cancellationRequested) {
-        Process process;
-        try {
-            Files.createDirectories(outputFile.toAbsolutePath().getParent());
-            process = new ProcessBuilder(buildFrameFfmpegCommand(frameFiles, outputFile, width, height, frameRate)).start();
-        } catch (IOException exception) {
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.fFmpegIsMissingOrMisconfigured"));
-        }
-        StringBuilder errorOutput = new StringBuilder();
-        AtomicInteger maximumProgress = new AtomicInteger(0);
-        Thread outputReader = Thread.ofVirtual().start(() -> readProgress(process.getInputStream(), durationMilliseconds, maximumProgress, progressConsumer));
-        Thread errorReader = Thread.ofVirtual().start(() -> readProcessError(process.getErrorStream(), errorOutput));
-        try {
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(Math.max(1, properties.getAi().getVideoComposition().getExecutionTimeoutSeconds()));
-            while (!process.waitFor(1, TimeUnit.SECONDS)) {
-                if (isCancellationRequested(cancellationRequested)) {
-                    terminateProcess(process);
-                    throw new VideoCompositionCanceledException();
-                }
-                if (System.nanoTime() > deadline) {
-                    terminateProcess(process);
-                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.directorVideoEncodingTimedOut"));
-                }
-            }
-            joinReader(outputReader);
-            joinReader(errorReader);
-            if (isCancellationRequested(cancellationRequested)) throw new VideoCompositionCanceledException();
-            if (process.exitValue() != 0) throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.directorVideoEncodingFailed", processError(errorOutput)));
-            progressConsumer.accept(99);
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            terminateProcess(process);
-            throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.directorVideoEncodingInterrupted"));
-        } finally {
-            if (process.isAlive()) terminateProcess(process);
-            joinReader(outputReader);
-            joinReader(errorReader);
-        }
-    }
-
-    /**
      * 校验源视频总时长不超过当前合成上限。
      *
      * @param probes List<VideoProbe> 源视频探测结果
@@ -205,7 +99,7 @@ public class VideoCompositionMediaProcessor {
         List<String> command = List.of(
                 executable(properties.getAi().getVideoComposition().getFfprobeExecutable(), "ffprobe"),
                 "-v", "error",
-                "-show_entries", "stream=codec_type,codec_name,pix_fmt,width,height,avg_frame_rate,nb_frames:format=duration,format_name",
+                "-show_entries", "stream=codec_type,width,height,avg_frame_rate:format=duration",
                 "-of", "json",
                 sourceFile.toAbsolutePath().toString()
         );
@@ -236,13 +130,7 @@ public class VideoCompositionMediaProcessor {
             if (width < 1 || height < 1 || durationMilliseconds < 1) {
                 throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.videoHasNoValidPictureOrDurationMetadata"));
             }
-            String formatName = format == null ? "" : format.getString("format_name");
-            String codecName = videoStream == null ? "" : videoStream.getString("codec_name");
-            String pixelFormat = videoStream == null ? "" : videoStream.getString("pix_fmt");
-            long frameCount = videoStream == null ? 0L : parseLong(videoStream.getString("nb_frames"));
-            return new VideoProbe(evenSize(width), evenSize(height), normalizeFrameRate(videoStream.getString("avg_frame_rate")), durationMilliseconds,
-                    hasAudio, formatName == null ? "" : formatName, codecName == null ? "" : codecName,
-                    pixelFormat == null ? "" : pixelFormat, Math.max(0L, frameCount));
+            return new VideoProbe(evenSize(width), evenSize(height), normalizeFrameRate(videoStream.getString("avg_frame_rate")), durationMilliseconds, hasAudio);
         } catch (BusinessException exception) {
             throw exception;
         } catch (Exception exception) {
@@ -310,10 +198,45 @@ public class VideoCompositionMediaProcessor {
      */
     private void runFfmpeg(List<Path> sourceFiles, List<VideoProbe> probes, Path outputFile, long totalDurationMilliseconds,
                            IntConsumer progressConsumer, BooleanSupplier cancellationRequested) {
+        runCommand(buildFfmpegCommand(sourceFiles, probes, outputFile), outputFile, totalDurationMilliseconds,
+                progressConsumer, cancellationRequested);
+    }
+
+    /**
+     * 执行分镜导出的FFmpeg命令，沿用进度、超时及取消处理。
+     * @param command FFmpeg命令参数
+     * @param outputFile 输出文件
+     * @param durationMilliseconds 预期时长
+     * @param width 输出宽度
+     * @param height 输出高度
+     * @param progressConsumer 进度回调
+     * @param cancellationRequested 取消状态查询
+     * @return 成片媒体信息
+     */
+    public CompositionResult runStoryboardCommand(List<String> command, Path outputFile, long durationMilliseconds,
+                                                    int width, int height, IntConsumer progressConsumer,
+                                                    BooleanSupplier cancellationRequested) {
+        runCommand(command, outputFile, durationMilliseconds, progressConsumer, cancellationRequested);
+        if (!Files.isRegularFile(outputFile)) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "FFmpeg未生成分镜视频文件");
+        }
+        return new CompositionResult(width, height, probe(outputFile).durationMilliseconds());
+    }
+
+    /**
+     * 执行指定的FFmpeg命令。
+     * @param command FFmpeg命令参数
+     * @param outputFile 输出文件
+     * @param totalDurationMilliseconds 预期时长
+     * @param progressConsumer 进度回调
+     * @param cancellationRequested 取消状态查询
+     */
+    private void runCommand(List<String> command, Path outputFile, long totalDurationMilliseconds,
+                            IntConsumer progressConsumer, BooleanSupplier cancellationRequested) {
         Process process;
         try {
             Files.createDirectories(outputFile.toAbsolutePath().getParent());
-            process = new ProcessBuilder(buildFfmpegCommand(sourceFiles, probes, outputFile)).start();
+            process = new ProcessBuilder(command).start();
         } catch (IOException exception) {
             throw new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.fFmpegIsMissingOrMisconfigured"));
         }
@@ -565,19 +488,6 @@ public class VideoCompositionMediaProcessor {
         return value.matches("\\d+(?:/\\d+)?") ? value : "30";
     }
 
-    /** 比较帧率表达式和目标整数帧率。 */
-    private boolean frameRateEquals(String value, int expectedFrameRate) {
-        try {
-            if (value.contains("/")) {
-                String[] parts = value.split("/", 2);
-                return Double.parseDouble(parts[0]) / Double.parseDouble(parts[1]) == expectedFrameRate;
-            }
-            return Double.parseDouble(value) == expectedFrameRate;
-        } catch (Exception exception) {
-            return false;
-        }
-    }
-
     /**
      * 格式化时长秒数。
      *
@@ -635,13 +545,7 @@ public class VideoCompositionMediaProcessor {
      * @param durationMilliseconds long 时长毫秒数
      * @param hasAudio boolean 是否包含音轨
      */
-    record VideoProbe(int width, int height, String frameRate, long durationMilliseconds, boolean hasAudio,
-                      String formatName, String codecName, String pixelFormat, long frameCount) {
-
-        /** 兼容普通视频合成测试使用的基础探测结果。 */
-        VideoProbe(int width, int height, String frameRate, long durationMilliseconds, boolean hasAudio) {
-            this(width, height, frameRate, durationMilliseconds, hasAudio, "", "", "", 0L);
-        }
+    public record VideoProbe(int width, int height, String frameRate, long durationMilliseconds, boolean hasAudio) {
     }
 
     /**

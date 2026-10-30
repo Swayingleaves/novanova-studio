@@ -92,9 +92,9 @@ class CreditCardServiceTest {
      */
     @Test
     void shouldValidateGenerationLimits() {
-        assertThrows(BusinessException.class, () -> CreditCardService.validateGeneration(0, 10));
-        assertThrows(BusinessException.class, () -> CreditCardService.validateGeneration(1001, 10));
-        assertThrows(BusinessException.class, () -> CreditCardService.validateGeneration(100, 0));
+        assertThrows(BusinessException.class, () -> CreditCardService.validateGeneration(0, java.math.BigDecimal.valueOf(10)));
+        assertThrows(BusinessException.class, () -> CreditCardService.validateGeneration(1001, java.math.BigDecimal.valueOf(10)));
+        assertThrows(BusinessException.class, () -> CreditCardService.validateGeneration(100, java.math.BigDecimal.valueOf(0)));
     }
 
     /**
@@ -126,21 +126,21 @@ class CreditCardServiceTest {
     void shouldRedeemCardAndPublishUpdatedBalance() {
         OffsetDateTime redeemedAt = OffsetDateTime.parse("2026-08-02T14:00:00+08:00");
         when(creditCardRepository.claimUnredeemedCard(SensitiveDataCrypto.sha256Hex(CARD_CODE), 42L))
-                .thenReturn(Mono.just(new CreditCardRepository.ClaimedCard(7L, "****-****-****-****-STUV", "STUV", 50, redeemedAt)));
-        when(creditRepository.changeBalance(42L, 50)).thenReturn(Mono.just(150));
-        when(creditRepository.createCardRedeemTransaction(42L, 7L, 50, 150, "兑换积分卡密"))
+                .thenReturn(Mono.just(new CreditCardRepository.ClaimedCard(7L, "****-****-****-****-STUV", "STUV", java.math.BigDecimal.valueOf(50), redeemedAt)));
+        when(creditRepository.changeBalance(42L, java.math.BigDecimal.valueOf(50))).thenReturn(Mono.just(java.math.BigDecimal.valueOf(150)));
+        when(creditRepository.createCardRedeemTransaction(42L, 7L, java.math.BigDecimal.valueOf(50), java.math.BigDecimal.valueOf(150), "兑换积分卡密"))
                 .thenReturn(Mono.just(99L));
 
         StepVerifier.create(creditCardService.redeemCredits(CARD_CODE))
                 .assertNext(response -> {
                     assertEquals(7L, response.cardId());
-                    assertEquals(50, response.credits());
-                    assertEquals(150, response.creditBalance());
+                    assertEquals(0, java.math.BigDecimal.valueOf(50).compareTo(response.credits()));
+                    assertEquals(0, java.math.BigDecimal.valueOf(150).compareTo(response.creditBalance()));
                     assertEquals("****-****-****-****-STUV", response.cardMasked());
                 })
                 .verifyComplete();
 
-        verify(eventPublisher).publish(eq(42L), argThat(event -> "credit-balance".equals(event.type()) && Integer.valueOf(150).equals(event.creditBalance())));
+        verify(eventPublisher).publish(eq(42L), argThat(event -> "credit-balance".equals(event.type()) && java.math.BigDecimal.valueOf(150).compareTo(event.creditBalance()) == 0));
     }
 
     /**
@@ -156,7 +156,7 @@ class CreditCardServiceTest {
                 .expectErrorSatisfies(error -> assertEquals("卡密已兑换", error.getMessage()))
                 .verify();
 
-        verify(creditRepository, never()).changeBalance(anyLong(), org.mockito.ArgumentMatchers.anyInt());
+        verify(creditRepository, never()).changeBalance(anyLong(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class));
         verify(eventPublisher, never()).publish(anyLong(), any());
     }
 
@@ -166,14 +166,14 @@ class CreditCardServiceTest {
     @Test
     void shouldRejectRedeemWhenCreditAccountCannotBeUpdated() {
         when(creditCardRepository.claimUnredeemedCard(SensitiveDataCrypto.sha256Hex(CARD_CODE), 42L))
-                .thenReturn(Mono.just(new CreditCardRepository.ClaimedCard(7L, "****-****-****-****-STUV", "STUV", 50, OffsetDateTime.now())));
-        when(creditRepository.changeBalance(42L, 50)).thenReturn(Mono.empty());
+                .thenReturn(Mono.just(new CreditCardRepository.ClaimedCard(7L, "****-****-****-****-STUV", "STUV", java.math.BigDecimal.valueOf(50), OffsetDateTime.now())));
+        when(creditRepository.changeBalance(42L, java.math.BigDecimal.valueOf(50))).thenReturn(Mono.empty());
 
         StepVerifier.create(creditCardService.redeemCredits(CARD_CODE))
                 .expectErrorSatisfies(error -> assertEquals("积分账户不存在，无法兑换卡密", error.getMessage()))
                 .verify();
 
-        verify(creditRepository, never()).createCardRedeemTransaction(anyLong(), anyLong(), org.mockito.ArgumentMatchers.anyInt(), org.mockito.ArgumentMatchers.anyInt(), any(String.class));
+        verify(creditRepository, never()).createCardRedeemTransaction(anyLong(), anyLong(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), any(String.class));
         verify(eventPublisher, never()).publish(anyLong(), any());
     }
 
@@ -183,9 +183,9 @@ class CreditCardServiceTest {
     @Test
     void shouldNotPublishBalanceEventWhenTransactionFails() {
         when(creditCardRepository.claimUnredeemedCard(SensitiveDataCrypto.sha256Hex(CARD_CODE), 42L))
-                .thenReturn(Mono.just(new CreditCardRepository.ClaimedCard(7L, "****-****-****-****-STUV", "STUV", 50, OffsetDateTime.now())));
-        when(creditRepository.changeBalance(42L, 50)).thenReturn(Mono.just(150));
-        when(creditRepository.createCardRedeemTransaction(42L, 7L, 50, 150, "兑换积分卡密"))
+                .thenReturn(Mono.just(new CreditCardRepository.ClaimedCard(7L, "****-****-****-****-STUV", "STUV", java.math.BigDecimal.valueOf(50), OffsetDateTime.now())));
+        when(creditRepository.changeBalance(42L, java.math.BigDecimal.valueOf(50))).thenReturn(Mono.just(java.math.BigDecimal.valueOf(150)));
+        when(creditRepository.createCardRedeemTransaction(42L, 7L, java.math.BigDecimal.valueOf(50), java.math.BigDecimal.valueOf(150), "兑换积分卡密"))
                 .thenReturn(Mono.error(new IllegalStateException("流水写入失败")));
 
         StepVerifier.create(creditCardService.redeemCredits(CARD_CODE))
@@ -201,9 +201,9 @@ class CreditCardServiceTest {
     @Test
     void shouldRejectEmptyRedeemTransactionResult() {
         when(creditCardRepository.claimUnredeemedCard(SensitiveDataCrypto.sha256Hex(CARD_CODE), 42L))
-                .thenReturn(Mono.just(new CreditCardRepository.ClaimedCard(7L, "****-****-****-****-STUV", "STUV", 50, OffsetDateTime.now())));
-        when(creditRepository.changeBalance(42L, 50)).thenReturn(Mono.just(150));
-        when(creditRepository.createCardRedeemTransaction(42L, 7L, 50, 150, "兑换积分卡密"))
+                .thenReturn(Mono.just(new CreditCardRepository.ClaimedCard(7L, "****-****-****-****-STUV", "STUV", java.math.BigDecimal.valueOf(50), OffsetDateTime.now())));
+        when(creditRepository.changeBalance(42L, java.math.BigDecimal.valueOf(50))).thenReturn(Mono.just(java.math.BigDecimal.valueOf(150)));
+        when(creditRepository.createCardRedeemTransaction(42L, 7L, java.math.BigDecimal.valueOf(50), java.math.BigDecimal.valueOf(150), "兑换积分卡密"))
                 .thenReturn(Mono.empty());
 
         StepVerifier.create(creditCardService.redeemCredits(CARD_CODE))

@@ -1,0 +1,174 @@
+---
+title: Comic Drama Creation
+description: Continue from the shared script through readiness, visual assets, shot breakdown, storyboard, media generation, and final export. PRO feature.
+pro: true
+---
+
+# Comic Drama Creation
+
+> **PRO feature.** "Comic Drama Creation" carries a PRO badge in the sidebar and is available with an enterprise license.
+
+Comic Drama Creation continues from the same script data produced by Script Creation and turns it into images: visual assets, shot breakdown, storyboard arrangement, media generation, and final export. **Script and comic drama share one dataset** — no copy is created. Edits on the script side are recorded as pending changes, and you decide whether downstream content should follow.
+
+## Three ways in
+
+| Entry | How |
+| --- | --- |
+| From the script workspace | Top-bar "Enter Comic Drama Creation", which runs a production readiness check |
+| Continue an existing script | "Continue existing script" in the library, then pick a script from the list |
+| New full project | "New full project" creates the shared script and the comic drama workspace together |
+
+"Continue existing script" uses the same script data — later edits sync back to Script Creation. Library cards show the project name, type and production stage, production progress, completed shots, pending update count, and running task state.
+
+## Production stages
+
+The left navigation has eight items; media generation is reached from a top-bar button:
+
+`Production readiness → Production settings → Shot list → Visual storyboard → Visual assets / Voice and dialogue / Canvas linkage / Pending updates`
+
+Opening a workspace lands on the stage that fits: shots exist → shot list; no shots but the script is ready → production settings; otherwise production readiness.
+
+### 1. Production readiness
+
+"The script production readiness check" reviews the shared script, main characters, locations, and episode bodies, with each item marked `Ready / Suggested / Missing`. Checked items are story synopsis, episode structure, usable script body, scene production info, main characters, locations, and pending AI drafts.
+
+**The system never auto-writes or silently modifies the script.** Missing items can jump back via "Go fix" or "Edit script"; you can also "Continue production flow" and move on.
+
+### 2. Production settings
+
+"Project production settings" define the global aspect ratio, visual style, duration, and target platform. The visual style is injected as the default standard for automatic shot splitting, prompt synthesis, and generation.
+
+| Setting | Notes |
+| --- | --- |
+| Project type | Comic drama / live-action short drama / animation / ad story / music video / story short |
+| Orientation | Portrait (9:16) / landscape (16:9) / square (1:1); switching rewrites the aspect ratio |
+| Aspect ratio | 9:16 / 16:9 / 1:1 / 4:3 / 2.35:1 |
+| Target episode count | 1–1000 |
+| Target duration per episode | 0 means unlimited; short drama is typically 60–120 seconds |
+| Estimated total duration | 0 derives it from the episode count |
+| Default visual style and look | Injected into shot prompts and asset images; seven one-click style presets |
+| Era and overall atmosphere | Shapes the mood of every shot |
+| Target platform | Douyin / Kuaishou / WeChat Channels / Bilibili / Xiaohongshu / YouTube / TikTok, appended as tags |
+| Intended use | e.g. commercial short drama promotion, IP incubation, vertical series updates |
+
+### 3. Visual assets
+
+Manages the visual baseline for characters, scenes, and props. Each asset can derive multiple versions (casual outfit, battle-damaged, rainy night), and shots bind exact versions so the whole film stays consistent.
+
+- Filter by all / character / scene / prop and search names and descriptions.
+- Batch operations: select all, **select only ungenerated**, and "Batch generate asset images" (latest version per asset; assets without a version are skipped and counted).
+- Asset cards show type, description, referencing shot count, and version count; a "Needs update" tag appears when an upstream change is pending.
+- Version variant types: default baseline / costume change / age period / lighting or weather / damaged or transformed state.
+
+AI asset image generation offers model, quality (low / standard / high), resolution (1K / 2K / 4K), and aspect ratio. Output form is fixed: characters produce a white-background three-view turnaround sheet, props a white-background multi-view sheet, and scenes an empty environment shot with no characters or action.
+
+### 4. Shot list
+
+"The shot breakdown and list" turns script scenes into executable picture units.
+
+- **AI auto-split**: pick the range (episode), optionally a specific scene, the expected shot count (1–50; **empty by default, so the AI decides from the script content**), narrative pace (tight / climax-twist / lyrical / action-heavy), an optional creative focus note (for example "highlight character conflict and key actions"), and the splitting model. Generated drafts **only take effect after you review and confirm them**.
+- In the review drawer you can tune shot size, duration (0.5–60 s), visual description, dialogue and voiceover, camera direction, and lighting, then "Save changes" or "Confirm as official shots"; the last remaining shot cannot be deleted.
+- Each shot card shows composition and content, dialogue and sound, lighting atmosphere with bound asset versions, and the final video prompt.
+- Six shot sizes: extreme long / long / medium / medium close-up / close-up / extreme close-up.
+- Seven camera movements: static / push in / pull out / pan / tilt / tracking / orbit.
+- The toolbar offers episode and scene filters, "select only shots without prompts", and "Batch generate final prompts".
+- Deleting a shot pre-checks the impact: if generated images or videos exist it warns that prompts versions, bindings, and media records are cascaded and that the action is irreversible.
+
+### 5. Visual storyboard
+
+The top bar switches between **Timeline** and **Grid board** views and provides episode filtering, save, video export, and batch media generation.
+
+**Grid board**: shots in a grid with image or video, shot number, duration, description, and failure reason. Click a video to open the player; "Preview in workspace" returns to the timeline and moves the playhead. The grid offers no editing or generation actions.
+
+**Timeline**: a 3D flipping stage with "Video preview" on the front and "Generation settings" on the back.
+
+- The preview side plays, steps between shots, shows a timecode and progress bar, and can mute. Text overlays visible at the current time render on the preview; drag to reposition, drag the bottom-right handle to resize (12–120), double-click or right-click to edit.
+- The settings side shows the final video prompt (`Adopted v{n}`), the previous generation snapshot prompt, composition and action, dialogue and effects, lighting and camera movement, bound visual assets and references, the task snapshot parameters, plus "Copy prompt", "Edit shot", and "Generate this shot".
+- The **storyboard track** has four lanes: video, text (up to 3 lanes), and audio. Text clips can be trimmed from both edges and dragged; clips in the same lane cannot overlap. Audio clips can be dragged and trimmed at both ends.
+- Zoom with `Ctrl/⌘ + scroll` or the side buttons; a normal scroll pans horizontally; `Space` plays and pauses.
+- The top bar shows "N unsaved" and auto-saves every 15 seconds when there is no conflict. Leaving the stage, returning to the library, or closing the page with pending edits opens "The timeline has unsaved changes" with "Save and leave / Leave without saving / Keep editing".
+
+**Add text**: content (≤2000 characters), font (Noto Sans SC, Noto Serif SC, LXGW WenKai, Inter, Montserrat, Lora, Caveat), size (12–120), alignment, color, and optional background color. When all three text lanes are occupied at that moment you cannot add another.
+
+**Add audio**: pick an existing voice item or create one (dialogue / narration / ambient / sound effect / music), upload MP3 or WAV (≤ 15 MB), then set the timeline start and trim range. "Remove from track" only detaches the placement — the item and file are kept.
+
+**Batch media generation**: tick multiple shots from the current episode to generate videos at once; the right side shows how many have adopted prompts, the reference image split (image-to-video where available), and the estimated total. The estimate refreshes automatically when parameters change.
+
+### 6. Media generation center
+
+Generates storyboard images or per-shot videos from each shot's adopted prompt and bound visual assets. All versions are archived, so you can preview, compare, and adopt the best one.
+
+- Filter by type (image / video) and status (adopted / completed / processing / failed).
+- Each record can be "Set as adopted", "Stop" (refunds any deducted credits), or "Retry".
+- When creating a task, pick the target shot, media type, and model; video mode lists reference images and automatically switches to image-to-video when any exist, otherwise it uses text-to-video.
+- Generation targets support only shots and asset versions; media type supports only image and video.
+
+### 7. Voice and dialogue
+
+"Audio Tracks" structures character dialogue, narration, ambient sound, effects, and music suggestions.
+
+- "Extract dialogue from shots" scans every shot with lines and creates dialogue tracks in bulk, skipping duplicates.
+- Types: dialogue / narration / ambient / sound effect / music.
+- Fields: content or sound description, tone, emotion, speech rate (0.5–2.0), and voice model, optionally linked to a shot.
+- This stage registers structured voice items and parameters; the actual audio file upload happens on the storyboard timeline.
+
+### 8. Canvas linkage
+
+Comic Drama Creation owns structured project management and the shot pipeline; the infinite canvas owns free visual exploration, multi-option comparison, and combined arrangement, with two-way data linkage. You can reference this project's character sheets, shot prompts, and storyboard script nodes on the canvas, link nodes freely, and composite videos; media adopted on the canvas can be written back to shots and asset versions here. "Bind node manually" links a shot or asset to a given canvas node.
+
+### 9. Pending updates
+
+"Upstream change management" tracks exactly which downstream shots and assets are affected after edits to the shared script, characters, or locations, while keeping every existing generated result. **Nothing is overwritten and nothing is charged again without your explicit confirmation.**
+
+| Script-side action | Impact scope |
+| --- | --- |
+| Editing overview, outline, episode order, or restoring a version | Marks all shots and assets |
+| Editing an episode | All shots in that episode |
+| Editing a scene | All shots in that scene |
+| Editing a character or world/location | Shots and assets linked through version bindings and source entities |
+
+Each change is grouped by source and shows the impact ("37 generated results · 34 prompt versions") plus which stage to revisit after accepting. There are exactly two resolutions:
+
+- **Keep old result**: closes the impact without triggering regeneration; existing output stays in use.
+- **Accept update**: only closes the impact and tags the targets "needs update" — it **never regenerates automatically**, you then handle it in the relevant stage yourself.
+
+"Needs update" only means the script source changed; it does not mean the historical result is invalid.
+
+## Supporting tools
+
+**Batch production** (top bar): tabs for "Start batch generation" and "Progress monitoring".
+
+- Scope: `Unfinished shots` / `All shots` / `Batch by selected episodes`.
+- Media type is only storyboard image or shot video; aspect ratio has three options 9:16 / 16:9 / 1:1, defaulting to the project orientation.
+- The job runs on each shot's **adopted prompt**; finished shots are not processed twice.
+- Monitoring shows status (all completed / failed / queued), completed, queued, and failed counts, and the estimated cost.
+
+## Export
+
+From the storyboard top bar, "Export video" → "Export storyboard video".
+
+- The scope is all episodes or the current episode; the film includes video, text, and audio lanes, **missing shots stay black, and the maximum length is 10 minutes**.
+- Export force-saves pending timeline edits first; if saving fails the export cannot start.
+- When finished you can "Download MP4"; while running you can "Cancel export", and on failure "Export again".
+
+## Limits
+
+| Item | Limit |
+| --- | --- |
+| Expected shots per AI split | 1–50; empty by default, meaning unspecified so the AI decides from the script content |
+| Shot duration | 0.5–120 s (review drawer and storyboard dialog 0.5–60 / 1–60 s) |
+| Target episode count | 1–1000 |
+| Text clips | Content ≤ 2000 characters, size 12–120, at most 3 text lanes |
+| Audio file | MP3 / WAV, ≤ 15 MB each |
+| Speech rate | 0.5–2.0 |
+| Total export duration | ≤ 10 minutes |
+| Batch media types | Image and video only; targets are shots and asset versions only |
+| Timeline saving | Auto-saves every 15 s when there is no conflict; pending edits block export |
+| Library pagination | 12 per page |
+
+## Working with Script Creation
+
+- The script workspace top bar "Enter Comic Drama Creation" saves first, then runs the readiness check before switching to the comic drama workspace.
+- The comic drama workspace top bar "Script workspace" returns to the script project.
+- Both "Continue existing script" and "New full project" copy no project data; each side increments its own revision.
+- Every script-side edit only records a pending impact — it **never** changes the state of shots, assets, or media automatically.

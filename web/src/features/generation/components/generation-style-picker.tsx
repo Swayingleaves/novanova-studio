@@ -26,6 +26,8 @@ type GenerationStyleMenuProps = {
     grouped?: boolean;
     placement?: "topLeft" | "top" | "topRight" | "bottomLeft" | "bottom" | "bottomRight";
     iconOnly?: boolean;
+    /** 供产品导览定位的锚点；由调用方传入，避免画布里的同款按钮也被打上标记。 */
+    dataTour?: string;
 };
 
 export function useGenerationStyles(generationType?: GenerationStyleType) {
@@ -101,6 +103,7 @@ export function GenerationStyleMenu({
     grouped = false,
     placement = "topLeft",
     iconOnly = false,
+    dataTour,
 }: GenerationStyleMenuProps) {
     const translate = useTranslation();
     const [internalQuery, setInternalQuery] = useState("");
@@ -278,7 +281,7 @@ export function GenerationStyleMenu({
             >
                 <span className="inline-flex">
                     <Tooltip title={translate("generation.selectStyle")}>
-                        <Button size="small" className={`creation-composer-action ${iconOnly ? "creation-composer-action-icon" : ""}`} icon={<Palette className="size-3.5" />} aria-expanded={open} aria-haspopup="dialog" aria-label={translate("generation.selectStyle")}>
+                        <Button size="small" data-tour={dataTour} className={`creation-composer-action ${iconOnly ? "creation-composer-action-icon" : ""}`} icon={<Palette className="size-3.5" />} aria-expanded={open} aria-haspopup="dialog" aria-label={translate("generation.selectStyle")}>
                             {iconOnly ? null : translate("generation.style_1bfde6")}
                         </Button>
                     </Tooltip>

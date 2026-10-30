@@ -1,4 +1,3 @@
-
 "use client";
 
 import { translateMessage as translate } from "@/features/locale/translate";

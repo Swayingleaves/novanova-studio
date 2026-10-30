@@ -80,6 +80,8 @@ class CreationAgentRequestDispatcherTest {
         when(requestQueue.listExpiredActiveRequests()).thenReturn(Flux.empty());
         when(requestQueue.listActiveRequests()).thenReturn(Flux.empty());
         when(requestQueue.renewRecoveryClaim(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.just(true));
+        // 恢复权释放与续约成对使用：中断、取消与租约过期收尾都会走到这里。
+        when(requestQueue.releaseRecoveryClaim(org.mockito.ArgumentMatchers.any())).thenReturn(Mono.empty());
 
         dispatcher = new CreationAgentRequestDispatcher(requestQueue, requestRepository, orchestratorProvider,
                 planRepository, aiTaskService, eventEmitter, new NovanovaProperties());

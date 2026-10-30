@@ -154,7 +154,7 @@ function PreviewNodeShape({ node, theme }: { node: PreviewNode; theme: CanvasThe
     }
 
     if (isDirectorDeskNode(node)) {
-        return <g><rect x={node.previewX} y={node.previewY} width={node.previewWidth} height={node.previewHeight} rx="6" fill="#111827" stroke={theme.node.stroke} /><circle cx={node.previewX + node.previewWidth / 2} cy={node.previewY + node.previewHeight / 2} r={Math.max(4, Math.min(node.previewWidth, node.previewHeight) * 0.16)} fill="#a855f7" opacity="0.9" /><text x={node.previewX + 7} y={node.previewY + 14} fontSize="8.5" fontWeight="600" fill="#ffffff">{label}</text>{showText ? <text x={node.previewX + 7} y={node.previewY + node.previewHeight - 8} fontSize="7.5" fill="#cbd5e1">{shortenText(content)}</text> : null}</g>;
+        return <g><rect x={node.previewX} y={node.previewY} width={node.previewWidth} height={node.previewHeight} rx="6" fill={theme.node.panel} stroke={theme.node.stroke} /><circle cx={node.previewX + node.previewWidth / 2} cy={node.previewY + node.previewHeight / 2} r={Math.max(4, Math.min(node.previewWidth, node.previewHeight) * 0.16)} fill={theme.node.activeStroke} opacity="0.9" /><text x={node.previewX + 7} y={node.previewY + 14} fontSize="8.5" fontWeight="600" fill={theme.node.text}>{label}</text>{showText ? <text x={node.previewX + 7} y={node.previewY + node.previewHeight - 8} fontSize="7.5" fill={theme.node.muted}>{shortenText(content)}</text> : null}</g>;
     }
 
     if ((isImageNode(node) || isVideoNode(node)) && node.content.source) {

@@ -38,6 +38,8 @@ test("积分流水类型映射为中文文案", () => {
     assert.equal(creditTransactionTypeLabel("invitation_reward"), "邀请奖励");
     assert.equal(creditTransactionTypeLabel("daily_check_in"), "每日签到");
     assert.equal(creditTransactionTypeLabel("credit_expired"), "积分过期");
+    assert.equal(creditTransactionTypeLabel("storage_purchase"), "永久存储扩容");
+    assert.equal(creditTransactionTypeLabel("storage_charge"), "历史存储月费");
 });
 
 test("积分变动格式化保留正负号", () => {
@@ -61,4 +63,12 @@ test("非任务流水详情显示变动原因", () => {
     assert.equal(creditTransactionDetail("card_redeem", null, null, "兑换积分卡密"), "兑换积分卡密");
     assert.equal(creditTransactionDetail("admin_adjustment", null, null, "活动补偿"), "活动补偿");
     assert.equal(creditTransactionDetail("invitation_reward", null, null, "邀请新用户注册奖励"), "邀请新用户注册奖励");
+});
+
+test("没有生成任务的业务操作流水用原因说明来源并隐藏内部操作标识", () => {
+    assert.equal(creditTransactionDetail("task_charge", null, null, "生成最终提示词扣费（操作ID：9f1c7d2e）"), "生成最终提示词");
+    assert.equal(creditTransactionDetail("task_refund", null, null, "生成最终提示词退款（操作ID：9f1c7d2e）"), "生成最终提示词");
+    assert.equal(creditTransactionDetail("task_charge", null, null, "分镜首次生成扣费（操作ID：abc）"), "分镜首次生成");
+    assert.equal(creditTransactionDetail("task_charge", null, null, "无格式说明"), "无格式说明");
+    assert.equal(creditTransactionDetail("task_charge", null, null, null), "");
 });
