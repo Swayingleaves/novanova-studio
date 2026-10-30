@@ -3,7 +3,24 @@ import test from "node:test";
 
 import { createBackgroundNode, createImageNode } from "../constants.ts";
 import { createCanvasConnection } from "../domain/canvas-page-node.ts";
-import { toRFEdges, toRFNodes } from "./rf-adapter.ts";
+import { createEdgesChangeHandler, toRFEdges, toRFNodes } from "./rf-adapter";
+import type { CanvasConnection } from "../types";
+
+test("撤销后的重复连线删除保留原数组，避免清空重做记录", () => {
+    const connection = createCanvasConnection("连线", "起点", "终点");
+    let connections: CanvasConnection[] = [connection];
+    const handler = createEdgesChangeHandler((update) => {
+        connections = typeof update === "function" ? update(connections) : update;
+    });
+    const original = connections;
+    handler([{ type: "remove", id: "已撤销的连线" }]);
+    assert.equal(connections, original);
+    handler([{ type: "remove", id: connection.id }]);
+    assert.deepEqual(connections, []);
+    const empty = connections;
+    handler([{ type: "remove", id: connection.id }]);
+    assert.equal(connections, empty);
+});
 
 test("批次折叠时保留 React Flow 节点并标记为隐藏", () => {
     const root = createImageNode({ id: "root", position: { x: 0, y: 0 } });

@@ -3,15 +3,15 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { useEffect, useRef, type ComponentType } from "react";
-import { Box, Copy, Frame, Image, Trash2, Type, AudioLines, Video } from "lucide-react";
+import { Box, Copy, Frame, Image, Trash2, Type, AudioLines, Upload, Video } from "lucide-react";
 
-import type { CanvasNodeKind, ContextMenuState } from "../types";
+import type { CanvasNodeKind, CanvasPoint, ContextMenuState } from "../types";
 import { useCanvasTheme } from "./canvas-theme-provider";
 
-type CanvasNodeContextMenuProps = { menu: ContextMenuState; onClose: () => void; onCreateNode: (kind: CanvasNodeKind) => void; onDuplicate: () => void; onDelete: () => void; onDeleteBackgroundOnly: () => void; onAddToBackground: (nodeIds: string[]) => void };
+type CanvasNodeContextMenuProps = { menu: ContextMenuState; onClose: () => void; onCreateNode: (kind: CanvasNodeKind) => void; onUpload: (position: CanvasPoint) => void; onDuplicate: () => void; onDelete: () => void; onDeleteBackgroundOnly: () => void; onAddToBackground: (nodeIds: string[]) => void };
 type MenuAction = { key: string; label: string; icon: ComponentType<{ className?: string }>; danger?: boolean; run: () => void };
 
-export function CanvasNodeContextMenu({ menu, onClose, onCreateNode, onDuplicate, onDelete, onDeleteBackgroundOnly, onAddToBackground }: CanvasNodeContextMenuProps) {
+export function CanvasNodeContextMenu({ menu, onClose, onCreateNode, onUpload, onDuplicate, onDelete, onDeleteBackgroundOnly, onAddToBackground }: CanvasNodeContextMenuProps) {
     const translate = useTranslation();
     const theme = useCanvasTheme();
     const menuRef = useRef<HTMLDivElement>(null);
@@ -30,6 +30,8 @@ export function CanvasNodeContextMenu({ menu, onClose, onCreateNode, onDuplicate
               ...(menu.type === "node" && menu.nodeKind === "background" ? [{ key: "delete-background-only", label: translate("canvas.deleteBackgroundOnly"), icon: Trash2, danger: true, run: onDeleteBackgroundOnly }] : []),
               { key: "delete", label: menu.type === "selection" ? translate("canvas.deleteSelectedNodes", { value0: menu.nodeIds.length }) : menu.type === "node" ? translate("canvas.deleteNode") : translate("canvas.deleteConnection"), icon: Trash2, danger: true, run: onDelete },
           ];
+    const uploadPosition = menu.type === "canvas" || menu.type === "selection" ? menu.position : undefined;
+    if (uploadPosition) actions.unshift({ key: "upload", label: translate("canvas.uploadAssets"), icon: Upload, run: () => onUpload(uploadPosition) });
 
     useEffect(() => {
         const closeWhenOutside = (event: PointerEvent) => {

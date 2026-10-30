@@ -108,6 +108,8 @@ type SelectionContextMenuState = {
     x: number;
     y: number;
     nodeIds: string[];
+    /** 仅空白处打开的选区菜单携带上传锚点。 */
+    position?: CanvasPoint;
 };
 
 export type ContextMenuState = NodeContextMenuState | ConnectionContextMenuState | CanvasContextMenuState | SelectionContextMenuState;

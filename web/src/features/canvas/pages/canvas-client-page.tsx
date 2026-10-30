@@ -123,6 +123,7 @@ import {
 import { useCanvasStore } from "../stores/use-canvas-store";
 import { useCanvasUiStore } from "../stores/use-canvas-ui-store";
 import { readCanvasSystemClipboard } from "../services/canvas-system-clipboard";
+import { layoutUploadedCanvasNodes, uploadCanvasFiles } from "../services/canvas-media-upload";
 import { saveCanvasLastUsedGenerationSettings } from "../services/canvas-last-used-generation-settings";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
@@ -193,6 +194,12 @@ type CanvasNodeGenerationOutcome = {
     error?: AiTaskErrorDetails;
     canceled?: boolean;
 };
+
+type CanvasMediaUploadScope = {
+    controller: AbortController;
+    messageKeys: Set<string>;
+    replacingNodeIds: Set<string>;
+};
 const CONNECTION_NODE_HIT_PADDING = 32;
 const PROMPT_PANEL_WIDTH = 580;
 const PROMPT_PANEL_HEIGHT = 196;
@@ -254,7 +261,22 @@ function CanvasWorkspacePage() {
     );
     const containerRef = useRef<HTMLDivElement>(null);
     const imageInputRef = useRef<HTMLInputElement>(null);
-    const uploadTargetRef = useRef<{ nodeId?: string; position?: CanvasPoint } | null>(null);
+    const mediaUploadScopeRef = useRef<CanvasMediaUploadScope | null>(null);
+    const uploadTargetRef = useRef<{ nodeId?: string; position: CanvasPoint; scope: CanvasMediaUploadScope } | null>(null);
+    useLayoutEffect(() => {
+        const scope: CanvasMediaUploadScope = { controller: new AbortController(), messageKeys: new Set(), replacingNodeIds: new Set() };
+        mediaUploadScopeRef.current = scope;
+        return () => {
+            scope.controller.abort();
+            // 导航提交后再关闭全局提示，避免布局清理阶段的浮层更新丢失。
+            scope.messageKeys.forEach((key) => queueMicrotask(() => message.destroy(key)));
+            scope.replacingNodeIds.forEach((nodeId) => useCanvasUiStore.getState().finishNodeUpload(nodeId));
+            scope.messageKeys.clear();
+            scope.replacingNodeIds.clear();
+            uploadTargetRef.current = null;
+            mediaUploadScopeRef.current = null;
+        };
+    }, [message, projectId]);
     const clipboardRef = useRef<CanvasClipboard | null>(null);
     const historyRef = useRef<{ past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }>({ past: [], future: [] });
     const lastHistoryRef = useRef<CanvasHistoryEntry | null>(null);
@@ -2044,16 +2066,7 @@ function CanvasWorkspacePage() {
             try {
                 const audio = await uploadAudioFile(file);
                 if (audioUploadScope.current.get(targetId) !== scope) return;
-                const attributes = {
-                    content: audio.url,
-                    storageKey: audio.storageKey,
-                    mimeType: audio.mimeType,
-                    bytes: audio.bytes,
-                    durationMs: audio.durationMs,
-                    waveformPeaks: audio.waveformPeaks,
-                    objectStorage: audio.objectStorage,
-                    status: "success" as const,
-                };
+                const attributes = audioAttributes(audio);
                 setNodes((previous) => previous.map((node) => (node.id === targetId ? { ...applyCanvasNodeAttributes(placeholder, attributes), id: targetId, frame: node.frame } : node)));
                 if (nodesRef.current.some((node) => node.id === targetId)) setSelectedNodeIds(new Set([targetId]));
                 setSelectedConnectionId(null);
@@ -2072,24 +2085,46 @@ function CanvasWorkspacePage() {
         [message, requestFocusNodes],
     );
 
-    const createVideoFileNode = useCallback(
-        async (file: File, position: CanvasPoint) => {
-            try {
-                const video = await uploadMediaFile(file, "video");
-                const size = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                const id = `video-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-                const node = updateCanvasNodeFrame({ ...createCanvasNode("video", position, videoAttributes(video)), id, title: file.name }, { position: { x: position.x - size.width / 2, y: position.y - size.height / 2 }, ...size });
-                setNodes((prev) => [...prev, node]);
-                requestFocusNodes([node.id]);
-                setSelectedNodeIds(new Set([id]));
-                setSelectedConnectionId(null);
-                setDialogNodeId(id);
-            } catch (error) {
-                message.error(error instanceof Error ? error.message : translate("canvas.failedToUploadVideo"));
-            }
-        },
-        [message, requestFocusNodes],
-    );
+    /** 整批完成后一次性插入节点，进度与取消作用域均不进入画布文档。 */
+    const uploadCanvasMediaFiles = useCallback(async (files: File[], position: CanvasPoint) => {
+        const scope = mediaUploadScopeRef.current;
+        if (!files.length || !scope || scope.controller.signal.aborted) return;
+        const { signal } = scope.controller;
+        const messageKey = `canvas-media-upload-${nanoid()}`;
+        scope.messageKeys.add(messageKey);
+        const showProgress = (completed: number) => message.open({ key: messageKey, type: "loading", duration: 0, content: translate("canvas.mediaUploadProgress", { value0: completed, value1: files.length }) });
+        showProgress(0);
+        const results = await uploadCanvasFiles(files, uploadCanvasMediaNode, signal, showProgress);
+        if (signal.aborted) return;
+        const uploadedNodes: CanvasDomainNode[] = [];
+        const failures: Array<{ name: string; reason: string }> = [];
+        results.forEach((result, index) => {
+            if (result.status === "fulfilled") uploadedNodes.push(result.value);
+            else failures.push({ name: files[index].name, reason: result.reason instanceof Error ? result.reason.message : translate("canvas.failedToUploadMedia") });
+        });
+        if (uploadedNodes.length) {
+            setNodes((previous) => signal.aborted ? previous : [...previous, ...layoutUploadedCanvasNodes(uploadedNodes, previous, position)]);
+            const nodeIds = uploadedNodes.map((node) => node.id);
+            setSelectedNodeIds(new Set(nodeIds));
+            setSelectedConnectionId(null);
+            setSelectionBox(null);
+            setDialogNodeId(files.length === 1 && !isAudioNode(uploadedNodes[0]) ? nodeIds[0] : null);
+            requestFocusNodes(nodeIds);
+        }
+        message.open({
+            key: messageKey,
+            type: failures.length ? uploadedNodes.length ? "warning" : "error" : "success",
+            duration: failures.length ? 0 : 3,
+            onClose: () => scope.messageKeys.delete(messageKey),
+            content: <div className="max-w-sm text-left" role="status">
+                <div className="flex items-center gap-3">
+                    <span>{translate("canvas.mediaUploadCompleted", { value0: uploadedNodes.length, value1: failures.length })}</span>
+                    {failures.length ? <button type="button" className="shrink-0 text-xs underline" onClick={() => { message.destroy(messageKey); scope.messageKeys.delete(messageKey); }}>{translate("canvas.close")}</button> : null}
+                </div>
+                {failures.length ? <ul className="mt-2 max-h-40 overflow-y-auto break-words text-xs">{failures.map((failure, index) => <li key={index}>{failure.name}：{failure.reason}</li>)}</ul> : null}
+            </div>,
+        });
+    }, [message, requestFocusNodes, translate]);
 
     /** 将音频裁剪为新节点，并保留原节点的完整媒体与波形。 */
     const trimAudioNode = useCallback(
@@ -3135,83 +3170,94 @@ function CanvasWorkspacePage() {
 
     const handleUploadRequest = useCallback((nodeId?: string, position?: CanvasPoint) => {
         if (nodeId && useCanvasUiStore.getState().uploadingNodeIds.has(nodeId)) return;
-        uploadTargetRef.current = { nodeId, position };
-        if (imageInputRef.current) imageInputRef.current.accept = nodeId && nodesRef.current.some((node) => node.id === nodeId && isAudioNode(node)) ? ".mp3,.wav,audio/mpeg,audio/wav" : "image/*,video/*,.mp3,.wav";
-        imageInputRef.current?.click();
-    }, []);
+        const input = imageInputRef.current;
+        const scope = mediaUploadScopeRef.current;
+        if (!input || !scope || scope.controller.signal.aborted) return;
+        uploadTargetRef.current = { nodeId, position: position || getCanvasCenter(), scope };
+        input.multiple = !nodeId;
+        input.accept = nodeId && nodesRef.current.some((node) => node.id === nodeId && isAudioNode(node)) ? ".mp3,.wav,audio/mpeg,audio/wav" : "image/*,video/*,.mp3,.wav,audio/mpeg,audio/wav";
+        input.click();
+    }, [getCanvasCenter]);
 
     const handleImageInputChange = useCallback(
         async (event: ReactChangeEvent<HTMLInputElement>) => {
-            const file = event.target.files?.[0];
+            const files = Array.from(event.target.files || []);
             const target = uploadTargetRef.current;
             // 选中文件后立即释放选择器，避免并行上传时清空其他节点的新选择。
             uploadTargetRef.current = null;
             event.target.value = "";
-            const targetNode = target?.nodeId ? nodesRef.current.find((node) => node.id === target.nodeId) : undefined;
-            if (file && targetNode && isAudioNode(targetNode) && !isAudioFile(file)) {
+            if (!files.length || !target || target.scope.controller.signal.aborted) return;
+            if (!target.nodeId) {
+                void uploadCanvasMediaFiles(files, target.position);
+                return;
+            }
+            const file = files[0];
+            const { signal } = target.scope.controller;
+            const targetNode = nodesRef.current.find((node) => node.id === target.nodeId);
+            if (!targetNode) return;
+            if (isAudioNode(targetNode) && !isAudioFile(file)) {
                 message.error(translate("canvas.audioNodesSupportMP3AndWAVOnly"));
                 return;
             }
-            if (file && isAudioFile(file)) {
-                if (targetNode && !isAudioNode(targetNode)) {
+            if (isAudioFile(file)) {
+                if (!isAudioNode(targetNode)) {
                     message.error(translate("canvas.imageAndVideoNodesCannotBecomeAudioCreateAn"));
                     return;
                 }
-                void createAudioFileNode(file, target?.position || getCanvasCenter(), targetNode && isAudioNode(targetNode) ? targetNode.id : undefined);
+                void createAudioFileNode(file, target.position, targetNode.id);
                 return;
             }
-            if (!file || (!file.type.startsWith("image/") && !file.type.startsWith("video/"))) return;
-
-            if (targetNode) {
-                const replacement = { ...createCanvasNode(file.type.startsWith("video/") ? "video" : "image", targetNode.frame.position, { content: "pending-upload", mimeType: file.type }), id: targetNode.id };
-                const issue = readVideoReferenceAdditionIssue(nodesRef.current.map((node) => node.id === targetNode.id ? replacement : node), connectionsRef.current);
-                if (issue) { message.warning(issue); return; }
+            if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) {
+                message.error(translate("canvas.unsupportedMediaFileType"));
+                return;
             }
 
-            if (target?.nodeId) {
-                const { beginNodeUpload, finishNodeUpload } = useCanvasUiStore.getState();
-                if (!beginNodeUpload(target.nodeId)) return;
-                try {
-                    if (file.type.startsWith("video/")) {
-                        const video = await uploadMediaFile(file, "video");
-                        const nextSize = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
-                        setNodes((prev) =>
-                            prev.map((node) => {
-                                if (node.id !== target.nodeId) return node;
-                                const center = { x: node.frame.position.x + node.frame.width / 2, y: node.frame.position.y + node.frame.height / 2 };
-                                const replacement = { ...createCanvasNode("video", center, videoAttributes(video)), id: node.id, title: file.name };
-                                return updateCanvasNodeFrame(replacement, { position: { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 }, ...nextSize });
-                            }),
-                        );
-                        setSelectedNodeIds(new Set([target.nodeId]));
-                        setSelectedConnectionId(null);
-                        setDialogNodeId(target.nodeId);
-                        return;
-                    }
-                    const image = await uploadImage(file);
-                    const size = fitNodeSize(image.width, image.height);
+            const replacement = { ...createCanvasNode(file.type.startsWith("video/") ? "video" : "image", targetNode.frame.position, { content: "pending-upload", mimeType: file.type }), id: targetNode.id };
+            const issue = readVideoReferenceAdditionIssue(nodesRef.current.map((node) => node.id === targetNode.id ? replacement : node), connectionsRef.current);
+            if (issue) { message.warning(issue); return; }
+
+            const { beginNodeUpload, finishNodeUpload } = useCanvasUiStore.getState();
+            if (!beginNodeUpload(target.nodeId)) return;
+            target.scope.replacingNodeIds.add(target.nodeId);
+            try {
+                if (file.type.startsWith("video/")) {
+                    const video = await uploadMediaFile(file, "video");
+                    if (signal.aborted || !nodesRef.current.some((node) => node.id === target.nodeId)) return;
+                    const nextSize = fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT);
                     setNodes((prev) =>
                         prev.map((node) => {
                             if (node.id !== target.nodeId) return node;
                             const center = { x: node.frame.position.x + node.frame.width / 2, y: node.frame.position.y + node.frame.height / 2 };
-                            const replacement = { ...createCanvasNode("image", center, imageAttributes(image)), id: node.id, title: file.name };
-                            return updateCanvasNodeFrame(replacement, { position: { x: center.x - size.width / 2, y: center.y - size.height / 2 }, ...size, freeResize: false });
+                            const replacement = { ...createCanvasNode("video", center, videoAttributes(video)), id: node.id, title: file.name };
+                            return updateCanvasNodeFrame(replacement, { position: { x: center.x - nextSize.width / 2, y: center.y - nextSize.height / 2 }, ...nextSize });
                         }),
                     );
                     setSelectedNodeIds(new Set([target.nodeId]));
                     setSelectedConnectionId(null);
                     setDialogNodeId(target.nodeId);
-                } catch (error) {
-                    message.error(error instanceof Error ? error.message : translate("canvas.failedToUploadMedia"));
-                } finally {
-                    finishNodeUpload(target.nodeId);
+                    return;
                 }
-            } else {
-                const position = target?.position || screenToCanvas((containerRef.current?.getBoundingClientRect().left || 0) + size.width / 2, (containerRef.current?.getBoundingClientRect().top || 0) + size.height / 2);
-                void (file.type.startsWith("video/") ? createVideoFileNode(file, position) : createImageFileNode(file, position));
+                const image = await uploadImage(file);
+                if (signal.aborted || !nodesRef.current.some((node) => node.id === target.nodeId)) return;
+                const size = fitNodeSize(image.width, image.height);
+                setNodes((prev) =>
+                    prev.map((node) => {
+                        if (node.id !== target.nodeId) return node;
+                        const center = { x: node.frame.position.x + node.frame.width / 2, y: node.frame.position.y + node.frame.height / 2 };
+                        const replacement = { ...createCanvasNode("image", center, imageAttributes(image)), id: node.id, title: file.name };
+                        return updateCanvasNodeFrame(replacement, { position: { x: center.x - size.width / 2, y: center.y - size.height / 2 }, ...size, freeResize: false });
+                    }),
+                );
+                setSelectedNodeIds(new Set([target.nodeId]));
+                setSelectedConnectionId(null);
+                setDialogNodeId(target.nodeId);
+            } catch (error) {
+                if (!signal.aborted) message.error(error instanceof Error ? error.message : translate("canvas.failedToUploadMedia"));
+            } finally {
+                if (target.scope.replacingNodeIds.delete(target.nodeId)) finishNodeUpload(target.nodeId);
             }
         },
-        [readVideoReferenceAdditionIssue, createAudioFileNode, createImageFileNode, createVideoFileNode, getCanvasCenter, message, screenToCanvas, size.height, size.width],
+        [readVideoReferenceAdditionIssue, createAudioFileNode, uploadCanvasMediaFiles, message, translate],
     );
 
     const handleDrop = useCallback(
@@ -3219,13 +3265,9 @@ function CanvasWorkspacePage() {
             event.preventDefault();
             const target = event.target;
             if (target instanceof Element && target.closest('[data-canvas-prompt-panel],input,textarea,select,[contenteditable="true"],.ant-modal,.ant-popover,.ant-dropdown,.ant-select-dropdown,.ant-picker-dropdown')) return;
-            const file = Array.from(event.dataTransfer.files).find((item) => item.type.startsWith("image/") || item.type.startsWith("video/") || isAudioFile(item));
-            if (!file) return;
-
-            const pos = screenToCanvas(event.clientX, event.clientY);
-            void (isAudioFile(file) ? createAudioFileNode(file, pos) : file.type.startsWith("video/") ? createVideoFileNode(file, pos) : createImageFileNode(file, pos));
+            void uploadCanvasMediaFiles(Array.from(event.dataTransfer.files), screenToCanvas(event.clientX, event.clientY));
         },
-        [createAudioFileNode, createImageFileNode, createVideoFileNode, screenToCanvas],
+        [uploadCanvasMediaFiles, screenToCanvas],
     );
 
     const pasteAssistantImage = useCallback(
@@ -4605,7 +4647,11 @@ function CanvasWorkspacePage() {
                     finishNodeUpload(id);
                 });
                 setAudioTrimNodeId((current) => (current && allIds.has(current) ? null : current));
-                setConnections((currentConnections) => currentConnections.filter((connection) => !allIds.has(connection.source.nodeId) && !allIds.has(connection.target.nodeId)));
+                setConnections((currentConnections) => {
+                    const remainingConnections = currentConnections.filter((connection) => !allIds.has(connection.source.nodeId) && !allIds.has(connection.target.nodeId));
+                    // 撤销后重复的节点删除通知不应生成新历史、清空重做记录。
+                    return remainingConnections.length === currentConnections.length ? currentConnections : remainingConnections;
+                });
                 return allIds;
             }),
         [cancelVideoCompositionTasksForDeletedNodes, translate.locale],
@@ -4785,7 +4831,7 @@ function CanvasWorkspacePage() {
             setDialogNodeId(null);
             const selectedNodeIds = selectedNodeIdsRef.current;
             if (selectedNodeIds.size) {
-                setContextMenu({ type: "selection", x: event.clientX, y: event.clientY, nodeIds: [...selectedNodeIds] });
+                setContextMenu({ type: "selection", x: event.clientX, y: event.clientY, nodeIds: [...selectedNodeIds], position: screenToCanvas(event.clientX, event.clientY) });
                 return;
             }
             setSelectedNodeIds(new Set());
@@ -5089,6 +5135,7 @@ function CanvasWorkspacePage() {
                     onDeleteBackgroundOnly={confirmDeleteBackgroundOnly}
                     onDeleteConnection={confirmDeleteConnection}
                     onImageInputChange={handleImageInputChange}
+                    onUpload={(position) => handleUploadRequest(undefined, position)}
                     onCloseInfo={() => setInfoNodeId(null)}
                     onCloseCrop={() => {
                         if (!croppingNodeId) setCropNodeId(null);
@@ -5347,6 +5394,28 @@ function imageExtension(dataUrl: string) {
 
 function imageAttributes(image: UploadedImage): CanvasNodeAttributes {
     return { content: image.url, storageKey: image.storageKey, status: "success", naturalWidth: image.width, naturalHeight: image.height, bytes: image.bytes, mimeType: image.mimeType, objectStorage: image.objectStorage };
+}
+
+function audioAttributes(audio: Awaited<ReturnType<typeof uploadAudioFile>>): CanvasNodeAttributes {
+    return { content: audio.url, storageKey: audio.storageKey, mimeType: audio.mimeType, bytes: audio.bytes, durationMs: audio.durationMs, waveformPeaks: audio.waveformPeaks, objectStorage: audio.objectStorage, status: "success" };
+}
+
+/** 使用现有存储服务读取媒体元数据，节点位置由整批布局统一确定。 */
+async function uploadCanvasMediaNode(file: File): Promise<CanvasDomainNode> {
+    const position = { x: 0, y: 0 };
+    if (isAudioFile(file)) {
+        const audio = await uploadAudioFile(file);
+        return { ...createCanvasNode("audio", position, audioAttributes(audio)), title: file.name };
+    }
+    if (file.type.startsWith("video/")) {
+        const video = await uploadMediaFile(file, "video");
+        return updateCanvasNodeFrame({ ...createCanvasNode("video", position, videoAttributes(video)), title: file.name }, fitNodeSize(video.width || 1280, video.height || 720, VIDEO_NODE_MAX_WIDTH, VIDEO_NODE_MAX_HEIGHT));
+    }
+    if (file.type.startsWith("image/")) {
+        const image = await uploadImage(file);
+        return updateCanvasNodeFrame({ ...createCanvasNode("image", position, imageAttributes(image)), title: file.name }, fitNodeSize(image.width, image.height));
+    }
+    throw new Error(translate("canvas.unsupportedMediaFileType"));
 }
 
 function videoAttributes(video: UploadedFile): CanvasNodeAttributes {
