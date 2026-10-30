@@ -95,7 +95,8 @@ const promptTheme = EditorView.theme({
     "&.cm-focused": { outline: "none" },
     ".cm-scroller": { fontFamily: "inherit", lineHeight: "1.75", overflowY: "auto" },
     ".cm-content": { padding: "0", caretColor: "var(--studio-ink)", overflowWrap: "anywhere" },
-    ".cm-line": { padding: "0" },
+    // 为行首光标保留空间，避免空内容时被滚动容器裁剪。
+    ".cm-line": { padding: "0 2px" },
     ".cm-placeholder": { color: "var(--studio-faint)" },
     ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": { background: "var(--studio-primary-soft)" },
     ".cm-cursor": { borderLeftColor: "var(--studio-ink)" },
