@@ -19,7 +19,7 @@ export type ApiCallFormat = "openai" | "newapi" | "evolink" | "gemini" | "agnes"
 export type ModelCapability = "image" | "video" | "text";
 export type ModelCreditUnit = "generation" | "second";
 export type VideoGenerationMode = "text-to-video" | "image-to-video" | "reference-to-video" | "first-last-frame-to-video";
-export type VideoResolution = "auto" | "480p" | "720p" | "768p" | "1080p" | "2k" | "4k";
+export type VideoResolution = "auto" | "480p" | "720p" | "768p" | "1080p" | "1088p" | "1440p" | "2k" | "4k";
 export type VideoBillingConfiguration = {
     billingUnit: ModelCreditUnit;
     minimumDurationSeconds: number;

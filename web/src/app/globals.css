@@ -348,6 +348,15 @@ html[data-theme="purple"] {
         filter: invert(1);
     }
 
+    :is(html[data-theme="dark"], html[data-theme="purple"]) .model-picker-icon-qwen {
+        background: color-mix(in srgb, var(--background) 78%, transparent);
+        box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--foreground) 10%, transparent);
+    }
+
+    :is(html[data-theme="dark"], html[data-theme="purple"]) .model-icon-qwen {
+        filter: brightness(0) invert(1);
+    }
+
     .studio-glass {
         background: var(--studio-glass);
         border: 1px solid var(--studio-line);

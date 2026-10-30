@@ -87,6 +87,30 @@ public class AdminCreditController {
     }
 
     /**
+     * 分页查询管理员可见的全站图片与视频任务记录。
+     *
+     * @param startDate LocalDate 筛选起始日期
+     * @param endDate LocalDate 筛选结束日期
+     * @param taskType String 任务类型筛选：image/video，可为空表示全部
+     * @param keyword String 提示词或模型搜索词，可为空
+     * @param page int 页码
+     * @param pageSize int 每页数量
+     * @return Mono<ApiResponse<AdminTaskRecordListResponse>> 任务记录
+     */
+    @GetMapping("/listTaskRecords")
+    public Mono<ApiResponse<CreditDtos.AdminTaskRecordListResponse>> listTaskRecords(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false) String taskType,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int pageSize) {
+        return adminGuard.requireAdmin()
+                .then(Mono.defer(() -> creditService.listAdminTaskRecords(startDate, endDate, taskType, keyword, page, pageSize)))
+                .map(ApiResponse::ok);
+    }
+
+    /**
      * 批量生成积分卡密。
      *
      * @param request GenerateCreditCardsRequest 生成参数

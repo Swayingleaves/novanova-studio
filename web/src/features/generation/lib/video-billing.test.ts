@@ -16,7 +16,7 @@ function configFor(billingUnit: "generation" | "second" = "generation") {
                     billingUnit,
                     minimumDurationSeconds: 3,
                     modePrices: {
-                        "text-to-video": { auto: 6, "480p": 6, "720p": 14, "1080p": 22 },
+                        "text-to-video": { auto: 6, "480p": 6, "720p": 14, "1080p": 22, "1088p": 24, "1440p": 30 },
                         "image-to-video": { auto: 6, "480p": 8, "720p": 16, "1080p": 25 },
                         "reference-to-video": { auto: 6, "720p": 20, "1080p": 32 },
                     },
@@ -32,6 +32,31 @@ test("统一视频报价支持三种模式和Auto/具体分辨率", () => {
     assertQuoteCredits(quoteVideoGeneration({ config, model: "video-model", mode: "image-to-video", resolution: "480p", seconds: "4", imageReferenceCount: 1 }), 8);
     assertQuoteCredits(quoteVideoGeneration({ config, model: "video-model", mode: "reference-to-video", resolution: "1080p", seconds: "3", videoReferenceCount: 1 }), 32);
     assertQuoteCredits(quoteVideoGeneration({ config, model: "video-model", mode: "text-to-video", resolution: "auto", seconds: "3" }), 6);
+});
+
+test("视频计费支持1088P和1440P分辨率", () => {
+    const config = configFor();
+    const resolutions = availableVideoResolutions(config, "video-model", "text-to-video");
+
+    assert.ok(resolutions.includes("1088p"));
+    assert.ok(resolutions.includes("1440p"));
+    const quoteAt1088pResolution = quoteVideoGeneration({
+        config,
+        model: "video-model",
+        mode: "text-to-video",
+        resolution: "1088p",
+        seconds: "3",
+    });
+    const quoteAt1440pResolution = quoteVideoGeneration({
+        config,
+        model: "video-model",
+        mode: "text-to-video",
+        resolution: "1440p",
+        seconds: "3",
+    });
+
+    assertQuoteCredits(quoteAt1088pResolution, 24);
+    assertQuoteCredits(quoteAt1440pResolution, 30);
 });
 
 test("按秒报价按时长和任务数量累计", () => {

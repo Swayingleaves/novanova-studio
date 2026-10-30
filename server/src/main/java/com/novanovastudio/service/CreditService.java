@@ -348,10 +348,10 @@ public class CreditService {
         if (page < 1 || pageSize < 1 || pageSize > 100) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidPaginationParameters")));
         }
-        if (taskType != null && !List.of("image", "video").contains(taskType)) {
+        if (!isValidTaskRecordType(taskType)) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.generationTypeFilterMustBeImageOrVideo")));
         }
-        String normalizedKeyword = keyword == null || keyword.isBlank() ? null : keyword.trim();
+        String normalizedKeyword = normalizeTaskRecordKeyword(keyword);
         return currentUserProvider.currentUserId().flatMap(userId -> {
             CreditRepository.TaskRecordQuery query = createTaskRecordQuery(userId, startDate, endDate, taskType, normalizedKeyword);
             return Mono.zip(
@@ -365,6 +365,60 @@ public class CreditService {
                                     item.errorMessage(), item.createdAt(), item.completedAt()))
                             .toList(), result.getT3()));
         });
+    }
+
+    /**
+     * 分页查询管理员可见的全站图片与视频生成任务记录。
+     *
+     * @param startDate LocalDate 筛选起始日期
+     * @param endDate LocalDate 筛选结束日期
+     * @param taskType String 任务类型筛选：image/video，可为空表示全部
+     * @param keyword String 提示词或模型搜索词，可为空
+     * @param page int 页码
+     * @param pageSize int 每页数量
+     * @return Mono<AdminTaskRecordListResponse> 管理员任务记录
+     */
+    public Mono<CreditDtos.AdminTaskRecordListResponse> listAdminTaskRecords(LocalDate startDate, LocalDate endDate, String taskType, String keyword, int page, int pageSize) {
+        if (page < 1 || pageSize < 1 || pageSize > 100) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidPaginationParameters")));
+        }
+        if (!isValidTaskRecordType(taskType)) {
+            return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.generationTypeFilterMustBeImageOrVideo")));
+        }
+        String normalizedKeyword = normalizeTaskRecordKeyword(keyword);
+        return Mono.defer(() -> {
+            CreditRepository.TaskRecordQuery query = createTaskRecordQuery(null, startDate, endDate, taskType, normalizedKeyword);
+            return Mono.zip(
+                            persistenceService.getPlatformModelConfigs().map(CreditService::displayNameIndex),
+                            creditRepository.listAdminTaskRecords(query, page, pageSize).collectList(),
+                            creditRepository.countTaskRecords(query))
+                    .map(result -> new CreditDtos.AdminTaskRecordListResponse(result.getT2().stream()
+                            .map(item -> new CreditDtos.AdminTaskRecordItem(item.taskId(), item.taskType(),
+                                    resolveModelDisplayName(result.getT1(), item.taskType(), item.model()), item.status(), item.prompt(),
+                                    item.resolution(), item.size(), item.seconds(), item.consumedCredits(), item.resultUrls(),
+                                    item.errorMessage(), item.createdAt(), item.completedAt(), item.userId(), item.username(), item.nickname(), item.email()))
+                            .toList(), result.getT3()));
+        });
+    }
+
+    /**
+     * 校验任务记录的类型筛选。
+     *
+     * @param taskType String 任务类型筛选
+     * @return boolean 类型为空或属于支持的图片、视频筛选
+     */
+    private boolean isValidTaskRecordType(String taskType) {
+        return taskType == null || List.of("image", "video").contains(taskType);
+    }
+
+    /**
+     * 规范化任务记录关键词。
+     *
+     * @param keyword String 提示词或模型搜索词
+     * @return String 去除首尾空格的关键词，空白输入返回 null
+     */
+    private String normalizeTaskRecordKeyword(String keyword) {
+        return keyword == null || keyword.isBlank() ? null : keyword.trim();
     }
 
     /**

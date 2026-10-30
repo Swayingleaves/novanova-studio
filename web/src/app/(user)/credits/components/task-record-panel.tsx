@@ -7,27 +7,29 @@ import { useTranslation } from "@/features/locale/use-translation";
 import { Button, Empty, Input, Modal, Pagination, Segmented, Skeleton, Table, Tag, DatePicker, type TableProps } from "antd";
 import { Image as ImageIcon, Play, Video } from "lucide-react";
 
-import { listTaskRecords, type ServerTaskRecord } from "@/services/api/server";
+import { listAdminTaskRecords, listTaskRecords, type ServerAdminTaskRecord, type ServerTaskRecord } from "@/services/api/server";
 
 import { formatCreditTime, generationTypeLabel } from "../credit-page-utils";
-import { formatConsumedCredits, TASK_RECORD_PAGE_SIZE, taskRecordStatusLabel, taskRecordStatusTone } from "../task-record-utils";
+import { formatConsumedCredits, TASK_RECORD_PAGE_SIZE, taskRecordStatusLabel, taskRecordStatusTone, taskRecordUserLabel } from "../task-record-utils";
 
 type TaskTypeFilter = "all" | "image" | "video";
 type MediaPreview = { url: string; taskType: "image" | "video" };
+type TaskRecordView = ServerTaskRecord & Partial<Pick<ServerAdminTaskRecord, "userId" | "username" | "nickname" | "email">>;
 
 /**
  * 渲染积分页下方的图片与视频生成任务记录。
  *
+ * @param props 管理员模式开启时查询全站记录并显示用户列
  * @return 任务记录面板
  */
-export function TaskRecordPanel() {
+export function TaskRecordPanel({ admin = false }: { admin?: boolean } = {}) {
     const translate = useTranslation();
     const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")]);
     const [taskType, setTaskType] = useState<TaskTypeFilter>("all");
     const [keyword, setKeyword] = useState("");
     const [keywordDraft, setKeywordDraft] = useState("");
     const [page, setPage] = useState(1);
-    const [detail, setDetail] = useState<ServerTaskRecord | null>(null);
+    const [detail, setDetail] = useState<TaskRecordView | null>(null);
     const [preview, setPreview] = useState<MediaPreview | null>(null);
 
     const filters = useMemo(() => ({
@@ -38,12 +40,21 @@ export function TaskRecordPanel() {
     }), [dateRange, taskType, keyword]);
 
     const recordsQuery = useQuery({
-        queryKey: ["task-records", filters.startDate, filters.endDate, filters.taskType, filters.keyword, page],
-        queryFn: () => listTaskRecords({ ...filters, page, pageSize: TASK_RECORD_PAGE_SIZE }),
+        queryKey: [admin ? "admin-task-records" : "task-records", filters.startDate, filters.endDate, filters.taskType, filters.keyword, page],
+        queryFn: () => admin
+            ? listAdminTaskRecords({ ...filters, page, pageSize: TASK_RECORD_PAGE_SIZE })
+            : listTaskRecords({ ...filters, page, pageSize: TASK_RECORD_PAGE_SIZE }),
     });
 
-    const records = recordsQuery.data?.records || [];
-    const columns = useMemo<TableProps<ServerTaskRecord>["columns"]>(() => [
+    const records: TaskRecordView[] = recordsQuery.data?.records || [];
+    const columns = useMemo<TableProps<TaskRecordView>["columns"]>(() => [
+        ...(admin ? [{
+            title: translate("administration.user"),
+            dataIndex: "username",
+            width: 160,
+            ellipsis: true,
+            render: (_: string | null | undefined, record: TaskRecordView) => <span className="block truncate text-[var(--studio-text)]" title={record.email || undefined}>{taskRecordUserLabel(record)}</span>,
+        }] : []),
         {
             title: translate("credits.time"),
             dataIndex: "createdAt",
@@ -90,7 +101,7 @@ export function TaskRecordPanel() {
                 </div>
             ),
         },
-    ], [translate, translate.locale]);
+    ], [admin, translate, translate.locale]);
 
     return (
         <div>
@@ -140,13 +151,13 @@ export function TaskRecordPanel() {
             </div>
 
             <div className="mt-4 hidden md:block">
-                <Table<ServerTaskRecord>
+                <Table<TaskRecordView>
                     rowKey="taskId"
                     columns={columns}
                     dataSource={records}
                     loading={recordsQuery.isLoading}
                     pagination={false}
-                    scroll={{ x: 884 }}
+                    scroll={{ x: admin ? 1_044 : 884 }}
                     locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={translate("credits.noTaskRecordsInThisPeriod")} /> }}
                 />
             </div>
@@ -165,6 +176,7 @@ export function TaskRecordPanel() {
                                 <Tag color={taskRecordStatusTone(record.status)} className="mr-0">{taskRecordStatusLabel(record.status)}</Tag>
                                 <span className="tabular-nums">{formatCreditTime(record.createdAt)}</span>
                             </div>
+                            {admin ? <p className="mt-1 truncate text-xs text-[var(--studio-muted)]">{translate("administration.user")} · {taskRecordUserLabel(record)}</p> : null}
                             <p className="mt-1 truncate text-xs text-[var(--studio-muted)]" title={record.model}>{record.model || "—"}</p>
                             <p className="mt-1 line-clamp-2 text-xs text-[var(--studio-muted)]">{record.prompt || translate("credits.noPrompt")}</p>
                             <div className="mt-2">

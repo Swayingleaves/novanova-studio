@@ -125,10 +125,11 @@ export function ModelIcon({ config, model }: { config: AiConfig; model: string }
     const configuredKey = model ? config.modelIcons?.[model] : undefined;
     const icon = configuredKey ? resolveModelIconByKey(configuredKey) : model ? resolveModelIcon(modelName, apiFormat) : "";
     const monochrome = configuredKey ? MODEL_ICON_MONOCHROME_KEYS.has(configuredKey) : model ? isMonochromeModelIcon(modelName, apiFormat) : false;
+    const qwenIcon = icon === "/icons/qwen.svg";
 
     return (
-        <span className={cn("model-picker-icon flex size-5 shrink-0 items-center justify-center rounded-md", monochrome && "model-picker-icon-monochrome")}>
-            {icon ? <img src={icon} alt="" className="size-4" /> : <Clapperboard className="size-4 opacity-70" />}
+        <span className={cn("model-picker-icon flex size-5 shrink-0 items-center justify-center rounded-md", monochrome && "model-picker-icon-monochrome", qwenIcon && "model-picker-icon-qwen")}>
+            {icon ? <img src={icon} alt="" className={cn("size-4", qwenIcon && "model-icon-qwen")} /> : <Clapperboard className="size-4 opacity-70" />}
         </span>
     );
 }

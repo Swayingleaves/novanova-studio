@@ -385,6 +385,18 @@ export type ServerTaskRecordList = {
     total: number;
 };
 
+export type ServerAdminTaskRecord = ServerTaskRecord & {
+    userId: number;
+    username: string | null;
+    nickname: string | null;
+    email: string | null;
+};
+
+export type ServerAdminTaskRecordList = {
+    records: ServerAdminTaskRecord[];
+    total: number;
+};
+
 export type ServerAdminCreditTransaction = ServerUserCreditTransaction & {
     userId: number;
     username: string;
@@ -1161,6 +1173,19 @@ export function listTaskRecords(params: { startDate: string; endDate: string; ta
     if (params.taskType) query.set("taskType", params.taskType);
     if (params.keyword) query.set("keyword", params.keyword);
     return serverGet<ServerTaskRecordList>(`/credit/listTaskRecords?${query}`);
+}
+
+/** 查询管理员可见的全站图片与视频任务记录。 */
+export function listAdminTaskRecords(params: { startDate: string; endDate: string; taskType?: "image" | "video"; keyword?: string; page: number; pageSize: number }) {
+    const query = new URLSearchParams({
+        startDate: params.startDate,
+        endDate: params.endDate,
+        page: String(params.page),
+        pageSize: String(params.pageSize),
+    });
+    if (params.taskType) query.set("taskType", params.taskType);
+    if (params.keyword) query.set("keyword", params.keyword);
+    return serverGet<ServerAdminTaskRecordList>(`/admin/credit/listTaskRecords?${query}`);
 }
 
 export function redeemCredits(cardCode: string) {
