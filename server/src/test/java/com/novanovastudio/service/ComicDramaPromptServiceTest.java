@@ -218,11 +218,45 @@ class ComicDramaPromptServiceTest {
         bindGeneration("shot", 1, legacy, List.of());
         when(aiTaskService.quoteTaskCredits(any())).thenReturn(Mono.just(BigDecimal.ONE));
         service.estimateGeneration(new ComicDramaDtos.EstimateGenerationRequest("project", "shot", List.of("shot"),
-                "model", JSONObject.of("mediaType", "video"))).block();
+                "model", JSONObject.of("mediaType", "video", "seconds", "15"))).block();
         ArgumentCaptor<AiTaskDtos.CreateAiTaskRequest> quoted = ArgumentCaptor.forClass(AiTaskDtos.CreateAiTaskRequest.class);
         verify(aiTaskService).quoteTaskCredits(quoted.capture());
         assertEquals("旧版正文", quoted.getValue().prompt());
         assertEquals("text-to-video", quoted.getValue().videoGenerationMode());
+        assertEquals("15", quoted.getValue().parameters().get("seconds"));
+    }
+
+    /** 批量视频报价和提交均使用各镜头规划时长，而非共享设置中的默认时长。 */
+    @Test
+    void shouldUsePlannedDurationForEachBatchShot() {
+        bindGeneration("five-seconds", 1, BigDecimal.valueOf(5));
+        bindGeneration("four-seconds", 2, BigDecimal.valueOf(4));
+        when(aiTaskService.quoteTaskCredits(any())).thenReturn(Mono.just(BigDecimal.ONE));
+        when(repository.createMediaResult(eq("project"), any())).thenReturn(Mono.empty());
+        when(repository.refreshProjectProductionStatus("project")).thenReturn(Mono.empty());
+        AiTaskDtos.AiGenerationTaskResponse created = new AiTaskDtos.AiGenerationTaskResponse(
+                "task", "video", "model", "provider", "queued", 0, new JSONObject(), new JSONObject(),
+                "", null, null, null, null, null);
+        when(aiTaskService.createTask(any(AiTaskDtos.CreateAiTaskRequest.class), any()))
+                .thenReturn(Mono.just(created));
+
+        service.createGenerationTask(new ComicDramaDtos.CreateGenerationTaskRequest("project", 3L, "shot",
+                List.of("five-seconds", "four-seconds"), "model",
+                JSONObject.of("mediaType", "video", "seconds", "15", "usePlannedShotDuration", true), true)).block();
+
+        ArgumentCaptor<AiTaskDtos.CreateAiTaskRequest> quoted = ArgumentCaptor.forClass(AiTaskDtos.CreateAiTaskRequest.class);
+        verify(aiTaskService, times(2)).quoteTaskCredits(quoted.capture());
+        assertEquals(List.of("5", "4"), quoted.getAllValues().stream()
+                .map(request -> request.parameters().get("seconds")).toList());
+        ArgumentCaptor<AiTaskDtos.CreateAiTaskRequest> submitted = ArgumentCaptor.forClass(AiTaskDtos.CreateAiTaskRequest.class);
+        verify(aiTaskService, times(2)).createTask(submitted.capture(), any());
+        assertEquals(List.of("5", "4"), submitted.getAllValues().stream()
+                .map(request -> request.parameters().get("seconds")).toList());
+        assertTrue(submitted.getAllValues().stream().allMatch(request -> !request.parameters().containsKey("usePlannedShotDuration")));
+        ArgumentCaptor<ComicDramaDtos.MediaResult> saved = ArgumentCaptor.forClass(ComicDramaDtos.MediaResult.class);
+        verify(repository, times(2)).createMediaResult(eq("project"), saved.capture());
+        assertEquals(List.of("5", "4"), saved.getAllValues().stream()
+                .map(media -> media.inputSnapshot().getString("seconds")).toList());
     }
 
     /** 未确认费用时，单镜头和批量入口均不得查询价格、调用模型或保存版本。 */
@@ -384,6 +418,16 @@ class ComicDramaPromptServiceTest {
         when(repository.listShotReferencesForVideo("project", shotId)).thenReturn(Mono.just(images));
     }
 
+    /** 设置指定规划时长的镜头及其空引用提示词。
+     * @param shotId 镜头标识
+     * @param number 镜头序号
+     * @param durationSeconds 镜头规划时长
+     */
+    private void bindGeneration(String shotId, int number, BigDecimal durationSeconds) {
+        bindGeneration(shotId, number, prompt(shotId, List.of()), List.of());
+        when(repository.getShot("project", shotId)).thenReturn(Mono.just(shot(shotId, number, durationSeconds)));
+    }
+
     /** 创建指定来源的测试图片。
      * @param type 资产类型
      * @param id 媒体身份
@@ -411,7 +455,17 @@ class ComicDramaPromptServiceTest {
      * @return 测试镜头
      */
     private static ComicDramaDtos.Shot shot(String id, int number) {
-        return new ComicDramaDtos.Shot(id, null, null, "来源剧本", number, number, BigDecimal.valueOf(5),
+        return shot(id, number, BigDecimal.valueOf(5));
+    }
+
+    /** 创建指定规划时长的测试镜头。
+     * @param id 镜头标识
+     * @param number 镜头序号
+     * @param durationSeconds 镜头规划时长
+     * @return 测试镜头
+     */
+    private static ComicDramaDtos.Shot shot(String id, int number, BigDecimal durationSeconds) {
+        return new ComicDramaDtos.Shot(id, null, null, "来源剧本", number, number, durationSeconds,
                 "中景", "", "画面", "", "固定", "", "", "", "", "ready", List.of("actor"), 0, null, null);
     }
 }

@@ -1089,13 +1089,17 @@ public class ComicDramaService {
                         promptSnapshot.put("promptVersionId", version.id());
                         String prompt = "video".equals(mediaType) ? version.prompt()
                                 : ComicDramaPromptReferences.fullPrompt(promptSnapshot);
+                        String videoSeconds = "video".equals(mediaType)
+                                && Boolean.TRUE.equals(request.settings().getBoolean("usePlannedShotDuration"))
+                                ? plannedShotVideoSeconds(tuple.getT3().durationSeconds()) : null;
                         return generationPlan(request, targetId, mediaType, prompt,
-                                images.stream().map(ComicDramaRepository.ShotReferenceImage::reference).toList(), promptSnapshot);
+                                images.stream().map(ComicDramaRepository.ShotReferenceImage::reference).toList(), promptSnapshot,
+                                videoSeconds);
                     });
         } else if ("assetVersion".equals(request.targetType())) {
             return repository.getAssetVersion(request.projectId(), targetId).switchIfEmpty(notFound("资产版本不存在"))
                     .map(version -> generationPlan(request, targetId, mediaType,
-                            version.versionName() + "\n" + text(version.appearanceDescription()), List.of(), new JSONObject()));
+                            version.versionName() + "\n" + text(version.appearanceDescription()), List.of(), new JSONObject(), null));
         } else {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, "生成目标仅支持shot或assetVersion"));
         }
@@ -1109,22 +1113,28 @@ public class ComicDramaService {
      * @param prompt 完整提示词
      * @param references 实际提交的有序图片
      * @param promptSnapshot 正文和系统说明快照
+     * @param videoSeconds 批量视频生成时采用的镜头规划时长
      * @return 可报价和提交的生成计划
      */
     private GenerationPlan generationPlan(ComicDramaDtos.CreateGenerationTaskRequest request, String targetId,
-            String mediaType, String prompt, List<AiTaskDtos.AiTaskMediaReference> references, JSONObject promptSnapshot) {
+            String mediaType, String prompt, List<AiTaskDtos.AiTaskMediaReference> references, JSONObject promptSnapshot,
+            String videoSeconds) {
             JSONObject snapshot = new JSONObject(request.settings());
+            snapshot.remove("usePlannedShotDuration");
             snapshot.putAll(promptSnapshot);
             snapshot.put("prompt", prompt);
             snapshot.put("model", request.model());
             snapshot.put("targetType", request.targetType());
+            if (videoSeconds != null) {
+                snapshot.put("seconds", videoSeconds);
+            }
             if (references != null && !references.isEmpty()) {
                 snapshot.put("referenceCount", references.size());
             }
             ComicDramaDtos.MediaResult media = new ComicDramaDtos.MediaResult(id(), request.targetType(), targetId,
                     mediaType, null, snapshot, new JSONObject(), "queued", false, "",
                     OffsetDateTime.now(), OffsetDateTime.now());
-            return new GenerationPlan(media, prompt, references);
+            return new GenerationPlan(media, prompt, references, videoSeconds);
     }
 
     /**
@@ -1151,6 +1161,10 @@ public class ComicDramaService {
     private AiTaskDtos.CreateAiTaskRequest generationTaskRequest(ComicDramaDtos.CreateGenerationTaskRequest request,
             GenerationPlan plan, String mediaType) {
         Map<String, Object> parameters = new LinkedHashMap<>(request.settings());
+        parameters.remove("usePlannedShotDuration");
+        if (plan.videoSeconds() != null) {
+            parameters.put("seconds", plan.videoSeconds());
+        }
         String videoMode = null;
         if ("video".equals(mediaType)) {
             String mode = (String) parameters.get("videoGenerationMode");
@@ -1161,6 +1175,24 @@ public class ComicDramaService {
         }
         return new AiTaskDtos.CreateAiTaskRequest(mediaType, plan.prompt(), request.model(), parameters,
                 plan.references(), null, AiTaskSources.STORYBOARD, videoMode);
+    }
+
+    /**
+     * 将批量视频镜头的规划时长转换为底层任务支持的正整数秒。
+     * @param durationSeconds 镜头规划时长
+     * @return 可传递给视频任务的整数秒
+     * @throws BusinessException 镜头时长不是正整数秒时抛出
+     */
+    private String plannedShotVideoSeconds(BigDecimal durationSeconds) {
+        try {
+            int seconds = durationSeconds.stripTrailingZeros().intValueExact();
+            if (seconds < 1) {
+                throw new ArithmeticException("镜头时长必须大于零");
+            }
+            return Integer.toString(seconds);
+        } catch (ArithmeticException exception) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "批量视频生成要求镜头规划时长为正整数秒");
+        }
     }
 
     /** 执行单个已预先持久化的媒体计划。 */
@@ -1209,7 +1241,8 @@ public class ComicDramaService {
     }
 
     /** 媒体生成前已完成权限与输入校验的持久化计划。 */
-    private record GenerationPlan(ComicDramaDtos.MediaResult media, String prompt, List<AiTaskDtos.AiTaskMediaReference> references) {
+    private record GenerationPlan(ComicDramaDtos.MediaResult media, String prompt,
+                                  List<AiTaskDtos.AiTaskMediaReference> references, String videoSeconds) {
     }
 
     /**

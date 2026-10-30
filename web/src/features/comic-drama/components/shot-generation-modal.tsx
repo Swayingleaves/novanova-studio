@@ -140,7 +140,8 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
     const videoGenerationMode: VideoGenerationMode = (isBatch ? shotsWithReferenceCount > 0 : referenceCount > 0) ? "image-to-video" : "text-to-video";
     const constraintIssue = referencesLoading || referenceError ? "" : targetShots.map((shot) => {
         const imageCount = referenceCountByShot.get(shot.id) || 0;
-        const issue = readVideoGenerationConstraintIssue({ config, model, mode: imageCount ? "image-to-video" : "text-to-video", size, seconds: videoSeconds, imageCount });
+        const seconds = isBatch ? shot.durationSeconds : videoSeconds;
+        const issue = readVideoGenerationConstraintIssue({ config, model, mode: imageCount ? "image-to-video" : "text-to-video", size, seconds, imageCount });
         return issue ? `${shot.shotNumber}：${issue}` : "";
     }).find(Boolean) || "";
 
@@ -150,7 +151,7 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
             mediaType: "video",
             size,
             resolution: vquality,
-            seconds: videoSeconds,
+            ...(isBatch ? { usePlannedShotDuration: true } : { seconds: videoSeconds }),
             videoGenerationMode: isBatch ? undefined : videoGenerationMode,
         }),
         [size, vquality, videoSeconds, isBatch, videoGenerationMode]
@@ -162,17 +163,17 @@ export function ShotGenerationModal({ open, shotIds, onClose }: ShotGenerationMo
     }, []);
 
     // 每次打开默认全选镜头；模型、比例、清晰度优先沿用上次选择，没有记录时回到项目画幅与默认模型配置。
-    // 单镜头沿用其分镜时长，批量时各镜头时长不一致，回落到默认视频时长。
+    // 单镜头默认沿用分镜时长；批量由服务端逐镜头使用规划时长。
     useEffect(() => {
         if (!open || shots.length === 0) return;
         const lastUsed = readShotGenerationLastUsedSettingsCache();
         setSelectedIds(shots.map((shot) => shot.id));
         // 上次使用的模型可能已被删除或停用，不可用时整组回落到默认配置。
         setModel(lastUsed.model && config.videoModels.includes(lastUsed.model) ? lastUsed.model : config.videoModel || "");
-        // 跟随项目生产设置的画面方向（9:16 等），并按当前模型换算成它接受的 size 取值
+    // 跟随项目生产设置的画面方向（9:16 等），并按当前模型换算成它接受的 size 取值
         setSize(lastUsed.size || sizeFromAspectRatio(config, workspace?.settings.aspectRatio));
         setVquality(lastUsed.vquality || config.vquality || "720p");
-        setVideoSeconds(isBatch ? config.videoSeconds || "5" : String(activeShot?.durationSeconds || config.videoSeconds || "5"));
+        setVideoSeconds(isBatch ? "5" : String(activeShot?.durationSeconds || config.videoSeconds || "5"));
         setEstimatedCredits(null);
         // 只在打开的那一帧重置一次，避免配置变化打断正在调整的参数
         // eslint-disable-next-line react-hooks/exhaustive-deps
