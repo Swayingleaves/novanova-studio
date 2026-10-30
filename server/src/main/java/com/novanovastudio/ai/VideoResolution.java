@@ -25,6 +25,12 @@ public final class VideoResolution {
     /** 1080P 分辨率。 */
     public static final String RESOLUTION_1080P = "1080p";
 
+    /** 1088P 分辨率。 */
+    public static final String RESOLUTION_1088P = "1088p";
+
+    /** 1440P 分辨率。 */
+    public static final String RESOLUTION_1440P = "1440p";
+
     /** 2K 分辨率。 */
     public static final String RESOLUTION_2K = "2k";
 
@@ -38,6 +44,8 @@ public final class VideoResolution {
             RESOLUTION_720P,
             RESOLUTION_768P,
             RESOLUTION_1080P,
+            RESOLUTION_1088P,
+            RESOLUTION_1440P,
             RESOLUTION_2K,
             RESOLUTION_4K
     );

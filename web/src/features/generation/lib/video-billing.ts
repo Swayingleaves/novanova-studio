@@ -27,6 +27,8 @@ export const VIDEO_RESOLUTION_OPTIONS: Array<{ value: VideoResolution; label: st
     { value: "720p", label: "720P" },
     { value: "768p", label: "768P" },
     { value: "1080p", label: "1080P" },
+    { value: "1088p", label: "1088P" },
+    { value: "1440p", label: "1440P" },
     { value: "2k", label: "2K" },
     { value: "4k", label: "4K" },
 ];

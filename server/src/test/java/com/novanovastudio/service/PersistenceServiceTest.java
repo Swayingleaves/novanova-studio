@@ -761,7 +761,10 @@ class PersistenceServiceTest {
         when(repository.getPlatformAiChannel("channel-1")).thenReturn(Mono.just(channel));
         when(repository.createPlatformAiModelConfig(org.mockito.ArgumentMatchers.any(PersistenceRecords.UserAiModelConfigRecord.class))).thenReturn(Mono.empty());
         VideoBillingConfiguration configuration = new VideoBillingConfiguration("generation", 3,
-                java.util.Map.of(VideoGenerationMode.REFERENCE_TO_VIDEO, java.util.Map.of("720p", 10)));
+                java.util.Map.of(VideoGenerationMode.REFERENCE_TO_VIDEO, java.util.Map.of(
+                        "720p", 10,
+                        "1088p", 20,
+                        "1440p", 30)));
 
         PersistenceDtos.ModelConfig created = service.createModelConfig(new PersistenceDtos.CreateModelConfigRequest(
                 "channel-1", "video-model", "video", List.of(VideoGenerationMode.REFERENCE_TO_VIDEO, AudioInputSupport.CAPABILITY), 0, 0,
@@ -770,6 +773,9 @@ class PersistenceServiceTest {
         Assertions.assertNotNull(created);
         Assertions.assertEquals(List.of(VideoGenerationMode.REFERENCE_TO_VIDEO, AudioInputSupport.CAPABILITY), created.capabilities());
         Assertions.assertEquals(java.util.Set.of(VideoGenerationMode.REFERENCE_TO_VIDEO), created.videoBillingConfiguration().modePrices().keySet());
+        // 1088P 和 1440P 分辨率价格应随配置一并保存。
+        Assertions.assertEquals(java.util.Map.of("720p", 10, "1088p", 20, "1440p", 30),
+                created.videoBillingConfiguration().modePrices().get(VideoGenerationMode.REFERENCE_TO_VIDEO));
     }
 
     /** 未开启全能参考时，服务端必须拒绝音频能力配置。 */
