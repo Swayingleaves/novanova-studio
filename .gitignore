@@ -38,3 +38,6 @@ volume/
 /web/public/novanova-sw.js
 /web/public/novanova-offline.html
 /videos/project-introduction/
+AGENTS.md
+CLAUDE.md
+deploy.sh
