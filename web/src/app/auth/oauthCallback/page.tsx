@@ -6,10 +6,10 @@ import { useTranslation } from "@/features/locale/use-translation";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { App, Button } from "antd";
 import { CircleAlert, LoaderCircle } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "@/shared/lib/team-navigation";
 
 import { consumeOAuth2Redirect, oauth2ErrorMessage } from "@/features/auth/lib/oauth2-login";
-import { useUserStore } from "@/features/auth/stores/use-user-store";
+import { completeAuthentication } from "@/features/auth/lib/complete-authentication";
 import { exchangeOAuth2LoginCode } from "@/services/api/server";
 
 export default function OAuth2CallbackPage() {
@@ -25,7 +25,6 @@ function OAuth2CallbackContent() {
     const { message } = App.useApp();
     const router = useRouter();
     const searchParams = useSearchParams();
-    const setSession = useUserStore((state) => state.setSession);
     const handled = useRef(false);
     const [errorMessage, setErrorMessage] = useState("");
     const authorizationError = searchParams.get("error");
@@ -34,7 +33,9 @@ function OAuth2CallbackContent() {
     useEffect(() => {
         if (handled.current) return;
         handled.current = true;
-        const redirectPath = consumeOAuth2Redirect();
+        let redirectPath: string | null;
+        try { redirectPath = consumeOAuth2Redirect(); }
+        catch (error) { setErrorMessage(error instanceof Error ? error.message : "登录跳转地址无效"); return; }
         if (redirectPath === null) {
             setErrorMessage(translate("auth.sessionStorageUnavailableCannotFinishSignIn"));
             return;
@@ -49,14 +50,13 @@ function OAuth2CallbackContent() {
         }
         void exchangeOAuth2LoginCode(loginCode)
             .then((session) => {
-                setSession(session);
+                completeAuthentication(session, redirectPath);
                 message.success(translate("auth.signedIn"));
-                router.replace(redirectPath);
             })
             .catch((error) => {
                 setErrorMessage(error instanceof Error ? error.message : translate("auth.oAuth2SignInFailedTryAgain"));
             });
-    }, [authorizationError, loginCode, message, router, setSession]);
+    }, [authorizationError, loginCode, message]);
 
     if (!errorMessage) return <OAuth2CallbackLoading />;
 

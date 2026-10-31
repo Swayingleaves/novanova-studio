@@ -35,7 +35,7 @@ export const DirectorDeskNode = memo(function DirectorDeskNode({ data: rawData, 
             <NodeHoverSurface
                 nodeId={data.id}
                 className="relative flex select-none flex-col overflow-visible rounded-lg border"
-                style={{ width: "100%", height: "100%", background: theme.node.panel, color: theme.node.text, borderColor: selected ? theme.node.activeStroke : theme.node.stroke, boxShadow: selected ? `0 0 0 1px ${theme.node.activeStroke}55` : undefined }}
+                style={{ width: "100%", height: "100%", background: theme.node.panel, color: theme.node.text, borderColor: selected ? theme.node.activeStroke : theme.node.stroke }}
             >
                 <CanvasNodeTitle nodeId={data.id} title={data.title} defaultTitle={translate("canvas.3DDirectorDesk")} onTitleChange={actions.onTitleChange} />
                 <div className="flex items-center gap-2 border-b px-3 py-2.5" style={{ borderColor: theme.node.stroke }}>
@@ -51,14 +51,13 @@ export const DirectorDeskNode = memo(function DirectorDeskNode({ data: rawData, 
                             className="absolute inset-0 opacity-35"
                             style={{ backgroundImage: `linear-gradient(${theme.directorDesk.grid} 1px, transparent 1px), linear-gradient(90deg, ${theme.directorDesk.grid} 1px, transparent 1px)`, backgroundSize: "24px 24px" }}
                         />
-                        <div className="absolute inset-x-[18%] bottom-[14%] h-[28%] rounded-[50%] border" style={{ transform: "perspective(500px) rotateX(62deg)", borderColor: theme.directorDesk.grid, background: theme.toolbar.activeBg }} />
-                        <div className="absolute left-1/2 top-[42%] size-10 -translate-x-1/2 rounded-[45%_45%_35%_35%]" style={{ background: theme.node.activeStroke }} />
+                        <Box aria-hidden="true" className="absolute left-1/2 top-1/2 size-10 -translate-x-1/2 -translate-y-1/2" style={{ color: theme.node.activeStroke }} />
                         <div className="absolute left-1/2 top-2 flex -translate-x-1/2 items-center gap-1 rounded px-2 py-1 text-[10px]" style={{ background: theme.node.panel, color: theme.node.muted }}>
-                            <Camera className="size-3" />
+                            <Camera className="size-3" aria-hidden="true" />
                             {camera?.name || translate("canvas.noCameraSelected")}
                         </div>
                         <div className="absolute bottom-2 left-2 flex items-center gap-1 text-[10px]" style={{ color: theme.node.muted }}>
-                            <KeyRound className="size-3" />
+                            <KeyRound className="size-3" aria-hidden="true" />
                             {keyframeCount} {translate("canvas.keyframes_2e317f")}</div>
                     </div>
                 </div>

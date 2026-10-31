@@ -687,7 +687,7 @@ class AgentTaskOrchestratorTest {
          * @param channels List<AiChannelConfig> 全站渠道列表
          */
         private StubPersistenceService(List<AiTaskDtos.AiChannelConfig> channels) {
-            super(null, null, null, null, null, null, null, null);
+            super(null, com.novanovastudio.TeamTestSupport.teamRepository(), com.novanovastudio.TeamTestSupport.storageBilling(), null, null, null, null, null, null, null);
             this.channels = channels;
         }
 
@@ -712,7 +712,7 @@ class AgentTaskOrchestratorTest {
                     .flatMap(channel -> channel.models().stream()
                             .map(model -> new PersistenceDtos.ModelConfig(
                                     channel.id() + "::" + model, channel.id(), model, AiTaskTypes.TEXT, List.of(),
-                                    model.equals(channel.models().get(0)), 0, 0, true, "high")))
+                                    model.equals(channel.models().get(0)), 0, java.math.BigDecimal.valueOf(0), true, "high")))
                     .toList());
         }
 

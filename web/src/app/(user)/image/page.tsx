@@ -1,4 +1,6 @@
 "use client";
+import { useInsufficientCreditsPrompt } from "@/features/credits/use-insufficient-credits-prompt";
+import { showInsufficientCredits } from "@/features/credits/insufficient-credits";
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { translateMessage as translate } from "@/features/locale/translate";
@@ -17,9 +19,10 @@ import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/com
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
-import { RecentReferenceImagePicker } from "@/features/generation/components/recent-reference-image-picker";
+import { RecentReferenceAssetPicker } from "@/features/generation/components/recent-reference-asset-picker";
 import { ImageSettingsPanel, imageQualityLabel, imageResolutionLabel, imageSizeLabel } from "@/features/generation/components/image-settings-panel";
 import { MEDIA_FALLBACK_IMAGE, MediaPreview, useMediaFallback } from "@/features/generation/components/media-fallback";
+import { useModelCreditBalance } from "@/features/team/credit-balance";
 import { requestCreditCost } from "@/features/generation/constants/credits";
 import type { CreationComposerAction, CreationConversationItem, CreationReferenceChip, CreationStyleOption, CreationThreadRound, CreationThreadSection } from "@/features/generation/components/creation-workspace-types";
 import { useAgentChatSSE } from "@/features/chat/use-agent-chat-sse";
@@ -36,7 +39,8 @@ import { selectGenerationAttachments } from "@/features/generation/lib/generatio
 import { imageReferenceAttachments, referenceMediaType, referenceMediaUrl } from "@/features/generation/lib/reference-attachments";
 import { reconcileImageMentions, type PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
-import { useRecentReferenceImages } from "@/features/generation/hooks/use-recent-reference-images";
+import { useRecentReferenceAssets } from "@/features/generation/hooks/use-recent-reference-assets";
+import type { RecentReferenceAsset } from "@/features/generation/lib/recent-reference-assets";
 import { imageReferenceLabel } from "@/features/generation/lib/image-reference-prompt";
 import { formatImageGenerationSettingsSummary } from "@/features/generation/lib/generation-settings-summary";
 import { loadImageLastUsedSettings, saveImageLastUsedSettings, type ImageLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
@@ -55,7 +59,7 @@ import { canvasThemes } from "@/shared/lib/canvas-theme";
 import { clearInitialPromptFromLocation, readInitialPromptFromLocation } from "@/shared/lib/initial-prompt";
 import { useCopyText } from "@/shared/hooks/use-copy-text";
 import type { ObjectStorageFile } from "@/shared/types/object-storage";
-import { deleteGenerationLogs, getAiTaskPollingIntervalMilliseconds, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
+import { deleteGenerationLogs, getAgentSessionHistory, getAiTaskPollingIntervalMilliseconds, listGenerationStyles, listSkills, markGenerationLogViewed, renameGenerationLogTitle, type GenerationStyleSnapshot, type SkillOption } from "@/services/api/server";
 
 type GeneratedImage = {
     id: string;
@@ -124,12 +128,14 @@ export default function ImagePage() {
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
     const theme = canvasThemes[resolvedTheme];
     const { optimizingOperationId, optimizePrompt } = usePromptOptimization();
-    const { recentReferenceImageUrls, recordRecentReferenceImage } = useRecentReferenceImages(userId);
+    const { recentReferenceAssets, recordRecentReferenceAsset } = useRecentReferenceAssets(userId);
     const isPromptOptimizing = optimizingOperationId === "image-page";
 
     const [activeId, setActiveId] = useState<string | null>(null);
     const activeIdRef = useRef(activeId);
     const { conversations, setConversations, conversationsRef, refreshConversations, loadMoreConversations, conversationsLoading, hasMoreConversations, conversationsError, retryConversations } = useGenerationConversations("image", userId, activeIdRef, normalizeConversation);
+    const [conversationHistory, setConversationHistory] = useState<{ id: string; messages: ChatMessageItem[]; loading: boolean; error: string } | null>(null);
+    const historyRequestVersion = useRef(0);
     const [prompt, setPrompt] = useState("");
     const [styleOptions, setStyleOptions] = useState<CreationStyleOption[]>([]);
     const [selectedStyles, setSelectedStyles] = useState<CreationStyleOption[]>([]);
@@ -447,6 +453,8 @@ export default function ImagePage() {
     });
 
     const creditCost = requestCreditCost({ modelCosts: effectiveConfig.modelCosts, model, taskType: "image", count: 1, resolution: config.imageResolution });
+    const creditBalance = useModelCreditBalance("image");
+    const balanceInsufficient = useInsufficientCreditsPrompt({ enabled: effectiveConfig.modelCosts.some((item) => item.model === model && item.taskType === "image"), requiredCredits: creditCost, availableCredits: creditBalance });
     const activeConversation = conversations.find((item) => item.id === activeId) || null;
     const latestRound = activeConversation?.rounds.at(-1);
     const historyModel = !imageDraftSettingsModified && activeId && latestRound?.config ? latestRound.config.imageModel || latestRound.config.model || "" : "";
@@ -454,7 +462,7 @@ export default function ImagePage() {
     const historySettingsSummary = !imageDraftSettingsModified && activeId && latestRound?.config ? buildImageSettingsSummary(latestRound.config, effectiveConfig, historyModel) : "";
     const settingsSummary = draftSettingsSummary || historySettingsSummary;
     const activeConversationPending = activeConversation ? hasPendingImageConversation(activeConversation) : false;
-    const canGenerate = Boolean(prompt.trim()) && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
+    const canGenerate = Boolean(prompt.trim()) && !balanceInsufficient && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
     const allSelected = Boolean(conversations.length) && selectedIds.length === conversations.length;
 
     useEffect(() => {
@@ -515,7 +523,7 @@ export default function ImagePage() {
                 try {
                     const file = imageFiles[index];
                     const image = await uploadImage(file);
-                    recordRecentReferenceImage(image.objectStorage?.url);
+                    recordRecentReferenceAsset({ kind: "image", url: image.objectStorage?.url || image.url, name: file.name });
                     const uploadedReference: ReferenceImage = {
                         ...placeholder,
                         name: file.name,
@@ -548,6 +556,7 @@ export default function ImagePage() {
             return;
         }
         if (!ensureModelConfiguration("image", model) || !ensureModelConfiguration("text")) return;
+        if (balanceInsufficient) { showInsufficientCredits(); return; }
 
         resetThinkings();
 
@@ -634,6 +643,8 @@ export default function ImagePage() {
         }
         setActiveId(null);
         activeIdRef.current = null;
+        historyRequestVersion.current += 1;
+        setConversationHistory(null);
         setImageDraftSettingsModified(false);
         setPrompt("");
         setReferences([]);
@@ -650,6 +661,22 @@ export default function ImagePage() {
         setStreamingText(null);
         streamingTextRef.current = null;
         resetSession();
+    };
+
+    const loadConversationHistory = async (conversation: Conversation) => {
+        const requestVersion = ++historyRequestVersion.current;
+        setConversationHistory(null);
+        // 没有生成轮次的记录仍有真实对话，按需读取会话正文，不能显示为新建页。
+        if (conversation.rounds.length) return;
+        setConversationHistory({ id: conversation.id, messages: [], loading: true, error: "" });
+        try {
+            const messages = await getAgentSessionHistory(conversation.id);
+            if (requestVersion !== historyRequestVersion.current || activeIdRef.current !== conversation.id) return;
+            setConversationHistory({ id: conversation.id, messages, loading: false, error: "" });
+        } catch (error) {
+            if (requestVersion !== historyRequestVersion.current || activeIdRef.current !== conversation.id) return;
+            setConversationHistory({ id: conversation.id, messages: [], loading: false, error: error instanceof Error ? error.message : translate("image.failedToLoadConversationHistory") });
+        }
     };
 
     const selectConversation = (conversation: Conversation) => {
@@ -678,6 +705,7 @@ export default function ImagePage() {
         setSelectedSkill(null);
         setMobileSidebarOpen(false);
         restoreSession(conversation.id);
+        void loadConversationHistory(conversation);
     };
 
     const toggleAll = () => {
@@ -885,10 +913,11 @@ export default function ImagePage() {
             onRemove: () => setReferences((current) => current.filter((item) => item.id !== reference.id)),
         };
     });
-    const addRecentReference = (url: string) => {
+    // 图片生成页只回填图片素材，视频素材留在视频页使用。
+    const addRecentReference = (asset: RecentReferenceAsset) => {
         setReferences((current) => {
-            if (current.some((reference) => reference.dataUrl === url)) return current;
-            return [...current, { id: nanoid(), name: translate("image.recentReferenceImages"), type: "image/*", dataUrl: url }];
+            if (current.some((reference) => reference.dataUrl === asset.url)) return current;
+            return [...current, { id: nanoid(), name: asset.name || translate("image.recentReferenceImages"), type: "image/*", dataUrl: asset.url }];
         });
     };
     const composerActions: CreationComposerAction[] = [
@@ -896,7 +925,13 @@ export default function ImagePage() {
             key: "upload",
             label: translate("image.referenceImage"),
             icon: <Upload className="size-3.5" />,
-            popoverContent: <RecentReferenceImagePicker urls={recentReferenceImageUrls} selectedUrls={references.map((reference) => reference.dataUrl)} onSelect={addRecentReference} />,
+            popoverContent: (
+                <RecentReferenceAssetPicker
+                    assets={recentReferenceAssets.filter((asset) => asset.kind === "image")}
+                    selectedUrls={references.map((reference) => reference.dataUrl)}
+                    onSelect={addRecentReference}
+                />
+            ),
             onClick: () => fileInputRef.current?.click(),
         },
         {
@@ -988,7 +1023,15 @@ export default function ImagePage() {
         renderPendingImageToolCall,
     );
     // 历史记录与当前生成中消息同时展示；当前待生成轮次仅在聊天区渲染。
-    const allThreadSections = chatThreadSection ? [...threadSections, chatThreadSection] : threadSections;
+    const activeHistory = conversationHistory?.id === activeId ? conversationHistory : null;
+    const historyThreadSection = activeHistory?.messages.length
+        ? buildChatThreadSection(activeHistory.messages, [], null, null, [], () => null)
+        : null;
+    const allThreadSections = [
+        ...(historyThreadSection ? [{ ...historyThreadSection, id: `history-${activeId}` }] : []),
+        ...threadSections,
+        ...(chatThreadSection ? [chatThreadSection] : []),
+    ];
 
     return (
         <>
@@ -1050,7 +1093,13 @@ export default function ImagePage() {
                         // 与页面"添加参考图"同一上传链路；上传完成后自动发送带附件消息，对话区回显图片
                         uploadChoiceInputRef.current?.click();
                     },
-                    emptyState: (
+                    emptyState: activeConversation ? (
+                        <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-[var(--studio-muted)]" role={activeHistory?.error ? "alert" : "status"}>
+                            {activeHistory?.loading ? <LoaderCircle className="size-5 animate-spin" /> : null}
+                            <span>{activeHistory?.loading ? translate("image.loadingConversationHistory") : activeHistory?.error || translate("generation.noConversations")}</span>
+                            {activeHistory?.error ? <Button onClick={() => void loadConversationHistory(activeConversation)}>{translate("image.retryLoadingConversationHistory")}</Button> : null}
+                        </div>
+                    ) : (
                         <div className="flex h-full flex-col justify-center pb-28 pt-12">
                             <div className="relative mx-auto w-full max-w-5xl px-6 sm:px-10 lg:-left-4 lg:px-3">
                                 <div className="relative -top-[10%] max-w-2xl">

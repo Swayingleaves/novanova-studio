@@ -108,7 +108,8 @@ class ModelTaskExecutionDispatcherTest {
 
         Assertions.assertTrue(released.await(2, TimeUnit.SECONDS));
         verify(modelTaskQueue).releaseActiveTask("model-1", "task-1");
-        verify(modelTaskQueue).claimAvailable("model-1");
+        // 初次入队与释放后的补位各检查一次，等待异步补位完成后验证。
+        verify(modelTaskQueue, org.mockito.Mockito.timeout(2000).times(2)).claimAvailable("model-1");
     }
 
     /** 执行器同步抛出异常时也应释放模型名额。 */

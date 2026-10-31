@@ -1,5 +1,8 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.novanovastudio.common.SystemMessage;
 
 import com.novanovastudio.common.BusinessException;
@@ -83,7 +86,7 @@ public class CheckInService {
                             result.getT1().size(),
                             result.getT1().stream().map(LocalDate::toString).toList(),
                             result.getT3().checkInCredits(),
-                            result.getT2().map(CheckInRepository.CheckInRecord::credits).orElse(0))));
+                            result.getT2().map(CheckInRepository.CheckInRecord::credits).orElse(BigDecimal.ZERO))));
         });
     }
 
@@ -137,7 +140,7 @@ public class CheckInService {
                     if (result.getT1().isPresent()) {
                         return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.alreadyCheckedInComeBackTomorrow")));
                     }
-                    int earnedCredits = result.getT2().checkInCredits();
+                    BigDecimal earnedCredits = result.getT2().checkInCredits();
                     return checkInRepository.claimCheckIn(userId, today, earnedCredits)
                             .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.alreadyCheckedInComeBackTomorrow"))))
                             .flatMap(recordId -> grantCredits(userId, earnedCredits, recordId))
@@ -157,8 +160,8 @@ public class CheckInService {
      * @param checkInRecordId Long 签到记录ID，用于追溯发放批次
      * @return Mono<Integer> 发放后的积分余额
      */
-    private Mono<Integer> grantCredits(Long userId, int earnedCredits, Long checkInRecordId) {
-        if (earnedCredits == 0) {
+    private Mono<BigDecimal> grantCredits(Long userId, BigDecimal earnedCredits, Long checkInRecordId) {
+        if (CreditAmounts.of(earnedCredits).compareTo(CreditAmounts.of(0)) == 0) {
             return creditRepository.getCreditBalance(userId)
                     .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.creditAccountNotFoundCannotCheckIn"))));
         }

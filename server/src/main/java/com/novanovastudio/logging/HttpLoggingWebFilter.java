@@ -318,6 +318,8 @@ public class HttpLoggingWebFilter implements WebFilter {
      */
     private void sanitizeJsonValue(Object value) {
         if (value instanceof JSONObject jsonObject) {
+            // 带到期时间的文件链接等同短期访问凭证，不将签名写入应用日志。
+            if (jsonObject.containsKey("expiresAt") && jsonObject.get("url") instanceof String) jsonObject.put("url", MASKED_VALUE);
             for (Map.Entry<String, Object> entry : jsonObject.entrySet()) {
                 if (SENSITIVE_BODY_FIELDS.contains(entry.getKey().toLowerCase(java.util.Locale.ROOT))) {
                     entry.setValue(MASKED_VALUE);

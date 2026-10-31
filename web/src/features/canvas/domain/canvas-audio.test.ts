@@ -48,8 +48,8 @@ test("音频连线按首次出现顺序去重，持久化引用沿用存储标�
 test("同一画布只播放一段音频，释放非当前节点不会停止其他节点", () => {
     let firstPauses = 0;
     let secondPauses = 0;
-    const first = { pause: () => firstPauses++ } as HTMLAudioElement;
-    const second = { pause: () => secondPauses++ } as HTMLAudioElement;
+    const first = { pause: () => { firstPauses++; } } as HTMLAudioElement;
+    const second = { pause: () => { secondPauses++; } } as HTMLAudioElement;
     activateCanvasAudio(first);
     activateCanvasAudio(second);
     assert.equal(firstPauses, 1);

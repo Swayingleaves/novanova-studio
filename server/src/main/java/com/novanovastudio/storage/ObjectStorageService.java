@@ -6,6 +6,7 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
 import com.novanovastudio.dto.PersistenceDtos;
 import java.io.InputStream;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -49,6 +50,61 @@ public class ObjectStorageService {
      */
     public String putObject(PersistenceDtos.ObjectStorageConfig config, String key, InputStream inputStream, long contentLength, String mimeType) {
         return providerAdapter(config).putObject(config, key, inputStream, contentLength, mimeType);
+    }
+
+    /**
+     * 确认默认存储桶拒绝匿名读取。
+     *
+     * @param config ObjectStorageConfig 对象存储配置
+     * @return boolean 是否已确认匿名读取被拒绝
+     */
+    public boolean verifyPrivateBucket(PersistenceDtos.ObjectStorageConfig config) {
+        return providerAdapter(config).verifyPrivateBucket(config);
+    }
+
+    /**
+     * 上传不可公开访问的私有对象。
+     *
+     * @param config ObjectStorageConfig 对象存储配置
+     * @param key String 对象键
+     * @param file Path 本地文件
+     */
+    public void putPrivateObject(PersistenceDtos.ObjectStorageConfig config, String key, Path file) {
+        providerAdapter(config).putPrivateObject(config, key, file);
+    }
+
+    /**
+     * 下载私有对象到本地路径。
+     *
+     * @param config ObjectStorageConfig 对象存储配置
+     * @param key String 对象键
+     * @param target Path 目标路径
+     */
+    public void downloadPrivateObject(PersistenceDtos.ObjectStorageConfig config, String key, Path target) {
+        providerAdapter(config).downloadPrivateObject(config, key, target);
+    }
+
+    /**
+     * 删除私有对象。
+     *
+     * @param config ObjectStorageConfig 对象存储配置
+     * @param key String 对象键
+     */
+    public void deletePrivateObject(PersistenceDtos.ObjectStorageConfig config, String key) {
+        providerAdapter(config).deletePrivateObject(config, key);
+    }
+
+    /**
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否作为附件下载
+     * @param expiresAt 到期时间
+     * @return 由原存储提供方签名的只读地址
+     */
+    public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        return providerAdapter(config).createReadUrl(config, key, fileName, mimeType, download, expiresAt);
     }
 
     /**

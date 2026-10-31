@@ -1,8 +1,8 @@
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { translateMessage as translate } from "@/features/locale/translate";
 
 import type { ServerAiTaskStatus } from "@/services/api/server";
-
-import { formatCredits } from "./credit-page-utils";
 
 /** 任务记录每页条数。 */
 export const TASK_RECORD_PAGE_SIZE = 20;
@@ -40,9 +40,9 @@ export function taskRecordStatusTone(status: ServerAiTaskStatus) {
  * @param consumedCredits 净消耗积分
  * @return 带负号的消耗文本
  */
-export function formatConsumedCredits(consumedCredits: number | null | undefined) {
-    const amount = consumedCredits ?? 0;
-    return amount > 0 ? `-${formatCredits(amount)}` : "0";
+export function formatConsumedCredits(consumedCredits: CreditAmount | null | undefined) {
+    const amount = creditAmount(consumedCredits ?? 0);
+    return amount.greaterThan(0) ? `-${creditText(amount)}` : "0";
 }
 
 /**

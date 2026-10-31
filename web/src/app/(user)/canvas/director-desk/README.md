@@ -1,5 +1,11 @@
 # 3D 导演台人工验收
 
+## 功能接入
+
+功能取自开源项目提交 `441bd9dc`，可从画布工具栏或空白区域右键菜单添加“3D 导演台”。场景、姿势、运动轨迹、机位和导出设置随画布文档保存。PNG 和 MP4 导出结果通过现有媒体上传接口保存，并回填为带来源连线的普通画布节点。
+
+三维场景按需加载，内置人体模型及 CC0 授权保存在 `web/public/models/director-desk/`。视频使用浏览器本地编码，不依赖服务端逐帧导出接口，也不需要新增数据库迁移或服务端配置。
+
 ## 绘制与运动
 
 1. 打开画布中的 3D 导演台，选中角色，进入“运动轨迹”。分别拖出圆形、直线、矩形和铅笔路径；确认时间轨道出现对应区间。
@@ -50,14 +56,17 @@
 7. 给当前拍摄机位绘制轨迹后，直接点击播放或按空格，无须手动切换视角，应自动进入“机位视角”并沿路径移动；暂停后保留当前机位画面。拖动播放头、点击刻度和逐帧定位也应使用对应时间的机位位置及跟随目标，和导出一致。
 8. 播放中手动切回“导演视角”可观察机位运动；暂停后再次播放重新进入机位预览。点击轨迹片段或面板片段选择框进入导演视角编辑，确认绘制与导航仍可操作，且导演视角位置不会写入拍摄机位。
 
-## 已执行的自动验证
+## 自动验证
 
-仅执行导演台求值与运动单元测试，不执行构建、语法检查或浏览器测试：
+从仓库根目录运行导演台单元测试及生产构建：
 
 ```powershell
 cd web
 node --experimental-strip-types --loader ./scripts/node-test-loader.mjs --test "src/app/(user)/canvas/director-desk/director-desk-evaluator.test.ts" "src/app/(user)/canvas/director-desk/director-desk-motion.test.ts" "src/app/(user)/canvas/director-desk/director-desk-video-export.test.ts" "src/app/(user)/canvas/director-desk/director-desk-timeline-segments.test.ts" "src/app/(user)/canvas/director-desk/director-desk-object-editing.test.ts" "src/features/canvas/constants.test.ts"
+pnpm build
 ```
+
+2026-10-16 合入验证：导演台单元测试与生产构建通过；完整画布回归中的“缩放结束时一次性保存节点位置和尺寸”和“缺少坐标的生成节点放在当前画布视口中心”在合入前的 `HEAD` 同样失败。独立 TypeScript 检查仍有既有错误，与 `HEAD` 对照没有新增诊断。生产构建沿用项目配置跳过类型错误，不能替代独立类型检查。未运行浏览器人工验收。
 
 ## 浏览器本地编码
 

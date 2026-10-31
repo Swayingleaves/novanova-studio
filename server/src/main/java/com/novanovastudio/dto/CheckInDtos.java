@@ -1,5 +1,9 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import java.util.List;
@@ -32,8 +36,8 @@ public final class CheckInDtos {
                                         boolean checkedInToday,
                                         int monthCheckedCount,
                                         List<String> monthCheckedDates,
-                                        int dailyCredits,
-                                        int todayCredits) {
+                                        @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal dailyCredits,
+                                        @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal todayCredits) {
     }
 
     /**
@@ -44,8 +48,8 @@ public final class CheckInDtos {
      * @param creditBalance 签到后的可用积分余额
      */
     public record CheckInResultResponse(String checkInDate,
-                                        int earnedCredits,
-                                        int creditBalance) {
+                                        @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal earnedCredits,
+                                        @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditBalance) {
     }
 
     /**
@@ -53,7 +57,7 @@ public final class CheckInDtos {
      *
      * @param checkInCredits 每日签到积分
      */
-    public record CheckInRewardSettingsResponse(int checkInCredits) {
+    public record CheckInRewardSettingsResponse(@jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal checkInCredits) {
     }
 
     /**
@@ -63,6 +67,6 @@ public final class CheckInDtos {
      */
     public record UpdateCheckInRewardSettingsRequest(
             @NotNull(message = "business.dailyCheckInCreditsAreRequired")
-            @Min(value = 0, message = "business.dailyCheckInCreditsMustNotBeNegative") Integer checkInCredits) {
+            @Min(value = 0, message = "business.dailyCheckInCreditsMustNotBeNegative") @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal checkInCredits) {
     }
 }

@@ -3,25 +3,45 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { useEffect, useState } from "react";
-import { Bell } from "lucide-react";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { Bell, createLucideIcon } from "lucide-react";
+import Link from "@/shared/lib/team-navigation";
+import { usePathname } from "@/shared/lib/team-navigation";
 import { Popover, Tooltip } from "antd";
 
 import { LanguageMenu } from "@/features/locale/components/language-menu";
+import { SidebarInstallEntry } from "@/features/pwa/components/sidebar-install-entry";
 import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
 import { navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
+import { canManageCurrentSpace } from "@/features/team/stores/use-team-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { cn } from "@/shared/lib/utils";
 import { useNotificationStore } from "@/features/notification/stores/use-notification-store";
 import { NotificationDetailModal } from "@/features/notification/components/notification-detail-modal";
+import { InvitationNotificationItem } from "@/features/notification/components/invitation-notification-item";
+import { listMyTeams } from "@/services/api/team";
+import { useTeamSwitcherStore } from "@/features/team/stores/use-team-switcher-store";
+import { useSpaceBrand } from "@/features/team/use-space-brand";
+
+/** Lucide 官方 user-round-group 图标（ISC 许可），沿用图标库的尺寸与主题能力。 */
+const UserRoundGroup = createLucideIcon("UserRoundGroup", [
+    ["path", { d: "M17 21a5 5 0 00-10 0", key: "center-body" }],
+    ["path", { d: "M22 10.5a3.5 3.5 0 00-5.507-2.868", key: "right-body" }],
+    ["path", { d: "M7.507 7.632A3.5 3.5 0 002 10.5", key: "left-body" }],
+    ["circle", { cx: "12", cy: "13", r: "3", key: "center-head" }],
+    ["circle", { cx: "18.5", cy: "4.5", r: "2.5", key: "right-head" }],
+    ["circle", { cx: "5.5", cy: "4.5", r: "2.5", key: "left-head" }],
+]);
 
 export function AppSidebar() {
     const translate = useTranslation();
+    const brand = useSpaceBrand();
     const pathname = usePathname();
     const user = useUserStore((state) => state.user);
-    const { notifications, unreadCount, loadNotifications } = useNotificationStore();
+    const myTeams = useQuery({ queryKey: ["myTeams", user?.id], queryFn: listMyTeams, enabled: Boolean(user && user.role !== "admin") });
+    const { notifications, invitations, unreadCount, loadNotifications } = useNotificationStore();
     const [detailNotification, setDetailNotification] = useState<(typeof notifications)[number] | null>(null);
+    const teamSwitcherOpen = useTeamSwitcherStore((state) => state.open);
 
     useEffect(() => {
         if (user) void loadNotifications();
@@ -30,8 +50,9 @@ export function AppSidebar() {
     const pathSlug = pathname.split("/").filter(Boolean).slice(0, 2).join("/");
     const slug = pathSlug.startsWith("admin/") ? pathSlug : pathname.split("/").filter(Boolean)[0];
 
-    const visibleTools = navigationTools.filter((tool) => !tool.adminOnly || user?.role === "admin");
+    const visibleTools = navigationTools.filter((tool) => !tool.adminOnly || canManageCurrentSpace());
     const activeSlug = navigationTools.some((tool) => tool.slug === slug) ? (slug as NavigationToolSlug) : undefined;
+    const showTeamSwitcher = Boolean(user && user.role !== "admin" && myTeams.data?.length);
 
     const renderNavItem = (tool: (typeof navigationTools)[number]) => {
         const Icon = tool.icon;
@@ -43,6 +64,7 @@ export function AppSidebar() {
                     <Icon className="size-5" />
                 </span>
                 <span className="sidebar-rail-label">{translate(tool.labelKey)}</span>
+                {tool.pro ? <span className="pro-badge right-0.5 top-0.5" title={translate("common.enterpriseFeature")}>PRO</span> : null}
             </Link>
         );
     };
@@ -51,23 +73,28 @@ export function AppSidebar() {
         <div className="w-72">
             <div className="border-b border-[var(--studio-line)] px-3 py-2 text-sm font-semibold text-[var(--studio-ink)]">{translate("appShell.announcements")}</div>
             <div className="max-h-72 overflow-y-auto">
-                {notifications.length ? (
-                    notifications.map((notification) => (
-                        <button
-                            key={notification.id}
-                            type="button"
-                            className={cn("block w-full border-b border-[var(--studio-line)] px-3 py-2.5 text-left transition hover:bg-[var(--studio-surface-hover)]", !notification.read && "bg-[var(--studio-primary-soft)]")}
-                            onClick={() => {
-                                setDetailNotification(notification);
-                            }}
-                        >
-                            <span className="flex items-start justify-between gap-2">
-                                <span className="line-clamp-1 text-sm font-medium text-[var(--studio-ink)]">{notification.title}</span>
-                                {!notification.read ? <span className="mt-1 size-1.5 shrink-0 rounded-full bg-[var(--studio-primary)]" /> : null}
-                            </span>
-                            {notification.content ? <span className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--studio-muted)]">{notification.content}</span> : null}
-                        </button>
-                    ))
+                {invitations.length || notifications.length ? (
+                    <>
+                        {invitations.map((invitation) => (
+                            <InvitationNotificationItem key={invitation.id} invitation={invitation} compact />
+                        ))}
+                        {notifications.map((notification) => (
+                            <button
+                                key={notification.id}
+                                type="button"
+                                className={cn("block w-full border-b border-[var(--studio-line)] px-3 py-2.5 text-left transition hover:bg-[var(--studio-surface-hover)]", !notification.read && "bg-[var(--studio-primary-soft)]")}
+                                onClick={() => {
+                                    setDetailNotification(notification);
+                                }}
+                            >
+                                <span className="flex items-start justify-between gap-2">
+                                    <span className="line-clamp-1 text-sm font-medium text-[var(--studio-ink)]">{notification.title}</span>
+                                    {!notification.read ? <span className="mt-1 size-1.5 shrink-0 rounded-full bg-[var(--studio-primary)]" /> : null}
+                                </span>
+                                {notification.content ? <span className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--studio-muted)]">{notification.content}</span> : null}
+                            </button>
+                        ))}
+                    </>
                 ) : (
                     <div className="px-3 py-8 text-center text-xs text-[var(--studio-faint)]">{translate("appShell.noAnnouncements")}</div>
                 )}
@@ -80,16 +107,16 @@ export function AppSidebar() {
             <NotificationDetailModal notification={detailNotification} onClose={() => setDetailNotification(null)} />
             <aside className={cn("studio-sidebar-rail flex h-dvh shrink-0 flex-col", translate.locale === "en" ? "w-28" : "w-[88px]")}>
                 <div className="flex h-[72px] shrink-0 items-center justify-center border-b border-[var(--studio-line)]">
-                    <Tooltip title="Novanova Studio" placement="right">
-                        <Link href="/" className="sidebar-brand-mark" aria-label={translate("appShell.novanovaStudioHome")}>
-                            <img src="/logo/novanovastudio.svg" alt="" aria-hidden="true" className="size-10 object-contain" />
+                    <Tooltip title={brand.name} placement="right">
+                        <Link href="/" className="sidebar-brand-mark" aria-label={translate("appShell.brandHome", { name: brand.name })}>
+                            <img src={brand.logoUrl} alt="" aria-hidden="true" className="size-10 object-contain" />
                         </Link>
                     </Tooltip>
                 </div>
 
-                <nav className="hide-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto px-2 pb-3">{visibleTools.map(renderNavItem)}</nav>
+                <nav data-tour="sidebar-nav" className="hide-scrollbar flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto px-2 pb-3">{visibleTools.map(renderNavItem)}</nav>
 
-                <div className="flex shrink-0 flex-col items-center gap-2 border-t border-[var(--studio-line)] px-2 py-2">
+                <div data-tour="sidebar-actions" className="flex shrink-0 flex-col items-center gap-2 border-t border-[var(--studio-line)] px-2 py-2">
                     <Tooltip title={translate("appShell.announcements")} placement="right">
                         {user ? (
                             <Popover
@@ -112,7 +139,15 @@ export function AppSidebar() {
                             </button>
                         )}
                     </Tooltip>
+                    <SidebarInstallEntry />
                     <LanguageMenu />
+                    {showTeamSwitcher ? (
+                        <Tooltip title="切换团队" placement="right">
+                            <button type="button" className="sidebar-rail-action" onClick={() => useTeamSwitcherStore.setState({ open: true, loginTarget: "", switchingTo: "" })} aria-label="切换团队" aria-haspopup="dialog" aria-expanded={teamSwitcherOpen}>
+                                <UserRoundGroup className="size-4.5" />
+                            </button>
+                        </Tooltip>
+                    ) : null}
                     <ThemePreferenceMenu />
                 </div>
             </aside>

@@ -38,11 +38,11 @@ test("首尾帧工作流按两个图片阶段和视频阶段汇总报价", () =>
 
     assert.equal(quote.available, true);
     if (quote.available) {
-        assert.equal(quote.credits, 30);
+        assert.equal(quote.credits, "30");
         assert.deepEqual(quote.stages.map((stage) => [stage.role, stage.credits]), [
-            ["first_frame", 5],
-            ["last_frame", 5],
-            ["video", 20],
+            ["first_frame", "5"],
+            ["last_frame", "5"],
+            ["video", "20"],
         ]);
     }
 });
@@ -53,8 +53,7 @@ test("首尾帧工作流优先使用模型原生首尾帧能力", () => {
         ...config.videoModelBillingConfigurations[0],
         capabilities: ["first-last-frame-to-video", "reference-to-video"],
         videoBillingConfiguration: {
-            ...config.videoModelBillingConfigurations[0].videoBillingConfiguration,
-            billingUnit: "generation" as const,
+            billingUnit: "generation",
             minimumDurationSeconds: 3,
             modePrices: { "first-last-frame-to-video": { "720p": 13 }, "reference-to-video": { "720p": 20 } },
         },
@@ -64,9 +63,9 @@ test("首尾帧工作流优先使用模型原生首尾帧能力", () => {
 
     assert.equal(quote.available, true);
     if (quote.available) {
-        assert.equal(quote.credits, 23);
+        assert.equal(quote.credits, "23");
         assert.deepEqual(quote.requiredCapabilities, ["text-to-image", "first-last-frame-to-video"]);
-        assert.equal(quote.stages.at(-1)?.credits, 13);
+        assert.equal(quote.stages.at(-1)?.credits, "13");
     }
 });
 
@@ -76,7 +75,7 @@ test("首尾帧工作流在原生能力缺失时回退到参考图能力", () =>
     assert.equal(quote.available, true);
     if (quote.available) {
         assert.deepEqual(quote.requiredCapabilities, ["text-to-image", "reference-to-video"]);
-        assert.equal(quote.stages.at(-1)?.credits, 20);
+        assert.equal(quote.stages.at(-1)?.credits, "20");
     }
 });
 
@@ -86,7 +85,8 @@ test("原生首尾帧模式未配置768p价格时回退到已定价的参考图�
         ...config.videoModelBillingConfigurations[0],
         capabilities: ["first-last-frame-to-video", "reference-to-video"],
         videoBillingConfiguration: {
-            ...config.videoModelBillingConfigurations[0].videoBillingConfiguration,
+            billingUnit: "generation",
+            minimumDurationSeconds: 3,
             modePrices: {
                 "first-last-frame-to-video": { "720p": 13 },
                 "reference-to-video": { "768p": 21 },
@@ -99,7 +99,7 @@ test("原生首尾帧模式未配置768p价格时回退到已定价的参考图�
     assert.equal(quote.available, true);
     if (quote.available) {
         assert.deepEqual(quote.requiredCapabilities, ["text-to-image", "reference-to-video"]);
-        assert.equal(quote.stages.at(-1)?.credits, 21);
+        assert.equal(quote.stages.at(-1)?.credits, "21");
     }
 });
 

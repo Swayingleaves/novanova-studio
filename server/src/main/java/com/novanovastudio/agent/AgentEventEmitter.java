@@ -40,8 +40,11 @@ public class AgentEventEmitter {
     /** Redis消息监听容器，测试构造器中允许为空 */
     private final ReactiveRedisMessageListenerContainer listenerContainer;
 
+    /** 按持久化会话解析事件归属，不能使用发射线程的当前空间。 */
+    private final org.springframework.r2dbc.core.DatabaseClient databaseClient;
+
     /** 当前实例的用户事件流 */
-    private final ConcurrentHashMap<Long, UserEventSink> userSinks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, UserEventSink> userSinks = new ConcurrentHashMap<>();
 
     /** 运行中会话对应的主Agent请求ID */
     private final ConcurrentHashMap<String, String> requestIdsBySession = new ConcurrentHashMap<>();
@@ -55,10 +58,11 @@ public class AgentEventEmitter {
      */
     @Autowired
     public AgentEventEmitter(AgentActivityService activityService, ReactiveStringRedisTemplate redisTemplate,
-                             ReactiveRedisMessageListenerContainer listenerContainer) {
+                             ReactiveRedisMessageListenerContainer listenerContainer, org.springframework.r2dbc.core.DatabaseClient databaseClient) {
         this.activityService = activityService;
         this.redisTemplate = redisTemplate;
         this.listenerContainer = listenerContainer;
+        this.databaseClient = databaseClient;
     }
 
     /**
@@ -70,6 +74,7 @@ public class AgentEventEmitter {
         this.activityService = activityService;
         this.redisTemplate = null;
         this.listenerContainer = null;
+        this.databaseClient = null;
     }
 
     /**
@@ -82,7 +87,7 @@ public class AgentEventEmitter {
         }
         listenerContainer.receive(new PatternTopic(EVENT_CHANNEL_PREFIX + "*"))
                 .flatMap(message -> {
-                    Long userId = parseChannelUserId(message.getChannel());
+                    String userId = message.getChannel().substring(EVENT_CHANNEL_PREFIX.length());
                     if (userId == null) {
                         return Mono.empty();
                     }
@@ -104,6 +109,15 @@ public class AgentEventEmitter {
      * @return Flux<AgentEvent> 事件流
      */
     public Flux<AgentEvent> subscribe(Long userId) {
+        return Flux.deferContextual(context -> subscribeSpace(com.novanovastudio.security.TeamScope.from(context).teamId() + ":" + userId));
+    }
+
+    /**
+     * 订阅唯一用户及空间的事件流。
+     * @param userId 用户和空间组合键
+     * @return 隔离事件流
+     */
+    private Flux<AgentEvent> subscribeSpace(String userId) {
         UserEventSink sink = userSinks.computeIfAbsent(userId,
                 ignored -> new UserEventSink(Sinks.many().multicast().onBackpressureBuffer(256, false), new AtomicInteger()));
         return sink.sink().asFlux()
@@ -125,10 +139,14 @@ public class AgentEventEmitter {
     public void emit(Long userId, AgentEvent event) {
         AgentEvent enriched = enrichRequestId(event);
         if (redisTemplate == null) {
-            deliver(userId, enriched);
+            deliver("0:" + userId, enriched);
             return;
         }
-        redisTemplate.convertAndSend(EVENT_CHANNEL_PREFIX + userId, JSON.toJSONString(enriched))
+        databaseClient.sql("SELECT team_id FROM agent_session WHERE id = :session AND user_id = :user")
+                .bind("session", enriched.sessionId()).bind("user", userId)
+                .map((row, metadata) -> row.get("team_id", Long.class)).one()
+                .contextWrite(context -> context.put(com.novanovastudio.security.TeamScope.SYSTEM_KEY, true))
+                .flatMap(teamId -> redisTemplate.convertAndSend(EVENT_CHANNEL_PREFIX + teamId + ":" + userId, JSON.toJSONString(enriched)))
                 .subscribe(
                         ignored -> {
                         },
@@ -202,7 +220,7 @@ public class AgentEventEmitter {
      * @param userId Long 用户ID
      */
     public void remove(Long userId) {
-        UserEventSink userEventSink = userSinks.remove(userId);
+        UserEventSink userEventSink = userSinks.remove("0:" + userId);
         if (userEventSink != null) {
             userEventSink.sink().tryEmitComplete();
         }
@@ -214,7 +232,7 @@ public class AgentEventEmitter {
      * @param userId Long 用户ID
      * @param event AgentEvent 事件
      */
-    private void deliver(Long userId, AgentEvent event) {
+    private void deliver(String userId, AgentEvent event) {
         if (event == null) {
             return;
         }
@@ -240,21 +258,6 @@ public class AgentEventEmitter {
         }
         String requestId = requestIdsBySession.get(event.sessionId());
         return requestId == null ? event : event.withRequestId(requestId);
-    }
-
-    /**
-     * 从Redis通道解析用户ID。
-     *
-     * @param channel String Redis通道名
-     * @return Long 用户ID，无法解析时返回null
-     */
-    private Long parseChannelUserId(String channel) {
-        try {
-            int index = channel.lastIndexOf(':');
-            return index < 0 ? null : Long.parseLong(channel.substring(index + 1));
-        } catch (Exception exception) {
-            return null;
-        }
     }
 
     /**

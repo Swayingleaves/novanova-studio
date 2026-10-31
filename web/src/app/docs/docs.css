@@ -22,6 +22,8 @@ html:has(.docs-shell) body { height: auto; overflow: visible; }
 .docs-sidebar-link-active { border-left-color: var(--studio-primary); background: var(--studio-primary-soft); color: var(--studio-ink); font-weight: 600; }
 .docs-sidebar-group { margin-top: 20px; }
 .docs-sidebar-group-title { padding: 0 10px 6px; color: var(--studio-faint); font-size: 11px; font-weight: 650; text-transform: uppercase; }
+/* PRO 角标：只用颜色区分，不带底色，与主应用导航里的企业版角标一致。 */
+.docs-pro-badge { display: inline-block; margin-left: 6px; border-radius: 4px; background: color-mix(in srgb, var(--studio-pro) 12%, transparent); color: var(--studio-pro); padding: 1px 5px; font-size: 10px; font-weight: 700; line-height: 1.6; letter-spacing: 0.06em; vertical-align: middle; }
 .docs-main { display: grid; grid-template-columns: minmax(0, 760px) 180px; justify-content: center; gap: 72px; padding: 56px 48px 96px; }
 .docs-article { min-width: 0; }
 .docs-breadcrumb { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 32px; color: var(--studio-faint); font-size: 13px; }

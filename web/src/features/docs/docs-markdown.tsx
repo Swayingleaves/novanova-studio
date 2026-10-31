@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/shared/lib/team-navigation";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";

@@ -1,4 +1,6 @@
 "use client";
+
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { translateMessage as translate } from "@/features/locale/translate";
@@ -9,7 +11,7 @@ import { useMemo, useState } from "react";
 import dayjs, { type Dayjs } from "dayjs";
 import { Alert, App, Button, DatePicker, Empty, Input, Pagination, Table, Tag, type TableProps } from "antd";
 import { ArrowLeft, CheckCircle2, Search, Ticket, Zap } from "lucide-react";
-import Link from "next/link";
+import Link from "@/shared/lib/team-navigation";
 import { useQuery } from "@tanstack/react-query";
 
 import { useUserStore } from "@/features/auth/stores/use-user-store";
@@ -60,7 +62,7 @@ export default function CreditRedeemPage() {
     const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>(() => [dayjs().subtract(29, "day").startOf("day"), dayjs().endOf("day")]);
     const [page, setPage] = useState(1);
     const [redeeming, setRedeeming] = useState(false);
-    const [redeemResult, setRedeemResult] = useState<{ credits: number; balance: number } | null>(null);
+    const [redeemResult, setRedeemResult] = useState<{ credits: CreditAmount; balance: CreditAmount } | null>(null);
 
     const filters = useMemo(() => ({
         startDate: dateRange[0].format("YYYY-MM-DD"),
@@ -164,7 +166,7 @@ export default function CreditRedeemPage() {
                             />
                         </div>
                     </div>
-                    {recordsQuery.isError ? <Alert className="mt-5" type="error" showIcon message={translate("credits.failedToLoadRedemptions")} action={<Button size="small" onClick={() => void recordsQuery.refetch()}>{translate("credits.reload")}</Button>} /> : null}
+                    {recordsQuery.isError ? <Alert className="mt-5" type="error" showIcon title={translate("credits.failedToLoadRedemptions")} action={<Button size="small" onClick={() => void recordsQuery.refetch()}>{translate("credits.reload")}</Button>} /> : null}
                     <div className="mt-5 overflow-x-auto">
                         <Table<ServerRedemptionRecord>
                             rowKey="id"

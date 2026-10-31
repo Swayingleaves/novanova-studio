@@ -60,14 +60,15 @@ export async function uploadImage(input: string | Blob): Promise<UploadedImage> 
 
 export async function reuseOrUploadImage(input: ReusableImage): Promise<UploadedImage> {
     if (!input.storageKey) return uploadImage(input.dataUrl);
-    const hasWidth = isPositiveDimension(input.width);
-    const hasHeight = isPositiveDimension(input.height);
+    const { width, height } = input;
+    const hasWidth = isPositiveDimension(width);
+    const hasHeight = isPositiveDimension(height);
     const meta = hasWidth && hasHeight && input.mimeType ? undefined : await readImageMeta(input.dataUrl);
     const image: UploadedImage = {
         url: input.dataUrl,
         storageKey: input.storageKey,
-        width: hasWidth ? input.width : meta!.width,
-        height: hasHeight ? input.height : meta!.height,
+        width: hasWidth ? width : meta!.width,
+        height: hasHeight ? height : meta!.height,
         bytes: input.bytes ?? 0,
         mimeType: input.mimeType || meta!.mimeType,
         ...(input.objectStorage ? { objectStorage: input.objectStorage } : {}),

@@ -1,6 +1,8 @@
 package com.novanovastudio.service;
 
 import com.novanovastudio.common.SystemMessage;
+import com.novanovastudio.common.AccountIdentifier;
+import com.novanovastudio.security.TeamScope;
 
 import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.common.ErrorCode;
@@ -28,8 +30,10 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
+import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Locale;
 import java.util.Base64;
@@ -93,6 +97,12 @@ public class UserService {
 
     /** 用户统计业务时区 */
     private static final ZoneId USER_STATISTICS_TIME_ZONE = ZoneId.of("Asia/Shanghai");
+
+    /** 用户趋势默认统计天数，含结束日期当天 */
+    private static final int DEFAULT_USER_TREND_DAYS = 30;
+
+    /** 用户趋势单次最大统计天数，避免一次查询过大区间 */
+    private static final int MAX_USER_TREND_DAYS = 366;
 
     /** 安全随机数 */
     private static final SecureRandom secureRandom = new SecureRandom();
@@ -183,32 +193,29 @@ public class UserService {
      * @return Mono<Void> 操作结果
      */
     public Mono<Void> sendEmailCode(UserDtos.SendEmailCodeRequest request) {
-        return Mono.defer(() -> {
-            // 标准化并校验邮箱，避免同一邮箱大小写重复注册。
-            String email = normalizeEmail(request.email());
-            validateEmailAllowedForRegistration(email);
-            log.info("发送邮箱验证码: email={}, purpose={}", email, CODE_PURPOSE_REGISTER);
-            return userRepository.findByEmail(email)
-                    .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered"))))
-                    .switchIfEmpty(Mono.defer(() -> {
-                        String code = randomNumericCode();
-                        return encodePassword(code)
-                                .flatMap(codeHash -> {
-                                    EmailVerificationCode record = new EmailVerificationCode();
-                                    record.setEmail(email);
-                                    record.setCodeHash(codeHash);
-                                    record.setPurpose(CODE_PURPOSE_REGISTER);
-                                    record.setSendCount(1);
-                                    record.setStatus(0);
-                                    record.setExpiresAt(OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(EMAIL_CODE_EXPIRE_MINUTES));
-                                    return userRepository.createEmailCode(record)
-                                            .flatMap(codeId -> sendEmailVerificationCode(email, code)
-                                                    .onErrorResume(exception -> userRepository.markEmailCodeUsed(codeId)
-                                                            .then(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.failedToSendVerificationCode", exception.getMessage()))))));
-                                });
-                    }))
-                    .then();
-        });
+        // 标准化并校验邮箱，避免同一邮箱大小写重复注册。
+        String email = normalizeEmail(request.email());
+        log.info("发送邮箱验证码: email={}, purpose={}", email, CODE_PURPOSE_REGISTER);
+        return userRepository.findByEmail(email)
+                .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered"))))
+                .switchIfEmpty(Mono.defer(() -> {
+                    String code = randomNumericCode();
+                    return encodePassword(code)
+                            .flatMap(codeHash -> {
+                                EmailVerificationCode record = new EmailVerificationCode();
+                                record.setEmail(email);
+                                record.setCodeHash(codeHash);
+                                record.setPurpose(CODE_PURPOSE_REGISTER);
+                                record.setSendCount(1);
+                                record.setStatus(0);
+                                record.setExpiresAt(OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(EMAIL_CODE_EXPIRE_MINUTES));
+                                return userRepository.createEmailCode(record)
+                                        .flatMap(codeId -> sendEmailVerificationCode(email, code)
+                                                .onErrorResume(exception -> userRepository.markEmailCodeUsed(codeId)
+                                                        .then(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.failedToSendVerificationCode", exception.getMessage()))))));
+                            });
+                }))
+                .then();
     }
 
     /**
@@ -218,59 +225,56 @@ public class UserService {
      * @return Mono<AuthResponse> 登录响应
      */
     public Mono<UserDtos.AuthResponse> register(UserDtos.RegisterRequest request) {
-        return Mono.defer(() -> {
-            // 注册前统一校验邮箱、密码和邮箱占用状态。
-            String email = normalizeEmail(request.email());
-            validateEmailAllowedForRegistration(email);
-            log.info("用户注册: email={}", email);
-            validatePassword(request.password());
-            return invitationService.resolveInviterUserId(request.invitationCode())
-                    .map(Optional::of)
-                    .defaultIfEmpty(Optional.empty())
-                    .flatMap(inviterUserId -> userRepository.findByEmail(email)
-                    .flatMap(existing -> Mono.<UserDtos.AuthResponse>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered"))))
-                    .switchIfEmpty(userRepository.latestValidEmailCode(email, CODE_PURPOSE_REGISTER)
-                            .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailCodeIsInvalidOrExpired"))))
-                            .flatMap(codeRecord -> matchesPassword(request.code().trim(), codeRecord.getCodeHash())
-                                    .flatMap(matches -> {
-                                        if (!matches) {
-                                            return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailCodeIsInvalidOrExpired")));
-                                        }
-                                        return encodePassword(request.password())
-                                                .flatMap(passwordHash -> {
-                                                    User user = new User();
-                                                    user.setUsername(email);
-                                                    user.setPassword(passwordHash);
-                                                    user.setEmail(email);
-                                                    user.setNickname(firstNonEmpty(request.nickname(), emailName(email)));
-                                                    user.setRole(ROLE_USER);
-                                                    user.setStatus(STATUS_NORMAL);
-                                                    user.setInvitationCode(invitationService.generateInvitationCode());
-                                                    user.setInvitedByUserId(inviterUserId.orElse(null));
-                                                    user.setRegisteredAt(OffsetDateTime.now(ZoneOffset.UTC));
-                                                    return userRepository.registerUserWithEmailCode(user, codeRecord.getId())
-                                                            .flatMap(userId -> creditService.initializeAccount(userId)
-                                                                    .then(inviterUserId.map(inviterId -> creditService.grantInvitationReward(inviterId, userId)).orElseGet(Mono::empty))
-                                                                    .then(userRepository.findById(userId)))
-                                                            .as(transactionalOperator::transactional)
-                                                            .map(this::buildAuthResponse);
-                                                });
-                                    }))));
-        });
+        // 注册前统一校验邮箱、密码和邮箱占用状态。
+        String email = normalizeEmail(request.email());
+        log.info("用户注册: email={}", email);
+        validatePassword(request.password());
+        return invitationService.resolveInviterUserId(request.invitationCode())
+                .map(Optional::of)
+                .defaultIfEmpty(Optional.empty())
+                .flatMap(inviterUserId -> userRepository.findByEmail(email)
+                .flatMap(existing -> Mono.<UserDtos.AuthResponse>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered"))))
+                .switchIfEmpty(userRepository.latestValidEmailCode(email, CODE_PURPOSE_REGISTER)
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailCodeIsInvalidOrExpired"))))
+                        .flatMap(codeRecord -> matchesPassword(request.code().trim(), codeRecord.getCodeHash())
+                                .flatMap(matches -> {
+                                    if (!matches) {
+                                        return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailCodeIsInvalidOrExpired")));
+                                    }
+                                    return encodePassword(request.password())
+                                            .flatMap(passwordHash -> {
+                                                User user = new User();
+                                                user.setUsername(email);
+                                                user.setPassword(passwordHash);
+                                                user.setEmail(email);
+                                                user.setNickname(firstNonEmpty(request.nickname(), emailName(email)));
+                                                user.setRole(ROLE_USER);
+                                                user.setStatus(STATUS_NORMAL);
+                                                user.setInvitationCode(invitationService.generateInvitationCode());
+                                                user.setInvitedByUserId(inviterUserId.orElse(null));
+                                                user.setRegisteredAt(OffsetDateTime.now(ZoneOffset.UTC));
+                                                return userRepository.registerUserWithEmailCode(user, codeRecord.getId())
+                                                        .flatMap(userId -> creditService.initializeAccount(userId)
+                                                                .then(inviterUserId.map(inviterId -> creditService.grantInvitationReward(inviterId, userId)).orElseGet(Mono::empty))
+                                                                .then(userRepository.findById(userId)))
+                                                        .as(transactionalOperator::transactional)
+                                                        .map(this::buildAuthResponse);
+                                            });
+                                }))));
     }
 
     /**
-     * 邮箱密码登录
+     * 用户名或邮箱密码登录
      *
      * @param request LoginRequest 登录请求
      * @return Mono<AuthResponse> 登录响应
      */
     public Mono<UserDtos.AuthResponse> login(UserDtos.LoginRequest request) {
-        // 按标准化邮箱查找用户，并统一返回账号密码错误以避免枚举邮箱。
-        String email = normalizeEmail(request.email());
-        log.info("用户登录: email={}", email);
-        return userRepository.findByEmail(email)
-                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.incorrectEmailOrPassword"))))
+        // 账号类型在查询前确定，密码错误后不尝试另一种标识。
+        AccountIdentifier account = AccountIdentifier.parse(request.account());
+        log.info("用户登录: account={}", account.value());
+        return findAccount(account)
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.incorrectAccountOrPassword"))))
                 .flatMap(user -> passwordLoginLockService.remainingLockDuration(user.getId())
                         .flatMap(duration -> Mono.<UserDtos.AuthResponse>error(passwordLockException(duration)))
                         .switchIfEmpty(matchesPassword(request.password(), user.getPassword()).flatMap(matches -> {
@@ -364,8 +368,12 @@ public class UserService {
         String nickname = request.nickname() == null ? "" : request.nickname().trim();
         String avatar = request.avatar() == null ? "" : request.avatar().trim();
         return currentUserProvider.currentUserId()
-                .flatMap(userId -> userRepository.updateCurrentUserProfile(userId, username, nickname, avatar)
-                        .flatMap(updated -> {
+                .flatMap(userId -> userRepository.findById(userId)
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.userNotFound"))))
+                        .flatMap(existing -> {
+                            if (!username.equals(existing.getUsername())) AccountIdentifier.username(username);
+                            return userRepository.updateCurrentUserProfile(userId, username, nickname, avatar);
+                        }).flatMap(updated -> {
                             if (!updated) {
                                 return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.usernameAlreadyTaken")));
                             }
@@ -415,6 +423,33 @@ public class UserService {
     }
 
     /**
+     * 标记当前用户已完成产品引导。
+     *
+     * @param version int 已完成的产品引导版本
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> completeOnboarding(int version) {
+        // 版本号由前端常量驱动，服务端只做下限与上限保护，避免异常值写坏数据。
+        int normalized = Math.max(1, Math.min(version, 1000));
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> userRepository.markOnboardingCompleted(userId, normalized)
+                        .doOnSuccess(ignored -> log.info("用户已完成产品引导: userId={}, version={}", userId, normalized)));
+    }
+
+    /**
+     * 标记当前用户已完成创作页产品导览。
+     *
+     * @param version int 已完成的创作页产品导览版本
+     * @return Mono<Void> 操作结果
+     */
+    public Mono<Void> completeCreationTour(int version) {
+        int normalized = Math.max(1, Math.min(version, 1000));
+        return currentUserProvider.currentUserId()
+                .flatMap(userId -> userRepository.markCreationTourCompleted(userId, normalized)
+                        .doOnSuccess(ignored -> log.info("用户已完成创作页产品导览: userId={}, version={}", userId, normalized)));
+    }
+
+    /**
      * 查询用户列表（支持搜索和筛选）
      *
      * @param page int 页码
@@ -434,7 +469,7 @@ public class UserService {
                 .collectList()
                 .flatMap(users -> passwordLoginLockService.lockedUntilByUserIds(users.stream().map(User::getId).toList())
                         .map(passwordLockedUntilByUserId -> users.stream()
-                                .map(user -> userProfile(user, passwordLockedUntilByUserId.get(user.getId())))
+                                .map(user -> userProfile(user, passwordLockedUntilByUserId.get(user.getId()), user.getEmail() == null))
                                 .toList()))
                 .zipWith(userRepository.countUsers(keyword, userId, role, status, createdAfter, createdBefore))
                 .map(tuple -> new UserDtos.UserListResponse(tuple.getT1(), tuple.getT2()));
@@ -455,6 +490,72 @@ public class UserService {
                 .doOnSuccess(statistics -> log.info(
                         "查询用户统计成功: totalUsers={}, monthlyNewUsers={}, dailyNewUsers={}",
                         statistics.totalUsers(), statistics.monthlyNewUsers(), statistics.dailyNewUsers()));
+    }
+
+    /**
+     * 查询用户数量与每日增量趋势。
+     *
+     * @param startDate String 开始日期（yyyy-MM-dd），为空时取结束日期前 29 天
+     * @param endDate String 结束日期（yyyy-MM-dd），为空时取今天
+     * @return Mono<UserTrendResponse> 每日用户数量与增量
+     */
+    public Mono<UserDtos.UserTrendResponse> getUserTrend(String startDate, String endDate) {
+        return Mono.defer(() -> {
+            LocalDate today = LocalDate.now(USER_STATISTICS_TIME_ZONE);
+            LocalDate end = resolveUserTrendDate(endDate, today);
+            LocalDate start = resolveUserTrendDate(startDate, end.minusDays(DEFAULT_USER_TREND_DAYS - 1L));
+            if (start.isAfter(end)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.userTrendStartDateMustNotBeAfterEndDate"));
+            }
+            // 区间过长时只保留结束日期前最近的合法天数，避免单次返回过多数据点
+            LocalDate rangeStart = start.isBefore(end.minusDays(MAX_USER_TREND_DAYS - 1L)) ? end.minusDays(MAX_USER_TREND_DAYS - 1L) : start;
+            OffsetDateTime startTime = rangeStart.atStartOfDay(USER_STATISTICS_TIME_ZONE).toOffsetDateTime();
+            OffsetDateTime endTime = end.plusDays(1).atStartOfDay(USER_STATISTICS_TIME_ZONE).toOffsetDateTime();
+            return Mono.zip(userRepository.countUsersCreatedBefore(startTime), userRepository.listDailyNewUsers(startTime, endTime).collectList())
+                    .map(tuple -> buildUserTrend(rangeStart, end, tuple.getT1(), tuple.getT2()))
+                    .doOnSuccess(trend -> log.info("查询用户趋势成功: startDate={}, endDate={}, totalUsers={}, newUsers={}",
+                            trend.startDate(), trend.endDate(), trend.totalUsers(), trend.newUsers()));
+        });
+    }
+
+    /**
+     * 解析用户趋势日期，空值回退到默认日期。
+     *
+     * @param value String 日期文本
+     * @param fallback LocalDate 默认日期
+     * @return LocalDate 解析后的日期
+     */
+    private LocalDate resolveUserTrendDate(String value, LocalDate fallback) {
+        if (!StringUtils.hasText(value)) return fallback;
+        try {
+            return LocalDate.parse(value.trim());
+        } catch (DateTimeParseException error) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.userTrendDateMustBeISODate"));
+        }
+    }
+
+    /**
+     * 按区间逐日展开用户数量与增量，缺失日期补零。
+     *
+     * @param start LocalDate 统计开始日期
+     * @param end LocalDate 统计结束日期
+     * @param baseline long 统计开始前的用户总数
+     * @param daily List<DailyNewUsers> 每日新增用户数
+     * @return UserTrendResponse 趋势数据
+     */
+    private UserDtos.UserTrendResponse buildUserTrend(LocalDate start, LocalDate end, long baseline, List<UserRepository.DailyNewUsers> daily) {
+        Map<String, Long> newUsersByDate = daily.stream()
+                .collect(Collectors.toMap(UserRepository.DailyNewUsers::date, UserRepository.DailyNewUsers::newUsers, Long::sum));
+        List<UserDtos.UserTrendPoint> points = new ArrayList<>();
+        long cumulative = baseline;
+        long newUsers = 0;
+        for (LocalDate cursor = start; !cursor.isAfter(end); cursor = cursor.plusDays(1)) {
+            long dailyNewUsers = newUsersByDate.getOrDefault(cursor.toString(), 0L);
+            cumulative += dailyNewUsers;
+            newUsers += dailyNewUsers;
+            points.add(new UserDtos.UserTrendPoint(cursor.toString(), dailyNewUsers, cumulative));
+        }
+        return new UserDtos.UserTrendResponse(start.toString(), end.toString(), cumulative, newUsers, points);
     }
 
     /**
@@ -508,24 +609,51 @@ public class UserService {
      * @return Mono<Void>
      */
     public Mono<Void> adminCreateUser(UserDtos.AdminCreateUserRequest request) {
-        String email = normalizeEmail(request.email());
-        return userRepository.findByEmail(email)
-                .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered"))))
-                .switchIfEmpty(encodePassword(request.password())
-                        .flatMap(passwordHash -> {
-                            User user = new User();
-                            user.setUsername(email);
-                            user.setPassword(passwordHash);
-                            user.setEmail(email);
-                            user.setNickname(firstNonEmpty(request.nickname(), emailName(email)));
-                            user.setRole(ROLE_ADMIN.equals(request.role()) ? ROLE_ADMIN : ROLE_USER);
-                            user.setStatus(STATUS_NORMAL);
-                            user.setInvitationCode(invitationService.generateInvitationCode());
-                            user.setRegisteredAt(java.time.OffsetDateTime.now());
-                            return userRepository.createUser(user)
-                                    .flatMap(userId -> creditService.initializeAccount(userId))
-                                    .as(transactionalOperator::transactional);
-                        }));
+        AccountIdentifier account = AccountIdentifier.parse(request.account());
+        account.validateCreation();
+        AccountIdentifier.validatePassword(request.password());
+        return currentUserProvider.currentUserId().flatMap(operator -> findAccount(account)
+                .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.accountAlreadyExists"))))
+                .switchIfEmpty(Mono.defer(() -> encodePassword(request.password()).flatMap(passwordHash -> {
+                    User user = new User();
+                    user.setUsername(account.value()); user.setEmail(account.email()); user.setPassword(passwordHash);
+                    user.setNickname(firstNonEmpty(request.nickname(), account.defaultNickname()));
+                    user.setRole(ROLE_ADMIN.equals(request.role()) ? ROLE_ADMIN : ROLE_USER);
+                    user.setStatus(STATUS_NORMAL); user.setCreatedByUserId(operator);
+                    user.setInvitationCode(invitationService.generateInvitationCode());
+                    user.setRegisteredAt(OffsetDateTime.now(ZoneOffset.UTC));
+                    return userRepository.createUser(user).flatMap(creditService::initializeAccount);
+                }))).as(transactionalOperator::transactional));
+    }
+
+    /**
+     * 超级管理员在平台空间重置无邮箱账号密码，提交后清除错误锁定。
+     * @param request 目标账号及新密码
+     * @return 重置完成信号
+     */
+    public Mono<Void> resetUserPassword(UserDtos.AdminResetPasswordRequest request) {
+        AccountIdentifier.validatePassword(request.newPassword());
+        return currentUserProvider.currentUser().filter(operator -> ROLE_ADMIN.equals(operator.role()))
+                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, SystemMessage.of("business.permissionDenied"))))
+                .flatMap(operator -> TeamScope.current().filter(scope -> scope.teamId() == 0)
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, SystemMessage.of("business.permissionDenied"))))
+                        .then(Mono.defer(() -> userRepository.lockUser(request.userId())
+                                .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, SystemMessage.of("business.userNotFound"))))))
+                        .flatMap(user -> user.getEmail() != null
+                                ? Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, SystemMessage.of("business.onlyPasswordAccountsCanBeReset")))
+                                : encodePassword(request.newPassword()).flatMap(encoded -> userRepository.updatePasswordAfterReset(user.getId(), encoded)))
+                        .as(transactionalOperator::transactional)
+                        .then(Mono.defer(() -> passwordLoginLockService.clear(request.userId())))
+                        .doOnSuccess(ignored -> log.info("超级管理员重置无邮箱账号密码：operatorUserId={}, userId={}", operator.id(), request.userId())));
+    }
+
+    /**
+     * 根据已确定的标识类型查询唯一账号。
+     * @param account 标准化账号
+     * @return 用户记录
+     */
+    private Mono<User> findAccount(AccountIdentifier account) {
+        return account.email() == null ? userRepository.findByUsername(account.value()) : userRepository.findByEmail(account.email());
     }
 
     /**
@@ -592,7 +720,7 @@ public class UserService {
      * @return UserProfile 用户公开资料
      */
     private UserDtos.UserProfile userProfile(User user) {
-        return userProfile(user, null);
+        return userProfile(user, null, false);
     }
 
     /**
@@ -600,9 +728,10 @@ public class UserService {
      *
      * @param user User 用户信息
      * @param passwordLockedUntil OffsetDateTime 密码锁定截止时间
+     * @param canResetPassword 是否可由当前管理入口重置密码
      * @return UserProfile 用户公开资料
      */
-    private UserDtos.UserProfile userProfile(User user, OffsetDateTime passwordLockedUntil) {
+    private UserDtos.UserProfile userProfile(User user, OffsetDateTime passwordLockedUntil, boolean canResetPassword) {
         // 只返回前端需要的公开字段，密码哈希等敏感字段不进入响应。
         return new UserDtos.UserProfile(
                 user.getId(),
@@ -616,7 +745,10 @@ public class UserService {
                 formatTime(user.getCreatedAt()),
                 formatTime(user.getLastLoginAt()),
                 user.getWelcomeReadAt() != null,
-                passwordLockedUntil == null ? null : formatTime(passwordLockedUntil)
+                user.getOnboardingVersion() == null ? 0 : user.getOnboardingVersion(),
+                user.getCreationTourVersion() == null ? 0 : user.getCreationTourVersion(),
+                passwordLockedUntil == null ? null : formatTime(passwordLockedUntil),
+                canResetPassword
         );
     }
 
@@ -646,7 +778,7 @@ public class UserService {
             case 6 -> new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.tooManyIncorrectPasswordsTryIn10Minutes"));
             default -> lockState.failedAttempts() >= 7
                     ? new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.tooManyIncorrectPasswordsAccountLockedFor2Hours"))
-                    : new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.incorrectEmailOrPassword"));
+                    : new BusinessException(ErrorCode.AUTH_ERROR, SystemMessage.of("business.incorrectAccountOrPassword"));
         };
     }
 
@@ -666,58 +798,12 @@ public class UserService {
     }
 
     /**
-     * 校验邮箱是否属于允许注册的后缀白名单。
-     *
-     * @param email String 标准化后的邮箱
-     */
-    private void validateEmailAllowedForRegistration(String email) {
-        if (properties == null || properties.getEmail() == null) {
-            return;
-        }
-        String allowedSuffixesConfig = properties.getEmail().getAllowedSuffixes();
-        if (!StringUtils.hasText(allowedSuffixesConfig)) {
-            return;
-        }
-        List<String> allowedSuffixes = Arrays.stream(allowedSuffixesConfig.split(","))
-                .map(String::trim)
-                .filter(StringUtils::hasText)
-                .map(suffix -> suffix.replaceAll("^[.@]+", ""))
-                .map(suffix -> suffix.toLowerCase(Locale.ROOT))
-                .toList();
-
-        if (allowedSuffixes.isEmpty() || allowedSuffixes.contains("*")) {
-            return;
-        }
-
-        int atIndex = email.lastIndexOf('@');
-        if (atIndex < 0 || atIndex >= email.length() - 1) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.invalidEmailAddress"));
-        }
-        String domain = email.substring(atIndex + 1).toLowerCase(Locale.ROOT);
-
-        boolean matched = allowedSuffixes.stream().anyMatch(allowed ->
-                domain.equals(allowed) || domain.endsWith("." + allowed)
-        );
-
-        if (!matched) {
-            if (allowedSuffixes.size() <= 4) {
-                String examples = allowedSuffixes.stream().map(s -> "@" + s).collect(Collectors.joining("、"));
-                throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.emailDomainUnsupportedSupportedDomains", examples));
-            }
-            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.useASupportedEmailDomainSuchAsQqComOr"));
-        }
-    }
-
-    /**
      * 校验密码强度
      *
      * @param password String 密码
      */
     private void validatePassword(String password) {
-        // 通过码点数量判断长度，避免多字节字符被错误计算。
-        if (password == null || password.codePointCount(0, password.length()) < MIN_PASSWORD_LENGTH) {
-            throw new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.passwordNeedsAtLeastCharacters", MIN_PASSWORD_LENGTH));
-        }
+        AccountIdentifier.validatePassword(password);
     }
 
     /**

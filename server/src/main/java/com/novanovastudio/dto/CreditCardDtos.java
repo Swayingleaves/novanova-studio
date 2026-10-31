@@ -1,5 +1,10 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -40,7 +45,7 @@ public final class CreditCardDtos {
      * @param creditBalance Integer 兑换后的积分余额
      * @param redeemedAt String 兑换时间
      */
-    public record RedeemCreditsResponse(Long cardId, String cardMasked, Integer credits, Integer creditBalance, String redeemedAt) {
+    public record RedeemCreditsResponse(Long cardId, String cardMasked, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditBalance, String redeemedAt) {
     }
 
     /**
@@ -56,7 +61,7 @@ public final class CreditCardDtos {
      * @param redeemedAt String 兑换时间
      */
     public record RedemptionRecord(Long id, Long transactionId, String cardCode, String cardMasked, String cardSuffix,
-                                   Integer credits, Integer balanceAfter, String redeemedAt) {
+                                   @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal balanceAfter, String redeemedAt) {
     }
 
     /**
@@ -75,7 +80,7 @@ public final class CreditCardDtos {
      * @param creditsPerCard Integer 单卡兑换积分
      */
     public record GenerateCreditCardsRequest(@Min(value = 1, message = "business.quantityMustBePositive") @Max(value = MAX_QUANTITY, message = "business.quantityMustNotExceed1000") Integer quantity,
-                                             @NotNull(message = "business.creditsPerCardAreRequired") @Min(value = 1, message = "business.creditsPerCardMustBeAPositiveInteger") Integer creditsPerCard) {
+                                             @NotNull(message = "business.creditsPerCardAreRequired") @jakarta.validation.constraints.DecimalMin(value = "0.000001", message = "business.creditsPerCardMustBeAPositiveInteger") @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditsPerCard) {
     }
 
     /**
@@ -87,7 +92,7 @@ public final class CreditCardDtos {
      * @param cardCodes List<String> 卡密明文，每行一个
      * @param createdAt String 创建时间
      */
-    public record GenerateCreditCardsResponse(Long batchId, Integer quantity, Integer creditsPerCard, List<String> cardCodes, String createdAt) {
+    public record GenerateCreditCardsResponse(Long batchId, Integer quantity, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditsPerCard, List<String> cardCodes, String createdAt) {
     }
 
     /**
@@ -103,7 +108,7 @@ public final class CreditCardDtos {
      * @param createdByEmail String 创建管理员邮箱
      * @param createdAt String 创建时间
      */
-    public record CreditCardBatch(Long id, Integer quantity, Integer creditsPerCard, Integer redeemedCount, Integer availableCount,
+    public record CreditCardBatch(Long id, Integer quantity, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditsPerCard, Integer redeemedCount, Integer availableCount,
                                   Long createdByUserId, String createdByName, String createdByEmail, String createdAt) {
     }
 
@@ -135,9 +140,9 @@ public final class CreditCardDtos {
      * @param transactionId Long 积分流水ID
      * @param balanceAfter Integer 流水后的积分余额
      */
-    public record CreditCard(Long id, Long batchId, String code, String codeMasked, String codeSuffix, Integer credits, String status,
+    public record CreditCard(Long id, Long batchId, String code, String codeMasked, String codeSuffix, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal credits, String status,
                              Long redeemedByUserId, String redeemedByUsername, String redeemedByNickname, String redeemedByEmail,
-                             String redeemedAt, String createdAt, Long transactionId, Integer balanceAfter) {
+                             String redeemedAt, String createdAt, Long transactionId, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal balanceAfter) {
     }
 
     /**

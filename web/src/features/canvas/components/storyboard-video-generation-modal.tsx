@@ -1,4 +1,8 @@
 "use client";
+import { useInsufficientCreditsPrompt } from "@/features/credits/use-insufficient-credits-prompt";
+import { showInsufficientCredits } from "@/features/credits/insufficient-credits";
+
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
@@ -7,6 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { App, Button, Checkbox, Modal, Tag } from "antd";
 import { Clapperboard } from "lucide-react";
 
+import { modelCreditBalance } from "@/features/team/credit-balance";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { VideoSettingsPanel } from "@/features/generation/components/video-settings-panel";
 import { videoGenerationModeLabel, videoModelSupportsMode } from "@/features/generation/lib/video-billing";
@@ -46,7 +51,6 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
     const theme = useCanvasTheme();
     const effectiveConfig = useEffectiveConfig();
     const isAiConfigReady = useConfigStore((state) => state.isAiConfigReady);
-    const creditBalance = useUserStore((state) => state.user?.creditBalance);
     const [selectedShotIds, setSelectedShotIds] = useState<string[]>([]);
     const [videoModel, setVideoModel] = useState("");
     const [videoSettings, setVideoSettings] = useState<StoryboardVideoGenerationSettings>(() => readVideoSettings(effectiveConfig));
@@ -82,7 +86,9 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
     const modelReady = Boolean(videoModel && storyboardModelOptions.includes(videoModel) && isAiConfigReady(effectiveConfig, videoModel));
     const videoQuote = readStoryboardVideoCost(effectiveConfig, videoModel, videoConfig, selectedShots, node?.storyboard.assets || [], referenceVideos);
     const totalCredits = videoQuote.available ? videoQuote.credits : null;
-    const balanceInsufficient = typeof creditBalance === "number" && totalCredits !== null && totalCredits > creditBalance;
+    const creditBalance = modelCreditBalance(videoModel);
+    useInsufficientCreditsPrompt({ enabled: open && modelReady && !!selectedShots.length, requiredCredits: totalCredits, availableCredits: creditBalance, contextKey: node?.id });
+    const balanceInsufficient = creditBalance !== null && creditBalance !== undefined && totalCredits !== null && creditAmount(totalCredits).greaterThan(creditBalance);
     const selectedSelectableShotCount = selectedShotIds.filter((id) => selectableShotIds.includes(id)).length;
     const allSelected = Boolean(selectableShotIds.length) && selectedSelectableShotCount === selectableShotIds.length;
     const partiallySelected = selectedSelectableShotCount > 0 && !allSelected;
@@ -113,12 +119,12 @@ export function StoryboardVideoGenerationModal({ open, node, generating, referen
             return;
         }
         if (balanceInsufficient) {
-            message.error(translate("canvas.insufficientCreditsVideosNeedAvailable", { value0: selectedShots.length, value1: totalCredits, value2: creditBalance }));
+            showInsufficientCredits(translate("canvas.insufficientCreditsVideosNeedAvailable", { value0: selectedShots.length, value1: totalCredits, value2: creditBalance }));
             return;
         }
         modal.confirm({
             title: translate("canvas.confirmBatchVideoGeneration"),
-            content: `将使用所选模型、${videoConfig.size || translate("canvas.auto")}比例和${videoConfig.vquality || translate("canvas.default")}清晰度，为 ${selectedShots.length} 个镜头分别创建视频任务，预计消耗 ${totalCredits} 积分。是否继续？`,
+            content: translate("canvas.confirmBatchVideoGenerationDetails", { value0: videoConfig.size || translate("canvas.auto"), value1: videoConfig.vquality || translate("canvas.default"), value2: selectedShots.length, value3: totalCredits ?? "0" }),
             okText: translate("canvas.confirmGeneration"),
             cancelText: translate("canvas.cancel"),
             onOk: () => {

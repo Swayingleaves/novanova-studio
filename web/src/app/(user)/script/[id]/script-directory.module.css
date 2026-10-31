@@ -1,0 +1,28 @@
+.sceneGroup {
+    position: relative;
+    margin: 2px 0 10px 58px;
+    padding-left: 14px;
+}
+
+.sceneGroup::before {
+    position: absolute;
+    top: 0;
+    bottom: 16px;
+    left: 0;
+    border-left: 1px solid var(--studio-line-strong);
+    content: "";
+}
+
+.sceneItem {
+    position: relative;
+    margin-bottom: 4px;
+}
+
+.sceneItem::before {
+    position: absolute;
+    top: 50%;
+    left: -14px;
+    width: 14px;
+    border-top: 1px solid var(--studio-line-strong);
+    content: "";
+}

@@ -5,12 +5,13 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { ArrowUp, ArrowUpRight, Bot, BookOpenText, Clapperboard, ImageIcon, Images, Paperclip, Pause, Play, Search, SendToBack, SlidersHorizontal, Sparkles } from "lucide-react";
-import Link from "next/link";
+import Link from "@/shared/lib/team-navigation";
 import { motion, useReducedMotion } from "motion/react";
 
-import { useUserStore } from "@/features/auth/stores/use-user-store";
+import { useSpaceBrand } from "@/features/team/use-space-brand";
 import { getHomepageTargetPath, homepageFallbackEditorialShowcaseId, homepageFallbackEditorialVideoUrls } from "@/features/homepage/api/homepage-showcases";
 import { useHomepageShowcases } from "@/features/homepage/hooks/use-homepage-showcases";
+import { startHomepageCreation } from "@/features/homepage/lib/homepage-navigation";
 import { FANTASTIC_SHOWCASE_LIMIT, FANTASTIC_SHOW_CATEGORIES, creatorMonogram, filterFantasticShowcases, getFantasticShowcases, type FantasticShowCategory } from "@/features/homepage/lib/fantastic-show";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
 import type { HomepageShowcase } from "@/services/api/server";
@@ -32,22 +33,13 @@ const icpRecordNumber = process.env.NEXT_PUBLIC_ICP_RECORD_NUMBER?.trim();
 export default function IndexPage() {
     const translate = useTranslation();
     const [prompt, setPrompt] = useState("");
-    const user = useUserStore((state) => state.user);
-    const openAuthModal = useUserStore((state) => state.openAuthModal);
+    const brand = useSpaceBrand();
+    const teamIntroduction = brand.isTeam ? brand.introduction.trim() : "";
     const showcases = useHomepageShowcases();
     const { optimizingOperationId, optimizePrompt } = usePromptOptimization();
     const isPromptOptimizing = optimizingOperationId === "homepage-image";
 
-    const submitAgent = () => {
-        const value = prompt.trim();
-        if (!value) return;
-        const target = `/image?initialPrompt=${encodeURIComponent(value)}`;
-        if (!user) {
-            openAuthModal(target);
-            return;
-        }
-        window.location.assign(target);
-    };
+    const submitAgent = () => startHomepageCreation(prompt);
 
     return (
         <main className="studio-page h-full overflow-y-auto">
@@ -59,16 +51,17 @@ export default function IndexPage() {
                             AI Visual Creation Studio
                         </div>
                         <BrandMark />
-                        <p className="mt-7 max-w-[520px] text-base leading-7 text-[var(--studio-text)] md:text-lg">
-                            <strong className="font-semibold text-[var(--studio-ink)]">{translate("page.oneSentenceOrchestratesYourVisualWorkflow")}</strong> {translate("page.fromIdeasAndGenerationToComparisonAndCanvasComposition")}</p>
+                        <p className="mt-7 max-w-[520px] wrap-anywhere whitespace-pre-wrap text-base leading-7 text-[var(--studio-text)] md:text-lg">
+                            {teamIntroduction || <><strong className="font-semibold text-[var(--studio-ink)]">{translate("page.oneSentenceOrchestratesYourVisualWorkflow")}</strong> {translate("page.fromIdeasAndGenerationToComparisonAndCanvasComposition")}</>}
+                        </p>
 
                         <div className="mt-8 overflow-hidden rounded-[8px] border border-[var(--studio-line-strong)] bg-[var(--studio-surface)] shadow-[var(--studio-shadow)] transition duration-300 focus-within:-translate-y-0.5 focus-within:border-[var(--studio-action)] motion-reduce:transform-none">
                             <div className="flex items-center justify-between gap-4 border-b border-[var(--studio-line)] px-3.5 py-3 text-[11px] text-[var(--studio-muted)]">
-                                <span style={studioInterfaceFont} className="flex items-center gap-2 font-semibold text-[var(--studio-action)]">
-                                    <Bot className="size-3.5" strokeWidth={1.6} aria-hidden="true" />
-                                    Novanova Agent
+                                <span style={studioInterfaceFont} className="flex min-w-0 items-center gap-2 font-semibold text-[var(--studio-action)]">
+                                    <Bot className="size-3.5 shrink-0" strokeWidth={1.6} aria-hidden="true" />
+                                    <span className="min-w-0 wrap-anywhere">{brand.agentName}</span>
                                 </span>
-                                <span>{prompt.length} / 2000</span>
+                                <span className="shrink-0">{prompt.length} / 2000</span>
                             </div>
                             <textarea
                                 value={prompt}
@@ -187,7 +180,7 @@ export default function IndexPage() {
                 <FantasticShow {...showcases} />
 
                 <footer className="mt-9 flex flex-col gap-2 border-t border-[var(--studio-line)] pt-4 text-[10px] text-[var(--studio-faint)] sm:flex-row sm:items-center sm:justify-between">
-                    <span className="uppercase">Novanova Studio / AI Visual Agent</span>
+                    <span className={brand.isTeam ? "wrap-anywhere" : "uppercase"}>{brand.name} / AI Visual Agent</span>
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                         {icpRecordNumber ? (
                             <a
@@ -208,8 +201,15 @@ export default function IndexPage() {
 }
 
 function BrandMark() {
+    const brand = useSpaceBrand();
+    if (brand.isTeam) return (
+        <h1 aria-label={brand.name} className="m-0 flex max-w-[720px] flex-col items-start gap-5 pb-[14px] pt-1 text-[var(--studio-ink)] sm:flex-row sm:items-center">
+            <img src={brand.logoUrl} alt="" aria-hidden="true" width={80} height={80} className="size-16 shrink-0 object-contain sm:size-20" />
+            <span className="min-w-0 wrap-anywhere whitespace-pre-wrap text-[clamp(32px,4.6vw,64px)] leading-[1.15] font-semibold">{brand.name}</span>
+        </h1>
+    );
     return (
-        <h1 aria-label="Novanova Studio" style={studioWordmarkFont} className="m-0 max-w-[720px] pb-[14px] pt-1 text-[var(--studio-ink)] uppercase">
+        <h1 aria-label={brand.name} style={studioWordmarkFont} className="m-0 max-w-[720px] pb-[14px] pt-1 text-[var(--studio-ink)] uppercase">
             <span className="flex items-start gap-[14px]">
                 <span style={studioWordmarkText} className="whitespace-nowrap text-[clamp(72px,7.6vw,128px)] leading-[0.82]">Nova</span>
                 <span style={studioInterfaceFont} className="mt-1.5 min-w-7 text-[11px] font-semibold text-[var(--studio-action)]">N / 01</span>
@@ -219,7 +219,7 @@ function BrandMark() {
                 <span style={studioInterfaceFont} className="mt-1.5 min-w-7 text-[11px] font-semibold text-[var(--studio-action)]">N / 02</span>
             </span>
             <span className="mt-5 flex items-center gap-3 normal-case">
-                <img src="/logo/novanovastudio.svg" alt="" aria-hidden="true" className="size-[52px] object-contain" />
+                <img src={brand.logoUrl} alt="" aria-hidden="true" className="size-[52px] object-contain" />
                 <span style={studioLockupFont} className="text-[clamp(25px,2.5vw,39px)] leading-none">Studio</span>
                 <span className="h-px w-[120px] max-w-[18vw] bg-[var(--studio-line-strong)]" aria-hidden="true" />
             </span>
@@ -435,7 +435,7 @@ function FantasticShow({ items, loading, error, reload }: ReturnType<typeof useH
     const categoryMessageKeys: Record<string, string> = {"全部":"page.all","视觉海报":"page.visualPoster","概念短片":"page.conceptFilm","商业广告":"page.commercial","游戏美术":"page.gameArt","时尚影像":"page.fashionFilm","产品视觉":"page.productVisuals","生活方式":"page.lifestyle"};
     const translateCategory = (category: string) => translate(categoryMessageKeys[category]);
     const translate = useTranslation();
-    const [category, setCategory] = useState<FantasticShowCategory>(translate("page.all"));
+    const [category, setCategory] = useState<FantasticShowCategory>("全部");
     const [keyword, setKeyword] = useState("");
     const showcases = useMemo(() => getFantasticShowcases(items), [items, translate.locale]);
     const filteredShowcases = useMemo(() => filterFantasticShowcases(showcases, category, keyword), [category, keyword, showcases, translate.locale]);

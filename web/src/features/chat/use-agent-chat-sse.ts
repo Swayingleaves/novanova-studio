@@ -1,4 +1,5 @@
 "use client";
+import { notifyInsufficientCredits, useInsufficientCreditsStore } from "@/features/credits/insufficient-credits";
 import { translateMessage as translate } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
@@ -142,6 +143,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
     clearReconnectTimer();
     if (eventSourceRef.current) eventSourceRef.current.close();
     const es = agentSubscribeEvents();
+    const creditPromptScope = useInsufficientCreditsStore.getState().scope;
     eventSourceRef.current = es;
 
     const readCurrentEvent = (event: MessageEvent): AgentEvent | null => {
@@ -289,6 +291,7 @@ export function useAgentChatSSE(props: UseAgentChatSSEProps): AgentChatSSEReturn
       try {
         const data = readCurrentEvent(e);
         if (!data) return;
+        notifyInsufficientCredits(data.systemMessage?.key, data.errorMessage, data.requestId ? `agent:${data.requestId}` : undefined, creditPromptScope);
         const errorMessage = data.errorMessage || translate("chat.unknownError");
         setIsStreaming(false);
         setIsQueued(false);

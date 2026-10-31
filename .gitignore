@@ -23,11 +23,8 @@ data/
 /.trellis/
 /.workbuddy/
 /.cursor/
-/deploy.sh
 /.agents/
 !/docs-api/backend-database.md
-AGENTS.md
-CLAUDE.md
 skills-lock.json
 volume/
 .agnes/
@@ -36,4 +33,8 @@ volume/
 /server/logs/
 .test-out*.txt
 .diff-*.txt
-videos/
+/artifacts/
+/web/public/manifest.webmanifest
+/web/public/novanova-sw.js
+/web/public/novanova-offline.html
+/videos/project-introduction/

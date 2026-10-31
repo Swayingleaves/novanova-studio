@@ -3,12 +3,13 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { Drawer } from "antd";
-import Link from "next/link";
+import Link from "@/shared/lib/team-navigation";
 
 import { LanguageMenu } from "@/features/locale/components/language-menu";
 import { ThemePreferenceMenu } from "@/features/theme/components/theme-preference-menu";
 import { NAV_GROUPS, navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
 import { cn } from "@/shared/lib/utils";
+import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 
 type MobileNavDrawerProps = {
@@ -20,7 +21,7 @@ type MobileNavDrawerProps = {
 export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDrawerProps) {
     const translate = useTranslation();
     const user = useUserStore((state) => state.user);
-    const visibleNavigationTools = navigationTools.filter((tool) => !tool.adminOnly || user?.role === "admin");
+    const visibleNavigationTools = navigationTools.filter((tool) => !tool.adminOnly || canManageCurrentSpace());
 
     return (
         <Drawer title={translate("appShell.navigation")} placement="left" size={292} open={open} onClose={onClose} className="md:hidden">
@@ -41,7 +42,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                                             href={`/${tool.slug}`}
                                             onClick={onClose}
                                             className={cn(
-                                                "flex min-h-20 flex-col justify-between rounded-lg border p-3 transition",
+                                                "relative flex min-h-20 flex-col justify-between rounded-lg border p-3 transition",
                                                 active
                                                     ? "border-[var(--studio-primary-line)] bg-[var(--studio-primary-soft)] font-medium text-[var(--studio-ink)]"
                                                     : "border-[var(--studio-line)] bg-[var(--studio-surface-soft)] text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)]",
@@ -49,6 +50,7 @@ export function MobileNavDrawer({ open, activeToolSlug, onClose }: MobileNavDraw
                                         >
                                             <Icon className="size-5" />
                                             <span className="text-sm">{translate(tool.labelKey)}</span>
+                                            {tool.pro ? <span className="pro-badge right-2 top-2" title={translate("common.enterpriseFeature")}>PRO</span> : null}
                                         </Link>
                                     );
                                 })}

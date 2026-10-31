@@ -1,11 +1,17 @@
 "use client";
-import { translateMessage as translate } from "@/features/locale/translate";
 
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
+import type { ImageSizeMappings } from "@/features/generation/lib/image-size-mappings";
+import { useTeamStore } from "@/features/team/stores/use-team-store";
+import { notifyInsufficientCredits, useInsufficientCreditsStore } from "@/features/credits/insufficient-credits";
+import { notifyStorageCapacityChanged } from "@/features/storage/capacity-events";
+import { translateMessage as translate } from "@/features/locale/translate";
 
 import { currentWebsiteLocale, currentLanguageTag } from "@/features/locale/translate";
 import { useLanguageStore } from "@/features/locale/language-store";
 import type { ObjectStorageConfig, ObjectStorageFile } from "@/shared/types/object-storage";
-import type { ImageSizeMappings } from "@/features/generation/lib/image-size-mappings";
 import { getAuthToken, useUserStore, type ServerUserProfile } from "@/features/auth/stores/use-user-store";
 import type { ApiCallFormat, CustomModelGroupConfig, ImageBillingConfiguration, ModelCreditUnit, VideoBillingConfiguration, VideoGenerationConstraints, VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 
@@ -15,18 +21,22 @@ type ApiResponse<T> = {
     msg: string;
 };
 
-/** 保留服务端稳定错误标识，界面行为不依赖某种语言的提示文本。 */
-export class ServerRequestError extends Error {
-    readonly code: number;
+/** 服务端业务错误，保留HTTP状态和业务错误码供并发冲突等场景判断。 */
+export class ServerApiError extends Error {
+    readonly status: number;
     readonly messageKey: string | null;
+    readonly code: number;
 
-    constructor(message: string, code: number, messageKey: string | null) {
+    constructor(message: string, status: number, code: number, messageKey: string | null = null) {
         super(message);
-        this.name = "ServerRequestError";
-        this.code = code;
+        this.name = "ServerApiError";
+        this.status = status;
         this.messageKey = messageKey;
+        this.code = code;
     }
 }
+
+export { ServerApiError as ServerRequestError };
 
 export type ServerMediaInput = {
     kind: string;
@@ -94,6 +104,7 @@ export type ServerAiTask = {
 };
 
 export type AiTaskErrorDetails = {
+    messageKey?: string;
     source: string;
     category: string;
     stage: string;
@@ -137,7 +148,7 @@ export type ServerVideoWorkflowStageQuote = {
     model?: string | null;
     taskCount: number;
     /** 阶段定价失败（报价整体不可用）时为 null，仅保留阶段骨架供前端识别工作流构成。 */
-    credits?: number | null;
+    credits?: CreditAmount | null;
     videoGenerationMode?: "text-to-video" | "image-to-video" | "reference-to-video" | "first-last-frame-to-video" | string | null;
 };
 
@@ -145,7 +156,7 @@ export type ServerVideoWorkflowQuote = {
     available: boolean;
     workflowType?: string;
     stages: ServerVideoWorkflowStageQuote[];
-    credits?: number | null;
+    credits?: CreditAmount | null;
     reason?: string;
     requiredCapabilities: string[];
 };
@@ -215,7 +226,8 @@ export type ServerAiModelList = {
         provider: string;
         apiFormat: ApiCallFormat;
         defaultModel: boolean;
-        creditCost: number;
+        creditCost: CreditAmount;
+        ownerTeamId?: number;
         creditUnit: ModelCreditUnit;
         capabilities: string[];
         videoBillingConfiguration: VideoBillingConfiguration | null;
@@ -255,7 +267,7 @@ export type InvitationInfo = {
 };
 
 export type InvitationRewardSettings = {
-    invitationRewardCredits: number;
+    invitationRewardCredits: CreditAmount;
 };
 
 export type UserListResponse = {
@@ -267,6 +279,22 @@ export type UserStatisticsResponse = {
     totalUsers: number;
     monthlyNewUsers: number;
     dailyNewUsers: number;
+};
+
+/** 用户增长趋势的单日数据，totalUsers 为截至当日结束的累计用户数。 */
+export type UserTrendPoint = {
+    date: string;
+    newUsers: number;
+    totalUsers: number;
+};
+
+/** 用户增长趋势，points 按日期升序、缺失日期已补零。 */
+export type UserTrendResponse = {
+    startDate: string;
+    endDate: string;
+    totalUsers: number;
+    newUsers: number;
+    points: UserTrendPoint[];
 };
 
 /** 后端渠道配置，对齐 AiChannelConfig record */
@@ -298,7 +326,8 @@ export type ServerModelConfig = {
     /** 是否开启，关闭后不出现在用户的模型下拉选择中。 */
     enabled: boolean;
     sortOrder: number;
-    creditCost: number;
+    creditCost: CreditAmount;
+    ownerTeamId?: number;
     creditUnit: ModelCreditUnit;
     thinkingEnabled: boolean;
     reasoningEffort: "high" | "max";
@@ -315,22 +344,22 @@ export type ServerModelConfig = {
 };
 
 export type CreditSettings = {
-    initialCredits: number;
+    initialCredits: CreditAmount;
 };
 
 export type CreditBalance = {
     userId: number;
-    creditBalance: number;
+    creditBalance: CreditAmount;
 };
 
 export type ServerCreditDistributionItem = {
     name: string;
-    consumedCredits: number;
+    consumedCredits: CreditAmount;
 };
 
 export type ServerCreditTrendItem = {
     period: string;
-    consumedCredits: number;
+    consumedCredits: CreditAmount;
 };
 
 export type ServerCreditOverview = {
@@ -339,11 +368,58 @@ export type ServerCreditOverview = {
     trend: ServerCreditTrendItem[];
 };
 
-export type ServerCreditTransactionType = "task_charge" | "task_refund" | "admin_adjustment" | "card_redeem" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired";
+export type ServerCreditTransactionType = "task_charge" | "task_refund" | "admin_adjustment" | "card_redeem" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired" | "storage_purchase" | "storage_charge" | "credit_purchase";
 
 export type ServerCreditDirection = "add" | "spend";
 
-export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redeem" | "admin_adjustment" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired";
+export type ServerCreditSource = "image" | "video" | "task_refund" | "card_redeem" | "admin_adjustment" | "initial_grant" | "invitation_reward" | "daily_check_in" | "credit_expired" | "storage_purchase" | "storage_charge" | "credit_purchase";
+
+export type ServerCreditProduct = {
+    id: number;
+    credits: CreditAmount;
+    bonusCredits: CreditAmount;
+    totalCredits: CreditAmount;
+    priceAmount: string;
+    sortOrder: number;
+    enabled: boolean;
+};
+
+export type ServerCreditProductList = {
+    products: ServerCreditProduct[];
+};
+
+export type ServerCreateCreditOrderResponse = {
+    orderNo: string;
+    paymentMethod: string;
+    status: "pending" | "processing" | "paid" | "closed" | string;
+    paymentUrl: string;
+    priceAmount: string;
+    expiresAt: string;
+};
+
+export type ServerCreditOrderStatus = {
+    orderNo: string;
+    credits: CreditAmount;
+    priceAmount: string;
+    paymentMethod: string;
+    status: "pending" | "processing" | "paid" | "closed" | string;
+    paidAt: string | null;
+};
+
+export type ServerCreditOrderItem = {
+    orderNo: string;
+    credits: CreditAmount;
+    priceAmount: string;
+    paymentMethod: string;
+    status: "pending" | "processing" | "paid" | "closed" | string;
+    createdAt: string;
+    expiresAt: string;
+    paidAt: string | null;
+};
+
+export type ServerCreditOrderList = {
+    orders: ServerCreditOrderItem[];
+};
 
 export type ServerUserCreditTransaction = {
     id: number;
@@ -352,9 +428,9 @@ export type ServerUserCreditTransaction = {
     generationType: Exclude<ServerAiTaskType, "text"> | null;
     model: string | null;
     generationSource: ServerGenerationSource | null;
-    changeAmount: number;
+    changeAmount: CreditAmount;
     reason: string;
-    balanceAfter: number;
+    balanceAfter: CreditAmount;
     invitedUserId: number | null;
     createdAt: string;
 };
@@ -373,7 +449,7 @@ export type ServerTaskRecord = {
     resolution: string | null;
     size: string | null;
     seconds: string | null;
-    consumedCredits: number;
+    consumedCredits: CreditAmount;
     resultUrls: string[];
     errorMessage: string | null;
     createdAt: string;
@@ -414,25 +490,25 @@ export type ServerCheckInStatus = {
     checkedInToday: boolean;
     monthCheckedCount: number;
     monthCheckedDates: string[];
-    dailyCredits: number;
-    todayCredits: number;
+    dailyCredits: CreditAmount;
+    todayCredits: CreditAmount;
 };
 
 export type ServerCheckInResult = {
     checkInDate: string;
-    earnedCredits: number;
-    creditBalance: number;
+    earnedCredits: CreditAmount;
+    creditBalance: CreditAmount;
 };
 
 export type ServerCheckInRewardSettings = {
-    checkInCredits: number;
+    checkInCredits: CreditAmount;
 };
 
 export type ServerRedeemCreditsResponse = {
     cardId: number;
     cardMasked: string;
-    credits: number;
-    creditBalance: number;
+    credits: CreditAmount;
+    creditBalance: CreditAmount;
     redeemedAt: string;
 };
 
@@ -442,8 +518,8 @@ export type ServerRedemptionRecord = {
     cardCode: string;
     cardMasked: string;
     cardSuffix: string;
-    credits: number;
-    balanceAfter: number;
+    credits: CreditAmount;
+    balanceAfter: CreditAmount;
     redeemedAt: string;
 };
 
@@ -455,7 +531,7 @@ export type ServerRedemptionRecordList = {
 export type ServerCreditCardBatch = {
     id: number;
     quantity: number;
-    creditsPerCard: number;
+    creditsPerCard: CreditAmount;
     redeemedCount: number;
     availableCount: number;
     createdByUserId: number;
@@ -475,7 +551,7 @@ export type ServerCreditCard = {
     code: string | null;
     codeMasked: string;
     codeSuffix: string;
-    credits: number;
+    credits: CreditAmount;
     status: "available" | "redeemed";
     redeemedByUserId: number | null;
     redeemedByUsername: string | null;
@@ -484,7 +560,7 @@ export type ServerCreditCard = {
     redeemedAt: string;
     createdAt: string;
     transactionId: number | null;
-    balanceAfter: number | null;
+    balanceAfter: CreditAmount | null;
 };
 
 export type ServerCreditCardList = {
@@ -508,7 +584,7 @@ export function registerByEmail(input: { email: string; code: string; password: 
     return serverPost<AuthResponse>("/auth/register", input, { auth: false });
 }
 
-export function loginByEmail(input: { email: string; password: string }) {
+export function loginByAccount(input: { account: string; password: string }) {
     return serverPost<AuthResponse>("/auth/login", input, { auth: false });
 }
 
@@ -540,8 +616,16 @@ export function acknowledgeWelcome() {
     return serverPost("/auth/acknowledgeWelcome", {});
 }
 
-export function getCurrentUserInfo() {
-    return serverGet<ServerUserProfile>("/auth/userInfo");
+export function completeOnboarding(version: number) {
+    return serverPost("/auth/completeOnboarding", { version });
+}
+
+export function completeCreationTour(version: number) {
+    return serverPost("/auth/completeCreationTour", { version });
+}
+
+export function getCurrentUserInfo(options?: ServerRequestOptions) {
+    return serverGet<ServerUserProfile>("/auth/userInfo", options);
 }
 
 export function getInvitationInfo() {
@@ -556,8 +640,9 @@ export function changeCurrentUserPassword(input: { currentPassword: string; newP
     return serverPost("/auth/changePassword", input);
 }
 
-export function listServerUsers(params: { page: number; pageSize: number; keyword?: string; userId?: string; role?: string; status?: number; createdAfter?: string; createdBefore?: string }) {
+export function listServerUsers(params: { page: number; pageSize: number; filterTeamId?: number; keyword?: string; userId?: string; role?: string; status?: number; createdAfter?: string; createdBefore?: string }) {
     const query = new URLSearchParams({ page: String(params.page), pageSize: String(params.pageSize) });
+    if (params.filterTeamId !== undefined) query.set("filterTeamId", String(params.filterTeamId));
     if (params.keyword) query.set("keyword", params.keyword);
     if (params.userId) query.set("userId", params.userId);
     if (params.role) query.set("role", params.role);
@@ -567,8 +652,15 @@ export function listServerUsers(params: { page: number; pageSize: number; keywor
     return serverGet<UserListResponse>(`/admin/user/listUsers?${query}`);
 }
 
-export function getServerUserStatistics() {
-    return serverGet<UserStatisticsResponse>("/admin/user/getUserStatistics");
+export function getServerUserStatistics(filterTeamId?: number) {
+    return serverGet<UserStatisticsResponse>(`/admin/user/getUserStatistics${filterTeamId === undefined ? "" : `?filterTeamId=${filterTeamId}`}`);
+}
+
+/** 查询用户数量与每日增量趋势，日期为 yyyy-MM-dd。 */
+export function getServerUserTrend(startDate: string, endDate: string, filterTeamId?: number) {
+    const params = new URLSearchParams({ startDate, endDate });
+    if (filterTeamId !== undefined) params.set("filterTeamId", String(filterTeamId));
+    return serverGet<UserTrendResponse>(`/admin/user/getUserTrend?${params.toString()}`);
 }
 
 export function updateServerUserStatus(userId: number, status: number) {
@@ -579,7 +671,7 @@ export function updateServerUserRole(userId: number, role: "user" | "admin") {
     return serverPost("/admin/user/updateUserRole", { userId, role });
 }
 
-export function adminCreateUser(input: { email: string; password: string; nickname?: string; role?: string }) {
+export function adminCreateUser(input: { account: string; password: string; nickname?: string; role?: string }) {
     return serverPost("/admin/user/createUser", input);
 }
 
@@ -609,8 +701,12 @@ export function listAdminApiLogs(params: { page: number; pageSize: number; keywo
     return serverGet<ServerApiLogList>(`/admin/apiLog/listApiLogs?${query}`);
 }
 
-export function adjustServerUserCredits(input: { userId: number; changeAmount: number; reason: string }) {
+export function adjustServerUserCredits(input: { userId: number; changeAmount: CreditAmount; reason: string }) {
     return serverPost<CreditBalance>("/admin/user/adjustUserCredits", input);
+}
+
+export function resetServerUserPassword(input: { userId: number; newPassword: string }) {
+    return serverPost("/admin/user/resetUserPassword", input);
 }
 
 export function unlockServerUserPassword(userId: number) {
@@ -666,7 +762,7 @@ export type HomepageShowcaseInput = {
 };
 
 export function listHomepageShowcases(limit = 24) {
-    return serverGet<{ items: HomepageShowcase[]; total: number }>(`/homepage/listShowcases?limit=${limit}`, { auth: false });
+    return serverGet<{ items: HomepageShowcase[]; total: number }>(`/homepage/listShowcases?limit=${limit}`, { auth: Boolean(useUserStore.getState().token) });
 }
 
 export function listAdminHomepageShowcases() {
@@ -951,6 +1047,17 @@ export function listGenerationLogs<T>(logType: "image" | "video", page = 1) {
     return serverGet<ServerGenerationLogPage<T>>(`/generationLogs/listGenerationLogs?logType=${encodeURIComponent(logType)}&page=${page}`);
 }
 
+export type ServerAgentSessionHistoryMessage = {
+    id: string;
+    role: "user" | "assistant";
+    text: string;
+};
+
+/** 按当前用户和团队读取历史对话正文。 */
+export function getAgentSessionHistory(sessionId: string) {
+    return serverGet<ServerAgentSessionHistoryMessage[]>(`/ai/agent/getSessionHistory?sessionId=${encodeURIComponent(sessionId)}`);
+}
+
 export function saveGenerationLog(logType: "image" | "video", log: unknown) {
     return serverPost("/generationLogs/saveGenerationLog", { logType, log });
 }
@@ -987,6 +1094,20 @@ export async function downloadServerMedia(storageKey: string) {
     if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as ApiResponse<never> | null;
         throw new Error(payload?.msg || translate("common.downloadFailed", { value0: response.status }));
+    }
+    return response.blob();
+}
+
+/** 流式读取已完成的分镜导出视频。 */
+export async function downloadComicDramaExportVideo(taskId: string): Promise<Blob> {
+    const response = await requestServer("/comicDrama/downloadExportVideo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId }),
+    });
+    if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as ApiResponse<never> | null;
+        throw new Error(payload?.msg || `下载失败：${response.status}`);
     }
     return response.blob();
 }
@@ -1108,7 +1229,30 @@ export function createModelConfig(config: Omit<ServerModelConfig, "id" | "defaul
     return serverPost<ServerModelConfig>("/config/model/createModelConfig", config);
 }
 
-export function updateModelConfig(config: Pick<ServerModelConfig, "id" | "modelType" | "capabilities" | "enabled" | "sortOrder" | "creditCost" | "creditUnit" | "thinkingEnabled" | "reasoningEffort" | "requestConcurrency" | "convertImageSizeToPixels" | "imageSizeMappings" | "customBodyParameters" | "videoBillingConfiguration" | "imageBillingConfiguration" | "displayName" | "modelIcon" | "isCustomModel" | "customModelConfig">) {
+export function updateModelConfig(
+    config: Pick<
+        ServerModelConfig,
+        | "id"
+        | "modelType"
+        | "capabilities"
+        | "enabled"
+        | "sortOrder"
+        | "creditCost"
+        | "creditUnit"
+        | "thinkingEnabled"
+        | "reasoningEffort"
+        | "requestConcurrency"
+        | "convertImageSizeToPixels"
+        | "imageSizeMappings"
+        | "customBodyParameters"
+        | "videoBillingConfiguration"
+        | "imageBillingConfiguration"
+        | "displayName"
+        | "modelIcon"
+        | "isCustomModel"
+        | "customModelConfig"
+    >,
+) {
     return serverPost<ServerModelConfig>("/config/model/updateModelConfig", config);
 }
 
@@ -1116,15 +1260,58 @@ export function getCreditSettings() {
     return serverGet<CreditSettings>("/config/credit/getCreditSettings");
 }
 
-export function updateCreditSettings(initialCredits: number) {
+export function updateCreditSettings(initialCredits: CreditAmount) {
     return serverPost<CreditSettings>("/config/credit/updateCreditSettings", { initialCredits });
+}
+
+export function listCreditProducts() {
+    return serverGet<ServerCreditProductList>("/payment/credit/listProducts", { scope: "platform" });
+}
+
+export function createCreditPurchaseOrder(input: { productId: number; paymentMethod: string }) {
+    return serverPost<ServerCreateCreditOrderResponse>("/payment/credit/createOrder", input, { scope: "platform" });
+}
+
+export function getCreditPurchaseOrderStatus(orderNo: string, signal?: AbortSignal) {
+    const query = new URLSearchParams({ orderNo });
+    return serverGet<ServerCreditOrderStatus>(`/payment/credit/getOrderStatus?${query}`, { scope: "platform", signal });
+}
+
+export function getCreditPurchasePayment(orderNo: string, signal?: AbortSignal) {
+    const query = new URLSearchParams({ orderNo });
+    return serverGet<ServerCreateCreditOrderResponse>(`/payment/credit/getOrderPayment?${query}`, { scope: "platform", signal });
+}
+
+export function listCreditOrders(limit = 30, signal?: AbortSignal) {
+    const query = new URLSearchParams({ limit: String(limit) });
+    return serverGet<ServerCreditOrderList>(`/payment/credit/listOrders?${query}`, { scope: "platform", signal });
+}
+
+export function cancelCreditOrder(orderNo: string) {
+    return serverPost<ServerCreditOrderStatus>("/payment/credit/cancelOrder", { orderNo }, { scope: "platform" });
+}
+
+export function listAdminCreditProducts() {
+    return serverGet<ServerCreditProduct[]>("/config/creditProduct/listCreditProducts", { scope: "platform" });
+}
+
+export function createAdminCreditProduct(input: { credits: CreditAmount; bonusCredits: CreditAmount; priceAmount: string; sortOrder: number; enabled: boolean }) {
+    return serverPost<ServerCreditProduct>("/config/creditProduct/createCreditProduct", input, { scope: "platform" });
+}
+
+export function updateAdminCreditProduct(input: { id: number; credits: CreditAmount; bonusCredits: CreditAmount; priceAmount: string; sortOrder: number; enabled: boolean }) {
+    return serverPost<ServerCreditProduct>("/config/creditProduct/updateCreditProduct", input, { scope: "platform" });
+}
+
+export function updateAdminCreditProductStatus(id: number, enabled: boolean) {
+    return serverPost<ServerCreditProduct>("/config/creditProduct/updateCreditProductStatus", { id, enabled }, { scope: "platform" });
 }
 
 export function getInvitationRewardSettings() {
     return serverGet<InvitationRewardSettings>("/config/invitation/getInvitationRewardSettings");
 }
 
-export function updateInvitationRewardSettings(invitationRewardCredits: number) {
+export function updateInvitationRewardSettings(invitationRewardCredits: CreditAmount) {
     return serverPost<InvitationRewardSettings>("/config/invitation/updateInvitationRewardSettings", { invitationRewardCredits });
 }
 
@@ -1200,27 +1387,29 @@ export function listRedemptionRecords(params: { startDate?: string; endDate?: st
     return serverGet<ServerRedemptionRecordList>(`/credit/listRedemptionRecords?${query}`);
 }
 
-export function getAdminCreditOverview(params: { userId?: number; startDate: string; endDate: string; generationType?: "image" | "video"; trendUnit: "day" | "month" }) {
+export function getAdminCreditOverview(params: { filterTeamId?: number; userId?: number; startDate: string; endDate: string; generationType?: "image" | "video"; trendUnit: "day" | "month" }) {
     const query = new URLSearchParams({ startDate: params.startDate, endDate: params.endDate, trendUnit: params.trendUnit });
+    if (params.filterTeamId !== undefined) query.set("filterTeamId", String(params.filterTeamId));
     if (params.userId !== undefined) query.set("userId", String(params.userId));
     if (params.generationType) query.set("generationType", params.generationType);
     return serverGet<ServerCreditOverview>(`/admin/credit/getCreditOverview?${query}`);
 }
 
-export function listAdminCreditTransactions(params: { userId?: number; startDate: string; endDate: string; generationType?: "image" | "video"; page: number; pageSize: number }) {
+export function listAdminCreditTransactions(params: { filterTeamId?: number; userId?: number; startDate: string; endDate: string; generationType?: "image" | "video"; page: number; pageSize: number }) {
     const query = new URLSearchParams({
         startDate: params.startDate,
         endDate: params.endDate,
         page: String(params.page),
         pageSize: String(params.pageSize),
     });
+    if (params.filterTeamId !== undefined) query.set("filterTeamId", String(params.filterTeamId));
     if (params.userId !== undefined) query.set("userId", String(params.userId));
     if (params.generationType) query.set("generationType", params.generationType);
     return serverGet<ServerAdminCreditTransactionList>(`/admin/credit/listCreditTransactions?${query}`);
 }
 
-export function generateCreditCards(input: { quantity?: number; creditsPerCard: number }) {
-    return serverPost<{ batchId: number; quantity: number; creditsPerCard: number; cardCodes: string[]; createdAt: string }>("/admin/credit/generateCreditCards", input);
+export function generateCreditCards(input: { quantity?: number; creditsPerCard: CreditAmount }) {
+    return serverPost<{ batchId: number; quantity: number; creditsPerCard: CreditAmount; cardCodes: string[]; createdAt: string }>("/admin/credit/generateCreditCards", input);
 }
 
 export function listCreditCardBatches(params: { page: number; pageSize: number }) {
@@ -1266,6 +1455,7 @@ export function setDefaultObjectStorage(storageId: string) {
 }
 
 export async function waitAiTask(taskId: string, options: { signal?: AbortSignal; onProgress?: (task: ServerAiTask) => void } = {}) {
+    const creditPromptScope = useInsufficientCreditsStore.getState().scope;
     if (options.signal?.aborted) {
         void cancelAiTask(taskId).catch(() => {});
         throw new DOMException("Aborted", "AbortError");
@@ -1275,7 +1465,7 @@ export async function waitAiTask(taskId: string, options: { signal?: AbortSignal
         void cancelAiTask(taskId).catch(() => {});
         throw new DOMException("Aborted", "AbortError");
     }
-    if (isFinalAiTaskStatus(initial.status)) return completedAiTask(initial);
+    if (isFinalAiTaskStatus(initial.status)) return completedAiTask(initial, creditPromptScope);
     const pollingIntervalMilliseconds = await getAiTaskPollingIntervalMilliseconds();
     return new Promise<ServerAiTask>((resolve, reject) => {
         let settled = false;
@@ -1294,7 +1484,7 @@ export async function waitAiTask(taskId: string, options: { signal?: AbortSignal
             }
             finish(() => {
                 try {
-                    resolve(completedAiTask(task));
+                    resolve(completedAiTask(task, creditPromptScope));
                 } catch (error) {
                     reject(error);
                 }
@@ -1328,6 +1518,7 @@ export function readAiTaskError(error: unknown): AiTaskErrorDetails {
         return { source: "canvas", category: "canceled", stage: "frontend_tool", message: translate("common.generationStopped"), requestAccepted: true, safeToRetry: false };
     }
     return {
+        messageKey: error instanceof ServerApiError ? (error.messageKey ?? undefined) : undefined,
         source: "canvas",
         category: "unknown",
         stage: "frontend_tool",
@@ -1337,12 +1528,14 @@ export function readAiTaskError(error: unknown): AiTaskErrorDetails {
     };
 }
 
-function completedAiTask(task: ServerAiTask): ServerAiTask {
+function completedAiTask(task: ServerAiTask, creditPromptScope: string): ServerAiTask {
     if (task.status === "success") return task;
+    notifyInsufficientCredits(task.systemMessage?.key, task.errorMessage, `task:${task.id}`, creditPromptScope);
     const rawResult = task.resultData && typeof task.resultData === "object" ? (task.resultData as Record<string, unknown>) : undefined;
     const rawError = rawResult?.error && typeof rawResult.error === "object" ? (rawResult.error as Record<string, unknown>) : undefined;
     const message = task.errorMessage || readOptionalText(rawError?.message) || (task.status === "canceled" ? translate("common.taskCanceled") : translate("common.generationFailed"));
     throw new AiTaskFailureError(message, {
+        messageKey: task.systemMessage?.key,
         source: readOptionalText(rawError?.source) || "task",
         category: readOptionalText(rawError?.category) || (task.status === "canceled" ? "canceled" : "unknown"),
         stage: readOptionalText(rawError?.stage) || "execution",
@@ -1360,11 +1553,13 @@ function readOptionalText(value: unknown): string | undefined {
     return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-export async function serverGet<T>(path: string, options?: { auth?: boolean }) {
-    return serverFetch<T>(path, { method: "GET" }, options);
+type ServerRequestOptions = { auth?: boolean; signal?: AbortSignal; scope?: "platform" };
+
+export async function serverGet<T>(path: string, options?: ServerRequestOptions) {
+    return serverFetch<T>(path, { method: "GET", signal: options?.signal }, options);
 }
 
-export async function serverPost<T = string>(path: string, body: unknown, options?: { auth?: boolean }) {
+export async function serverPost<T = string>(path: string, body: unknown, options?: ServerRequestOptions & { allowEmpty?: boolean }) {
     return serverFetch<T>(
         path,
         {
@@ -1376,22 +1571,34 @@ export async function serverPost<T = string>(path: string, body: unknown, option
     );
 }
 
-export async function serverFetch<T>(path: string, init: RequestInit, options: { auth?: boolean } = {}) {
+export function serverUpload<T = string>(path: string, formData: FormData) {
+    return serverFetch<T>(path, { method: "POST", body: formData });
+}
+
+async function serverFetch<T>(path: string, init: RequestInit, options: ServerRequestOptions & { allowEmpty?: boolean } = {}) {
+    const creditPromptScope = useInsufficientCreditsStore.getState().scope;
     const response = await requestServer(path, init, options);
     const payload = (await response.json().catch(() => null)) as ApiResponse<T> | null;
+    // 允许空响应体的查询接口（例如“项目最近一次任务”没有任务时）返回 undefined，而不是抛错。
+    if (!payload && options.allowEmpty && response.ok) return undefined as T;
+    if (!response.ok || (payload && payload.code !== 0)) {
+        notifyInsufficientCredits(response.headers.get("X-System-Message-Key"), payload?.msg, undefined, creditPromptScope);
+    }
     if (!response.ok || !payload) {
-        if (payload) throw new ServerRequestError(payload.msg, payload.code, response.headers.get("X-System-Message-Key"));
-        throw new Error(payload?.msg || translate("common.serverRequestFailed", { value0: response.status }));
+        throw new ServerApiError(payload?.msg || translate("common.serverRequestFailed", { value0: response.status }), response.status, payload?.code ?? -1, response.headers.get("X-System-Message-Key"));
     }
     if (payload.code !== 0) {
-        throw new ServerRequestError(payload.msg || translate("common.serverRequestFailed_5ed90b"), payload.code, response.headers.get("X-System-Message-Key"));
+        throw new ServerApiError(payload.msg || translate("common.serverRequestFailed_5ed90b"), response.status, payload.code, response.headers.get("X-System-Message-Key"));
     }
+    if (init.method === "POST" && /^\/(media|script\/source|storage)\//.test(path)) notifyStorageCapacityChanged();
     return payload.data;
 }
 
-async function requestServer(path: string, init: RequestInit, options: { auth?: boolean } = {}) {
+async function requestServer(path: string, init: RequestInit, options: ServerRequestOptions = {}) {
     const headers = new Headers(init.headers);
     headers.set("Accept-Language", currentLanguageTag());
+    const teamId = useTeamStore.getState().team?.id;
+    if (teamId && options.scope !== "platform") headers.set("X-Team-Id", String(teamId));
     if (options.auth !== false) {
         const token = getAuthToken();
         if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -1402,10 +1609,11 @@ async function requestServer(path: string, init: RequestInit, options: { auth?: 
         cache: "no-store",
         credentials: "include",
     });
-    if (response.status === 401) {
+    if (response.status === 401 && options.auth !== false && !init.signal?.aborted) {
         const store = useUserStore.getState();
-        store.clearSession();
-        store.openAuthModal();
+        // 旧请求的失败不能退出后来登录的新账号；会话失效由空间边界统一导航。
+        if (headers.get("Authorization") === `Bearer ${store.token}` && store.token) store.clearSession();
+        else if (!headers.has("Authorization") && !store.token) store.openAuthModal();
     }
     return response;
 }
@@ -1419,7 +1627,7 @@ export function serverBaseUrl() {
 
 type AiTaskListener = (task: ServerAiTask) => void;
 type AiTaskDeltaListener = (taskId: string, delta: string) => void;
-type CreditBalanceListener = (creditBalance: number) => void;
+type CreditBalanceListener = (creditBalance: CreditAmount) => void;
 
 const aiTaskListeners = new Set<AiTaskListener>();
 const aiTaskDeltaListeners = new Set<AiTaskDeltaListener>();
@@ -1458,11 +1666,19 @@ function ensureAiTaskEventSource() {
     if (aiTaskEventSource || typeof window === "undefined") return;
     const token = getAuthToken();
     if (!token) return;
-    const source = new EventSource(`${serverBaseUrl()}/ai/task/subscribe?token=${encodeURIComponent(token)}&locale=${currentWebsiteLocale()}`);
+    const source = new EventSource(`${serverBaseUrl()}/ai/task/subscribe?token=${encodeURIComponent(token)}&locale=${currentWebsiteLocale()}&teamId=${useTeamStore.getState().team?.id || 0}`);
+    const creditPromptScope = useInsufficientCreditsStore.getState().scope;
     aiTaskEventSource = source;
+    source.addEventListener("wallet-change", () => {
+        void import("./team")
+            .then((module) => module.getWalletBalances())
+            .then((wallets) => useTeamStore.getState().setWallets(wallets))
+            .catch((error) => console.error("刷新积分钱包失败", error));
+    });
     source.addEventListener("task", (event) => {
         const payload = parseAiTaskEventData((event as MessageEvent).data);
         if (!payload.task) return;
+        if (payload.task.status === "failed") notifyInsufficientCredits(payload.task.systemMessage?.key, payload.task.errorMessage, `task:${payload.task.id}`, creditPromptScope);
         aiTaskListeners.forEach((listener) => listener(payload.task as ServerAiTask));
     });
     source.addEventListener("text-delta", (event) => {
@@ -1473,7 +1689,7 @@ function ensureAiTaskEventSource() {
     source.addEventListener("credit-balance", (event) => {
         const payload = parseAiTaskEventData((event as MessageEvent).data);
         const creditBalance = payload.creditBalance;
-        if (typeof creditBalance !== "number" || !Number.isInteger(creditBalance) || creditBalance < 0) return;
+        if (creditBalance === undefined || !creditAmount(creditBalance).isFinite() || creditAmount(creditBalance).isNegative()) return;
         creditBalanceListeners.forEach((listener) => listener(creditBalance));
     });
     source.onerror = () => {
@@ -1503,9 +1719,9 @@ function isFinalAiTaskStatus(status: ServerAiTaskStatus) {
     return status === "success" || status === "failed" || status === "canceled";
 }
 
-function parseAiTaskEventData(data: string): { task?: ServerAiTask; delta?: string; creditBalance?: number } {
-    const payload = JSON.parse(data) as { task?: ServerAiTask; delta?: string; creditBalance?: number } | string;
-    return typeof payload === "string" ? (JSON.parse(payload) as { task?: ServerAiTask; delta?: string; creditBalance?: number }) : payload;
+function parseAiTaskEventData(data: string): { task?: ServerAiTask; delta?: string; creditBalance?: CreditAmount } {
+    const payload = JSON.parse(data) as { task?: ServerAiTask; delta?: string; creditBalance?: CreditAmount } | string;
+    return typeof payload === "string" ? (JSON.parse(payload) as { task?: ServerAiTask; delta?: string; creditBalance?: CreditAmount }) : payload;
 }
 
 function withServerApiPrefix(baseUrl: string) {

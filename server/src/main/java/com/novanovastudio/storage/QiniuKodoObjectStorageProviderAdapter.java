@@ -42,6 +42,40 @@ public class QiniuKodoObjectStorageProviderAdapter implements ObjectStorageProvi
     }
 
     /**
+     * @param config 原对象存储配置
+     * @param key 对象键
+     * @param fileName 原始文件名
+     * @param mimeType 文件媒体类型
+     * @param download 是否附件下载
+     * @param expiresAt 到期时间
+     * @return 七牛SDK签发的临时只读地址
+     */
+    @Override
+    public String createReadUrl(PersistenceDtos.ObjectStorageConfig config, String key, String fileName, String mimeType, boolean download, java.time.Instant expiresAt) {
+        validate(config);
+        String url = ObjectStorageUrlBuilder.buildPublicUrl(config.publicBaseUrl(), key);
+        if (download) url += "?attname=" + java.net.URLEncoder.encode(fileName, java.nio.charset.StandardCharsets.UTF_8);
+        return Auth.create(config.accessKey(), config.secretKey()).privateDownloadUrlWithDeadline(url, expiresAt.getEpochSecond());
+    }
+
+    /**
+     * 物理删除对象，七牛的612表示文件已经不存在。
+     * @param config 对象存储配置
+     * @param key 对象键
+     * @throws BusinessException 删除失败时抛出
+     */
+    @Override
+    public void deletePrivateObject(PersistenceDtos.ObjectStorageConfig config, String key) {
+        validate(config);
+        try {
+            new com.qiniu.storage.BucketManager(Auth.create(config.accessKey(), config.secretKey()),
+                    Configuration.create(Region.createWithRegionId(config.region()))).delete(config.bucket(), key);
+        } catch (QiniuException exception) {
+            if (exception.code() != 612) throw new BusinessException(ErrorCode.THIRD_PARTY_CALL_ERROR, "删除七牛对象失败：" + exception.getMessage());
+        }
+    }
+
+    /**
      * 校验七牛云Kodo配置。
      *
      * @param config ObjectStorageConfig 对象存储配置

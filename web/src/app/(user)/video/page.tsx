@@ -1,4 +1,10 @@
 "use client";
+import { useInsufficientCreditsPrompt } from "@/features/credits/use-insufficient-credits-prompt";
+import { showInsufficientCredits } from "@/features/credits/insufficient-credits";
+
+import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
+
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { currentLanguageTag } from "@/features/locale/translate";
 
 import { translateMessage as translate } from "@/features/locale/translate";
@@ -14,10 +20,11 @@ import { bindPendingVideoSize, renderPendingVideoToolCall, VideoGeneratingCard }
 import { renderPendingImageToolCall } from "@/app/(user)/image/components/pending-image-tool-call";
 import { AssetPickerModal, type InsertAssetPayload } from "@/features/assets/components/asset-picker-modal";
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
+import { modelCreditRequirement, useModelCreditBalance } from "@/features/team/credit-balance";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import type { AgentAttachment } from "@/features/canvas/api/agent";
 import { CreationWorkspace } from "@/features/generation/components/creation-workspace";
-import { RecentReferenceImagePicker } from "@/features/generation/components/recent-reference-image-picker";
+import { RecentReferenceAssetPicker } from "@/features/generation/components/recent-reference-asset-picker";
 import { ImageSettingsPanel } from "@/features/generation/components/image-settings-panel";
 import { MEDIA_FALLBACK_IMAGE, MediaPreview, useMediaFallback } from "@/features/generation/components/media-fallback";
 import { VideoSettingsPanel, videoResolutionLabel, videoSecondsLabel, videoSizeLabel } from "@/features/generation/components/video-settings-panel";
@@ -63,7 +70,8 @@ import { getGenerationConversationStatus, hasRunningGeneration, type GenerationL
 import { selectGenerationAttachments } from "@/features/generation/lib/generation-retry";
 import { imageReferenceAttachments, referenceMediaType, referenceMediaUrl, videoReferenceAttachments } from "@/features/generation/lib/reference-attachments";
 import { usePromptOptimization } from "@/features/generation/hooks/use-prompt-optimization";
-import { useRecentReferenceImages } from "@/features/generation/hooks/use-recent-reference-images";
+import { useRecentReferenceAssets } from "@/features/generation/hooks/use-recent-reference-assets";
+import type { RecentReferenceAsset } from "@/features/generation/lib/recent-reference-assets";
 import { reconcileImageMentions, type PromptImageReference } from "@/features/generation/lib/image-reference-mentions";
 import { loadVideoLastUsedSettings, saveVideoLastUsedSettings, type VideoLastUsedSettings } from "@/features/generation/lib/last-used-generation-settings";
 import { formatGenerationStyleMessage } from "@/features/generation/lib/style-command";
@@ -212,13 +220,13 @@ export default function VideoPage() {
     const updateConfig = useConfigStore((state) => state.updateConfig);
     const configHydrated = useConfigStore((state) => state.hydrated);
     const userId = useUserStore((state) => state.user?.id);
-    const creditBalance = useUserStore((state) => state.user?.creditBalance);
+    const creditBalance = useModelCreditBalance("video");
     const addAsset = useAssetStore((state) => state.addAsset);
     const resolvedTheme = useThemeStore((state) => state.resolvedTheme);
     const theme = canvasThemes[resolvedTheme];
     const { optimizingOperationId, optimizePrompt } = usePromptOptimization();
     const ensureModelConfiguration = useModelConfigurationGuard();
-    const { recentReferenceImageUrls, recordRecentReferenceImage } = useRecentReferenceImages(userId);
+    const { recentReferenceAssets, recordRecentReferenceAsset } = useRecentReferenceAssets(userId);
     const isPromptOptimizing = optimizingOperationId === "video-page";
 
     const [activeId, setActiveId] = useState<string | null>(null);
@@ -709,7 +717,7 @@ export default function VideoPage() {
               credits: workflowVideoStageQuote.credits ?? 0,
               reason: serverWorkflowQuote?.available ? undefined : serverWorkflowQuote?.reason || translate("video.videoWorkflowQuoteUnavailable"),
               stages: serverWorkflowQuote?.stages ?? [],
-          } as { available: boolean; credits: number; reason?: string; stages: ServerVideoWorkflowStageQuote[] })
+          } as { available: boolean; credits: CreditAmount; reason?: string; stages: ServerVideoWorkflowStageQuote[] })
         : null;
     const activeQuote = selectedSkill?.workflowType
         ? workflowChargingNext
@@ -721,7 +729,11 @@ export default function VideoPage() {
         size: config.size, seconds: config.videoSeconds, imageCount: references.length, videoCount: videoReferences.length })
         || videoGenerationReferenceIssue(config.videoGenerationMode, references.length, videoReferences.length);
     const creditCost = activeQuote === null ? undefined : activeQuote.available ? (activeQuote.credits ?? null) : null;
-    const workflowBalanceInsufficient = Boolean(selectedSkill?.workflowType) && activeQuote !== null && activeQuote.available && typeof creditBalance === "number" && (activeQuote.credits ?? 0) > creditBalance;
+    const creditRequirement = selectedSkill?.workflowType
+        ? modelCreditRequirement(activeQuote?.available ? (workflowImageConfirmNext ? workflowVideoStageQuote ? [workflowVideoStageQuote] : [] : serverWorkflowQuote?.stages ?? []) : [])
+        : { requiredCredits: creditCost, availableCredits: creditBalance };
+    const balanceInsufficient = useInsufficientCreditsPrompt({ requiredCredits: creditRequirement.requiredCredits, availableCredits: creditRequirement.availableCredits });
+    const workflowBalanceInsufficient = Boolean(selectedSkill?.workflowType) && balanceInsufficient;
     const draftSettingsSummary = videoDraftSettingsModified ? buildVideoSettingsSummary(config, effectiveConfig, model) : "";
     const historySettingsSummary = !videoDraftSettingsModified && activeId && latestRound?.config ? buildVideoSettingsSummary(latestRound.config, effectiveConfig, latestRound.config.videoModel || latestRound.config.model || "") : "";
     const settingsSummary = draftSettingsSummary || historySettingsSummary;
@@ -729,7 +741,7 @@ export default function VideoPage() {
     // 声明视频工作流的技能，其首轮及后续引导消息属于免费对话，不应被视频报价阻断；
     // 工作流进入确认生成阶段后，activeQuote 与积分余额仍会继续控制提交状态。
     const workflowSkillConversation = Boolean(selectedSkill?.workflowType) && !workflowChargingNext && !workflowImageConfirmNext;
-    const quoteReady = workflowSkillConversation || activeQuote === null || (activeQuote.available && !workflowBalanceInsufficient);
+    const quoteReady = workflowSkillConversation || activeQuote === null || (activeQuote.available && !balanceInsufficient);
     // 工作流会自行生成阶段素材，不要求页面先上传普通视频参考素材。
     const referenceReady = Boolean(selectedSkill?.workflowType) || !referenceIssue;
     const canGenerate = Boolean(prompt.trim()) && quoteReady && referenceReady && !isStreaming && !isQueued && !activeConversationPending && !isPromptOptimizing && !uploadingReferenceIds.length;
@@ -853,7 +865,7 @@ export default function VideoPage() {
                     const file = imageFiles[index];
                     try {
                         const image = await uploadImage(file);
-                        recordRecentReferenceImage(image.objectStorage?.url);
+                        recordRecentReferenceAsset({ kind: "image", url: image.objectStorage?.url || image.url, name: file.name });
                         const uploadedReference: ReferenceImage = {
                             ...placeholder,
                             type: image.mimeType,
@@ -875,6 +887,7 @@ export default function VideoPage() {
                     const file = videoFiles[index];
                     try {
                         const video = await uploadMediaFile(file, "video-reference");
+                        recordRecentReferenceAsset({ kind: "video", url: video.objectStorage?.url || video.url, name: file.name, durationMs: video.durationMs });
                         const uploadedReference: ReferenceVideo = {
                             ...placeholder,
                             type: video.mimeType,
@@ -957,8 +970,8 @@ export default function VideoPage() {
                     message.error(serverWorkflowQuote.reason || translate("video.videoWorkflowQuoteUnavailable"));
                     return;
                 }
-                if (typeof videoQuote.credits === "number" && typeof creditBalance === "number" && videoQuote.credits > creditBalance) {
-                    message.error(translate("video.insufficientCreditsVideoNeedsAvailable", { value0: videoQuote.credits, value1: creditBalance }));
+                if (videoQuote.credits !== null && videoQuote.credits !== undefined && creditBalance !== null && creditBalance !== undefined && creditAmount(videoQuote.credits).greaterThan(creditBalance)) {
+                    showInsufficientCredits(translate("video.insufficientCreditsVideoNeedsAvailable", { value0: videoQuote.credits, value1: creditBalance }));
                     return;
                 }
             } else {
@@ -971,8 +984,8 @@ export default function VideoPage() {
                     message.error(selectedQuote.reason);
                     return;
                 }
-                if (selectedSkill?.workflowType && typeof creditCost === "number" && typeof creditBalance === "number" && creditCost > creditBalance) {
-                    message.error(translate("video.insufficientCreditsWorkflowNeedsAvailable", { value0: creditCost, value1: creditBalance }));
+                if (selectedSkill?.workflowType && balanceInsufficient) {
+                    showInsufficientCredits();
                     return;
                 }
             }
@@ -1021,8 +1034,8 @@ export default function VideoPage() {
                 message.error(serverWorkflowQuote.reason);
                 return;
             }
-            if (typeof creditCost === "number" && typeof creditBalance === "number" && creditCost > creditBalance) {
-                message.error(translate("video.insufficientCreditsWorkflowNeedsAvailable", { value0: creditCost, value1: creditBalance }));
+            if (balanceInsufficient) {
+                showInsufficientCredits();
                 return;
             }
         }
@@ -1042,8 +1055,8 @@ export default function VideoPage() {
                 return;
             }
             const videoCost = videoQuote.credits;
-            if (typeof videoCost === "number" && typeof creditBalance === "number" && videoCost > creditBalance) {
-                message.error(translate("video.insufficientCreditsVideoNeedsAvailable", { value0: videoCost, value1: creditBalance }));
+            if (videoCost !== null && videoCost !== undefined && creditBalance !== null && creditBalance !== undefined && creditAmount(videoCost).greaterThan(creditBalance)) {
+                showInsufficientCredits(translate("video.insufficientCreditsVideoNeedsAvailable", { value0: videoCost, value1: creditBalance }));
                 return;
             }
         }
@@ -1486,11 +1499,21 @@ export default function VideoPage() {
                 };
             }),
     ];
-    const addRecentReference = (url: string) => {
-        if (references.some((reference) => reference.dataUrl === url) || !canAddReferences(1, 0)) return;
+    // 「最近上传」按素材类型回填到对应的参考列表，视频回填时带上时长，保持 2-15 秒校验有效。
+    const addRecentReference = (asset: RecentReferenceAsset) => {
+        if (asset.kind === "video") {
+            if (videoReferences.some((reference) => reference.url === asset.url) || !canAddReferences(0, 1)) return;
+            setVideoReferences((current) => {
+                if (current.some((reference) => reference.url === asset.url)) return current;
+                return [...current, { id: nanoid(), name: asset.name || translate("generation.referenceVideo_6ae00d"), type: "video/*", url: asset.url, durationMs: asset.durationMs }];
+            });
+            autoSwitchModeForReferences(0, 1);
+            return;
+        }
+        if (references.some((reference) => reference.dataUrl === asset.url) || !canAddReferences(1, 0)) return;
         setReferences((current) => {
-            if (current.some((reference) => reference.dataUrl === url)) return current;
-            return [...current, { id: nanoid(), name: translate("video.recentReferenceImages"), type: "image/*", dataUrl: url }];
+            if (current.some((reference) => reference.dataUrl === asset.url)) return current;
+            return [...current, { id: nanoid(), name: asset.name || translate("video.recentReferenceImages"), type: "image/*", dataUrl: asset.url }];
         });
         autoSwitchModeForReferences(1, 0);
     };
@@ -1499,7 +1522,13 @@ export default function VideoPage() {
             key: "upload",
             label: translate("video.assets"),
             icon: <Upload className="size-3.5" />,
-            popoverContent: <RecentReferenceImagePicker urls={recentReferenceImageUrls} selectedUrls={references.map((reference) => reference.dataUrl)} onSelect={addRecentReference} />,
+            popoverContent: (
+                <RecentReferenceAssetPicker
+                    assets={recentReferenceAssets}
+                    selectedUrls={[...references.map((reference) => reference.dataUrl), ...videoReferences.map((reference) => reference.url)]}
+                    onSelect={addRecentReference}
+                />
+            ),
             onClick: () => fileInputRef.current?.click(),
         },
         {
@@ -1593,7 +1622,7 @@ export default function VideoPage() {
                     const videoQuote = workflowVideoStageQuote;
                     if (!videoQuote || videoQuote.credits == null) return { 用这些图片生成视频: translate("video.fetchingVideoQuote") };
                     if (serverWorkflowQuote && !serverWorkflowQuote.available) return { 用这些图片生成视频: serverWorkflowQuote.reason || translate("video.videoWorkflowQuoteUnavailable") };
-                    if (typeof videoQuote.credits === "number" && typeof creditBalance === "number" && videoQuote.credits > creditBalance) {
+                    if (videoQuote.credits !== null && videoQuote.credits !== undefined && creditBalance !== null && creditBalance !== undefined && creditAmount(videoQuote.credits).greaterThan(creditBalance)) {
                         return { 用这些图片生成视频: translate("video.insufficientCreditsVideoNeedsCredits", { value0: videoQuote.credits }) };
                     }
                     return undefined;
@@ -1631,6 +1660,7 @@ export default function VideoPage() {
             const imageNodes = renderLiveWorkflowImages(data, call);
             if (imageNodes) return imageNodes;
             return renderResultVideos(data, {
+                uploadingObjectStorageId,
                 onDownload: downloadVideo,
                 onSaveAsset: saveResultToAssets,
                 onUploadObjectStorage: uploadResultToObjectStorage,
@@ -1801,13 +1831,13 @@ export default function VideoPage() {
                             {activeQuote !== null && (!activeQuote.available || (!selectedSkill?.workflowType && referenceIssue) || workflowBalanceInsufficient) ? (
                                 <div className="flex items-start gap-1.5 text-xs leading-relaxed" style={{ color: theme.node.muted }}>
                                     <HelpCircle className="mt-px size-3.5 shrink-0" />
-                                    <span>{workflowBalanceInsufficient ? translate("video.insufficientCreditsWorkflowNeedsAvailable", { value0: creditCost, value1: creditBalance }) : activeQuote.available ? referenceIssue : activeQuote.reason}</span>
+                                    <span>{workflowBalanceInsufficient && creditCost !== null && creditCost !== undefined && creditBalance !== null && creditBalance !== undefined ? translate("video.insufficientCreditsWorkflowNeedsAvailable", { value0: creditRequirement.requiredCredits ?? 0, value1: creditRequirement.availableCredits ?? 0 }) : activeQuote.available ? referenceIssue : activeQuote.reason}</span>
                                 </div>
                             ) : null}
                             {workflowChargingNext && serverWorkflowQuote?.available ? (
                                 <div className="flex items-start gap-1.5 text-xs leading-relaxed" style={{ color: theme.node.muted }}>
                                     <HelpCircle className="mt-px size-3.5 shrink-0" />
-                                    <span>{translate("video.workflowStageQuote")}{serverWorkflowQuote.stages.map((stage) => translate("video.credits", { value0: stage.displayName, value1: stage.credits })).join("，")}</span>
+                                    <span>{translate("video.workflowStageQuote")}{serverWorkflowQuote.stages.map((stage) => translate("video.credits", { value0: stage.displayName, value1: String(stage.credits) })).join("，")}</span>
                                 </div>
                             ) : null}
                             {workflowImageConfirmNext && workflowVideoStageQuote?.credits != null ? (
@@ -1992,6 +2022,7 @@ function FrameImagePreview({ url, role }: { url: string; role?: string }) {
 function renderResultVideos(
     data: Record<string, unknown>,
     callbacks: {
+        uploadingObjectStorageId: string;
         onDownload: (video: GeneratedVideo) => void;
         onSaveAsset: (video: GeneratedVideo) => void;
         onUploadObjectStorage: (video: GeneratedVideo) => Promise<void>;
@@ -2008,8 +2039,10 @@ function renderResultVideos(
             .map((item, i) => {
                 const url = typeof item.url === "string" ? item.url : "";
                 if (!url) return null;
+                // 标识必须跨渲染稳定，否则上传中的 loading 永远匹配不上；缺失时按 storageKey、url 兜底。
+                const id = (typeof item.id === "string" ? item.id : "") || readVideoStorageKey(item) || url;
                 const video: GeneratedVideo = {
-                    id: (typeof item.id === "string" ? item.id : "") || nanoid(),
+                    id,
                     url,
                     storageKey: readVideoStorageKey(item),
                     durationMs: typeof item.durationMs === "number" ? item.durationMs : 0,
@@ -2021,7 +2054,7 @@ function renderResultVideos(
                 return React.createElement(ResultCard, {
                     key: i,
                     video,
-                    uploadingObjectStorage: false,
+                    uploadingObjectStorage: callbacks.uploadingObjectStorageId === video.id,
                     onDownload: callbacks.onDownload,
                     onSaveAsset: callbacks.onSaveAsset,
                     onUploadObjectStorage: callbacks.onUploadObjectStorage,

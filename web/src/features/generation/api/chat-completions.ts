@@ -129,7 +129,7 @@ export function consumeChatCompletionStreamText(state: ChatCompletionStreamState
     state.buffer += text;
     for (;;) {
         const match = state.buffer.match(/\r?\n\r?\n/);
-        if (!match) break;
+        if (match?.index === undefined) break;
         consumeChatCompletionStreamBlock(state.buffer.slice(0, match.index), state, onDelta);
         state.buffer = state.buffer.slice(match.index + match[0].length);
     }

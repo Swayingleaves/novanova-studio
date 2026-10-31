@@ -7,6 +7,14 @@ export function proxy(request: NextRequest) {
     const headers = new Headers(request.headers);
     headers.set("x-novanova-language", locale);
     headers.set("x-novanova-pathname", request.nextUrl.pathname);
+    const teamMatch = request.nextUrl.pathname.match(/^\/team\/([^/]+)(.*)$/);
+    if (teamMatch) {
+        const destination = request.nextUrl.clone();
+        destination.pathname = teamMatch[2] || "/";
+        headers.set("x-novanova-team-slug", teamMatch[1]);
+        headers.set("x-novanova-pathname", destination.pathname);
+        return NextResponse.rewrite(destination, { request: { headers } });
+    }
     const response = NextResponse.next({ request: { headers } });
     const prefetch = request.headers.has("next-router-prefetch") || request.headers.get("purpose") === "prefetch";
     if (!prefetch && /^\/docs\/(zh-cn|en)(?:\/|$)/.test(request.nextUrl.pathname)) {

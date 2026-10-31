@@ -112,6 +112,7 @@
     --studio-line-strong: #c7cec4;
     --studio-glass: #ffffff;
     --studio-glass-strong: #ffffff;
+    --studio-glass-auth: rgba(255, 255, 255, 0.62);
     --studio-panel: #ffffff;
     --studio-panel-solid: #ffffff;
     --studio-action: #526f1e;
@@ -126,6 +127,7 @@
     --studio-accent: #db4f97;
     --studio-accent-soft: color-mix(in srgb, var(--studio-accent) 12%, transparent);
     --studio-accent-line: color-mix(in srgb, var(--studio-accent) 26%, transparent);
+    --studio-pro: #2563eb;
     --studio-brand-start: #5d8fff;
     --studio-brand-middle: #8a75ff;
     --studio-brand-end: #f46ab8;
@@ -147,6 +149,8 @@
     --studio-sidebar-active: color-mix(in srgb, var(--studio-action) 14%, transparent);
     --studio-scrollbar: rgba(71, 85, 105, 0.45);
     --studio-scrollbar-track: rgba(71, 85, 105, 0.12);
+    --auth-ray-opacity: 1;
+    --auth-ray-blend: normal;
 }
 
 html[data-theme="dark"] {
@@ -191,6 +195,7 @@ html[data-theme="dark"] {
     --studio-line-strong: #363c36;
     --studio-glass: #0c0e0d;
     --studio-glass-strong: #121512;
+    --studio-glass-auth: rgba(12, 14, 13, 0.56);
     --studio-panel: #0c0e0d;
     --studio-panel-solid: #0c0e0d;
     --studio-action: #c7f36b;
@@ -204,6 +209,7 @@ html[data-theme="dark"] {
     --studio-primary-line: color-mix(in srgb, var(--studio-action) 36%, transparent);
     --studio-accent-soft: color-mix(in srgb, var(--studio-accent) 18%, transparent);
     --studio-accent-line: color-mix(in srgb, var(--studio-accent) 34%, transparent);
+    --studio-pro: #60a5fa;
     --studio-brand-start: #8db2ff;
     --studio-brand-middle: #aa92ff;
     --studio-brand-end: #ff95d1;
@@ -225,6 +231,8 @@ html[data-theme="dark"] {
     --studio-sidebar-active: color-mix(in srgb, var(--studio-action) 18%, transparent);
     --studio-scrollbar: rgba(148, 163, 184, 0.45);
     --studio-scrollbar-track: rgba(148, 163, 184, 0.12);
+    --auth-ray-opacity: 0.5;
+    --auth-ray-blend: screen;
 }
 
 html[data-theme="purple"] {
@@ -269,6 +277,7 @@ html[data-theme="purple"] {
     --studio-line-strong: #35353c;
     --studio-glass: #0d0d0f;
     --studio-glass-strong: #141418;
+    --studio-glass-auth: rgba(13, 13, 15, 0.56);
     --studio-panel: #0d0d0f;
     --studio-panel-solid: #0d0d0f;
     --studio-action: #b85cf6;
@@ -283,6 +292,7 @@ html[data-theme="purple"] {
     --studio-accent: #ec4899;
     --studio-accent-soft: color-mix(in srgb, var(--studio-accent) 18%, transparent);
     --studio-accent-line: color-mix(in srgb, var(--studio-accent) 34%, transparent);
+    --studio-pro: #60a5fa;
     --studio-brand-start: #a78bfa;
     --studio-brand-middle: #b85cf6;
     --studio-brand-end: #ec4899;
@@ -304,6 +314,8 @@ html[data-theme="purple"] {
     --studio-sidebar-active: color-mix(in srgb, var(--studio-action) 20%, transparent);
     --studio-scrollbar: rgba(184, 146, 240, 0.45);
     --studio-scrollbar-track: rgba(184, 146, 240, 0.12);
+    --auth-ray-opacity: 0.52;
+    --auth-ray-blend: screen;
 }
 
 @layer base {
@@ -361,6 +373,117 @@ html[data-theme="purple"] {
         background: var(--studio-glass);
         border: 1px solid var(--studio-line);
         backdrop-filter: blur(18px);
+    }
+
+    /* 认证页背景：平台入口与团队入口（/team/<slug>/auth）共用同一套登录页，仅品牌信息不同。 */
+    .auth-stage {
+        isolation: isolate;
+    }
+
+    .auth-backdrop {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+    }
+
+    .auth-ray {
+        position: absolute;
+        top: -45%;
+        height: 190%;
+        transform-origin: 50% 0;
+        will-change: transform;
+        filter: blur(26px);
+        mix-blend-mode: var(--auth-ray-blend);
+        opacity: calc(var(--ray-opacity, 0.8) * var(--auth-ray-opacity));
+        background: linear-gradient(180deg, color-mix(in srgb, var(--ray-color, var(--studio-brand-middle)) 30%, transparent), transparent 76%);
+        animation: auth-ray-sway var(--ray-duration, 16s) ease-in-out infinite alternate;
+        animation-delay: var(--ray-delay, 0s);
+    }
+
+    .auth-ray-1 {
+        left: 4%;
+        width: 17%;
+        --ray-angle: 16deg;
+        --ray-opacity: 0.9;
+        --ray-duration: 19s;
+        --ray-color: var(--studio-brand-start);
+    }
+
+    .auth-ray-2 {
+        left: 26%;
+        width: 9%;
+        --ray-angle: 23deg;
+        --ray-opacity: 0.6;
+        --ray-duration: 14s;
+        --ray-delay: -3s;
+        --ray-color: var(--studio-brand-middle);
+    }
+
+    .auth-ray-3 {
+        left: 50%;
+        width: 21%;
+        --ray-angle: 11deg;
+        --ray-opacity: 0.8;
+        --ray-duration: 23s;
+        --ray-delay: -7s;
+        --ray-color: var(--studio-brand-end);
+    }
+
+    .auth-ray-4 {
+        left: 73%;
+        width: 7%;
+        --ray-angle: 26deg;
+        --ray-opacity: 0.55;
+        --ray-duration: 16s;
+        --ray-delay: -11s;
+        --ray-color: var(--studio-brand-middle);
+    }
+
+    .auth-ray-5 {
+        left: 87%;
+        width: 14%;
+        --ray-angle: 18deg;
+        --ray-opacity: 0.7;
+        --ray-duration: 21s;
+        --ray-delay: -5s;
+        --ray-color: var(--studio-brand-start);
+    }
+
+    /* 登录卡片改用半透明玻璃，否则不透明的 --studio-glass 会把背景光柱完全挡住。 */
+    .auth-card {
+        background: var(--studio-glass-auth);
+        border: 1px solid var(--studio-line);
+        box-shadow: var(--studio-shadow), inset 0 1px 0 color-mix(in srgb, var(--studio-ink) 6%, transparent);
+        backdrop-filter: blur(24px) saturate(1.4);
+    }
+
+    @keyframes auth-ray-sway {
+        0% {
+            transform: rotate(calc(var(--ray-angle) - 4deg)) translate3d(-2%, 0, 0) scaleY(1);
+        }
+
+        50% {
+            transform: rotate(calc(var(--ray-angle) + 2.5deg)) translate3d(2.5%, 0, 0) scaleY(1.06);
+        }
+
+        100% {
+            transform: rotate(calc(var(--ray-angle) - 6deg)) translate3d(-1%, 0, 0) scaleY(0.97);
+        }
+    }
+
+    @media (max-width: 640px) {
+        .auth-ray-2,
+        .auth-ray-4 {
+            display: none;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .auth-ray {
+            animation: none;
+            transform: rotate(var(--ray-angle));
+        }
     }
 
     .studio-panel {
@@ -837,6 +960,13 @@ html[data-theme="purple"] {
         overflow-wrap: anywhere;
         position: relative;
         z-index: 1;
+    }
+
+    /* 企业版专属功能的 PRO 文字角标，只用颜色区分，不带底色。 */
+    .pro-badge {
+        @apply absolute text-[10px] font-bold leading-none tracking-[0.06em];
+        color: var(--studio-pro);
+        z-index: 2;
     }
 
     .sidebar-rail-item-inactive {
@@ -1640,7 +1770,8 @@ html[data-theme="dark"] .creation-composer-submit-trigger:disabled {
 }
 
 .studio-sidebar-rail .sidebar-rail-item-active svg,
-.studio-sidebar-rail .sidebar-rail-item-active .sidebar-rail-label {
+.studio-sidebar-rail .sidebar-rail-item-active .sidebar-rail-label,
+.studio-sidebar-rail .sidebar-rail-item-active .pro-badge {
     color: var(--studio-action-foreground);
 }
 
@@ -1747,4 +1878,14 @@ html[data-theme="dark"] .creation-composer-submit-trigger:disabled {
     .sidebar-user-dot-emphasis:focus-visible > span {
         transform: none;
     }
+}
+
+/* 首次登录引导期间隐藏侧栏 Tooltip，避免与引导卡片争抢层级。 */
+body[data-onboarding="active"] .ant-tooltip {
+    display: none;
+}
+
+/* 第四步不展开用户菜单，禁用 hover 避免菜单浮层与引导卡片重叠。 */
+body[data-onboarding="active"] [data-tour="user-menu"] {
+    pointer-events: none;
 }

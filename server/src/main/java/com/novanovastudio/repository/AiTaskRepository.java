@@ -66,7 +66,7 @@ public class AiTaskRepository {
                 SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
-                WHERE user_id = :userId AND id = :taskId
+                WHERE user_id = :userId AND id = :taskId AND NOT data_purged
                 """)
                 .bind("userId", userId)
                 .bind("taskId", taskId)
@@ -86,7 +86,7 @@ public class AiTaskRepository {
                 SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
-                WHERE id = :taskId
+                WHERE id = :taskId AND NOT data_purged
                 """)
                 .bind("taskId", taskId)
                 .map((row, metadata) -> RowMappers.aiTask(row))
@@ -106,7 +106,7 @@ public class AiTaskRepository {
                 SELECT id, user_id, task_type, model, provider, model_config_id, status, progress, request_data::text AS request_data, result_data::text AS result_data,
                        error_message, error_message_key, error_message_arguments::text AS error_message_arguments, started_at, completed_at, created_at, updated_at
                 FROM ai_generation_tasks
-                WHERE user_id = :userId
+                WHERE user_id = :userId AND NOT data_purged
                 """;
         if (statuses != null && !statuses.isEmpty()) {
             sql += " AND status IN (" + R2dbcBindings.namedPlaceholders("status", statuses.size()) + ")";
@@ -133,7 +133,7 @@ public class AiTaskRepository {
         // 更新字段由服务层固定Map构造，避免外部输入控制列名。
         StringBuilder sql = new StringBuilder("UPDATE ai_generation_tasks SET updated_at = CURRENT_TIMESTAMP");
         values.keySet().forEach(column -> sql.append(", ").append(column).append(" = ").append("error_message_arguments".equals(column) ? "CAST(:error_message_arguments AS jsonb)" : ":" + column));
-        sql.append(" WHERE id = :taskId");
+        sql.append(" WHERE id = :taskId AND NOT data_purged");
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(sql.toString()).bind("taskId", taskId);
         for (Map.Entry<String, Object> entry : values.entrySet()) {
             spec = bindDynamicValue(spec, entry.getKey(), entry.getValue());
@@ -156,7 +156,7 @@ public class AiTaskRepository {
         if (resultData != null) {
             sql.append(", result_data = CAST(:resultData AS jsonb)");
         }
-        sql.append(" WHERE id = :taskId");
+        sql.append(" WHERE id = :taskId AND NOT data_purged");
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(sql.toString()).bind("taskId", taskId);
         for (Map.Entry<String, Object> entry : values.entrySet()) {
             spec = bindDynamicValue(spec, entry.getKey(), entry.getValue());
@@ -182,7 +182,7 @@ public class AiTaskRepository {
         if (resultData != null) {
             sql.append(", result_data = CAST(:resultData AS jsonb)");
         }
-        sql.append(" WHERE id = :taskId AND status IN ('pending', 'running')");
+        sql.append(" WHERE id = :taskId AND NOT data_purged AND status IN ('pending', 'running')");
         DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(sql.toString()).bind("taskId", taskId);
         for (Map.Entry<String, Object> entry : values.entrySet()) {
             spec = bindDynamicValue(spec, entry.getKey(), entry.getValue());
@@ -269,7 +269,7 @@ public class AiTaskRepository {
                 SET status = 'running', progress = 5, error_message = '', error_message_key = '', error_message_arguments = '[]'::jsonb,
                     started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = :taskId AND status IN ('pending', 'running')
+                WHERE id = :taskId AND NOT data_purged AND status IN ('pending', 'running')
                 """)
                 .bind("taskId", taskId)
                 .fetch()

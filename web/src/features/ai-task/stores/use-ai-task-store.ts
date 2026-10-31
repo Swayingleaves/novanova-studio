@@ -4,6 +4,7 @@ import { create } from "zustand";
 
 import { getCurrentUserInfo, listAiTasks, subscribeAiTaskEvents, type ServerAiTask } from "@/services/api/server";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
+import { notifyStorageCapacityChanged } from "@/features/storage/capacity-events";
 
 type AiTaskStore = {
     tasks: Record<string, ServerAiTask>;
@@ -24,6 +25,7 @@ export const useAiTaskStore = create<AiTaskStore>()((set, get) => ({
     startSubscribe: () => {
         if (get().subscribed) return;
         const unsubscribe = subscribeAiTaskEvents((task) => {
+            if (["completed", "success", "failed", "canceled"].includes(task.status)) notifyStorageCapacityChanged();
             set((state) => ({ tasks: { ...state.tasks, [task.id]: task } }));
             if (task.status === "pending" || task.status === "failed" || task.status === "canceled") {
                 // 任务创建扣费及失败退款完成后，同步左侧栏展示的可用积分。

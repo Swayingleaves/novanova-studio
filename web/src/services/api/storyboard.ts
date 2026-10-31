@@ -1,3 +1,4 @@
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 
 import { translateMessage as translate } from "@/features/locale/translate";
 import type { CanvasStoryboardAsset, CanvasStoryboardAssetGenerationSettings, CanvasStoryboardAssetImage, CanvasStoryboardShot } from "@/features/canvas/types";
@@ -20,12 +21,12 @@ export type ComposeStoryboardPromptsParams = GenerateStoryboardParams & {
 export type StoryboardGenerationResult = {
     shots: CanvasStoryboardShot[];
     assets: CanvasStoryboardAsset[];
-    chargedCredits: number;
+    chargedCredits: CreditAmount;
 };
 
 export type StoryboardPromptCompositionResult = {
     prompts: Array<{ shotId: string; finalPrompt: string }>;
-    chargedCredits: number;
+    chargedCredits: CreditAmount;
 };
 
 /** 创建分镜资产图片任务，提示词由服务端按资产类别模板渲染。 */

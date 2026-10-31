@@ -3,9 +3,28 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createTranslator } from "next-intl";
+import { parse, TYPE } from "@formatjs/icu-messageformat-parser";
 
 const directory = fileURLToPath(new URL("./messages/", import.meta.url));
 const load = (language) => Object.fromEntries(readdirSync(`${directory}/${language}`).map((file) => [file.replace(/\.json$/, ""), JSON.parse(readFileSync(`${directory}/${language}/${file}`, "utf8"))]));
+
+/** 解析 ICU 消息中的参数，包含复数、选择分支和富文本标签内的嵌套参数。 */
+function parameters(text) {
+    const names = new Set();
+    const visit = (elements) => {
+        for (const element of elements) {
+            if (element.type !== TYPE.literal && element.type !== TYPE.pound && element.type !== TYPE.tag) names.add(element.value);
+            if (element.type === TYPE.select || element.type === TYPE.plural) Object.values(element.options).forEach((option) => visit(option.value));
+            if (element.type === TYPE.tag) visit(element.children);
+        }
+    };
+    visit(parse(text));
+    return [...names].sort();
+}
+
+test("消息参数解析覆盖命名参数与嵌套分支并排除转义文本", () => {
+    assert.deepEqual(parameters("'{literal}' {name} {count, plural, one {<b>{title}</b>} other {{kind, select, book {{author}} other {#}}}}"), ["author", "count", "kind", "name", "title"]);
+});
 
 test("源文件使用的固定消息键都存在", () => {
     const messages = load("zh-cn");
@@ -23,7 +42,6 @@ test("所有业务模块的中英文消息键和参数一致，消息能完成�
     const chinese = load("zh-cn");
     const english = load("en");
     assert.deepEqual(Object.keys(chinese).sort(), Object.keys(english).sort());
-    const parameters = (text) => [...new Set(text.match(/value\d+/g) ?? [])].sort();
     for (const [module, messages] of Object.entries(chinese)) {
         assert.deepEqual(Object.keys(messages).sort(), Object.keys(english[module]).sort(), module);
         for (const [key, text] of Object.entries(messages)) {

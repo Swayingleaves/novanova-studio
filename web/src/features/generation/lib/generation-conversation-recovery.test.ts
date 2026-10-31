@@ -10,14 +10,12 @@ import {
 test("hasPendingImageConversation 检查所有图片结果状态", () => {
     assert.equal(
         hasPendingImageConversation({
-            updatedAt: 100,
             rounds: [{ results: [{ status: "success" }, { status: "pending" }] }],
         }),
         true,
     );
     assert.equal(
         hasPendingImageConversation({
-            updatedAt: 100,
             rounds: [{ results: [{ status: "success" }, { status: "failed" }] }],
         }),
         false,
@@ -27,14 +25,12 @@ test("hasPendingImageConversation 检查所有图片结果状态", () => {
 test("hasPendingVideoConversation 检查每轮视频结果状态", () => {
     assert.equal(
         hasPendingVideoConversation({
-            updatedAt: 100,
             rounds: [{ result: { status: "success" } }, { result: { status: "pending" } }],
         }),
         true,
     );
     assert.equal(
         hasPendingVideoConversation({
-            updatedAt: 100,
             rounds: [{ result: { status: "success" } }, { result: { status: "failed" } }],
         }),
         false,

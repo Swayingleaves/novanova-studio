@@ -70,7 +70,7 @@ export async function requestGeminiConversation(config: AiConfig, messages: Resp
 
 function createGeminiBody(config: AiConfig, messages: ResponseInputMessage[], tools: ResponseFunctionTool[], toolChoice: ToolChoice) {
     const callNames = new Map<string, string>();
-    const systemMessages = messages.filter((message) => !("type" in message) && message.role === "system").map((message) => textContent(message.content));
+    const systemMessages = messages.flatMap((message) => !("type" in message) && message.role === "system" ? [textContent(message.content)] : []);
     const contents = messages.filter((message) => "type" in message || message.role !== "system").map((message) => {
         if ("type" in message) {
             callNames.set(message.call_id, message.name);

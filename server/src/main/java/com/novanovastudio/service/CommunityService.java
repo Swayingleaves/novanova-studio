@@ -8,6 +8,7 @@ import com.novanovastudio.entity.PlatformCommunityConfigRecords;
 import com.novanovastudio.repository.CommunityConfigRepository;
 import com.novanovastudio.security.CurrentUser;
 import com.novanovastudio.security.CurrentUserProvider;
+import com.novanovastudio.security.TeamScope;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -71,15 +72,16 @@ public class CommunityService {
     }
 
     /**
-     * 限定平台管理员，普通用户不能编辑全站社群内容。
+     * 限定平台管理员与平台空间，团队管理员不能编辑全站社群内容。
      *
      * @return 当前平台管理员
      */
     private Mono<CurrentUser> requirePlatformAdministrator() {
-        return currentUserProvider.currentUser()
-                .filter(user -> "admin".equals(user.role()))
+        return currentUserProvider.currentUser().flatMap(user -> TeamScope.current()
+                .filter(scope -> scope.teamId() == 0 && "admin".equals(user.role()))
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED,
-                        SystemMessage.of("business.onlyPlatformAdministratorCanManageCommunity"))));
+                        SystemMessage.of("business.onlyPlatformAdministratorCanManageCommunity"))))
+                .thenReturn(user));
     }
 
     /**

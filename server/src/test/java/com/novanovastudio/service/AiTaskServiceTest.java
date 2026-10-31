@@ -1,7 +1,6 @@
 package com.novanovastudio.service;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -120,22 +119,22 @@ class AiTaskServiceTest {
     @BeforeEach
     void setUp() {
         executionOrder = new ArrayList<>();
-        service = new AiTaskService(repository, currentUserProvider, properties, persistenceService,
-                eventPublisher, taskQueue, modelTaskExecutionDispatcher, orchestrator, adapterRegistry, customProviderAdapter, creditService, transactionalOperator);
+        when(persistenceService.requireStorageWritable(org.mockito.ArgumentMatchers.anyLong())).thenReturn(Mono.empty());
+        service = new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), repository, currentUserProvider, properties, persistenceService, eventPublisher, taskQueue, modelTaskExecutionDispatcher, orchestrator, adapterRegistry, customProviderAdapter, creditService, transactionalOperator);
 
         AiTaskDtos.AiChannelConfig channel = new AiTaskDtos.AiChannelConfig(
                 "channel-1", "图片渠道", "https://example.com", "key", "openai", List.of("model-1"));
         when(currentUserProvider.currentUserId()).thenReturn(Mono.just(7L));
         when(persistenceService.getPlatformAiChannels()).thenReturn(Mono.just(List.of(channel)));
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(
-                new PersistenceDtos.ModelConfig("model-config-1", "channel-1", "model-1", AiTaskTypes.IMAGE, List.of(), true, 0, 0, true, "high"),
+                new PersistenceDtos.ModelConfig("model-config-1", "channel-1", "model-1", AiTaskTypes.IMAGE, List.of(), true, 0, java.math.BigDecimal.valueOf(0), true, "high"),
                 new PersistenceDtos.ModelConfig("model-config-2", "channel-1", "model-1", AiTaskTypes.VIDEO,
-                        List.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO, VideoGenerationMode.REFERENCE_TO_VIDEO), true, 0, 0, true, "high", "generation", 1,
+                        List.of(VideoGenerationMode.TEXT_TO_VIDEO, VideoGenerationMode.IMAGE_TO_VIDEO, VideoGenerationMode.REFERENCE_TO_VIDEO), true, 0, java.math.BigDecimal.valueOf(0), true, "high", "generation", 1,
                         new com.alibaba.fastjson2.JSONObject(), new VideoBillingConfiguration("generation", 3,
-                        Map.of(VideoGenerationMode.TEXT_TO_VIDEO, Map.of("720p", 6),
-                                VideoGenerationMode.IMAGE_TO_VIDEO, Map.of("720p", 8),
-                                VideoGenerationMode.REFERENCE_TO_VIDEO, Map.of("720p", 10))), null, null, false, null, false, null),
-                new PersistenceDtos.ModelConfig("model-config-3", "channel-1", "model-1", AiTaskTypes.TEXT, List.of(), true, 0, 0, true, "high")
+                        Map.of(VideoGenerationMode.TEXT_TO_VIDEO, Map.of("720p", java.math.BigDecimal.valueOf(6)),
+                                VideoGenerationMode.IMAGE_TO_VIDEO, Map.of("720p", java.math.BigDecimal.valueOf(8)),
+                                VideoGenerationMode.REFERENCE_TO_VIDEO, Map.of("720p", java.math.BigDecimal.valueOf(10)))), null, null, false, null),
+                new PersistenceDtos.ModelConfig("model-config-3", "channel-1", "model-1", AiTaskTypes.TEXT, List.of(), true, 0, java.math.BigDecimal.valueOf(0), true, "high")
         )));
         providerAdapter = mock(AiProviderAdapter.class);
         when(adapterRegistry.resolve(any(AiTaskDtos.AiChannelConfig.class), eq(AiTaskTypes.IMAGE)))
@@ -148,7 +147,7 @@ class AiTaskServiceTest {
             executionOrder.add("create");
             return Mono.empty();
         }));
-        when(creditService.chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class))).thenReturn(Mono.empty());
+        when(creditService.chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), anyString(), org.mockito.ArgumentMatchers.nullable(String.class))).thenReturn(Mono.empty());
         org.mockito.Mockito.lenient().when(creditService.refundTask(anyLong(), anyString(), anyString())).thenReturn(Mono.empty());
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any())).thenAnswer(invocation -> invocation.getArgument(0));
         org.mockito.Mockito.lenient().when(repository.updateTaskIfNotTerminal(anyString(), any(), org.mockito.ArgumentMatchers.nullable(String.class))).thenReturn(Mono.just(true));
@@ -251,8 +250,8 @@ class AiTaskServiceTest {
     @Test
     void shouldPassImageSizeConversionToBoundModelExecution() {
         PersistenceDtos.ModelConfig enabled = new PersistenceDtos.ModelConfig(
-                "model-config-1", "channel-1", "model-1", AiTaskTypes.IMAGE, List.of(), true, 0, 0,
-                false, "high", "generation", 1, new JSONObject(), null, null, null, false, null, true,
+                "model-config-1", "channel-1", "model-1", AiTaskTypes.IMAGE, List.of(), true, 0, java.math.BigDecimal.ZERO,
+                false, "high", "generation", 1, new JSONObject(), null, null, null, false, null, 0L, true,
                 Map.of("9:16", Map.of("2K", "1440x2560")));
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(enabled)));
         AiGenerationTask queuedTask = task("task-1");
@@ -328,7 +327,7 @@ class AiTaskServiceTest {
 
         Assertions.assertTrue(exception.getMessage().contains("图片参考列表只能包含图片素材"));
         verify(repository, never()).createTask(any(AiGenerationTask.class));
-        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
         verify(modelTaskExecutionDispatcher, never()).enqueue(anyString(), anyString());
     }
 
@@ -343,7 +342,7 @@ class AiTaskServiceTest {
 
         Assertions.assertTrue(exception.getMessage().contains("不存在或不属于当前用户"));
         verify(repository, never()).createTask(any(AiGenerationTask.class));
-        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
         verify(modelTaskExecutionDispatcher, never()).enqueue(anyString(), anyString());
     }
 
@@ -359,7 +358,7 @@ class AiTaskServiceTest {
 
         Assertions.assertTrue(exception.getMessage().contains("不存在或不属于当前用户"));
         verify(repository, never()).createTask(any(AiGenerationTask.class));
-        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
         verify(modelTaskExecutionDispatcher, never()).enqueue(anyString(), anyString());
     }
 
@@ -375,7 +374,7 @@ class AiTaskServiceTest {
 
         Assertions.assertTrue(exception.getMessage().contains("素材类型与声明不一致"));
         verify(repository, never()).createTask(any(AiGenerationTask.class));
-        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
         verify(modelTaskExecutionDispatcher, never()).enqueue(anyString(), anyString());
     }
 
@@ -391,7 +390,7 @@ class AiTaskServiceTest {
 
         Assertions.assertTrue(exception.getMessage().contains("没有可访问的http或https地址"));
         verify(repository, never()).createTask(any(AiGenerationTask.class));
-        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
         verify(modelTaskExecutionDispatcher, never()).enqueue(anyString(), anyString());
     }
 
@@ -445,7 +444,7 @@ class AiTaskServiceTest {
         BusinessException error = Assertions.assertThrows(BusinessException.class, () -> service.createTask(audioRequest()).block());
         Assertions.assertTrue(error.getMessage().contains("未开启音频输入"));
         verify(repository, never()).createTask(any(AiGenerationTask.class));
-        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
     }
 
     /** 音频输入是否可用由模型配置能力决定，不依据适配器预置标记拒绝。 */
@@ -456,7 +455,7 @@ class AiTaskServiceTest {
                 new PersistenceDtos.UploadedMediaResponse("audio:reference", "https://example.com/audio.mp3", 100L, "audio/mpeg", null, null, 5000, null)));
         Assertions.assertDoesNotThrow(() -> service.createTask(audioRequest()).block());
         verify(repository).createTask(any(AiGenerationTask.class));
-        verify(creditService).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        verify(creditService).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
     }
 
     /** 非当前用户的音频不能提交给渠道，也不会扣费。 */
@@ -467,7 +466,7 @@ class AiTaskServiceTest {
         BusinessException error = Assertions.assertThrows(BusinessException.class, () -> service.createTask(audioRequest()).block());
         Assertions.assertTrue(error.getMessage().contains("不属于当前用户"));
         verify(repository, never()).createTask(any(AiGenerationTask.class));
-        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.anyInt(), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), org.mockito.ArgumentMatchers.any(java.math.BigDecimal.class), anyString(), org.mockito.ArgumentMatchers.nullable(String.class));
     }
 
     /** Evolink 必须在音频以外提供视觉参考。 */
@@ -485,12 +484,12 @@ class AiTaskServiceTest {
         configureAudioModel("evolink");
         var constraints = new VideoGenerationConstraints(2, 10, 0, 0, List.of("16:9"), 0, 1);
         var group = new PersistenceDtos.CustomModelGroupConfig("/video", "POST", "video", "{}", null, null,
-                "url", null, null, null, null, null, null, constraints);
+                "url", null, null, null, null, null, null, constraints, null);
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(new PersistenceDtos.ModelConfig(
                 "model-config-2", "channel-1", "model-1", AiTaskTypes.VIDEO, List.of("reference-to-video", "audio-input"),
-                true, 0, 0, false, "high", "generation", 1, new JSONObject(),
-                new VideoBillingConfiguration("generation", 3, Map.of("reference-to-video", Map.of("720p", 10))),
-                null, null, true, Map.of("reference-to-video", group), false, null))));
+                true, 0, java.math.BigDecimal.ZERO, false, "high", "generation", 1, new JSONObject(),
+                new VideoBillingConfiguration("generation", 3, Map.of("reference-to-video", Map.of("720p", java.math.BigDecimal.TEN))),
+                null, null, true, Map.of("reference-to-video", group)))));
         var request = new AiTaskDtos.CreateAiTaskRequest(AiTaskTypes.VIDEO, "参考音频", "channel-1::model-1",
                 Map.of("seconds", 5, "size", "16:9", "resolution", "720p"), List.of(), List.of(),
                 AiTaskSources.VIDEO_PAGE, null, null, "reference-to-video", audioRequest().audioReferences());
@@ -516,8 +515,8 @@ class AiTaskServiceTest {
         when(persistenceService.getPlatformAiChannels()).thenReturn(Mono.just(List.of(new AiTaskDtos.AiChannelConfig(
                 "channel-1", "音频测试渠道", "https://example.com", "key", format, List.of("model-1")))));
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(new PersistenceDtos.ModelConfig(
-                "model-config-2", "channel-1", "model-1", AiTaskTypes.VIDEO, List.of("reference-to-video", "audio-input"), true, 0, 0, true, "high", "generation", 1,
-                new com.alibaba.fastjson2.JSONObject(), new VideoBillingConfiguration("generation", 3, Map.of("reference-to-video", Map.of("720p", 10))), null, null, false, null, false, null))));
+                "model-config-2", "channel-1", "model-1", AiTaskTypes.VIDEO, List.of("reference-to-video", "audio-input"), true, 0, java.math.BigDecimal.valueOf(0), true, "high", "generation", 1,
+                new com.alibaba.fastjson2.JSONObject(), new VideoBillingConfiguration("generation", 3, Map.of("reference-to-video", Map.of("720p", java.math.BigDecimal.valueOf(10)))), null, null, false, null))));
     }
 
     /**
@@ -541,7 +540,7 @@ class AiTaskServiceTest {
         Assertions.assertEquals(quoteError.getMessage(), createError.getMessage());
         Assertions.assertTrue(createError.getMessage().contains("16:9"));
         verify(repository, never()).createTask(any());
-        verify(creditService, never()).chargeTask(anyLong(), anyString(), anyInt(), anyString(), anyString());
+        verify(creditService, never()).chargeTask(anyLong(), anyString(), any(), anyString(), any());
         org.mockito.Mockito.verifyNoInteractions(customProviderAdapter);
     }
 
@@ -595,13 +594,13 @@ class AiTaskServiceTest {
     private void configureCustomVideoModel(int referenceImages) {
         var text = new VideoGenerationConstraints(2, 10, 0, 0, List.of("16:9", "auto"), null, null);
         var reference = new VideoGenerationConstraints(2, 10, 0, referenceImages, List.of("16:9"), 1, 0);
-        var textGroup = new PersistenceDtos.CustomModelGroupConfig("/video", "POST", "video", "{}", null, null, "url", null, null, null, null, null, null, text);
-        var referenceGroup = new PersistenceDtos.CustomModelGroupConfig("/video", "POST", "video", "{}", null, null, "url", null, null, null, null, null, null, reference);
+        var textGroup = new PersistenceDtos.CustomModelGroupConfig("/video", "POST", "video", "{}", null, null, "url", null, null, null, null, null, null, text, null);
+        var referenceGroup = new PersistenceDtos.CustomModelGroupConfig("/video", "POST", "video", "{}", null, null, "url", null, null, null, null, null, null, reference, null);
         when(persistenceService.getPlatformModelConfigs()).thenReturn(Mono.just(List.of(new PersistenceDtos.ModelConfig(
-                "model-config-2", "channel-1", "model-1", "video", List.of("text-to-video", "reference-to-video"), true, 0, 0,
+                "model-config-2", "channel-1", "model-1", "video", List.of("text-to-video", "reference-to-video"), true, 0, java.math.BigDecimal.ZERO,
                 false, "high", "generation", 1, new JSONObject(), new VideoBillingConfiguration("generation", 3,
-                Map.of("text-to-video", Map.of("720p", 1), "reference-to-video", Map.of("720p", 1))),
-                null, null, true, Map.of("text-to-video", textGroup, "reference-to-video", referenceGroup), false, null))));
+                Map.of("text-to-video", Map.of("720p", java.math.BigDecimal.ONE), "reference-to-video", Map.of("720p", java.math.BigDecimal.ONE))),
+                null, null, true, Map.of("text-to-video", textGroup, "reference-to-video", referenceGroup)))));
     }
 
 }

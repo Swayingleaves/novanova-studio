@@ -34,19 +34,8 @@ class AiTaskModelAccessTest {
     @Test
     void shouldRejectModelCatalogRequestWithoutAuthenticatedUser() {
         PersistenceService persistenceService = mock(PersistenceService.class);
-        AiTaskService service = new AiTaskService(
-                mock(AiTaskRepository.class),
-                new CurrentUserProvider(),
-                mock(NovanovaProperties.class),
-                persistenceService,
-                mock(AiTaskEventPublisher.class),
-                mock(AiTaskQueue.class),
-                mock(ModelTaskExecutionDispatcher.class),
-                mock(AgentTaskOrchestrator.class),
-                mock(AiProviderAdapterRegistry.class),
-                mock(CustomProviderAdapter.class),
-                mock(CreditService.class),
-                mock(TransactionalOperator.class));
+        org.mockito.Mockito.when(persistenceService.requireStorageWritable(org.mockito.ArgumentMatchers.anyLong())).thenReturn(reactor.core.publisher.Mono.empty());
+        AiTaskService service = new AiTaskService(com.novanovastudio.TeamTestSupport.taskScope(), mock(AiTaskRepository.class), new CurrentUserProvider(), mock(NovanovaProperties.class), persistenceService, mock(AiTaskEventPublisher.class), mock(AiTaskQueue.class), mock(ModelTaskExecutionDispatcher.class), mock(AgentTaskOrchestrator.class), mock(AiProviderAdapterRegistry.class), mock(CustomProviderAdapter.class), mock(CreditService.class), mock(TransactionalOperator.class));
 
         BusinessException exception = Assertions.assertThrows(BusinessException.class,
                 () -> service.listModels().block());

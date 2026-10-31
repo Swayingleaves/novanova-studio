@@ -310,7 +310,7 @@ public class CreationAgentRequestRepository {
      */
     private String selectSql() {
         return """
-                SELECT id, user_id, session_id, entry_source, request_data::text AS request_data, status,
+                SELECT id, team_id, user_id, session_id, entry_source, request_data::text AS request_data, status,
                        COALESCE(plan_id, '') AS plan_id, task_ids::text AS task_ids, error_message, error_message_key, error_message_arguments::text AS error_message_arguments,
                        started_at, completed_at, created_at, updated_at
                 FROM creation_agent_request
@@ -326,6 +326,7 @@ public class CreationAgentRequestRepository {
     private CreationAgentRequest map(io.r2dbc.spi.Row row) {
         CreationAgentRequest request = new CreationAgentRequest();
         request.setId(row.get("id", String.class));
+        request.setTeamId(row.get("team_id", Long.class));
         request.setUserId(row.get("user_id", Long.class));
         request.setSessionId(row.get("session_id", String.class));
         request.setEntrySource(row.get("entry_source", String.class));

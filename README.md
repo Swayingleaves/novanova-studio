@@ -4,13 +4,14 @@
   <img src="logo/novanovastudio.png" width="128" alt="Novanova Studio logo">
 </p>
 
-<h1 align="center">Novanova Studio</h1>
+<h1 align="center">Novanova Studio PRO企业版</h1>
+
 <p align="center">
-  NovaNova Studio 一个 Agent 驱动的集 AI图片生成、AI视频生成、无限画布、自定义模型 API 、AI漫剧、AI短剧、小说解析剧本、小说转短剧、3D导演台、用户管理、积分管理于一体的全流程开源平台
+  AI Agent 驱动的视觉创作工作台：在一个持续保留上下文的空间里完成构思、生成、编辑、编排与沉淀。
 </p>
 
 <p align="center">
-  <a href="https://www.novanovastudio.cn/">>>>>如果觉得部署麻烦、找便宜渠道麻烦->点我在线体验 seedance2.0系列4折官转API<<<<<</a>
+  <a href="https://www.novanovastudio.cn/">>>>>如果觉得部署麻烦、找便宜渠道麻烦->点我在线体验<<<<<</a>
 </p>
 
 <p align="center">
@@ -29,35 +30,6 @@
   <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/mjcz.png" alt="Novanova Studio 漫剧创作">
 </p>
 
-### 感谢以下赞助商的鼎力支持
-<table align="center">
-  <thead>
-    <tr>
-      <th align="center">赞助商</th>
-      <th align="center">note</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td align="center" width="33%">
-        <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/sponsor/notoken.png" alt="notoken" width="220" />
-      </td>
-      <td align="left" width="33%">
-        https://notoken.pro/ <br>
-        让每一次调用 都释放创造力 <br>
-        seedance渠道超低折扣
-      </td>
-    </tr>
-    <tr>
-      <td align="center" width="33%">
-        <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/sponsor/LL2.png" alt="notoken" width="220" />
-      </td>
-      <td align="left" width="33%">
-        ll2.cn｜自营算力底座 · 官方直签批价。MiniMax-H3 0.05 元/秒（自部署 768P 满血）；deepseek-v4.1-flash 官方 4 折；Seedance 系列 7 折起；超分 0.018 元/秒；Vega系列 6折起 注册链接：https://hub.ll2.cn?p=ua5r
-      </td>
-    </tr>
-  </tbody>
-</table>
 
 ## 联系我
 - 商业授权/企业版
@@ -76,7 +48,7 @@
         <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/wechat_me.png" alt="作者微信二维码" width="220" />
       </td>
       <td align="center" width="33%">
-        <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/wechat-group2.png" alt="交流群二维码" width="220" />
+        <img src="https://ai-flow-1253318092.cos.ap-singapore.myqcloud.com/novanova-studio/docs/wechat-group.png" alt="交流群二维码" width="220" />
       </td>
     </tr>
   </tbody>
@@ -134,11 +106,21 @@ flowchart LR
 
 - **无限画布**：把文字、图片、视频、参考素材和生成结果放到同一空间编排，保留创作上下文。
 - **对话式图片与视频生成**：在同一会话中完成生成、编辑、引用历史结果和继续迭代。
-- **多渠道模型配置**：在“配置与用户偏好”中维护 AI 渠道、模型能力、默认模型和积分消耗规则；视频模型支持按分辨率、时长等规格分档计费。
+- **多渠道模型配置**：在“配置与用户偏好”中维护 AI 渠道、模型能力、默认模型和积分消耗规则。
 - **素材与生成记录**：保存可复用资产、生成历史和提示词，减少重复上传与重复配置。
 - **对象存储接入**：支持腾讯云 COS、阿里云 OSS、七牛云 Kodo，用于上传素材与保存生成结果。
-- **用户与运营能力**：邮箱登录、OAuth2 登录、积分与流水（画布顶部提供余额快捷入口，流水可按方向与来源筛选）、通知、提示词库、首页展示和管理员后台。
+- **用户与运营能力**：邮箱登录、OAuth2 登录、积分、通知、提示词库、首页展示和管理员后台。
 - **异步任务机制**：Redis Stream 消费组、任务锁、失败恢复与 SSE 事件流支撑可追踪的长耗时任务。
+
+### 🚀 当前分支新增能力
+
+- **视频生成技能与工作流**：管理员可维护图片、视频生成技能；视频页支持技能引导式多轮澄清、提示词草案确认，以及首帧、尾帧图片生成后再合成视频。
+- **首尾帧视频模式**：新增 `first-last-frame-to-video` 能力，支持将首帧和尾帧作为带角色的参考素材传入兼容渠道。
+- **自定义模型调用**：图片和视频模型可配置自有 API 的请求/响应模板、异步查询路径和占位符，适配自建模型服务。
+- **模型展示配置**：管理员可为模型设置展示名称和展示图标；Evolink 渠道支持拉取模型列表。
+- **视频分档计费**：可按视频模型的分辨率、时长等规格配置积分价格，工作流会展示各阶段报价。
+- **积分流水与快捷入口**：用户可从画布顶部查看积分余额并进入积分记录，流水支持增加、消耗和退款方向及来源筛选。
+- **管理与可观测性**：新增技能管理、风格封面分类、提示词封面、结果详情和接口访问日志；AI 异步任务轮询间隔支持统一配置。
 
 ## 🌟 项目优势特点
 
@@ -152,7 +134,7 @@ Agent 不只是一次性调用模型，而是贯穿需求理解、工具选择�
 
 ### 🧩 技能化、工作流化的复杂创作
 
-技能通过可配置提示词驱动引导式交互，工作流负责定义阶段、任务角色和状态流转。例如首尾帧视频工作流（`first-last-frame-to-video`）可以依次完成需求澄清、提示词确认、首帧生成、尾帧生成和视频合成，首帧、尾帧会以明确的媒体角色作为参考素材传入兼容渠道；只有各阶段模型能力和积分价格均配置完成后，工作流才会显示可用报价。后续可以沿用同一机制扩展更多创作流程。
+技能通过可配置提示词驱动引导式交互，工作流负责定义阶段、任务角色和状态流转。例如首尾帧视频工作流可以依次完成需求澄清、提示词确认、首帧生成、尾帧生成和视频合成，后续可以沿用同一机制扩展更多创作流程。
 
 ### 🔌 开放的模型与渠道接入
 
@@ -168,7 +150,7 @@ Agent 不只是一次性调用模型，而是贯穿需求理解、工具选择�
 
 ## 🤖 支持的模型与渠道
 
-项目通过渠道的 `apiFormat`（接口调用格式）选择对应适配器，模型名称由管理员从渠道同步后配置，不维护固定的全量模型白名单。只要模型实现对应渠道协议和接口，就可以加入相应的图片、视频或 Chat 模型目录；最终可用范围仍取决于渠道账号实际开通的模型。
+项目通过渠道的 `apiFormat`（接口调用格式）选择对应适配器，模型名称由管理员从渠道同步后配置，不维护固定的全量模型白名单。因此，除下表明确写出的专用模型外，只要模型实现对应渠道协议和接口，就可以加入相应的图片、视频或 Chat 模型目录；最终可用范围仍取决于渠道账号实际开通的模型。
 
 ### 渠道能力矩阵
 
@@ -182,6 +164,35 @@ Agent 不只是一次性调用模型，而是贯穿需求理解、工具选择�
 | Seedance（`seedance`） | ❌ | ✅ | ❌ | `https://ark.cn-beijing.volces.com/api/v3` | 使用火山方舟视频生成任务接口。 |
 | MiniMax（`minimax`） | ❌ | ✅ | ❌ | `https://api.minimaxi.com` | 使用 MiniMax H3 视频生成 V2 接口，模型需手动配置。 |
 | 自定义（`custom`） | ✅ | ✅ | ❌ | 由管理员填写 | 按模型配置的请求/响应模板调用自有图片或视频 API；视频支持异步轮询，模型列表需手动配置。 |
+
+### 生成图片模型
+
+| 渠道 | 当前支持的模型范围 | 已实现能力 |
+| --- | --- | --- |
+| OpenAI 兼容 | 提供 OpenAI Images API 的图片模型，不限制具体模型名称。 | 文生图调用 `/images/generations`；带参考图时调用 `/images/edits`。 |
+| Gemini | 支持通过 Gemini `generateContent` 返回图片的模型，不限制具体模型名称。 | 文生图、参考图生成；请求 `TEXT` 和 `IMAGE` 两种响应模态。 |
+| Agnes | `agnes-image-2.1-flash` | 文生图、图生图和多参考图生成。 |
+
+### 生成视频模型
+
+| 渠道 | 当前支持的模型范围 | 已实现能力 |
+| --- | --- | --- |
+| OpenAI 兼容 | 提供 OpenAI 兼容 Videos API 的视频模型，不限制具体模型名称。 | 文生视频、最多 7 张参考图生成；不支持参考视频。 |
+| Agnes | `agnes-video-v2.0` | 文生视频、单图或多图参考生成；不支持参考视频。 |
+| Seedance | Doubao Seedance 2.0 系列、Doubao Seedance 1.5 Pro、Doubao Seedance 1.0 Pro、Doubao Seedance 1.0 Pro Fast，以及兼容同一任务接口的模型 ID 或推理接入点 ID。 | 文生视频、参考图生成；Seedance 2.0 系列支持最多 9 张参考图和 3 个参考视频。 |
+| MiniMax | `MiniMax-H3` | 文生视频、图片或视频参考生成；支持最多 9 张参考图和 3 个参考视频，分辨率为 `768P` 或 `2K`，时长为 4～15 秒。 |
+| Evolink | Evolink 文档中开通的 Seedance 2.0 模型 | 文生视频、图片或视频参考生成；通过 Evolink 自有 `/v1/videos/generations` 异步接口创建任务，并通过 `/v1/tasks/{task_id}` 查询结果。 |
+| 自定义 | 管理员配置的模型 | 按模型模板调用自有视频 API，支持文生视频、参考素材和异步任务轮询；具体能力取决于配置。 |
+
+首尾帧技能工作流默认包含“生成首帧”“生成尾帧”“合成视频”三个阶段。只有各阶段模型能力和积分价格均配置完成后，工作流才会显示可用报价。
+
+### Chat 模型
+
+| 渠道 | 当前支持的模型范围 | 接口与用途 |
+| --- | --- | --- |
+| OpenAI 兼容 | GPT 系列及其他实现 OpenAI Chat Completions 协议的模型，不限制具体模型名称。 | `/chat/completions`，支持流式输出和 Agent 工具调用。 |
+| Gemini | Gemini 文本或多模态 Chat 模型，不限制具体模型名称。 | Gemini 原生接口，用于主 Agent 对话与任务规划。 |
+| Anthropic | Claude 系列模型，不限制具体模型名称。 | `/v1/messages`，支持流式输出和 Agent 工具调用。 |
 
 > ⚠️ “渠道可拉取到模型”不等于“模型具备对应生成能力”。管理员仍需在模型配置中为每个模型标记文本、图片或视频类型及具体能力，并设置各类型的默认模型。
 
@@ -220,12 +231,46 @@ Agent 不只是一次性调用模型，而是贯穿需求理解、工具选择�
 
 - [Docker 完整部署指南](deploy_docs/docker-deploy.md)
 
-Docker 部署会由 Flyway 自动执行数据库迁移，当前分支需执行至 `V28__Add_Password_Reset.sql`。生产环境还应配置 `APP_SECRET_KEY`、`FRONTEND_BASE_URL`、可信代理地址 `TRUSTED_PROXY_ADDRESSES`，并按需调整统一 AI 任务轮询间隔 `AI_TASK_POLLING_INTERVAL_SECONDS`，具体说明见 [Docker 部署指南](deploy_docs/docker-deploy.md)。
+Docker 部署会由 Flyway 自动执行数据库迁移。企业版已有数据库及新数据库默认使用 `classpath:db/migration`，保留线上 V1–V76；原开源版数据库必须在 `.env` 中设置 `FLYWAY_MIGRATION_LOCATION=classpath:db/migration-community`，从 V38 升级至 V77。已有数据库不能切换或同时加载这两套历史，详见 [数据库迁移说明](docs-api/backend-database.md#合并后的数据库迁移历史)。
+
+生产环境还应配置 `APP_SECRET_KEY`、`FRONTEND_BASE_URL`、可信代理地址 `TRUSTED_PROXY_ADDRESSES`，并按需调整统一 AI 任务轮询间隔 `AI_TASK_POLLING_INTERVAL_SECONDS`。当前线上部署需组合使用 `docker-compose.yml` 和 `docker-compose-production.yml`，保留企业版容器名称及端口，具体说明见 [Docker 部署指南](deploy_docs/docker-deploy.md)。
+
+## 📝 Agent 提示词配置
+
+Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不需要把提示词硬编码到 Java 代码中：
+
+| 文件 | 用途 | 可覆盖环境变量 |
+| --- | --- | --- |
+| `agent-main.md` | 主 Agent 的意图识别、任务依赖图与页面能力边界。 | `AI_SYSTEM_PROMPT_AGENT_MAIN_FILE` |
+| `agent-image.md` | 图片生成与编辑 Agent 的工具与行为约束。 | `AI_SYSTEM_PROMPT_AGENT_IMAGE_FILE` |
+| `agent-video.md` | 视频生成与编辑 Agent 的工具与行为约束。 | `AI_SYSTEM_PROMPT_AGENT_VIDEO_FILE` |
+| `agent-canvas.md` | 画布 Agent 的状态理解与画布操作约束。 | `AI_SYSTEM_PROMPT_AGENT_CANVAS_FILE` |
+| `agent-storyboard.md` | 分镜脚本与中文提示词合成 Agent 的行为约束。 | `AI_SYSTEM_PROMPT_AGENT_STORYBOARD_FILE` |
+| `image-storyboard-asset.md` | 分镜资产图片提示词模板，按 `character`、`scene`、`prop` 分段。 | `AI_SYSTEM_PROMPT_IMAGE_STORYBOARD_ASSET_FILE` |
+| `optimization-image.md` | 图片提示词优化策略。 | `AI_SYSTEM_PROMPT_OPTIMIZATION_IMAGE_FILE` |
+| `optimization-video.md` | 视频提示词优化策略。 | `AI_SYSTEM_PROMPT_OPTIMIZATION_VIDEO_FILE` |
+
+本地默认从项目根目录下的 `server/config/prompts/` 读取；Docker 部署时，Compose 会将该目录只读挂载到 `/app/config/prompts/`。替换提示词文件路径时，请同时确认运行目录与对应环境变量一致。
+
+## 🔒 安全提醒
+
+不要把 `.env`、AI 渠道密钥、对象存储密钥或证书私钥提交到 Git。浏览器可见的 `NEXT_PUBLIC_*` 环境变量不应用于保存任何密钥。
+
+## 🔍 常见问题
+
+| 现象 | 检查方向 |
+| --- | --- |
+| `http://127.0.0.1:8080/api/v1/health` 无法访问 | 确认 PostgreSQL、Redis 已启动，`.env` 中连接地址与端口正确，并查看服务端启动日志。 |
+| 前端页面无法请求 API | 确认服务端端口为 `8080`；若改过端口，在启动 `pnpm dev` 前设置 `NEXT_PUBLIC_SERVER_URL`。 |
+| Agent 或生成页没有可选模型 | 在“配置与用户偏好”中保存 AI 渠道、模型能力和对应默认模型。 |
+| 上传素材或保存生成结果失败 | 检查默认对象存储是否已配置、凭证是否有效，以及存储桶的读写权限。 |
+| 找不到 Agent 提示词文件 | 从项目根目录使用 `mvn -f server/pom.xml spring-boot:run` 启动，或显式覆盖对应 `AI_SYSTEM_PROMPT_*_FILE` 环境变量。 |
+| Docker Compose 完整部署 Nginx 异常 | Nginx 使用 `network_mode: host` 并挂载宿主机目录，仅适用于 Linux 服务器；详见 [Docker 部署指南](deploy_docs/docker-deploy.md)。 |
 
 ## 📚 相关文档
 
 - [Novanova Studio 文档门户](/docs)
-- [工程与 API 文档](/docs-api)
+- [工程与 API 文档](docs-api/)
 - [产品定位](PRODUCT.md)
 - [开源许可证](LICENSE)
 

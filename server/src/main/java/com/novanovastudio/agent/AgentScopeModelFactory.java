@@ -1,5 +1,8 @@
 package com.novanovastudio.agent;
 
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.novanovastudio.common.SystemMessage;
 
 import com.alibaba.fastjson2.JSONObject;
@@ -38,6 +41,10 @@ public class AgentScopeModelFactory {
 
     /** 平台配置服务 */
     private final PersistenceService persistenceService;
+    /** 资源实际归属。 */
+    private final com.novanovastudio.repository.TeamRepository teamRepository;
+    /** 每次外部模型调用前重新检查团队。 */
+    private final com.novanovastudio.service.TeamTaskScopeService teamTaskScopeService;
     /** 供应商适配器注册表 */
     private final AiProviderAdapterRegistry adapterRegistry;
 
@@ -47,7 +54,7 @@ public class AgentScopeModelFactory {
      * @return Mono<Model> AgentScope模型
      */
     public Mono<Model> defaultTextModel() {
-        return Mono.zip(persistenceService.getPlatformAiChannels(), persistenceService.getPlatformModelConfigs())
+        return Mono.deferContextual(modelContext -> teamTaskScopeService.requireCurrentActive().then(Mono.zip(persistenceService.getPlatformAiChannels(), persistenceService.getPlatformModelConfigs())
                 .flatMap(tuple -> {
                     List<AiTaskDtos.AiChannelConfig> channels = tuple.getT1();
                     java.util.Optional<ResolvedTextModel> selectedModel = tuple.getT2().stream()
@@ -65,11 +72,11 @@ public class AgentScopeModelFactory {
                                             config)))
                             .flatMap(java.util.Optional::stream)
                             .findFirst();
-                    return selectedModel.<Mono<Model>>map(model -> Mono.just(createModel(model.channel(),
+                    return selectedModel.<Mono<Model>>map(model -> Mono.just(guardModel(createModel(model.channel(),
                                     thinkingEnabled(model.config().thinkingEnabled()), reasoningEffort(model.config().reasoningEffort()),
-                                    model.config().customBodyParameters())))
+                                    model.config().customBodyParameters()), model.config().id(), modelContext)))
                             .orElseGet(() -> Mono.error(new IllegalStateException("未配置可用的默认文本模型")));
-                });
+                })));
     }
 
     /**
@@ -80,7 +87,7 @@ public class AgentScopeModelFactory {
      */
     public Mono<TextModelSelection> resolveTextModel(String selectedModel) {
         if (!StringUtils.hasText(selectedModel)) {
-            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.selectATextModelForTheStoryboard")));
+            return Mono.error(new BusinessException(ErrorCode.PARAM_MISSING, SystemMessage.of("business.selectATextModelForCurrentOperation")));
         }
         String normalizedModel = selectedModel.trim();
         int separatorIndex = normalizedModel.indexOf("::");
@@ -89,7 +96,7 @@ public class AgentScopeModelFactory {
         }
         String channelId = normalizedModel.substring(0, separatorIndex);
         String modelName = normalizedModel.substring(separatorIndex + 2);
-        return Mono.zip(persistenceService.getPlatformAiChannels(), persistenceService.getPlatformModelConfigs())
+        return Mono.deferContextual(modelContext -> teamTaskScopeService.requireCurrentActive().then(Mono.zip(persistenceService.getPlatformAiChannels(), persistenceService.getPlatformModelConfigs())
                 .flatMap(tuple -> {
                     PersistenceDtos.ModelConfig modelConfig = tuple.getT2().stream()
                             .filter(config -> AiTaskTypes.TEXT.equals(config.modelType())
@@ -112,20 +119,79 @@ public class AgentScopeModelFactory {
                     if (channel == null) {
                         return Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.textModelChannelUnavailableAskTheAdministratorToCheckIt")));
                     }
-                    Integer creditCost = modelConfig.creditCost();
-                    if (creditCost == null || creditCost < 0) {
+                    BigDecimal creditCost = modelConfig.creditCost();
+                    if (creditCost == null || CreditAmounts.of(creditCost).compareTo(CreditAmounts.of(0)) < 0) {
                         return Mono.error(new BusinessException(ErrorCode.SYSTEM_ERROR, SystemMessage.of("business.invalidTextModelCreditConfiguration")));
                     }
                     AiTaskDtos.AiChannelConfig scopedChannel = new AiTaskDtos.AiChannelConfig(
                             channel.id(), channel.name(), channel.baseUrl(), channel.apiKey(), channel.apiFormat(), List.of(modelName));
-                    return Mono.just(new TextModelSelection(
-                            createModel(scopedChannel, thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort()),
-                                    modelConfig.customBodyParameters()),
+                    return teamRepository.findResource("model", modelConfig.id()).map(resource -> new TextModelSelection(
+                            guardModel(createModel(scopedChannel, thinkingEnabled(modelConfig.thinkingEnabled()), reasoningEffort(modelConfig.reasoningEffort()),
+                                    modelConfig.customBodyParameters()), modelConfig.id(), modelContext),
+                            modelConfig.id(),
                             normalizedModel,
                             modelName,
                             channel.name(),
-                            creditCost));
-                });
+                            creditCost, resource.getLongValue("teamId")));
+                })));
+    }
+
+    /**
+     * 每次模型调用前重查授权，已发出的调用仍按原参数收尾。
+     * @param model 创建时的模型参数
+     * @param modelConfigId 固定模型标识
+     * @param modelContext 模型创建时的原用户与空间
+     * @return 带派发权限检查的模型
+     */
+    private Model guardModel(Model model, String modelConfigId, reactor.util.context.ContextView modelContext) {
+        return new Model() {
+            /** @param messages 消息 @param tools 工具 @param options 参数 @return 已验证的响应流 */
+            @Override
+            public Flux<ChatResponse> stream(List<Msg> messages, List<ToolSchema> tools, GenerateOptions options) {
+                return teamTaskScopeService.requireCurrentActive().then(persistenceService.getPlatformModelConfigs()
+                        .filter(models -> models.stream().anyMatch(config -> modelConfigId.equals(config.id())))
+                        .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, "模型授权已失效，停止后续调用"))))
+                        .thenMany(Flux.defer(() -> model.stream(messages, tools, options)))
+                        .contextWrite(context -> context.putAll(modelContext));
+            }
+            /** @return 模型名称 */
+            @Override public String getModelName() { return model.getModelName(); }
+            /** @return 原生结构化能力 */
+            @Override public boolean supportsNativeStructuredOutput() { return model.supportsNativeStructuredOutput(); }
+            /** @return 原生工具结构化能力 */
+            @Override public boolean supportsNativeStructuredOutputWithTools() { return model.supportsNativeStructuredOutputWithTools(); }
+            /** @return 上下文窗口 */
+            @Override public int getContextWindowSize() { return model.getContextWindowSize(); }
+        };
+    }
+
+    /**
+     * 为单次故事知识库快速分析请求设置管理员验证的最大输出Token数。
+     * @param model Model 原模型
+     * @param maximumOutputTokens int 最大输出Token数
+     * @return Model 限制输出的模型
+     */
+    public Model withOutputLimit(Model model, int maximumOutputTokens) {
+        return new Model() {
+            @Override
+            public Flux<ChatResponse> stream(List<Msg> messages, List<ToolSchema> tools, GenerateOptions options) {
+                GenerateOptions limited = GenerateOptions.mergeOptions(
+                        GenerateOptions.builder().maxTokens(maximumOutputTokens).build(), options);
+                return model.stream(messages, tools, limited);
+            }
+
+            @Override
+            public String getModelName() { return model.getModelName(); }
+
+            @Override
+            public boolean supportsNativeStructuredOutput() { return model.supportsNativeStructuredOutput(); }
+
+            @Override
+            public boolean supportsNativeStructuredOutputWithTools() { return model.supportsNativeStructuredOutputWithTools(); }
+
+            @Override
+            public int getContextWindowSize() { return model.getContextWindowSize(); }
+        };
     }
 
     /**
@@ -184,11 +250,11 @@ public class AgentScopeModelFactory {
      */
     private GenerateOptions openAiGenerateOptions(boolean thinkingEnabled, String reasoningEffort, JSONObject customBodyParameters) {
         GenerateOptions.Builder builder = GenerateOptions.builder()
+                .additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters)
                 .additionalBodyParam("thinking", Map.of("type", thinkingEnabled ? "enabled" : "disabled"));
         if (thinkingEnabled) {
             builder.reasoningEffort(reasoningEffort(reasoningEffort));
         }
-        builder.additionalBodyParams(customBodyParameters == null ? Map.of() : customBodyParameters);
         return builder.build();
     }
 
@@ -225,12 +291,13 @@ public class AgentScopeModelFactory {
      * 已解析的文本模型与积分配置。
      *
      * @param agentModel Model AgentScope模型实例
+     * @param modelConfigId String 模型配置标识，用于查询该模型的专项定价
      * @param modelValue String 渠道模型编码
      * @param modelName String 模型名称
      * @param provider String 渠道名称
      * @param creditCost int 单次积分价格
      */
-    public record TextModelSelection(Model agentModel, String modelValue, String modelName, String provider, int creditCost) {
+    public record TextModelSelection(Model agentModel, String modelConfigId, String modelValue, String modelName, String provider, BigDecimal creditCost, long ownerTeamId) {
     }
 
     /**

@@ -1,0 +1,21 @@
+{
+    "installApp": "Install {value0}",
+    "guideTitle": "Install {value0} on your desktop",
+    "guideChromeStep1": "Click the \"⋮\" menu button at the top-right of the browser toolbar",
+    "guideChromeStep2": "Go to \"Cast, save and share\" → \"Install page as app…\" (older versions: under \"More tools\")",
+    "guideChromeStep3": "Click \"Install\" in the confirmation dialog",
+    "guideEdgeStep1": "Click the \"⋯ Settings and more\" button at the top-right of the browser toolbar",
+    "guideEdgeStep2": "Choose \"Apps\" → \"Install this site as an app\"",
+    "guideEdgeStep3": "Click \"Install\" in the confirmation dialog",
+    "guideSafariStep1": "Click \"File\" in the menu bar at the top of the screen",
+    "guideSafariStep2": "Choose \"Add to Dock…\", then click \"Add\" in the dialog",
+    "guideSafariStep3": "After clicking \"Add\", the {value0} icon will appear in the Dock — click it to launch",
+    "updateTitle": "Update available",
+    "updateDescription": "A new version of {value0} is ready. It will restart on the latest version after updating.",
+    "updateNow": "Update now",
+    "updateLater": "Later",
+    "updateFailed": "Update failed, please try again later",
+    "offlineTitle": "You're offline",
+    "offlineDescription": "The network is unavailable. Please check your connection and try again.",
+    "offlineRetry": "Reload"
+}

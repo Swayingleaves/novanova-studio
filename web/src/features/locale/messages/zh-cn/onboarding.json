@@ -1,0 +1,20 @@
+{
+    "navigationTitle": "创作工具",
+    "navigationDescription": "图片、视频、无限画布、剧本创作、漫剧创作、我的资产和提示词库都在这里，点击即可开始。管理后台仅管理员可见。",
+    "utilitiesTitle": "常用操作",
+    "utilitiesDescription": "通知、安装到桌面、切换语言和切换主题都在这一列。",
+    "headerTitle": "版本与帮助",
+    "headerDescription": "在这里查看版本对比、打开使用文档，或访问 GitHub 仓库。",
+    "accountTitle": "我的信息",
+    "accountDescription": "这里显示当前积分和头像。展开菜单后可以看到个人信息、签到、购买、兑换、积分记录、系统管理和退出登录。",
+    "creationStyleTitle": "风格库",
+    "creationStyleDescription": "挑一个视觉风格，提示词会按这个风格渲染，可以多选叠加。",
+    "creationReferenceTitle": "参考图",
+    "creationReferenceDescription": "上传图片作为参考，也可以从最近使用里挑。视频创作还支持参考视频。",
+    "creationAssetsTitle": "资产库",
+    "creationAssetsDescription": "直接从「我的资产」里取用已经上传或生成过的素材。",
+    "creationSettingsTitle": "更多设置",
+    "creationSettingsDescription": "模型、比例、清晰度、时长和数量都在这里。图片和视频展示各自的参数，按钮上会实时显示当前配置摘要。",
+    "creationSubmitTitle": "确认后生成",
+    "creationSubmitDescription": "参数确认好就点这里提交，按钮上会显示本次消耗的积分。"
+}

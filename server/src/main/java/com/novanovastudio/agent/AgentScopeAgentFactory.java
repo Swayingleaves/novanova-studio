@@ -91,7 +91,29 @@ public class AgentScopeAgentFactory {
      */
     public ReActAgent storyboardAgent(Model model) {
         return build("storyboard-agent", promptService.get(PromptTemplateType.AGENT_STORYBOARD), model,
-                "只能返回当前请求对应的分镜结构化结果，不得调用工具、解释或输出额外文本。", false);
+                "只能通过框架要求的结构化输出提交当前请求对应的分镜结果；除该机制外不得调用业务工具、不得解释或输出额外文本。", false);
+    }
+
+    /**
+     * 创建剧本创作Agent。
+     *
+     * @param model Model 用户明确选择的文本模型
+     * @return ReActAgent 剧本创作Agent
+     */
+    public ReActAgent scriptAgent(Model model) {
+        return build("script-agent", promptService.get(PromptTemplateType.AGENT_SCRIPT), model,
+                "只能返回当前请求对应的剧本结构化结果，不得调用工具、解释或输出额外文本。", false);
+    }
+
+    /**
+     * 创建故事知识库分析Agent。
+     *
+     * @param model Model 用户明确选择的文本模型
+     * @return ReActAgent 故事知识库分析Agent
+     */
+    public ReActAgent storyBibleAgent(Model model) {
+        return build("story-bible-agent", promptService.get(PromptTemplateType.AGENT_STORY_BIBLE), model,
+                "只能返回当前请求对应的故事知识库结构化结果，不得调用工具、解释或输出额外文本；证据必须逐字摘自输入原文。", false);
     }
 
     /**

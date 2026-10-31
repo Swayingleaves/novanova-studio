@@ -27,9 +27,9 @@ test("分镜费用只读取已选文本模型的按次单价", () => {
 test("分镜资产图片费用按勾选数量乘图片模型单价计算", () => {
     const modelCosts = [{ model: "channel-1::image-model", taskType: "image", credits: 8 }];
 
-    assert.equal(readStoryboardAssetImageCost(modelCosts, "channel-1::image-model", 3), 24);
-    assert.equal(readStoryboardAssetImageCost(modelCosts, "missing-model", 3), 0);
-    assert.equal(readStoryboardAssetImageCost(modelCosts, "channel-1::image-model", 0), 0);
+    assert.equal(readStoryboardAssetImageCost(modelCosts, "channel-1::image-model", 3), "24");
+    assert.equal(readStoryboardAssetImageCost(modelCosts, "missing-model", 3), "0");
+    assert.equal(readStoryboardAssetImageCost(modelCosts, "channel-1::image-model", 0), "0");
 });
 
 test("分镜视频费用按模式分辨率和计费单位逐镜头累计", () => {
@@ -53,8 +53,8 @@ test("分镜视频费用按模式分辨率和计费单位逐镜头累计", () =>
     const videoConfig = { ...config, vquality: "auto" };
     const generationQuote = readStoryboardVideoCost(config, "video-generation", videoConfig, shots, []);
     const secondQuote = readStoryboardVideoCost(config, "video-second", videoConfig, shots, []);
-    assert.deepEqual(generationQuote, { available: true, credits: 6 });
-    assert.deepEqual(secondQuote, { available: true, credits: 20 });
+    assert.deepEqual(generationQuote, { available: true, credits: "6" });
+    assert.deepEqual(secondQuote, { available: true, credits: "20" });
 });
 
 test("分镜按图片资产自动切换图生视频并累计各镜头价格", () => {
@@ -73,7 +73,7 @@ test("分镜按图片资产自动切换图生视频并累计各镜头价格", ()
     });
     assert.equal(readStoryboardVideoGenerationMode(shots[0], assets), "text-to-video");
     assert.equal(readStoryboardVideoGenerationMode(shots[1], assets), "image-to-video");
-    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, shots, assets), { available: true, credits: 13 });
+    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, shots, assets), { available: true, credits: "13" });
 });
 
 test("分镜任一镜头缺少分档价格时整批不可报价", () => {
@@ -245,7 +245,7 @@ test("分镜按视频参考自动切换全能参考并携带参考数量报价",
         },
     });
     assert.equal(readStoryboardVideoGenerationMode(shot, [], referenceVideos), "reference-to-video");
-    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, [shot], [], referenceVideos), { available: true, credits: 12 });
+    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, [shot], [], referenceVideos), { available: true, credits: "12" });
 });
 
 test("分镜图片与视频混合参考按全能参考判定并报价", () => {
@@ -265,7 +265,7 @@ test("分镜图片与视频混合参考按全能参考判定并报价", () => {
     });
     assert.equal(readStoryboardVideoGenerationMode(shot, assets, referenceVideos), "reference-to-video");
     assert.deepEqual(readStoryboardVideoGenerationModes([shot], assets, referenceVideos), ["reference-to-video"]);
-    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, [shot], assets, referenceVideos), { available: true, credits: 12 });
+    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, [shot], assets, referenceVideos), { available: true, credits: "12" });
 });
 
 test("分镜批量视频参考应用到全部镜头并统一按全能参考报价", () => {
@@ -286,7 +286,7 @@ test("分镜批量视频参考应用到全部镜头并统一按全能参考报�
         },
     });
     assert.deepEqual(readStoryboardVideoGenerationModes(shots, assets, referenceVideos), ["reference-to-video"]);
-    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, shots, assets, referenceVideos), { available: true, credits: 36 });
+    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, shots, assets, referenceVideos), { available: true, credits: "36" });
 });
 
 test("分镜无视频参考时按各镜头图片参考分别判定模式", () => {
@@ -304,7 +304,7 @@ test("分镜无视频参考时按各镜头图片参考分别判定模式", () =>
         },
     });
     assert.deepEqual(readStoryboardVideoGenerationModes(shots, assets), ["text-to-video", "image-to-video"]);
-    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, shots, assets), { available: true, credits: 13 });
+    assert.deepEqual(readStoryboardVideoCost(config, "video-model", { ...config, vquality: "auto" }, shots, assets), { available: true, credits: "13" });
 });
 
 test("分镜无参考素材时不会静默落入全能参考模式", () => {

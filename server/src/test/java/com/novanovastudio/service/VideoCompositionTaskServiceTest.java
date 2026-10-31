@@ -3,6 +3,8 @@ package com.novanovastudio.service;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -10,16 +12,22 @@ import com.novanovastudio.common.BusinessException;
 import com.novanovastudio.config.NovanovaProperties;
 import com.novanovastudio.dto.VideoCompositionDtos;
 import com.novanovastudio.repository.VideoCompositionTaskRepository;
+import com.novanovastudio.repository.ComicDramaRepository;
 import com.novanovastudio.security.CurrentUserProvider;
 import com.novanovastudio.task.VideoCompositionMediaProcessor;
+import com.novanovastudio.task.StoryboardVideoExportProcessor;
 import com.novanovastudio.task.VideoCompositionTaskCancellation;
 import com.novanovastudio.task.VideoCompositionTaskDispatcher;
 import com.novanovastudio.task.VideoCompositionTaskQueue;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
+import reactor.test.scheduler.VirtualTimeScheduler;
 
 /**
  * 视频合成任务服务测试。
@@ -47,6 +55,9 @@ class VideoCompositionTaskServiceTest {
     /** 待测试服务 */
     private VideoCompositionTaskService taskService;
 
+    /** 服务配置 */
+    private NovanovaProperties properties;
+
     /**
      * 初始化视频合成任务服务依赖。
      */
@@ -55,18 +66,39 @@ class VideoCompositionTaskServiceTest {
         repository = mock(VideoCompositionTaskRepository.class);
         currentUserProvider = mock(CurrentUserProvider.class);
         persistenceService = mock(PersistenceService.class);
+        when(persistenceService.requireStorageWritable(org.mockito.ArgumentMatchers.anyLong())).thenReturn(Mono.empty());
         taskDispatcher = mock(VideoCompositionTaskDispatcher.class);
         cancellation = mock(VideoCompositionTaskCancellation.class);
-        taskService = new VideoCompositionTaskService(
-                repository,
-                currentUserProvider,
-                persistenceService,
-                mock(VideoCompositionMediaProcessor.class),
-                taskDispatcher,
-                mock(VideoCompositionTaskQueue.class),
-                cancellation,
-                new NovanovaProperties()
-        );
+        properties = new NovanovaProperties();
+        taskService = new VideoCompositionTaskService(com.novanovastudio.TeamTestSupport.taskScope(), repository, currentUserProvider, persistenceService, mock(VideoCompositionMediaProcessor.class), mock(StoryboardVideoExportProcessor.class), mock(ComicDramaRepository.class), mock(ScriptService.class), mock(ComicDramaService.class), taskDispatcher, mock(VideoCompositionTaskQueue.class), cancellation, properties);
+    }
+
+    /**
+     * 数据库扫描跨越多个轮询周期时，恢复订阅仍应继续，并能在服务停止时取消。
+     */
+    @Test
+    void shouldContinueRecoveryAfterSlowScan() {
+        properties.getAi().getTask().setPollingIntervalSeconds(1);
+        Sinks.Empty<Void> pendingScan = Sinks.empty();
+        when(repository.listPendingTasks()).thenReturn(pendingScan.asMono().thenMany(Flux.empty()));
+        when(repository.listRunningTasks()).thenReturn(Flux.empty());
+        VirtualTimeScheduler scheduler = VirtualTimeScheduler.getOrSet();
+        try {
+            taskService.recoverUnfinishedTasks();
+            scheduler.advanceTimeBy(Duration.ofSeconds(100));
+            verify(repository, times(1)).listPendingTasks();
+
+            Assertions.assertEquals(Sinks.EmitResult.OK, pendingScan.tryEmitEmpty());
+            scheduler.advanceTimeBy(Duration.ofSeconds(1));
+            verify(repository, times(2)).listPendingTasks();
+
+            taskService.stopRecovery();
+            scheduler.advanceTimeBy(Duration.ofSeconds(10));
+            verify(repository, times(2)).listPendingTasks();
+        } finally {
+            taskService.stopRecovery();
+            VirtualTimeScheduler.reset();
+        }
     }
 
     /**

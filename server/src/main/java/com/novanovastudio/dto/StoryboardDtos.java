@@ -1,5 +1,9 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -192,7 +196,7 @@ public final class StoryboardDtos {
      * @param assets List<StoryboardAsset> 带稳定标识的资产列表
      * @param chargedCredits int 本次实际扣除积分
      */
-    public record GenerateStoryboardResponse(List<StoryboardShot> shots, List<StoryboardAsset> assets, int chargedCredits) {
+    public record GenerateStoryboardResponse(List<StoryboardShot> shots, List<StoryboardAsset> assets, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal chargedCredits) {
     }
 
     /**
@@ -201,6 +205,6 @@ public final class StoryboardDtos {
      * @param prompts List<StoryboardPrompt> 按稳定镜头标识返回的提示词映射
      * @param chargedCredits int 本次实际扣除积分
      */
-    public record ComposePromptsResponse(List<StoryboardPrompt> prompts, int chargedCredits) {
+    public record ComposePromptsResponse(List<StoryboardPrompt> prompts, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal chargedCredits) {
     }
 }

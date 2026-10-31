@@ -80,6 +80,29 @@ class RoleAuthFilterTest {
     }
 
     /**
+     * 同一全局普通账号的后台权限随当前团队身份升降变化，后续请求不能沿用旧管理员身份。
+     *
+     * @throws NoSuchMethodException 测试控制器方法不存在时抛出
+     */
+    @Test
+    void shouldAuthorizeFromLatestTeamMembership() throws NoSuchMethodException {
+        var repository = Mockito.mock(com.novanovastudio.repository.TeamRepository.class);
+        CurrentUserProvider users = new CurrentUserProvider();
+        TeamScopeWebFilter scopeFilter = new TeamScopeWebFilter(repository, users);
+        for (String role : java.util.List.of("administrator", "member")) {
+            Mockito.when(repository.findMembership(101L, 9L)).thenReturn(Mono.just(com.alibaba.fastjson2.JSONObject.of(
+                    "enabled", true, "memberRole", role, "memberStatus", "active")));
+            var exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/v1/admin/prompt/listPrompts").header("X-Team-Id", "101"));
+            RoleAuthFilter roleFilter = new RoleAuthFilter(handlerMapping(exchange, TestController.class.getDeclaredMethod("adminTask")), users);
+            scopeFilter.filter(exchange, scopedExchange -> roleFilter.filter(scopedExchange, request -> Mono.fromRunnable(() ->
+                    request.getResponse().setStatusCode(org.springframework.http.HttpStatus.OK))))
+                    .contextWrite(context -> context.put(CurrentUserProvider.CURRENT_USER_CONTEXT_KEY,
+                            new CurrentUser(9L, "member@example.com", "user", 1))).block();
+            Assertions.assertEquals("administrator".equals(role) ? 200 : 403, exchange.getResponse().getStatusCode().value());
+        }
+    }
+
+    /**
      * 构造固定返回测试处理器的映射。
      *
      * @param exchange MockServerWebExchange 请求交换对象

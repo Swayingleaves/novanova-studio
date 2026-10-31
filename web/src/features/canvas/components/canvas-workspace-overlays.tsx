@@ -37,6 +37,7 @@ type CanvasWorkspaceOverlaysProps = {
     onDeleteBackgroundOnly: (nodeId: string) => void;
     onDeleteConnection: (connectionId: string) => void;
     onImageInputChange: (event: ChangeEvent<HTMLInputElement>) => void;
+    onUpload: (position: CanvasPoint) => void;
     onCloseInfo: () => void;
     onCloseCrop: () => void;
     onCrop: (node: CanvasNode, crop: CanvasImageCropRect) => void;
@@ -85,6 +86,10 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
                         props.onCloseContextMenu();
                     }}
                     onDelete={deleteContextTarget}
+                    onUpload={(position) => {
+                        props.onUpload(position);
+                        props.onCloseContextMenu();
+                    }}
                     onDeleteBackgroundOnly={() => {
                         if (props.contextMenu?.type === "node") props.onDeleteBackgroundOnly(props.contextMenu.nodeId);
                         props.onCloseContextMenu();
@@ -96,7 +101,7 @@ export function CanvasWorkspaceOverlays(props: CanvasWorkspaceOverlaysProps) {
                 />
             ) : null}
 
-            <input ref={props.imageInputRef} type="file" accept="image/*,video/*,.mp3,.wav,audio/mpeg,audio/wav" hidden onChange={props.onImageInputChange} />
+            <input ref={props.imageInputRef} type="file" multiple accept="image/*,video/*,.mp3,.wav,audio/mpeg,audio/wav" hidden onChange={props.onImageInputChange} />
             <CanvasNodeInfoModal node={props.infoNode} open={Boolean(props.infoNode)} onClose={props.onCloseInfo} />
 
             {cropSource && props.cropNode ? (

@@ -5,14 +5,16 @@ import { useTranslation } from "@/features/locale/use-translation";
 import { useEffect, useMemo, useState } from "react";
 import { App, Button, Form, Input, Tabs } from "antd";
 import { ArrowRight } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/shared/lib/team-navigation";
 
-import { loginByEmail, registerByEmail, sendEmailCode } from "@/services/api/server";
+import { loginByAccount, registerByEmail, sendEmailCode } from "@/services/api/server";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { OAuth2LoginOptions } from "@/features/auth/components/oauth2-login-options";
+import { completeAuthentication } from "@/features/auth/lib/complete-authentication";
+import { useSpaceBrand } from "@/features/team/use-space-brand";
 
 type LoginForm = {
-    email: string;
+    account: string;
     password: string;
 };
 
@@ -39,16 +41,19 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
     const translate = useTranslation();
     const { message } = App.useApp();
     const router = useRouter();
-    const [activeKey, setActiveKey] = useState(invitationCode ? "register" : "login");
+    const brand = useSpaceBrand();
+    const registrationEnabled = !brand.isTeam;
+    const platformInvitationCode = registrationEnabled ? invitationCode : undefined;
+    const [activeKey, setActiveKey] = useState(platformInvitationCode ? "register" : "login");
     const [sendingCode, setSendingCode] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [codeCooldownSeconds, setCodeCooldownSeconds] = useState(0);
     const [loginForm] = Form.useForm<LoginForm>();
     const [registerForm] = Form.useForm<RegisterForm>();
-    const setSession = useUserStore((state) => state.setSession);
     const closeAuthModal = useUserStore((state) => state.closeAuthModal);
 
     useEffect(() => {
+        if (!registrationEnabled) return;
         const updateCountdown = () => {
             const remainingSeconds = readEmailCodeCooldownSeconds();
             setCodeCooldownSeconds(remainingSeconds);
@@ -59,7 +64,7 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
         updateCountdown();
         const timer = window.setInterval(updateCountdown, 1000);
         return () => window.clearInterval(timer);
-    }, []);
+    }, [registrationEnabled]);
 
     const codeButtonText = useMemo(() => {
         if (sendingCode) return translate("auth.sending");
@@ -68,6 +73,7 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
     }, [codeCooldownSeconds, sendingCode, translate.locale]);
 
     const sendCode = async () => {
+        if (!registrationEnabled) return;
         const email = registerForm.getFieldValue("email");
         if (!email) {
             message.warning(translate("auth.enterYourEmailFirst"));
@@ -93,8 +99,8 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
     const login = async (values: LoginForm) => {
         setSubmitting(true);
         try {
-            const result = await loginByEmail(values);
-            setSession(result);
+            const result = await loginByAccount(values);
+            completeAuthentication(result, redirectPath);
             message.success(translate("auth.signedIn"));
             onSuccess?.();
         } catch (error) {
@@ -105,10 +111,11 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
     };
 
     const register = async (values: RegisterForm) => {
+        if (!registrationEnabled) return;
         setSubmitting(true);
         try {
-            const result = await registerByEmail({ ...values, invitationCode });
-            setSession(result);
+            const result = await registerByEmail({ ...values, invitationCode: platformInvitationCode });
+            completeAuthentication(result, redirectPath);
             message.success(translate("auth.signedUp"));
             onSuccess?.();
         } catch (error) {
@@ -126,7 +133,7 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
     return (
         <>
             <Tabs
-                activeKey={activeKey}
+                activeKey={registrationEnabled ? activeKey : "login"}
                 onChange={setActiveKey}
                 items={[
                 {
@@ -134,8 +141,8 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
                     label: translate("auth.signIn_1e2df9"),
                     children: (
                         <Form form={loginForm} layout="vertical" requiredMark={false} onFinish={login} className="pt-2">
-                            <Form.Item name="email" label={translate("auth.email")} rules={[{ required: true, message: translate("auth.enterAnEmailAddress") }, { type: "email", message: translate("auth.invalidEmailAddress") }]}>
-                                <Input size="large" autoComplete="email" placeholder="name@example.com" />
+                            <Form.Item name="account" label={translate("auth.account")} rules={[{ required: true, whitespace: true, message: translate("auth.enterAccount") }]}>
+                                <Input size="large" autoComplete="username" placeholder={translate("auth.enterAccount")} />
                             </Form.Item>
                             <Form.Item name="password" label={translate("auth.password")} rules={[{ required: true, message: translate("auth.enterAPassword") }]}>
                                 <Input.Password size="large" autoComplete="current-password" placeholder={translate("auth.enterAPassword")} />
@@ -146,17 +153,17 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
                             </div>
                             <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<ArrowRight className="size-4" />} iconPlacement="end">
                                 {translate("auth.signIn_1e2df9")}</Button>
-                            <OAuth2LoginOptions redirectPath={redirectPath} invitationCode={invitationCode} />
+                            <OAuth2LoginOptions redirectPath={redirectPath} invitationCode={platformInvitationCode} />
                         </Form>
                     ),
                 },
-                {
+                ...(registrationEnabled ? [{
                     key: "register",
                     label: translate("auth.signUp"),
                     children: (
                         <Form form={registerForm} layout="vertical" requiredMark={false} onFinish={register} className="pt-2">
                             <Form.Item name="email" label={translate("auth.email")} rules={[{ required: true, message: translate("auth.enterAnEmailAddress") }, { type: "email", message: translate("auth.invalidEmailAddress") }]}>
-                                <Input size="large" autoComplete="email" placeholder="name@qq.com / name@gmail.com" />
+                                <Input size="large" autoComplete="email" placeholder="name@example.com" />
                             </Form.Item>
                             <Form.Item label={translate("auth.verificationCode")} required>
                                 <div className="grid grid-cols-[1fr_auto] gap-2">
@@ -176,10 +183,10 @@ export function AuthForm({ onSuccess, redirectPath, invitationCode }: AuthFormPr
                             </Form.Item>
                             <Button type="primary" htmlType="submit" size="large" block loading={submitting} icon={<ArrowRight className="size-4" />} iconPlacement="end">
                                 {translate("auth.signUpAndSignIn")}</Button>
-                            <OAuth2LoginOptions redirectPath={redirectPath} invitationCode={invitationCode} />
+                            <OAuth2LoginOptions redirectPath={redirectPath} invitationCode={platformInvitationCode} />
                         </Form>
                     ),
-                },
+                }] : []),
                 ]}
             />
         </>

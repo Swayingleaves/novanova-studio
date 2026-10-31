@@ -149,7 +149,10 @@ export function createEdgesChangeHandler(
   return (changes: EdgeChange<Edge>[]) => {
     const removeIds = new Set(changes.filter(isEdgeRemoveChange).map((change) => change.id));
     if (removeIds.size === 0) return;
-    setConnections((prev) => prev.filter((connection) => !removeIds.has(connection.id)));
+    setConnections((prev) => {
+      const remaining = prev.filter((connection) => !removeIds.has(connection.id));
+      return remaining.length === prev.length ? prev : remaining;
+    });
   };
 }
 

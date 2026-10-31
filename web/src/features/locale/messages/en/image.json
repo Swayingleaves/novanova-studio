@@ -1,4 +1,7 @@
 {
+    "loadingConversationHistory": "Loading conversation history…",
+    "failedToLoadConversationHistory": "Failed to load conversation history",
+    "retryLoadingConversationHistory": "Reload",
     "failedToLoadImageStyles": "Failed to load image styles",
     "failedToLoadSkills": "Failed to load skills",
     "generatingImage": "Generating image...",

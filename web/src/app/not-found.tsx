@@ -1,9 +1,8 @@
-
 "use client";
 
 import { useTranslation } from "@/features/locale/use-translation";
 import { Home } from "lucide-react";
-import Link from "next/link";
+import Link from "@/shared/lib/team-navigation";
 
 /**
  * 全局 404 页：居中卡片提示页面不存在并提供返回首页入口。

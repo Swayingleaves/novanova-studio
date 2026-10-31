@@ -33,3 +33,14 @@ export const useCanvasStore = createCanvasStore({
 });
 
 storeReference = useCanvasStore;
+
+/** 切换空间前同步保存已加载文档，失败由调用方提示并保留原空间。 */
+export async function saveCanvasBeforeTeamSwitch() {
+    const state = useCanvasStore.getState();
+    if (!state.hydrated) return;
+    for (const document of state.documents) {
+        saveScheduler.cancel(document.identity.id);
+        await persistence.saveDocument(document);
+    }
+    if (Object.keys(state.saveErrors).length) throw new Error("画布存在保存错误，请处理后再切换空间");
+}

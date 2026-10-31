@@ -1,0 +1,265 @@
+"use client";
+
+import { translateMessage } from "@/features/locale/translate";
+import { useTranslation } from "@/features/locale/use-translation";
+
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { App, Button, Empty, Modal, Spin } from "antd";
+import { ArrowLeft, ArrowRight, Bot, Pencil, Plus, Sparkles, X } from "lucide-react";
+
+import { createScriptScene } from "../lib/script-episode-editing";
+import { useScriptStore } from "../stores/use-script-store";
+import type { ScriptBlock, ScriptCharacter } from "../types";
+import { EpisodeDetailEditor } from "./section-editors";
+import { ScriptAiPanel } from "./script-ai-panel";
+import styles from "./script-episode-reader.module.css";
+
+const getBlockLabels = (translate = translateMessage): Record<ScriptBlock["blockType"], string> => ({ action: translate("script.action"), dialogue: translate("script.dialogue"), narration: translate("script.narration"), transition: translate("script.transition") });
+const getStatusLabels = (translate = translateMessage) => ({ planning: translate("script.planning"), draft: translate("script.draft"), complete: translate("script.completed") });
+
+/** 按分集浏览封面与场次，并在弹窗中编辑指定卡片。 */
+export function ScriptEpisodeReader({ selectedEpisodeId, selectedSceneId, sceneEditRequestId, onSceneEditRequestHandled, onSelectEpisode, onSelectScene, onOpenAiGeneration }: { selectedEpisodeId: string; selectedSceneId: string; sceneEditRequestId: string; onSceneEditRequestHandled: () => void; onSelectEpisode: (episodeId: string) => void; onSelectScene: (sceneId: string, episodeId?: string) => void; onOpenAiGeneration: () => void }) {
+    const translate = useTranslation();
+    const { message, modal } = App.useApp();
+    const project = useScriptStore((state) => state.project);
+    const detail = useScriptStore((state) => selectedEpisodeId ? state.episodes[selectedEpisodeId] : undefined);
+    const loadEpisode = useScriptStore((state) => state.loadEpisode);
+    const updateEpisode = useScriptStore((state) => state.updateEpisode);
+    const createEpisode = useScriptStore((state) => state.createEpisode);
+    const deleteEpisode = useScriptStore((state) => state.deleteEpisode);
+    const [loadError, setLoadError] = useState("");
+    const [editingPage, setEditingPage] = useState<{ episodeId: string; sceneId: string } | null>(null);
+    const [aiPage, setAiPage] = useState<{ episodeId: string; sceneId: string } | null>(null);
+    const trackRef = useRef<HTMLDivElement>(null);
+    const pageRefs = useRef<Array<HTMLElement | null>>([]);
+    const scrollingRef = useRef(false);
+    const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const wheelTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const pageIndexRef = useRef(0);
+    const scrolledEpisodeIdRef = useRef("");
+    const selectionRef = useRef({ episodeId: selectedEpisodeId, sceneId: selectedSceneId });
+    const currentEpisode = project?.episodes.find((episode) => episode.id === selectedEpisodeId);
+    const currentEpisodeIndex = project?.episodes.findIndex((episode) => episode.id === selectedEpisodeId) ?? -1;
+    const previousEpisode = currentEpisodeIndex > 0 ? project?.episodes[currentEpisodeIndex - 1] : undefined;
+    const nextEpisode = currentEpisodeIndex >= 0 ? project?.episodes[currentEpisodeIndex + 1] : undefined;
+    const scenes = detail?.scenes;
+    const pageIndex = Math.max(0, (scenes?.findIndex((scene) => scene.id === selectedSceneId) ?? -1) + 1);
+    const currentScene = pageIndex ? scenes?.[pageIndex - 1] : undefined;
+    const editingScene = scenes?.find((scene) => scene.id === editingPage?.sceneId);
+    const aiScene = scenes?.find((scene) => scene.id === aiPage?.sceneId);
+    const cardAiTarget = aiPage?.episodeId === selectedEpisodeId
+        ? aiPage.sceneId
+            ? aiScene ? { targetType: "scene" as const, targetId: aiScene.id, label: `${detail?.episode.title || translate("script.untitledEpisode")} · ${aiScene.title || translate("script.sceneCount", { value0: aiScene.sceneNumber })}` } : null
+            : { targetType: "episode" as const, targetId: selectedEpisodeId, label: detail?.episode.title || translate("script.untitledEpisode") }
+        : null;
+    const totalPages = (scenes?.length || 0) + 1;
+    pageIndexRef.current = pageIndex;
+    selectionRef.current = { episodeId: selectedEpisodeId, sceneId: selectedSceneId };
+
+    useEffect(() => {
+        let active = true;
+        setLoadError("");
+        if (selectedEpisodeId && !detail) {
+            void loadEpisode(selectedEpisodeId).catch((error: unknown) => {
+                if (active) setLoadError(error instanceof Error ? error.message : translate("script.couldNotLoadEpisodeText"));
+            });
+        }
+        return () => { active = false; };
+    }, [detail, loadEpisode, selectedEpisodeId]);
+
+    useEffect(() => {
+        if (detail && selectedSceneId && !detail.scenes.some((scene) => scene.id === selectedSceneId)) onSelectScene("");
+    }, [detail, onSelectScene, selectedSceneId]);
+
+    useEffect(() => {
+        setEditingPage(null);
+        setAiPage(null);
+    }, [selectedEpisodeId]);
+
+    useEffect(() => {
+        if (sceneEditRequestId && sceneEditRequestId === selectedSceneId) {
+            setEditingPage({ episodeId: selectedEpisodeId, sceneId: selectedSceneId });
+            onSceneEditRequestHandled();
+        }
+    }, [sceneEditRequestId, selectedEpisodeId, selectedSceneId, onSceneEditRequestHandled]);
+
+    useLayoutEffect(() => {
+        const card = pageRefs.current[pageIndex];
+        if (!card || !trackRef.current) return;
+        scrollingRef.current = true;
+        const track = trackRef.current;
+        const target = card.offsetLeft - (track.clientWidth - card.clientWidth) / 2;
+        const episodeChanged = scrolledEpisodeIdRef.current !== detail?.episode.id;
+        scrolledEpisodeIdRef.current = detail?.episode.id || "";
+        track.scrollTo({ left: target, behavior: episodeChanged || window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+        if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+        scrollTimerRef.current = setTimeout(() => { scrollingRef.current = false; }, 450);
+        return () => { if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current); };
+    }, [pageIndex, detail?.episode.id]);
+
+    useEffect(() => {
+        const track = trackRef.current;
+        if (!track || !scenes) return;
+        const handleWheel = (event: WheelEvent) => {
+            if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+            const body = event.target instanceof Element ? event.target.closest(`.${styles.body}`) : null;
+            if (body && ((event.deltaY > 0 && body.scrollTop + body.clientHeight < body.scrollHeight - 2) || (event.deltaY < 0 && body.scrollTop > 2))) return;
+            if (Math.abs(event.deltaY) < 6) return;
+            event.preventDefault();
+            if (wheelTimerRef.current) return;
+            const next = Math.max(0, Math.min(pageIndexRef.current + (event.deltaY > 0 ? 1 : -1), scenes.length));
+            onSelectScene(scenes[next - 1]?.id || "");
+            wheelTimerRef.current = setTimeout(() => { wheelTimerRef.current = null; }, 520);
+        };
+        track.addEventListener("wheel", handleWheel, { passive: false });
+        return () => { track.removeEventListener("wheel", handleWheel); if (wheelTimerRef.current) { clearTimeout(wheelTimerRef.current); wheelTimerRef.current = null; } };
+    }, [onSelectScene, scenes]);
+
+    if (!project) return null;
+
+    const selectPage = (index: number) => {
+        const nextIndex = Math.max(0, Math.min(index, totalPages - 1));
+        const scene = scenes?.[nextIndex - 1];
+        onSelectScene(scene?.id || "");
+        if (nextIndex === pageIndex && trackRef.current && pageRefs.current[nextIndex]) {
+            const track = trackRef.current;
+            const card = pageRefs.current[nextIndex];
+            track.scrollTo({ left: card.offsetLeft - (track.clientWidth - card.clientWidth) / 2, behavior: "smooth" });
+        }
+    };
+
+    const selectNextPage = () => {
+        if (pageIndex < totalPages - 1) selectPage(pageIndex + 1);
+        else if (nextEpisode) onSelectEpisode(nextEpisode.id);
+    };
+
+    const selectPreviousPage = async () => {
+        if (pageIndex > 0) { selectPage(pageIndex - 1); return; }
+        if (!previousEpisode) return;
+        try {
+            const previousDetail = await loadEpisode(previousEpisode.id);
+            if (selectionRef.current.episodeId !== selectedEpisodeId || selectionRef.current.sceneId !== selectedSceneId) return;
+            onSelectScene(previousDetail.scenes.at(-1)?.id || "", previousEpisode.id);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : translate("script.couldNotLoadThePreviousEpisodeTryAgain"));
+        }
+    };
+
+    const confirmDelete = () => {
+        if (!detail) return;
+        modal.confirm({
+            title: translate("script.deleteThisEpisode"), content: translate("script.allScenesAndTextInThisEpisodeWillAlsoBe"), okText: translate("script.delete"), okButtonProps: { danger: true }, cancelText: translate("script.cancel"),
+            onOk: async () => {
+                try {
+                    await deleteEpisode(detail.episode.id);
+                    onSelectEpisode(project.episodes.find((episode) => episode.id !== detail.episode.id)?.id || "");
+                    message.success(translate("script.episodeDeleted"));
+                } catch (error) {
+                    message.error(error instanceof Error ? error.message : translate("script.couldNotDeleteTheEpisodeTryAgain"));
+                    throw error;
+                }
+            },
+        });
+    };
+
+    /** 空态下从 + 卡片直接建第一集。 */
+    const addEpisode = () => {
+        const id = createEpisode();
+        if (id) onSelectEpisode(id);
+    };
+
+    /** 空分集时从 + 卡片直接起一场，并进入编辑。 */
+    const addScene = () => {
+        if (!detail) return;
+        const scene = createScriptScene(detail.scenes.length, translate);
+        updateEpisode({ ...detail, scenes: [...detail.scenes, scene] });
+        onSelectScene(scene.id, detail.episode.id);
+        setEditingPage({ episodeId: detail.episode.id, sceneId: scene.id });
+    };
+
+    const confirmDeleteScene = (sceneId: string) => {
+        if (!detail) return;
+        const sceneIndex = detail.scenes.findIndex((scene) => scene.id === sceneId);
+        if (sceneIndex < 0) return;
+        modal.confirm({
+            title: translate("script.deleteSceneCount", { value0: detail.scenes[sceneIndex].sceneNumber }),
+            content: translate("script.allTextInThisSceneWillAlsoBeDeleted"),
+            okText: translate("script.delete"),
+            okButtonProps: { danger: true },
+            cancelText: translate("script.cancel"),
+            onOk: () => {
+                const nextSceneId = detail.scenes[sceneIndex + 1]?.id || detail.scenes[sceneIndex - 1]?.id || "";
+                if (selectedSceneId === sceneId) onSelectScene(nextSceneId);
+                updateEpisode({ ...detail, scenes: detail.scenes.filter((scene) => scene.id !== sceneId).map((scene, sortOrder) => ({ ...scene, sortOrder, sceneNumber: sortOrder + 1 })) });
+                message.success(translate("script.sceneDeleted"));
+            },
+        });
+    };
+
+    const onScroll = () => {
+        if (scrollingRef.current || !trackRef.current || !detail) return;
+        const bounds = trackRef.current.getBoundingClientRect();
+        const center = bounds.left + bounds.width / 2;
+        let nearest = 0;
+        let distance = Infinity;
+        pageRefs.current.slice(0, totalPages).forEach((card, index) => {
+            if (!card) return;
+            const rect = card.getBoundingClientRect();
+            const nextDistance = Math.abs(rect.left + rect.width / 2 - center);
+            if (nextDistance < distance) { nearest = index; distance = nextDistance; }
+        });
+        if (nearest !== pageIndex) selectPage(nearest);
+    };
+
+    const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+        if (event.target instanceof Element && event.target.closest("input, textarea, select, button, [contenteditable='true'], [role='tab']")) return;
+        if (event.key === "ArrowRight" || event.key === "PageDown") { event.preventDefault(); selectNextPage(); }
+        if (event.key === "ArrowLeft" || event.key === "PageUp") { event.preventDefault(); void selectPreviousPage(); }
+        if (event.key === "Home") { event.preventDefault(); selectPage(0); }
+        if (event.key === "End") { event.preventDefault(); selectPage(totalPages - 1); }
+    };
+
+    return <section className={styles.reader} onKeyDown={onKeyDown} tabIndex={-1} aria-label={translate("script.episodeScriptReader")}>
+        <header className={styles.header}>
+            <div className="min-w-0"><h2 className="truncate text-base font-semibold text-[var(--studio-ink)]">{detail ? translate("script.episodeCountCount", { value0: currentEpisode?.episodeNumber ?? detail.episode.episodeNumber, value1: detail.episode.title }) : translate("script.episodeScript_110f7a")}</h2><p className="mt-1 truncate text-xs text-[var(--studio-muted)]">{currentScene ? translate("script.sceneCountCount", { value0: currentScene.sceneNumber, value1: currentScene.title }) : detail ? getStatusLabels(translate)[detail.episode.completionStatus] : translate("script.selectAnEpisodeToStartWriting")}</p></div>
+            {/* 宽屏下右侧常驻「AI剧本助手」，这个入口只在窄屏（面板隐藏时）保留 */}
+            <Button className="xl:hidden" size="small" icon={<Bot className="size-4" />} onClick={onOpenAiGeneration}>{translate("script.generateWithAi")}</Button>
+        </header>
+        {!selectedEpisodeId ? <div className="flex min-h-0 flex-1 items-center justify-center p-6"><button type="button" className={styles.newEpisodeCard} onClick={addEpisode} aria-label={translate("script.addEpisode")}><Plus className="size-9" aria-hidden="true" /><span className="text-base font-semibold">{translate("script.addEpisode")}</span><span className="text-xs text-[var(--studio-faint)]">{translate("script.createYourFirstEpisodeToStartWriting")}</span></button></div>
+            : loadError ? <div className="flex min-h-0 flex-1 items-center justify-center"><Empty description={loadError}><Button onClick={() => { setLoadError(""); void loadEpisode(selectedEpisodeId).catch((error: unknown) => setLoadError(error instanceof Error ? error.message : translate("script.couldNotLoadEpisodeText"))); }}>{translate("script.reloadEpisode")}</Button></Empty></div>
+                : !detail ? <div className="flex min-h-0 flex-1 items-center justify-center"><Spin /></div> : <>
+                    <div className={styles.stage} tabIndex={0} aria-label={translate("script.scriptCardsUseTheLeftAndRightArrowKeysTo")}>
+                        <div ref={trackRef} className={styles.track} onScroll={onScroll}>
+                            <article ref={(element) => { pageRefs.current[0] = element; }} className={`${styles.page} ${pageIndex === 0 ? styles.active : ""} ${pageIndex > 1 ? styles.distant : ""}`}>
+                                <div className={`${styles.card} ${styles.cover}`}><span className={styles.eyebrow}>{translate("script.episodeCount_0399e1", { value0: currentEpisode?.episodeNumber ?? detail.episode.episodeNumber })}</span><h3>{detail.episode.title || translate("script.untitledEpisode")}</h3><span className={styles.rule} /><p className={styles.synopsis}>{detail.episode.summary || translate("script.noEpisodeSummaryYet")}</p><div className={styles.tags}><span>{translate("script.countScenes_e0fd98", { value0: scenes?.length || 0 })}</span><span>{getStatusLabels(translate)[detail.episode.completionStatus]}</span>{detail.episode.targetDurationSeconds > 0 ? <span>{translate("script.targetDurationCountMinutes_9ce3ae", { value0: Math.ceil(detail.episode.targetDurationSeconds / 60) })}</span> : null}</div>{scenes?.length ? null : <button type="button" className={styles.addCard} onClick={addScene} aria-label={translate("script.addScene")}><Plus className="size-5" aria-hidden="true" /><span>{translate("script.addScene")}</span></button>}{pageIndex === 1 ? <button type="button" className={styles.previewTarget} aria-label={translate("script.viewEpisodeCover")} onClick={() => selectPage(0)} /> : null}<div className={styles.cardActions}><button type="button" className={styles.cardAction} aria-label={translate("script.editEpisodeCover")} onClick={() => setEditingPage({ episodeId: selectedEpisodeId, sceneId: "" })}><Pencil className="size-4" /></button><button type="button" className={styles.cardAction} aria-label={translate("script.generateScenesAndTextForThisEpisodeWithAi")} onClick={() => setAiPage({ episodeId: selectedEpisodeId, sceneId: "" })}><Sparkles className="size-4" /></button></div></div>
+                            </article>
+                            {scenes?.map((scene, index) => <article key={scene.id} ref={(element) => { pageRefs.current[index + 1] = element; }} className={`${styles.page} ${pageIndex === index + 1 ? styles.active : ""} ${Math.abs(pageIndex - index - 1) > 1 ? styles.distant : ""}`}>
+                                <div className={styles.card}>
+                                    <header className={styles.sceneHeader}><span className={styles.eyebrow}>{translate("script.sceneCount_306fbf", { value0: scene.sceneNumber })}</span><h3>{scene.title || translate("script.untitledScene")}</h3><div className={styles.metadata}><span>{project.locations.find((location) => location.id === scene.locationId)?.name || translate("script.locationNotSet")}</span><span>·</span><span>{scene.timeDescription || translate("script.timeNotSet")}</span><span>·</span><span>{({ interior: translate("script.interior"), exterior: translate("script.exterior"), mixed: translate("script.mixed") })[scene.interiorExterior]}</span></div></header>
+                                    <div className={styles.body}>{scene.blocks.length ? scene.blocks.map((block) => <ScriptReadingBlock key={block.id} block={block} characters={project.characters} />) : <p className="text-sm text-[var(--studio-muted)]">{translate("script.thisSceneHasNoTextYetSwitchToEditMode")}</p>}</div>
+                                    {Math.abs(pageIndex - index - 1) === 1 ? <button type="button" className={styles.previewTarget} aria-label={translate("script.viewSceneCount", { value0: scene.sceneNumber })} onClick={() => selectPage(index + 1)} /> : null}
+                                    <div className={styles.cardActions}><button type="button" className={styles.cardAction} aria-label={translate("script.editSceneCount", { value0: scene.sceneNumber })} onClick={() => setEditingPage({ episodeId: selectedEpisodeId, sceneId: scene.id })}><Pencil className="size-4" /></button><button type="button" className={styles.cardAction} aria-label={translate("script.useAiOnSceneCount", { value0: scene.sceneNumber })} onClick={() => setAiPage({ episodeId: selectedEpisodeId, sceneId: scene.id })}><Sparkles className="size-4" /></button></div>
+                                    <button type="button" className={styles.sceneDelete} aria-label={translate("script.deleteSceneCount_bd555e", { value0: scene.sceneNumber })} onClick={() => confirmDeleteScene(scene.id)}><X className="size-4" /></button>
+                                </div>
+                            </article>)}
+                        </div>
+                        <button type="button" className={`${styles.sideArrow} ${styles.previous}`} aria-label={translate("script.previousPage")} disabled={!pageIndex && !previousEpisode} onClick={() => void selectPreviousPage()}><ArrowLeft className="size-5" /></button>
+                        <button type="button" className={`${styles.sideArrow} ${styles.next}`} aria-label={translate("script.nextPage")} disabled={pageIndex === totalPages - 1 && !nextEpisode} onClick={selectNextPage}><ArrowRight className="size-5" /></button>
+                    </div>
+                    <footer className={styles.footer}><Button aria-label={translate("script.previousPage")} icon={<ArrowLeft className="size-4" />} disabled={!pageIndex && !previousEpisode} onClick={() => void selectPreviousPage()} /><input type="range" min={0} max={totalPages - 1} value={pageIndex} onChange={(event) => selectPage(Number(event.target.value))} aria-label={translate("script.goToEpisodePage")} className={styles.progress} /><span className="text-xs tabular-nums text-[var(--studio-muted)]">{pageIndex + 1} / {totalPages}</span><Button aria-label={translate("script.nextPage")} icon={<ArrowRight className="size-4" />} disabled={pageIndex === totalPages - 1 && !nextEpisode} onClick={selectNextPage} /></footer>
+                    <Modal title={editingPage?.sceneId ? translate("script.editSceneCountCount", { value0: editingScene?.sceneNumber ?? "", value1: editingScene?.title || translate("script.untitledScene") }) : translate("script.editEpisodeCover")} open={Boolean(editingPage && editingPage.episodeId === selectedEpisodeId && (!editingPage.sceneId || editingScene))} onCancel={() => setEditingPage(null)} footer={null} width={900} styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }} destroyOnHidden>
+                        {editingPage && editingPage.episodeId === selectedEpisodeId && (!editingPage.sceneId || editingScene) ? <EpisodeDetailEditor detail={currentEpisode ? { ...detail, episode: currentEpisode } : detail} sceneId={editingPage.sceneId || undefined} onChange={updateEpisode} onDelete={() => { setEditingPage(null); confirmDelete(); }} onSelectScene={(sceneId) => { onSelectScene(sceneId); setEditingPage({ episodeId: selectedEpisodeId, sceneId }); }} /> : null}
+                    </Modal>
+                    <Modal open={Boolean(cardAiTarget)} onCancel={() => setAiPage(null)} footer={null} width={520} styles={{ body: { maxHeight: "75vh", overflowY: "auto", padding: 0 } }} destroyOnHidden>
+                        {cardAiTarget ? <ScriptAiPanel key={`${cardAiTarget.targetType}:${cardAiTarget.targetId}`} section="episodes" selectedEpisodeId={selectedEpisodeId} cardTarget={cardAiTarget} /> : null}
+                    </Modal>
+                </>}
+    </section>;
+}
+
+/** 根据正文块类型排版阅读内容。 */
+function ScriptReadingBlock({ block, characters }: { block: ScriptBlock; characters: ScriptCharacter[] }) {
+    const translate = useTranslation();
+    const speaker = block.blockType === "dialogue" ? characters.find((character) => character.id === block.characterId)?.name || translate("script.noCharacterSelected") : "";
+    return <div className={`${styles.block} ${styles[block.blockType]}`}><span className={styles.blockLabel}>{speaker || getBlockLabels(translate)[block.blockType]}{block.origin === "adapted" ? <span className={styles.blockOrigin}>{translate("script.adaptation")}</span> : null}</span><p>{block.content || translate("script.noCountContentYet", { value0: getBlockLabels(translate)[block.blockType] })}</p></div>;
+}

@@ -1,5 +1,7 @@
 package com.novanovastudio.repository;
 
+import java.math.BigDecimal;
+
 import java.time.LocalDate;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Repository;
@@ -69,7 +71,7 @@ public class CheckInRepository {
                 .bind("checkInDate", checkInDate)
                 .map((row, metadata) -> new CheckInRecord(
                         row.get("check_in_date", LocalDate.class),
-                        row.get("credits", Integer.class)))
+                        row.get("credits", BigDecimal.class)))
                 .one();
     }
 
@@ -81,7 +83,7 @@ public class CheckInRepository {
      * @param credits int 本次签到发放的积分
      * @return Mono<Long> 新签到记录ID，当天已签到时为空
      */
-    public Mono<Long> claimCheckIn(Long userId, LocalDate checkInDate, int credits) {
+    public Mono<Long> claimCheckIn(Long userId, LocalDate checkInDate, BigDecimal credits) {
         return databaseClient.sql("""
                 INSERT INTO user_check_ins(user_id, check_in_date, credits)
                 VALUES (:userId, :checkInDate, :credits)
@@ -101,6 +103,6 @@ public class CheckInRepository {
      * @param checkInDate LocalDate 签到日期
      * @param credits int 本次签到发放的积分
      */
-    public record CheckInRecord(LocalDate checkInDate, int credits) {
+    public record CheckInRecord(LocalDate checkInDate, BigDecimal credits) {
     }
 }

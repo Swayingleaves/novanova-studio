@@ -261,6 +261,9 @@
     "undo": "撤销",
     "redo": "重做",
     "uploadAssets": "上传素材",
+    "mediaUploadProgress": "正在上传素材：已完成 {value0}/{value1}",
+    "mediaUploadCompleted": "上传完成：成功 {value0}，失败 {value1}",
+    "unsupportedMediaFileType": "不支持此文件类型，请选择图片、视频或 MP3/WAV 音频",
     "myAssets": "我的资产",
     "deleteSelected_53f101": "删除选中 {value0}",
     "clearCanvas": "清空画布",
@@ -789,5 +792,7 @@
     "youCanUndoThisDeletion": "删除后可通过撤销恢复。",
     "theCurrentCanvasIsSavedAutomaticallyReturnToThe": "当前画布会自动保存，是否返回到画布列表？",
     "images_a4f725": "{value0} 张",
-    "items_9479b5": "{value0} 个"
+    "items_9479b5": "{value0} 个",
+    "notUploaded": "尚未上传",
+    "confirmBatchVideoGenerationDetails": "将使用所选模型、{value0}比例和{value1}清晰度，为 {value2} 个镜头分别创建视频任务，预计消耗 {value3} 积分。是否继续？"
 }

@@ -1,0 +1,32 @@
+# 当前线上 Nginx 直接提供 HTTPS，并通过宿主机回环地址访问前后端。
+services:
+  # 线上沿用已部署的企业版容器、镜像及端口，避免更新时创建第二套服务。
+  postgres:
+    container_name: novanovastudio-pro-postgres
+    ports: !override
+      - "${POSTGRES_PORT:-15432}:5432"
+
+  redis:
+    container_name: novanovastudio-pro-redis
+    ports: !override
+      - "${REDIS_PORT:-16379}:6379"
+
+  web:
+    image: novanovastudio-pro-web:${IMAGE_TAG:-latest}
+    container_name: novanovastudio-pro-web
+    ports: !override
+      - "127.0.0.1:${WEB_PORT:-15555}:5550"
+
+  server:
+    image: novanovastudio-pro-server:${IMAGE_TAG:-latest}
+    container_name: novanovastudio-pro-server
+    ports: !override
+      - "127.0.0.1:${SERVER_PORT:-18080}:8080"
+
+  nginx:
+    container_name: novanovastudio-pro-nginx
+    network_mode: host
+    ports: !reset []
+    volumes:
+      - ${NGINX_STATIC_DIRECTORY:-/usr/share/nginx/html}:/usr/share/nginx/html:ro
+      - ${NGINX_SSL_DIRECTORY:-/etc/nginx/ssl}:/etc/nginx/ssl:ro

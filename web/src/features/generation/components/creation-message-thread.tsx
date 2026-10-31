@@ -7,7 +7,7 @@ import { Button, Input, Modal, Tooltip } from "antd";
 import { ArrowRight, Copy, PenLine } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/shared/lib/team-navigation";
 
 import { AgentActivityTimeline } from "@/features/generation/components/agent-activity-timeline";
 import type { CreationMessageThreadProps } from "@/features/generation/components/creation-workspace-types";
@@ -113,7 +113,7 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                             ) : null}
                                             {round.resultContent}
                                             {round.choiceSettingsContent ? <div className="max-w-3xl">{round.choiceSettingsContent}</div> : null}
-                                            {round.action?.type === "navigate" ? (
+                                            {round.action?.type === "navigate" && round.action.href ? (
                                                 <div className="pt-1">
                                                     <Button
                                                         type="primary"
@@ -121,7 +121,7 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                                         icon={<ArrowRight className="size-3.5" />}
                                                         onClick={() => {
                                                             const action = round.action;
-                                                            if (!action || action.type !== "navigate") return;
+                                                            if (!action || action.type !== "navigate" || !action.href) return;
                                                             if (action.initialPrompt) storeInitialPromptForNavigation(action.initialPrompt);
                                                             router.push(action.href);
                                                         }}

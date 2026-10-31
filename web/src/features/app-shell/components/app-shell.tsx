@@ -3,8 +3,8 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { useState, type ReactNode } from "react";
-import { usePathname } from "next/navigation";
-import Link from "next/link";
+import { usePathname } from "@/shared/lib/team-navigation";
+import Link from "@/shared/lib/team-navigation";
 import { BookOpen, Layers3, Menu } from "lucide-react";
 
 import { AppSidebar } from "@/features/app-shell/components/app-sidebar";
@@ -14,11 +14,15 @@ import { UserCreditMenu } from "@/features/app-shell/components/user-credit-menu
 import { WelcomeModal } from "@/features/app-shell/components/welcome-modal";
 import { AuthModal } from "@/features/auth/components/auth-modal";
 import { MobileNavDrawer } from "@/features/app-shell/components/mobile-nav-drawer";
+import { ProductTour } from "@/features/onboarding/components/product-tour";
 import { navigationTools, type NavigationToolSlug } from "@/shared/constants/navigation-tools";
+import { useTeamStore } from "@/features/team/stores/use-team-store";
 
 export function AppShell({ children }: { children: ReactNode }) {
     const translate = useTranslation();
     const pathname = usePathname();
+    const team = useTeamStore((state) => state.team);
+    const teamSpaceLabel = team ? translate("appShell.currentTeamSpace", { name: team.name }) : "";
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
     const hideSidebar = /^\/canvas\/[^/]+/.test(pathname);
@@ -47,26 +51,29 @@ export function AppShell({ children }: { children: ReactNode }) {
             )}
 
             {!hideSidebar ? (
-                <div className="fixed right-3 top-3 z-40 flex items-center gap-2">
-                    <CommunityMenu className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]" />
-                    <Link
-                        href="/editions"
-                        className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]"
-                        aria-label={translate("appShell.compareEditions")}
-                        title={translate("appShell.compareEditions")}
-                    >
-                        <Layers3 className="size-4" aria-hidden="true" />
-                    </Link>
-                    <Link
-                        href={`/docs/${translate.locale}`}
-                        className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]"
-                        aria-label={translate("appShell.docs")}
-                        title={translate("appShell.docs")}
-                    >
-                        <BookOpen className="size-4" aria-hidden="true" />
-                    </Link>
-                    <GitHubLink className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]" />
-                    <UserCreditMenu className="shrink-0" />
+                <div className="fixed right-3 top-3 z-40 flex max-w-[calc(100vw-4.5rem)] items-center gap-2 md:max-w-[calc(100vw-7rem)]">
+                    {team ? <span role="status" title={teamSpaceLabel} className="mr-1 min-w-0 max-w-80 truncate text-xs text-[var(--studio-muted)]">{teamSpaceLabel}</span> : null}
+                    <div data-tour="header-links" className="flex items-center gap-2">
+                        <CommunityMenu className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]" />
+                        <Link
+                            href="/editions"
+                            className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]"
+                            aria-label={translate("appShell.compareEditions")}
+                            title={translate("appShell.compareEditions")}
+                        >
+                            <Layers3 className="size-4" aria-hidden="true" />
+                        </Link>
+                        <Link
+                            href={`/docs/${translate.locale}`}
+                            className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] transition hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]"
+                            aria-label={translate("appShell.docs")}
+                            title={translate("appShell.docs")}
+                        >
+                            <BookOpen className="size-4" aria-hidden="true" />
+                        </Link>
+                        <GitHubLink className="studio-glass inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-[var(--studio-muted)] hover:bg-[var(--studio-surface-hover)] hover:text-[var(--studio-ink)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--studio-action)]" />
+                    </div>
+                    <UserCreditMenu className="shrink-0" tourAnchor="user-menu" />
                 </div>
             ) : null}
 
@@ -77,6 +84,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
             <AuthModal />
             <WelcomeModal />
+            <ProductTour />
         </div>
     );
 }

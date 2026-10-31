@@ -261,6 +261,9 @@
     "undo": "Undo",
     "redo": "Redo",
     "uploadAssets": "Upload assets",
+    "mediaUploadProgress": "Uploading assets: {value0}/{value1} completed",
+    "mediaUploadCompleted": "Upload completed: {value0} succeeded, {value1} failed",
+    "unsupportedMediaFileType": "Unsupported file type. Choose an image, video, or MP3/WAV audio file",
     "myAssets": "My assets",
     "deleteSelected_53f101": "Delete selected {value0}",
     "clearCanvas": "Clear canvas",
@@ -789,5 +792,7 @@
     "youCanUndoThisDeletion": "You can undo this deletion.",
     "theCurrentCanvasIsSavedAutomaticallyReturnToThe": "The current canvas is saved automatically. Return to the canvas list?",
     "images_a4f725": "{value0} images",
-    "items_9479b5": "{value0} items"
+    "items_9479b5": "{value0} items",
+    "notUploaded": "Not uploaded",
+    "confirmBatchVideoGenerationDetails": "Create a video task for each of {value2, plural, one {# shot} other {# shots}} using the selected model, {value0} aspect ratio and {value1} resolution. Estimated cost: {value3} credits. Continue?"
 }

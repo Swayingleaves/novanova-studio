@@ -78,11 +78,15 @@ public class RoleAuthFilter implements WebFilter {
                                             return writeErrorResponse(exchange, "未登录或Token无效");
                                         }
                                         CurrentUser authenticatedUser = currentUser.get();
-                                        if (!requiredRole.equals(authenticatedUser.role())) {
+                                        return TeamScope.current().flatMap(scope -> {
+                                        boolean allowed = scope.teamId() > 0 && "admin".equals(requiredRole)
+                                                ? "administrator".equals(scope.memberRole()) : requiredRole.equals(authenticatedUser.role());
+                                        if (!allowed) {
                                             log.warn("角色权限不足: userId={}, role={}, required={}", authenticatedUser.id(), authenticatedUser.role(), requiredRole);
                                             return writeErrorResponse(exchange, "权限不足，需要 " + requiredRole + " 角色");
                                         }
                                         return chain.filter(exchange);
+                                        });
                                     });
                         }
                     }

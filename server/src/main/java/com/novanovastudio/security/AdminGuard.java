@@ -28,11 +28,11 @@ public class AdminGuard {
      */
     public Mono<CurrentUser> requireAdmin() {
         // 从Reactor上下文读取当前用户，并校验角色为管理员。
-        return currentUserProvider.currentUser().flatMap(currentUser -> {
-            if (!"admin".equals(currentUser.role())) {
+        return currentUserProvider.currentUser().flatMap(currentUser -> TeamScope.current().flatMap(scope -> {
+            if (scope.teamId() > 0 ? !"administrator".equals(scope.memberRole()) : !"admin".equals(currentUser.role())) {
                 return Mono.error(new BusinessException(ErrorCode.PERMISSION_DENIED, SystemMessage.of("business.permissionDenied")));
             }
             return Mono.just(currentUser);
-        });
+        }));
     }
 }

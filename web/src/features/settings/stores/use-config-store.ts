@@ -1,4 +1,7 @@
 "use client";
+
+import { canManageCurrentSpace, useTeamStore } from "@/features/team/stores/use-team-store";
+import type { CreditAmount } from "@/shared/lib/credit-amounts";
 import { translateMessage as translate } from "@/features/locale/translate";
 
 
@@ -23,11 +26,11 @@ export type VideoResolution = "auto" | "480p" | "720p" | "768p" | "1080p" | "108
 export type VideoBillingConfiguration = {
     billingUnit: ModelCreditUnit;
     minimumDurationSeconds: number;
-    modePrices: Partial<Record<VideoGenerationMode, Partial<Record<VideoResolution, number>>>>;
+    modePrices: Partial<Record<VideoGenerationMode, Partial<Record<VideoResolution, CreditAmount>>>>;
 };
 /** 图片模型按 1K、2K、4K 清晰度配置的积分单价，空表示沿用模型单价。 */
 export type ImageBillingConfiguration = {
-    resolutionPrices: Partial<Record<ImageResolution, number>>;
+    resolutionPrices: Partial<Record<ImageResolution, CreditAmount>>;
 };
 /** 自定义视频模式限制；草稿和未补全配置允许缺失字段，使用前必须统一校验。 */
 export type VideoGenerationConstraints = {
@@ -54,6 +57,8 @@ export type CustomModelGroupConfig = {
     aiQueryPrompt: string;
     queryResponseExample: string;
     queryResultPath: string;
+    /** 仅图片能力使用：true为异步（提交响应取出任务ID后轮询查询接口），缺省或false为同步；视频沿用查询字段非空即异步的判断。 */
+    asyncQuery?: boolean | null;
     videoGenerationConstraints?: VideoGenerationConstraints | null;
 };
 export type VideoModelBillingConfiguration = {
@@ -112,7 +117,7 @@ export type AiConfig = {
     videoGenerationMode: VideoGenerationMode;
     systemPrompt: string;
     models: string[];
-    modelCosts: Array<{ model: string; taskType: ModelCapability; credits: number; unit: ModelCreditUnit; resolutionPrices?: Partial<Record<ImageResolution, number>> }>;
+    modelCosts: Array<{ model: string; taskType: ModelCapability; credits: CreditAmount; ownerTeamId?: number; unit: ModelCreditUnit; resolutionPrices?: Partial<Record<ImageResolution, CreditAmount>> }>;
     imageModels: string[];
     videoModels: string[];
     textModels: string[];
@@ -136,6 +141,7 @@ type ConfigStore = {
     objectStorages: ObjectStorageConfig[];
     activeObjectStorageId: string;
     modelConfigs: ServerModelConfig[];
+    managedChannels: ModelChannel[];
     hydrateConfig: () => Promise<void>;
     updateConfig: <K extends keyof AiConfig>(key: K, value: AiConfig[K]) => void;
     setChannels: (channels: ModelChannel[]) => void;
@@ -211,10 +217,11 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
     objectStorages: [defaultObjectStorage],
     activeObjectStorageId: defaultObjectStorage.id,
     modelConfigs: [],
+    managedChannels: [],
     hydrateConfig: async () => {
         const user = useUserStore.getState().user;
         if (!user || (get().hydrated && get().hydratedUserId === user.id)) return;
-        if (user?.role !== "admin") {
+        if (!canManageCurrentSpace()) {
             const modelResult = await listServerAiModels().catch(() => null);
             // 服务刚启动等瞬时故障时不能提交空配置，否则整个会话都会处于“无模型可生成”状态；
             // 保持未就绪并稍后自动重试，成功后前端能力自动恢复（刷新页面也能立即恢复）。
@@ -229,6 +236,7 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
                 hydratedUserId: user.id,
                 config: configFromServerModels(modelResult),
                 modelConfigs: [],
+                managedChannels: [],
                 objectStorages: [defaultObjectStorage],
                 activeObjectStorageId: defaultObjectStorage.id,
                 objectStorage: defaultObjectStorage,
@@ -249,8 +257,9 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
         set({
             hydrated: true,
             hydratedUserId: user.id,
-            config: configFromModelConfigs(channels, modelConfigs),
+            config: useTeamStore.getState().team ? configFromServerModels(await listServerAiModels()) : configFromModelConfigs(channels, modelConfigs),
             modelConfigs,
+            managedChannels: channels,
             objectStorages,
             activeObjectStorageId,
             objectStorage: objectStorages.find((item) => item.id === activeObjectStorageId) || objectStorages[0],
@@ -321,8 +330,9 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
     refreshChannels: async () => {
         const data = await listChannels();
         set((state) => {
-            const config = normalizeConfig({ ...state.config, channels: normalizeChannels(data.channels) });
-            return { config };
+            const managedChannels = normalizeChannels(data.channels);
+            const config = useTeamStore.getState().team ? state.config : normalizeConfig({ ...state.config, channels: managedChannels });
+            return { config, managedChannels };
         });
     },
     refreshModelConfiguration: () =>
@@ -330,11 +340,12 @@ export const useConfigStore = create<ConfigStore>()((set, get) => ({
             set((state) => {
                 const normalizedChannels = normalizeChannels(channels);
                 return {
+                    managedChannels: normalizedChannels,
                     modelConfigs: modelConfigurations.map(normalizeServerModelConfig),
                     config: configFromModelConfigs(normalizedChannels, modelConfigurations, state.config),
                 };
             });
-        }),
+        }).then(async () => { if (useTeamStore.getState().team) set({ config: configFromServerModels(await listServerAiModels()) }); }),
     refreshObjectStorages: async () => {
         const data = await listObjectStorages();
         const objectStorages = normalizeObjectStorages(data.objectStorages);
@@ -523,6 +534,7 @@ export function configFromModelConfigs(channels: ModelChannel[], modelConfigs: S
             model: `${item.channelId}${CHANNEL_MODEL_SEPARATOR}${item.modelName}`,
             taskType: item.modelType,
             credits: item.creditCost,
+            ownerTeamId: item.ownerTeamId,
             unit: normalizeModelCreditUnit(item.creditUnit, item.modelType),
             resolutionPrices: item.imageBillingConfiguration?.resolutionPrices,
         })),
@@ -561,6 +573,7 @@ function configFromServerModels(modelList: ServerAiModelList | null) {
             model: model.value,
             taskType: model.capability as ModelCapability,
             credits: model.creditCost,
+            ownerTeamId: model.ownerTeamId,
             unit: normalizeModelCreditUnit(model.creditUnit, model.capability as ModelCapability),
             resolutionPrices: model.imageBillingConfiguration?.resolutionPrices,
         })),

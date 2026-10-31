@@ -1,5 +1,10 @@
 package com.novanovastudio.dto;
 
+import com.alibaba.fastjson2.annotation.JSONField;
+import com.novanovastudio.common.CreditAmountWriter;
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -25,7 +30,7 @@ public final class CreditDtos {
      *
      * @param initialCredits Integer 新用户初始积分
      */
-    public record CreditSettingsResponse(Integer initialCredits) {
+    public record CreditSettingsResponse(@jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal initialCredits) {
     }
 
     /**
@@ -33,7 +38,7 @@ public final class CreditDtos {
      *
      * @param initialCredits Integer 新用户初始积分
      */
-    public record UpdateCreditSettingsRequest(@NotNull(message = "business.initialCreditsAreRequired") @Min(value = 0, message = "business.initialCreditsMustNotBeNegative") Integer initialCredits) {
+    public record UpdateCreditSettingsRequest(@NotNull(message = "business.initialCreditsAreRequired") @Min(value = 0, message = "business.initialCreditsMustNotBeNegative") @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal initialCredits) {
     }
 
     /**
@@ -44,7 +49,7 @@ public final class CreditDtos {
      * @param reason String 调整原因
      */
     public record AdjustUserCreditsRequest(@NotNull(message = "business.userIDIsRequired") Long userId,
-                                           @NotNull(message = "business.creditChangeIsRequired") Integer changeAmount,
+                                           @NotNull(message = "business.creditChangeIsRequired") @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal changeAmount,
                                            @NotBlank(message = "business.adjustmentReasonIsRequired") @Size(max = 200, message = "business.reasonMustNotExceed200Characters") String reason) {
     }
 
@@ -54,7 +59,7 @@ public final class CreditDtos {
      * @param userId Long 用户ID
      * @param creditBalance Integer 可用积分
      */
-    public record CreditBalanceResponse(Long userId, Integer creditBalance) {
+    public record CreditBalanceResponse(Long userId, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal creditBalance) {
     }
 
     /**
@@ -63,7 +68,7 @@ public final class CreditDtos {
      * @param name String 分组名称
      * @param consumedCredits Long 消耗积分
      */
-    public record CreditDistributionItem(String name, Long consumedCredits) {
+    public record CreditDistributionItem(String name, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal consumedCredits) {
     }
 
     /**
@@ -72,7 +77,7 @@ public final class CreditDtos {
      * @param period String 日或月周期
      * @param consumedCredits Long 消耗积分
      */
-    public record CreditTrendItem(String period, Long consumedCredits) {
+    public record CreditTrendItem(String period, @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal consumedCredits) {
     }
 
     /**
@@ -101,7 +106,7 @@ public final class CreditDtos {
                                         String generationType,
                                         String model,
                                         String generationSource,
-                                        Long consumedCredits,
+                                        @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal consumedCredits,
                                         String createdAt) {
     }
 
@@ -122,7 +127,7 @@ public final class CreditDtos {
      * @param username String 用户名
      * @param nickname String 用户昵称，可为空
      * @param email String 用户邮箱
-     * @param transactionType String 流水类型：task_charge/task_refund/admin_adjustment/card_redeem/initial_grant/invitation_reward/daily_check_in/credit_expired
+     * @param transactionType String 流水类型：task_charge/task_refund/admin_adjustment/card_redeem/initial_grant/invitation_reward/daily_check_in/credit_expired/storage_purchase/storage_charge/credit_purchase
      * @param direction String 变动方向：add 增加 / spend 消耗，服务端按 change_amount 符号派生
      * @param generationType String 生成任务类型：image/video，非任务流水为 null
      * @param model String 生成任务实际使用模型，非任务流水为 null
@@ -143,9 +148,9 @@ public final class CreditDtos {
                                              String generationType,
                                              String model,
                                              String generationSource,
-                                             Long changeAmount,
+                                             @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal changeAmount,
                                              String reason,
-                                             Long balanceAfter,
+                                             @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal balanceAfter,
                                              Long invitedUserId,
                                              String createdAt) {
     }
@@ -163,7 +168,7 @@ public final class CreditDtos {
      * 用户统一积分流水明细项（含增加与消耗）。
      *
      * @param id Long 流水ID
-     * @param transactionType String 流水类型：task_charge/task_refund/admin_adjustment/card_redeem/initial_grant/invitation_reward
+     * @param transactionType String 流水类型：task_charge/task_refund/admin_adjustment/card_redeem/initial_grant/invitation_reward/daily_check_in/credit_expired/storage_purchase/storage_charge/credit_purchase
      * @param direction String 变动方向：add 增加 / spend 消耗，服务端按 change_amount 符号派生
      * @param generationType String 生成任务类型：image/video，非任务流水为 null
      * @param model String 生成任务模型展示名，非任务流水为 null
@@ -180,9 +185,9 @@ public final class CreditDtos {
                                             String generationType,
                                             String model,
                                             String generationSource,
-                                            Long changeAmount,
+                                            @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal changeAmount,
                                             String reason,
-                                            Long balanceAfter,
+                                            @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal balanceAfter,
                                             Long invitedUserId,
                                             String createdAt) {
     }
@@ -221,7 +226,7 @@ public final class CreditDtos {
                                  String resolution,
                                  String size,
                                  String seconds,
-                                 Long consumedCredits,
+                                 @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal consumedCredits,
                                  List<String> resultUrls,
                                  String errorMessage,
                                  String createdAt,
@@ -248,7 +253,7 @@ public final class CreditDtos {
      * @param resolution String 选择的分辨率，未记录时为 null
      * @param size String 选择的画面比例，未记录时为 null
      * @param seconds String 视频秒数，图片任务为 null
-     * @param consumedCredits Long 任务实际消耗积分，已全额退款时为 0
+     * @param consumedCredits BigDecimal 任务实际消耗积分，已全额退款时为 0
      * @param resultUrls List<String> 生成结果媒体地址
      * @param errorMessage String 失败原因，非失败任务为 null
      * @param createdAt String 任务创建时间
@@ -266,7 +271,7 @@ public final class CreditDtos {
                                       String resolution,
                                       String size,
                                       String seconds,
-                                      Long consumedCredits,
+                                      @jakarta.validation.constraints.Digits(integer = 18, fraction = 6) @JSONField(serializeUsing = CreditAmountWriter.class) BigDecimal consumedCredits,
                                       List<String> resultUrls,
                                       String errorMessage,
                                       String createdAt,

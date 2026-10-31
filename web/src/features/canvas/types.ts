@@ -108,6 +108,8 @@ type SelectionContextMenuState = {
     x: number;
     y: number;
     nodeIds: string[];
+    /** 仅空白处打开的选区菜单携带上传锚点。 */
+    position?: CanvasPoint;
 };
 
 export type ContextMenuState = NodeContextMenuState | ConnectionContextMenuState | CanvasContextMenuState | SelectionContextMenuState;
@@ -179,7 +181,7 @@ export interface CanvasImageGrouping {
 }
 
 /** 音频节点保存真实波形采样，播放状态只保留在组件中。 */
-export interface CanvasAudioNode extends CanvasNodeBase<"audio"> {
+export type CanvasAudioNode = CanvasNodeBase<"audio"> & {
     content: CanvasVideoContent & {
         waveformPeaks: number[];
         /** 裁剪片段在原音频中的起始位置，未设置时从0开始。 */
@@ -233,7 +235,7 @@ export interface CanvasVideoGenerationSettings {
     generationStyleSnapshots: GenerationStyleSnapshot[];
 }
 
-interface CanvasNodeBase<Kind extends CanvasNodeKind> {
+type CanvasNodeBase<Kind extends CanvasNodeKind> = {
     id: string;
     kind: Kind;
     title: string;
@@ -241,13 +243,13 @@ interface CanvasNodeBase<Kind extends CanvasNodeKind> {
     execution: CanvasExecutionState;
 }
 
-export interface CanvasImageNode extends CanvasNodeBase<"image"> {
+export type CanvasImageNode = CanvasNodeBase<"image"> & {
     content: CanvasImageContent;
     generation: CanvasImageGenerationSettings;
     grouping: CanvasImageGrouping;
 }
 
-export interface CanvasTextNode extends CanvasNodeBase<"text"> {
+export type CanvasTextNode = CanvasNodeBase<"text"> & {
     content: {
         text: string;
         fontSize: number;
@@ -311,7 +313,7 @@ export interface CanvasStoryboardShot {
     assetIds: string[];
 }
 
-export interface CanvasStoryboardNode extends CanvasNodeBase<"storyboard"> {
+export type CanvasStoryboardNode = CanvasNodeBase<"storyboard"> & {
     content: {
         instruction: string;
         visualStyle: string;
@@ -324,7 +326,7 @@ export interface CanvasStoryboardNode extends CanvasNodeBase<"storyboard"> {
     };
 }
 
-export interface CanvasVideoNode extends CanvasNodeBase<"video"> {
+export type CanvasVideoNode = CanvasNodeBase<"video"> & {
     content: CanvasVideoContent;
     generation: CanvasVideoGenerationSettings;
 }
@@ -338,7 +340,7 @@ export interface CanvasVideoCompositionData {
 }
 
 /** 画布视频合成节点。 */
-export interface CanvasVideoCompositionNode extends CanvasNodeBase<"videoComposition"> {
+export type CanvasVideoCompositionNode = CanvasNodeBase<"videoComposition"> & {
     /** 视频合成业务数据。 */
     composition: CanvasVideoCompositionData;
 }
@@ -511,12 +513,12 @@ export interface CanvasDirectorDeskData {
 }
 
 /** 画布 3D 导演台节点。 */
-export interface CanvasDirectorDeskNode extends CanvasNodeBase<"directorDesk"> {
+export type CanvasDirectorDeskNode = CanvasNodeBase<"directorDesk"> & {
     director: CanvasDirectorDeskData;
 }
 
 /** 画布背景板节点，使用绝对坐标包裹一组普通内容节点。 */
-export interface CanvasBackgroundNode extends CanvasNodeBase<"background"> {
+export type CanvasBackgroundNode = CanvasNodeBase<"background"> & {
     /** 背景板填充颜色，使用主题预设颜色标识。 */
     backgroundColor: string;
     /** 背景板直接包含的普通节点标识。 */

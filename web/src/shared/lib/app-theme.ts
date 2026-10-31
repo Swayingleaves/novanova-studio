@@ -121,6 +121,10 @@ export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
     const isDark = isDarkResolvedTheme(resolvedTheme);
     const p = PALETTES[resolvedTheme];
     const brand = BRAND[resolvedTheme];
+    // 暗色主题的主色是浅绿，colorTextLightSolid 被设为深色前景（#11170a），而 Tooltip 的文字色正是
+    // colorTextLightSolid、底色是 colorBgSpotlight：沿用 antd 默认灰底会变成深字配灰底。这里只给暗色主题
+    // 换浅色浮层底（colorBgSpotlight 在 antd 中仅 Tooltip 使用）；浅色与紫色主题文字为白色，保持默认反色底。
+    const spotlightBg = resolvedTheme === "dark" ? "#dfe4d8" : undefined;
 
     return {
         algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
@@ -134,7 +138,7 @@ export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
             colorLink: brand.primary,
             colorLinkHover: brand.hover,
             colorLinkActive: brand.active,
-            colorTextLightSolid: "#ffffff",
+            colorTextLightSolid: brand.foreground,
             colorBgLayout: p.layout,
             colorBgContainer: p.bg,
             colorBgElevated: p.bgElevated,
@@ -148,6 +152,7 @@ export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
             colorSplit: p.borderLight,
             borderRadius: 8,
             boxShadow: p.shadow,
+            ...(spotlightBg ? { colorBgSpotlight: spotlightBg } : {}),
         },
         components: {
             Button: {
@@ -161,6 +166,16 @@ export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
                 defaultHoverBorderColor: brand.border,
                 borderRadius: 8,
                 controlHeight: 34,
+            },
+            Radio: {
+                buttonSolidCheckedColor: brand.foreground,
+                buttonSolidCheckedBg: brand.primary,
+                buttonSolidCheckedHoverBg: brand.hover,
+                buttonSolidCheckedActiveBg: brand.active,
+            },
+            Segmented: {
+                itemSelectedBg: brand.primary,
+                itemSelectedColor: brand.foreground,
             },
             Input: {
                 activeBorderColor: brand.primary,
@@ -194,12 +209,12 @@ export function getAntThemeConfig(resolvedTheme: ResolvedTheme): ThemeConfig {
             Menu: {
                 itemActiveBg: brand.soft,
                 itemHoverBg: p.fill,
-                itemSelectedBg: brand.soft,
-                itemSelectedColor: p.text,
+                itemSelectedBg: brand.primary,
+                itemSelectedColor: brand.foreground,
                 darkItemBg: p.bg,
                 darkItemHoverBg: brand.soft,
-                darkItemSelectedBg: brand.soft,
-                darkItemSelectedColor: p.text,
+                darkItemSelectedBg: brand.primary,
+                darkItemSelectedColor: brand.foreground,
             },
         },
     };

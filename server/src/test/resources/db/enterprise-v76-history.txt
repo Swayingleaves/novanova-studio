@@ -1,0 +1,76 @@
+1|Initial Schema|626378413|t
+2|Add Agent Plan Tables|-1582738373|t
+3|Update Agent Plan Task Final Prompt Comment|-155441248|t
+4|Add Model Thinking Settings|662950620|t
+5|Add Generation Styles|771344165|t
+6|Add Credit Card Redemption|1038943668|t
+7|Add Model Credit Unit|-1464079110|t
+8|Add Platform Ai Channel Created At Index|107931367|t
+9|Allow Storyboard Credit Generation Source|1241254866|t
+10|Add Model Request Concurrency|1038782393|t
+11|Add Video Composition Tasks|-222921453|t
+12|Add Generation Style Covers And Categories|-1493379386|t
+13|Add Creation Agent Requests|-2135235075|t
+14|Add Model Custom Body Parameters|10592705|t
+15|Add Video Mode Pricing|-1027641925|t
+16|Add Model Display Name|993311413|t
+17|Add Model Icon|1598726341|t
+18|Add Api Logs|-987683504|t
+19|Add Model Custom Config|-913101075|t
+20|Add Skills|2136135890|t
+21|Add Video Workflow|-351125936|t
+22|Workflow Conversation Draft|1651532257|t
+23|Workflow Image Stage|1826975757|t
+24|Add Canvas Setting Graph Skills|-1846190344|t
+25|Add Skill Aspect Ratio|305841131|t
+26|Update Character Three View Skill|817440571|t
+27|Add Invitation Reward|-1195364641|t
+28|Add Password Reset|2142370993|t
+29|Add Daily Check In|1813780466|t
+30|Simplify Daily Check In|2036616215|t
+31|Add Credit Expiry|-1509314074|t
+32|Add Script Creation|-2056769005|t
+33|Add Comic Drama Production|-1167001902|t
+34|Add Shot Draft Script Revision|-1701032005|t
+35|Add Comic Drama Timeline Tracks|-761985665|t
+36|Add Comic Drama Text Track Lanes|-1216227527|t
+37|Add Storyboard Video Export|1370952370|t
+38|Add Storyboard Text Font Family|-1571056338|t
+39|Remove Script Positioning Fields|-2140149306|t
+40|Add Script Source Import|-174865387|t
+41|Add Story Bible|-185407542|t
+42|Add Story Bible Quick Analysis|-1982637796|t
+43|Remove Story Bible Analysis Mode|-1910710524|t
+44|Add Story Bible Initial Batch Count|-1709181963|t
+45|Add Novel Adaptation|1809280721|t
+46|Expand Novel Adaptation Stages|10020304|t
+47|Add Novel Adaptation Jobs|2119462502|t
+48|Add Novel Adaptation Retry Count|-1473146178|t
+49|Add Whole Book Adaptation|-1969947553|t
+50|Drop Character Graph Position|313214907|t
+51|Add Episode Body Batch|-2141893467|t
+52|Add Script Block Origin|2073932700|t
+53|Add Episode Bodies Pricing|231302480|t
+54|Drop Novel Adaptation Asset Links|-1372469972|t
+55|Add Localized Task Messages|-172452372|t
+56|Add Team Spaces|-235231607|t
+57|Add Team Wallets And Storage Billing|-120129335|t
+58|Add Username Accounts And Invitation Targets|99996502|t
+59|Allow Team Member Role Assignment|-128351967|t
+60|Add Permanent Storage Capacity|-493851821|t
+61|Add Storage File Details|-1691145108|t
+62|Add Image Size Conversion|-1649250570|t
+63|Add Image Size Mappings|1863346420|t
+64|Add Image Resolution Pricing|50530784|t
+65|Add Email Campaigns|-176160208|t
+66|Add Email Campaign Domains|897369548|t
+67|Remove Email Campaign Domains|1006310141|t
+68|Add User Onboarding Version|1229598796|t
+69|Add User Creation Tour Version|-647367832|t
+70|Add Credit Purchase Payments|1859059140|t
+71|Add Credit Purchase Order Cancelled Status|1001391523|t
+72|Add Credit Product Bonus|-1344623499|t
+73|Add Comic Drama Final Prompt Pricing|1048764099|t
+74|Add Script Ai Action Pricing|134824788|t
+75|Add Platform Community Configs|-1255325708|t
+76|Add Model Enabled|954321845|t

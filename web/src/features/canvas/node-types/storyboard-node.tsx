@@ -1,4 +1,6 @@
 "use client";
+import { useInsufficientCreditsPrompt } from "@/features/credits/use-insufficient-credits-prompt";
+import { modelCreditBalance } from "@/features/team/credit-balance";
 import { useTranslation } from "@/features/locale/use-translation";
 
 
@@ -31,6 +33,7 @@ export const StoryboardNode = memo(function StoryboardNode({ data: rawData, sele
     const failed = data.execution.phase === "failed";
     const model = data.content.model || config.textModel;
     const creditCost = readStoryboardModelCost(config.modelCosts, model);
+    useInsufficientCreditsPrompt({ enabled: !!selected && !running && config.modelCosts.some((item) => item.model === model && item.taskType === "text"), requiredCredits: creditCost, availableCredits: modelCreditBalance(model), contextKey: data.id });
     const statusText = running ? translate("canvas.processing_694b71") : generated ? translate("canvas.generated") : failed ? translate("canvas.operationFailed") : translate("canvas.notGenerated");
     const statusColor = running || generated ? theme.node.activeStroke : failed ? "var(--studio-danger)" : theme.node.muted;
     const creditLabel = translate("canvas.credits_5c15b9", { value0: generated ? translate("canvas.regenerate") : translate("canvas.firstGeneration"), value1: creditCost });

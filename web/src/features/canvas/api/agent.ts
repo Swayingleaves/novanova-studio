@@ -1,8 +1,8 @@
+import { useTeamStore } from "@/features/team/stores/use-team-store";
 
-import { translateMessage as translate } from "@/features/locale/translate";
-import { currentLanguageTag, currentWebsiteLocale } from "@/features/locale/translate";
+import { currentWebsiteLocale } from "@/features/locale/translate";
 import { getAuthToken } from "@/features/auth/stores/use-user-store";
-import { serverBaseUrl } from "@/services/api/server";
+import { serverBaseUrl, serverGet, serverPost } from "@/services/api/server";
 import type { ServerSystemMessage } from "@/services/api/server";
 import type { VideoGenerationMode } from "@/features/settings/stores/use-config-store";
 
@@ -116,124 +116,38 @@ export interface AgentEvent {
 
 export type AgentRequestStatus = "queued" | "running" | "success" | "failed" | "canceled" | "interrupted";
 
-type ApiResponse<T> = { code: number; data: T; msg: string };
-
-/**
- * 发起 Agent 对话，返回 sessionId 供前端订阅事件流
- */
-export async function agentChat(params: AgentChatParams): Promise<{ sessionId: string; requestId: string; status: AgentRequestStatus }> {
-    const token = getAuthToken();
-    const res = await fetch(`${serverBaseUrl()}/ai/agent/chat`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Accept-Language": currentLanguageTag(),
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        cache: "no-store",
-        body: JSON.stringify(params),
-    });
-    const payload = (await res.json().catch(() => null)) as ApiResponse<{ sessionId: string; requestId: string; status: AgentRequestStatus }> | null;
-    if (!res.ok || !payload) throw new Error(payload?.msg || translate("canvas.agentChatRequestFailed", { value0: res.status }));
-    if (payload.code !== 0) throw new Error(payload.msg || translate("canvas.agentChatRequestFailed_fe728e"));
-    return payload.data;
+/** 发起对话，复用统一请求入口绑定当前团队及认证。 */
+export function agentChat(params: AgentChatParams) {
+    return serverPost<{ sessionId: string; requestId: string; status: AgentRequestStatus }>("/ai/agent/chat", params);
 }
 
-/**
- * 停止当前 Agent 会话及其关联的生成任务。
- */
+/** 停止当前空间中的请求及其关联任务。 */
 export async function cancelAgentChat(sessionId: string, requestId: string): Promise<void> {
-    const token = getAuthToken();
-    const res = await fetch(`${serverBaseUrl()}/ai/agent/cancelChat`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Accept-Language": currentLanguageTag(),
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        cache: "no-store",
-        body: JSON.stringify({ sessionId, requestId }),
-    });
-    const payload = (await res.json().catch(() => null)) as ApiResponse<null> | null;
-    if (!res.ok || !payload || payload.code !== 0) {
-        throw new Error(payload?.msg || translate("canvas.failedToStopAgentChat", { value0: res.status }));
-    }
+    await serverPost("/ai/agent/cancelChat", { sessionId, requestId });
 }
 
-/**
- * 按请求ID查询主Agent请求状态，用于SSE终态事件丢失时对账。
- */
-export async function agentRequestStatus(requestId: string): Promise<{ status: AgentRequestStatus; message: string }> {
-    const token = getAuthToken();
-    const res = await fetch(`${serverBaseUrl()}/ai/agent/requestStatus?requestId=${encodeURIComponent(requestId)}`, {
-        headers: { "Accept-Language": currentLanguageTag(), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        cache: "no-store",
-    });
-    const payload = (await res.json().catch(() => null)) as ApiResponse<{ status: AgentRequestStatus; message: string }> | null;
-    if (!res.ok || !payload) throw new Error(payload?.msg || translate("canvas.failedToQueryAgentStatus", { value0: res.status }));
-    if (payload.code !== 0) throw new Error(payload.msg || translate("canvas.failedToQueryAgentRequestStatus"));
-    return payload.data;
+/** 查询当前空间中的主Agent请求状态。 */
+export function agentRequestStatus(requestId: string) {
+    return serverGet<{ status: AgentRequestStatus; message: string }>(`/ai/agent/requestStatus?requestId=${encodeURIComponent(requestId)}`);
 }
 
-/**
- * 查询指定入口分区内仍在执行的主Agent请求，供页面刷新后重新接入。
- */
-export async function agentActiveRequest(entrySource: string): Promise<{ requestId: string; sessionId: string; status: AgentRequestStatus; message: string; projectId: string } | null> {
-    const token = getAuthToken();
-    const res = await fetch(`${serverBaseUrl()}/ai/agent/activeRequest?entrySource=${encodeURIComponent(entrySource)}`, {
-        headers: { "Accept-Language": currentLanguageTag(), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        cache: "no-store",
-    });
-    const payload = (await res.json().catch(() => null)) as ApiResponse<{ requestId: string; sessionId: string; status: AgentRequestStatus; message: string; projectId: string } | null> | null;
-    if (!res.ok || !payload) throw new Error(payload?.msg || translate("canvas.failedToQueryActiveAgentRequest", { value0: res.status }));
-    if (payload.code !== 0) throw new Error(payload.msg || translate("canvas.failedToQueryActiveAgentRequest_70fa06"));
-    return payload.data || null;
+/** 查询当前空间、当前入口仍在执行的请求。 */
+export function agentActiveRequest(entrySource: string) {
+    return serverGet<{ requestId: string; sessionId: string; status: AgentRequestStatus; message: string; projectId: string } | null>(`/ai/agent/activeRequest?entrySource=${encodeURIComponent(entrySource)}`);
 }
 
-/**
- * 让服务端重放当前页面未在执行的前端工具调用，避免刷新后主Agent请求一直等到工具超时。
- */
-export async function agentReplayPendingTools(params: { sessionId: string; requestId: string; activeToolCallIds: string[] }): Promise<number> {
-    const token = getAuthToken();
-    const res = await fetch(`${serverBaseUrl()}/ai/agent/replayPendingTools`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Accept-Language": currentLanguageTag(),
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        cache: "no-store",
-        body: JSON.stringify(params),
-    });
-    const payload = (await res.json().catch(() => null)) as ApiResponse<number> | null;
-    if (!res.ok || !payload) throw new Error(payload?.msg || translate("canvas.agentToolReplayFailed", { value0: res.status }));
-    if (payload.code !== 0) throw new Error(payload.msg || translate("canvas.agentToolReplayFailed_0e6d68"));
-    return payload.data || 0;
+/** 页面刷新后重放当前空间中尚未执行的工具调用。 */
+export function agentReplayPendingTools(params: { sessionId: string; requestId: string; activeToolCallIds: string[] }) {
+    return serverPost<number>("/ai/agent/replayPendingTools", params);
 }
 
-/**
- * 订阅 SSE 事件流。EventSource 无法设置自定义头，通过 query token 传递鉴权令牌。
- */
+/** EventSource通过查询参数显式传递团队，服务端验证成员关系。 */
 export function agentSubscribeEvents(): EventSource {
     const token = getAuthToken();
-    const url = `${serverBaseUrl()}/ai/agent/events?locale=${currentWebsiteLocale()}${token ? `&token=${encodeURIComponent(token)}` : ""}`;
-    return new EventSource(url);
+    return new EventSource(`${serverBaseUrl()}/ai/agent/events?locale=${currentWebsiteLocale()}&teamId=${useTeamStore.getState().team?.id || 0}${token ? `&token=${encodeURIComponent(token)}` : ""}`);
 }
 
-/**
- * 回传前端工具执行结果
- */
+/** 回传工具结果，同样验证原会话属于当前空间。 */
 export async function agentSubmitToolResult(params: AgentToolResultParams): Promise<void> {
-    const token = getAuthToken();
-    const res = await fetch(`${serverBaseUrl()}/ai/agent/tool-result`, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Accept-Language": currentLanguageTag(),
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        cache: "no-store",
-        body: JSON.stringify(params),
-    });
-    if (!res.ok) throw new Error(translate("canvas.failedToSubmitToolResult", { value0: res.status }));
+    await serverPost("/ai/agent/tool-result", params);
 }

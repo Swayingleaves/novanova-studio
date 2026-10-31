@@ -1,5 +1,8 @@
 package com.novanovastudio.service;
 
+import java.math.BigDecimal;
+import com.novanovastudio.common.CreditAmounts;
+
 import com.novanovastudio.common.SystemMessage;
 
 import com.novanovastudio.common.BusinessException;
@@ -49,9 +52,9 @@ public class CreditGrantService {
      * @param sourceRef String 来源业务ID，可为null
      * @param credits int 发放积分
      * @param expiresAt OffsetDateTime 过期时间
-     * @return Mono<Integer> 发放后的积分余额
+     * @return Mono<BigDecimal> 发放后的积分余额
      */
-    public Mono<Integer> grantExpiringCredits(Long userId, String sourceType, String sourceRef, int credits, OffsetDateTime expiresAt) {
+    public Mono<BigDecimal> grantExpiringCredits(Long userId, String sourceType, String sourceRef, BigDecimal credits, OffsetDateTime expiresAt) {
         return creditRepository.createExpiringGrant(userId, sourceType, sourceRef, credits, expiresAt)
                 .then(creditRepository.changeBalance(userId, credits))
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.creditAccountNotFoundCannotGrantCredits"))));
@@ -65,29 +68,31 @@ public class CreditGrantService {
      *
      * @param userId Long 用户ID
      * @param credits int 扣减积分
-     * @return Mono<Integer> 扣减后的积分余额，余额不足或账户不存在时为空
+     * @return Mono<BigDecimal> 扣减后的积分余额，余额不足或账户不存在时为空
      */
-    public Mono<Integer> consumeCredits(Long userId, int credits) {
-        if (credits <= 0) {
+    public Mono<BigDecimal> consumeCredits(Long userId, BigDecimal credits) {
+        if (CreditAmounts.of(credits).compareTo(CreditAmounts.of(0)) <= 0) {
             return Mono.error(new BusinessException(ErrorCode.PARAM_INVALID, SystemMessage.of("business.creditDeductionMustBePositive")));
         }
         OffsetDateTime now = OffsetDateTime.now(CREDIT_TIME_ZONE);
-        return creditRepository.listActiveGrantsForUpdate(userId).collectList()
+        return creditRepository.lockWallet(userId).filter(Boolean::booleanValue)
+                .flatMap(locked -> creditRepository.listActiveGrantsForUpdate(userId).collectList()
                 .flatMap(grants -> settleGrants(userId, grants, credits, now))
-                .then(creditRepository.changeBalance(userId, -credits));
+                .then(creditRepository.changeBalance(userId, credits.negate())));
     }
 
     /**
      * 清理指定用户已过期的批次并写入积分过期流水。
      *
      * @param userId Long 用户ID
-     * @return Mono<Integer> 本次作废的积分总额，无过期批次时为0
+     * @return Mono<BigDecimal> 本次作废的积分总额，无过期批次时为0
      */
-    public Mono<Integer> expireExpiredGrants(Long userId) {
+    public Mono<BigDecimal> expireExpiredGrants(Long userId) {
         return Mono.defer(() -> {
             OffsetDateTime now = OffsetDateTime.now(CREDIT_TIME_ZONE);
-            return creditRepository.listActiveGrantsForUpdate(userId).collectList()
-                    .flatMap(grants -> clearExpiredGrants(userId, grants, now));
+            return creditRepository.lockWallet(userId).filter(Boolean::booleanValue)
+                    .flatMap(locked -> creditRepository.listActiveGrantsForUpdate(userId).collectList()
+                            .flatMap(grants -> clearExpiredGrants(userId, grants, now))).defaultIfEmpty(BigDecimal.ZERO);
         }).as(transactionalOperator::transactional);
     }
 
@@ -104,9 +109,9 @@ public class CreditGrantService {
                 .concatMap(userId -> expireExpiredGrants(userId)
                         .onErrorResume(error -> {
                             log.error("清理用户过期积分失败: userId={}", userId, error);
-                            return Mono.just(0);
+                            return Mono.just(BigDecimal.ZERO);
                         }))
-                .filter(credits -> credits > 0)
+                .filter(credits -> CreditAmounts.of(credits).compareTo(CreditAmounts.of(0)) > 0)
                 .count();
     }
 
@@ -119,22 +124,22 @@ public class CreditGrantService {
      * @param now OffsetDateTime 判定时刻
      * @return Mono<Void> 操作完成信号
      */
-    private Mono<Void> settleGrants(Long userId, List<CreditRepository.ExpiringGrant> grants, int credits, OffsetDateTime now) {
+    private Mono<Void> settleGrants(Long userId, List<CreditRepository.ExpiringGrant> grants, BigDecimal credits, OffsetDateTime now) {
         List<CreditRepository.ExpiringGrant> expiredGrants = grants.stream()
                 .filter(grant -> !grant.expiresAt().isAfter(now))
                 .toList();
         List<GrantDeduction> deductions = new ArrayList<>();
-        int remainingCredits = credits;
+        BigDecimal remainingCredits = credits;
         for (CreditRepository.ExpiringGrant grant : grants) {
-            if (remainingCredits <= 0) {
+            if (CreditAmounts.of(remainingCredits).compareTo(CreditAmounts.of(0)) <= 0) {
                 break;
             }
             if (!grant.expiresAt().isAfter(now)) {
                 continue;
             }
-            int deductAmount = Math.min(grant.remainingAmount(), remainingCredits);
+            BigDecimal deductAmount = grant.remainingAmount().min(remainingCredits);
             deductions.add(new GrantDeduction(grant.id(), deductAmount));
-            remainingCredits -= deductAmount;
+            remainingCredits = remainingCredits.subtract(deductAmount);
         }
         return Flux.fromIterable(expiredGrants)
                 .concatMap(grant -> creditRepository.clearGrant(grant.id()))
@@ -150,19 +155,19 @@ public class CreditGrantService {
      * @param userId Long 用户ID
      * @param grants List<ExpiringGrant> 该用户未耗尽的全部批次
      * @param now OffsetDateTime 判定时刻
-     * @return Mono<Integer> 本次作废的积分总额
+     * @return Mono<BigDecimal> 本次作废的积分总额
      */
-    private Mono<Integer> clearExpiredGrants(Long userId, List<CreditRepository.ExpiringGrant> grants, OffsetDateTime now) {
+    private Mono<BigDecimal> clearExpiredGrants(Long userId, List<CreditRepository.ExpiringGrant> grants, OffsetDateTime now) {
         List<CreditRepository.ExpiringGrant> expiredGrants = grants.stream()
                 .filter(grant -> !grant.expiresAt().isAfter(now))
                 .toList();
         if (expiredGrants.isEmpty()) {
-            return Mono.just(0);
+            return Mono.just(BigDecimal.ZERO);
         }
         return Flux.fromIterable(expiredGrants)
                 .concatMap(grant -> creditRepository.clearGrant(grant.id()))
                 .then(writeExpiredTransaction(userId, expiredGrants))
-                .thenReturn(expiredGrants.stream().mapToInt(CreditRepository.ExpiringGrant::remainingAmount).sum());
+                .thenReturn(expiredGrants.stream().map(CreditRepository.ExpiringGrant::remainingAmount).reduce(BigDecimal.ZERO, BigDecimal::add));
     }
 
     /**
@@ -176,10 +181,10 @@ public class CreditGrantService {
         if (expiredGrants.isEmpty()) {
             return Mono.empty();
         }
-        int expiredCredits = expiredGrants.stream().mapToInt(CreditRepository.ExpiringGrant::remainingAmount).sum();
-        return creditRepository.changeBalance(userId, -expiredCredits)
+        BigDecimal expiredCredits = expiredGrants.stream().map(CreditRepository.ExpiringGrant::remainingAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
+        return creditRepository.changeBalance(userId, expiredCredits.negate())
                 .switchIfEmpty(Mono.error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.creditAccountErrorCannotExpireCredits"))))
-                .flatMap(balance -> creditRepository.createTransaction(userId, CreditService.TRANSACTION_CREDIT_EXPIRED, null, -expiredCredits, balance, "签到积分过期")
+                .flatMap(balance -> creditRepository.createTransaction(userId, CreditService.TRANSACTION_CREDIT_EXPIRED, null, expiredCredits.negate(), balance, "签到积分过期")
                         .then(Mono.fromRunnable(() -> log.info("积分过期作废: userId={}, expiredCredits={}, balanceAfter={}", userId, expiredCredits, balance))))
                 .then();
     }
@@ -190,6 +195,6 @@ public class CreditGrantService {
      * @param grantId Long 批次ID
      * @param amount int 本次扣减额度
      */
-    private record GrantDeduction(Long grantId, int amount) {
+    private record GrantDeduction(Long grantId, BigDecimal amount) {
     }
 }

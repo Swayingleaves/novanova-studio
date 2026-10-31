@@ -5,7 +5,8 @@ import { useTranslation } from "@/features/locale/use-translation";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
 import { App } from "antd";
-import { usePathname } from "next/navigation";
+import { usePathname } from "@/shared/lib/team-navigation";
+import { usePathname as useBrowserPathname } from "next/navigation";
 
 import { useCanvasStore } from "@/features/canvas/stores/use-canvas-store";
 import { useAiTaskStore } from "@/features/ai-task/stores/use-ai-task-store";
@@ -13,7 +14,10 @@ import { useConfigStore } from "@/features/settings/stores/use-config-store";
 import { useAssetStore } from "@/features/assets/stores/use-asset-store";
 import { useNotificationStore } from "@/features/notification/stores/use-notification-store";
 import { useUserStore } from "@/features/auth/stores/use-user-store";
+import { getWalletBalances } from "@/services/api/team";
+import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { getCurrentUserInfo, subscribeCreditBalanceEvents } from "@/services/api/server";
+import { canInitializeSpaceBusiness } from "@/features/team/team-entry";
 
 export function ClientRootInit({ children }: { children: ReactNode }) {
     const translate = useTranslation();
@@ -22,6 +26,10 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     const sessionHydrated = useUserStore((state) => state.hydrated);
     const hydrateSession = useUserStore((state) => state.hydrateSession);
     const user = useUserStore((state) => state.user);
+    const authenticationRedirect = useUserStore((state) => state.authenticationRedirect);
+    const team = useTeamStore((state) => state.team);
+    const browserPathname = useBrowserPathname();
+    const businessEnabled = sessionHydrated && Boolean(user) && !authenticationRedirect && canInitializeSpaceBusiness(browserPathname, team);
     const setUser = useUserStore((state) => state.setUser);
     const setCreditBalance = useUserStore((state) => state.setCreditBalance);
     const hydrateConfig = useConfigStore((state) => state.hydrateConfig);
@@ -36,7 +44,7 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
     }, [hydrateSession]);
 
     useEffect(() => {
-        if (!sessionHydrated || !user) return;
+        if (!businessEnabled) return;
         // 登录态只保存了快照，应用启动后以服务端余额覆盖，避免展示过期积分。
         let active = true;
         void getCurrentUserInfo()
@@ -47,34 +55,43 @@ export function ClientRootInit({ children }: { children: ReactNode }) {
         return () => {
             active = false;
         };
-    }, [sessionHydrated, setUser, user?.id]);
+    }, [businessEnabled, setUser, user?.id]);
 
     useEffect(() => {
-        if (!user) return;
+        if (!businessEnabled || !user) return;
         const userId = user.id;
         return subscribeCreditBalanceEvents((creditBalance) => {
             if (useUserStore.getState().user?.id === userId) {
                 setCreditBalance(creditBalance);
             }
         });
-    }, [setCreditBalance, user?.id]);
+    }, [businessEnabled, setCreditBalance, user?.id]);
 
     useEffect(() => {
-        if (!sessionHydrated || !user) return;
+        if (!businessEnabled) return;
         startTaskSubscribe();
         void Promise.all([hydrateConfig(), hydrateDocuments(), hydrateAssets(), hydrateRunningTasks()]).catch((error) => {
             message.error(error instanceof Error ? error.message : translate("appShell.failedToLoadServerData"));
         });
         return stopTaskSubscribe;
-    }, [hydrateAssets, hydrateConfig, hydrateDocuments, hydrateRunningTasks, message, sessionHydrated, startTaskSubscribe, stopTaskSubscribe, user]);
+    }, [businessEnabled, hydrateAssets, hydrateConfig, hydrateDocuments, hydrateRunningTasks, message, startTaskSubscribe, stopTaskSubscribe, user]);
 
-    // 公告轮询独立 effect，登录后每5分钟刷新。
     useEffect(() => {
-        if (!user || pathname === "/auth") return;
+        if (!businessEnabled) return;
+        let active = true;
+        const reload = () => { void getWalletBalances().then((wallets) => { if (active) useTeamStore.getState().setWallets(wallets); }).catch(() => undefined); };
+        reload();
+        const timer = window.setInterval(reload, 30000);
+        return () => { active = false; window.clearInterval(timer); };
+    }, [businessEnabled, user?.id, user?.creditBalance]);
+
+    // 通知与待接受邀请轮询独立 effect，登录后每30秒刷新。
+    useEffect(() => {
+        if (!businessEnabled) return;
         useNotificationStore.getState().loadNotifications();
         const timer = window.setInterval(() => useNotificationStore.getState().loadNotifications(), 30_000);
         return () => window.clearInterval(timer);
-    }, [pathname, user]);
+    }, [businessEnabled, pathname, user]);
 
     return <>{children}</>;
 }

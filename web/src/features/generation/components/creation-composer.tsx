@@ -10,15 +10,16 @@ import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type Keyboar
 import { ArrowUp, BookOpenText, Bot, LoaderCircle, Square, X } from "lucide-react";
 
 import type { CreationComposerProps } from "@/features/generation/components/creation-workspace-types";
-import { ReferencePromptInput, type ReferencePromptInputHandle } from "@/features/generation/components/reference-prompt-input";
 import { CreditCostDisplay } from "@/features/generation/constants/credits";
 import { GenerationStyleCover, GenerationStyleMenu } from "@/features/generation/components/generation-style-picker";
 import { filterGenerationStyles, MAX_GENERATION_STYLE_SELECTION_COUNT } from "@/features/generation/lib/generation-style-library";
 import { getStyleCommandRange, parseGenerationStyleMessage, removeStyleCommand } from "@/features/generation/lib/style-command";
 import type { SkillOption } from "@/services/api/server";
+import { useSpaceBrand } from "@/features/team/use-space-brand";
+import { ReferencePromptInput, type ReferencePromptInputHandle } from "@/features/generation/components/reference-prompt-input";
 
 export function CreationComposer({
-    agentLabel = "Novanova Agent",
+    agentLabel,
     value,
     placeholder,
     references,
@@ -50,6 +51,7 @@ export function CreationComposer({
     notice,
 }: CreationComposerProps) {
     const translate = useTranslation();
+    const brand = useSpaceBrand();
     const { message } = App.useApp();
     const inputRef = useRef<TextAreaRef>(null);
     const referenceInputRef = useRef<ReferencePromptInputHandle>(null);
@@ -206,6 +208,7 @@ export function CreationComposer({
         const button = (
             <Button
                 size="small"
+                data-tour={`composer-${action.key}`}
                 className={["creation-composer-action", action.iconOnly ? "creation-composer-action-icon" : "", action.className].filter(Boolean).join(" ")}
                 icon={action.icon}
                 disabled={action.disabled}
@@ -237,7 +240,7 @@ export function CreationComposer({
                                 <span className="size-1.5 rounded-full bg-[var(--studio-action)] shadow-[0_0_0_3px_var(--studio-primary-soft)]" />
                             </span>
                             <span className="sr-only">{translate("generation.agentReady")}</span>
-                            <span className="truncate">{agentLabel}</span>
+                            <span className="truncate">{agentLabel ?? brand.agentName}</span>
                         </span>
                         <span>{queued ? translate("generation.queued") : running ? translate("generation.generating") : `${value.length} / 2000`}</span>
                     </div>
@@ -307,6 +310,7 @@ export function CreationComposer({
                             query={styleQuery}
                             highlightedIndex={highlightedStyleIndex}
                             placement="topLeft"
+                            dataTour="composer-style"
                             onOpenChange={(open) => {
                                 if (open) openStyleMenu();
                                 else closeStyleMenu();
@@ -344,6 +348,7 @@ export function CreationComposer({
                             ) : (
                                 <button
                                     type="button"
+                                    data-tour="creation-submit"
                                     className="creation-composer-submit-trigger creation-composer-submit-trigger-cost"
                                     disabled={!canSubmit || requestActive}
                                     onClick={onSubmit}

@@ -88,7 +88,8 @@ export function buildChatThreadSection(
             currentAssistantText = msg.text;
             currentAction = msg.action;
         } else if (msg.role === "system" && isAgentActivityState(msg.detail)) {
-            currentActivities = [...currentActivities.filter((activity) => activity.id !== msg.detail.id), msg.detail];
+            const activityDetail = msg.detail;
+            currentActivities = [...currentActivities.filter((activity) => activity.id !== activityDetail.id), activityDetail];
         } else if (msg.role === "tool") {
             const call = msg.detail as ToolCallState | undefined;
             if (call?.status === "executing") {

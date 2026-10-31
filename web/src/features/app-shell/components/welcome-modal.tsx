@@ -5,15 +5,17 @@ import { useTranslation } from "@/features/locale/use-translation";
 
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/shared/lib/team-navigation";
 import { App, Button, Modal } from "antd";
 import { ArrowRight } from "lucide-react";
 
 import { useUserStore } from "@/features/auth/stores/use-user-store";
 import { acknowledgeWelcome } from "@/services/api/server";
+import { useSpaceBrand } from "@/features/team/use-space-brand";
 
 export function WelcomeModal() {
     const translate = useTranslation();
+    const brand = useSpaceBrand();
     const router = useRouter();
     const { message } = App.useApp();
     const user = useUserStore((state) => state.user);
@@ -34,15 +36,15 @@ export function WelcomeModal() {
         }
     };
 
-    if (!user || user.welcomeRead) return null;
+    if (brand.isTeam || !user || user.welcomeRead) return null;
     const creditBalanceText = user.creditBalance.toLocaleString(currentLanguageTag());
 
     return (
         <Modal open closable={!acknowledging} footer={null} centered width={520} mask={{ closable: false }} keyboard={false} onCancel={() => void acknowledge()} styles={{ body: { padding: 0 } }}>
-            <section className="px-6 pb-6 pt-10 text-center sm:px-8 sm:pb-8" aria-label={translate("appShell.welcomeToNovanovaStudio")}>
+            <section className="px-6 pb-6 pt-10 text-center sm:px-8 sm:pb-8" aria-label={translate("appShell.welcomeToBrand", { name: brand.name })}>
                 <img src="/images/welcome.png" alt={translate("appShell.welcomeIllustration")} className="mx-auto mb-4 h-auto w-54 object-contain" />
 
-                <h2 className="text-balance text-xl font-semibold text-[var(--studio-ink)]">Welcome to Novanova Studio</h2>
+                <h2 className="wrap-anywhere text-balance text-xl font-semibold text-[var(--studio-ink)]">{translate("appShell.welcomeToBrand", { name: brand.name })}</h2>
                 <p className="mt-2 text-sm leading-6 text-[var(--studio-muted)]">{translate("appShell.professionalAIAgentWorkspaceForVisualCreators")}</p>
 
                 <div className="mt-5 border-t border-[var(--studio-line)] pt-4">

@@ -249,7 +249,7 @@ export function CanvasNodeInfoModal({ node, open, onClose }: { node: CanvasNode 
                                     }
                                 />
                             ) : null}
-                            {isAudioNode(node) ? <><InfoRow label={translate("canvas.audioDuration")} value={formatAudioTime(audioNodeTrimRange(node.content).durationMs / 1000)} /><InfoRow label={translate("canvas.audioSize")} value={formatBytes(node.content.bytes || 0)} /><InfoRow label={translate("canvas.audioFormat")} value={node.content.mimeType || "尚未上传"} /></> : null}
+                            {isAudioNode(node) ? <><InfoRow label={translate("canvas.audioDuration")} value={formatAudioTime(audioNodeTrimRange(node.content).durationMs / 1000)} /><InfoRow label={translate("canvas.audioSize")} value={formatBytes(node.content.bytes || 0)} /><InfoRow label={translate("canvas.audioFormat")} value={node.content.mimeType || translate("canvas.notUploaded")} /></> : null}
                             {imageBytes ? <InfoRow label={translate("canvas.imageSize")} value={formatBytes(imageBytes)} /> : null}
                             {(isImageNode(node) || isVideoNode(node) || isAudioNode(node)) && node.content.objectStorage?.url ? (
                                 <InfoRow

@@ -296,6 +296,27 @@ function resolveRatio(size: string, seedance: boolean, agnes: boolean, miniMaxH3
     return nearestRatio(Number(dimensions[1]) / Number(dimensions[2]));
 }
 
+/**
+ * 把项目画幅比例转换为当前视频模型可用的 size 取值。
+ * <p>
+ * 通用模型使用 `宽x高` 像素串，Seedance/Agnes/MiniMaxH3 直接使用比例串；
+ * 生成入口初始化画幅时必须走这里，否则把 `9:16` 直接塞给通用模型会在面板里被解析成 16:9。
+ *
+ * @param config 当前AI配置（需含 videoModel）
+ * @param ratio 项目画幅比例，例如 9:16
+ * @return 该模型可用的 size 取值
+ */
+export function sizeFromAspectRatio(config: AiConfig, ratio?: string): string {
+    const normalized = (ratio || "").trim();
+    if (!normalized) return config.size || "16:9";
+    const resolved = resolveModelRequestConfig(config, config.videoModel || config.model);
+    if (readVideoModelConfiguration(config)?.isCustomModel) return normalized === "adaptive" ? "auto" : normalized;
+    if (isSeedanceVideoConfig(resolved) || isAgnesVideoConfig(resolved) || isMiniMaxH3VideoConfig(resolved)) {
+        return normalized;
+    }
+    return GENERIC_SIZE_BY_RATIO[normalized as RatioPreset["value"]] || normalized;
+}
+
 function normalizeConfiguredResolution(value: string) {
     const normalized = value.trim().toLowerCase();
     if (normalized === "768") return "768p";
