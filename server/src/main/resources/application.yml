@@ -8,8 +8,8 @@
 # 服务基础配置
 # ============================================================
 server:
-  # 服务监听端口，默认 18080
-  port: ${SERVER_PORT:18080}
+  # 服务监听端口，默认 8080
+  port: ${SERVER_PORT:8080}
   # 关闭模式：immediate 表示立即关闭，graceful 表示优雅关闭（等待请求处理完毕）
   shutdown: immediate
 
@@ -38,7 +38,7 @@ spring:
   # ----------------------------------------------------------
   datasource:
     # PostgreSQL JDBC 连接地址
-    url: jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:15432}/${POSTGRES_DATABASE:novanova_studio}
+    url: jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:5432}/${POSTGRES_DATABASE:novanova_studio}
     # 数据库用户名
     username: ${POSTGRES_USERNAME:postgres}
     # 数据库密码
@@ -54,7 +54,7 @@ spring:
   # ----------------------------------------------------------
   r2dbc:
     # PostgreSQL R2DBC 连接地址
-    url: r2dbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:15432}/${POSTGRES_DATABASE:novanova_studio}
+    url: r2dbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:5432}/${POSTGRES_DATABASE:novanova_studio}
     # 数据库用户名
     username: ${POSTGRES_USERNAME:postgres}
     # 数据库密码
@@ -75,7 +75,7 @@ spring:
       # Redis 服务地址
       host: ${REDIS_HOST:127.0.0.1}
       # Redis 服务端口
-      port: ${REDIS_PORT:16379}
+      port: ${REDIS_PORT:6379}
       # Redis 密码，为空表示无密码
       password: ${REDIS_PASSWORD:}
       # 使用的 Redis 数据库编号（0-15）
@@ -88,13 +88,15 @@ spring:
     # 是否启用 Flyway 迁移
     enabled: true
     # 迁移使用的数据库连接地址
-    url: jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:15432}/${POSTGRES_DATABASE:novanova_studio}
+    url: jdbc:postgresql://${POSTGRES_HOST:127.0.0.1}:${POSTGRES_PORT:5432}/${POSTGRES_DATABASE:novanova_studio}
     # 迁移使用的数据库用户名
     user: ${POSTGRES_USERNAME:postgres}
     # 迁移使用的数据库密码
     password: ${POSTGRES_PASSWORD:123456}
-    # SQL 迁移脚本存放路径
-    locations: classpath:db/migration
+    # 默认保留线上企业版历史；开源版已有数据库须显式选择独立迁移目录。
+    locations: ${FLYWAY_MIGRATION_LOCATION:classpath:db/migration}
+    # 目录配置错误时立即失败，禁止静默跳过迁移。
+    fail-on-missing-locations: true
 
   # ----------------------------------------------------------
   # 邮件发送配置（SMTP）
@@ -203,7 +205,7 @@ novanova:
     return-url: ${ALIPAY_RETURN_URL:}
   cors:
     # 允许跨域请求的来源地址模式（逗号分隔）
-    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:15555,http://127.0.0.1:15555,https://www.novanovastudio.cn}
+    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:5555,http://127.0.0.1:5555,https://www.novanovastudio.cn}
   admin:
     # 初始管理员邮箱，首次启动时自动创建
     initial-email: ${ADMIN_INITIAL_EMAIL:admin@admin.com}

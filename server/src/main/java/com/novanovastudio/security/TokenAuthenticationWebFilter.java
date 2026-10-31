@@ -46,6 +46,7 @@ public class TokenAuthenticationWebFilter implements WebFilter {
 
     /** 公开路径模式（无需登录即可访问） */
     private static final List<PathPattern> PUBLIC_PATTERNS = List.of(
+            PathPatternParser.defaultInstance.parse("/api/v1/health"),
             PathPatternParser.defaultInstance.parse("/api/v1/auth/sendEmailCode"),
             PathPatternParser.defaultInstance.parse("/api/v1/auth/register"),
             PathPatternParser.defaultInstance.parse("/api/v1/auth/login"),

@@ -264,7 +264,13 @@ export function normalizeModelDistribution(items: ServerCreditDistributionItem[]
  * @return 带千分位的积分文本
  */
 export function formatCredits(credits: CreditAmount | null | undefined) {
-    return creditText(credits ?? 0);
+    const [integer, fraction = ""] = creditText(credits ?? 0).split(".");
+    const formatter = new Intl.NumberFormat(currentLanguageTag(), {
+        minimumFractionDigits: fraction.length,
+        maximumFractionDigits: fraction.length,
+    });
+    return formatter.formatToParts(integer === "-0" ? -0 : BigInt(integer))
+        .map((part) => part.type === "fraction" ? fraction : part.value).join("");
 }
 
 /**

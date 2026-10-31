@@ -5,7 +5,7 @@
     "type": "module",
     "packageManager": "pnpm@11.7.0",
     "scripts": {
-        "dev": "next dev --turbo -H 0.0.0.0 -p 15555",
+        "dev": "next dev --turbo -H 0.0.0.0 -p 5555",
         "build": "pnpm docs:validate && next build && pnpm pwa:generate",
         "docs:validate": "node ./src/features/docs/validate-docs.mjs",
         "pwa:generate": "node ./scripts/generate-pwa.mjs",
@@ -66,6 +66,7 @@
     },
     "devDependencies": {
         "@electric-sql/pglite": "^0.5.10",
+        "@formatjs/icu-messageformat-parser": "3.5.21",
         "@tailwindcss/postcss": "^4",
         "@types/file-saver": "^2.0.7",
         "@types/node": "^20",

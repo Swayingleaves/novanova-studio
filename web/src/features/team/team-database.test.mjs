@@ -10,7 +10,7 @@ test("团队迁移、资源授权、钱包隔离与月度账单", async (context
     const files = (await readdir(migrationDirectory)).filter((name) => /^V\d+__.*\.sql$/.test(name)).sort((left, right) => Number(left.match(/^V(\d+)/)[1]) - Number(right.match(/^V(\d+)/)[1]));
     try {
         for (const file of files) {
-            if (file.startsWith("V57__")) await database.exec(`
+            if (file.endsWith("__Add_Team_Wallets_And_Storage_Billing.sql")) await database.exec(`
                 INSERT INTO users(id,username,email,invitation_code) VALUES(1000,'historical-user','historical@example.com','HISTORY001');
                 INSERT INTO platform_object_storage_configs(storage_id,name,provider,bucket,region) VALUES
                     ('historical-storage','历史明确存储','tencentCos','historical-bucket','region-a'),

@@ -668,7 +668,7 @@ export function StageMedia() {
                                         <div key={ref.id} className="group relative flex flex-col items-center">
                                             <div className="relative size-14 overflow-hidden rounded-lg border border-[var(--studio-line)] bg-[var(--studio-bg)] shadow-sm">
                                                 <img src={ref.url} alt={ref.name} className="h-full w-full object-cover" />
-                                                {"isStoryboard" in ref && ref.isStoryboard && (
+                                                {"isStoryboard" in ref && ref.isStoryboard === true && (
                                                     <span className="absolute bottom-0 inset-x-0 bg-black/60 text-center text-[9px] text-white">
                                                         {translate("comicDrama.storyboard")}</span>
                                                 )}

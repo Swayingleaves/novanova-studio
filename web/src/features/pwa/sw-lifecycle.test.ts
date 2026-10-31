@@ -87,7 +87,7 @@ interface FakeEnv extends ServiceWorkerLifecycleEnv {
     fireInterval(index: number): void;
 }
 
-function createFakeEnv(overrides?: Partial<ServiceWorkerLifecycleEnv>): FakeEnv {
+function createFakeEnv(overrides?: Partial<FakeEnv>): FakeEnv {
     const containerListeners = new Map<string, Set<() => void>>();
     const windowListeners = new Map<string, Set<() => void>>();
     const env: FakeEnv = {

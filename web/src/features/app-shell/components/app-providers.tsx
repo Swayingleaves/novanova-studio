@@ -100,7 +100,7 @@ export function AppProviders({
     }, [preference, syncSystemTheme]);
 
     return (
-        <NextIntlClientProvider locale={locale} messages={websiteMessages[locale]}>
+        <NextIntlClientProvider locale={locale} messages={websiteMessages[locale]} timeZone="Asia/Shanghai">
             <ConfigProvider locale={locale === "en" ? enUS : zhCN} theme={getAntThemeConfig(effectiveResolvedTheme)}>
                 <ProConfigProvider intl={locale === "en" ? enUSIntl : zhCNIntl} dark={isDarkResolvedTheme(effectiveResolvedTheme)}>
                     <App>

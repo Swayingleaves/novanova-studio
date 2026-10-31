@@ -8,8 +8,8 @@ import { readinessItemText, scriptTemplateLabel } from "../script/lib/script-loc
 import { diffScriptVersion } from "../script/lib/script-version-diff";
 import type { ReadinessItem, ScriptTemplate } from "../script/types";
 
-const english = (key: string, values?: Parameters<typeof translateMessage>[1]) => translateMessage(key, values, "en");
-const chinese = (key: string, values?: Parameters<typeof translateMessage>[1]) => translateMessage(key, values, "zh-cn");
+const english = (key: Parameters<typeof translateMessage>[0], values?: Parameters<typeof translateMessage>[1]) => translateMessage(key, values, "en");
+const chinese = (key: Parameters<typeof translateMessage>[0], values?: Parameters<typeof translateMessage>[1]) => translateMessage(key, values, "zh-cn");
 
 test("两个企业版工作台已注册英文资源，固定英文文案不含中文", () => {
     for (const namespace of ["script", "comicDrama"] as const) {

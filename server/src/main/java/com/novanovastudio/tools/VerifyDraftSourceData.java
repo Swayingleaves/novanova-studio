@@ -23,7 +23,7 @@ import java.util.Map;
 public final class VerifyDraftSourceData {
 
     /** 数据库连接串。 */
-    private static final String URL = "jdbc:postgresql://localhost:15432/novanova_studio";
+    private static final String URL = "jdbc:postgresql://localhost:5432/novanova_studio";
 
     /** 数据库用户。 */
     private static final String USER = "postgres";

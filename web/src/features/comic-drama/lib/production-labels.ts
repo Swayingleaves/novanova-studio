@@ -1,7 +1,7 @@
-import { translateMessage } from "@/features/locale/translate";
+import { translateMessage, type TranslationKey } from "@/features/locale/translate";
 
 /** 景别与运镜的存储值保持原样，只翻译已知的界面名称。 */
-const parameterLabels: Record<string, string> = {
+const parameterLabels: Record<string, TranslationKey> = {
     "远景": "comicDrama.extremeLongShot",
     "全景": "comicDrama.longShot",
     "中景": "comicDrama.mediumShot",

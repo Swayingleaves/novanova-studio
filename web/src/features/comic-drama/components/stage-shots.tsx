@@ -6,6 +6,7 @@ import { translateMessage } from "@/features/locale/translate";
 import { useTranslation } from "@/features/locale/use-translation";
 
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { creditAmount, creditText } from "@/shared/lib/credit-amounts";
 import {
     Alert,
@@ -43,6 +44,8 @@ import {
 import { ModelPicker } from "@/features/settings/components/model-picker";
 import { useEffectiveConfig } from "@/features/settings/stores/use-config-store";
 import { readComicDramaMediaUrl } from "@/services/api/comic-drama";
+import { getScriptEpisode } from "@/services/api/script";
+import { useTeamStore } from "@/features/team/stores/use-team-store";
 import { useFinalPromptPricing } from "../hooks/use-final-prompt-pricing";
 import { useFinalPromptConfirmation } from "../hooks/use-final-prompt-confirmation";
 import { usePendingImpactTargets } from "../hooks/use-pending-impact-targets";
@@ -80,6 +83,17 @@ const getStatusMap = (translate = translateMessage): Record<string, { label: str
     failed: { label: translate("comicDrama.failed_3e3c80"), color: "error" },
     needsUpdate: { label: translate("comicDrama.needsUpdate"), color: "warning" },
 });
+
+/** 按当前空间和分集读取场次，查询键隔离项目切换及并发响应。 */
+function useEpisodeScenes(projectId: string, episodeId: string, enabled = true) {
+    const teamId = useTeamStore((state) => state.team?.id ?? 0);
+    return useQuery({
+        queryKey: ["comicDrama", "episodeScenes", teamId, projectId, episodeId],
+        queryFn: () => getScriptEpisode(projectId, episodeId),
+        enabled: enabled && Boolean(projectId && episodeId && episodeId !== "all"),
+        retry: false,
+    });
+}
 
 /** 镜头拆分与清单阶段视图。 */
 export function StageShots() {
@@ -142,15 +156,11 @@ export function StageShots() {
         }
     }, [config.textModel, promptModel]);
 
-    if (!workspace) return null;
-
-    const episodes = workspace.scriptProject.episodes || [];
-    const shots = workspace.shots || [];
-    const pendingDraft = workspace.shotDrafts.find((d) => d.status === "pending") || null;
-
-    // Available scenes for the selected episode filter
-    const currentEpisode = episodes.find((e) => e.id === selectedEpisodeId);
-    const availableScenes = currentEpisode?.scenes || [];
+    const episodes = workspace?.scriptProject.episodes ?? [];
+    const shots = workspace?.shots ?? [];
+    const episodeQuery = useEpisodeScenes(workspace?.scriptProjectId ?? "", selectedEpisodeId);
+    const splitEpisodeQuery = useEpisodeScenes(workspace?.scriptProjectId ?? "", splitEpisodeId, splitModalOpen);
+    const availableScenes = episodeQuery.data?.scenes ?? [];
 
     // Filtered shots list
     const filteredShots = useMemo(() => {
@@ -166,7 +176,7 @@ export function StageShots() {
     // 视频任务只读取已采用的提示词版本，列表也只展示该版本以保证所见即所用。
     const finalVideoPrompts = useMemo(() => {
         const promptsByShotId = new Map<string, ComicDramaPromptVersion>();
-        for (const prompt of workspace.promptVersions) {
+        for (const prompt of workspace?.promptVersions ?? []) {
             if (prompt.status !== "adopted") continue;
             const current = promptsByShotId.get(prompt.shotId);
             if (!current || prompt.versionNumber > current.versionNumber) {
@@ -174,7 +184,7 @@ export function StageShots() {
             }
         }
         return promptsByShotId;
-    }, [workspace.promptVersions]);
+    }, [workspace?.promptVersions]);
 
     // 供「仅选未生成提示词」使用，仍以已采用的最终提示词为准。
     const shotsMissingFinalPrompt = useMemo(
@@ -200,6 +210,8 @@ export function StageShots() {
         () => shots.filter((shot) => selectedShotIds.includes(shot.id)).sort((a, b) => a.sortOrder - b.sortOrder),
         [shots, selectedShotIds],
     );
+    if (!workspace) return null;
+    const pendingDraft = workspace.shotDrafts.find((draft) => draft.status === "pending") ?? null;
     const selectedInFilteredCount = filteredShots.filter((shot) => selectedShotIds.includes(shot.id)).length;
 
     const toggleShotSelection = (shotId: string, checked: boolean) => {
@@ -512,21 +524,24 @@ export function StageShots() {
                         ]}
                     />
 
-                    {selectedEpisodeId !== "all" && availableScenes.length > 0 && (
+                    {selectedEpisodeId !== "all" && (
                         <>
                             <span className="ml-2 text-xs font-medium text-[var(--studio-muted)]">{translate("comicDrama.scene_e22aac")}</span>
                             <Select
                                 className="w-36"
                                 value={selectedSceneId}
                                 onChange={setSelectedSceneId}
+                                loading={episodeQuery.isFetching}
+                                disabled={episodeQuery.isFetching || episodeQuery.isError}
                                 options={[
                                     { value: "all", label: translate("comicDrama.allScenes") },
                                     ...availableScenes.map((sc) => ({
                                         value: sc.id,
-                                        label: translate("comicDrama.sceneCountCount", { value0: sc.sceneNumber, value1: sc.location || translate("comicDrama.locationNotSet") }),
+                                        label: translate("comicDrama.sceneCountCount", { value0: sc.sceneNumber, value1: workspace.scriptProject.locations.find((location) => location.id === sc.locationId)?.name || translate("comicDrama.locationNotSet") }),
                                     })),
                                 ]}
                             />
+                            {episodeQuery.isError && <Alert type="error" title={episodeQuery.error.message} />}
                         </>
                     )}
                 </div>
@@ -791,14 +806,17 @@ export function StageShots() {
                                 className="mt-1 w-full"
                                 value={splitSceneId}
                                 onChange={setSplitSceneId}
+                                loading={splitEpisodeQuery.isFetching}
+                                disabled={splitEpisodeQuery.isFetching || splitEpisodeQuery.isError}
                                 options={[
                                     { value: "", label: translate("comicDrama.breakDownEntireEpisode") },
-                                    ...(episodes.find((e) => e.id === splitEpisodeId)?.scenes || []).map((sc) => ({
+                                    ...(splitEpisodeQuery.data?.scenes ?? []).map((sc) => ({
                                         value: sc.id,
-                                        label: translate("comicDrama.sceneCountCount", { value0: sc.sceneNumber, value1: sc.location || translate("comicDrama.locationNotSet") }),
+                                        label: translate("comicDrama.sceneCountCount", { value0: sc.sceneNumber, value1: workspace.scriptProject.locations.find((location) => location.id === sc.locationId)?.name || translate("comicDrama.locationNotSet") }),
                                     })),
                                 ]}
                             />
+                            {splitEpisodeQuery.isError && <Alert type="error" title={splitEpisodeQuery.error.message} />}
                         </div>
                     )}
 

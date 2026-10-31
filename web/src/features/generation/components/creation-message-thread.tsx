@@ -113,7 +113,7 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                             ) : null}
                                             {round.resultContent}
                                             {round.choiceSettingsContent ? <div className="max-w-3xl">{round.choiceSettingsContent}</div> : null}
-                                            {round.action?.type === "navigate" ? (
+                                            {round.action?.type === "navigate" && round.action.href ? (
                                                 <div className="pt-1">
                                                     <Button
                                                         type="primary"
@@ -121,7 +121,7 @@ export function CreationMessageThread({ sections, emptyState, onAtBottomChange, 
                                                         icon={<ArrowRight className="size-3.5" />}
                                                         onClick={() => {
                                                             const action = round.action;
-                                                            if (!action || action.type !== "navigate") return;
+                                                            if (!action || action.type !== "navigate" || !action.href) return;
                                                             if (action.initialPrompt) storeInitialPromptForNavigation(action.initialPrompt);
                                                             router.push(action.href);
                                                         }}

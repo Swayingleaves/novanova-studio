@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { getCanvasNodeTemplate } from "../constants";
 import { positionCanvasAgentAddNodeOps, resolveCanvasAgentTool } from "./canvas-agent-tools.ts";
 
 test("图片生成工具创建稳定配置节点并立即触发生成", () => {
@@ -241,8 +242,9 @@ test("缺少坐标的生成节点放在当前画布视口中心", () => {
 
     assert.ok(execution);
     const positioned = positionCanvasAgentAddNodeOps(execution.ops, { x: 1000, y: 800 });
-    assert.equal(positioned[0]?.x, 830);
-    assert.equal(positioned[0]?.y, 680);
+    const template = getCanvasNodeTemplate("image");
+    assert.equal((positioned[0]?.x ?? NaN) + template.width / 2, 1000);
+    assert.equal((positioned[0]?.y ?? NaN) + template.height / 2, 800);
     assert.equal(positioned[1]?.type, "run_generation");
 });
 

@@ -26,7 +26,7 @@ test("用户名账号迁移、邀请目标及重置能力", async (context) => {
     };
     try {
         for (const file of files) {
-            if (file.startsWith("V58__")) await database.exec(`
+            if (file.endsWith("__Add_Username_Accounts_And_Invitation_Targets.sql")) await database.exec(`
                 INSERT INTO users(id,username,email,invitation_code) VALUES(2011,'historical@example.com','historical@example.com','HISTORICAL2011');
                 INSERT INTO user_credit_accounts(team_id,user_id,credit_balance) VALUES(0,2011,0);
                 INSERT INTO teams(id,team_slug,name,member_limit) VALUES(501,'account-test-a','账号团队甲',5),(502,'account-test-b','账号团队乙',5);

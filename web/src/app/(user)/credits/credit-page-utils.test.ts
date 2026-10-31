@@ -54,6 +54,12 @@ test("缺失字段时积分格式化不崩溃", () => {
     assert.equal(creditTransactionTypeLabel(undefined), "未知类型");
 });
 
+test("积分显示保留大额六位小数和不足一积分的负号", () => {
+    assert.equal(formatCredits("12345678901234567890.123456"), "12,345,678,901,234,567,890.123456");
+    assert.equal(formatCredits("-0.000001"), "-0.000001");
+    assert.equal(formatCreditChange("0.000001"), "+0.000001");
+});
+
 test("任务流水详情显示生成类型与模型", () => {
     assert.equal(creditTransactionDetail("task_charge", "video", "agnes-video-v2.0", "视频生成任务扣费"), "视频生成 · agnes-video-v2.0");
     assert.equal(creditTransactionDetail("task_refund", "image", null, "图片生成任务退款"), "图片生成");

@@ -1,5 +1,7 @@
+import type { TranslationKey } from "@/features/locale/translate";
+
 /** 剧本 AI 助手的动作定义：助手面板与后台动作定价共用同一份清单，避免两处漂移。 */
-export type ScriptAiActionDefinition = { value: string; labelKey: string; sections: string[] };
+export type ScriptAiActionDefinition = { value: string; labelKey: TranslationKey; sections: string[] };
 
 /** 动作清单顺序即后台定价表的展示顺序，与服务端 `ScriptAiActions` 保持一致。 */
 export const SCRIPT_AI_ACTIONS: ScriptAiActionDefinition[] = [

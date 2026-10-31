@@ -53,8 +53,7 @@ test("首尾帧工作流优先使用模型原生首尾帧能力", () => {
         ...config.videoModelBillingConfigurations[0],
         capabilities: ["first-last-frame-to-video", "reference-to-video"],
         videoBillingConfiguration: {
-            ...config.videoModelBillingConfigurations[0].videoBillingConfiguration,
-            billingUnit: "generation" as const,
+            billingUnit: "generation",
             minimumDurationSeconds: 3,
             modePrices: { "first-last-frame-to-video": { "720p": 13 }, "reference-to-video": { "720p": 20 } },
         },
@@ -86,7 +85,8 @@ test("原生首尾帧模式未配置768p价格时回退到已定价的参考图�
         ...config.videoModelBillingConfigurations[0],
         capabilities: ["first-last-frame-to-video", "reference-to-video"],
         videoBillingConfiguration: {
-            ...config.videoModelBillingConfigurations[0].videoBillingConfiguration,
+            billingUnit: "generation",
+            minimumDurationSeconds: 3,
             modePrices: {
                 "first-last-frame-to-video": { "720p": 13 },
                 "reference-to-video": { "768p": 21 },

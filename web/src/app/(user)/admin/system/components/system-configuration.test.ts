@@ -35,7 +35,7 @@ test("视频模型音频输入能力由管理员配置且仅受全能参考约�
     assert.match(source, /capabilities\.includes\("audio-input"\)/);
     assert.match(source, /capabilities\.includes\("reference-to-video"\)/);
     assert.doesNotMatch(source, /\["minimax", "evolink"\]\.includes/);
-    assert.match(source, /disabled=\{isSaving \|\| !editingModelConfig\.capabilities\.includes\("audio-input"\) && !editingModelConfig\.capabilities\.includes\("reference-to-video"\)\}/);
+    assert.match(source, /disabled=\{isSaving \|\| \(!editingModelConfig\.capabilities\.includes\("audio-input"\) && !editingModelConfig\.capabilities\.includes\("reference-to-video"\)\)\}/);
     assert.match(source, /\{ label: "\{\{audioReferences\}\}", value: "\{\{audioReferences\}\}" \}/);
     assert.match(source, /mode !== "audio-input" && supportedCapabilities\.has\(mode\)/);
 });

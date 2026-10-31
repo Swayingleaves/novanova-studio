@@ -19,7 +19,7 @@ RUN corepack enable
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml web/.npmrc ./
 # 预热 packageManager 声明的 pnpm 版本，下载失败时在此报错，而不是等到 install 阶段。
 RUN corepack install
-RUN --mount=type=cache,id=novanova-studio-pro-pnpm,target=/app/web/.pnpm-store pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=novanova-studio-pnpm,target=/app/web/.pnpm-store pnpm install --frozen-lockfile
 
 COPY web/ ./
 COPY docs/ /app/docs/

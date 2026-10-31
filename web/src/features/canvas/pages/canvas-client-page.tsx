@@ -49,7 +49,7 @@ import { cropDataUrl, splitDataUrl } from "../utils/canvas-image-data";
 import { fitNodeSize, nodeSizeFromRatio } from "../utils/canvas-node-size";
 import { App } from "antd";
 import type { OnConnectEnd, OnConnectStartParams } from "@xyflow/react";
-import { CANVAS_BACKGROUND_MIN_HEIGHT, CANVAS_BACKGROUND_MIN_WIDTH, CANVAS_BACKGROUND_PADDING, createBackgroundNode, getCanvasNodeTemplate } from "../constants";
+import { CANVAS_BACKGROUND_MIN_HEIGHT, CANVAS_BACKGROUND_MIN_WIDTH, CANVAS_BACKGROUND_PADDING, createAudioNode, createBackgroundNode, getCanvasNodeTemplate } from "../constants";
 import {
     applyCanvasNodeAttributes,
     isBackgroundNode,
@@ -288,7 +288,7 @@ function CanvasWorkspacePage() {
     const clipboardRef = useRef<CanvasClipboard | null>(null);
     const historyRef = useRef<{ past: CanvasHistoryEntry[]; future: CanvasHistoryEntry[] }>({ past: [], future: [] });
     const lastHistoryRef = useRef<CanvasHistoryEntry | null>(null);
-    const historyCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const historyCommitTimerRef = useRef<number | null>(null);
     const applyingHistoryRef = useRef(false);
     const historyPausedRef = useRef(false);
     const rafRef = useRef<number | null>(null);
@@ -2147,9 +2147,7 @@ function CanvasWorkspacePage() {
             const position = findNonOverlappingCanvasNodePosition(nodesRef.current, { x: node.frame.position.x + node.frame.width + CONNECTED_NODE_GAP, y: node.frame.position.y }, node.frame.width, node.frame.height);
             const child: CanvasDomainNode = updateCanvasNodeFrame(
                 {
-                    ...createCanvasNode("audio", position),
-                    id: childId,
-                    title: translate("canvas.clip", { value0: node.title || translate("canvas.audio") }),
+                    ...createAudioNode({ id: childId, position, title: translate("canvas.clip", { value0: node.title || translate("canvas.audio") }) }),
                     content: {
                         ...node.content,
                         trimStartMilliseconds: range.startMs,
@@ -2245,7 +2243,7 @@ function CanvasWorkspacePage() {
 
     const handleNodeResize = useCallback((nodeId: string, width: number, height: number, position?: CanvasPoint) => {
         setNodes((prev) => {
-            const resized = prev.map((node) => (node.id === nodeId ? updateCanvasNodeFrame(node, { width, height, position: position || node.frame.position }) : node));
+            const resized = prev.map((node) => (node.id === nodeId ? updateCanvasNodeFrame(node, { width, height, position: position ?? node.frame.position }) : node));
             return resized.some((node) => node.id === nodeId && isBackgroundNode(node)) ? expandBackgroundBoardsToMembers(resized) : resized;
         });
     }, []);

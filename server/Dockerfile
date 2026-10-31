@@ -6,7 +6,7 @@ COPY pom.xml .
 COPY .mvn ./.mvn
 COPY src ./src
 # 直接打包并复用依赖缓存，避免预下载未使用的插件；并发构建时锁定仓库缓存。
-RUN --mount=type=cache,id=novanova-studio-pro-maven,target=/app/.maven-repository,sharing=locked mvn -B -ntp -s /opt/maven/settings.xml -DskipTests package
+RUN --mount=type=cache,id=novanova-studio-maven,target=/app/.maven-repository,sharing=locked mvn -B -ntp -s /opt/maven/settings.xml -DskipTests package
 
 FROM eclipse-temurin:21-jre
 

@@ -1,8 +1,8 @@
-import { translateMessage } from "@/features/locale/translate";
+import { translateMessage, type TranslationKey } from "@/features/locale/translate";
 import type { ReadinessItem, ScriptTemplate } from "../types";
 
 /** 生产检查的稳定标识对应界面文案，用户输入的剧本内容不参与翻译。 */
-const readinessMessageKeys: Record<string, { title: string; description: string }> = {
+const readinessMessageKeys: Record<string, { title: TranslationKey; description: TranslationKey }> = {
     story: { title: "script.readinessStoryTitle", description: "script.readinessStoryDescription" },
     episodes: { title: "script.readinessEpisodesTitle", description: "script.readinessEpisodesDescription" },
     scriptContent: { title: "script.readinessScriptContentTitle", description: "script.readinessScriptContentDescription" },
@@ -22,7 +22,7 @@ export function readinessItemText(item: ReadinessItem, translate = translateMess
 }
 
 /** 内置模板按稳定键展示双语名称，自定义模板保留管理员填写的内容。 */
-const templateMessageKeys: Record<string, string> = {
+const templateMessageKeys: Record<string, TranslationKey> = {
     "short-revenge": "script.templateShortRevenge",
     "short-rebirth": "script.templateShortRebirth",
     "short-suspense": "script.templateShortSuspense",

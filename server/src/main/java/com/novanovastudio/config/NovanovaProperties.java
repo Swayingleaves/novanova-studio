@@ -403,7 +403,7 @@ public class NovanovaProperties {
     public static class Cors {
 
         /** 允许跨域来源规则 */
-        private String allowedOriginPatterns = "http://localhost:15555,http://127.0.0.1:15555,https://www.novanovastudio.cn";
+        private String allowedOriginPatterns = "http://localhost:5555,http://127.0.0.1:5555,https://www.novanovastudio.cn";
 
         /**
          * 获取允许的来源匹配表达式

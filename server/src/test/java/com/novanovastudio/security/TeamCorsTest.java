@@ -21,12 +21,12 @@ class TeamCorsTest {
     @Test
     void shouldAllowTeamHeaderFromConfiguredOrigin() {
         var filter = new CorsWebFilter(new SecurityConfiguration().corsConfigurationSource(new NovanovaProperties()));
-        var exchange = MockServerWebExchange.from(MockServerHttpRequest.options("http://localhost:18080/api/v1/team/listMembers")
-                .header("Origin", "http://localhost:15555")
+        var exchange = MockServerWebExchange.from(MockServerHttpRequest.options("http://localhost:8080/api/v1/team/listMembers")
+                .header("Origin", "http://localhost:5555")
                 .header("Access-Control-Request-Method", "GET")
                 .header("Access-Control-Request-Headers", "Authorization,X-Team-Id"));
         StepVerifier.create(filter.filter(exchange, request -> Mono.error(new AssertionError("预检不应执行业务接口")))).verifyComplete();
         assertTrue(exchange.getResponse().getHeaders().getAccessControlAllowHeaders().contains("X-Team-Id"));
-        assertEquals("http://localhost:15555", exchange.getResponse().getHeaders().getAccessControlAllowOrigin());
+        assertEquals("http://localhost:5555", exchange.getResponse().getHeaders().getAccessControlAllowOrigin());
     }
 }

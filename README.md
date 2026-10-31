@@ -231,7 +231,9 @@ Agent 不只是一次性调用模型，而是贯穿需求理解、工具选择�
 
 - [Docker 完整部署指南](deploy_docs/docker-deploy.md)
 
-Docker 部署会由 Flyway 自动执行数据库迁移，当前分支需执行至 `V28__Add_Password_Reset.sql`。生产环境还应配置 `APP_SECRET_KEY`、`FRONTEND_BASE_URL`、可信代理地址 `TRUSTED_PROXY_ADDRESSES`，并按需调整统一 AI 任务轮询间隔 `AI_TASK_POLLING_INTERVAL_SECONDS`，具体说明见 [Docker 部署指南](deploy_docs/docker-deploy.md)。
+Docker 部署会由 Flyway 自动执行数据库迁移。企业版已有数据库及新数据库默认使用 `classpath:db/migration`，保留线上 V1–V76；原开源版数据库必须在 `.env` 中设置 `FLYWAY_MIGRATION_LOCATION=classpath:db/migration-community`，从 V38 升级至 V77。已有数据库不能切换或同时加载这两套历史，详见 [数据库迁移说明](docs-api/backend-database.md#合并后的数据库迁移历史)。
+
+生产环境还应配置 `APP_SECRET_KEY`、`FRONTEND_BASE_URL`、可信代理地址 `TRUSTED_PROXY_ADDRESSES`，并按需调整统一 AI 任务轮询间隔 `AI_TASK_POLLING_INTERVAL_SECONDS`。当前线上部署需组合使用 `docker-compose.yml` 和 `docker-compose-production.yml`，保留企业版容器名称及端口，具体说明见 [Docker 部署指南](deploy_docs/docker-deploy.md)。
 
 ## 📝 Agent 提示词配置
 
@@ -258,8 +260,8 @@ Agent 行为提示词以可编辑文件保存在 `server/config/prompts/`，不�
 
 | 现象 | 检查方向 |
 | --- | --- |
-| `http://127.0.0.1:18080/api/v1/health` 无法访问 | 确认 PostgreSQL、Redis 已启动，`.env` 中连接地址与端口正确，并查看服务端启动日志。 |
-| 前端页面无法请求 API | 确认服务端端口为 `18080`；若改过端口，在启动 `pnpm dev` 前设置 `NEXT_PUBLIC_SERVER_URL`。 |
+| `http://127.0.0.1:8080/api/v1/health` 无法访问 | 确认 PostgreSQL、Redis 已启动，`.env` 中连接地址与端口正确，并查看服务端启动日志。 |
+| 前端页面无法请求 API | 确认服务端端口为 `8080`；若改过端口，在启动 `pnpm dev` 前设置 `NEXT_PUBLIC_SERVER_URL`。 |
 | Agent 或生成页没有可选模型 | 在“配置与用户偏好”中保存 AI 渠道、模型能力和对应默认模型。 |
 | 上传素材或保存生成结果失败 | 检查默认对象存储是否已配置、凭证是否有效，以及存储桶的读写权限。 |
 | 找不到 Agent 提示词文件 | 从项目根目录使用 `mvn -f server/pom.xml spring-boot:run` 启动，或显式覆盖对应 `AI_SYSTEM_PROMPT_*_FILE` 环境变量。 |

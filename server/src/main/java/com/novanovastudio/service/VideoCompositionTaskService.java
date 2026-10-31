@@ -128,6 +128,8 @@ public class VideoCompositionTaskService {
         }
         Duration pollingInterval = AiTaskPollingSupport.pollingInterval(properties);
         recoveryDisposable = Flux.interval(Duration.ZERO, pollingInterval)
+                // 恢复扫描是幂等操作，处理不及时丢弃多余的轮询信号，避免积压导致订阅终止。
+                .onBackpressureDrop()
                 .concatMap(ignored -> recoverUnfinishedTasksOnce().onErrorResume(exception -> {
                     log.error("恢复视频合成任务失败", exception);
                     return Mono.<Void>empty();

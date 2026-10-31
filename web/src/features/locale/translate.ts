@@ -1,4 +1,4 @@
-import { createTranslator, type AbstractIntlMessages, type TranslationValues } from "next-intl";
+import { createTranslator, type TranslationValues } from "next-intl";
 import { websiteMessages } from "./messages";
 import { isWebsiteLocale, languageTag, type WebsiteLocale } from "./locale";
 
@@ -10,13 +10,15 @@ export function currentWebsiteLocale(): WebsiteLocale {
 
 /** 为两种语言创建相同类型的翻译入口，不缓存翻译后的业务数据。 */
 function createWebsiteTranslator(locale: WebsiteLocale) {
-    return createTranslator({ locale: languageTag(locale), messages: websiteMessages[locale] as AbstractIntlMessages });
+    return createTranslator({ locale: languageTag(locale), messages: websiteMessages[locale] });
 }
 
 const translators = { "zh-cn": createWebsiteTranslator("zh-cn"), en: createWebsiteTranslator("en") };
 
+export type TranslationKey = Parameters<ReturnType<typeof createWebsiteTranslator>>[0];
+
 /** 按当前语言翻译固定系统文案。 */
-export function translateMessage(key: string, values?: TranslationValues, locale = currentWebsiteLocale()): string {
+export function translateMessage(key: TranslationKey, values?: TranslationValues, locale = currentWebsiteLocale()): string {
     return translators[locale](key, values);
 }
 

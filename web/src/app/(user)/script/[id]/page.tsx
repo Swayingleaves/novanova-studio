@@ -177,7 +177,7 @@ export default function ScriptWorkspacePage() {
     useEffect(() => {
         if (!hasUnsaved) return;
         const handleClick = (event: MouseEvent) => {
-            const link = (event.target as HTMLElement | null)?.closest("a[href]");
+            const link = (event.target as HTMLElement | null)?.closest<HTMLAnchorElement>("a[href]");
             if (!link || link.target === "_blank") return;
             if (!useScriptStore.getState().hasUnsaved) return;
             event.preventDefault();
