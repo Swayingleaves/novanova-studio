@@ -64,11 +64,11 @@ public class ScriptSourceController {
             @RequestPart(value = "encoding", required = false) String encoding,
             @RequestPart("clientRequestId") String clientRequestId,
             ServerHttpRequest httpRequest) {
-        log.info("上传原文请求: url={}, headers={}, sourceType={}, contentType={}, title={}, encoding={}, clientRequestId={}",
+        log.debug("上传原文请求: url={}, headers={}, sourceType={}, contentType={}, title={}, encoding={}, clientRequestId={}",
                 httpRequest.getURI(), sanitizedHeaders(httpRequest), sourceType, contentType, title, encoding, clientRequestId);
         return file.flatMap(filePart -> scriptSourceService.upload(filePart, sourceType, contentType, title, encoding, clientRequestId))
                 .map(ApiResponse::ok)
-                .doOnNext(response -> log.info("上传原文响应: response={}", response));
+                .doOnNext(response -> log.debug("上传原文响应: response={}", response));
     }
 
     /**
