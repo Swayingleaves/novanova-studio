@@ -46,14 +46,12 @@ services:
   redis:
     image: redis:8.6
     container_name: novanovastudio-redis
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?请在.env中配置REDIS_PASSWORD}
     entrypoint:
       - /bin/sh
-      - -ec
+      - -c
       - |
         chown -R redis:redis /var/log/redis
-        exec docker-entrypoint.sh "$@" --requirepass "$${REDIS_PASSWORD}"
+        exec docker-entrypoint.sh "$@"
       - --
     command: ["redis-server", "--appendonly", "yes", "--logfile", "/var/log/redis/redis.log"]
     ports:
@@ -63,7 +61,7 @@ services:
       - ./volume/redis_data:/data
       - ./logs/redis:/var/log/redis
     healthcheck:
-      test: ["CMD-SHELL", 'REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli ping | grep -qx PONG']
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -132,7 +130,7 @@ services:
       POSTGRES_ADMINISTRATOR_DATABASE: ${POSTGRES_ADMINISTRATOR_DATABASE:-postgres}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?请在.env中配置REDIS_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       REDIS_DATABASE: ${REDIS_DATABASE:-0}
       ADMIN_INITIAL_EMAIL: ${ADMIN_INITIAL_EMAIL:-admin@admin.com}
       ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-novanovastudio@pwss}

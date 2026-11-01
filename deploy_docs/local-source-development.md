@@ -72,7 +72,7 @@ if (!(Test-Path -LiteralPath .env)) {
 | `POSTGRES_DATABASE` | 项目使用的数据库名称。 |
 | `POSTGRES_ADMINISTRATOR_DATABASE` | 自动创建目标数据库时连接的管理数据库。 |
 | `REDIS_HOST` / `REDIS_PORT` | 本机 Redis 的地址和端口。 |
-| `REDIS_PASSWORD` / `REDIS_DATABASE` | Redis 密码和逻辑数据库编号；使用 Compose 启动 Redis 时密码必填，服务端必须配置相同密码。 |
+| `REDIS_PASSWORD` / `REDIS_DATABASE` | Redis 密码和逻辑数据库编号；默认 Compose Redis 不启用认证，密码留空。连接自行启用认证的 Redis 时填写其密码。 |
 | `ALIPAY_ENABLED` | 可选，设为 `true` 才启用支付宝电脑网站支付。 |
 | `ALIPAY_APP_ID` / `ALIPAY_PRIVATE_KEY` / `ALIPAY_PUBLIC_KEY` | 支付宝沙箱应用标识、应用私钥和支付宝公钥；私钥只通过本机环境变量注入。 |
 | `ALIPAY_GATEWAY_URL` | 支付宝网关地址；沙箱环境使用支付宝开放平台提供的沙箱网关。 |
@@ -134,10 +134,10 @@ if (!(Test-Path -LiteralPath web/.env.local)) {
 
 ```bash
 pg_isready -h 127.0.0.1 -p 5432
-redis-cli --askpass -h 127.0.0.1 -p 6379 ping
+redis-cli -h 127.0.0.1 -p 6379 ping
 ```
 
-PostgreSQL 应返回正在接受连接；Redis 提示输入密码时填写 `.env` 中的 `REDIS_PASSWORD`，应返回 `PONG`。如果 `.env` 使用了其他地址或端口，检查命令也需要使用对应值。
+PostgreSQL 应返回正在接受连接，Redis 应返回 `PONG`。自行启用 Redis 认证时，在 `redis-cli` 命令中加上 `--askpass` 并按提示输入密码。如果 `.env` 使用了其他地址或端口，检查命令也需要使用对应值。
 
 ## 5. 启动和调试服务端
 

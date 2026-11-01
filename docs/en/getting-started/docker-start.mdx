@@ -5,7 +5,7 @@ description: Build and start PostgreSQL, Redis, the server, the web app, and Ngi
 
 # Start with Docker
 
-Docker Compose brings up PostgreSQL, Redis, the server, the web app, and Nginx together. It suits Linux servers and is also the fastest way to try the whole product on a single machine. **The minimal setup needs three variables in `.env`**; everything else has a working default.
+Docker Compose brings up PostgreSQL, Redis, the server, the web app, and Nginx together. It suits Linux servers and is also the fastest way to try the whole product on a single machine. **The minimal setup needs two variables in `.env`**; everything else has a working default.
 
 > This page aims at "get it running". A fuller production checklist and troubleshooting notes live in `deploy_docs/docker-deploy.md` at the repository root.
 
@@ -37,20 +37,18 @@ cp .env.example .env
 
 ### Required (startup fails without them)
 
-Compose validates these three variables strictly. If any is missing or empty, the command fails immediately and nothing starts:
+Compose validates these two variables strictly. If either is missing or empty, the command fails immediately and nothing starts:
 
 | Variable | Notes |
 | --- | --- |
 | `APP_SECRET_KEY` | Secret used to sign bearer tokens; generate a high-entropy value of at least 32 bytes with `openssl rand -base64 48` |
 | `FRONTEND_BASE_URL` | Public root URL of the web app, for example `https://www.example.com`. Use an HTTP(S) root URL with no path, query, or fragment |
-| `REDIS_PASSWORD` | Redis password shared by the server and health check; generate a separate random password with `openssl rand -hex 32` |
 
 That is the entire minimal configuration for a single-machine trial:
 
 ```dotenv
 APP_SECRET_KEY=<paste the output of openssl rand -base64 48>
 FRONTEND_BASE_URL=http://127.0.0.1:5554
-REDIS_PASSWORD=<paste the output of a separate openssl rand -hex 32 command>
 ```
 
 ### Worth changing (defaults work, but only for a local trial)
@@ -59,6 +57,7 @@ REDIS_PASSWORD=<paste the output of a separate openssl rand -hex 32 command>
 | --- | --- | --- |
 | `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | `admin@admin.com` / `novanovastudio@pwss` | Initial administrator account. **Change the password before exposing the service**; the account is only created when no user with that email exists, so an existing account is never overwritten |
 | `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | `postgres` / `123456` | Database credentials. The port is published only on host `127.0.0.1`; use a separate strong password in production |
+| `REDIS_PASSWORD` | Empty | Leave empty for the default Compose Redis, which does not enable password authentication. Setting this variable alone does not enable Redis authentication |
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | Includes `localhost:3000` and `www.novanovastudio.cn` | Replace with your real origins, comma-separated |
 | `TRUSTED_PROXY_ADDRESSES` | Empty | Behind Nginx, set the Docker bridge gateway (usually `172.18.0.1`, or the whole subnet `172.18.0.0/16`). Without it, API logs and login rate limiting only see the gateway address. Do not put `127.0.0.1` here — the peer address inside the container is the gateway, not loopback |
 | `TZ` | `Asia/Shanghai` | Time zone used by the containers and Java logs |
@@ -104,7 +103,7 @@ docker compose -f docker-compose.yml -f docker-compose-production.yml up -d --bu
 
 Dependency order is enforced: `server` starts only after PostgreSQL and Redis are healthy, and `web` plus `nginx` start after `server`. **Flyway runs the migrations selected by `FLYWAY_MIGRATION_LOCATION` when the server boots**, so there is no manual schema step. After editing `.env`, run the corresponding startup command again so the affected containers are recreated with the new values.
 
-Before updating an existing deployment, set `REDIS_PASSWORD` in its existing `.env`, then run the applicable startup command above. Redis and the server are recreated with the same password, while existing data under `volume/` is kept. Running only `docker compose restart` does not apply new environment variables or port bindings.
+To update an existing deployment, run the applicable startup command above; existing data under `volume/` is kept. Running only `docker compose restart` does not apply new environment variables or port bindings.
 
 ### Nginx configuration and mounts
 

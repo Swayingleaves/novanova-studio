@@ -35,7 +35,7 @@ cp .env.example .env
 | `FRONTEND_BASE_URL` | `http://localhost:5555` | 必填，用于生成密码重置链接 |
 | `SERVER_PORT` | `8080` | **务必显式写成 8080**：配置里的兜底默认值是 9080，而前端默认请求 8080 |
 | `POSTGRES_*` / `REDIS_*` | 保持默认（`127.0.0.1`、`postgres` / `123456`、库名 `novanova_studio`） | 与本机实际账号保持一致 |
-| `REDIS_PASSWORD` | 独立随机密码，可用 `openssl rand -hex 32` 生成 | 使用 Compose 启动依赖时必填；本机服务端使用同一密码连接 |
+| `REDIS_PASSWORD` | 默认留空 | 默认 Compose Redis 不启用认证；连接自行启用认证的 Redis 时，填写其密码 |
 | `FLYWAY_MIGRATION_LOCATION` | `classpath:db/migration-community` | 新建开源库和原开源库使用此目录；已有企业库使用 `classpath:db/migration`，必须与原迁移历史一致 |
 | `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | 默认 `admin@admin.com` / `novanovastudio@pwss` | 首次启动自动创建管理员；同邮箱账号已存在时不会覆盖 |
 
@@ -91,7 +91,7 @@ pnpm dev
 ## 常见坑
 
 - **端口对不上**：没有显式设置 `SERVER_PORT=8080` 时服务端会用配置里的兜底值 `9080`，表现是前端所有接口请求失败。
-- **依赖没起来**：先用 `pg_isready -h 127.0.0.1 -p 5432` 和 `redis-cli --askpass -h 127.0.0.1 -p 6379 ping` 确认连接正常；Redis 提示输入密码时填写 `.env` 中的 `REDIS_PASSWORD`，正常返回 `PONG`。
+- **依赖没起来**：先用 `pg_isready -h 127.0.0.1 -p 5432` 和 `redis-cli -h 127.0.0.1 -p 6379 ping` 确认连接正常；自行启用 Redis 认证时，加上 `--askpass` 并按提示输入密码，正常返回 `PONG`。
 - **找不到 Agent 提示词文件**：必须从项目根目录启动服务端；也可以显式覆盖对应的 `AI_SYSTEM_PROMPT_*_FILE` 环境变量。
 - **合成视频报 FFmpeg 错误**：安装 FFmpeg 后，用 `AI_VIDEO_COMPOSITION_FFMPEG_EXECUTABLE` 与 `AI_VIDEO_COMPOSITION_FFPROBE_EXECUTABLE` 指定可执行文件路径。
 - 想在容器里跑整套（而不是前后端各跑一半），见[使用 Docker 启动](./docker-start)；跑起来之后的报错排查见[常见问题](../troubleshooting/faq)。
