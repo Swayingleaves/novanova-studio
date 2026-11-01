@@ -5,7 +5,7 @@ description: Build and start PostgreSQL, Redis, the server, the web app, and Ngi
 
 # Start with Docker
 
-Docker Compose brings up PostgreSQL, Redis, the server, the web app, and Nginx together. It suits Linux servers and is also the fastest way to try the whole product on a single machine. **The minimal setup needs only two variables in `.env`**; everything else has a working default.
+Docker Compose brings up PostgreSQL, Redis, the server, the web app, and Nginx together. It suits Linux servers and is also the fastest way to try the whole product on a single machine. **The minimal setup needs two variables in `.env`**; everything else has a working default.
 
 > This page aims at "get it running". A fuller production checklist and troubleshooting notes live in `deploy_docs/docker-deploy.md` at the repository root.
 
@@ -13,7 +13,7 @@ Docker Compose brings up PostgreSQL, Redis, the server, the web app, and Nginx t
 
 | Component | Requirement |
 | --- | --- |
-| Operating system | Linux (Ubuntu 22.04+ recommended). Nginx inside Compose uses `network_mode: host` and mounts host directories, so this path does not work on Windows or macOS — use [Local development](./local-development) there |
+| Operating system | Linux (Ubuntu 22.04+ recommended). For source development on Windows or macOS, see [Local development](./local-development) |
 | Docker Engine | 24 or later |
 | Docker Compose | v2 (the `docker compose` subcommand) |
 | Source code | Already cloned on the server, with the repository root as the working directory |
@@ -22,10 +22,12 @@ Docker Compose brings up PostgreSQL, Redis, the server, the web app, and Nginx t
 
 | Path | Compose file | Entry point | Good for |
 | --- | --- | --- | --- |
-| Minimal | `docker-compose-local.yml` | `http://127.0.0.1:5550` | Trying it on one machine, using the Nginx config shipped in the repository |
-| Production | `docker-compose.yml` | Your own domain | A Linux server that already has a domain and certificate |
+| Default | `docker-compose.yml` | `http://127.0.0.1:5554` | Running all services with the Nginx config shipped in the repository |
+| Existing enterprise deployment | `docker-compose.yml` + `docker-compose-production.yml` | Your own domain | Keeping the existing container names, images, ports, and Nginx configuration |
 
-Both paths configure `.env` and build images the same way; only Nginx differs. The minimal path uses `nginx/default.conf` from the repository, which proxies to `server:8080` and `web:5550` inside the Compose network. The production path uses a site config under the host's `/etc/nginx/conf.d` that proxies to `127.0.0.1:8080` and `127.0.0.1:5550`, because Compose publishes the `server` and `web` ports on `127.0.0.1` only.
+The main configuration uses a bridge network. Nginx proxies to `server:8080` and `web:5550` inside the Compose network. Access the full application through `NGINX_PORT` (default `5554`); `WEB_PORT` (default `5550`) provides direct access to Next.js only.
+
+When switching from the previous local configuration, keep the existing `.env` and `volume/` data directory, and update `FRONTEND_BASE_URL` to the actual Nginx URL. Existing enterprise deployments must keep their server-side `.env` and production override.
 
 ## 3. Configure `.env`
 
@@ -35,7 +37,7 @@ cp .env.example .env
 
 ### Required (startup fails without them)
 
-Compose validates these two variables strictly. If either is missing, the command fails immediately and nothing starts:
+Compose validates these two variables strictly. If either is missing or empty, the command fails immediately and nothing starts:
 
 | Variable | Notes |
 | --- | --- |
@@ -46,7 +48,7 @@ That is the entire minimal configuration for a single-machine trial:
 
 ```dotenv
 APP_SECRET_KEY=<paste the output of openssl rand -base64 48>
-FRONTEND_BASE_URL=http://127.0.0.1:5550
+FRONTEND_BASE_URL=http://127.0.0.1:5554
 ```
 
 ### Worth changing (defaults work, but only for a local trial)
@@ -54,16 +56,19 @@ FRONTEND_BASE_URL=http://127.0.0.1:5550
 | Variable | Default | Why change it |
 | --- | --- | --- |
 | `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | `admin@admin.com` / `novanovastudio@pwss` | Initial administrator account. **Change the password before exposing the service**; the account is only created when no user with that email exists, so an existing account is never overwritten |
-| `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | `postgres` / `123456` | Database credentials. Port 5432 is published on every host interface by default, so a public machine must change the password or add a firewall rule |
-| `REDIS_PASSWORD` | Empty (no auth) | Port 6379 is published the same way; set a password for any public deployment |
+| `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | `postgres` / `123456` | Database credentials. The port is published only on host `127.0.0.1`; use a separate strong password in production |
+| `REDIS_PASSWORD` | Empty | Leave empty for the default Compose Redis, which does not enable password authentication. Setting this variable alone does not enable Redis authentication |
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | Includes `localhost:3000` and `www.novanovastudio.cn` | Replace with your real origins, comma-separated |
 | `TRUSTED_PROXY_ADDRESSES` | Empty | Behind Nginx, set the Docker bridge gateway (usually `172.18.0.1`, or the whole subnet `172.18.0.0/16`). Without it, API logs and login rate limiting only see the gateway address. Do not put `127.0.0.1` here — the peer address inside the container is the gateway, not loopback |
 | `TZ` | `Asia/Shanghai` | Time zone used by the containers and Java logs |
+| `FLYWAY_MIGRATION_LOCATION` | `.env.example` uses `classpath:db/migration-community` | Use community migrations for new community databases and existing community databases; existing enterprise databases use `classpath:db/migration`. The Compose filename does not select the migration history |
 
 ### Leave alone
 
 - `POSTGRES_HOST` / `REDIS_HOST`: Compose pins them to `postgres` / `redis`; the `.env` values only matter when you run the server from source.
 - `POSTGRES_PORT` / `REDIS_PORT` / `SERVER_PORT` / `WEB_PORT`: these are the **host-side** published ports. Container ports are fixed (5432 / 6379 / 8080 / 5550), so only change these on a port conflict.
+- Both the main configuration and the production override publish PostgreSQL and Redis only on host `127.0.0.1`. Containers connect by service name; use an SSH tunnel for remote administration.
+- `NGINX_PORT`: entry port for the full application in the main configuration, default `5554`. Update `FRONTEND_BASE_URL` whenever this changes.
 - `TOKEN_EXPIRE_HOURS`, `LOG_LEVEL`, `TENCENT_COS_*`, and `AI_*` (polling interval, timeouts, prompt file paths): defaults are fine.
 - Email (`EMAIL_SMTP_*`) and linux.do / Google sign-in (`OAUTH2_*`): optional features, off unless configured.
 - AI channel keys and object storage credentials do **not** belong in `.env`; you enter them in System configuration after signing in — see [System configuration](../using-studio/system-configuration).
@@ -77,9 +82,8 @@ In Docker the web app calls the API on the same origin via `/api/v1/**` (Compose
 ## 4. Build
 
 ```bash
-docker compose build                             # build the web and server images
-docker compose build server                      # rebuild the server only
-docker compose -f docker-compose-local.yml build # build for the minimal path
+docker compose build        # 构建 web 与 server 镜像
+docker compose build server # 只重建服务端
 ```
 
 - The `server` image uses a Maven 3.9 + JDK 21 multi-stage build (tests skipped) and runs on `eclipse-temurin:21-jre` with FFmpeg bundled for canvas video composition.
@@ -90,18 +94,20 @@ docker compose -f docker-compose-local.yml build # build for the minimal path
 ## 5. Start
 
 ```bash
-# Minimal: open http://127.0.0.1:5550 afterwards
-docker compose -f docker-compose-local.yml up -d --build
-
-# Production: served behind your host Nginx
+# 默认启动：访问 http://127.0.0.1:5554
 docker compose up -d --build
+
+# 现有企业线上部署：在服务器上沿用原有 .env 和 Nginx 站点配置
+docker compose -f docker-compose.yml -f docker-compose-production.yml up -d --build
 ```
 
-Dependency order is enforced: `server` starts only after PostgreSQL and Redis are healthy, and `web` plus `nginx` start after `server`. **Database migrations run automatically with Flyway when the server boots**, so there is no manual schema step. After editing `.env`, run `docker compose up -d` again so the affected containers are recreated with the new values.
+Dependency order is enforced: `server` starts only after PostgreSQL and Redis are healthy, and `web` plus `nginx` start after `server`. **Flyway runs the migrations selected by `FLYWAY_MIGRATION_LOCATION` when the server boots**, so there is no manual schema step. After editing `.env`, run the corresponding startup command again so the affected containers are recreated with the new values.
 
-### The host Nginx site config for production
+To update an existing deployment, run the applicable startup command above; existing data under `volume/` is kept. Running only `docker compose restart` does not apply new environment variables or port bindings.
 
-The Nginx service in `docker-compose.yml` uses `network_mode: host` and mounts `${NGINX_CONFIG_DIRECTORY:-/etc/nginx/conf.d}` read-only, so the site config lives on the host and points upstream at `127.0.0.1`:
+### Nginx configuration and mounts
+
+The main configuration mounts the repository's `nginx/` directory read-only. Custom site configurations must use Compose service names for upstreams; `127.0.0.1` would refer to the Nginx container itself:
 
 ```nginx
 server {
@@ -111,7 +117,7 @@ server {
 
     # API and SSE: keep buffering off and raise the timeouts so streams are not cut short.
     location ^~ /api/ {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://server:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -125,7 +131,7 @@ server {
 
     # Pages and static assets.
     location / {
-        proxy_pass http://127.0.0.1:5550;
+        proxy_pass http://web:5550;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -135,14 +141,16 @@ server {
 }
 ```
 
-The repository's `nginx/default.conf` is the minimal-path version (it points at the container names `server:8080` and `web:5550`) and is a good reference. Every Nginx mount can be overridden from `.env`:
+The repository's `nginx/default.conf` already contains these proxy rules. Every Nginx mount in the main configuration can be overridden from `.env`:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `NGINX_CONFIG_DIRECTORY` | `/etc/nginx/conf.d` | Site config directory, mounted read-only |
+| `NGINX_CONFIG_DIRECTORY` | `./nginx` | Site config directory, mounted read-only |
 | `NGINX_LOG_DIRECTORY` | `./logs/nginx` | Nginx log directory, mounted read-write |
-| `NGINX_STATIC_DIRECTORY` | `/usr/share/nginx/html` | Static asset directory, mounted read-only |
-| `NGINX_SSL_DIRECTORY` | `/etc/nginx/ssl` | Certificate directory, mounted read-only |
+| `NGINX_STATIC_DIRECTORY` | `./volume/nginx_static` | Static asset directory, mounted read-only |
+| `NGINX_SSL_DIRECTORY` | `./volume/nginx_ssl` | Certificate directory, mounted read-only |
+
+In the production override, Nginx uses `network_mode: host`, with `/usr/share/nginx/html` and `/etc/nginx/ssl` as the default static asset and certificate directories. The server-side `.env` must point `NGINX_CONFIG_DIRECTORY` at the existing site configuration. Its upstreams must use `127.0.0.1` with the actual `SERVER_PORT` and `WEB_PORT`, rather than the service-name configuration shipped in the repository.
 
 ## 6. Verify
 
@@ -162,6 +170,8 @@ Logs are written per service under the repository root: `logs/server/`, `logs/we
 4. Each option is explained in [System configuration](../using-studio/system-configuration).
 
 ## 8. Common commands
+
+These commands use the main configuration. For existing enterprise deployments, add `-f docker-compose.yml -f docker-compose-production.yml` after `docker compose` in every management command.
 
 ```bash
 docker compose stop             # stop services, keep containers

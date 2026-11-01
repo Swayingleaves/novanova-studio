@@ -5,7 +5,7 @@ description: 用 Docker Compose 以最小配置构建并启动 PostgreSQL、Redi
 
 # 使用 Docker 启动
 
-Docker Compose 会把 PostgreSQL、Redis、服务端、前端和 Nginx 一起拉起，适合 Linux 服务器部署，也适合在单机上快速跑通整套功能。**最小配置只需要在 `.env` 里填两个变量**，其余都有可用默认值。
+Docker Compose 会把 PostgreSQL、Redis、服务端、前端和 Nginx 一起拉起，适合 Linux 服务器部署，也适合在单机上快速跑通整套功能。**最小配置需要在 `.env` 里填两个变量**，其余都有可用默认值。
 
 > 这篇文档的目标是“先把服务跑起来”。更完整的生产部署清单和排障说明见仓库根目录的 `deploy_docs/docker-deploy.md`。
 
@@ -13,7 +13,7 @@ Docker Compose 会把 PostgreSQL、Redis、服务端、前端和 Nginx 一起拉
 
 | 组件 | 要求 |
 | --- | --- |
-| 操作系统 | Linux（推荐 Ubuntu 22.04+）。Compose 里的 Nginx 使用 `network_mode: host` 并挂载宿主机目录，因此不适用于 Windows / macOS；这两者请走[本地启动调试](./local-development) |
+| 操作系统 | Linux（推荐 Ubuntu 22.04+）；Windows / macOS 的源码调试见[本地启动调试](./local-development) |
 | Docker Engine | 24 或更高 |
 | Docker Compose | v2（即 `docker compose` 子命令） |
 | 源码 | 已克隆到服务器，并已进入项目根目录 |
@@ -22,10 +22,12 @@ Docker Compose 会把 PostgreSQL、Redis、服务端、前端和 Nginx 一起拉
 
 | 方式 | Compose 文件 | 访问入口 | 适合场景 |
 | --- | --- | --- | --- |
-| 最小启动 | `docker-compose-local.yml` | `http://127.0.0.1:5550` | 单机试用，用仓库自带的 Nginx 配置 |
-| 生产部署 | `docker-compose.yml` | 你自己的域名 | Linux 服务器 + 已有域名与证书 |
+| 默认启动 | `docker-compose.yml` | `http://127.0.0.1:5554` | 使用仓库自带的 Nginx 配置运行整套服务 |
+| 现有企业线上部署 | `docker-compose.yml` + `docker-compose-production.yml` | 你自己的域名 | 沿用线上容器名称、镜像、端口与 Nginx 配置 |
 
-两种方式的 `.env` 配置和构建步骤完全相同，区别只在 Nginx：最小启动用仓库内的 `nginx/default.conf`，在容器网络里反代 `server:8080` 与 `web:5550`；生产部署使用宿主机 `/etc/nginx/conf.d` 下的站点配置，反代 `127.0.0.1:8080` 与 `127.0.0.1:5550`——因为 Compose 里 `server` 和 `web` 的端口只发布在 `127.0.0.1` 上。
+主配置使用桥接网络，Nginx 在容器网络里反代 `server:8080` 与 `web:5550`。整套服务通过 `NGINX_PORT`（默认 `5554`）访问；`WEB_PORT`（默认 `5550`）只用于直接访问 Next.js 前端。
+
+从原本的本地配置切换时，保留原有 `.env` 和 `volume/` 数据目录，将 `FRONTEND_BASE_URL` 更新为实际的 Nginx 访问地址。现有企业线上部署继续沿用服务器的 `.env` 和生产覆盖文件。
 
 ## 3. 配置 `.env`
 
@@ -35,18 +37,18 @@ cp .env.example .env
 
 ### 必填项（不填会直接启动失败）
 
-Compose 对下面两个变量用了强制校验，缺失时命令会立刻报错退出，不会启动任何服务：
+Compose 对下面两个变量用了强制校验，缺失或为空时命令会立刻报错退出，不会启动任何服务：
 
 | 变量 | 说明 |
 | --- | --- |
 | `APP_SECRET_KEY` | 签发 Bearer Token 的密钥，要求至少 32 字节的高强度随机值。生成命令：`openssl rand -base64 48` |
 | `FRONTEND_BASE_URL` | 浏览器公开访问的前端根地址，例如 `https://www.example.com`；只能是 HTTP(S) 根地址，不要带路径、查询参数或片段 |
 
-最小可用配置（单机试用）就是这样两行：
+最小可用配置（单机试用）如下：
 
 ```dotenv
 APP_SECRET_KEY=<把 openssl rand -base64 48 的输出粘到这里>
-FRONTEND_BASE_URL=http://127.0.0.1:5550
+FRONTEND_BASE_URL=http://127.0.0.1:5554
 ```
 
 ### 建议修改（默认值能跑，但只适合本机）
@@ -54,16 +56,19 @@ FRONTEND_BASE_URL=http://127.0.0.1:5550
 | 变量 | 默认值 | 为什么要改 |
 | --- | --- | --- |
 | `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | `admin@admin.com` / `novanovastudio@pwss` | 初始管理员账号，**公网部署前必须改密码**；只在不存在同邮箱账号时创建，已有账号不会被覆盖 |
-| `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | `postgres` / `123456` | 数据库凭据。注意 5432 默认发布在宿主机所有网卡上，公网机器必须改密码或加防火墙 |
-| `REDIS_PASSWORD` | 空（不认证） | 6379 同样发布在所有网卡上，公网环境建议设置密码 |
+| `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | `postgres` / `123456` | 数据库凭据。端口仅发布到宿主机 `127.0.0.1`，生产环境仍需使用独立强密码 |
+| `REDIS_PASSWORD` | 空 | 默认 Compose Redis 不启用密码认证，保持为空；仅填写此变量不会给 Redis 启用认证 |
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | 含 `localhost:3000` 与 `www.novanovastudio.cn` | 改成你的实际来源，多个用英文逗号分隔 |
 | `TRUSTED_PROXY_ADDRESSES` | 空 | Nginx 反代场景建议填 Docker bridge 网关（通常 `172.18.0.1`，或直接写网段 `172.18.0.0/16`）；不配置时“接口记录”和登录限流只能看到网关地址。不要把 `127.0.0.1` 填在这里——容器内看到的对端地址是网关，不是它 |
 | `TZ` | `Asia/Shanghai` | 容器与 Java 日志使用的时区 |
+| `FLYWAY_MIGRATION_LOCATION` | `.env.example` 为 `classpath:db/migration-community` | 新建开源库和原开源库使用开源迁移目录；已有企业库使用 `classpath:db/migration`。Compose 文件名不会自动选择迁移历史 |
 
 ### 可以不动的部分
 
 - `POSTGRES_HOST` / `REDIS_HOST`：Compose 已固定为 `postgres` / `redis`，`.env` 里的这两个值只在本地源码启动时生效。
 - `POSTGRES_PORT` / `REDIS_PORT` / `SERVER_PORT` / `WEB_PORT`：填的是**宿主机映射端口**，容器内端口固定（5432 / 6379 / 8080 / 5550），宿主机端口冲突时才需要改。
+- 主配置与生产覆盖配置中的 PostgreSQL、Redis 端口均只发布到宿主机 `127.0.0.1`；容器内通过服务名连接，远程运维请使用 SSH 隧道。
+- `NGINX_PORT`：主配置的整套服务入口端口，默认 `5554`；修改后同步更新 `FRONTEND_BASE_URL`。
 - `TOKEN_EXPIRE_HOURS`、`LOG_LEVEL`、`TENCENT_COS_*`、`AI_*`（轮询间隔、各类超时、提示词文件路径）：默认值即可用。
 - 邮件（`EMAIL_SMTP_*`）与 linux.do / Google 登录（`OAUTH2_*`）：可选能力，不配置就是关闭状态。
 - AI 渠道密钥、对象存储凭证**不写在 `.env` 里**，而是登录后在“系统配置”界面填写，见[系统配置](../using-studio/system-configuration)。
@@ -77,9 +82,8 @@ FRONTEND_BASE_URL=http://127.0.0.1:5550
 ## 4. 构建
 
 ```bash
-docker compose build                            # 构建 web 与 server 镜像
-docker compose build server                     # 只重建服务端
-docker compose -f docker-compose-local.yml build # 最小启动方式对应的构建
+docker compose build        # 构建 web 与 server 镜像
+docker compose build server # 只重建服务端
 ```
 
 - `server` 镜像：Maven 3.9 + JDK 21 多阶段构建（跳过单元测试），运行镜像基于 `eclipse-temurin:21-jre` 并内置 FFmpeg，供画布视频合成使用。
@@ -90,18 +94,20 @@ docker compose -f docker-compose-local.yml build # 最小启动方式对应的�
 ## 5. 启动
 
 ```bash
-# 最小启动：单机试用，启动后访问 http://127.0.0.1:5550
-docker compose -f docker-compose-local.yml up -d --build
-
-# 生产部署：配合宿主机 Nginx 使用
+# 默认启动：访问 http://127.0.0.1:5554
 docker compose up -d --build
+
+# 现有企业线上部署：在服务器上沿用原有 .env 和 Nginx 站点配置
+docker compose -f docker-compose.yml -f docker-compose-production.yml up -d --build
 ```
 
-启动顺序由依赖关系保证：PostgreSQL 与 Redis 健康检查通过后才启动 `server`，`server` 起来后再启动 `web` 和 `nginx`。**数据库迁移由服务端启动时用 Flyway 自动执行**，不需要手工建表。修改 `.env` 后重新执行 `docker compose up -d` 即可让新变量生效（Compose 会重建相关容器）。
+启动顺序由依赖关系保证：PostgreSQL 与 Redis 健康检查通过后才启动 `server`，`server` 起来后再启动 `web` 和 `nginx`。**数据库迁移由服务端启动时按 `FLYWAY_MIGRATION_LOCATION` 用 Flyway 自动执行**，不需要手工建表。修改 `.env` 后重新执行对应启动命令即可让新变量生效（Compose 会重建相关容器）。
 
-### 生产部署需要准备的宿主机 Nginx 站点配置
+更新已有部署时，执行上述对应的启动命令，已有 `volume/` 数据保持不变；仅执行 `docker compose restart` 不会应用新的环境变量和端口绑定。
 
-`docker-compose.yml` 里的 Nginx 容器使用 `network_mode: host`，只读挂载 `${NGINX_CONFIG_DIRECTORY:-/etc/nginx/conf.d}`，所以站点配置写在宿主机上，上游指向 `127.0.0.1`：
+### Nginx 配置与挂载
+
+主配置默认只读挂载仓库中的 `nginx/` 目录。自定义站点配置时，上游使用 Compose 服务名称，不能写容器自身的 `127.0.0.1`：
 
 ```nginx
 server {
@@ -111,7 +117,7 @@ server {
 
     # 接口与 SSE：关闭缓冲，拉长超时，保证流式输出不被截断。
     location ^~ /api/ {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://server:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -125,7 +131,7 @@ server {
 
     # 前端页面与静态资源。
     location / {
-        proxy_pass http://127.0.0.1:5550;
+        proxy_pass http://web:5550;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -135,14 +141,16 @@ server {
 }
 ```
 
-仓库里的 `nginx/default.conf` 是最小启动用的版本（上游写的是容器名 `server:8080` / `web:5550`），可以对照着改。Nginx 的挂载目录都可以用 `.env` 覆盖：
+仓库里的 `nginx/default.conf` 已包含上述代理配置。主配置中 Nginx 的挂载目录都可以用 `.env` 覆盖：
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
-| `NGINX_CONFIG_DIRECTORY` | `/etc/nginx/conf.d` | 站点配置目录，只读挂载 |
+| `NGINX_CONFIG_DIRECTORY` | `./nginx` | 站点配置目录，只读挂载 |
 | `NGINX_LOG_DIRECTORY` | `./logs/nginx` | Nginx 日志目录，读写挂载 |
-| `NGINX_STATIC_DIRECTORY` | `/usr/share/nginx/html` | 静态资源目录，只读挂载 |
-| `NGINX_SSL_DIRECTORY` | `/etc/nginx/ssl` | 证书目录，只读挂载 |
+| `NGINX_STATIC_DIRECTORY` | `./volume/nginx_static` | 静态资源目录，只读挂载 |
+| `NGINX_SSL_DIRECTORY` | `./volume/nginx_ssl` | 证书目录，只读挂载 |
+
+生产覆盖文件中的 Nginx 使用 `network_mode: host`，静态资源与证书目录分别默认挂载 `/usr/share/nginx/html`、`/etc/nginx/ssl`。线上 `.env` 的 `NGINX_CONFIG_DIRECTORY` 必须指向已有站点配置目录，上游使用 `127.0.0.1` 和实际的 `SERVER_PORT`、`WEB_PORT`，不能直接使用仓库中的容器服务名配置。
 
 ## 6. 验证
 
@@ -162,6 +170,8 @@ docker compose logs -f server            # 跟踪服务端日志
 4. 每一项的具体含义见[系统配置](../using-studio/system-configuration)。
 
 ## 8. 常用命令
+
+以下命令适用于主配置；现有企业线上部署的管理命令都需在 `docker compose` 后添加 `-f docker-compose.yml -f docker-compose-production.yml`。
 
 ```bash
 docker compose stop             # 停止服务，保留容器

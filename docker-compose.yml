@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-123456}
       POSTGRES_DB: ${POSTGRES_DATABASE:-novanova_studio}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     entrypoint:
       - /bin/sh
       - -c
@@ -55,7 +55,7 @@ services:
       - --
     command: ["redis-server", "--appendonly", "yes", "--logfile", "/var/log/redis/redis.log"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - /etc/localtime:/etc/localtime:ro
       - ./volume/redis_data:/data
