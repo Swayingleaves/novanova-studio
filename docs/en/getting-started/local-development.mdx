@@ -19,12 +19,6 @@ Local development has three parts: **dependencies** (PostgreSQL and Redis, plus 
 | pnpm | 11 (the repository declares `pnpm@11.7.0`) | Web dependencies and scripts |
 | FFmpeg | Stable | Only needed for canvas video composition; without it that feature reports 服务端未安装FFmpeg或FFmpeg路径配置错误 |
 
-If you would rather not install PostgreSQL and Redis locally, start just those two from the repository's Compose file and keep the server and web app on the host:
-
-```bash
-docker compose -f docker-compose-local.yml up -d postgres redis
-```
-
 ## 2. Configure environment variables
 
 ### Server: `.env` in the repository root
@@ -41,7 +35,15 @@ The server loads the root `.env` automatically (it tries both the current and th
 | `FRONTEND_BASE_URL` | `http://localhost:5555` | Required; used to build password reset links |
 | `SERVER_PORT` | `8080` | **Set it explicitly**: the fallback default in the config is 9080, while the web app expects 8080 |
 | `POSTGRES_*` / `REDIS_*` | Defaults (`127.0.0.1`, `postgres` / `123456`, database `novanova_studio`) | Match your local instance |
+| `REDIS_PASSWORD` | A separate random password; generate it with `openssl rand -hex 32` | Required when starting dependencies with Compose; use the same password for the server on the host |
+| `FLYWAY_MIGRATION_LOCATION` | `classpath:db/migration-community` | Use this for new community databases and existing community databases. Existing enterprise databases use `classpath:db/migration`; keep the original migration history |
 | `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | `admin@admin.com` / `novanovastudio@pwss` | The administrator is created on first boot and never overwritten |
+
+After configuring the root `.env`, start PostgreSQL and Redis from the main Compose file if you prefer to keep those dependencies in containers and run the server and web app on the host:
+
+```bash
+docker compose up -d postgres redis
+```
 
 ### Web app: `web/.env.local`
 
@@ -66,7 +68,7 @@ $env:JAVA_HOME="$env:USERPROFILE\.jabba\jdk\openjdk@21.0.2"
 mvn -f server/pom.xml spring-boot:run
 ```
 
-Flyway runs the migrations in `server/src/main/resources/db/migration/` during startup, so there is no manual schema step. For breakpoint debugging, run `NovanovaStudioServerApplication` from your IDE with the repository root as the working directory.
+Flyway runs the migrations selected by `FLYWAY_MIGRATION_LOCATION` during startup. The `.env.example` default is the community directory, `classpath:db/migration-community`, so there is no manual schema step. For breakpoint debugging, run `NovanovaStudioServerApplication` from your IDE with the repository root as the working directory.
 
 ## 4. Start the web app
 
@@ -89,7 +91,7 @@ Server logs are written to `logs/current.log`. AI calls leave three lines — `A
 ## Common pitfalls
 
 - **Port mismatch**: without an explicit `SERVER_PORT=8080` the server falls back to `9080`, and every request from the web app fails.
-- **Dependencies not ready**: check with `pg_isready -h 127.0.0.1 -p 5432` and `redis-cli -h 127.0.0.1 -p 6379 ping`.
+- **Dependencies not ready**: check with `pg_isready -h 127.0.0.1 -p 5432` and `redis-cli --askpass -h 127.0.0.1 -p 6379 ping`. Enter `REDIS_PASSWORD` from `.env` at the prompt; Redis should return `PONG`.
 - **Agent prompt files not found**: start the server from the repository root, or override the matching `AI_SYSTEM_PROMPT_*_FILE` variable.
 - **FFmpeg error from video composition**: install FFmpeg and point `AI_VIDEO_COMPOSITION_FFMPEG_EXECUTABLE` and `AI_VIDEO_COMPOSITION_FFPROBE_EXECUTABLE` at the binaries.
 - To run everything in containers instead, see [Start with Docker](./docker-start); for error messages after startup, see the [FAQ](../troubleshooting/faq).

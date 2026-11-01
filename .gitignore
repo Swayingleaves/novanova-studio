@@ -41,3 +41,4 @@ volume/
 AGENTS.md
 CLAUDE.md
 deploy.sh
+docker-compose-production.yml

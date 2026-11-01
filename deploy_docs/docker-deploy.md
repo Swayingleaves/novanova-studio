@@ -42,7 +42,7 @@ openssl rand -base64 48
 | `FRONTEND_BASE_URL` | 必填，浏览器公开访问的前端根地址，例如 `https://www.example.com`；仅允许 HTTP(S)，不能包含路径、查询参数或片段。 |
 | `ADMIN_INITIAL_EMAIL` / `ADMIN_INITIAL_PASSWORD` | 初始管理员账号，**部署到公网前必须修改默认密码**。 |
 | `POSTGRES_USERNAME` / `POSTGRES_PASSWORD` | PostgreSQL 凭据，部署到公网前必须修改默认密码。 |
-| `REDIS_PASSWORD` | Redis 密码，公网环境建议设置。 |
+| `REDIS_PASSWORD` | 必填，使用 `openssl rand -hex 32` 生成独立随机密码；Redis、服务端和健康检查共用，缺失或为空会阻止 Compose 启动。 |
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | 改为实际的域名，例如 `https://www.yourdomain.com`。 |
 | `TZ` | 容器和 Java 日志时区，默认是 `Asia/Shanghai`。 |
 | `TRUSTED_PROXY_ADDRESSES` | 可选，Nginx 反代场景**建议配置**。本 Compose 中 Nginx 为 `network_mode: host`、经宿主机映射端口访问后端，**进入容器的连接源地址会被 Docker NAT 成 bridge 网关**（通常 `172.18.0.1`，用 `docker network inspect <网络名>` 查看 Gateway），因此应设为网关 IP 或网段 CIDR（如 `172.18.0.1` 或 `172.18.0.0/16`）。配置后"接口记录"与登录限流可解析出真实客户端 IP；不配置时记录到的是网关/代理地址。注意：不要把 `127.0.0.1` 配在这里，容器内看到的对端地址不会是它。 |
@@ -80,6 +80,8 @@ docker compose ps
 ```
 
 所有服务状态为 `Up` 且 `healthy`（PostgreSQL、Redis）即表示启动成功。
+
+PostgreSQL 和 Redis 在主配置、生产覆盖配置中均仅发布到宿主机 `127.0.0.1`，远程运维请使用 SSH 隧道。更新已有部署时，先在原 `.env` 中填写 `REDIS_PASSWORD`，再执行对应的 `docker compose up -d` 命令，让 Redis 和服务端同步重建并启用认证；已有数据目录保持不变，单独执行 `restart` 不会应用新的环境变量和端口绑定。
 
 ## 4. 验证
 
