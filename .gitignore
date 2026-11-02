@@ -42,3 +42,4 @@ AGENTS.md
 CLAUDE.md
 docker-compose-production.yml
 __pycache__/
+deploy.sh
