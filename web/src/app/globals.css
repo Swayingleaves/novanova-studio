@@ -375,6 +375,33 @@ html[data-theme="purple"] {
         backdrop-filter: blur(18px);
     }
 
+    /* 顶栏购买积分入口：主色实心胶囊 + 间歇扫光；余额见底或未登录时由 data-emphasis="high" 缩短周期。 */
+    .credit-entry-shine {
+        position: relative;
+        overflow: hidden;
+    }
+
+    .credit-entry-shine::after {
+        content: "";
+        position: absolute;
+        top: -50%;
+        left: 0;
+        width: 30%;
+        height: 200%;
+        background: color-mix(in srgb, var(--studio-brand-shine) 42%, transparent);
+        opacity: 0;
+        animation: credit-entry-sweep 8s ease-in-out infinite;
+        pointer-events: none;
+    }
+
+    .credit-entry-shine[data-emphasis="high"]::after {
+        animation-duration: 3s;
+    }
+
+    .credit-entry-shine:hover::after {
+        animation: credit-entry-sweep-once 0.9s ease-out;
+    }
+
     /* 认证页背景：平台入口与团队入口（/team/<slug>/auth）共用同一套登录页，仅品牌信息不同。 */
     .auth-stage {
         isolation: isolate;
@@ -1821,6 +1848,42 @@ html[data-theme="dark"] .creation-composer-submit-trigger:disabled {
     }
 }
 
+/* 一个周期只扫一次，其余时间静止：恒定运动会在几小时内退化成背景噪声。 */
+@keyframes credit-entry-sweep {
+    0%,
+    86% {
+        transform: translateX(-160%) skewX(-18deg);
+        opacity: 0;
+    }
+
+    88% {
+        transform: translateX(-160%) skewX(-18deg);
+        opacity: 1;
+    }
+
+    97% {
+        transform: translateX(420%) skewX(-18deg);
+        opacity: 1;
+    }
+
+    100% {
+        transform: translateX(420%) skewX(-18deg);
+        opacity: 0;
+    }
+}
+
+@keyframes credit-entry-sweep-once {
+    0% {
+        transform: translateX(-160%) skewX(-18deg);
+        opacity: 1;
+    }
+
+    100% {
+        transform: translateX(420%) skewX(-18deg);
+        opacity: 0;
+    }
+}
+
 /* 图片与视频任务共用的生成状态，仅在媒体卡片局部提供进度反馈。 */
 .pending-generation-field {
     background: var(--studio-surface-raised);
@@ -1848,6 +1911,11 @@ html[data-theme="dark"] .creation-composer-submit-trigger:disabled {
 
     .studio-skeleton {
         animation: none !important;
+    }
+
+    .credit-entry-shine::after {
+        animation: none !important;
+        opacity: 0 !important;
     }
 
     .canvas-edge-flow {
