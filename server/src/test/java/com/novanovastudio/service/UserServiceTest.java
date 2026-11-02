@@ -54,6 +54,47 @@ import java.util.stream.Stream;
 class UserServiceTest {
 
     /**
+     * 白名单外邮箱不能获取注册验证码，也不能直接提交注册绕过检查。
+     * @param email String 待拒绝的邮箱
+     */
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(strings = {"a56fv43@vn-v55.com", "881txi4@kuailejianfei8.com", "user@qq.com.evil.com"})
+    void shouldRejectUnsupportedEmailBeforeRegistration(String email) {
+        TestContext context = testContext();
+        context.properties.getEmail().setAllowedSuffixes("qq.com,gmail.com");
+
+        StepVerifier.create(Mono.defer(() -> context.service.sendEmailCode(new UserDtos.SendEmailCodeRequest(email))))
+                .expectErrorMatches(error -> error instanceof BusinessException businessException
+                        && "business.emailSuffixNotAllowed".equals(businessException.getSystemMessage().key()))
+                .verify();
+        StepVerifier.create(Mono.defer(() -> context.service.register(new UserDtos.RegisterRequest(
+                        email, "123456", "password123", "新用户", null))))
+                .expectErrorMatches(error -> error instanceof BusinessException businessException
+                        && "business.emailSuffixNotAllowed".equals(businessException.getSystemMessage().key()))
+                .verify();
+
+        org.mockito.Mockito.verifyNoInteractions(context.userRepository, context.mailSender, context.creditService, context.invitationService);
+    }
+
+    /** 白名单内邮箱可以完成验证码保存和邮件发送。 */
+    @Test
+    void shouldSendRegistrationCodeForAllowedEmail() {
+        TestContext context = testContext();
+        context.properties.getEmail().setAllowedSuffixes("@QQ.COM");
+        when(context.userRepository.findByEmail("user@qq.com")).thenReturn(Mono.empty());
+        when(context.passwordEncoder.encode(any())).thenReturn("code-hash");
+        when(context.userRepository.createEmailCode(any())).thenReturn(Mono.just(3L));
+        when(context.mailSender.createMimeMessage()).thenReturn(new MimeMessage(Session.getInstance(new Properties())));
+
+        StepVerifier.create(context.service.sendEmailCode(new UserDtos.SendEmailCodeRequest(" User@QQ.COM ")))
+                .verifyComplete();
+
+        verify(context.userRepository).createEmailCode(argThat(code -> "user@qq.com".equals(code.getEmail())
+                && "register".equals(code.getPurpose())));
+        verify(context.mailSender).send(any(MimeMessage.class));
+    }
+
+    /**
      * 有效邀请码注册应记录邀请关系并在同一注册流程发放邀请奖励。
      */
     @Test
@@ -687,6 +728,7 @@ class UserServiceTest {
         NovanovaProperties properties = new NovanovaProperties();
         properties.getApp().setFrontendBaseUrl("https://www.novanovastudio.cn");
         properties.getEmail().setFrom("noreply@novanovastudio.cn");
+        properties.getEmail().setAllowedSuffixes("example.com");
         JavaMailSender mailSender = mock(JavaMailSender.class);
         CreditService creditService = mock(CreditService.class);
         InvitationService invitationService = mock(InvitationService.class);
@@ -694,7 +736,7 @@ class UserServiceTest {
         TransactionalOperator transactionalOperator = mock(TransactionalOperator.class);
         when(transactionalOperator.transactional(org.mockito.ArgumentMatchers.<Mono<Object>>any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        UserService service = new UserService(userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, properties, mailSender, creditService, invitationService, eventPublisher, transactionalOperator);
+        UserService service = new UserService(userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, properties, new EmailRegistrationPolicy(properties), mailSender, creditService, invitationService, eventPublisher, transactionalOperator);
         return new TestContext(service, userRepository, passwordEncoder, tokenService, currentUserProvider, passwordLoginLockService, properties, mailSender, creditService, invitationService, eventPublisher);
     }
 

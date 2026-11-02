@@ -45,6 +45,7 @@ openssl rand -base64 48
 | `REDIS_PASSWORD` | 默认 Compose Redis 不启用认证，留空；仅填写此变量不会给 Redis 启用认证。 |
 | `CORS_ALLOWED_ORIGIN_PATTERNS` | 改为实际的域名，例如 `https://www.yourdomain.com`。 |
 | `TZ` | 容器和 Java 日志时区，默认是 `Asia/Shanghai`。 |
+| `EMAIL_ALLOWED_SUFFIXES` | 注册邮箱域名白名单，逗号分隔，支持 `qq.com` 或 `@qq.com`。邮箱验证码和 Google、linux.do 首次注册统一校验；已有账号登录和绑定不受影响。为空或包含独立 `*` 表示不限制，未设置时采用 `.env.example` 中的常见邮箱列表。 |
 | `TRUSTED_PROXY_ADDRESSES` | 可选，Nginx 反代场景**建议配置**。本 Compose 中 Nginx 为 `network_mode: host`、经宿主机映射端口访问后端，**进入容器的连接源地址会被 Docker NAT 成 bridge 网关**（通常 `172.18.0.1`，用 `docker network inspect <网络名>` 查看 Gateway），因此应设为网关 IP 或网段 CIDR（如 `172.18.0.1` 或 `172.18.0.0/16`）。配置后"接口记录"与登录限流可解析出真实客户端 IP；不配置时记录到的是网关/代理地址。注意：不要把 `127.0.0.1` 配在这里，容器内看到的对端地址不会是它。 |
 | `NEXT_PUBLIC_CREDIT_STORE_URL` | 可选，发卡网站地址；未配置时购买积分页面显示“没有配置发卡网站”。 |
 | `ALIPAY_ENABLED` | 可选，设为 `true` 才启用支付宝电脑网站支付；启用时必须同时配置下列支付宝字段。 |
@@ -53,6 +54,12 @@ openssl rand -base64 48
 | `ALIPAY_NOTIFY_URL` | 必填，形如 `https://域名/api/v1/payment/alipay/notify`，必须能被支付宝服务器公网访问。 |
 | `ALIPAY_RETURN_URL` | 必填，形如 `https://域名/api/v1/payment/alipay/return`，用于同步回到前端购买页。 |
 | `AI_TASK_POLLING_INTERVAL_SECONDS` | 所有 AI 异步任务状态轮询间隔（服务端渠道、内部等待、视频合成恢复和前端状态查询），单位为秒，必须大于 0，默认 `5`。 |
+
+已有 `.env` 会覆盖新增的默认白名单；更新版本时，如需开放新增邮箱域名，请同步更新该配置。配置修改后须重新创建服务容器，单纯 `restart` 不会重新注入环境变量。当前默认列表为：
+
+```dotenv
+EMAIL_ALLOWED_SUFFIXES=qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,foxmail.com,icloud.com,sina.com,aliyun.com,yeah.net,139.com,189.cn,sina.cn,vip.qq.com,vip.163.com,yahoo.com,live.com,msn.com,proton.me,protonmail.com
+```
 
 ### Nginx 路径配置
 

@@ -11,6 +11,18 @@ import org.junit.jupiter.api.Test;
  */
 class NovanovaPropertiesTest {
 
+    /** 验证邮箱白名单配置可以绑定，显式空值保留不限注册的语义。 */
+    @Test
+    void shouldBindEmailRegistrationWhitelist() {
+        var source = new org.springframework.boot.context.properties.source.MapConfigurationPropertySource(
+                java.util.Map.of("novanova.email.allowed-suffixes", "@qq.com,gmail.com"));
+        var binder = new org.springframework.boot.context.properties.bind.Binder(source);
+        NovanovaProperties properties = binder.bind("novanova", NovanovaProperties.class).get();
+        Assertions.assertEquals("@qq.com,gmail.com", properties.getEmail().getAllowedSuffixes());
+        source.put("novanova.email.allowed-suffixes", "");
+        Assertions.assertEquals("", binder.bind("novanova", NovanovaProperties.class).get().getEmail().getAllowedSuffixes());
+    }
+
     /**
      * 测试AI任务队列配置默认值。
      *

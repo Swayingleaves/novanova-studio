@@ -35,6 +35,9 @@ public class ThirdPartyAuthenticationService {
     /** 用户仓储 */
     private final UserRepository userRepository;
 
+    /** 邮箱注册白名单规则 */
+    private final EmailRegistrationPolicy emailRegistrationPolicy;
+
     /** 积分服务 */
     private final CreditService creditService;
 
@@ -86,7 +89,16 @@ public class ThirdPartyAuthenticationService {
      */
     private Mono<User> createOrBindUser(ThirdPartyUserIdentity identity, Long inviterUserId) {
         // 用户解析和身份写入必须处于同一事务，避免只创建用户但未建立身份绑定。
-        return identityRepository.resolveUserByTrustedEmail(identity, invitationService.generateInvitationCode(), inviterUserId)
+        return userRepository.findByEmail(identity.email())
+                .map(user -> new OAuth2IdentityRepository.ResolvedOAuthUser(user, false))
+                .switchIfEmpty(Mono.defer(() -> {
+                    // 已有邮箱只绑定身份；新账号在写库和发放积分前校验注册资格。
+                    if (!emailRegistrationPolicy.isAllowed(identity.email())) {
+                        log.info("第三方首次注册被白名单拒绝: provider={}, email={}", identity.providerId(), identity.email());
+                        return Mono.error(new OAuth2LoginException("emailSuffixNotAllowed", "该邮箱后缀暂不支持注册，请使用允许的邮箱"));
+                    }
+                    return identityRepository.resolveUserByTrustedEmail(identity, invitationService.generateInvitationCode(), inviterUserId);
+                }))
                 .flatMap(resolvedUser -> (resolvedUser.created()
                         ? creditService.initializeAccount(resolvedUser.user().getId())
                                 .then(inviterUserId == null

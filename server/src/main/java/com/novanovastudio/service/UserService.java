@@ -131,6 +131,9 @@ public class UserService {
     /** 服务配置 */
     private final NovanovaProperties properties;
 
+    /** 邮箱注册白名单规则 */
+    private final EmailRegistrationPolicy emailRegistrationPolicy;
+
     /** 邮件发送器 */
     private final JavaMailSender mailSender;
 
@@ -195,6 +198,7 @@ public class UserService {
     public Mono<Void> sendEmailCode(UserDtos.SendEmailCodeRequest request) {
         // 标准化并校验邮箱，避免同一邮箱大小写重复注册。
         String email = normalizeEmail(request.email());
+        emailRegistrationPolicy.validate(email);
         log.info("发送邮箱验证码: email={}, purpose={}", email, CODE_PURPOSE_REGISTER);
         return userRepository.findByEmail(email)
                 .flatMap(existing -> Mono.<Void>error(new BusinessException(ErrorCode.BUSINESS_ERROR, SystemMessage.of("business.emailAlreadyRegistered"))))
@@ -227,6 +231,7 @@ public class UserService {
     public Mono<UserDtos.AuthResponse> register(UserDtos.RegisterRequest request) {
         // 注册前统一校验邮箱、密码和邮箱占用状态。
         String email = normalizeEmail(request.email());
+        emailRegistrationPolicy.validate(email);
         log.info("用户注册: email={}", email);
         validatePassword(request.password());
         return invitationService.resolveInviterUserId(request.invitationCode())

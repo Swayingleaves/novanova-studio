@@ -166,6 +166,8 @@ services:
       EMAIL_SMTP_USERNAME: ${EMAIL_SMTP_USERNAME:-}
       EMAIL_SMTP_PASSWORD: ${EMAIL_SMTP_PASSWORD:-}
       EMAIL_SMTP_FROM: ${EMAIL_SMTP_FROM:-}
+      # 仅未设置时采用默认白名单，显式空值保留不限制注册的语义。
+      EMAIL_ALLOWED_SUFFIXES: ${EMAIL_ALLOWED_SUFFIXES-qq.com,163.com,126.com,gmail.com,outlook.com,hotmail.com,foxmail.com,icloud.com,sina.com,aliyun.com,yeah.net,139.com,189.cn,sina.cn,vip.qq.com,vip.163.com,yahoo.com,live.com,msn.com,proton.me,protonmail.com}
       EMAIL_CAMPAIGN_MINIMUM_INTERVAL_SECONDS: ${EMAIL_CAMPAIGN_MINIMUM_INTERVAL_SECONDS:-3}
       EMAIL_CAMPAIGN_MAXIMUM_PER_MINUTE: ${EMAIL_CAMPAIGN_MAXIMUM_PER_MINUTE:-20}
       EMAIL_CAMPAIGN_MAXIMUM_PER_HOUR: ${EMAIL_CAMPAIGN_MAXIMUM_PER_HOUR:-200}
